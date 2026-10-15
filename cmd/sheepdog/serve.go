@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -127,7 +129,10 @@ func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
 		path = implicitEnvFile()
 	}
 	if _, err := os.Stat(path); err != nil {
-		if explicit {
+		// The default secret file is passed explicitly by `sheepdog
+		// start` and the login service; before setup has written it, it
+		// is simply absent (a fresh install), not an error.
+		if explicit && path != configEnvPath() {
 			fprintf(stderr, "sheepdog: --env-file %s: %v\n", path, err)
 			return 1, false
 		}
@@ -146,6 +151,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if !run {
 		return code
 	}
+	baseEnv := os.Environ() // before the env file: a reload starts from it
+	startedAt := time.Now().UTC()
 	if code, ok := loadServeEnvFile(o.envFile, stderr); !ok {
 		return code
 	}
@@ -154,13 +161,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fprintf(stderr, "sheepdog: %v\n", err)
 		return 1
 	}
-	if o.dataDir != "" {
-		// --data-dir moves the state file along unless it was set explicitly.
-		if cfg.State.Path == filepath.Join(cfg.DataDir, "state.json") {
-			cfg.State.Path = filepath.Join(o.dataDir, "state.json")
-		}
-		cfg.DataDir = o.dataDir
-	}
+	applyDataDir(&cfg, o.dataDir)
 	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version}
 	if err := app.Check(cfg, opts); err != nil {
 		fprintf(stderr, "sheepdog serve: %v\n", err)
@@ -207,40 +208,11 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	opts.Echo = mirror
 
-	a, err := app.Build(cfg, opts)
-	if err != nil {
-		fprintf(stderr, "sheepdog serve: %v\n", err)
-		return 2
-	}
-	if err := a.Listen(); err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
-			if msg := portBusyMessage(ctx, cfg, port); msg != "" {
-				fprintln(stderr, msg)
-				return 1
-			}
-		}
-		fprintf(stderr, "sheepdog serve: %v\n", err)
-		return 1
-	}
-	_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: a.URL(), Version: version, StartedAt: time.Now().UTC(), Background: o.background})
-	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
-	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
-	if !cfg.Web.IsLoopback() {
-		// web.bind is not loopback: print every non-loopback IPv4 of the
-		// host, so the operator can read the LAN or Tailscale URL off the
-		// log instead of guessing which interface it is (CONFIG.md
-		// "web.bind").
-		for _, u := range a.URLs() {
-			fprintf(stdout, "  lan url     %s\n", u)
-		}
-	}
-	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
-	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
-	fprintf(stdout, "  events      %s/events\n", a.URL())
-	fprintf(stdout, "  log         %s\n", rot.Path())
-
-	// Event retention (events.retention_days): at startup, then daily.
-	go pruneEvents(ctx, cfg, a.Log(), stdout)
+	// The daemon runs in a loop: the setup page saves keys or changes
+	// the bind and asks for a restart (app.ErrRestart), and the env
+	// file and config are read again and the daemon rebuilt in this
+	// process (same pid, same lock), so nothing outside notices.
+	var cur atomic.Pointer[app.App]
 
 	// SIGHUP re-reads the prompt override directory (docs/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
@@ -256,20 +228,144 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			case <-ctx.Done():
 				return
 			case <-hup:
-				files := a.ReloadPrompts()
-				a.Log().Log("daemon", "prompts.reloaded", "", map[string]any{"files": files, "via": "sighup"})
+				if a := cur.Load(); a != nil {
+					files := a.ReloadPrompts()
+					a.Log().Log("daemon", "prompts.reloaded", "", map[string]any{"files": files, "via": "sighup"})
+				}
 			}
 		}
 	}()
 
-	if err := a.Run(ctx); err != nil {
-		fprintf(stderr, "sheepdog serve: %v\n", err)
-		if errors.Is(err, gemini.ErrAllKeysExhausted) {
-			return 3
+	for run := 0; ; run++ {
+		a, err := app.Build(cfg, opts)
+		if err != nil {
+			fprintf(stderr, "sheepdog serve: %v\n", err)
+			return 2
 		}
-		return 1
+		if err := listenRetry(a, run > 0); err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) {
+				if msg := portBusyMessage(ctx, cfg, port); msg != "" {
+					fprintln(stderr, msg)
+					return 1
+				}
+			}
+			fprintf(stderr, "sheepdog serve: %v\n", err)
+			return 1
+		}
+		cur.Store(a)
+		if serveBuilt != nil {
+			serveBuilt(a)
+		}
+		_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: a.URL(), Version: version, StartedAt: startedAt, Background: o.background})
+		if run == 0 {
+			fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
+			fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
+		} else {
+			fprintf(stdout, "sheepdog reloaded its settings: listening on %s (voice=%s orchestrator=%s)\n", a.URL(), a.VoiceProvider(), a.BrainMode())
+		}
+		if !cfg.Web.IsLoopback() {
+			// web.bind is not loopback: print every non-loopback IPv4 of the
+			// host, so the operator can read the LAN or Tailscale URL off the
+			// log instead of guessing which interface it is (CONFIG.md
+			// "web.bind").
+			for _, u := range a.URLs() {
+				fprintf(stdout, "  lan url     %s\n", u)
+			}
+		}
+		if a.SetupNeeded() {
+			fprintf(stdout, "  setup       %s/setup  (no voice key yet: the voice is off until you add one)\n", a.URL())
+		}
+		if run == 0 {
+			fprintf(stdout, "  voice page  %s/voice\n", a.URL())
+			fprintf(stdout, "  debug page  %s/debug\n", a.URL())
+			fprintf(stdout, "  events      %s/events\n", a.URL())
+			fprintf(stdout, "  log         %s\n", rot.Path())
+			// Event retention (events.retention_days): at startup, then daily.
+			go pruneEvents(ctx, cfg, func() logging.Logger { return cur.Load().Log() }, stdout)
+		}
+
+		err = a.Run(ctx)
+		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil {
+			next, ok := reloadServeConfig(baseEnv, o, stderr)
+			if ok {
+				cfg = next
+				logw.SetRedactor(redact.ForConfig(cfg))
+				if err := app.Check(cfg, opts); err != nil {
+					fprintf(stderr, "sheepdog serve: the new settings do not start (%v); keeping the old ones\n", err)
+					cfg = a.Config()
+				}
+			}
+			port = cfg.Web.Port
+			if o.port > 0 {
+				port = o.port
+			}
+			continue
+		}
+		if err != nil && !errors.Is(err, app.ErrRestart) {
+			fprintf(stderr, "sheepdog serve: %v\n", err)
+			if errors.Is(err, gemini.ErrAllKeysExhausted) {
+				return 3
+			}
+			return 1
+		}
+		return 0
 	}
-	return 0
+}
+
+// serveBuilt, when set (tests), gets each daemon serve builds, once it
+// listens.
+var serveBuilt func(*app.App)
+
+// listenRetry binds the web port. After a reload the old listener has
+// just closed; a few short retries cover the moment it takes.
+func listenRetry(a *app.App, reload bool) error {
+	err := a.Listen()
+	for i := 0; reload && err != nil && errors.Is(err, syscall.EADDRINUSE) && i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		err = a.Listen()
+	}
+	return err
+}
+
+// reloadServeConfig reads the env file and the config again for a
+// reload: the process environment goes back to what it was before the
+// env file was first loaded (config.LoadEnvFile never overrides a set
+// variable, so a key changed in the file would otherwise be ignored),
+// then the file is loaded over it.
+func reloadServeConfig(baseEnv []string, o serveOpts, stderr io.Writer) (config.Config, bool) {
+	restoreEnv(baseEnv)
+	if _, ok := loadServeEnvFile(o.envFile, stderr); !ok {
+		return config.Config{}, false
+	}
+	cfg, err := config.Load(o.configPath)
+	if err != nil {
+		fprintf(stderr, "sheepdog serve: reload: %v; keeping the old settings\n", err)
+		return config.Config{}, false
+	}
+	applyDataDir(&cfg, o.dataDir)
+	return cfg, true
+}
+
+// restoreEnv makes the process environment exactly env.
+func restoreEnv(env []string) {
+	os.Clearenv()
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			_ = os.Setenv(k, v)
+		}
+	}
+}
+
+// applyDataDir applies --data-dir: it moves the state file along unless
+// that was set explicitly.
+func applyDataDir(cfg *config.Config, dir string) {
+	if dir == "" {
+		return
+	}
+	if cfg.State.Path == filepath.Join(cfg.DataDir, "state.json") {
+		cfg.State.Path = filepath.Join(dir, "state.json")
+	}
+	cfg.DataDir = dir
 }
 
 // portBusyMessage says who holds the daemon's port, or "" when it is
@@ -292,8 +388,9 @@ var retentionEvery = 24 * time.Hour
 
 // pruneEvents deletes event day files older than events.retention_days
 // now and every retentionEvery until ctx ends; each run that deletes
-// something logs events.pruned and one line.
-func pruneEvents(ctx context.Context, cfg config.Config, log logging.Logger, out io.Writer) {
+// something logs events.pruned (to the current daemon's log) and one
+// line.
+func pruneEvents(ctx context.Context, cfg config.Config, logOf func() logging.Logger, out io.Writer) {
 	if cfg.Events.RetentionDays <= 0 {
 		return
 	}
@@ -301,6 +398,7 @@ func pruneEvents(ctx context.Context, cfg config.Config, log logging.Logger, out
 	defer t.Stop()
 	for {
 		removed, err := eventlog.Prune(cfg.DataDir, cfg.Events.RetentionDays, time.Now())
+		log := logOf()
 		switch {
 		case err != nil:
 			log.Log("daemon", "daemon.retention_error", "", map[string]any{"error": err.Error()})

@@ -26,10 +26,11 @@ func TestVoiceProviderSwitchPersists(t *testing.T) {
 	if _, err := Build(cfg, Options{Voice: VoiceGemini, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
 		t.Fatalf("--voice=gemini without a key: %v", err)
 	}
+	// Without the provider's key the daemon still builds: setup mode.
 	noOpenAI := cfg
 	noOpenAI.Voice.OpenAI.APIKey = ""
-	if _, err := Build(noOpenAI, Options{Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
-		t.Fatalf("openai without a key: %v", err)
+	if a, err := Build(noOpenAI, Options{Herdr: HerdrMock}); err != nil || !a.SetupNeeded() {
+		t.Fatalf("openai without a key: %v (setup needed: %v)", err, err == nil && a.SetupNeeded())
 	}
 
 	run := func(check func(url string)) {

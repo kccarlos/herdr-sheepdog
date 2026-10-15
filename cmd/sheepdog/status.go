@@ -50,6 +50,9 @@ type statusVoice struct {
 	Model    string `json:"model,omitempty"`
 	// Source is "daemon" (what the running daemon reports) or "config".
 	Source string `json:"source"`
+	// Problem says why the running daemon's voice is not connected
+	// (setup mode, a failed connect being retried).
+	Problem string `json:"problem,omitempty"`
 }
 
 type statusOrchestrator struct {
@@ -163,7 +166,8 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 				Model    string `json:"model"`
 			} `json:"brain"`
 			Voice struct {
-				ClientConnected bool `json:"client_connected"`
+				ClientConnected bool   `json:"client_connected"`
+				Problem         string `json:"problem"`
 			} `json:"voice"`
 		}
 		if err := getJSON(ctx, r.URL, "/api/state", cfg.Web.Token, &st); err == nil {
@@ -176,6 +180,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			}
 			_ = getJSON(ctx, r.URL, "/api/push/status", cfg.Web.Token, &push)
 			r.Phones = &statusPhones{PushDevices: push.Devices, VoiceClientConnected: st.Voice.ClientConnected}
+			r.Voice.Problem = st.Voice.Problem
 		}
 	}
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
@@ -222,6 +227,9 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 		voice += ", from config"
 	}
 	row("voice", voice)
+	if r.Voice.Problem != "" {
+		row("", "NOT connected: "+r.Voice.Problem)
+	}
 	orch := "off"
 	if r.Orchestrator.Enabled {
 		orch = r.Orchestrator.Provider + " / " + r.Orchestrator.Model

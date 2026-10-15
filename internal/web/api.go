@@ -105,6 +105,13 @@ type VoiceInfo struct {
 	Muted           bool   `json:"muted"`
 	Stalled         bool   `json:"stalled"`
 	ClientConnected bool   `json:"client_connected"`
+	// Problem says why the voice is not connected, in words for a
+	// screen ("Setup needed: no Gemini API key yet…", "Gemini (AI
+	// Studio) rejected the API key… Retrying in 20s."); empty when
+	// nothing is wrong.
+	Problem string `json:"problem,omitempty"`
+	// SetupNeeded: the voice has no credentials (run sheepdog setup).
+	SetupNeeded bool `json:"setup_needed,omitempty"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +122,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Agents:                agents,
 		PendingAction:         s.pendingView(snap.PendingAction),
 		Session:               snap.Session,
-		Voice:                 VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
+		Voice:                 s.voiceInfo(hs),
 		Settings:              s.settings(),
 		Brain:                 s.brainInfo(),
 		Herdr:                 s.deps.HerdrMode,
@@ -600,4 +607,16 @@ func (s *Server) handleHerdrEvent(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "injected": "none"})
 	}
+}
+
+// voiceInfo is /api/state's voice object.
+func (s *Server) voiceInfo(hs hubState) VoiceInfo {
+	v := VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client}
+	if s.deps.VoiceIssue != nil {
+		v.Problem = s.deps.VoiceIssue()
+	}
+	if s.deps.SetupNeeded != nil {
+		v.SetupNeeded = s.deps.SetupNeeded()
+	}
+	return v
 }

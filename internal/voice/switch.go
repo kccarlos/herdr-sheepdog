@@ -72,16 +72,22 @@ type Switcher struct {
 	billedRetired float64
 	fwd           sync.WaitGroup
 	retire        sync.WaitGroup
+	// emitMu guards sending on events against its close.
+	emitMu       sync.RWMutex
+	eventsClosed bool
 }
 
-// NewSwitcher builds a Switcher starting on initial, which must be
-// available.
+// NewSwitcher builds a Switcher starting on initial, which must be one
+// of providers. An unavailable initial provider (no key yet: the
+// daemon's setup mode) is accepted; Start then reports
+// ErrUnavailableProvider, and the stable Audio and Events channels exist
+// either way.
 func NewSwitcher(providers []Provider, initial string, log logging.Logger) (*Switcher, error) {
 	if log == nil {
 		log = logging.NopLogger{}
 	}
 	sw := &Switcher{log: log, providers: providers, audio: make(chan []byte), events: make(chan Event, 1024)}
-	if _, err := sw.lookup(initial); err != nil {
+	if _, err := sw.lookup(initial); err != nil && !errors.Is(err, ErrUnavailableProvider) {
 		return nil, err
 	}
 	sw.current = initial
@@ -136,9 +142,14 @@ func (sw *Switcher) Model() string {
 }
 
 // Start implements Session: it starts the current provider's session.
+// A failed Start may be retried (the daemon does, with a backoff, when
+// the voice cannot connect: docs/lifecycle "degraded").
 func (sw *Switcher) Start(ctx context.Context) error {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
+	if sw.closed {
+		return errors.New("voice: switcher closed")
+	}
 	if sw.started {
 		return errors.New("voice: Start called twice")
 	}
@@ -355,6 +366,11 @@ func (sw *Switcher) isCurrent(s Session) bool {
 }
 
 func (sw *Switcher) emit(ev Event) {
+	sw.emitMu.RLock()
+	defer sw.emitMu.RUnlock()
+	if sw.eventsClosed {
+		return
+	}
 	select {
 	case sw.events <- ev:
 	default:
@@ -362,11 +378,30 @@ func (sw *Switcher) emit(ev Event) {
 	}
 }
 
-// Close implements Session.
+// Report emits ev on Events as if the current session had: the daemon
+// tells the pages and the supervisor why the voice is not connected
+// while no session runs (setup mode, a failed connect being retried).
+func (sw *Switcher) Report(ev Event) {
+	sw.mu.RLock()
+	closed := sw.closed
+	sw.mu.RUnlock()
+	if !closed {
+		sw.emit(ev)
+	}
+}
+
+// Close implements Session. Audio and Events are closed whether or not
+// a session was ever started, so their consumers end.
 func (sw *Switcher) Close() error {
 	sw.mu.Lock()
-	if !sw.started || sw.closed {
+	if sw.closed {
+		sw.mu.Unlock()
+		return nil
+	}
+	if !sw.started {
 		sw.closed = true
+		close(sw.audio)
+		sw.closeEvents()
 		sw.mu.Unlock()
 		return nil
 	}
@@ -377,8 +412,15 @@ func (sw *Switcher) Close() error {
 	sw.retire.Wait()
 	sw.fwd.Wait()
 	close(sw.audio)
-	close(sw.events)
+	sw.closeEvents()
 	return err
+}
+
+func (sw *Switcher) closeEvents() {
+	sw.emitMu.Lock()
+	sw.eventsClosed = true
+	close(sw.events)
+	sw.emitMu.Unlock()
 }
 
 func (sw *Switcher) cur() Session {

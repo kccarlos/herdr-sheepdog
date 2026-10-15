@@ -26,6 +26,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
@@ -129,7 +130,7 @@ func (l *lifecycle) start(ctx context.Context) int {
 	}
 	if err := app.Check(l.cfg, app.Options{}); err != nil {
 		fprintf(l.errw, "sheepdog cannot start: %s\n", strings.TrimSuffix(strings.TrimPrefix(err.Error(), "app: "), "; use --voice=off to run without it"))
-		fprintln(l.errw, "Run `sheepdog init` to set it up, or `sheepdog doctor` to see what is missing.")
+		fprintln(l.errw, "Run `sheepdog setup` to set it up, or `sheepdog doctor` to see what is missing.")
 		return 1
 	}
 	stdio, logFile := daemon.StdioFile(l.cfg.DataDir), daemon.LogFile(l.cfg.DataDir)
@@ -166,6 +167,9 @@ func (l *lifecycle) start(ctx context.Context) int {
 	fprintf(l.out, "sheepdog started %s (pid %d)\n", how, info.PID)
 	fprintf(l.out, "  voice page  %s/voice\n", info.URL)
 	fprintln(l.out, "  logs        sheepdog logs -f")
+	if onboard.CheckVoice(l.cfg).Status == onboard.Fail {
+		fprintf(l.out, "  setup       no voice key yet, so the voice is off: run `sheepdog setup` (%s/setup)\n", info.URL)
+	}
 	return 0
 }
 
