@@ -1,18 +1,18 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/kccarlos/herdr-sheepdog/raw/main/assets/logo-transparent.svg">
-    <img src="https://github.com/kccarlos/herdr-sheepdog/raw/main/assets/logo-solid.svg" alt="sheepdog logo" width="160" height="160">
+    <img src="https://github.com/kccarlos/herdr-sheepdog/raw/main/assets/logo-solid.svg" alt="herdr-sheepdog logo" width="160" height="160">
   </picture>
 </p>
 
-# herdr-sheepdog
+# Talk to your Herdr agents. From anywhere.
 
-**Walk away from your desk. Your coding agents keep working; sheepdog keeps you in the loop, in your earbuds.**
+**Hear who's stuck, approve with a word, ask what broke. Right from your phone, no need to go back to your desk.**
 
-<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: an agent's approval arrives on the lock screen and is approved from the app" width="800"></a></p>
+<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: codex-payments' approval arrives on the lock screen; you say approve, ask what's going on and why the migration failed, and sheepdog answers" width="800"></a></p>
 <p align="center"><a href="assets/readme/hero.mp4">▶ Watch the 60-second demo</a></p>
 
-sheepdog is a voice supervisor for the coding agents you run in
+**herdr-sheepdog** (sheepdog for short) is a voice supervisor for the coding agents you run in
 [herdr](https://github.com/herdrdev/herdr) (Claude Code, Codex, agy). You
 use it **away from your desk**: an iPhone and earbuds, lock-screen
 notifications, a Live Activity while you talk, earbud remote controls.
@@ -25,7 +25,7 @@ notifications, a Live Activity while you talk, earbud remote controls.
 - **It investigates instead of guessing.** Behind the realtime voice (Gemini
   Live or GPT-Live) a stateful orchestrator reads the agents' screens and
   session records, and asks a read-only fork of the worker what a screen
-  cannot say. It remembers "tell me when auth is done", and comes back to a
+  cannot say. It remembers "tell me when claude-auth is done", and comes back to a
   question it could not answer.
 - **Every change is measured.** Prompts and harness changes merge only past
   an eval suite with confidence intervals, and several that looked good
@@ -70,8 +70,8 @@ you       What does the migration touch?
 sheepdog  Checking... It adds an index on orders, no data changes.
 you       Approve.
 sheepdog  Approved. Tell you when it is done?
-you       Yes. And ask auth why the tests failed.
-sheepdog  Asking auth's agent. I'll come back with that.
+you       Yes. And ask claude-auth why the tests failed.
+sheepdog  Asking claude-auth. I'll come back with that.
 ```
 
 ## How it works

@@ -1,7 +1,13 @@
 # Hero video
 
-`assets/readme/hero.mp4` (1920x1080, about 59 s), `hero-vertical.mp4`
-(1080x1920) and `hero.gif` (the notification → approve moment, 800 px wide).
+`assets/readme/hero.mp4` (1920x1080, about 59 s) and `hero-vertical.mp4`
+(1080x1920). The README's `hero.gif` is no longer cut here: it is the 12 s
+chat-bubble loop from [`../bubbles/`](../bubbles/make.sh), which reuses this
+directory's phone take (`phone.sh`). This video was rendered before the demo
+agents were renamed (auth, billing, migrate, docs; now claude-auth,
+codex-payments, claude-migration, codex-docs) and has not been re-cut;
+`demo-agent.sh`, `desk-setup.sh`, `lines.tsv` and `compose.py` still tell
+the old story.
 
 ```sh
 IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/hero/make.sh
@@ -16,8 +22,8 @@ caption is a PNG).
 ## What is real
 
 - **The phone** is the real Sheepdog app in the iOS Simulator, in its offline
-  demo mode (four scripted agents on the phone: auth, billing, migrate,
-  docs). `phone.sh` runs the iOS repo's `HeroRecordingUITests`, which locks
+  demo mode (four scripted agents on the phone: claude-auth,
+  codex-payments, claude-migration, codex-docs). `phone.sh` runs the iOS repo's `HeroRecordingUITests`, which locks
   the simulator, opens the app from the lock screen, taps "Yes, proceed"
   and the "What's going on?" and "What failed?" suggestions.
 - **The notification** is sent with `xcrun simctl push`; its payload is the
@@ -48,7 +54,7 @@ caption is a PNG).
 |---|---|
 | `make.sh` | runs the steps below into `$WORK` and `assets/readme/` |
 | `phone.sh` | the phone take: lock screenshots, `cfr2.mp4`, `marks.txt` |
-| `payload.go` | the APNs payload for billing's approval |
+| `payload.go` | the APNs payload for codex-payments' approval |
 | `desk.sh`, `desk.tape`, `desk-setup.sh`, `demo-agent.sh` | the two herdr shots |
 | `tts.go`, `lines.tsv` | the voice clips |
 | `compose.py` | cards, captions, timing and the encodes |

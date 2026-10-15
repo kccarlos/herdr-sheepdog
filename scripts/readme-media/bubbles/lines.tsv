@@ -1,0 +1,12 @@
+# The README hero GIF's chat bubbles, one per row, in order.
+# at: seconds into the 12 s loop when the bubble appears.
+# who: sheepdog (left, with the logo) or you (right, spoken: mic icon).
+# The texts are the iOS demo world's exact lines (DemoWorld.swift), so the
+# bubbles say what the phone shows. At most two lines each.
+# at	who	text
+1.5	sheepdog	codex-payments wants to run npm install p-retry. Approve?
+2.6	you	Approve.
+4.2	you	What's going on?
+5.2	sheepdog	claude-auth is done, claude-migration failed, codex-docs is still writing.
+8.2	you	Why did the migration fail?
+9.2	sheepdog	The column already existed. It rolled back, nothing changed.

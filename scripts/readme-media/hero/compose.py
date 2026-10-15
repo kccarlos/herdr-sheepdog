@@ -6,8 +6,9 @@ joined and encoded.
     uv run --with pillow python scripts/readme-media/hero/compose.py WORK OUT_DIR
 
 WORK holds phone/ (phone.sh), desk/ (desk.sh) and voice/ (tts.go).
-Writes OUT_DIR/hero.mp4 (1920x1080), hero-vertical.mp4 (1080x1920) and
-hero.gif (the notification → approve moment), and WORK/compose/timeline.txt.
+Writes OUT_DIR/hero.mp4 (1920x1080) and hero-vertical.mp4 (1080x1920), and
+WORK/compose/hero-cut.gif (the notification → approve moment) and
+WORK/compose/timeline.txt.
 The spoken lines come from lines.tsv; every caption is the same text.
 """
 
@@ -501,11 +502,12 @@ def main():
     with open(os.path.join(TMP, "timeline.txt"), "w") as f:
         f.write("\n".join(timeline) + f"\ntotal {total:.2f} s\n")
     print("\n".join(timeline), f"\ntotal {total:.2f} s")
-    # The GIF: the notification lands on the lock screen, then the card is
-    # approved (shots 3 and 4, cut short).
+    # A short GIF: the notification lands on the lock screen, then the card
+    # is approved (shots 3 and 4, cut short). It stays in WORK: the
+    # README's hero.gif comes from scripts/readme-media/bubbles/.
     lock, appr = spans[3], spans[4]
     parts = [(lock[0] + 0.4, lock[0] + 4.0), (appr[0], min(appr[1], appr[0] + 4.4))]
-    gif = os.path.join(OUT, "hero.gif")
+    gif = os.path.join(TMP, "hero-cut.gif")
     trims = "".join(f"[0:v]trim={a:.2f}:{b:.2f},setpts=PTS-STARTPTS[g{k}];" for k, (a, b) in enumerate(parts))
     ffmpeg("-i", os.path.join(OUT, "hero.mp4"), "-filter_complex",
            f"{trims}[g0][g1]concat=n=2:v=1,fps=10,scale=800:-1:flags=lanczos,split[a][b];"
