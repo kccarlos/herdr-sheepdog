@@ -7,9 +7,9 @@
 #
 #   IOS_REPO=/path/to/herdr-sheepdog-ios WORK=/tmp/hero scripts/readme-media/hero/phone.sh
 #
-# Writes $WORK/phone/cfr1.mp4 (until the unlock), cfr2.mp4 (after it),
-# rec{1,2}.t0 (each video's start in unix seconds) and marks.txt for
-# compose.py. A throwaway `--voice=off --brain=fake
+# Writes $WORK/phone/lock0.png and lock1.png (the lock screen before and
+# after the notification), cfr2.mp4 (the app after the unlock), rec2.t0
+# (the video's start in unix seconds) and marks.txt for compose.py. A throwaway `--voice=off --brain=fake
 # --herdr=mock` daemon on $FIXTURE_PORT (default 7796), with an empty
 # config and its own data dir, is the warm-up's connection (it is how the
 # app gets notification permission); it never touches herdr or a model.
@@ -94,37 +94,49 @@ stop() {
 	python3 -c "print($t1 - $dur)" >"$work/rec$1.t0"
 }
 
-# Two recordings: the simulator's recording can freeze across the
-# unlock, so the first stops when the test marks `unlocked` and the
-# second starts then (the test waits for $ready).
-record 1
+# The lock screen is shot as two screenshots (before and after the
+# notification): the simulator's recording freezes across a lock or an
+# unlock. The video starts once the app is open again (the test marks
+# `unlocked` and waits for $ready) and stops at `end`.
 TEST_RUNNER_SHEEPDOG_HERO_MARKS=$marks TEST_RUNNER_SHEEPDOG_HERO_READY=$ready TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port \
 	xcodebuild test-without-building -xctestrun "$xctestrun" -destination "id=$udid" \
 	-only-testing:SheepdogUITests/HeroRecordingUITests >"$work/test.log" 2>&1 &
 xcb=$!
-phase=1
+phase=0
 while kill -0 $xcb 2>/dev/null && ! grep -qE "Test Suite 'Selected tests' (passed|failed)" "$work/test.log"; do
-	if [ $phase = 1 ] && grep -q '^push_now ' "$marks"; then
+	if [ $phase = 0 ] && grep -q '^locked ' "$marks"; then
+		sleep 0.8
+		xcrun simctl io "$udid" screenshot "$work/lock0.png" >/dev/null 2>&1
+		phase=1
+	elif [ $phase = 1 ] && grep -q '^push_now ' "$marks"; then
 		xcrun simctl push "$udid" "$bundle" "$work/payload.apns"
 		phase=2
-	elif [ $phase = 2 ] && grep -q '^unlocked ' "$marks"; then
-		stop 1
+	elif [ $phase = 2 ] && grep -q '^notification ' "$marks"; then
+		sleep 0.6
+		xcrun simctl io "$udid" screenshot "$work/lock1.png" >/dev/null 2>&1
+		phase=3
+	elif [ $phase = 3 ] && grep -q '^unlocked ' "$marks"; then
+		sleep 0.5
 		record 2
 		touch "$ready"
-		phase=3
-	elif [ $phase = 3 ] && grep -q '^end ' "$marks"; then
-		stop 2
 		phase=4
+	elif [ $phase = 4 ] && grep -q '^end ' "$marks"; then
+		stop 2
+		phase=5
 	fi
 	sleep 0.05
 done
 [ -n "$rec" ] && { kill -INT $rec; wait $rec || true; rec=""; }
 kill $xcb 2>/dev/null || true
-if ! grep -q "Test Suite 'Selected tests' passed" "$work/test.log" || [ $phase != 4 ]; then
+if ! grep -q "Test Suite 'Selected tests' passed" "$work/test.log" || [ $phase != 5 ]; then
 	echo "the UI test failed; see $work/test.log" >&2
 	exit 1
 fi
-for i in 1 2; do
-	ffmpeg -loglevel error -y -i "$work/rec$i.mp4" -vf fps=30 -c:v libx264 -crf 14 -preset veryfast "$work/cfr$i.mp4"
-done
-echo "phone take in $work (marks.txt, rec{1,2}.t0, cfr{1,2}.mp4)"
+# A recording that froze (a handful of frames) makes a useless take.
+if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) > 8 else 1)" \
+	"$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$work/rec2.mp4")"; then :; else
+	echo "the recording after the unlock froze; run again" >&2
+	exit 1
+fi
+ffmpeg -loglevel error -y -i "$work/rec2.mp4" -vf fps=30 -c:v libx264 -crf 14 -preset veryfast "$work/cfr2.mp4"
+echo "phone take in $work (marks.txt, lock{0,1}.png, rec2.t0, cfr2.mp4)"

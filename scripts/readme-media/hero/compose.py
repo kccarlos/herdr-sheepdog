@@ -11,11 +11,9 @@ hero.gif (the notification → approve moment), and WORK/compose/timeline.txt.
 The spoken lines come from lines.tsv; every caption is the same text.
 """
 
-import json
 import os
 import subprocess
 import sys
-import textwrap
 import wave
 
 from PIL import Image, ImageDraw, ImageFont
@@ -69,17 +67,18 @@ def duration(ident):
 
 
 phone_dir = os.path.join(WORK, "phone")
-# Two phone videos: cfr1 until the unlock, cfr2 after it, each with its
-# own clock (recN.t0: unix seconds at the video's 0).
-t0 = {i: float(open(os.path.join(phone_dir, f"rec{i}.t0")).read()) for i in (1, 2)}
+# The phone: two lock-screen screenshots (before and after the
+# notification) and the video after the unlock (cfr2, its clock in
+# rec2.t0: unix seconds at the video's 0).
+t0 = {2: float(open(os.path.join(phone_dir, "rec2.t0")).read())}
 marks = {}
 for row in open(os.path.join(phone_dir, "marks.txt")):
     step, at = row.split()
     marks[step] = float(at)
 
 
-def m(step, video):
-    """Seconds into phone video 1 or 2 at a step of the UI test."""
+def m(step, video=2):
+    """Seconds into the phone video at a step of the UI test."""
     return marks[step] - t0[video]
 
 
@@ -90,7 +89,7 @@ def scenes(video):
     return [float(x.split(":")[1]) for x in out.stderr.split() if x.startswith("pts_time:")]
 
 
-SCENES = {1: scenes(1), 2: scenes(2)}
+SCENES = {2: scenes(2)}
 
 
 def tap(step, video=2, before=0.1):
@@ -186,7 +185,11 @@ def end_card(img, d, W, H):
     d.rounded_rectangle(box, radius=int(s * 0.02), fill=NAVY)
     d.text(((W - w) / 2, y), cmd, font=fm, fill=CREAM)
     y = box[3] + int(s * 0.06)
-    centered(d, W, y, "github.com/kccarlos/herdr-sheepdog", font(int(s * 0.055), "bold"), NAVY)
+    url = "github.com/kccarlos/herdr-sheepdog"
+    size = int(s * 0.055)
+    while d.textlength(url, font=font(size, "bold")) > W * 0.86:
+        size -= 2
+    centered(d, W, y, url, font(size, "bold"), NAVY)
     y += int(s * 0.09)
     centered(d, W, y, "iPhone app: Sheepdog for herdr", font(int(s * 0.04), "medium"), MUTED)
     y += int(s * 0.12)
@@ -323,11 +326,9 @@ def shots():
                   beat="Four coding agents at work in herdr.", note="demo agents"))
     p.append(dict(kind="card", draw="walk", length=2.2))
     # Lock screen: the notification arrives, the voice says it.
-    n = tap("notification", 1, before=1.0)
-    a = n - 0.9
-    p.append(dict(kind="phone", video=1, start=a, end=tap("tap_notification", 1) - 0.05,
-                  beat="An agent needs you. You hear it first.",
-                  cues=[("s_ask", n - a + 0.3)]))
+    lock = lock_video()
+    p.append(dict(kind="phone", video="lock", start=0, end=LOCK_BEFORE + 0.3, beat="An agent needs you. You hear it first.",
+                  cues=[("s_ask", LOCK_BEFORE + 0.3)]))
     # Unlocked: billing's card; approve.
     t = tap("tap_approve")
     a = max(0.0, m("approval", 2) - 0.3, t - 1.8)
@@ -353,6 +354,19 @@ def shots():
                   beat="Back at the desk, nothing is a surprise.", note="demo agents"))
     p.append(dict(kind="card", draw="end", length=4.6))
     return p
+
+
+LOCK_BEFORE = 0.9  # seconds of the bare lock screen before the notification
+
+
+def lock_video():
+    """The lock-screen shot: the bare lock screen, then the notification."""
+    out = os.path.join(phone_dir, "cfrlock.mp4")
+    ffmpeg("-loop", "1", "-framerate", str(FPS), "-t", str(LOCK_BEFORE), "-i", os.path.join(phone_dir, "lock0.png"),
+           "-loop", "1", "-framerate", str(FPS), "-t", "10", "-i", os.path.join(phone_dir, "lock1.png"),
+           "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-c:v", "libx264", "-crf", "14",
+           "-pix_fmt", "yuv420p", out)
+    return out
 
 
 def phone_size():
@@ -487,14 +501,15 @@ def main():
     with open(os.path.join(TMP, "timeline.txt"), "w") as f:
         f.write("\n".join(timeline) + f"\ntotal {total:.2f} s\n")
     print("\n".join(timeline), f"\ntotal {total:.2f} s")
-    # The GIF: the lock-screen notification through the approval (shots 3-4).
-    g0, g1 = spans[3][0] + 0.3, spans[4][1] - 0.3
-    gif_len = min(float(os.environ.get("GIF_LEN", "8")), g1 - g0)
-    g0 = max(spans[3][0] + 0.3, g1 - gif_len) if os.environ.get("GIF_FROM_END") else g0
+    # The GIF: the notification lands on the lock screen, then the card is
+    # approved (shots 3 and 4, cut short).
+    lock, appr = spans[3], spans[4]
+    parts = [(lock[0] + 0.4, lock[0] + 4.0), (appr[0], min(appr[1], appr[0] + 4.4))]
     gif = os.path.join(OUT, "hero.gif")
-    pre = f"fps=10,scale=800:-1:flags=lanczos"
-    ffmpeg("-ss", f"{g0:.2f}", "-t", f"{gif_len:.2f}", "-i", os.path.join(OUT, "hero.mp4"), "-filter_complex",
-           f"{pre},split[a][b];[a]palettegen=stats_mode=diff:max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle", gif)
+    trims = "".join(f"[0:v]trim={a:.2f}:{b:.2f},setpts=PTS-STARTPTS[g{k}];" for k, (a, b) in enumerate(parts))
+    ffmpeg("-i", os.path.join(OUT, "hero.mp4"), "-filter_complex",
+           f"{trims}[g0][g1]concat=n=2:v=1,fps=10,scale=800:-1:flags=lanczos,split[a][b];"
+           "[a]palettegen=stats_mode=diff:max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle", gif)
     subprocess.run(["gifsicle", "-O3", "--batch", gif])
     if not os.environ.get("NO_VERTICAL"):
         lst, _, _, _ = render(Portrait())
