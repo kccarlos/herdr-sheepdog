@@ -295,6 +295,44 @@ func (m Manager) Status(ctx context.Context) (string, error) {
 	return fmt.Sprintf("installed (%s): %s", path, strings.TrimSpace(out)), nil
 }
 
+// Start starts an installed service that is not running and reports
+// what it did. It never writes a unit file: a service that is not
+// installed is left alone (installed false, no error), and one that
+// already runs is not touched.
+func (m Manager) Start(ctx context.Context) (installed, started bool, err error) {
+	if err := m.Spec.check(); err != nil {
+		return false, false, err
+	}
+	path := m.Spec.UnitPath()
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, false, nil
+	}
+	if m.Spec.OS == "darwin" {
+		out, perr := m.Run(ctx, "launchctl", "print", m.domain()+"/"+Label)
+		if perr != nil {
+			// Not loaded (e.g. after a bootout): load it again.
+			if out, err := m.Run(ctx, "launchctl", "bootstrap", m.domain(), path); err != nil {
+				return true, false, fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(out))
+			}
+			return true, true, nil
+		}
+		if strings.Contains(out, "pid = ") {
+			return true, false, nil
+		}
+		if out, err := m.Run(ctx, "launchctl", "kickstart", m.domain()+"/"+Label); err != nil {
+			return true, false, fmt.Errorf("launchctl kickstart: %v: %s", err, strings.TrimSpace(out))
+		}
+		return true, true, nil
+	}
+	if out, _ := m.Run(ctx, "systemctl", "--user", "is-active", Unit); strings.TrimSpace(out) == "active" {
+		return true, false, nil
+	}
+	if out, err := m.Run(ctx, "systemctl", "--user", "start", Unit); err != nil {
+		return true, false, fmt.Errorf("systemctl start: %v: %s", err, strings.TrimSpace(out))
+	}
+	return true, true, nil
+}
+
 // launchdState picks the state, pid and last exit code out of
 // `launchctl print`.
 func launchdState(out string) string {

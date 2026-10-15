@@ -1,0 +1,82 @@
+id = "kccarlos.sheepdog"
+name = "sheepdog — voice control for your agents"
+version = "0.1.0"
+# 0.9.0: plugin popups with width/height arrived in 0.7.4 and startup
+# hooks in 0.7.3 (herdr CHANGELOG); 0.9.0 is the floor of the 0.9 line
+# and the plugin was linked and its actions listed on herdr 0.9.3.
+min_herdr_version = "0.9.0"
+description = "Talk to your coding agents from your phone or a browser. Runs the sheepdog daemon next to herdr: set up, pair your phone, check, logs."
+platforms = ["macos", "linux"]
+
+# Runs on `herdr plugin install` only (not on `plugin link`). Downloads the
+# release binary and verifies its sha256; falls back to `go build`.
+[[build]]
+command = ["sh", "scripts/plugin-fetch.sh"]
+
+# One-shot: starts the login service if it is installed and not running,
+# then exits. It installs nothing; the service manager (launchd or
+# systemd --user) owns the daemon, so the plugin leaves no process behind.
+[[startup]]
+command = ["bin/sheepdog", "service", "start"]
+
+# Actions open the popups below. A popup closes when its command exits,
+# so scripts/plugin-pane.sh waits for Enter after the command.
+[[actions]]
+id = "setup"
+title = "Set up sheepdog"
+contexts = ["workspace"]
+command = ["sh", "scripts/plugin-open.sh", "setup"]
+
+[[actions]]
+id = "pair"
+title = "Pair your phone"
+contexts = ["workspace"]
+command = ["sh", "scripts/plugin-open.sh", "pair"]
+
+[[actions]]
+id = "doctor"
+title = "Check setup"
+contexts = ["workspace"]
+command = ["sh", "scripts/plugin-open.sh", "doctor"]
+
+[[actions]]
+id = "logs"
+title = "Logs"
+contexts = ["workspace"]
+command = ["sh", "scripts/plugin-open.sh", "logs"]
+
+# Interactive: asks for the key; at the end offers `sheepdog service install`.
+[[panes]]
+id = "setup"
+title = "Set up sheepdog"
+placement = "popup"
+width = 90
+height = 30
+command = ["sh", "scripts/plugin-pane.sh", "init"]
+
+# The QR code is 49 to 57 columns and 24 to 28 rows; --compact adds under
+# 10 rows (TestPairCompactFitsThePluginPopup).
+[[panes]]
+id = "pair"
+title = "Pair your phone"
+placement = "popup"
+width = 72
+height = 42
+command = ["sh", "scripts/plugin-pane.sh", "pair", "--compact"]
+
+[[panes]]
+id = "doctor"
+title = "Check setup"
+placement = "popup"
+width = 100
+height = 30
+command = ["sh", "scripts/plugin-pane.sh", "doctor"]
+
+# Follows the log until Ctrl-C, which closes the popup.
+[[panes]]
+id = "logs"
+title = "Logs"
+placement = "popup"
+width = "90%"
+height = "80%"
+command = ["bin/sheepdog", "service", "logs", "-f"]

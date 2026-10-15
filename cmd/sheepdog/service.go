@@ -27,7 +27,7 @@ var serviceRunner service.Runner = service.ExecRunner
 var serviceHome = os.UserHomeDir
 
 func printServiceUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog service install|uninstall|status|logs [flags]")
+	fprintln(w, "usage: sheepdog service install|uninstall|start|status|logs [flags]")
 	fprintln(w, "")
 	fprintln(w, "Runs `sheepdog serve --env-file ~/.config/sheepdog/.env` as a user service, so")
 	fprintln(w, "the daemon starts at login and restarts after a crash without a terminal:")
@@ -37,6 +37,7 @@ func printServiceUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "  install     write the unit and start it (again, when it runs: picks up a new binary)")
 	fprintln(w, "  uninstall   stop it and remove the unit")
+	fprintln(w, "  start       start the installed service if it is not running; installs nothing")
 	fprintln(w, "  status      installed or not, and what the service manager says")
 	fprintln(w, "  logs        the daemon's last lines (-n N, -f to follow)")
 	fprintln(w, "")
@@ -59,7 +60,7 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	verb := args[0]
 	switch verb {
-	case "install", "uninstall", "status", "logs":
+	case "install", "uninstall", "start", "status", "logs":
 	default:
 		fprintf(stderr, "sheepdog service: unknown command %q\n\n", verb)
 		printServiceUsage(stderr)
@@ -114,6 +115,20 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if err := m.Uninstall(ctx); err != nil {
 			fprintf(stderr, "sheepdog service: %v\n", err)
 			return 1
+		}
+		return 0
+	case "start":
+		installed, started, err := m.Start(ctx)
+		switch {
+		case err != nil:
+			fprintf(stderr, "sheepdog service: %v\n", err)
+			return 1
+		case !installed:
+			fprintln(stdout, "sheepdog service: not installed, nothing started (run: sheepdog service install)")
+		case started:
+			fprintln(stdout, "sheepdog service: started")
+		default:
+			fprintln(stdout, "sheepdog service: already running")
 		}
 		return 0
 	case "status":
@@ -174,7 +189,7 @@ func serviceSpec(configPath, envFile, binary string) (service.Spec, error) {
 // becomes the prefix's bin/sheepdog link. A `go run` build lives in a
 // temp dir that disappears: refused.
 func stableExecutable() (string, error) {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return "", err
 	}
@@ -209,6 +224,9 @@ func portTaken(configPath string) (string, bool) {
 	_ = conn.Close()
 	return addr, true
 }
+
+// osExecutable is os.Executable (tests replace it).
+var osExecutable = os.Executable
 
 // runtimeGOOS is runtime.GOOS (a variable so tests read the same value).
 var runtimeGOOS = runtime.GOOS

@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
 // onboardEndpoints are the API roots init and doctor validate keys
@@ -155,7 +156,41 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		fprintf(stderr, "sheepdog init: %v\n", err)
 		return 1
 	}
+	if !o.nonInteractive {
+		offerService(ctx, o, in, stdout, stderr)
+	}
 	return 0
+}
+
+// offerService is init's last step: it offers `sheepdog service install`
+// unless the service is installed already. Declining or failing is not
+// a failure of init; the keys and the config are written by then.
+func offerService(ctx context.Context, o initOptions, in *prompter, stdout, stderr io.Writer) {
+	var extra []string
+	if o.configPath != config.DefaultPath() {
+		extra = append(extra, "--config", o.configPath)
+	}
+	if o.envPath != config.DefaultEnvPath() {
+		extra = append(extra, "--env-file", o.envPath)
+	}
+	spec, err := serviceSpec(o.configPath, o.envPath, "")
+	if err != nil {
+		fprintf(stderr, "sheepdog init: not offering the login service: %v\n", err)
+		return
+	}
+	m := service.Manager{Spec: spec, Run: serviceRunner, Out: stdout}
+	if st, _ := m.Status(ctx); !strings.HasPrefix(st, "not installed") {
+		fprintln(stdout, "sheepdog init: the login service is already installed ("+st+")")
+		return
+	}
+	yes, err := in.yesNo("Install sheepdog as a login service now (sheepdog service install)?", true)
+	if err != nil || !yes {
+		fprintln(stdout, "sheepdog init: skipped; later: sheepdog service install")
+		return
+	}
+	if code := runService(ctx, append([]string{"install"}, extra...), stdout, stderr); code != 0 {
+		fprintln(stderr, "sheepdog init: the service did not install; run sheepdog service install after fixing the above")
+	}
 }
 
 // initRun is init's flow; it returns before writing anything when a key
