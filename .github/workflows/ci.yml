@@ -92,8 +92,3 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -o dist/sheepdog-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/sheepdog
-      - if: github.event_name == 'push'
-        uses: actions/upload-artifact@v7
-        with:
-          name: sheepdog-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/sheepdog-${{ matrix.goos }}-${{ matrix.goarch }}
