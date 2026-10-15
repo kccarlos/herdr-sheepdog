@@ -26,8 +26,8 @@
 
 **Hands-free, from anywhere. Hear who's stuck, approve with a word, ask what broke.**
 
-<!-- The final video will be a GitHub user-attachments URL (drag the file into an issue or PR comment and paste the link here). -->
-<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: an approval arrives on the lock screen; you say approve, ask what is going on and why the migration failed, and sheepdog answers" width="800"></a></p>
+<!-- replace with the user-attachments URL: drag launch.mp4 into the GitHub web editor -->
+<p align="center"><a href="assets/readme/launch.mp4"><img src="assets/readme/launch-poster.png" alt="Play the 36 second video: an approval arrives on the lock screen, you say approve, ask what is going on and why the migration failed, and sheepdog answers out loud (sound on, captions burned in; the agents are scripted demo agents)" width="800"></a></p>
 
 - **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. [quick start →](docs/quick-start.md)
 - **who's stuck, first** — "what's going on?" covers the whole fleet and names who needs you before anyone else. [commands →](docs/commands.md)
@@ -49,7 +49,6 @@ herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
 sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
 ```
 
-<!-- install.gif: another agent re-records it; keep this slot. -->
 <p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 
 Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).

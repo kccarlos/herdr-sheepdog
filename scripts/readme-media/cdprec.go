@@ -108,6 +108,9 @@ func main() {
 	after2 := flag.Float64("after2", 0, "stop this many seconds after -file2 is set (0: run the full -seconds)")
 	file2 := flag.String("file2", "", "a second file (a follow-up), set on -file-selector -file2-at seconds after the click")
 	file2At := flag.Float64("file2-at", 12, "seconds after the click to set -file2")
+	initJS := flag.String("init-js", "", "JS file run in every new document before the page's own scripts (e.g. a redactor)")
+	steps := flag.String("steps", "", "file of 'seconds<TAB>JS' lines: each JS runs that many seconds after the recording starts")
+	doneWhen := flag.String("done-when", "", "JS expression: stop 0.8 s after it turns true (the -seconds limit still applies)")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -176,6 +179,13 @@ func main() {
 	must("Page.enable", map[string]any{})
 	must("Emulation.setDeviceMetricsOverride", map[string]any{"width": *width, "height": *height, "deviceScaleFactor": 2, "mobile": false})
 	must("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-color-scheme", "value": "light"}}})
+	if *initJS != "" {
+		src, err := os.ReadFile(*initJS)
+		if err != nil {
+			log.Fatal(err)
+		}
+		must("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": string(src)})
+	}
 	must("Page.navigate", map[string]any{"url": *url})
 	time.Sleep(2 * time.Second)
 	if *css != "" {
@@ -216,6 +226,7 @@ func main() {
 		return time.Since(*since).Seconds() >= hold
 	}
 	var whenSince, when2Since time.Time
+	stopping := false
 	setFile := func(path string) {
 		abs, _ := filepath.Abs(path)
 		var doc struct {
@@ -227,6 +238,29 @@ func main() {
 		}
 		_ = json.Unmarshal(must("DOM.querySelector", map[string]any{"nodeId": doc.Result.Root.NodeID, "selector": *fileSel}), &q)
 		must("DOM.setFileInputFiles", map[string]any{"files": []string{abs}, "nodeId": q.Result.NodeID})
+	}
+	type step struct {
+		at   float64
+		js   string
+		done bool
+	}
+	var todo []*step
+	if *steps != "" {
+		raw, err := os.ReadFile(*steps)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, l := range strings.Split(string(raw), "\n") {
+			if l = strings.TrimRight(l, "\r"); l == "" || strings.HasPrefix(l, "#") {
+				continue
+			}
+			a, js, ok := strings.Cut(l, "\t")
+			var at float64
+			if _, err := fmt.Sscanf(a, "%g", &at); !ok || err != nil {
+				log.Fatalf("bad steps line: %q", l)
+			}
+			todo = append(todo, &step{at: at, js: js})
+		}
 	}
 	n := 0
 	var lastName string
@@ -240,6 +274,20 @@ loop:
 		case <-deadline:
 			break loop
 		case <-tick.C:
+			if *doneWhen != "" && !stopping {
+				var d time.Time
+				if ready(*doneWhen, &d, 0) {
+					stopping = true
+					deadline = time.After(800 * time.Millisecond)
+				}
+			}
+			for _, st := range todo {
+				if !st.done && time.Since(start).Seconds() >= st.at {
+					st.done = true
+					must("Runtime.evaluate", map[string]any{"expression": st.js, "awaitPromise": false})
+					fmt.Printf("step %.2f\n", time.Since(start).Seconds())
+				}
+			}
 			if !clicked && time.Since(start) > 1500*time.Millisecond && *click != "" {
 				must("Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`document.querySelector(%q).click()`, *click)})
 				clicked = true
