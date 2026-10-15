@@ -61,7 +61,7 @@ loopback.
 | Works at home, not away | Tailscale is not on both devices, or they use different accounts. Scan a fresh `sheepdog pair` after fixing. |
 | The pairing code has no Tailscale address | Tailscale was not running when you paired. Start it, then `sheepdog pair`. |
 | `sheepdog status` shows `0 registered` phones | Normal until a phone has connected and allowed notifications. |
-| `sheepdog start` says the bind needs a token | `web.bind` is not loopback and no token is set. Run `sheepdog setup` and turn on phone access. |
+| `web.token is required when web.bind is not loopback` (exit 2) | `web.bind` is not loopback and no token is set. Run `sheepdog setup` and turn on phone access, or set `web.token`. |
 | `403` opening `/setup` from the phone | By design. Open `http://127.0.0.1:7777/setup` on the computer. |
 | Corporate or guest Wi-Fi blocks it | These networks often isolate devices. Use Tailscale. |
 

@@ -90,5 +90,20 @@ opens and talk. Ctrl-C ends it.
 | Voice page says "Setup needed" | Run `sheepdog setup` and finish step 1. |
 | Anything else | `sheepdog doctor`, then [troubleshooting.md](troubleshooting.md). |
 
+## Other ways to install
+
+The plugin is the supported path. The daemon is also a plain binary:
+
+- **Release download:** each GitHub release carries
+  `sheepdog_<tag>_darwin_arm64.tar.gz` and `sheepdog_<tag>_linux_amd64.tar.gz`
+  with `checksums.txt`. Check the sha256, unpack, and put `sheepdog` on your
+  PATH. The macOS binary is signed and notarized.
+- **From source** (Go, see `go.mod`): `git clone https://github.com/kccarlos/herdr-sheepdog.git`,
+  then `make install` builds it and copies it to `~/.local/bin/`.
+- **Homebrew:** not published yet.
+
+Then run `sheepdog setup` as above. `sheepdog update` prints the upgrade steps
+for the way you installed.
+
 Next: [pair your iPhone](iphone-app.md), [choose other models](models.md),
 [use it away from home](remote-access.md).
