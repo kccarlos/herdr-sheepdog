@@ -53,7 +53,7 @@ func TestPlist(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"<string>" + Label + "</string>",
-		"<string>/opt/homebrew/bin/sheepdog</string>\n\t\t<string>serve</string>\n\t\t<string>--env-file</string>\n\t\t<string>" + s.EnvFile + "</string>\n\t\t<string>--config</string>\n\t\t<string>/Users/a b/cfg &amp; co.toml</string>",
+		"<string>/opt/homebrew/bin/sheepdog</string>\n\t\t<string>serve</string>\n\t\t<string>--background</string>\n\t\t<string>--env-file</string>\n\t\t<string>" + s.EnvFile + "</string>\n\t\t<string>--config</string>\n\t\t<string>/Users/a b/cfg &amp; co.toml</string>",
 		"<key>RunAtLoad</key>\n\t<true/>",
 		"<key>KeepAlive</key>\n\t<true/>",
 		"<string>/opt/homebrew/bin:/usr/bin:/bin</string>",
@@ -77,7 +77,7 @@ func TestSystemdUnit(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		`ExecStart="/home/u/my bin/sheepdog" serve --env-file ` + s.EnvFile,
+		`ExecStart="/home/u/my bin/sheepdog" serve --background --env-file ` + s.EnvFile,
 		"Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin",
 		"Restart=on-failure",
 		"WantedBy=default.target",
@@ -267,5 +267,65 @@ func writeUnit(t *testing.T, s Spec) {
 	}
 	if err := os.WriteFile(s.UnitPath(), []byte("unit"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestStopUnloadsInsteadOfSignalling: launchd's KeepAlive and systemd's
+// Restart bring back a daemon that only got a signal, so Stop boots the
+// agent out / stops the unit, and does nothing without a unit file.
+func TestStopUnloadsInsteadOfSignalling(t *testing.T) {
+	t.Run("not installed", func(t *testing.T) {
+		f := &fakeRunner{}
+		installed, err := Manager{Spec: spec(t, "darwin"), Run: f.run}.Stop(context.Background())
+		if installed || err != nil || len(f.calls) != 0 {
+			t.Errorf("installed=%v err=%v calls=%q", installed, err, f.calls)
+		}
+	})
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			s := spec(t, goos)
+			if err := os.MkdirAll(filepath.Dir(s.UnitPath()), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(s.UnitPath(), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeRunner{}
+			installed, err := Manager{Spec: s, Run: f.run}.Stop(context.Background())
+			if !installed || err != nil {
+				t.Fatalf("installed=%v err=%v", installed, err)
+			}
+			want := "systemctl --user stop " + Unit
+			if goos == "darwin" {
+				want = "launchctl print gui/501/" + Label + "|launchctl bootout gui/501/" + Label
+			}
+			if strings.Join(f.calls, "|") != want {
+				t.Errorf("calls = %q, want %q", f.calls, want)
+			}
+		})
+	}
+}
+
+// TestUnitsRestartOnCrashAndUseStdioPath: the launchd agent keeps the
+// daemon alive and the systemd unit restarts it on failure; both send
+// stdout/stderr to StdioPath and run serve --background.
+func TestUnitsRestartOnCrashAndUseStdioPath(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		s := spec(t, goos)
+		s.StdioPath = filepath.Join(s.Home, ".local", "share", "sheepdog", "logs", "stdio.log")
+		data, err := s.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		wants := []string{"<key>KeepAlive</key>\n\t<true/>", "<string>" + s.StdioPath + "</string>", "<string>--background</string>"}
+		if goos == "linux" {
+			wants = []string{"Restart=on-failure", "StandardOutput=append:" + s.StdioPath, "StandardError=append:" + s.StdioPath, "serve --background"}
+		}
+		for _, w := range wants {
+			if !strings.Contains(text, w) {
+				t.Errorf("%s unit lacks %q:\n%s", goos, w, text)
+			}
+		}
 	}
 }

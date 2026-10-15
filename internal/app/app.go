@@ -175,38 +175,50 @@ type App struct {
 	pushErr error
 }
 
-// Build validates the options and wires every component. Nothing is
-// started; the state table is loaded and the event log opened.
-func Build(cfg config.Config, opts Options) (*App, error) {
+// Check reports the error Build would refuse cfg and opts with (a bad
+// mode flag, a missing voice key, a non-loopback bind without a token)
+// without building anything, so serve can say so before it takes the
+// single-instance lock or opens a file.
+func Check(cfg config.Config, opts Options) error {
 	opts = opts.withDefaults()
 	switch opts.Voice {
 	case VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff:
 	default:
-		return nil, fmt.Errorf("app: --voice must be %s, %s, %s or %s", VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff)
+		return fmt.Errorf("app: --voice must be %s, %s, %s or %s", VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff)
 	}
 	if opts.Herdr != HerdrSocket && opts.Herdr != HerdrMock {
-		return nil, fmt.Errorf("app: --herdr must be %s or %s", HerdrSocket, HerdrMock)
+		return fmt.Errorf("app: --herdr must be %s or %s", HerdrSocket, HerdrMock)
 	}
 	if opts.CLI != CLIOn && opts.CLI != CLIOff {
-		return nil, fmt.Errorf("app: --cli must be %s or %s", CLIOn, CLIOff)
+		return fmt.Errorf("app: --cli must be %s or %s", CLIOn, CLIOff)
 	}
 	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
-		return nil, fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
+		return fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
 	if opts.Voice != VoiceOff {
 		switch initialVoiceProvider(cfg, opts) {
 		case VoiceGemini:
 			if _, _, missing := GeminiLive(cfg.Gemini); missing != "" {
-				return nil, fmt.Errorf("app: the gemini voice (backend %s) needs %s; use --voice=off to run without it", cfg.Gemini.Backend, missing)
+				return fmt.Errorf("app: the gemini voice (backend %s) needs %s; use --voice=off to run without it", cfg.Gemini.Backend, missing)
 			}
 		case VoiceOpenAI:
 			if cfg.Voice.OpenAI.APIKey == "" {
-				return nil, errors.New("app: the openai voice needs OPENAI_API_KEY (or voice.openai.api_key); use --voice=off to run without it")
+				return errors.New("app: the openai voice needs OPENAI_API_KEY (or voice.openai.api_key); use --voice=off to run without it")
 			}
 		}
 	}
 	if !cfg.Web.IsLoopback() && cfg.Web.Token == "" {
-		return nil, errors.New("app: web.token is required when web.bind is not loopback")
+		return errors.New("app: web.token is required when web.bind is not loopback")
+	}
+	return nil
+}
+
+// Build validates the options and wires every component. Nothing is
+// started; the state table is loaded and the event log opened.
+func Build(cfg config.Config, opts Options) (*App, error) {
+	opts = opts.withDefaults()
+	if err := Check(cfg, opts); err != nil {
+		return nil, err
 	}
 	port := cfg.Web.Port
 	if opts.Port > 0 {

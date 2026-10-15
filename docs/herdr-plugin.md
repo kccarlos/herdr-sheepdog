@@ -23,7 +23,7 @@ opening a popup:
 | Set up sheepdog (`setup`) | `sheepdog init` | 90×30. Asks for a key; at the end offers `sheepdog service install`. |
 | Pair your phone (`pair`) | `sheepdog pair --compact` | 72×42, sized for the QR code with three addresses. |
 | Check setup (`doctor`) | `sheepdog doctor` | 100×30 |
-| Logs (`logs`) | `sheepdog service logs -f` | 90%×80%. Follows the log; Ctrl-C closes it. |
+| Logs (`logs`) | `sheepdog logs -f` | 90%×80%. Follows the log; Ctrl-C closes it. |
 
 A popup closes when its command exits, so
 [`scripts/plugin-pane.sh`](../scripts/plugin-pane.sh) waits for Enter after

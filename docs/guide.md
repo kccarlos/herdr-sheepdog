@@ -54,13 +54,17 @@ binary; this is the by-hand path.
    sheepdog doctor
    ```
 
-3. **Run.** Start herdr, then the daemon, in a terminal or as a login
-   service (a launchd agent on macOS, a systemd user unit on Linux):
+3. **Run.** Start herdr, then the daemon in the background:
 
    ```sh
-   sheepdog serve              # or:
-   sheepdog service install    # also: service status | logs [-f] | uninstall
+   sheepdog start              # stop | restart | status | logs [-f]
+   sheepdog open               # the voice page in your browser
    ```
+
+   `sheepdog service install` makes it start at login and restart after a
+   crash (a launchd agent on macOS, a systemd user unit on Linux); `start`
+   and `stop` then go through the service. `sheepdog serve` runs it in the
+   terminal instead (Ctrl-C stops it).
 
    Open **http://127.0.0.1:7777/voice** and press Connect. **/debug** shows
    what the daemon, the voice and the orchestrator are doing.
@@ -185,12 +189,36 @@ prints the effective config with secrets redacted. `sheepdog serve` loads
 `OPENAI_API_KEY` (GPT-Live, voice only), and the key of any
 OpenAI-compatible orchestrator.
 
+## Your data
+
+sheepdog keeps your settings in `~/.config/sheepdog/` and everything else
+in `~/.local/share/sheepdog/`: the runtime log (rotated at 10 MB, secrets
+redacted) and the event log, which holds transcripts of what you said and
+is deleted after 14 days (`events.retention_days`). `sheepdog data clear`
+deletes it now. The full list, with what each file holds and how long it
+is kept, is in [`CONFIG.md`](../CONFIG.md) "What sheepdog stores".
+
 ## Commands
+
+`sheepdog --help` lists the user commands:
 
 | Command | What it does |
 |---|---|
-| `sheepdog serve` | The daemon: herdr watcher, supervisor, orchestrator, voice session, web server (`/voice`, `/debug`, `/ws`, `/events`, `/api/*`). |
+| `sheepdog init` \| `doctor` \| `pair` \| `demo` | Set up \| check the setup \| the iOS app's QR code \| try it without herdr. |
+| `sheepdog start` \| `stop` \| `restart` | Run the daemon in the background (through the login service when it is installed, otherwise detached with a pid file in `<data_dir>/sheepdog.pid`) \| stop it \| both. A second `start` or `serve` says `sheepdog is already running (pid N, http://…)`. |
+| `sheepdog status [--json]` | Running or not, pid, version, URL, the voice and orchestrator models, herdr, phones, the last error. Exit 0 running, 3 stopped. |
+| `sheepdog logs [-f] [-n N]` | The runtime log, `~/.local/share/sheepdog/logs/sheepdog.log` ([`CONFIG.md`](../CONFIG.md) "What sheepdog stores"). |
+| `sheepdog open [voice\|setup\|debug]` | Open a page of the running daemon in the browser. |
+| `sheepdog serve` | The daemon in the foreground: herdr watcher, supervisor, orchestrator, voice session, web server (`/voice`, `/debug`, `/ws`, `/events`, `/api/*`). |
+| `sheepdog service install` \| `uninstall` \| `status` | Run the daemon at login (launchd / systemd --user). |
 | `sheepdog config show` \| `init` | Print the effective config (redacted) \| scaffold `config.toml`. |
+
+The developer commands are under `sheepdog dev` (`sheepdog dev --help`);
+each also still runs under its older top-level name (`sheepdog eval` =
+`sheepdog dev eval`):
+
+| Command | What it does |
+|---|---|
 | `sheepdog herdr watch` | Print debounced agent state transitions as JSONL; `--once` prints the persisted state table. |
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with echo tools; no daemon needed. |
 | `sheepdog brain-test` | Run one orchestrator turn against a mock herdr and a screen fixture (`--question`, `--say`, `--provider`; `--fake` needs no network). |

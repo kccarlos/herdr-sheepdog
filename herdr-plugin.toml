@@ -79,4 +79,4 @@ title = "Logs"
 placement = "popup"
 width = "90%"
 height = "80%"
-command = ["bin/sheepdog", "service", "logs", "-f"]
+command = ["bin/sheepdog", "logs", "-f"]
