@@ -22,14 +22,33 @@ func TestPushRoutes(t *testing.T) {
 	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", "", nil, map[string]string{"token": tok, "environment": "production"}), nil); code != http.StatusUnauthorized {
 		t.Errorf("no token: code=%d, want 401", code)
 	}
-	var ok map[string]bool
+	// Each registration answers the phone's content key, the same one
+	// every time.
+	keys := map[string]bool{}
 	for i := 0; i < 2; i++ {
-		code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", "s3cr3t", nil, map[string]string{"token": tok, "environment": "sandbox", "device": "iPhone"}), &ok)
-		if code != http.StatusOK || !ok["ok"] {
-			t.Fatalf("register #%d: code=%d body=%v", i+1, code, ok)
+		var reg struct {
+			OK         bool   `json:"ok"`
+			ContentKey string `json:"content_key"`
+			Encryption string `json:"encryption"`
 		}
+		code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", "s3cr3t", nil, map[string]string{"token": tok, "environment": "sandbox", "device": "iPhone"}), &reg)
+		if code != http.StatusOK || !reg.OK || len(reg.ContentKey) != 44 || reg.Encryption != "aes-256-gcm" {
+			t.Fatalf("register #%d: code=%d body=%+v", i+1, code, reg)
+		}
+		keys[reg.ContentKey] = true
 	}
-	for _, bad := range []map[string]string{{"token": "nothex", "environment": "production"}, {"token": tok, "environment": "debug"}} {
+	if len(keys) != 1 {
+		t.Errorf("content keys = %v, want one", keys)
+	}
+	// A relay token alone registers too, and unregisters by itself.
+	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", "s3cr3t", nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 2 {
+		t.Errorf("relay-only register: code=%d devices=%d", code, sender.Status().Devices)
+	}
+	if code, _ := h.do(h.authedRequest(http.MethodDelete, "/api/push/register", "s3cr3t", nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 1 {
+		t.Errorf("relay-only delete: code=%d devices=%d", code, sender.Status().Devices)
+	}
+	var ok map[string]bool
+	for _, bad := range []map[string]string{{"token": "nothex", "environment": "production"}, {"token": tok, "environment": "debug"}, {"relay_token": "not a token!"}} {
 		if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", "s3cr3t", nil, bad), nil); code != http.StatusBadRequest {
 			t.Errorf("register %v: code=%d, want 400", bad, code)
 		}

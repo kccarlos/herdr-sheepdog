@@ -504,7 +504,50 @@ var LogLevels = []string{"debug", "info", "warn", "error"}
 
 // Push configures phone notifications (docs/dev/push.md).
 type Push struct {
-	APNs APNs `toml:"apns"`
+	// Mode is how notifications reach APNs: "relay" (sheepdog's shared
+	// relay, or your own: [push.relay]), "apns" (directly, with your own
+	// key: [push.apns]) or "off". Empty picks: apns when [push.apns] is
+	// fully set, else relay (EffectiveMode).
+	Mode  string    `toml:"mode"`
+	Relay PushRelay `toml:"relay"`
+	APNs  APNs      `toml:"apns"`
+}
+
+// The push.mode values.
+const (
+	PushModeRelay = "relay"
+	PushModeAPNs  = "apns"
+	PushModeOff   = "off"
+)
+
+// PushModes are the valid push.mode values ("" is also accepted: auto).
+var PushModes = []string{PushModeRelay, PushModeAPNs, PushModeOff}
+
+// DefaultRelayURL is sheepdog's shared push relay (relay/README.md).
+const DefaultRelayURL = "https://sheepdog-relay.REPLACE.workers.dev"
+
+// PushRelay configures the push relay.
+type PushRelay struct {
+	// URL is the relay's base URL (default DefaultRelayURL).
+	URL string `toml:"url"`
+}
+
+// Complete reports whether all four [push.apns] values are set.
+func (a APNs) Complete() bool {
+	return strings.TrimSpace(a.KeyPath) != "" && strings.TrimSpace(a.KeyID) != "" && strings.TrimSpace(a.TeamID) != "" && strings.TrimSpace(a.Topic) != ""
+}
+
+// EffectiveMode is push.mode, or with it unset: apns when [push.apns] is
+// fully configured (a self-built app with its own key keeps working
+// unchanged), else relay.
+func (p Push) EffectiveMode() string {
+	if p.Mode != "" {
+		return p.Mode
+	}
+	if p.APNs.Complete() {
+		return PushModeAPNs
+	}
+	return PushModeRelay
 }
 
 // APNs configures the Apple Push Notification service sender for the
@@ -568,6 +611,7 @@ func Default() Config {
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 		Log:               Log{Level: "info", MaxSizeMB: 10, MaxFiles: 3},
 		Events:            Events{RetentionDays: 14},
+		Push:              Push{Relay: PushRelay{URL: DefaultRelayURL}},
 	}
 }
 
@@ -754,6 +798,12 @@ func validate(cfg Config) error {
 	if err := validateVoice(cfg); err != nil {
 		return err
 	}
+	if cfg.Push.Mode != "" && !oneOf(cfg.Push.Mode, PushModes) {
+		return fmt.Errorf("config: push.mode=%q: want one of %s", cfg.Push.Mode, strings.Join(PushModes, ", "))
+	}
+	if cfg.Push.EffectiveMode() == PushModeRelay && !strings.HasPrefix(cfg.Push.Relay.URL, "https://") && !strings.HasPrefix(cfg.Push.Relay.URL, "http://") {
+		return fmt.Errorf("config: push.relay.url=%q: want an http(s) URL", cfg.Push.Relay.URL)
+	}
 	if !oneOf(cfg.Log.Level, LogLevels) {
 		return fmt.Errorf("config: log.level=%q: want one of %s", cfg.Log.Level, strings.Join(LogLevels, ", "))
 	}
@@ -917,6 +967,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	SHEEPDOG_BRAIN_REPLY_WAIT_S,
 //	SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S, SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S,
 //	SHEEPDOG_PROMPTS_DIR,
+//	SHEEPDOG_PUSH_MODE, SHEEPDOG_PUSH_RELAY_URL,
 //	SHEEPDOG_APNS_KEY_PATH, SHEEPDOG_APNS_KEY_ID, SHEEPDOG_APNS_TEAM_ID,
 //	SHEEPDOG_APNS_TOPIC.
 //	The [cli] argv templates (codex_cmd, claude_cmd) are TOML-only, like
@@ -1203,12 +1254,15 @@ func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	return nil
 }
 
-// applyPushEnv overrides [push.apns] from SHEEPDOG_APNS_*.
+// applyPushEnv overrides [push] from SHEEPDOG_PUSH_* and [push.apns]
+// from SHEEPDOG_APNS_*.
 func applyPushEnv(cfg *Config, lookup func(string) (string, bool)) {
 	for _, e := range []struct {
 		name string
 		dst  *string
 	}{
+		{"SHEEPDOG_PUSH_MODE", &cfg.Push.Mode},
+		{"SHEEPDOG_PUSH_RELAY_URL", &cfg.Push.Relay.URL},
 		{"SHEEPDOG_APNS_KEY_PATH", &cfg.Push.APNs.KeyPath},
 		{"SHEEPDOG_APNS_KEY_ID", &cfg.Push.APNs.KeyID},
 		{"SHEEPDOG_APNS_TEAM_ID", &cfg.Push.APNs.TeamID},
@@ -1274,8 +1328,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
 }
 
 // compatString renders the [[brain.openai_compat]] entries for String,

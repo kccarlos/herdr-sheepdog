@@ -37,7 +37,7 @@ an OpenRouter key's credit where the API shows them; AI Studio does not
 expose its quota), a one-call tool-calling probe on each OpenAI-compatible
 orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
 voice providers, the web port (free, this daemon, or another program),
-the bind/token pairing, `[push.apns]` and the secret files' permissions.
+the bind/token pairing, push (the relay's health, or the `[push.apns]` key) and the secret files' permissions.
 It exits 1 on any failure.
 `sheepdog pair` prints the QR code the iOS app scans: every LAN and
 Tailscale address the daemon listens on (from `web.bind`/`web.port`) and
@@ -453,7 +453,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions and your runtime settings (`state.path`). | Overwritten as it changes. |
-| `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications (device tokens), when push is configured. | Until a phone unregisters. |
+| `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications: device tokens, relay tokens and each phone's notification content key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
@@ -462,11 +462,21 @@ Nothing is sent anywhere except to the model providers you configured.
 under `data_dir`; both ask first. `sheepdog uninstall` removes the
 service and asks before deleting either directory.
 
+## `[push]`
+
+Phone notifications for the iOS companion app (docs/dev/push.md; the
+three ways to set them up are in docs/iphone-app.md "Notifications").
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `push.mode` | `SHEEPDOG_PUSH_MODE` | unset: `apns` when all four `[push.apns]` keys are set, else `relay` | How notifications reach Apple. `relay`: through sheepdog's shared relay (or your own, `push.relay.url`); the daemon needs no Apple key, and the content is end-to-end encrypted with a key only the phone has, so the relay sees only the device token, the timing, the size and the kind. `apns`: straight to Apple with your own key (`[push.apns]`), for an app you build yourself. `off`: no notifications (phones can still register). |
+| `push.relay.url` | `SHEEPDOG_PUSH_RELAY_URL` | sheepdog's shared relay | The relay's base URL, for `push.mode = "relay"`. Point it at your own deployment of `relay/` (relay/README.md) to self-host. |
+
 ## `[push.apns]`
 
-Phone notifications for the iOS companion app over the Apple Push
-Notification service (docs/dev/push.md). All four keys are needed; with any
-one empty, sending is disabled and `push.disabled` at startup says which
+Direct delivery to the Apple Push Notification service with your own key,
+used when `push.mode` is `apns` (or unset with all four keys present). All
+four keys are needed; with any one empty, sending is disabled and `push.disabled` at startup says which
 are missing (devices can still register, so nothing is lost while the key
 is being set up). `config show` prints `key_path` as set/unset only; the
 key file's contents are never read into a log.
@@ -478,4 +488,4 @@ key file's contents are never read into a log.
 | `push.apns.team_id` | `SHEEPDOG_APNS_TEAM_ID` | empty | The Apple Developer Team ID the key belongs to (the JWT `iss`). A key from another team is rejected by APNs with `403 InvalidProviderToken`. |
 | `push.apns.topic` | `SHEEPDOG_APNS_TOPIC` | empty | The iOS app's bundle id (`apns-topic`). |
 
-Registered devices persist in `<data_dir>/push_devices.json`.
+Registered devices, with each phone's relay token and end-to-end content key, persist in `<data_dir>/push_devices.json` (mode 600).

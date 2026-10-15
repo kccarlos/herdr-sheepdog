@@ -19,7 +19,7 @@
 </header>
 
 <main>
-  <p class="lead">Five short steps, about three minutes. Nothing here leaves this computer except the key checks, which go to the provider you choose.</p>
+  <p class="lead">Five short steps, about three minutes. Nothing here leaves this computer except the key checks, which go to the provider you choose, and a check that the push relay answers.</p>
   <p id="offline" class="error hidden" role="alert">sheepdog is not answering. If it is restarting, this page reconnects by itself; otherwise run <code>sheepdog setup</code> again.</p>
 
   <!-- 1. Models -->
@@ -122,6 +122,7 @@
         <span id="phone-msg2" class="muted small" aria-live="polite"></span>
       </div>
     </div>
+    <p class="small muted" id="push-note">Notifications use sheepdog's shared relay; their content is end-to-end encrypted. Or build the app with your own Apple key. <a href="https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/iphone-app.md#notifications" target="_blank" rel="noopener">How notifications work</a>.</p>
   </section>
 
   <!-- 5. Talk -->

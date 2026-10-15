@@ -25,17 +25,61 @@ const DevicesFile = "push_devices.json"
 
 // Device is one registered iOS device.
 type Device struct {
-	Token        string    `json:"token"`
+	// Token is the APNs device token (hex); "" when the app registered
+	// only a relay token.
+	Token string `json:"token,omitempty"`
+	// RelayToken is the relay's sealed form of the device token
+	// (push.mode = "relay"): sent by the app, or fetched by the daemon
+	// from the relay's /v1/register on the first notification.
+	RelayToken string `json:"relay_token,omitempty"`
+	// ContentKey is the phone's end-to-end key (base64 of 32 bytes): the
+	// relay path encrypts each notification with it. Generated at the
+	// first registration and handed to the app in the answer.
+	ContentKey   string    `json:"content_key,omitempty"`
 	Environment  string    `json:"environment"`
 	Name         string    `json:"device,omitempty"`
 	RegisteredAt time.Time `json:"registered_at"`
 }
 
-// ErrBadToken and ErrBadEnvironment are what Register rejects.
+// id is the registry key: the device token, else the relay token.
+func (d Device) id() string {
+	if d.Token != "" {
+		return d.Token
+	}
+	return "relay:" + d.RelayToken
+}
+
+// tail is what a log line carries of the device: the last six characters
+// of its device token, else of its relay token.
+func (d Device) tail() string {
+	if d.Token != "" {
+		return tokenTail(d.Token)
+	}
+	return tokenTail(d.RelayToken)
+}
+
+// ErrBadToken, ErrBadRelayToken and ErrBadEnvironment are what Register
+// rejects.
 var (
 	ErrBadToken       = errors.New("token must be a hex device token")
+	ErrBadRelayToken  = errors.New("relay_token must be the relay's base64url token")
 	ErrBadEnvironment = errors.New(`environment must be "production" or "sandbox"`)
 )
+
+// checkRelayToken accepts a relay token's shape: base64url, at most 1024
+// characters (the relay itself decides whether it is valid).
+func checkRelayToken(tok string) (string, error) {
+	tok = strings.TrimSpace(tok)
+	if len(tok) < 16 || len(tok) > 1024 {
+		return "", ErrBadRelayToken
+	}
+	for _, c := range tok {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '-' && c != '_' {
+			return "", ErrBadRelayToken
+		}
+	}
+	return tok, nil
+}
 
 // NormalizeToken lowercases a hex device token and checks it: an even
 // number of hex digits, 32 to 200 bytes' worth (APNs tokens are 32 bytes
@@ -87,30 +131,61 @@ func loadDevices(path string) (*devices, error) {
 		return nil, fmt.Errorf("push: parse %s: %w", path, err)
 	}
 	for _, dev := range list {
-		d.m[dev.Token] = dev
+		d.m[dev.id()] = dev
 	}
 	return d, nil
 }
 
-// put adds or replaces dev and persists.
-func (d *devices) put(dev Device) error {
+// put adds or replaces dev and persists; it returns the stored device. A
+// re-registration keeps the device's content key (the phone already has
+// it) and, while the environment is unchanged, a relay token the new
+// registration does not carry. An unchanged device is not rewritten.
+func (d *devices) put(dev Device) (Device, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if old, ok := d.m[dev.Token]; ok && old.Environment == dev.Environment && old.Name == dev.Name {
+	old, had := d.m[dev.id()]
+	if had {
+		dev.ContentKey = old.ContentKey
+		if dev.RelayToken == "" && old.Environment == dev.Environment {
+			dev.RelayToken = old.RelayToken
+		}
+		if old.Environment == dev.Environment && old.Name == dev.Name && old.RelayToken == dev.RelayToken && old.ContentKey != "" {
+			return old, nil
+		}
+	}
+	if dev.ContentKey == "" {
+		k, err := NewContentKey()
+		if err != nil {
+			return Device{}, err
+		}
+		dev.ContentKey = k
+	}
+	d.m[dev.id()] = dev
+	return dev, d.saveLocked()
+}
+
+// update applies fn to the device with id and persists; a device removed
+// meanwhile is left alone.
+func (d *devices) update(id string, fn func(*Device)) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	dev, ok := d.m[id]
+	if !ok {
 		return nil
 	}
-	d.m[dev.Token] = dev
+	fn(&dev)
+	d.m[id] = dev
 	return d.saveLocked()
 }
 
-// remove drops token; it reports whether it was there.
-func (d *devices) remove(token string) (bool, error) {
+// remove drops the device with id; it reports whether it was there.
+func (d *devices) remove(id string) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if _, ok := d.m[token]; !ok {
+	if _, ok := d.m[id]; !ok {
 		return false, nil
 	}
-	delete(d.m, token)
+	delete(d.m, id)
 	return true, d.saveLocked()
 }
 
@@ -126,9 +201,22 @@ func (d *devices) list() []Device {
 		if !out[i].RegisteredAt.Equal(out[j].RegisteredAt) {
 			return out[i].RegisteredAt.Before(out[j].RegisteredAt)
 		}
-		return out[i].Token < out[j].Token
+		return out[i].id() < out[j].id()
 	})
 	return out
+}
+
+// idOfRelayToken is the id of the device holding relay token rt ("" for
+// none).
+func (d *devices) idOfRelayToken(rt string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, dev := range d.m {
+		if dev.RelayToken == rt {
+			return id
+		}
+	}
+	return ""
 }
 
 func (d *devices) count() int {
@@ -138,7 +226,8 @@ func (d *devices) count() int {
 }
 
 // saveLocked writes the set atomically (temp file + rename), mode 0600:
-// device tokens are not secrets, but they are the user's.
+// device tokens are not secrets, but they are the user's, and the
+// content keys are.
 func (d *devices) saveLocked() error {
 	if d.path == "" {
 		return nil
@@ -147,7 +236,7 @@ func (d *devices) saveLocked() error {
 	for _, dev := range d.m {
 		list = append(list, dev)
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Token < list[j].Token })
+	sort.Slice(list, func(i, j int) bool { return list[i].id() < list[j].id() })
 	b, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err

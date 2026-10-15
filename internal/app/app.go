@@ -417,6 +417,7 @@ func (a *App) wire() error {
 		a.brainProviders = BrainProviders(cfg)
 	}
 	a.push, a.pushErr = push.New(push.Config{
+		Mode: cfg.Push.EffectiveMode(), RelayURL: cfg.Push.Relay.URL,
 		KeyPath: cfg.Push.APNs.KeyPath, KeyID: cfg.Push.APNs.KeyID, TeamID: cfg.Push.APNs.TeamID, Topic: cfg.Push.APNs.Topic,
 		DataDir: cfg.DataDir,
 	}, a.log)

@@ -37,13 +37,29 @@ const tokenRefresh = 50 * time.Minute
 // logSource is the event log source of this package's events.
 const logSource = "push"
 
-// Config configures the APNs sender. Empty KeyPath, KeyID, TeamID or
-// Topic leaves sending disabled (registration still works).
+// The Config.Mode values (config.PushMode*).
+const (
+	ModeRelay = "relay"
+	ModeAPNs  = "apns"
+	ModeOff   = "off"
+)
+
+// Config configures the sender. Mode "apns" (the default when empty)
+// sends straight to APNs: empty KeyPath, KeyID, TeamID or Topic leaves
+// sending disabled. Mode "relay" sends through the push relay at
+// RelayURL, end-to-end encrypted. Mode "off" sends nothing. Registration
+// works in every mode.
 type Config struct {
-	KeyPath string // the .p8 auth key (PKCS#8 PEM, ES256)
-	KeyID   string // the key's 10-character id
-	TeamID  string // the Apple Developer team id (the JWT's iss)
-	Topic   string // the app's bundle id (apns-topic)
+	Mode string
+	// RelayURL is the relay's base URL (mode relay).
+	RelayURL string
+	// BundleID is the app the relay registers device tokens for (mode
+	// relay; default Topic, else DefaultBundleID).
+	BundleID string
+	KeyPath  string // the .p8 auth key (PKCS#8 PEM, ES256)
+	KeyID    string // the key's 10-character id
+	TeamID   string // the Apple Developer team id (the JWT's iss)
+	Topic    string // the app's bundle id (apns-topic)
 	// DataDir is where push_devices.json lives; "" keeps devices in
 	// memory only (tests).
 	DataDir string
@@ -63,6 +79,8 @@ type Status struct {
 	Enabled bool   `json:"enabled"`
 	Reason  string `json:"reason,omitempty"`
 	Devices int    `json:"devices"`
+	// Mode is how notifications are sent: relay, apns or off.
+	Mode string `json:"mode,omitempty"`
 }
 
 // Sender sends notifications to the registered devices. All methods are
@@ -70,7 +88,9 @@ type Status struct {
 type Sender struct {
 	cfg     Config
 	log     logging.Logger
-	key     *ecdsa.PrivateKey // nil: disabled
+	on      bool              // sending enabled
+	key     *ecdsa.PrivateKey // mode apns
+	relay   relayClient       // mode relay
 	reason  string            // why disabled
 	devs    *devices
 	client  *http.Client
@@ -121,7 +141,30 @@ func New(cfg Config, log logging.Logger) (*Sender, error) {
 	}
 	s := &Sender{cfg: cfg, log: log, devs: devs, client: client, seen: map[string]bool{},
 		baseURL: map[string]string{EnvProduction: cfg.ProductionURL, EnvSandbox: cfg.SandboxURL}}
-	s.key, s.reason = loadKey(cfg)
+	switch cfg.Mode {
+	case ModeOff:
+		s.reason = "push.mode is off"
+	case ModeRelay:
+		s.relay = relayClient{base: strings.TrimRight(cfg.RelayURL, "/"), client: client}
+		switch {
+		case strings.TrimSpace(cfg.RelayURL) == "":
+			s.reason = "push.relay.url is empty"
+		case strings.Contains(cfg.RelayURL, relayPlaceholder):
+			s.reason = "the shared relay is not deployed yet: set push.relay.url, or push.mode = \"apns\" with your own key"
+		default:
+			s.on = true
+		}
+		if s.cfg.BundleID == "" {
+			s.cfg.BundleID = cfg.Topic
+		}
+		if s.cfg.BundleID == "" {
+			s.cfg.BundleID = DefaultBundleID
+		}
+	default:
+		s.cfg.Mode = ModeAPNs
+		s.key, s.reason = loadKey(cfg)
+		s.on = s.key != nil
+	}
 	return s, nil
 }
 
@@ -131,11 +174,15 @@ func (s *Sender) LogStartup() {
 	if s == nil {
 		return
 	}
-	if s.key == nil {
-		s.log.Log(logSource, "push.disabled", "", map[string]any{"reason": s.reason, "devices": s.devs.count()})
+	if !s.on {
+		s.log.Log(logSource, "push.disabled", "", map[string]any{"mode": s.cfg.Mode, "reason": s.reason, "devices": s.devs.count()})
 		return
 	}
-	s.log.Log(logSource, "push.enabled", "", map[string]any{"key_id": s.cfg.KeyID, "team_id": s.cfg.TeamID, "topic": s.cfg.Topic, "devices": s.devs.count()})
+	if s.cfg.Mode == ModeRelay {
+		s.log.Log(logSource, "push.enabled", "", map[string]any{"mode": ModeRelay, "relay": s.relay.base, "bundle_id": s.cfg.BundleID, "devices": s.devs.count()})
+		return
+	}
+	s.log.Log(logSource, "push.enabled", "", map[string]any{"mode": ModeAPNs, "key_id": s.cfg.KeyID, "team_id": s.cfg.TeamID, "topic": s.cfg.Topic, "devices": s.devs.count()})
 }
 
 // loadKey reads and parses the auth key, or says why it cannot.
@@ -185,7 +232,7 @@ func ParseKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 }
 
 // Enabled reports whether notifications are sent.
-func (s *Sender) Enabled() bool { return s != nil && s.key != nil }
+func (s *Sender) Enabled() bool { return s != nil && s.on }
 
 // Status reports whether sending is enabled, why not, and how many
 // devices are registered.
@@ -193,45 +240,86 @@ func (s *Sender) Status() Status {
 	if s == nil {
 		return Status{Reason: "push not available"}
 	}
-	return Status{Enabled: s.key != nil, Reason: s.reason, Devices: s.devs.count()}
+	return Status{Enabled: s.on, Reason: s.reason, Devices: s.devs.count(), Mode: s.cfg.Mode}
 }
 
-// Register stores a device (idempotent: the same token again updates its
-// environment and name). It works while sending is disabled, so a device
-// registered before the key is configured is not lost.
+// Registration is what POST /api/push/register carries: a device token,
+// a relay token, or both.
+type Registration struct {
+	Token       string // hex APNs device token
+	RelayToken  string // the relay's token for it (mode relay)
+	Environment string // EnvProduction or EnvSandbox (required with Token)
+	Name        string // the phone's name, for the logs
+}
+
+// Register stores a device by its device token (see RegisterDevice).
 func (s *Sender) Register(token, environment, name string) error {
-	if s == nil {
-		return errors.New("push not available")
-	}
-	tok, err := NormalizeToken(token)
-	if err != nil {
-		return err
-	}
-	if environment != EnvProduction && environment != EnvSandbox {
-		return ErrBadEnvironment
-	}
-	if err := s.devs.put(Device{Token: tok, Environment: environment, Name: strings.TrimSpace(name), RegisteredAt: s.cfg.Now().UTC()}); err != nil {
-		return err
-	}
-	s.log.Log(logSource, "push.registered", "", map[string]any{"token_tail": tokenTail(tok), "environment": environment, "device": strings.TrimSpace(name), "devices": s.devs.count()})
-	return nil
+	_, err := s.RegisterDevice(Registration{Token: token, Environment: environment, Name: name})
+	return err
 }
 
-// Unregister removes a device; an unknown token is not an error.
+// RegisterDevice stores a device (idempotent: the same token again
+// updates its environment, name and relay token) and returns it, with
+// its content key: generated at the first registration, the same on
+// every later one. It works while sending is disabled, so a device
+// registered before push is set up is not lost.
+func (s *Sender) RegisterDevice(r Registration) (Device, error) {
+	if s == nil {
+		return Device{}, errors.New("push not available")
+	}
+	dev := Device{Name: strings.TrimSpace(r.Name), RegisteredAt: s.cfg.Now().UTC()}
+	if r.Token != "" || r.RelayToken == "" {
+		tok, err := NormalizeToken(r.Token)
+		if err != nil {
+			return Device{}, err
+		}
+		dev.Token = tok
+		if r.Environment != EnvProduction && r.Environment != EnvSandbox {
+			return Device{}, ErrBadEnvironment
+		}
+	}
+	if r.Environment != "" && r.Environment != EnvProduction && r.Environment != EnvSandbox {
+		return Device{}, ErrBadEnvironment
+	}
+	dev.Environment = r.Environment
+	if r.RelayToken != "" {
+		rt, err := checkRelayToken(r.RelayToken)
+		if err != nil {
+			return Device{}, err
+		}
+		dev.RelayToken = rt
+	}
+	stored, err := s.devs.put(dev)
+	if err != nil {
+		return Device{}, err
+	}
+	s.log.Log(logSource, "push.registered", "", map[string]any{"token_tail": stored.tail(), "relay_token": stored.RelayToken != "", "environment": stored.Environment, "device": stored.Name, "devices": s.devs.count()})
+	return stored, nil
+}
+
+// Unregister removes a device by its device token or relay token; an
+// unknown one is not an error.
 func (s *Sender) Unregister(token string) error {
 	if s == nil {
 		return errors.New("push not available")
 	}
-	tok, err := NormalizeToken(token)
-	if err != nil {
+	id := ""
+	if tok, err := NormalizeToken(token); err == nil {
+		id = tok
+	} else if rt, rerr := checkRelayToken(token); rerr == nil {
+		id = s.devs.idOfRelayToken(rt)
+	} else {
 		return err
 	}
-	had, err := s.devs.remove(tok)
+	if id == "" {
+		return nil
+	}
+	had, err := s.devs.remove(id)
 	if err != nil {
 		return err
 	}
 	if had {
-		s.log.Log(logSource, "push.unregistered", "", map[string]any{"token_tail": tokenTail(tok), "reason": "api", "devices": s.devs.count()})
+		s.log.Log(logSource, "push.unregistered", "", map[string]any{"token_tail": tokenTail(token), "reason": "api", "devices": s.devs.count()})
 	}
 	return nil
 }
@@ -274,6 +362,10 @@ func (s *Sender) Notify(n Notification) {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
 		defer cancel()
+		if s.cfg.Mode == ModeRelay {
+			s.sendRelay(ctx, n, devs)
+			return
+		}
 		s.send(ctx, n, devs)
 	}()
 }
@@ -300,7 +392,7 @@ func (s *Sender) send(ctx context.Context, n Notification, devs []Device) {
 			// token and try once more.
 			status, reason, err = s.post(ctx, d, n, body, true)
 		}
-		p := map[string]any{"kind": n.Kind, "token_tail": tokenTail(d.Token), "environment": d.Environment, "collapse_id": n.CollapseID()}
+		p := map[string]any{"mode": ModeAPNs, "kind": n.Kind, "token_tail": d.tail(), "environment": d.Environment, "collapse_id": n.CollapseID()}
 		if n.EventID != "" {
 			p["event_id"] = n.EventID
 		}
@@ -317,11 +409,16 @@ func (s *Sender) send(ctx context.Context, n Notification, devs []Device) {
 			p["status"], p["reason"] = status, reason
 			s.log.Log(logSource, "push.failed", n.PaneID, p)
 			if status == http.StatusGone || (status == http.StatusBadRequest && reason == "BadDeviceToken") {
-				if had, _ := s.devs.remove(d.Token); had {
-					s.log.Log(logSource, "push.unregistered", "", map[string]any{"token_tail": tokenTail(d.Token), "reason": reason, "status": status, "devices": s.devs.count()})
-				}
+				s.drop(d, reason, status)
 			}
 		}
+	}
+}
+
+// drop removes a device the push service says is gone.
+func (s *Sender) drop(d Device, reason string, status int) {
+	if had, _ := s.devs.remove(d.id()); had {
+		s.log.Log(logSource, "push.unregistered", "", map[string]any{"token_tail": d.tail(), "reason": reason, "status": status, "devices": s.devs.count()})
 	}
 }
 
@@ -334,6 +431,9 @@ func (s *Sender) post(ctx context.Context, d Device, n Notification, body []byte
 	jwt, err := s.token(fresh)
 	if err != nil {
 		return 0, "", err
+	}
+	if d.Token == "" {
+		return 0, "", errors.New("no device token (registered with a relay token only)")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/3/device/"+d.Token, bytes.NewReader(body))
 	if err != nil {

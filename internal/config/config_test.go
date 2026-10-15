@@ -758,3 +758,55 @@ func TestPushAPNsConfig(t *testing.T) {
 		t.Errorf("String() = %s", s)
 	}
 }
+
+// push.mode: unset picks apns when [push.apns] is complete (an existing
+// self-built setup keeps working), else the relay at its default URL; an
+// explicit mode wins; SHEEPDOG_PUSH_* override; a bad mode or relay URL
+// is refused.
+func TestPushModeConfig(t *testing.T) {
+	d := Default()
+	if d.Push.Mode != "" || d.Push.EffectiveMode() != PushModeRelay || d.Push.Relay.URL != DefaultRelayURL {
+		t.Errorf("default push = %+v (mode %s)", d.Push, d.Push.EffectiveMode())
+	}
+	apns := APNs{KeyPath: "/k.p8", KeyID: "K", TeamID: "T", Topic: "com.example"}
+	if m := (Push{APNs: apns}).EffectiveMode(); m != PushModeAPNs {
+		t.Errorf("complete [push.apns], no mode: %s, want apns", m)
+	}
+	partial := apns
+	partial.KeyID = ""
+	if m := (Push{APNs: partial}).EffectiveMode(); m != PushModeRelay {
+		t.Errorf("partial [push.apns], no mode: %s, want relay", m)
+	}
+	if m := (Push{Mode: PushModeRelay, APNs: apns}).EffectiveMode(); m != PushModeRelay {
+		t.Errorf("explicit relay: %s", m)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[push]\nmode = \"relay\"\n[push.relay]\nurl = \"https://relay.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, envFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Push.Mode != PushModeRelay || cfg.Push.Relay.URL != "https://relay.example" {
+		t.Errorf("from file: %+v", cfg.Push)
+	}
+	if s := cfg.String(); !strings.Contains(s, "push.mode=relay push.relay.url=https://relay.example") {
+		t.Errorf("String() = %s", s)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_PUSH_MODE": "off", "SHEEPDOG_PUSH_RELAY_URL": "https://mine.example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Push.Mode != PushModeOff || cfg.Push.Relay.URL != "https://mine.example" {
+		t.Errorf("from env: %+v", cfg.Push)
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_PUSH_MODE": "carrier-pigeon"})); err == nil || !strings.Contains(err.Error(), "push.mode") {
+		t.Errorf("bad mode: %v", err)
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_PUSH_RELAY_URL": "relay.example"})); err == nil || !strings.Contains(err.Error(), "push.relay.url") {
+		t.Errorf("bad url: %v", err)
+	}
+}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/push"
 )
 
 // Status is a check's outcome.
@@ -416,20 +417,38 @@ func CheckBindToken(w config.Web) Result {
 	return Result{Name: name, Status: OK, Detail: fmt.Sprintf("bind %s with a token of %d characters", w.Bind, len(w.Token))}
 }
 
-// CheckPush checks [push.apns]: all four values or none, and the key file.
-func CheckPush(a config.APNs) Result {
+// CheckPush checks phone notifications by push.mode: the relay's
+// GET /v1/health (relay), the [push.apns] key file (apns), or nothing
+// (off). A half-filled [push.apns] is reported in every mode: with the
+// mode unset it is why the relay is used instead.
+func CheckPush(ctx context.Context, e Endpoints, p config.Push) Result {
 	const name = "push"
 	set := 0
-	for _, v := range []string{a.KeyPath, a.KeyID, a.TeamID, a.Topic} {
-		if v != "" {
+	for _, v := range []string{p.APNs.KeyPath, p.APNs.KeyID, p.APNs.TeamID, p.APNs.Topic} {
+		if strings.TrimSpace(v) != "" {
 			set++
 		}
 	}
-	switch {
-	case set == 0:
-		return Result{Name: name, Status: Skip, Detail: "push not configured (optional; docs/iphone-app.md)"}
-	case set < 4:
-		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("[push.apns] has %d of its 4 values", set), Fix: "set key_path, key_id, team_id and topic, or none (docs/dev/push.md)"}
+	mode := p.EffectiveMode()
+	if set > 0 && set < 4 && mode != config.PushModeOff {
+		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("[push.apns] has %d of its 4 values (push.mode %s)", set, mode), Fix: "set key_path, key_id, team_id and topic, or none (docs/dev/push.md)"}
+	}
+	switch mode {
+	case config.PushModeOff:
+		return Result{Name: name, Status: Skip, Detail: "push.mode is off: no phone notifications (docs/iphone-app.md)"}
+	case config.PushModeRelay:
+		v, err := push.Health(ctx, e.client(), p.Relay.URL)
+		switch {
+		case err != nil && strings.Contains(p.Relay.URL, ".REPLACE."):
+			return Result{Name: name, Status: Warn, Detail: "push.mode relay: " + err.Error(), Fix: "set push.relay.url to your own relay, or push.mode = \"apns\" with your own key (docs/iphone-app.md)"}
+		case err != nil:
+			return Result{Name: name, Status: Fail, Detail: "push relay " + p.Relay.URL + ": " + err.Error(), Fix: "check the network and push.relay.url (relay/README.md)"}
+		}
+		return Result{Name: name, Status: OK, Detail: fmt.Sprintf("push.mode relay: %s answers (v%s); notification content is end-to-end encrypted", p.Relay.URL, v)}
+	}
+	a := p.APNs
+	if set == 0 {
+		return Result{Name: name, Status: Fail, Detail: "push.mode is apns but [push.apns] is empty", Fix: "set key_path, key_id, team_id and topic, or push.mode = \"relay\" (docs/dev/push.md)"}
 	}
 	st, err := os.Stat(a.KeyPath)
 	if err != nil {
@@ -438,7 +457,7 @@ func CheckPush(a config.APNs) Result {
 	if st.Mode().Perm()&0o077 != 0 {
 		return Result{Name: name, Status: Warn, Detail: "APNs key file is readable by other users", Fix: "chmod 600 " + a.KeyPath}
 	}
-	return Result{Name: name, Status: OK, Detail: "APNs configured for " + a.Topic}
+	return Result{Name: name, Status: OK, Detail: "push.mode apns: APNs configured for " + a.Topic}
 }
 
 // CheckVoice reports which voice backends have what they need and

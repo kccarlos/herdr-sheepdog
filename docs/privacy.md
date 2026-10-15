@@ -1,8 +1,10 @@
 # Privacy
 
 sheepdog is open-source software that runs on your computer. There is no
-sheepdog server, no account and **no telemetry**: nothing is sent to the
-project or its author. This page also serves as the privacy policy of the iOS
+account and **no telemetry**. The project runs one small service: an
+optional **push relay** that forwards phone notifications to Apple (see
+"Phone notifications" below). It cannot read them, and nothing else is
+sent to the project or its author. This page also serves as the privacy policy of the iOS
 app "Sheepdog for herdr". Questions: kccarlos.opensource@gmail.com.
 
 ## What goes to which provider
@@ -12,7 +14,7 @@ app "Sheepdog for herdr". Questions: kccarlos.opensource@gmail.com.
 | Your microphone audio | The **voice provider** you chose (Google Gemini Live or OpenAI GPT-Live), through the daemon with your own API key | So the voice can hear you |
 | What you said (text), agent screens, session records, command output | The **orchestrator provider** you chose (Google Gemini, DeepSeek, or your OpenAI-compatible endpoint) | So it can answer and act |
 | The daemon's briefings to the voice (short summaries of agent events) | The voice provider | So the voice can tell you the news |
-| A push payload: which agent needs you | Apple's push service (APNs), only if you configured `[push.apns]` | The lock-screen notification |
+| A phone notification: which agent needs you and what it asks | Encrypted, through sheepdog's push relay to Apple's push service (APNs); or straight to APNs with your own key (`push.mode = "apns"`) | The lock-screen notification |
 
 Each provider handles that data under its own terms; read them, especially for
 free-tier keys. A local Ollama orchestrator keeps screens and text on your
@@ -32,12 +34,41 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/brain/` | The orchestrator's transcripts and the requests it sent to its model; they include what you said. | `events.retention_days`, deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | Notes the orchestrator wrote about your agents. | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions, your runtime settings. | Overwritten as it changes. |
-| `~/.local/share/sheepdog/push_devices.json` | The notification tokens of your phones, when push is configured. | Until a phone unregisters. |
+| `~/.local/share/sheepdog/push_devices.json` | Your phones' notification tokens and each phone's notification encryption key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log, with secrets redacted. | Rotated at 10 MB, 3 old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log; normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version. | While it runs. |
 
 (Source of truth: [CONFIG.md](../CONFIG.md), "What sheepdog stores".)
+
+## Phone notifications
+
+Apple delivers a notification only when it is sent with the Apple key of
+the team that published the app, and that key cannot be shared. So by
+default (`push.mode = "relay"`) your daemon sends notifications through
+sheepdog's push relay, a small stateless service on Cloudflare
+([relay/README.md](../relay/README.md)) that holds the key and passes
+each notification on to Apple.
+
+Before a notification leaves your computer, the daemon encrypts its
+content (the agent's name, the sentence, the question's options) with a
+key that only your phone has: the daemon makes a fresh 32-byte key for
+each phone when it registers and hands it over on the authenticated
+connection to your daemon. The phone decrypts it.
+
+| The relay sees | The relay never sees |
+|---|---|
+| Your phone's push token (sealed into a relay token the daemon keeps), your daemon's IP address, when a notification is sent, its size, and its kind (approval, blocked, done, idle) | The title, the agent's name, the text, the options, your screens or anything you said |
+
+The relay keeps no database and logs only how many requests it answered
+and with which status. Apple sees what any push service sees: the token,
+the timing and the encrypted payload.
+
+You can avoid the shared relay: run your own copy of it on your own
+Cloudflare account, or build the app under your own Apple team and set
+`push.mode = "apns"` so the daemon talks to Apple directly
+([iphone-app.md](iphone-app.md), "Notifications"). `push.mode = "off"`
+sends nothing.
 
 ## Delete your data
 
@@ -52,7 +83,8 @@ All three ask first. Deleting the plugin is `herdr plugin uninstall kccarlos.she
 ## The iPhone app
 
 The app has no server of its own and collects nothing. It talks to the sheepdog
-daemon you point it at (and to Apple for push notifications); no analytics or
+daemon you point it at (and to Apple for push notifications, which reach it
+through the push relay above unless you chose otherwise); no analytics or
 tracking code is in it.
 
 | Permission | Why | When asked |
@@ -61,7 +93,7 @@ tracking code is in it.
 | Speech recognition | Demo mode only: your spoken questions are recognised on the phone (on-device); nothing is sent anywhere. | When the demo starts, on devices that support it |
 | Camera | Only to scan the pairing QR code that `sheepdog pair` shows. Nothing is recorded or kept. | When you tap Scan pairing code |
 | Local network | To reach the daemon on your Wi-Fi or Tailscale. | On the first connection |
-| Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token**, and the daemon keeps it in `push_devices.json`. | After the first connection to a daemon (never in the demo) |
+| Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token** and receives the key that encrypts the alerts' content; the daemon keeps both in `push_devices.json`. | After the first connection to a daemon (never in the demo) |
 
 What the app stores on the phone: the daemon's address, your settings and a
 cache of the conversation. The daemon token is in the iOS keychain, not synced
