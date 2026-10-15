@@ -230,10 +230,13 @@ func TestPortHeldByOlderSheepdog(t *testing.T) {
 	}
 }
 
-func TestStartRefusesWithoutAKey(t *testing.T) {
-	cfg, _, _ := lifeSetup(t, "")
+// TestStartRefusesAWideBindWithoutAToken: the one setting start still
+// refuses (a missing key is setup mode, not an error).
+func TestStartRefusesAWideBindWithoutAToken(t *testing.T) {
+	cfg, _, _ := lifeSetup(t, "bind = \"0.0.0.0\"\n")
+	t.Setenv("SHEEPDOG_WEB_TOKEN", "")
 	code, _, errs := runCLI("start", "--config", cfg)
-	if code != 1 || !strings.Contains(errs, "sheepdog cannot start: the gemini voice") || !strings.Contains(errs, "sheepdog init") || strings.Contains(errs, "--voice=off") {
+	if code != 1 || !strings.Contains(errs, "sheepdog cannot start: web.token is required") || !strings.Contains(errs, "sheepdog setup") {
 		t.Errorf("exit %d %q", code, errs)
 	}
 }

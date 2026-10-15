@@ -180,6 +180,18 @@ type Deps struct {
 	// Now overrides the clock (tests).
 	Now func() time.Time
 
+	// VoiceIssue, when set, says why the voice is not connected (setup
+	// mode, a failed connect being retried; "" when nothing is wrong):
+	// GET /api/state voice.problem.
+	VoiceIssue func() string
+	// SetupNeeded, when set, reports whether the voice has no
+	// credentials yet (GET /api/state voice.setup_needed).
+	SetupNeeded func() bool
+	// Restart, when set, makes the daemon reload its env file and config
+	// and rebuild itself in place (the setup page, after saving keys or
+	// changing the bind).
+	Restart func(reason string)
+
 	// Token, when non-empty, is the bearer token (config web.token) every
 	// request to /ws, /events and /api/* must present (docs/ws-contract.md
 	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and

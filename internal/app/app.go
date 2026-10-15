@@ -173,6 +173,60 @@ type App struct {
 	// file could not be read: pushErr says why).
 	push    *push.Sender
 	pushErr error
+
+	// voiceIssue says why the voice is not connected ("" when it is, or
+	// is connecting for the first time): no key yet (setup mode), or a
+	// failed connect being retried. /api/state, the pages and
+	// `sheepdog status` show it.
+	issueMu    sync.Mutex
+	voiceIssue string
+	// restart asks Run to shut down and return ErrRestart (RequestRestart).
+	restart     chan string
+	restartOnce sync.Once
+}
+
+// ErrRestart is what Run returns after RequestRestart: the caller
+// (sheepdog serve) reloads the env file and the config and builds the
+// daemon again in the same process, so new keys or a new bind take
+// effect without the user restarting anything.
+var ErrRestart = errors.New("app: restart requested")
+
+// RequestRestart makes Run shut down cleanly and return ErrRestart.
+// Safe to call more than once and from any goroutine.
+func (a *App) RequestRestart(reason string) {
+	a.restartOnce.Do(func() {
+		a.log.Log("daemon", "daemon.restart_requested", "", map[string]any{"reason": reason})
+		a.restart <- reason
+	})
+}
+
+// VoiceIssue says why the voice is not connected ("" when nothing is
+// wrong).
+func (a *App) VoiceIssue() string {
+	a.issueMu.Lock()
+	defer a.issueMu.Unlock()
+	return a.voiceIssue
+}
+
+func (a *App) setVoiceIssue(s string) {
+	a.issueMu.Lock()
+	a.voiceIssue = s
+	a.issueMu.Unlock()
+}
+
+// SetupNeeded reports whether the voice has no credentials (the daemon
+// runs in setup mode).
+func (a *App) SetupNeeded() bool {
+	if a.voiceSwitch == nil {
+		return false
+	}
+	cur := a.voiceSwitch.Provider()
+	for _, p := range a.voiceSwitch.Providers() {
+		if p.ID == cur {
+			return !p.Available
+		}
+	}
+	return false
 }
 
 // Check reports the error Build would refuse cfg and opts with (a bad
@@ -195,7 +249,11 @@ func Check(cfg config.Config, opts Options) error {
 	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
 		return fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
-	if opts.Voice != VoiceOff {
+	// A missing voice key is not an error with the default --voice=on:
+	// the daemon starts in setup mode (web server up, voice off until
+	// `sheepdog setup` saves a key). Only a provider forced by the flag
+	// must have its key.
+	if opts.Voice == VoiceGemini || opts.Voice == VoiceOpenAI {
 		switch initialVoiceProvider(cfg, opts) {
 		case VoiceGemini:
 			if _, _, missing := GeminiLive(cfg.Gemini); missing != "" {
@@ -233,7 +291,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.Echo != nil {
 		log = teeLogger{elog, opts.Echo}
 	}
-	a := &App{cfg: cfg, opts: opts, elog: elog, log: log, port: port}
+	a := &App{cfg: cfg, opts: opts, elog: elog, log: log, port: port, restart: make(chan string, 1)}
 	if err := a.wire(); err != nil {
 		_ = elog.Close()
 		return nil, err
@@ -452,6 +510,9 @@ func (a *App) wire() error {
 		Token:          cfg.Web.Token,
 		VoiceContext:   a.voiceCtx,
 		RouterContext:  a.routerCtx,
+		VoiceIssue:     a.VoiceIssue,
+		SetupNeeded:    a.SetupNeeded,
+		Restart:        a.RequestRestart,
 	}
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent
@@ -924,6 +985,9 @@ func lanURLs(port string) []string {
 	return out
 }
 
+// Config is the config the daemon was built with.
+func (a *App) Config() config.Config { return a.cfg }
+
 // Log returns the daemon's logger (the event log, plus the echo).
 func (a *App) Log() logging.Logger { return a.log }
 
@@ -994,13 +1058,13 @@ func (a *App) Run(ctx context.Context) (err error) {
 		go func() { defer wg.Done(); a.runWatcher(inner) }()
 	}
 	if a.voice != nil {
-		if err := a.voice.Start(inner); err != nil {
-			a.log.Log("daemon", "daemon.voice_error", "", map[string]any{"error": err.Error()})
-			cancel()
-			wg.Wait()
-			return fmt.Errorf("app: voice: %w", err)
-		}
-		wg.Add(2)
+		// The voice starts in the background and never stops the
+		// daemon: without a key it stays off (setup mode); a failed
+		// connect (a bad key, no network) is retried with a backoff
+		// while the web server, herdr and the supervisor run, so a
+		// login service's KeepAlive / Restart never loops on it.
+		wg.Add(3)
+		go func() { defer wg.Done(); a.startVoice(inner) }()
 		go func() {
 			defer wg.Done()
 			for ev := range a.voice.Events() {
@@ -1017,8 +1081,11 @@ func (a *App) Run(ctx context.Context) (err error) {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- a.web.Serve(inner, a.opts.Drain) }()
 
+	restart := false
 	select {
 	case <-ctx.Done():
+	case <-a.restart:
+		restart = true
 	case err = <-serveErr:
 		cancel()
 		if a.voice != nil {
@@ -1043,7 +1110,90 @@ func (a *App) Run(ctx context.Context) (err error) {
 	case <-time.After(a.opts.Drain):
 		a.log.Log("daemon", "daemon.drain_timeout", "", nil)
 	}
+	if restart {
+		return ErrRestart
+	}
 	return nil
+}
+
+// Voice start backoff: the first retry after voiceRetryMin, doubling up
+// to voiceRetryMax. Variables so tests can shorten them.
+var (
+	voiceRetryMin = 5 * time.Second
+	voiceRetryMax = 5 * time.Minute
+)
+
+// startVoice starts the voice session, retrying a failed connect with a
+// backoff until it succeeds or ctx ends. With no credentials for the
+// provider it does not retry: the daemon is in setup mode until
+// `sheepdog setup` saves a key (and restarts it). Every failure is
+// logged (daemon.voice_error) and reported to the pages as a closed
+// status with the reason, and an account problem (a rejected key, a
+// used-up quota) as the voice's account alert.
+func (a *App) startVoice(ctx context.Context) {
+	wait := voiceRetryMin
+	for attempt := 1; ; attempt++ {
+		err := a.voice.Start(ctx)
+		if err == nil {
+			a.setVoiceIssue("")
+			if attempt > 1 {
+				a.log.Log("daemon", "daemon.voice_recovered", "", map[string]any{"attempts": attempt})
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		provider := a.VoiceProvider()
+		if errors.Is(err, voice.ErrUnavailableProvider) {
+			issue := SetupIssue(provider)
+			a.setVoiceIssue(issue)
+			a.log.Log("daemon", "daemon.setup_mode", "", map[string]any{"voice_provider": provider, "reason": issue})
+			a.voiceSwitch.Report(voice.EventStatus{Status: voice.StatusClosed, Reason: "setup_needed"})
+			return
+		}
+		issue := voiceIssueText(provider, err, wait)
+		a.setVoiceIssue(issue)
+		a.log.Log("daemon", "daemon.voice_error", "", map[string]any{"error": err.Error(), "attempt": attempt, "retry_in_s": int(wait.Seconds())})
+		a.voiceSwitch.Report(voice.EventError{Err: err})
+		a.voiceSwitch.Report(voice.EventStatus{Status: voice.StatusClosed, Reason: issue})
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait *= 2
+		if wait > voiceRetryMax {
+			wait = voiceRetryMax
+		}
+	}
+}
+
+// SetupIssue is the voice issue of setup mode: the provider has no key.
+func SetupIssue(provider string) string {
+	if provider == VoiceOpenAI {
+		return "Setup needed: the GPT-Live voice has no OpenAI key yet. Run `sheepdog setup`."
+	}
+	return "Setup needed: no Gemini API key yet. Run `sheepdog setup`."
+}
+
+// voiceIssueText words a failed voice connect for a screen: the account
+// problem when it is one, else the error, and when the next try is.
+func voiceIssueText(provider string, err error, wait time.Duration) string {
+	retry := fmt.Sprintf(" Retrying in %s.", wait.Round(time.Second))
+	svc := provider
+	if svc == VoiceOpenAI {
+		svc = "openai"
+	}
+	if p := brain.AccountProblemOfErr(err); p != brain.ProblemNone {
+		al := brain.NewAccountAlert(brain.RoleVoice, svc, p, false)
+		return al.Message + " Fix: " + al.Fix + "." + retry
+	}
+	msg := err.Error()
+	if len(msg) > 200 {
+		msg = msg[:200] + "…"
+	}
+	return "The voice cannot connect (" + msg + ")." + retry
 }
 
 // observers are the handlers the observer feeds (internal/observe).

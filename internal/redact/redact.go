@@ -155,6 +155,14 @@ func (x *Writer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// SetRedactor replaces the Redactor (the daemon reloads its keys in
+// place: a key saved by sheepdog setup must be redacted from then on).
+func (x *Writer) SetRedactor(r *Redactor) {
+	x.mu.Lock()
+	x.r = r
+	x.mu.Unlock()
+}
+
 // Flush writes a held partial line.
 func (x *Writer) Flush() {
 	x.mu.Lock()

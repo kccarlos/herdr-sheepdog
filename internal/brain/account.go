@@ -132,7 +132,7 @@ func (s Service) Fix(p AccountProblem) string {
 		if s.KeyVar == "" {
 			return fmt.Sprintf("check the credentials and project (%s), then restart sheepdog", where)
 		}
-		return fmt.Sprintf("put a valid key in %s (%s), then restart sheepdog", s.KeyVar, where)
+		return fmt.Sprintf("put a valid key in %s with `sheepdog setup` (%s)", s.KeyVar, where)
 	case ProblemQuota:
 		return fmt.Sprintf("wait for the quota to reset or raise it (%s)", where)
 	case ProblemBalance:

@@ -255,3 +255,17 @@ func TestServeMockVoiceOffSmoke(t *testing.T) {
 		t.Errorf("banner lacks the debug URL: %s", stdout.String())
 	}
 }
+
+// TestDefaultSecretFileMayBeAbsent: `sheepdog start` and the login
+// service pass the default secret file explicitly; on a fresh install
+// (before setup writes it) it is absent, and serve must start anyway.
+func TestDefaultSecretFileMayBeAbsent(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "sheepdog", ".env")
+	orig := configEnvPath
+	configEnvPath = func() string { return missing }
+	t.Cleanup(func() { configEnvPath = orig })
+	var stderr bytes.Buffer
+	if code, ok := loadServeEnvFile(missing, &stderr); !ok || code != 0 {
+		t.Errorf("absent default secret file: code=%d ok=%v %s", code, ok, stderr.String())
+	}
+}

@@ -468,7 +468,8 @@ function onControl(m) {
       state.voiceStalled = !!m.stalled;
       state.daemonMuted = !!m.muted;
       if (m.provider) setPlaybackPolicy(m.provider);
-      if (m.voice === 'closed' && m.reason && m.reason !== 'voice_off') showError(`voice session closed: ${m.reason}`);
+      if (m.voice === 'closed' && m.reason === 'setup_needed') showError(`Setup needed: there is no voice key yet. Finish setup at ${location.origin}/setup (or run \`sheepdog setup\` on this computer).`);
+      else if (m.voice === 'closed' && m.reason && m.reason !== 'voice_off') showError(`voice session closed: ${m.reason}`);
       break;
     case 'flush':
       // Everything received before this is stale: drop it now, measure it.
