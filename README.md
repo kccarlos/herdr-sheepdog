@@ -9,8 +9,8 @@
 
 **Walk away from your desk. Your coding agents keep working; sheepdog keeps you in the loop, in your earbuds.**
 
-<!-- TODO(hero): add assets/readme/hero.gif and the demo video link once recorded (storyboard: docs/launch-kit.md). -->
-<p align="center"><img src="assets/readme/phone.gif" alt="Sheepdog on an iPhone: an agent asks for approval, the user approves and asks what failed" width="300"></p>
+<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: an agent's approval arrives on the lock screen and is approved from the app" width="800"></a></p>
+<p align="center"><a href="assets/readme/hero.mp4">▶ Watch the 60-second demo</a></p>
 
 sheepdog is a voice supervisor for the coding agents you run in
 [herdr](https://github.com/herdrdev/herdr) (Claude Code, Codex, agy). You
