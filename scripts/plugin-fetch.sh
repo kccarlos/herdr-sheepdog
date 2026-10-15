@@ -44,7 +44,7 @@ fetch_release() {
 		;;
 	esac
 	command -v curl >/dev/null 2>&1 || return 1
-	if ! curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt"; then
+	if ! curl -fsL "$base/checksums.txt" -o "$tmp/checksums.txt"; then
 		echo "plugin-fetch: no release found at $base" >&2
 		return 1
 	fi
@@ -78,10 +78,12 @@ link_cli() {
 	link=$dir/sheepdog
 	if [ -e "$link" ] && [ ! -L "$link" ]; then
 		echo "plugin-fetch: $link exists and is not a link; left it alone (run $bin directly, or remove it and reinstall)" >&2
+		cli=$bin
 		return 0
 	fi
 	mkdir -p "$dir" && ln -sf "$bin" "$link" || {
 		echo "plugin-fetch: could not link $link; run $bin directly" >&2
+		cli=$bin
 		return 0
 	}
 	echo "plugin-fetch: linked $link -> $bin"
@@ -93,6 +95,7 @@ link_cli() {
 
 fetch_release || build_from_source
 "$bin" version
+cli=sheepdog
 link_cli
 echo ""
-echo "Next: run \`sheepdog setup\` (or open the \"Set up sheepdog\" action in herdr)."
+echo "Next: run \`$cli setup\` (or open the \"Set up sheepdog\" action in herdr)."

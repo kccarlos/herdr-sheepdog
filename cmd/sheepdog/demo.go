@@ -189,7 +189,7 @@ func demoKeyProblem(cfg config.Config) string {
 	case len(cfg.Gemini.APIKeys) > 0:
 		return ""
 	}
-	return "no GEMINI_API_KEY: create a free key at https://aistudio.google.com/apikey, then run sheepdog init (or put GEMINI_API_KEY in ./.env)"
+	return "no GEMINI_API_KEY: create a free key at https://aistudio.google.com/apikey, then run sheepdog setup (or put GEMINI_API_KEY in ./.env)"
 }
 
 // waitForClient waits until a browser or the app is attached to /ws, so

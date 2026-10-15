@@ -331,7 +331,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 	if tokenNote != "" {
 		fprintln(out, "sheepdog init: "+tokenNote)
 	}
-	fprintln(out, "sheepdog init: next: sheepdog doctor, then sheepdog serve, and open http://127.0.0.1:7777/voice")
+	fprintf(out, "sheepdog init: next: sheepdog doctor, then sheepdog start, and open http://127.0.0.1:%d/voice (sheepdog open)\n", cur.Web.Port)
 	return nil
 }
 

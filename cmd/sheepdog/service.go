@@ -99,7 +99,7 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return 0
 		}
 		if _, err := os.Stat(spec.EnvFile); err != nil {
-			fprintf(stderr, "sheepdog service: warning: %s does not exist yet (run sheepdog init); the daemon starts without its keys\n", spec.EnvFile)
+			fprintf(stderr, "sheepdog service: warning: %s does not exist yet (run sheepdog setup); the daemon starts without its keys\n", spec.EnvFile)
 		}
 		if addr, busy := portTaken(*configPath); busy {
 			if st, _ := m.Status(ctx); strings.HasPrefix(st, "not installed") {

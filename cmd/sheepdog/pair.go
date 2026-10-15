@@ -93,7 +93,7 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintf(stdout, "  %-9s %s\n", a.Kind, a.URL)
 	}
 	if cfg.Web.Token == "" {
-		fprintln(stdout, "and no token: web.token is not set, so anyone on these networks can use the daemon (sheepdog init sets one).")
+		fprintln(stdout, "and no token: web.token is not set, so anyone on these networks can use the daemon (sheepdog setup sets one).")
 	} else {
 		fprintln(stdout, "and the web token (not printed). Treat the code like a password.")
 	}
@@ -121,7 +121,7 @@ func printPairCompact(w io.Writer, code string, addrs []pair.Address, hasToken b
 	if hasToken {
 		fprintln(w, "The code holds the web token (not printed): treat it like a password.")
 	} else {
-		fprintln(w, "No web.token is set: anyone on these networks can use the daemon (sheepdog init sets one).")
+		fprintln(w, "No web.token is set: anyone on these networks can use the daemon (sheepdog setup sets one).")
 	}
 	return 0
 }

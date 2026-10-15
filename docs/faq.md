@@ -34,7 +34,7 @@ the orchestrator provider, nowhere else. There is no telemetry.
 preferred first); the voice and the orchestrator answer in the language you use.
 
 **How fast is it?** About 5 s from herdr reporting a block to hearing it; a
-status question in about 2 s; an instruction delivered in about 4 s; an
+status question in about 2 s when the voice answers alone (when it waits for the orchestrator, one cold test took about 20 s); an instruction delivered in about 4 s; an
 investigation in about 30 s (acknowledged at once). From a 2026-10-02 phone run.
 
 **The microphone does not work in the browser.** macOS: System Settings,

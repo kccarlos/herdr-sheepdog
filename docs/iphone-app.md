@@ -7,8 +7,8 @@ notifications). It needs iOS 17 or newer.
 
 ## Install
 
-<!-- TESTFLIGHT_LINK: replace this URL when the public TestFlight link exists. -->
-- **TestFlight:** [TESTFLIGHT_LINK](https://testflight.apple.com/join/TESTFLIGHT_LINK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
+<!-- TESTFLIGHT_LINK: when the public link exists, restore the bullet: "**TestFlight:** [join](https://testflight.apple.com/join/...). Install the TestFlight app first, then open the link." -->
+- **TestFlight:** the public link is coming; until it exists, build the app yourself (next bullet). The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
 - **Build it yourself:** the source and steps are in
   [herdr-sheepdog-ios](https://github.com/kccarlos/herdr-sheepdog-ios)
   (XcodeGen, Xcode, your own Apple team).
