@@ -308,7 +308,7 @@ class Portrait(Landscape):
 
     def desk_filter(self):
         # The terminal's middle, as large as fits the width.
-        return "crop=1500:1080:420:0,scale=1080:-2,pad=1080:1920:0:(1920-ih)/2-120:color=0xf3ecdf"
+        return "crop=1540:1080:372:0,scale=1080:-2,pad=1080:1920:0:(1920-ih)/2-120:color=0xf3ecdf"
 
 
 # --- the shots ----------------------------------------------------------------
