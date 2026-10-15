@@ -35,6 +35,9 @@ type installMethod struct {
 // detectInstall classifies exe: a herdr plugin's bin/sheepdog (the
 // plugin directory has herdr-plugin.toml), a Homebrew Cellar binary, a
 // build in a source checkout (bin/ next to go.mod), or a plain binary.
+// herdr's plugin install directory is not verified yet: a checkout with
+// both files outside a herdr/plugins path is reported as "source", whose
+// upgrade steps cover both cases.
 func detectInstall(exe string) installMethod {
 	if p, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = p
@@ -65,8 +68,10 @@ func upgradeSteps(m installMethod, releaseURL string) []string {
 	case "homebrew":
 		return []string{"brew upgrade sheepdog", "sheepdog restart"}
 	case "source":
+		// A checkout with herdr-plugin.toml may also be what herdr
+		// installed or linked as the plugin: give both ways.
 		root := filepath.Dir(filepath.Dir(m.Path))
-		return []string{"git -C " + root + " pull && make -C " + root + " build", "sheepdog restart"}
+		return []string{"git -C " + root + " pull && make -C " + root + " build   (a checkout you cloned)", "herdr plugin update kccarlos.sheepdog   (if herdr installed it)", "sheepdog restart"}
 	}
 	return []string{"download it from " + releaseURL + " and replace " + m.Path, "sheepdog restart"}
 }

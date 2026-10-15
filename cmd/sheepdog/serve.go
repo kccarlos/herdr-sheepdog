@@ -128,13 +128,13 @@ func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		if explicit {
-			fprintf(stderr, "sheepdog serve: --env-file %s: %v\n", path, err)
+			fprintf(stderr, "sheepdog: --env-file %s: %v\n", path, err)
 			return 1, false
 		}
 		return 0, true // no default .env: not an error
 	}
 	if err := config.LoadEnvFile(path); err != nil {
-		fprintf(stderr, "sheepdog serve: %v\n", err)
+		fprintf(stderr, "sheepdog: %v\n", err)
 		return 1, false
 	}
 	return 0, true

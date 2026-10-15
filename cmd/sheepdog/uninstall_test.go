@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,11 +26,12 @@ func TestUninstallWithoutServiceKeepData(t *testing.T) {
 	fakeExe(t)
 	cfg, data, _ := lifeSetup(t, "")
 	_ = os.MkdirAll(data, 0o700)
+	_ = os.WriteFile(filepath.Join(data, "state.json"), []byte("{}"), 0o600)
 	code, out, errs := runCLI("uninstall", "--keep-data", "--config", cfg)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	for _, want := range []string{"sheepdog is not running", "login service: not installed", "kept " + filepath.Dir(cfg), "kept " + data} {
+	for _, want := range []string{"sheepdog is not running", "login service: not installed", "kept " + cfg, "kept " + data} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -53,6 +55,7 @@ func TestUninstallRemovesServiceLinkAndAsks(t *testing.T) {
 	exe := fakeExe(t)
 	cfg, data, _ := lifeSetup(t, "")
 	_ = os.MkdirAll(data, 0o700)
+	_ = os.WriteFile(filepath.Join(data, "state.json"), []byte("{}"), 0o600)
 	spec, err := serviceSpec(cfg, "", exe)
 	if err != nil {
 		t.Fatal(err)
@@ -110,5 +113,53 @@ func TestUninstallLeavesAForeignLink(t *testing.T) {
 	}
 	if _, err := os.Lstat(link); err != nil {
 		t.Error("a link to another sheepdog was removed")
+	}
+}
+
+// TestUninstallCustomConfigDeletesOnlyTheFile: --config in a project
+// directory must never take the directory with it.
+func TestUninstallCustomConfigDeletesOnlyTheFile(t *testing.T) {
+	fakeService(t)
+	fakeExe(t)
+	cfg, data, _ := lifeSetup(t, "")
+	sibling := filepath.Join(filepath.Dir(cfg), "my-project-notes.txt")
+	_ = os.WriteFile(sibling, []byte("keep me"), 0o600)
+	_ = os.MkdirAll(filepath.Join(data, "events"), 0o700)
+	code, out, errs := runCLI("uninstall", "--yes", "--config", cfg)
+	if code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, errs, out)
+	}
+	if _, err := os.Stat(cfg); err == nil {
+		t.Error("config file kept")
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Error("uninstall deleted a file next to a custom --config")
+	}
+	if _, err := os.Stat(data); err == nil {
+		t.Error("data dir kept with --yes")
+	}
+}
+
+// TestDataDirGuard: a data_dir that is the home directory, an ancestor of
+// it, or not a sheepdog data dir is never deleted.
+func TestDataDirGuard(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for _, d := range []string{"/", home, filepath.Dir(home), t.TempDir()} {
+		if err := checkDataDir(d); err == nil {
+			t.Errorf("%s accepted", d)
+		}
+	}
+	ok := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(ok, "events"), 0o700)
+	if err := checkDataDir(ok); err != nil {
+		t.Errorf("a real data dir refused: %v", err)
+	}
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	_ = os.WriteFile(cfg, []byte(fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n", home, freePort(t))), 0o600)
+	if code, _, errs := runCLI("data", "clear", "--all", "--yes", "--config", cfg); code != 1 || !strings.Contains(errs, "refusing to delete") {
+		t.Errorf("data clear --all on HOME: exit %d %q", code, errs)
+	}
+	if _, err := os.Stat(home); err != nil {
+		t.Fatal("HOME deleted")
 	}
 }

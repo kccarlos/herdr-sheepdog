@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -81,11 +82,17 @@ func runData(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
+	data := l.cfg.DataDir
+	if *all && fileExists(data) {
+		if err := checkDataDir(data); err != nil {
+			fprintf(stderr, "sheepdog data clear: %v\n", err)
+			return 1
+		}
+	}
 	if _, _, running := l.running(ctx); running {
 		fprintln(stderr, "sheepdog is running; stop it first (sheepdog stop), then run this again.")
 		return 1
 	}
-	data := l.cfg.DataDir
 	if *all {
 		if _, err := os.Stat(data); err != nil {
 			fprintf(stdout, "nothing to delete: %s does not exist\n", data)
@@ -120,6 +127,32 @@ func runData(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fprintf(stdout, "deleted %s\n", plural(len(removed), "file"))
 	return 0
+}
+
+// checkDataDir refuses to delete a data_dir that is not one: the root,
+// the home directory or one of its ancestors, or a directory holding
+// none of the files the daemon writes (a mistyped data_dir).
+func checkDataDir(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	abs = filepath.Clean(abs)
+	if abs == string(filepath.Separator) {
+		return errors.New("refusing to delete " + abs)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		home = filepath.Clean(home)
+		if rel, err := filepath.Rel(abs, home); err == nil && !strings.HasPrefix(rel, "..") {
+			return errors.New("refusing to delete " + abs + ": it holds your home directory")
+		}
+	}
+	for _, mark := range []string{"events", "logs", "brain", "state.json", "sheepdog.pid", "notes.jsonl", "push_devices.json"} {
+		if fileExists(filepath.Join(abs, mark)) {
+			return nil
+		}
+	}
+	return errors.New("refusing to delete " + abs + ": it does not look like a sheepdog data directory (no events/, logs/ or state.json)")
 }
 
 func plural(n int, what string) string {

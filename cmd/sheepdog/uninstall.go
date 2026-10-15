@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 )
@@ -66,33 +67,63 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fprintln(stdout, msg)
 	}
 
-	// 4. Config and data, after asking.
-	cfgDir := filepath.Dir(config.DefaultPath())
-	if *configPath != "" {
-		cfgDir = filepath.Dir(*configPath)
+	// 4. Config and data, after asking. The default config directory
+	// goes as a whole; a config given with --config elsewhere is removed
+	// as a file (with the --env-file given), never its directory.
+	type target struct {
+		paths []string
+		show  string
+		what  string
+		dir   bool
 	}
-	dirs := []struct{ path, what string }{
-		{cfgDir, "your config and API keys"},
-		{l.cfg.DataDir, "your data: transcripts, the agent table, logs"},
+	var targets []target
+	if *configPath == "" || filepath.Clean(filepath.Dir(*configPath)) == filepath.Dir(config.DefaultPath()) {
+		d := filepath.Dir(config.DefaultPath())
+		targets = append(targets, target{paths: []string{d}, show: d, what: "your config and API keys", dir: true})
+	} else {
+		files := []string{*configPath}
+		if *envFile != "" {
+			files = append(files, *envFile)
+		}
+		targets = append(targets, target{paths: files, show: strings.Join(files, " and "), what: "your config and API keys"})
 	}
-	for _, d := range dirs {
-		if !fileExists(d.path) {
+	if err := checkDataDir(l.cfg.DataDir); err == nil {
+		targets = append(targets, target{paths: []string{l.cfg.DataDir}, show: l.cfg.DataDir, what: "your data: transcripts, the agent table, logs", dir: true})
+	} else if fileExists(l.cfg.DataDir) {
+		fprintf(stdout, "left %s: %v\n", l.cfg.DataDir, err)
+	}
+	for _, d := range targets {
+		var present []string
+		for _, p := range d.paths {
+			if fileExists(p) {
+				present = append(present, p)
+			}
+		}
+		if len(present) == 0 {
 			continue
 		}
 		switch {
 		case *keep:
-			fprintf(stdout, "kept %s (%s)\n", d.path, d.what)
+			fprintf(stdout, "kept %s (%s)\n", d.show, d.what)
 			continue
-		case !*yes && !confirm(stdin, stdout, "Delete "+d.path+" ("+d.what+")?"):
-			fprintf(stdout, "kept %s\n", d.path)
-			continue
-		}
-		if err := os.RemoveAll(d.path); err != nil {
-			fprintf(stderr, "sheepdog uninstall: %v\n", err)
-			failed = true
+		case !*yes && !confirm(stdin, stdout, "Delete "+d.show+" ("+d.what+")?"):
+			fprintf(stdout, "kept %s\n", d.show)
 			continue
 		}
-		fprintf(stdout, "deleted %s\n", d.path)
+		for _, p := range present {
+			var err error
+			if d.dir {
+				err = os.RemoveAll(p)
+			} else {
+				err = os.Remove(p)
+			}
+			if err != nil {
+				fprintf(stderr, "sheepdog uninstall: %v\n", err)
+				failed = true
+				continue
+			}
+			fprintf(stdout, "deleted %s\n", p)
+		}
 	}
 
 	// 5. What only the user can do.
