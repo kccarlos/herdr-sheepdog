@@ -1,0 +1,8 @@
+# id	role	text (the iOS demo world's exact lines: DemoWorld.swift)
+s_ask	sheepdog	billing wants to run npm install p-retry, to add a retry library. Approve or decline?
+s_approved	sheepdog	Approved. billing is installing p-retry; I'll tell you when it's done.
+u_status	you	What's going on?
+s_status	sheepdog	auth is done; billing is working on add retries to the payment webhook; migrate is working on run the database migration on the staging copy; docs is working on update the install section of the README.
+u_failed	you	What failed?
+s_failed	sheepdog	Migration 0042 tried to add users.plan, which an earlier hotfix had already added by hand. Nothing was changed; the migration rolled back.
+s_billing_done	sheepdog	billing finished: the payment webhook now retries three times with backoff, and its tests pass.
