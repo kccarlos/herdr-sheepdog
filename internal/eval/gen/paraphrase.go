@@ -1,4 +1,4 @@
-// Package gen expands the eval corpus offline (docs/iteration-2.md WP0b):
+// Package gen expands the eval corpus offline (docs/dev/iteration-2.md WP0b):
 // paraphrases of the user's utterance per product job, and the
 // transcript noise the voice models' speech recognition produces. Both
 // are checked-in tables and a seeded generator — no model call — so the
@@ -18,7 +18,7 @@ import (
 // the trailing tags speech recognition leaves on. English only:
 // prompts/assistant.md does not claim any other language.
 //
-// A key is a job of docs/iteration-2.md with the sub-intent where
+// A key is a job of docs/dev/iteration-2.md with the sub-intent where
 // paraphrases would otherwise change what is right: a "yes" is not a
 // "no", and "never mind" must never become "stop" (J6). "{alias}" is
 // replaced by the case's target agent.

@@ -330,7 +330,7 @@ function setupSettings() {
   });
 }
 
-// "New conversation" (docs/roles.md): resets the orchestrator's transcript
+// "New conversation" (docs/dev/roles.md): resets the orchestrator's transcript
 // window and the voice session's memory. A confirm() guards it since it
 // is destructive to the shown conversation so far (the roster, promises,
 // notes and pending prompts are unaffected either way).

@@ -62,7 +62,7 @@ type Querier interface {
 // DefaultReplyWait is brain.reply_wait_s's default: above the utterance
 // budget (25 s) plus the final answer-only grace (3 s), so the orchestrator's
 // answer is the to_supervisor call's own result. The 2026-10-03 A/B
-// (docs/research/reply-as-function-response-2026-10-03.md) measured it
+// (docs/dev/research/reply-as-function-response-2026-10-03.md) measured it
 // against the old 2 s: no answer relayed back as the user's words
 // (7 of 147 before), no Chinese answer lost (6 of 36 before), pass rate
 // and latency unchanged.
@@ -92,13 +92,13 @@ type Config struct {
 	// it expires silently (default 2 h).
 	PromiseTTL time.Duration
 	// CancelWindow is how soon after an instruction went to a working
-	// agent a stop still interrupts it (default 30 s, docs/roles.md
+	// agent a stop still interrupts it (default 30 s, docs/dev/roles.md
 	// "Stop" phase 3).
 	CancelWindow time.Duration
 	// RepromptPoll is how long the post-answer poll watches a pane after
 	// keys go to it, in case it is already showing a different prompt
 	// within herdr's own poll window with no state change in between
-	// (docs/roles.md "blocked -> blocked is a block", reprompt.go). Zero
+	// (docs/dev/roles.md "blocked -> blocked is a block", reprompt.go). Zero
 	// (the default) turns the poll off: production always sets
 	// supervisor.reprompt_poll_s (10 s); a test that does not exercise
 	// this feature never spawns its goroutine.
@@ -114,7 +114,7 @@ type Config struct {
 	SnapshotInterval time.Duration
 	// InvestigateMax is the sanity ceiling of one background
 	// investigation — the only time limit on its answer (default 600 s,
-	// docs/roles.md "Investigations and explanations").
+	// docs/dev/roles.md "Investigations and explanations").
 	InvestigateMax time.Duration
 	// InvestigateSessionTTL is how long a finished investigation's
 	// sub-agent session stays resumable; a follow-up past it starts cold
@@ -123,7 +123,7 @@ type Config struct {
 	// AnnounceWait is how long a block waits for the orchestrator's announce turn
 	// before the daemon's own code sentence (the parsed prompt) is spoken
 	// (default 2 s, brain.announce_wait_s). Past it the orchestrator's line is
-	// dropped unless it says the user must act (docs/roles.md
+	// dropped unless it says the user must act (docs/dev/roles.md
 	// "Pushes"). A finish does not use it: a finish is not urgent and
 	// waits for the turn's own budget. Negative waits for the turn's own
 	// timeout on a block too.
@@ -134,20 +134,20 @@ type Config struct {
 	// utterance.go). Above the utterance budget, the reply is the tool
 	// result (Gemini: the late function response) unless the user
 	// barges in, the connection goes or the page leaves, which push it
-	// (docs/research/reply-as-function-response-2026-10-03.md). Negative
+	// (docs/dev/research/reply-as-function-response-2026-10-03.md). Negative
 	// waits for the whole turn under the call's own context, so a barge-in
 	// cancels the turn (--voice=off, brain-test).
 	ReplyWait time.Duration
 	// RepeatWindow is how long an unchanged roster sentence counts as
 	// "already reported" (default 60 s, supervisor.repeat_window_s,
-	// docs/history/issues-2026-09-18.md "Smaller items"): a status question
+	// docs/dev/history/issues-2026-09-18.md "Smaller items"): a status question
 	// inside it gets a context note the orchestrator can use to say "no change
 	// since I last checked" instead of repeating the roster; with no
 	// orchestrator, the code fallback sentence itself is prefixed that way.
 	RepeatWindow time.Duration
 	// AuthoriseWindow is how recent a user input must be to authorise
 	// answering a worker's approval prompt (default 30 s,
-	// supervisor.authorise_window_s, docs/roles.md "The one rail";
+	// supervisor.authorise_window_s, docs/dev/roles.md "The one rail";
 	// inputs.go).
 	AuthoriseWindow time.Duration
 	// ProjectRoots are where a new agent may be started (spawn.go,
@@ -163,7 +163,7 @@ type Config struct {
 	// HERDR_PANE_ID), "" when none; it is protected like ProtectedDirs.
 	OwnPane string
 	// Brain, when set, is the one model that decides and phrases
-	// (docs/roles.md); without it the daemon speaks code sentences and
+	// (docs/dev/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
 	Brain *brain.Brain
 	// Notifier, when set, gets one phone notification per announced
@@ -526,7 +526,7 @@ func (s *Supervisor) track() bool {
 // (session.voice_connected, /api/state). Pushes are not gated on it —
 // pushTagged hands them to the session regardless, which queues them
 // while reconnecting (audit B3). The first time it turns on — a live
-// connect event, or at once for --voice=off (docs/history/roles-status.md) —
+// connect event, or at once for --voice=off (docs/dev/history/roles-status.md) —
 // it also runs announceStartupPromises, once per daemon run.
 func (s *Supervisor) SetVoiceConnected(connected bool) {
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.VoiceConnected = connected })

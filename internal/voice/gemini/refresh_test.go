@@ -39,7 +39,7 @@ func refreshUntil(h *harness, within time.Duration) bool {
 	return false
 }
 
-// TestSessionRefreshedAfterTwoHours is docs/history/bench-2026-10-03.md #9: run
+// TestSessionRefreshedAfterTwoHours is docs/dev/history/bench-2026-10-03.md #9: run
 // 1's 18-hour, ~120-resume session voiced 5 % of push bodies and relayed
 // 17/17 Chinese push questions back, where run 2's fresh session voiced
 // them whole. Past two hours the session no longer resumes: at a quiet

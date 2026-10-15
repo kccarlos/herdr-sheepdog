@@ -38,7 +38,7 @@ type voiceStatser interface{ VoiceStats() map[string]any }
 type audioEnder interface{ AudioStreamEnd() }
 
 // playbackReporter takes the client's playback reports
-// (docs/ws-contract.md "Playback reports"): the session keeps "the
+// (docs/dev/ws-contract.md "Playback reports"): the session keeps "the
 // model is speaking" true until the client has played the reply, and
 // truncates a cut-off reply's transcript to what was heard.
 type playbackReporter interface {
@@ -56,7 +56,7 @@ type tagPusher interface {
 }
 
 // hub owns the single browser client and the daemon's view of the voice
-// state (docs/ws-contract.md).
+// state (docs/dev/ws-contract.md).
 type hub struct {
 	s *Server
 
@@ -201,7 +201,7 @@ func (h *hub) attach(c *client) bool {
 	}
 	old := h.client
 	h.client = c
-	// docs/ws-contract.md: "reconnecting clients start unmuted" — a new
+	// docs/dev/ws-contract.md: "reconnecting clients start unmuted" — a new
 	// client's mic is never silenced by whatever the previous client left
 	// behind (audit B2).
 	h.muted = false
@@ -228,7 +228,7 @@ func (h *hub) current() *client {
 }
 
 // sendAudio forwards a model audio chunk to the client, if any. Audio
-// with no client attached is dropped (docs/ws-contract.md "Reconnect
+// with no client attached is dropped (docs/dev/ws-contract.md "Reconnect
 // behaviour": the conversation is real time), but not silently: the
 // first chunk of each unheard run logs web.audio_unheard, so the log
 // shows the model spoke to nobody (the turn's voice.audio_timing has
@@ -339,7 +339,7 @@ func (h *hub) setMuted(on bool) {
 // setSilence records a silence-gate transition reported by the client and,
 // when the gate closed, tells the session the audio stream paused. From a
 // client that never sent a speaking message the gate is also its speech
-// detector: open means speaking (docs/ws-contract.md "Client speech
+// detector: open means speaking (docs/dev/ws-contract.md "Client speech
 // detector").
 func (h *hub) setSilence(c *client, on bool) {
 	c.mu.Lock()
@@ -383,7 +383,7 @@ func (h *hub) setPlayback(c *client, state string, playedMs int) {
 	}
 }
 
-// clientDrain logs a client drain message (docs/ws-contract.md
+// clientDrain logs a client drain message (docs/dev/ws-contract.md
 // "Feedback and drains"). Diagnostic only: "speaking" and the playback
 // run stay with the playback reports. skew_ms is the daemon's receive
 // time minus the client's at: message latency plus clock offset.

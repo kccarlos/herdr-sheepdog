@@ -2,7 +2,7 @@ package gen
 
 // CorpusOptions and CorpusPerJob are how the checked-in
 // testdata/eval/expanded.jsonl and expanded.assistant.jsonl are generated
-// (docs/iteration-2.md WP0b: the runner has a corpus without generating
+// (docs/dev/iteration-2.md WP0b: the runner has a corpus without generating
 // it in CI). The equivalent command line, from the repository root:
 //
 //	sheepdog eval expand --in testdata/eval/regressions.jsonl \

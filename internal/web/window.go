@@ -20,7 +20,7 @@ type ScreenResponse struct {
 }
 
 // handleAgentScreen answers a tracked agent's current window
-// (docs/ws-contract.md "Agent window: screen and input").
+// (docs/dev/ws-contract.md "Agent window: screen and input").
 func (s *Server) handleAgentScreen(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Supervisor == nil {
 		writeError(w, http.StatusServiceUnavailable, "no supervisor")

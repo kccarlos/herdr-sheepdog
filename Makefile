@@ -28,7 +28,7 @@ run-dev: build
 # Regenerates CHANGELOG.md from the full commit history (there are no
 # tags yet; see scripts/changelog.sh).
 # Signs and notarizes the darwin binary of a published release on this Mac
-# and replaces its tarball and checksums.txt (docs/signing.md). The release
+# and replaces its tarball and checksums.txt (docs/dev/signing.md). The release
 # workflow runs on ubuntu only, so the darwin asset is unsigned until then.
 #   make release-sign TAG=v0.1.0 [DRY_RUN=1]
 release-sign:
@@ -58,12 +58,12 @@ lint:
 # are only validated, every orchestrator case (svp, regressions, extracted,
 # expanded) runs through the orchestrator with a scripted fake model
 # (internal/eval), and the phrasing checks are listed as skipped. The L0
-# gate of docs/iteration-2.md; see docs/roles.md "The L0 eval corpus".
+# gate of docs/dev/iteration-2.md; see docs/dev/roles.md "The L0 eval corpus".
 # `eval sim` runs every simulated-user scenario (testdata/eval/sim) on the
 # real supervisor with the scripted orchestrator and user: a harness check of the
-# scenario files (the live campaign is `eval sim --live`, docs/iteration-2.md).
+# scenario files (the live campaign is `eval sim --live`, docs/dev/iteration-2.md).
 # `bench validate` checks the voice bench's scenarios and openings manifest
-# (testdata/bench, docs/bench/README.md) without any model.
+# (testdata/bench, docs/dev/bench/README.md) without any model.
 eval: build
 	./bin/$(BINARY) eval --set all
 	./bin/$(BINARY) eval sim
@@ -73,7 +73,7 @@ eval: build
 # Live audio): needs a Gemini key (GEMINI_API_KEY or --env-file) and
 # burns real quota (the free tier's, if that's what's configured) — run
 # it sparingly, it never hot-retries on a 429. Only the two small
-# hand-written sets: the corpus is hundreds of cases (docs/iteration-2.md
+# hand-written sets: the corpus is hundreds of cases (docs/dev/iteration-2.md
 # rule 6: live runs ≤ 30 cases, when the orchestrator says so; use
 # --set regressions or --filter for more).
 eval-live: build

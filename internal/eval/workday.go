@@ -21,7 +21,7 @@ type Workday struct {
 	// scripted cues run compressed in wall time (see the bench README).
 	SimMinutes int `json:"sim_minutes"`
 	// HeldOut marks a scenario that must never be used to tune a prompt:
-	// it only measures. Listed in docs/bench/README.md.
+	// it only measures. Listed in docs/dev/bench/README.md.
 	HeldOut bool `json:"held_out,omitempty"`
 	// Truth is the ground truth the judge items are rendered from.
 	Truth WorkdayTruth `json:"truth"`

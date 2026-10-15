@@ -141,7 +141,7 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 // 2026-10-01 with the API key: the text models (gemini-3.8-flash,
 // gemini-3.5-flash, gemini-3.5-flash-lite) answer at global and are "not
 // found" at us-central1, while the Live model the voice uses is served
-// at us-central1 and not at global (docs/research/
+// at us-central1 and not at global (docs/dev/research/
 // vertex-live-spike-2026-09-29.md), so the two cannot share one location.
 const VertexLocation = "global"
 

@@ -1,6 +1,6 @@
 ## Why
 
-<!-- The failure or need this answers: a log, an eval case id, a scorecard metric (docs/iteration-2.md "Rules for every change"). -->
+<!-- The failure or need this answers: a log, an eval case id, a scorecard metric (docs/dev/iteration-2.md "Rules for every change"). -->
 
 ## What changed
 
@@ -12,4 +12,4 @@
 
 ## Docs
 
-<!-- Which docs were updated (docs/status.md, CONFIG.md, roles.md, …), or "none needed". -->
+<!-- Which docs were updated (docs/dev/status.md, CONFIG.md, roles.md, …), or "none needed". -->

@@ -42,7 +42,7 @@ func newSDKDialer(vertex *Vertex) *sdkDialer {
 
 // clientConfig is the genai client configuration for one key.
 //
-// On Vertex (spike 2026-09-29, docs/research/vertex-live-spike-2026-09-29.md)
+// On Vertex (spike 2026-09-29, docs/dev/research/vertex-live-spike-2026-09-29.md)
 // the Live socket is wss://{location}-aiplatform.googleapis.com/ws/
 // google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent and
 // accepts the API key as an x-goog-api-key header; the setup names the

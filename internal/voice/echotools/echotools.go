@@ -1,5 +1,5 @@
 // Package echotools provides a stub ToolHandler for the voice's two
-// tools (docs/roles.md "One decision-maker") that just echoes the call
+// tools (docs/dev/roles.md "One decision-maker") that just echoes the call
 // back as spoken text, so the tool round-trip can be verified without
 // the Supervisor (WP3).
 package echotools

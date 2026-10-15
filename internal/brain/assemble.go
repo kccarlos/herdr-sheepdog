@@ -602,7 +602,7 @@ const toolWorkerLog = "worker_log"
 
 // workerWrote returns the last message the worker wrote for a human, from
 // the journal entry the supervisor appended for this announce's event
-// just before it started the turn (docs/iteration-2.md WP4), or "" when
+// just before it started the turn (docs/dev/iteration-2.md WP4), or "" when
 // there is none: no transcript, nothing new, or an entry older than the
 // agent's current state (it belongs to an earlier event, or the agent
 // has moved on). Both times come from the supervisor's clock.
@@ -620,7 +620,7 @@ func workerWrote(agent AgentInfo) string {
 // Ledger budget of the journal: the last journalLedgerEntries entries per
 // agent, none more than journalLedgerAge older than the agent's newest,
 // each at most journalLedgerRunes of text, so four agents add under 800
-// characters to every prompt (docs/iteration-2.md WP4, the age limit
+// characters to every prompt (docs/dev/iteration-2.md WP4, the age limit
 // WP5); the full entries are one recall away. The age is measured
 // against the newest entry, not the orchestrator's clock: the entries are
 // stamped by the supervisor's.

@@ -9,7 +9,7 @@ import (
 // Recap is the recent conversation a voice session keeps so a fresh
 // model session can be told what was said before it: GPT-Live replays it
 // when it reopens a billed session, and Gemini re-seeds a connection that
-// came back without its resumption handle (docs/timelines.md C23). It is
+// came back without its resumption handle (docs/dev/timelines.md C23). It is
 // not safe for concurrent use: the session calls it under its own lock.
 type Recap struct {
 	// Max bounds the entries kept (the oldest go first); 0 keeps
@@ -58,7 +58,7 @@ type RecapEntry struct {
 
 // Add remembers one finished utterance. Blank text is ignored, and so
 // is what would only teach a fresh model the wrong habit
-// (docs/history/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
+// (docs/dev/history/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
 // own ("On it.", "checking", "好的") and its "<no speech detected>"
 // placeholder, and a user entry that only repeats the line the
 // voice was just given or said (its own speech heard back, or a push's

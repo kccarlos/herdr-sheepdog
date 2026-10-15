@@ -33,7 +33,7 @@ import (
 )
 
 // bytesPerSample is fixed: every stream this package measures is PCM16
-// mono (docs/ws-contract.md).
+// mono (docs/dev/ws-contract.md).
 const bytesPerSample = 2
 
 // Tracker accumulates one turn's chunk arrivals. Not safe for concurrent

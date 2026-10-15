@@ -267,7 +267,7 @@ export class ConversationView {
       h.appendChild(el('span', `badge ${it.urgency}`, it.urgency));
       if (it.skipped) h.appendChild(el('span', 'badge skipped', 'not sent (voice off)'));
       // Asked to interrupt, sent when idle: the model was mid-sentence
-      // (docs/roles.md "Pushes").
+      // (docs/dev/roles.md "Pushes").
       if (it.deferred) h.appendChild(el('span', 'badge deferred', 'deferred: model was speaking'));
       // The answer to a look the user was told was coming.
       if (it.answersJob) h.appendChild(el('span', 'badge', `answers ${it.answersJob}`));

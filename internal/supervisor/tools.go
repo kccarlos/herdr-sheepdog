@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The voice's two tools (docs/roles.md "One decision-maker"):
+// The voice's two tools (docs/dev/roles.md "One decision-maker"):
 // to_supervisor carries the user's words verbatim, stop runs the stop
 // procedure. Nothing else is declared to the voice model.
 const (
@@ -54,7 +54,7 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 // noBrain is everything the daemon can say without one: the roster
 // sentence composeBriefing already keeps, and why that is all. Nothing
 // is sent to a worker — instructions are the orchestrator's judgment
-// (docs/roles.md "One decision-maker"). Within supervisor.repeat_window_s
+// (docs/dev/roles.md "One decision-maker"). Within supervisor.repeat_window_s
 // of an identical roster, the sentence is prefixed "No change since I
 // last checked: …" — there is no orchestrator here to add a note to instead,
 // and the roster is the whole answer, so it is delivered by saying it.

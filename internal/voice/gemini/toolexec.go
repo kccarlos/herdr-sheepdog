@@ -90,7 +90,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	// An INTERRUPT result is downgraded to WHEN_IDLE at send time, now
 	// that turnDone (or ToolResponseWait) has settled Speaking(), while
 	// the model is speaking — except stop(), the one tool result the
-	// user is always owed at once (docs/roles.md "Pushes").
+	// user is always owed at once (docs/dev/roles.md "Pushes").
 	sched := res.Scheduling
 	deferred := sched == voice.UrgencyInterrupt && call.Name != voice.ToolStop && s.Speaking()
 	if deferred {
@@ -140,7 +140,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		s.mu.Unlock()
 	}
 	if sendErr != nil {
-		// The connection the call came on is gone (docs/timelines.md
+		// The connection the call came on is gone (docs/dev/timelines.md
 		// C23): the answer goes through the push queue, which outlives
 		// connections.
 		s.pushUnsentAnswer(call, res, "send_error")

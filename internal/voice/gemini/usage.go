@@ -7,7 +7,7 @@ import (
 )
 
 // Resume-context observability (work item "Gemini Live context retention
-// across resumes", docs/handover-2026-10-04.md). After a resume the prompt
+// across resumes", docs/dev/handover-2026-10-04.md). After a resume the prompt
 // token count has been seen to drop sharply. This file only measures: it
 // records the usage report's per-modality token details and, once per
 // resumed connection, one voice.resume_context event comparing the prompt

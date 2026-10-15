@@ -312,7 +312,7 @@ func (sw *Switcher) carryRecap(old, inner Session, from, to string) {
 
 // carryPushes moves the pushes still queued in the retired session onto
 // the new one, in order, so a provider switch does not discard lines
-// nobody has heard yet (docs/timelines.md C15: the old session's queue
+// nobody has heard yet (docs/dev/timelines.md C15: the old session's queue
 // used to be closed with it, with no event). Each goes through the new
 // session's own queue and rules (hold, urgency, arbitration); its queue
 // age restarts. Logs voice.push_carried {count}; a line the new session
@@ -492,7 +492,7 @@ func (sw *Switcher) PushTagged(text string, u Urgency, tags map[string]any) erro
 
 // Reset drops the current session's conversational memory and starts it
 // over fresh, on the same provider ("New conversation",
-// docs/roles.md): for Gemini, the resumption handle is dropped and the
+// docs/dev/roles.md): for Gemini, the resumption handle is dropped and the
 // session reconnects with none; for GPT-Live, an open billed session is
 // closed (no recap) and reopens later on the next speech or push. A
 // no-op before Start, after Close, or when the current provider's
@@ -588,7 +588,7 @@ func (sw *Switcher) HasListener() bool {
 }
 
 // ClientPlayback forwards a /ws client playback report to the current
-// session (docs/ws-contract.md "Playback reports"). A new provider's
+// session (docs/dev/ws-contract.md "Playback reports"). A new provider's
 // session starts with no run, so a report about the old one's audio
 // (the flush a switch sends) is logged and otherwise ignored there.
 func (sw *Switcher) ClientPlayback(state string, playedMs int) {

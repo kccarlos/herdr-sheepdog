@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
-// Worker history (docs/roles.md "Worker history", docs/iteration-2.md
+// Worker history (docs/dev/roles.md "Worker history", docs/dev/iteration-2.md
 // WP4). The orchestrator used to know a worker only by its screen — tool output,
 // paths, progress bars — so its lines relayed the worker's working notes
 // (the 2026-09-24 baseline: about two jargon terms per orchestrator line; "why

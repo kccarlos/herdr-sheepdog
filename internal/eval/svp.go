@@ -195,7 +195,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 	rec := newRecorder()
 	rec.meter, rec.model = run.meter, modelName
 	m := model
-	// MaxSteps 3 caps a live case at up to 3 model calls (docs/roles.md
+	// MaxSteps 3 caps a live case at up to 3 model calls (docs/dev/roles.md
 	// D9-adjacent cost discipline: the Gemini free tier's quota is
 	// limited, keep eval runs small). The utterance budget is left to the
 	// orchestrator's default (brain.DefaultUtteranceTimeout), so a live case gets
@@ -346,7 +346,7 @@ type baseline struct {
 // baselineOf grades c's expectations, every check including the live-only
 // ones, against what the logged system did (c.Observed). This is how a
 // regression case proves offline, with no model, that it catches the
-// failure it was taken from (docs/iteration-2.md rule 2: "fails before").
+// failure it was taken from (docs/dev/iteration-2.md rule 2: "fails before").
 func baselineOf(c SVPCase) baseline {
 	if c.Observed == nil {
 		return baseline{}
@@ -396,7 +396,7 @@ func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline boo
 // liveOnlyChecks are the checks about how the reply is phrased or judged:
 // the offline fake model cannot phrase or judge, so offline they are
 // skipped and listed in the report, never passed silently
-// (docs/iteration-2.md WP0b).
+// (docs/dev/iteration-2.md WP0b).
 var liveOnlyChecks = []string{
 	"spoken_contains_any_of", "spoken_max_sentences", "spoken_max_words", "spoken_no_jargon",
 	"first_sentence_contains_any_of", "needs_user", "urgency_not", "ask_empty", "reply_language",
@@ -578,7 +578,7 @@ func containsAnyFold(s string, subs []string) bool {
 func wordCount(s string) int { return len(strings.Fields(s)) }
 
 // jargonTerms is a small stand-in list of words the user's ear should
-// not have to parse (docs/iteration-2.md WP1: no PR numbers, ms,
+// not have to parse (docs/dev/iteration-2.md WP1: no PR numbers, ms,
 // versions, unfamiliar terms).
 //
 // TODO(WP0a): switch to internal/earmetrics once it lands; this list is a
@@ -787,7 +787,7 @@ func scriptFor(c SVPCase, alias string) *braintest.Model {
 	case brain.Kind(c.Request.Kind).IsEvent() && containsStr(c.Expect.MustNotCall, brain.ToolPrompt):
 		// An event turn that must not act: script the attempt, so every
 		// extracted finish or block proves the executor refuses an action
-		// tool on an event (docs/roles.md "The one rail").
+		// tool on an event (docs/dev/roles.md "The one rail").
 		tool = brain.ToolPrompt
 	}
 	fc := braintest.FC(tool, defaultArgsFor(tool, alias))

@@ -2,7 +2,7 @@
 # Signs, notarizes and checks a bare macOS binary with a Developer ID
 # Application certificate that is already in a keychain on this Mac (the
 # login keychain by default). scripts/release-sign.sh sources this file for
-# `make release-sign`; it also runs on its own. See docs/signing.md.
+# `make release-sign`; it also runs on its own. See docs/dev/signing.md.
 #
 #   scripts/macos-sign.sh sign <binary>      # codesign (hardened runtime) + verify
 #   scripts/macos-sign.sh notarize <binary>  # zip + notarytool submit --wait

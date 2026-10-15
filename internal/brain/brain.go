@@ -42,7 +42,7 @@ const (
 	// found", so the orchestrator's line is worth waiting longer for.
 	DefaultAnnounceTimeout = 15 * time.Second
 	// DefaultWindowTokens and DefaultPruneAfterTurns were 24000 and 3
-	// until docs/iteration-2.md WP5 halved the window: prompts averaged
+	// until docs/dev/iteration-2.md WP5 halved the window: prompts averaged
 	// 19.8 k tokens and announce turns missed the 2 s reply window.
 	DefaultWindowTokens    = 12000
 	DefaultPruneAfterTurns = 2
@@ -99,7 +99,7 @@ type Config struct {
 	// Engine overrides the default context engine (the memory seam).
 	Engine ContextEngine
 	// Prompts resolves SOUL.md, RULES.md and USER.md against their
-	// overrides (docs/roles.md "Prompt files"); nil uses the embedded
+	// overrides (docs/dev/roles.md "Prompt files"); nil uses the embedded
 	// defaults. Recomputed every turn, so a reload takes effect at once.
 	Prompts *prompts.Loader
 	// Now overrides the clock (tests).
@@ -732,7 +732,7 @@ func (b *Brain) Seed(msgs []Message) {
 	}
 }
 
-// Reset is the orchestrator's half of "New conversation" (docs/roles.md): the
+// Reset is the orchestrator's half of "New conversation" (docs/dev/roles.md): the
 // context window is emptied — a fresh transcript segment starts (the
 // on-disk file so far is left alone, just no longer appended to) and the
 // compaction summary is gone — so the next turn's prompt carries none of
@@ -781,7 +781,7 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 // generation, no tools, on the current provider and model (failing over
 // like a turn's step, generateSummary), thinking off
 // (a summary needs no chain of thought) and short: the engine caps the
-// result at summaryMaxTokens (docs/iteration-2.md WP5).
+// result at summaryMaxTokens (docs/dev/iteration-2.md WP5).
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the user asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
 	resp, err := b.generateSummary(ctx, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})

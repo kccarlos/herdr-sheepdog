@@ -18,7 +18,7 @@ import (
 // item's context as facts and its turns as the conversation (not the full
 // worker screens a live run gives it).
 
-// CalibFile is docs/eval/calibration/<date>/items.json.
+// CalibFile is docs/dev/eval/calibration/<date>/items.json.
 type CalibFile struct {
 	Version int          `json:"version"`
 	Rubric  []RubricItem `json:"rubric"`

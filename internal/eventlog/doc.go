@@ -15,7 +15,7 @@
 //
 // The line shape is exactly {id, ts, source, type, pane_id?, turn_id?,
 // utterance_id?, payload, dur_ms?} with dur_ms, turn_id and utterance_id
-// copied from the payload when present (docs/architecture.md "Event
+// copied from the payload when present (docs/dev/architecture.md "Event
 // ids"). A Tap is a lossy feed for observers (internal/observe): an
 // event that does not fit its buffer is counted, never waited for. id is
 // stable and strictly increasing across day files and restarts (the

@@ -254,7 +254,7 @@ func TestWSSilenceGate(t *testing.T) {
 // TestWSPlaybackStatsAndSendWait: the client's ping carries the jitter
 // buffer's underruns/drains/buffer_ms into web.client.stats, and an audio
 // chunk sent to the client shows up as a send_wait sample (WP: audible
-// gaps investigation, docs/ws-contract.md "ping").
+// gaps investigation, docs/dev/ws-contract.md "ping").
 func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true, statsInterval: 50 * time.Millisecond})
 	c := dialWS(t, h)
@@ -304,7 +304,7 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 
 // TestWSPingAECInClientStats: the ping's aec (the browser's echo
 // cancellation: true/false/unknown) shows up in web.client.stats; a value
-// outside the three is ignored (WP-E, docs/ws-contract.md "ping").
+// outside the three is ignored (WP-E, docs/dev/ws-contract.md "ping").
 func TestWSPingAECInClientStats(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true, statsInterval: 50 * time.Millisecond})
 	c := dialWS(t, h)
@@ -379,7 +379,7 @@ func TestWSSingleClientReplacement(t *testing.T) {
 
 // TestWSMuteDoesNotPersistAcrossClients: a client that muted and then
 // disconnected must not leave the next client muted — reconnecting
-// clients start unmuted (docs/ws-contract.md, audit B2).
+// clients start unmuted (docs/dev/ws-contract.md, audit B2).
 func TestWSMuteDoesNotPersistAcrossClients(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true})
 	first := dialWS(t, h)

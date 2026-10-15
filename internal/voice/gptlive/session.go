@@ -336,7 +336,7 @@ func (s *Session) ClientAttached(attached bool) {
 // Reset implements the optional voice.Session Reset: the recap and any
 // silent context held for the next session are dropped, so a session
 // that reopens later (on the next speech or push) starts with no memory
-// of the conversation so far ("New conversation", docs/roles.md). An
+// of the conversation so far ("New conversation", docs/dev/roles.md). An
 // open billed session is closed now (session.close, no recap); a
 // standby one simply loses its recap. No-op before Start or after
 // Close.
@@ -380,7 +380,7 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 }
 
 // ClientPlayback applies a /ws client playback report
-// (docs/ws-contract.md "Playback reports"): it logs voice.playback and,
+// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback and,
 // when a flushed run was cut short, emits the heard part as a cut
 // transcript for the orchestrator. The push pump reads the new state on its
 // next tick.

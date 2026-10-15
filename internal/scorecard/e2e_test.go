@@ -11,7 +11,7 @@ import (
 // never crashes or errors, even though the fixture (from before the orchestrator
 // package existed: it logs "llm.call", not "brain.*", and carries no
 // event ids at all) is a good example of the schema drift
-// docs/architecture.md warns about. Per the brief, this test is skipped
+// docs/dev/architecture.md warns about. Per the brief, this test is skipped
 // if the fixture cannot be parsed at all rather than failing the suite.
 func TestAnalyzeOverRealE2EFixture(t *testing.T) {
 	const path = "../../testdata/e2e/2026-09-17-e2e.jsonl"

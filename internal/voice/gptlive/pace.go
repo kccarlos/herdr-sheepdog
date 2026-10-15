@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Input pacing (docs/research/voice-frameworks-2026-09-24.md P1, WP-A).
+// Input pacing (docs/dev/research/voice-frameworks-2026-09-24.md P1, WP-A).
 //
 // GPT-Live wants "a continuous microphone stream paced at its recorded
 // sample rate": the session timeline advances with input audio. The

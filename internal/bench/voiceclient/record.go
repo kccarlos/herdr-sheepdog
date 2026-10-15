@@ -103,7 +103,7 @@ type Recording struct {
 // heardText cuts an utterance's transcript at playedMS: every fragment
 // is placed at the audio received when it arrived, and the fragment
 // straddling the cut contributes a proportional share of its words (the
-// daemon's own method, docs/ws-contract.md "Playback reports").
+// daemon's own method, docs/dev/ws-contract.md "Playback reports").
 func heardText(frags []Fragment, playedMS, audioMS int) string {
 	if playedMS >= audioMS {
 		return joinFragments(frags)

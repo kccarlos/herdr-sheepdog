@@ -17,7 +17,7 @@ Release order, when the time comes (each step by the maintainer):
 1. Tag `vX.Y.Z`; the release workflow builds the tarballs and
    `checksums.txt`.
 2. `make release-sign TAG=vX.Y.Z` on the Mac signs and notarizes the darwin
-   binary and replaces its tarball and checksum (docs/signing.md).
+   binary and replaces its tarball and checksum (docs/dev/signing.md).
 3. `packaging/homebrew/render.sh vX.Y.Z > <tap checkout>/Formula/sheepdog.rb`,
    then review, commit and push in the tap.
 4. `brew install kccarlos/tap/sheepdog` on a clean machine.

@@ -178,7 +178,7 @@ func (i *Injector) SetState(ctx context.Context, paneID string, to herdr.State, 
 // Screen replaces a synthetic pane's screen text without moving its
 // state or touching the supervisor: the mock's counterpart to a worker
 // showing a new prompt while herdr's own status report stays unchanged
-// (docs/roles.md "blocked -> blocked is a block") — the post-answer
+// (docs/dev/roles.md "blocked -> blocked is a block") — the post-answer
 // poll or the reconciler is what is meant to notice it, not this call.
 func (i *Injector) Screen(paneID, screen string) (state.Agent, error) {
 	paneID = strings.TrimSpace(paneID)

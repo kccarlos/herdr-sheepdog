@@ -10,7 +10,7 @@ import (
 )
 
 // PromptSection is one part of the system prompt; the stable ones come
-// first so a provider's prefix cache applies (docs/roles.md, borrowed
+// first so a provider's prefix cache applies (docs/dev/roles.md, borrowed
 // from OpenClaw).
 type PromptSection struct {
 	Name string `json:"name"`
@@ -28,7 +28,7 @@ const SourceDynamic = "dynamic"
 // stableSections loads SOUL.md as the role section and splits RULES.md
 // into one section per "## " heading (tools, the one rail, the answer
 // contract). pl resolves each file against its override, if any
-// (docs/roles.md "Prompt files"); a nil pl uses the embedded defaults.
+// (docs/dev/roles.md "Prompt files"); a nil pl uses the embedded defaults.
 // Recomputed on every turn (systemPrompt) so a reloaded override takes
 // effect without a restart.
 func stableSections(pl *prompts.Loader) []PromptSection {
@@ -95,7 +95,7 @@ func slug(name string) string {
 	return name
 }
 
-// The state block's budget (docs/iteration-2.md WP5): every free text
+// The state block's budget (docs/dev/iteration-2.md WP5): every free text
 // in the roster and ledger is clipped to a few words — the captures had
 // a 6 k-character ledger of verbatim instructions — and when the block
 // is still over stateBudgetChars the journal gives way, down to one line

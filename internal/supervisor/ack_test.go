@@ -11,7 +11,7 @@ import (
 )
 
 // The voice owns the judgment an acknowledgement used to get in
-// code (docs/design/dual-brain.md; ackCues removed): whatever the voice
+// code (docs/dev/design/dual-brain.md; ackCues removed): whatever the voice
 // said is its answer, and the daemon does not second-guess it. Words met
 // with neither speech nor a tool call are still relayed (a lost
 // utterance, not a judgment of what was said).

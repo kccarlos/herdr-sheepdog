@@ -278,7 +278,7 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 		t.Errorf("push_decision = %v", d[3])
 	}
 	// A due promise is the exception that keeps INTERRUPT scheduling
-	// even while the model is speaking (docs/roles.md "Pushes"); the
+	// even while the model is speaking (docs/dev/roles.md "Pushes"); the
 	// gemini session reads this tag off the voice.push event.
 	if tags := h.pusher.tagsOf(2); tags["due_promise"] != true {
 		t.Errorf("tags = %v, want due_promise: true", tags)
@@ -939,7 +939,7 @@ func TestAnnouncePromiseOnlyEvents(t *testing.T) {
 	}
 }
 
-// TestKeptPromiseOnAStaleBlockIsLoggedDropped: docs/timelines.md C20 —
+// TestKeptPromiseOnAStaleBlockIsLoggedDropped: docs/dev/timelines.md C20 —
 // a promise kept by a block whose prompt was answered while the orchestrator
 // wrote about it is marked kept, and its line is dropped with the stale
 // block. The drop is logged (voice.push_dropped {reason: stale_block})
@@ -973,7 +973,7 @@ func TestKeptPromiseOnAStaleBlockIsLoggedDropped(t *testing.T) {
 
 // TestKeptPromiseLineIsTaggedOwed: the line that keeps a promise carries
 // keeps_promise_ids, so the voice queue lets it pass plain idle news
-// (docs/timelines.md C29).
+// (docs/dev/timelines.md C29).
 func TestKeptPromiseLineIsTaggedOwed(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Auth finished: all tests pass.", "idle", "", "", false)

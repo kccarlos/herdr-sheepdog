@@ -2,7 +2,7 @@ package gptlive
 
 // Wire types of the primary Live WebSocket, as documented in the API
 // reference (api/reference/resources/live/primary-websocket) and checked
-// against a live session on 2026-09-23 (docs/gpt-live-notes.md).
+// against a live session on 2026-09-23 (docs/dev/gpt-live-notes.md).
 
 // Client event types.
 const (

@@ -8,7 +8,7 @@ import (
 )
 
 // The language of the daemon's own code sentences
-// (docs/eval/eval-campaign-2026-10-03.md H4). Wherever an orchestrator turn follows,
+// (docs/dev/eval/eval-campaign-2026-10-03.md H4). Wherever an orchestrator turn follows,
 // the orchestrator gets the facts and writes the line in the user's
 // language itself. The few sentences the daemon speaks without it — the
 // bare-answer fast path, a tapped answer, the block template when the

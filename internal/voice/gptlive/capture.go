@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 )
 
-// The /debug Context tab's record of this session (docs/architecture.md
+// The /debug Context tab's record of this session (docs/dev/architecture.md
 // "Context capture"). A GPT-Live session keeps its context on the server
 // and it cannot be read back, so it is reconstructed from what the daemon
 // sent: every session is a fresh context made of session.start's

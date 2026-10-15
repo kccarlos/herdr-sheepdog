@@ -385,7 +385,7 @@ func waitSubs(t *testing.T, srv *herdrtest.Server, n int) {
 	t.Fatalf("subscriptions = %d, want %d", srv.SubscriptionCount(), n)
 }
 
-// The spawn calls (docs/roles.md "Starting an agent"): workspace.create
+// The spawn calls (docs/dev/roles.md "Starting an agent"): workspace.create
 // returns the root pane, pane.split the new pane, and pane.send_input
 // types the command line with its Enter in one write.
 func TestClientSpawnCalls(t *testing.T) {

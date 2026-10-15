@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Starting a new agent (docs/roles.md "Starting an agent"): the prompt
+// Starting a new agent (docs/dev/roles.md "Starting an agent"): the prompt
 // tool with new_agent_dir starts a Claude Code or Codex worker in a
 // project directory instead of instructing a running one, with text, when
 // given, as its first instruction. Which directory the user meant is the

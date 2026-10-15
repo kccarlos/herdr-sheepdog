@@ -16,7 +16,7 @@ const stderrCapBytes = 4 << 10
 // the tail. Codex announces the session on its first line and then
 // streams every command's output, so a talkative run pushes
 // thread.started out of the tail: without the head a follow-up could
-// never resume the session (docs/cli-query-tools.md §2b).
+// never resume the session (docs/dev/cli-query-tools.md §2b).
 const stdoutHeadBytes = 4 << 10
 
 // execResult is the raw outcome of one child process, before any
@@ -98,7 +98,7 @@ func killGroup(pid int) {
 
 // scrubEnv drops HERDR_*, CLAUDECODE and CLAUDE_CODE_* so the child's own
 // herdr / Claude Code integration hooks do not see the daemon's session
-// (docs/cli-query-tools.md, WP4 environment rules).
+// (docs/dev/cli-query-tools.md, WP4 environment rules).
 func scrubEnv(environ []string) []string {
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {

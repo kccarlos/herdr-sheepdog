@@ -24,7 +24,7 @@ func contentIndex(c *fakeConn, want string) int {
 	return -1
 }
 
-// TestOwedPushOvertakesIdleNews is docs/timelines.md C29: an answer to
+// TestOwedPushOvertakesIdleNews is docs/dev/timelines.md C29: an answer to
 // the user's utterance queued behind an idle line that is waiting
 // for the model's turn to end is spoken first once the turn ends, and
 // the overtaking is logged (voice.push_overtook). Before the fix the
@@ -142,7 +142,7 @@ func TestAnswersToOneUtteranceKeepTheirOrder(t *testing.T) {
 // TestPushDroppedAfterFailedSends: a push whose send keeps failing is put
 // back at the front three times, then dropped with voice.push_dropped
 // {reason: send_failed} — before the fix only an EventError said so
-// (docs/timelines.md §4 (d), §6 rank 6).
+// (docs/dev/timelines.md §4 (d), §6 rank 6).
 func TestPushDroppedAfterFailedSends(t *testing.T) {
 	c := newFakeConn("c1")
 	c.contentErr = errors.New("fake: write failed")

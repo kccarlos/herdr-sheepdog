@@ -111,7 +111,7 @@ var devCommands = map[string]*devCommand{
 	"voice-test": {runVoiceTest, "stream a WAV through a Gemini Live session with echo tools"},
 	"brain-test": {runBrainTest, "run one orchestrator turn against a mock herdr and a fixture"},
 	"eval":       {runEval, "run the conversation eval sets (--set NAME|all [--live]); extract, expand"},
-	"scorecard":  {runScorecard, "print docs/iteration-2.md's scorecard metrics over the event log"},
+	"scorecard":  {runScorecard, "print docs/dev/iteration-2.md's scorecard metrics over the event log"},
 	"audio-e2e":  {runAudioE2E, "speak scenarios (macOS say + noise) into a running daemon's /ws"},
 	"bench":      {runBench, "the voice benchmark: synthetic speech into scratch daemons (tier 2)"},
 	"herdr":      {runHerdr, "herdr watch: print debounced agent state transitions, persist the table"},

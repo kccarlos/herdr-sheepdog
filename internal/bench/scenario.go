@@ -111,7 +111,7 @@ type Reconnect struct {
 // old one closed; on a connection that was itself resumed the daemon
 // opens a fresh session and re-seeds it instead), so the following
 // turns show what the model kept. Measurement scenario for
-// docs/research/live-resume-context-2026-10-04.md; two recycles with a
+// docs/dev/research/live-resume-context-2026-10-04.md; two recycles with a
 // turn between them exercise the second-generation case.
 type Resume struct {
 	AfterTurn  int   `json:"after_turn,omitempty"`

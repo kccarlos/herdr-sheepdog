@@ -13,7 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
-// Report is every docs/iteration-2.md scorecard metric computed over one
+// Report is every docs/dev/iteration-2.md scorecard metric computed over one
 // slice of the event log (a session, or the whole loaded range).
 type Report struct {
 	Label         string            `json:"label"`

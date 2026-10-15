@@ -61,7 +61,7 @@ type Config struct {
 	deprecations []string
 }
 
-// Prompts configures the prompt workspace (docs/roles.md "Prompt files"):
+// Prompts configures the prompt workspace (docs/dev/roles.md "Prompt files"):
 // user overrides of the embedded assistant/SVP/USER prompt files.
 type Prompts struct {
 	// Dir is the override directory: <dir>/<same relative path as in the
@@ -71,7 +71,7 @@ type Prompts struct {
 	Dir string `toml:"dir"`
 }
 
-// Brain configures the orchestrator (plan D7-revised, docs/roles.md):
+// Brain configures the orchestrator (plan D7-revised, docs/dev/roles.md):
 // the stateful agent that answers the user's relayed words and the
 // workers' events with tools over a function-calling model (Gemini or DeepSeek, switchable at runtime),
 // keeping one transcript per daemon run under <data_dir>/brain/. When
@@ -99,12 +99,12 @@ type Brain struct {
 	UtteranceTimeoutS int `toml:"utterance_timeout_s"`
 	// WindowTokens is the context window target (estimated tokens); above
 	// it the oldest half is compacted into a summary (default 12000;
-	// 24000 before docs/iteration-2.md WP5).
+	// 24000 before docs/dev/iteration-2.md WP5).
 	WindowTokens int `toml:"window_tokens"`
 	// PruneAfterTurns is how many turns a tool result (screen, CLI output)
 	// stays verbatim in the window before it is replaced by a one-line
 	// stub; the disk transcript keeps it (default 2; 3 before
-	// docs/iteration-2.md WP5).
+	// docs/dev/iteration-2.md WP5).
 	PruneAfterTurns int `toml:"prune_after_turns"`
 	// StepReserveS: when less of the turn's timeout remains after a tool
 	// round than this, the next step is answer-only (no more tools), so
@@ -130,7 +130,7 @@ type Brain struct {
 	// AnnounceWaitS is how long a block waits for the orchestrator's announce
 	// turn before the parsed prompt is spoken; a late line follows only
 	// when it says the user must act (default 2). A finish does not
-	// use it: it waits for the turn's own budget (docs/roles.md "Pushes").
+	// use it: it waits for the turn's own budget (docs/dev/roles.md "Pushes").
 	AnnounceWaitS int `toml:"announce_wait_s"`
 	// ReplyWaitS is how long a to_supervisor call waits for the orchestrator's
 	// reply before it returns a silent pending result and the reply is
@@ -259,25 +259,25 @@ type Supervisor struct {
 	// for its event before it expires silently (default 7200, 2 h).
 	PromiseTTLS int `toml:"promise_ttl_s"`
 	// CancelWindowS is how soon after an instruction went to a working
-	// agent a "stop" still interrupts it with Ctrl-C (docs/roles.md
+	// agent a "stop" still interrupts it with Ctrl-C (docs/dev/roles.md
 	// "Stop", phase 3; default 30).
 	CancelWindowS int `toml:"cancel_window_s"`
 	// RepromptPollS is how long the post-answer poll watches a pane after
 	// keys go to it, in case it is already showing a different prompt
 	// within herdr's own poll window with no state change in between
-	// (docs/roles.md "blocked -> blocked is a block"; default 10).
+	// (docs/dev/roles.md "blocked -> blocked is a block"; default 10).
 	RepromptPollS int `toml:"reprompt_poll_s"`
 	// RepeatWindowS is how long an unchanged roster sentence counts as
 	// "already reported": a status question inside it gets a "no change
 	// since I last checked" note instead of the roster repeated in full
-	// (docs/history/issues-2026-09-18.md "Smaller items"; default 60).
+	// (docs/dev/history/issues-2026-09-18.md "Smaller items"; default 60).
 	RepeatWindowS int `toml:"repeat_window_s"`
 	// AuthoriseWindowS is how recent the user's own words (a voice
 	// transcript, typed text or a tap) must be to authorise answering a
-	// worker's approval prompt (docs/roles.md "The one rail"; default 30).
+	// worker's approval prompt (docs/dev/roles.md "The one rail"; default 30).
 	AuthoriseWindowS int `toml:"authorise_window_s"`
 	// ProjectRoots are the directories a new agent may be started in
-	// (docs/roles.md "Starting an agent"): any immediate subdirectory of
+	// (docs/dev/roles.md "Starting an agent"): any immediate subdirectory of
 	// one of them, or the directory of an existing herdr workspace. A
 	// leading "~/" is the home directory (default ["~/Documents"]).
 	ProjectRoots []string `toml:"project_roots"`
@@ -327,7 +327,7 @@ var ChattinessLevels = []string{"quiet", "normal", "chatty"}
 const DefaultChattiness = "chatty"
 
 // DefaultVoiceName is the built-in voice.name: what the voice calls
-// itself (docs/roles.md "Names").
+// itself (docs/dev/roles.md "Names").
 const DefaultVoiceName = "Sheepdog"
 
 // validChattiness reports whether v is one of ChattinessLevels.
@@ -346,7 +346,7 @@ func validChattiness(v string) bool {
 // background investigation in a worker's repository. CodexCmd and
 // ClaudeCmd are argv templates ({question}, {cwd}, {model} and
 // {reasoning} are substituted), the *ResumeCmd ones take {session} too;
-// no shell is invoked. See docs/cli-query-tools.md for why each flag is
+// no shell is invoked. See docs/dev/cli-query-tools.md for why each flag is
 // there.
 type CLI struct {
 	// Prefer picks the backend: "codex", "claude" or "auto" (codex if
@@ -363,7 +363,7 @@ type CLI struct {
 	// CodexResumeCmd / ClaudeResumeCmd are the argv templates of an
 	// investigation's follow-up: the same read-only invocation with
 	// {session} — the session id the first run reported — substituted as
-	// well (docs/cli-query-tools.md §3).
+	// well (docs/dev/cli-query-tools.md §3).
 	CodexResumeCmd  []string `toml:"codex_resume_cmd"`
 	ClaudeResumeCmd []string `toml:"claude_resume_cmd"`
 	// ClaudeModel fills {model} in ClaudeCmd (default a cheap Haiku id).
@@ -446,7 +446,7 @@ type Gemini struct {
 	StartSensitivity string `toml:"start_sensitivity"`
 	EndSensitivity   string `toml:"end_sensitivity"`
 	// BriefingChannel is how the daemon's and the orchestrator's words reach the
-	// Live model (docs/design/dual-brain.md): "function_response" (the
+	// Live model (docs/dev/design/dual-brain.md): "function_response" (the
 	// default; a function response labelled with provenance) or
 	// "user_turn" (the older marked user-role client turn, the A/B
 	// control).
@@ -503,7 +503,7 @@ type Events struct {
 // LogLevels are the valid log.level values.
 var LogLevels = []string{"debug", "info", "warn", "error"}
 
-// Push configures phone notifications (docs/push.md).
+// Push configures phone notifications (docs/dev/push.md).
 type Push struct {
 	APNs APNs `toml:"apns"`
 }
@@ -601,7 +601,7 @@ func defaultBrain() Brain {
 }
 
 // defaultCLI mirrors the argv templates verified in
-// docs/cli-query-tools.md §3. {question}, {cwd}, {model} and {reasoning}
+// docs/dev/cli-query-tools.md §3. {question}, {cwd}, {model} and {reasoning}
 // are substituted by internal/cli; no shell is invoked.
 func defaultCLI() CLI {
 	return CLI{

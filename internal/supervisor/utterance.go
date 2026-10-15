@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// One decision-maker (docs/roles.md): the voice hands over whatever the
+// One decision-maker (docs/dev/roles.md): the voice hands over whatever the
 // user said and decides nothing. The words every path below runs on are
 // the ones the daemon recorded (inputs.go's claimInput) — the voice's
 // input transcription, typed text or a tap — never the voice model's
@@ -130,7 +130,7 @@ func withCallID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, callIDKey{}, id)
 }
 
-// UtteranceOf is the words an utterance runs on (docs/roles.md "One
+// UtteranceOf is the words an utterance runs on (docs/dev/roles.md "One
 // decision-maker"): what the daemon recorded the user saying, typing
 // or tapping (heard), and the voice model's to_supervisor argument
 // (said) only when nothing was recorded — fallback is true then. The
@@ -229,7 +229,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 		return res
 	}
 	// The "New conversation" bare-phrase trigger and its confirm
-	// (docs/roles.md "Triggers" (b)): a fast path, like the stop word
+	// (docs/dev/roles.md "Triggers" (b)): a fast path, like the stop word
 	// above — no model, and only this claimed user input can ask or
 	// confirm it.
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
@@ -284,7 +284,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 }
 
 // coalesce merges the utterance u took the slot from into u when that
-// one's orchestrator turn is still queued behind another turn (docs/roles.md
+// one's orchestrator turn is still queued behind another turn (docs/dev/roles.md
 // "One decision-maker"): two back-to-back sentences ("Okay, I closed
 // the UC summary Codex agent." / "Check the remaining.", 2026-09-24
 // 00:41) are one request, and two turns answered them over each other.
@@ -315,7 +315,7 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 }
 
 // awaitReply runs the utterance turn detached and waits up to
-// Config.ReplyWait for it (docs/history/roles-status.md). A reply inside the
+// Config.ReplyWait for it (docs/dev/history/roles-status.md). A reply inside the
 // wait is the tool result, exactly as a synchronous call's would be.
 // Past it the call returns a silent pending result at once — the voice
 // said "on it" as it called the tool, and a second acknowledgement would
@@ -474,7 +474,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 			// ask for the floor, but it is not tagged needs_user — that
 			// exception is a decision on a block the push itself brings
 			// (announce.go's announceTags), so the voice still waits out
-			// its own sentence (docs/roles.md "Pushes").
+			// its own sentence (docs/dev/roles.md "Pushes").
 			urgency = voice.UrgencyInterrupt
 		}
 	} else {
@@ -717,7 +717,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, actedOn: rep.ActedOn, needsUser: rep.NeedsUser, focus: focusFromReply("", res.Spoken, rep)}
 }
 
-// The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*
+// The bare fast-path words (docs/dev/roles.md "One decision-maker"). *Bare*
 // means the whole utterance, so "don't stop the tests" never matches a
 // stop and "yes please run it" never answers a prompt — only these exact
 // (normalised) phrasings do, including the user's polite ones.
@@ -729,7 +729,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 // only became an ordinary orchestrator turn on Gemini.
 var (
 	//
-	// "never mind" is not one (docs/iteration-2.md J6, eval case
+	// "never mind" is not one (docs/dev/iteration-2.md J6, eval case
 	// never-mind-is-not-stop): it is ordinary speech that goes to the
 	// orchestrator, which decides whether it withdraws anything. As a stop word
 	// it sent Ctrl-C to a worker that had just been given a task.
@@ -794,7 +794,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		// Minutes after the announcement a bare "yes" may be about
 		// something else the user heard since: the orchestrator gets the
 		// words, with the prompt and how long it has waited in its
-		// roster, and decides (docs/history/bench-2026-10-03.md #8).
+		// roster, and decides (docs/dev/history/bench-2026-10-03.md #8).
 		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "prompt_old", "age_s": int(age.Seconds()), "text": text, "id": p.ID})
 		return voice.ToolResult{}, false
 	}
@@ -873,7 +873,7 @@ func (s *Supervisor) hasListener() bool {
 // Possible echo. On 2026-09-24 18:23:50 the iOS speaker played "No
 // change, all four are idle…", the mic picked it up and Gemini
 // transcribed "new change" as the user's words; on speakerphone the
-// bot's own speech came back often (docs/bench/tier2-2026-10-03.md #3).
+// bot's own speech came back often (docs/dev/bench/tier2-2026-10-03.md #3).
 // The client may have no echo cancellation and the voice model reports
 // only text, so the daemon cannot tell the two apart for sure, and it no
 // longer tries to decide (dual-brain, #122): an input that began while
@@ -890,11 +890,11 @@ func (s *Supervisor) hasListener() bool {
 // input transcription arrives after the echoed audio ends.
 //
 // The window is anchored to the end of playback when the client reports
-// it (docs/ws-contract.md "Playback reports": the web page, and the iOS
+// it (docs/dev/ws-contract.md "Playback reports": the web page, and the iOS
 // app since herdr-sheepdog-ios #14): Gemini generates ~4x real time, so
 // its turnComplete comes seconds before a long reply's tail is played,
 // and an echo of that tail used to arrive after a window anchored at
-// turnComplete had closed (docs/timelines.md C5). While the client says
+// turnComplete had closed (docs/dev/timelines.md C5). While the client says
 // the reply is still playing (started, no drained yet) the voice counts
 // as speaking, for up to echoPlayingMax after it stopped generating. A
 // client without reports keeps the anchor at turnComplete.

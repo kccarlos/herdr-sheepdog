@@ -12,7 +12,7 @@ cut them).
 Usage: scripts/bench-ceo-shape.py OUT_DIR [OUT_DIR...] [--label NAME]
        [--exclude-echo] [--json]
 
-Definitions (docs/eval/dual-brain-2026-10-04.md):
+Definitions (docs/dev/eval/dual-brain-2026-10-04.md):
 - send: something the daemon gave the voice model to say. An answer is a
   to_supervisor function response with spoken text (not pending, not
   silent) or a push tagged answers_utterance; any other audible push or

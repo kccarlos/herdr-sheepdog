@@ -284,7 +284,7 @@ func agendaList(agenda []string, next, stuck int) string {
 
 // agendaTurn records what the simulated user declared its turn does
 // (2026-10-08: replaces "an untagged line is the next beat", which
-// shifted every later beat when a line was untagged; docs/eval/
+// shifted every later beat when a line was untagged; docs/dev/eval/
 // analysis-coherence-2026-10-08.md). A line declared as agenda items
 // moves the agenda to the highest new one (items already done make it a
 // repeat); again and answer lines do not move it; an undeclared line is

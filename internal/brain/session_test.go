@@ -12,7 +12,7 @@ import (
 )
 
 // sevenGlitches is a worker's last message listing what it found
-// (docs/history/dive-deep.md: 2026-09-24 18:16:17, "what's the seven app
+// (docs/dev/history/dive-deep.md: 2026-09-24 18:16:17, "what's the seven app
 // glitches"; synthetic, not the user's transcript).
 const sevenGlitches = `Found one small bug and seven app glitches.
 The bug: after a failed reply the app says nothing changed.
@@ -36,7 +36,7 @@ func sessionRead() SessionRead {
 
 // read_screen with source session hands the model the worker's own
 // words inside the provenance delimiters: the last instruction, one line
-// of what it did, and its last message whole (docs/history/dive-deep.md WP8a).
+// of what it did, and its last message whole (docs/dev/history/dive-deep.md WP8a).
 func TestReadScreenSessionSource(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth", "source": "session"})}},

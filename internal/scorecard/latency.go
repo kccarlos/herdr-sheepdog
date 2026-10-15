@@ -4,7 +4,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 )
 
-// LatencyReport is the "Latency" section of docs/iteration-2.md's
+// LatencyReport is the "Latency" section of docs/dev/iteration-2.md's
 // scorecard: how long the user waits between speaking and hearing an
 // answer (J1: "first word ≤ 2 s, answer ≤ 5 s"), and how the orchestrator itself
 // spends its time.

@@ -277,7 +277,7 @@ func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
 }
 
 // (3b) The voice relaying a push back through to_supervisor never
-// reaches the orchestrator as the user's words (docs/history/issues-2026-09-18.md Bug 2):
+// reaches the orchestrator as the user's words (docs/dev/history/issues-2026-09-18.md Bug 2):
 // with nothing said since the push it is the model's own initiative, and
 // with something said, the orchestrator gets what was said, not the push.
 func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
@@ -376,7 +376,7 @@ func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
 	}
 }
 
-// "Never mind" is ordinary speech, not a stop word (docs/iteration-2.md
+// "Never mind" is ordinary speech, not a stop word (docs/dev/iteration-2.md
 // J6, eval case never-mind-is-not-stop): on 2026-09-24 00:13:18 it sent
 // Ctrl-C to a worker 16 s after the orchestrator gave it a task. It goes to the
 // orchestrator like any utterance; the stop procedure does not run and nothing

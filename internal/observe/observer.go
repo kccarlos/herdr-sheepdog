@@ -1,5 +1,5 @@
 // Package observe holds the daemon's observers (the Pipecat observer
-// pattern, docs/architecture.md "Observers"): consumers of the event log
+// pattern, docs/dev/architecture.md "Observers"): consumers of the event log
 // that derive something from it — the per-utterance latency breakdown
 // (turn.latency, latency.go), the daemon watchdog (watchdog.go) — without
 // slowing the main path. They read a lossy tap of the log
@@ -18,7 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Constants (no config knobs: docs/architecture.md "Observers").
+// Constants (no config knobs: docs/dev/architecture.md "Observers").
 const (
 	// TapBuffer is the observers' event buffer: about a minute of the
 	// busiest log seen (herdr.state bursts, web.client.stats every

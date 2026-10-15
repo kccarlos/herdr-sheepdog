@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// Closing an agent (docs/roles.md "Closing an agent"): the interrupt
+// Closing an agent (docs/dev/roles.md "Closing an agent"): the interrupt
 // tool with close true ends the agent by closing its herdr pane, instead
 // of sending Ctrl-C. Which agent the user meant is the orchestrator's judgement
 // (it asks when unsure); the daemon holds the rails: the user's own

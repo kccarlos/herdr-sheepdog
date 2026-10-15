@@ -1,4 +1,4 @@
-{"provider": "openai", "model": "gpt-live-1", "scenario": "long-reply (count from one to twenty)", "recorded": "2026-09-25", "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session after the input-pacing fix (keepAlive pays silence debt at real time; realtime_ratio 0.94-1.06); see docs/history/audio-e2e-results.md.", "chunks": [{"at_ms": 0, "bytes": 4800},
+{"provider": "openai", "model": "gpt-live-1", "scenario": "long-reply (count from one to twenty)", "recorded": "2026-09-25", "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session after the input-pacing fix (keepAlive pays silence debt at real time; realtime_ratio 0.94-1.06); see docs/dev/history/audio-e2e-results.md.", "chunks": [{"at_ms": 0, "bytes": 4800},
   {"at_ms": 100, "bytes": 4800},
   {"at_ms": 199, "bytes": 4800},
   {"at_ms": 298, "bytes": 4800},

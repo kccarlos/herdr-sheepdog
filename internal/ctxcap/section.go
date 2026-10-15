@@ -5,7 +5,7 @@
 // model receives it, cut into labelled Sections that cover it end to end,
 // with the provider-native body alongside, and a Diff against the
 // previous point. Link ids on the sections tie one piece in the orchestrator's
-// request to its counterpart in the voice context (docs/architecture.md
+// request to its counterpart in the voice context (docs/dev/architecture.md
 // "Context capture").
 //
 // The package depends on nothing else in the daemon, so the orchestrator, the

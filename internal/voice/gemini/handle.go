@@ -16,8 +16,8 @@ import (
 // so a context shrink in the log can be matched to the handle it came
 // from.
 
-// Never resume a resumed session (user decision, docs/handover-2026-10-04.md;
-// docs/research/live-resume-context-2026-10-04.md). A handle issued by a
+// Never resume a resumed session (user decision, docs/dev/handover-2026-10-04.md;
+// docs/dev/research/live-resume-context-2026-10-04.md). A handle issued by a
 // connection that was itself opened by a resume restores only what was
 // said on that connection, not the context it inherited (canary chain
 // arm: 9 of 9 runs, 0 of 8 facts); the first resume of a fresh session

@@ -9,7 +9,7 @@ import (
 )
 
 // The action list the segment judge's said_vs_done item checks claims
-// against (docs/eval/analysis-done-2026-10-08.md, F1): what sheepdog
+// against (docs/dev/eval/analysis-done-2026-10-08.md, F1): what sheepdog
 // sent to workers (prompts, keys with the pending answer they gave,
 // interrupts), what it started, closed and renamed, what a rail refused,
 // which tools failed or timed out, and the checks it ran (run_cli,

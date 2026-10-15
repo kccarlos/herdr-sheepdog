@@ -7,7 +7,7 @@ import (
 )
 
 // reComprehension matches a "what does that mean"-class follow-up (J5 in
-// docs/iteration-2.md). The apostrophe class covers both a straight and a
+// docs/dev/iteration-2.md). The apostrophe class covers both a straight and a
 // curly quote, since transcript text comes from a speech model and either
 // can appear.
 var reComprehension = regexp.MustCompile(`(?i)what does that mean|what do you mean|what is that|say again|repeat|explain|i don[’']t understand|什么意思|再说一遍`)

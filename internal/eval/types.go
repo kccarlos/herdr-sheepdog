@@ -1,11 +1,11 @@
-// Package eval implements `sheepdog eval` (docs/roles.md, phase 1b): a
+// Package eval implements `sheepdog eval` (docs/dev/roles.md, phase 1b): a
 // conversation eval set for the assistant prompt (prompts/assistant.md)
 // and the orchestrator (internal/brain), built from the user's real
 // voice sessions (generalised) plus the plan's §10 scenarios.
 //
 // The hand-written sets are testdata/eval/assistant.jsonl (one JSON
 // object per line, an AssistantCase) and testdata/eval/svp.jsonl (an
-// SVPCase). The L0 corpus of docs/iteration-2.md WP0b adds the five
+// SVPCase). The L0 corpus of docs/dev/iteration-2.md WP0b adds the five
 // logged failures (regressions*.jsonl), cases extracted from the event
 // log (extracted/, Extract) and generated variants (expanded*.jsonl,
 // internal/eval/gen). Offline (the default) validates the files and runs
@@ -48,7 +48,7 @@ type AssistantExpect struct {
 	// ToolAnyOf: the tool must be one of these (to_supervisor, stop,
 	// none), when non-empty — for a case where more than one choice is
 	// right but one is wrong ("Oh, never mind." may be relayed or let go,
-	// never a stop: docs/iteration-2.md J6).
+	// never a stop: docs/dev/iteration-2.md J6).
 	ToolAnyOf []string `json:"tool_any_of,omitempty"`
 }
 
@@ -62,7 +62,7 @@ type AssistantObserved struct {
 
 // CaseSource is where a case came from in the event log, so it can be
 // traced back: the day file, the event's time and its id
-// (docs/iteration-2.md rule 1: every change cites a failure from a real
+// (docs/dev/iteration-2.md rule 1: every change cites a failure from a real
 // log).
 type CaseSource struct {
 	Day     string `json:"day"`
@@ -75,10 +75,10 @@ type CaseSource struct {
 }
 
 // Meta is the bookkeeping every case of the L0 corpus carries
-// (docs/iteration-2.md WP0b): which job it exercises, where it came from,
+// (docs/dev/iteration-2.md WP0b): which job it exercises, where it came from,
 // what the harness cannot check yet, and how it was generated.
 type Meta struct {
-	// Job is the product job (J1…J6 of docs/iteration-2.md, with a
+	// Job is the product job (J1…J6 of docs/dev/iteration-2.md, with a
 	// sub-intent such as J2-yes or J6-nevermind); the paraphrase
 	// generator substitutes utterances within the same job only.
 	Job string `json:"job,omitempty"`
@@ -151,7 +151,7 @@ type SVPAgent struct {
 	Screen  string      `json:"screen,omitempty"` // fixture name under testdata/herdr, or inline text
 	Pending *SVPPending `json:"pending,omitempty"`
 	// Session is the agent's own session transcript (read_screen with
-	// source session, docs/history/dive-deep.md WP8a): a Claude Code or Codex
+	// source session, docs/dev/history/dive-deep.md WP8a): a Claude Code or Codex
 	// JSONL file name under testdata/workerlog, the screen fixture
 	// directory's sibling.
 	Session string `json:"session,omitempty"`
@@ -165,7 +165,7 @@ type SVPAgent struct {
 type SVPRequest struct {
 	// Kind is utterance (empty means utterance) or announce: the event
 	// turn the supervisor runs on a worker's block or finish, so a
-	// finish-delivery case (docs/iteration-2.md J4) exercises the turn
+	// finish-delivery case (docs/dev/iteration-2.md J4) exercises the turn
 	// that decides the line.
 	Kind     string `json:"kind"`
 	Question string `json:"question"`
@@ -225,7 +225,7 @@ type SVPExpect struct {
 	RailBlocked bool `json:"rail_blocked,omitempty"`
 	// NoTool requires the turn to answer without calling anything: a
 	// status question is answered from the roster and ledger already in
-	// the prompt (docs/roles.md "One decision-maker").
+	// the prompt (docs/dev/roles.md "One decision-maker").
 	NoTool bool `json:"no_tool,omitempty"`
 	// PromptMustNotContain: no prompt the orchestrator sends a worker may
 	// contain any of these substrings — e.g. "[" for text the orchestrator
@@ -235,7 +235,7 @@ type SVPExpect struct {
 	// QuestionIsHeard requires the orchestrator to be asked what the user
 	// said (the case's source.heard), not the voice model's relay of it
 	// (request.question): the daemon runs every utterance on its
-	// recorded input (docs/iteration-2.md WP3, regression
+	// recorded input (docs/dev/iteration-2.md WP3, regression
 	// partial-relay-no-fabrication). Checked offline.
 	QuestionIsHeard bool `json:"question_is_heard,omitempty"`
 	// SpokenMaxWords: the spoken reply may have at most this many words,
@@ -260,7 +260,7 @@ type SVPExpect struct {
 	NeedsUser *bool `json:"needs_user,omitempty"`
 	// ReadSource requires a read_screen call with this source ("session":
 	// the orchestrator read the worker's own session record for a detail
-	// question, docs/history/dive-deep.md WP8a) that completed. Checked offline,
+	// question, docs/dev/history/dive-deep.md WP8a) that completed. Checked offline,
 	// where the scripted call is derived from it and the check is that
 	// the Host served the read, and against the logged baseline.
 	ReadSource string `json:"read_source,omitempty"`
@@ -270,7 +270,7 @@ type SVPExpect struct {
 	UrgencyNot []string `json:"urgency_not,omitempty"`
 	// AskEmpty requires the reply's ask to be empty (live only): ask is
 	// for an open decision, never for a plain status or finish line
-	// (docs/history/bench-2026-10-03.md #15a).
+	// (docs/dev/history/bench-2026-10-03.md #15a).
 	AskEmpty bool `json:"ask_empty,omitempty"`
 	// ReplyLanguage is "en" or "zh" (live only): spoken and ask are in the
 	// language the user last used, which for "en" means no CJK characters at

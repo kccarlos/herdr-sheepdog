@@ -10,7 +10,7 @@ import (
 )
 
 // The latency breakdown of one user utterance (Pipecat's
-// LatencyBreakdown; docs/architecture.md "turn.latency"). The wait from
+// LatencyBreakdown; docs/dev/architecture.md "turn.latency"). The wait from
 // the user's last word to the first audio of the answer is cut into
 // consecutive segments, each measured from the events that bound it:
 //

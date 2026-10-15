@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
-// The agent window over /ws (docs/ws-contract.md "Agent window over /ws"):
+// The agent window over /ws (docs/dev/ws-contract.md "Agent window over /ws"):
 // a client subscribes to one tracked agent's screen and the daemon pushes
 // a screen frame whenever the window changed, instead of the app polling
 // GET /api/agents/{pane_id}/screen.

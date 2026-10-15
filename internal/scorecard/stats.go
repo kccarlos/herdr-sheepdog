@@ -6,7 +6,7 @@ import (
 )
 
 // Stats is a mean/median/p90 summary of a set of numbers (a latency in
-// ms, a token count), used wherever docs/iteration-2.md asks for a
+// ms, a token count), used wherever docs/dev/iteration-2.md asks for a
 // "distribution".
 type Stats struct {
 	N      int

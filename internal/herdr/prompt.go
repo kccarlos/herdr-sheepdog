@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// Approval prompts are parsed here, in code (docs/roles.md "Hot paths
+// Approval prompts are parsed here, in code (docs/dev/roles.md "Hot paths
 // that stay code"): no model sees a screen to find out what a worker is
 // asking. Codex, Claude Code and agy all draw the same shape — a
 // question, sometimes the command it is about, then two or more numbered
@@ -213,11 +213,11 @@ func (p Prompt) Phrase() string {
 }
 
 // Summary is the sentence the daemon speaks about the prompt when the
-// orchestrator does not phrase one (docs/roles.md "Pushes").
+// orchestrator does not phrase one (docs/dev/roles.md "Pushes").
 func (p Prompt) Summary(alias string) string { return p.SummaryIn(alias, false) }
 
 // SummaryIn is Summary in Chinese when zh is set: the language of the
-// user's last words (docs/eval/eval-campaign-2026-10-03.md H4). A
+// user's last words (docs/dev/eval/eval-campaign-2026-10-03.md H4). A
 // question that is itself Chinese is quoted as it is; any other question
 // is not: the Chinese line only names the agent and that it needs a
 // decision, since quoting "Do you want to proceed?" verbatim put an
@@ -521,7 +521,7 @@ func tailLines(text string, n int) []string {
 // leading plain words ("go test" of "go test -race ./..."), up to the
 // first flag, path, quote, operator or assignment and at most
 // promptCommandWords of them. The raw rest is screen syntax: spoken, it
-// came out as "-race./...." (docs/eval/eval-campaign-2026-10-03.md H3). The
+// came out as "-race./...." (docs/dev/eval/eval-campaign-2026-10-03.md H3). The
 // full command stays on the pending action for the orchestrator and the pages.
 func spokenCommand(cmd string) string {
 	var out []string

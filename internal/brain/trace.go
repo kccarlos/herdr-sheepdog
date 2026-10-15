@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Turn and utterance ids on the orchestrator's events (docs/architecture.md
+// Turn and utterance ids on the orchestrator's events (docs/dev/architecture.md
 // "Event ids"). Every event a turn logs carries its number as payload
 // "turn" (brain.step, brain.tool_call, brain.tool_result, brain.yielded,
 // brain.fallback, brain.turn, brain.compaction, brain.transcript,

@@ -24,7 +24,7 @@ const (
 	// unvoiced; speaking opens and closes with it; the opening sends the
 	// attack plus 100 ms of pre-roll. The default.
 	GateIOS = "ios"
-	// GateWeb is the /voice page's peak gate (docs/ws-contract.md
+	// GateWeb is the /voice page's peak gate (docs/dev/ws-contract.md
 	// "Silence gate"): below 8 LSB for 300 ms closes it, the next louder
 	// frame reopens it with 100 ms of pre-roll; speaking follows a
 	// separate detector on the user's speech.

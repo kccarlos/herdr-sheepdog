@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The user's words (docs/iteration-2.md WP3): every utterance runs
+// The user's words (docs/dev/iteration-2.md WP3): every utterance runs
 // on what the daemon recorded, not on the voice model's argument; an
 // utterance the voice leaves unanswered is relayed by the daemon; and
 // back-to-back utterances queued behind a running turn are one turn.

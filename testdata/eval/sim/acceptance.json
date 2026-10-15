@@ -2,7 +2,7 @@
   "scenarios": [
     {
       "id": "j1-status-en",
-      "note": "J1 'What's going on?' (docs/iteration-2.md; headset script step 1): the item that needs the CEO comes first, short.",
+      "note": "J1 'What's going on?' (docs/dev/iteration-2.md; headset script step 1): the item that needs the CEO comes first, short.",
       "goal": "find out what your workers are doing right now, and whether anything needs you",
       "opening": "What's going on?",
       "script": [

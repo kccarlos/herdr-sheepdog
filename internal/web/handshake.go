@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
-// The /ws protocol handshake (docs/ws-contract.md "Protocol version and
+// The /ws protocol handshake (docs/dev/ws-contract.md "Protocol version and
 // handshake"). A protocol-aware client sends client-ready as its first
 // frame and the daemon answers bot-ready. A client whose first frame is
 // anything else, or that sends nothing for Deps.HandshakeTimeout, is a

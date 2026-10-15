@@ -71,14 +71,14 @@ type Agent struct {
 	// herdr reports for the pane (herdr.AgentSession: the reporting
 	// integration, "id" or "path", and the session id or transcript
 	// path), and Cwd the pane's working directory: where the worker's own
-	// transcript is found (docs/iteration-2.md WP4, internal/workerlog).
+	// transcript is found (docs/dev/iteration-2.md WP4, internal/workerlog).
 	SessionSource string `json:"session_source,omitempty"`
 	SessionKind   string `json:"session_kind,omitempty"`
 	SessionValue  string `json:"session_value,omitempty"`
 	Cwd           string `json:"cwd,omitempty"`
 	// Journal is the agent's work journal, oldest first, capped at
 	// MaxJournal: one entry per done, idle or blocked transition, read
-	// from the worker's own transcript (docs/roles.md "Worker history").
+	// from the worker's own transcript (docs/dev/roles.md "Worker history").
 	Journal []JournalEntry `json:"journal,omitempty"`
 }
 
@@ -128,7 +128,7 @@ type Result struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// Promise is promised work (docs/roles.md "Promises"): the user asked to
+// Promise is promised work (docs/dev/roles.md "Promises"): the user asked to
 // be told when something happens to an agent, and the supervisor keeps
 // it at the matching event whatever the chattiness level. Kept in the
 // session so it survives a restart.
@@ -154,7 +154,7 @@ type Promise struct {
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	// CarriedOver marks a promise made before the daemon's current run
 	// that was announced once at startup ("Still watching for …",
-	// docs/history/roles-status.md): the briefing trailer never repeats it
+	// docs/dev/history/roles-status.md): the briefing trailer never repeats it
 	// again, and it is never re-announced, even across another restart.
 	// It is still kept normally at its matching event.
 	CarriedOver bool `json:"carried_over,omitempty"`
@@ -169,7 +169,7 @@ const (
 )
 
 // Investigation is one background job the orchestrator started to answer a
-// question the screen cannot (docs/roles.md "Investigations and
+// question the screen cannot (docs/dev/roles.md "Investigations and
 // explanations"): a read-only CLI sub-agent in the worker's repository,
 // or a read-only fork of the worker's own CLI session (source: worker),
 // which never touches the pane. Kept in the session so `recall`

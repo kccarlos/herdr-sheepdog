@@ -16,7 +16,7 @@ import (
 )
 
 // ExtractOptions selects a window of the event log for `sheepdog eval
-// extract` (docs/iteration-2.md WP0b: "turns a log window into cases").
+// extract` (docs/dev/iteration-2.md WP0b: "turns a log window into cases").
 type ExtractOptions struct {
 	// From and To bound the window (inclusive); zero is unbounded.
 	From, To time.Time
@@ -185,7 +185,7 @@ func DayFiles(dir string, from, to time.Time) ([]string, error) {
 // prompts the log lets us reconstruct at that moment, what the logged
 // system did (Observed, the baseline), and its provenance (Source).
 //
-// What the log does not carry is left out (docs/roles.md "The L0 eval
+// What the log does not carry is left out (docs/dev/roles.md "The L0 eval
 // corpus" lists it): herdr.read logs only a byte count, so a screen is at
 // most the first 1 KB of the orchestrator's own last read_screen result, and an
 // agent it never read shows "(screen not in the event log)"; aliases are
@@ -540,7 +540,7 @@ func strs(v any) []string {
 }
 
 // stopWords are the words that make an interrupt the right call
-// (prompts/assistant.md's stop list, minus "never mind": docs/iteration-2.md
+// (prompts/assistant.md's stop list, minus "never mind": docs/dev/iteration-2.md
 // J6 "never Ctrl-C on never mind").
 var reStopWord = regexp.MustCompile(`(?i)\b(stop|halt|abort|kill|cancel|interrupt|ctrl[- +]?c)\b`)
 
@@ -636,7 +636,7 @@ func (x *extractor) announceCase(i int, day string, n int) SVPCase {
 		}
 	}
 	// An event turn is read-only: whatever the event says, the orchestrator
-	// sends nothing to a worker (docs/roles.md "The one rail").
+	// sends nothing to a worker (docs/dev/roles.md "The one rail").
 	c.Expect.MustNotCall = []string{brain.ToolPrompt, brain.ToolSendKeys, brain.ToolInterrupt}
 	c.Request.Template, c.Observed = x.observeAnnounce(i, alias, event)
 	return c
@@ -748,7 +748,7 @@ func (x *extractor) observeAnnounce(i int, alias, event string) (string, *SVPObs
 	return scrub(template), obs
 }
 
-// classifyJob guesses the product job (docs/iteration-2.md) of an
+// classifyJob guesses the product job (docs/dev/iteration-2.md) of an
 // utterance from keywords, so the paraphrase generator substitutes within
 // the right job. A guess: unmatched utterances get "".
 func classifyJob(s string) string {

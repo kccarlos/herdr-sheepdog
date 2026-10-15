@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The daemon watchdog (docs/architecture.md "Watchdog"). Every Tick it
+// The daemon watchdog (docs/dev/architecture.md "Watchdog"). Every Tick it
 // checks that the daemon's long-lived parts are alive:
 //
 //	orchestrator       the turn holding the turn lock has not run far past its

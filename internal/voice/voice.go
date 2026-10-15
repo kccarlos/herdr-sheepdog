@@ -5,7 +5,7 @@
 // small event stream.
 //
 // Audio: SendAudio takes 16 kHz PCM16 LE mono; Audio() yields 24 kHz PCM16
-// LE mono chunks in playback order. Both match docs/ws-contract.md.
+// LE mono chunks in playback order. Both match docs/dev/ws-contract.md.
 package voice
 
 import (
@@ -45,10 +45,10 @@ func (u Urgency) String() string {
 }
 
 // SchedulingName renders u as the Gemini function-response scheduling
-// name (docs/gemini-live-notes.md §5): interrupt, when_idle or silent.
+// name (docs/dev/gemini-live-notes.md §5): interrupt, when_idle or silent.
 // voice.push and voice.tool_result log this beside the requested
 // urgency as scheduling_sent, the urgency actually used once a
-// speaking model has downgraded an INTERRUPT (docs/roles.md "Pushes").
+// speaking model has downgraded an INTERRUPT (docs/dev/roles.md "Pushes").
 func (u Urgency) SchedulingName() string {
 	switch u {
 	case UrgencyInterrupt:
@@ -60,7 +60,7 @@ func (u Urgency) SchedulingName() string {
 	}
 }
 
-// The two tools the voice model is declared (docs/roles.md "One
+// The two tools the voice model is declared (docs/dev/roles.md "One
 // decision-maker"). They are named here, in the model-agnostic package,
 // because the adapters declare them and the Supervisor handles them.
 const (
@@ -152,7 +152,7 @@ type Session interface {
 	// turn end is not enough: Gemini generates ~4× real time, so its
 	// turnComplete arrives while the reply is still playing. Nothing
 	// interrupts the model mid-sentence
-	// except the user (docs/roles.md "Pushes"): an implementation
+	// except the user (docs/dev/roles.md "Pushes"): an implementation
 	// downgrades INTERRUPT scheduling to WHEN_IDLE while this is true,
 	// with a due promise or a decision on a brand new block the only
 	// exceptions. A session with no live model (--voice=off) reports

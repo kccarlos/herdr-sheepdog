@@ -35,7 +35,7 @@ const logSource = "web"
 // Supervisor is what the web layer needs from the supervisor: the tool
 // handler (cancel goes through it like every other tool), the runtime
 // settings behind /api/settings, the user's typed inputs the one rail
-// reads (docs/roles.md "The one rail") and the tap behind
+// reads (docs/dev/roles.md "The one rail") and the tap behind
 // POST /api/pending/answer.
 type Supervisor interface {
 	Handler() voice.ToolHandler
@@ -45,12 +45,12 @@ type Supervisor interface {
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
-	// conversation", docs/roles.md).
+	// conversation", docs/dev/roles.md).
 	ConversationStartedAt() time.Time
 	ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error)
 	// Screen, WindowPrompt and WindowKeys back the agent window: GET
 	// /api/agents/{pane_id}/screen and POST /api/agents/{pane_id}/input
-	// (docs/ws-contract.md "Agent window: screen and input").
+	// (docs/dev/ws-contract.md "Agent window: screen and input").
 	Screen(ctx context.Context, paneID string, lines int) (supervisor.Screen, error)
 	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
 	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
@@ -120,7 +120,7 @@ type Deps struct {
 	SystemPrompt func() string
 	Aliases      []string
 	// Names, when set, returns the running agents' current spoken names
-	// (docs/roles.md "Agent names"): the list the system prompt is
+	// (docs/dev/roles.md "Agent names"): the list the system prompt is
 	// rendered with at the next (re)connect. GET /api/voice/system_prompt
 	// answers it in place of Aliases (the static start-up list) whenever
 	// it returns any.
@@ -151,7 +151,7 @@ type Deps struct {
 	RouterContext *ctxcap.VoiceSession
 
 	// Push backs POST/DELETE /api/push/register and GET /api/push/status
-	// (the iOS app's device registration, docs/push.md); nil answers 503.
+	// (the iOS app's device registration, docs/dev/push.md); nil answers 503.
 	Push PushService
 
 	// Heartbeat is the SSE keepalive period (default 15 s).
@@ -165,7 +165,7 @@ type Deps struct {
 	ToolTimeout time.Duration
 	// HandshakeTimeout is how long /ws waits for a client-ready before
 	// it treats the client as a legacy protocol-1 client (default 2 s;
-	// docs/ws-contract.md "Protocol version and handshake").
+	// docs/dev/ws-contract.md "Protocol version and handshake").
 	HandshakeTimeout time.Duration
 	// MinProtocol is the oldest /ws client protocol served (default
 	// wsproto.MinProtocolVersion); a lower one is refused with
@@ -174,7 +174,7 @@ type Deps struct {
 	// ScreenInterval is how often a /ws screen subscription reads the
 	// agent's window (default 1 s); ScreenMinGap is the least time between
 	// two reads, when a transition or an input asks for one sooner
-	// (default 250 ms). docs/ws-contract.md "Agent window over /ws".
+	// (default 250 ms). docs/dev/ws-contract.md "Agent window over /ws".
 	ScreenInterval time.Duration
 	ScreenMinGap   time.Duration
 	// Now overrides the clock (tests).
@@ -196,7 +196,7 @@ type Deps struct {
 	Restart func(reason string)
 
 	// Token, when non-empty, is the bearer token (config web.token) every
-	// request to /ws, /events and /api/* must present (docs/ws-contract.md
+	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
 	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
 	// /events, or the sheepdog_token cookie POST /api/login sets. Empty
 	// means no auth: every route is public, as in v1.
@@ -293,7 +293,7 @@ func (s *Server) routes() error {
 			return err
 		}
 	}
-	// GET /api/hello and POST /api/login stay public (docs/ws-contract.md
+	// GET /api/hello and POST /api/login stay public (docs/dev/ws-contract.md
 	// "Auth"): a client has to reach them to learn it found a sheepdog
 	// daemon and to trade a token for the cookie in the first place.
 	// Everything else that reads or acts on daemon state goes through

@@ -9,7 +9,7 @@ import (
 // OutRate is the daemon's audio rate (server -> client).
 const OutRate = wsproto.ServerSampleRate
 
-// PlayerConfig is the jitter buffer (docs/ws-contract.md "Playback jitter
+// PlayerConfig is the jitter buffer (docs/dev/ws-contract.md "Playback jitter
 // buffer"); zero values take the Gemini numbers.
 type PlayerConfig struct {
 	StartTarget time.Duration // 150 ms

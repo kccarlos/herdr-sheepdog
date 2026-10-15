@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 )
 
-// The Context tab's capture of every model call (docs/architecture.md
+// The Context tab's capture of every model call (docs/dev/architecture.md
 // "Context capture"): the provider-native request, its raw text as the
 // model receives it, and a section map over that text, recorded in the
 // BrainLog after the call returns.

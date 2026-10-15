@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-// A name the user said that matches no agent (docs/bench/tier2-2026-10-03.md
+// A name the user said that matches no agent (docs/dev/bench/tier2-2026-10-03.md
 // #6). "Let me know when bench-claude is done." reached the orchestrator as
 // "Oh, I know when Bench Squad is done." (also "Bench Quad", "Bench
 // Clad", "Bench Clear", "Bench Claw"); with no agent named, the request

@@ -152,7 +152,7 @@ func TestBlockedRunsFullChain(t *testing.T) {
 // pane's text but never touches the supervisor — no pending action, no
 // push, and Read serves the new text — the mock counterpart of a worker
 // showing a new prompt with herdr's own status report unchanged
-// (docs/roles.md "blocked -> blocked is a block").
+// (docs/dev/roles.md "blocked -> blocked is a block").
 func TestScreenReplacesTextWithoutTransition(t *testing.T) {
 	h := newHarness(t)
 	if _, err := h.inj.Blocked(context.Background(), BlockedRequest{PaneID: "fake:1", Alias: "auth", Screen: codexScreen(t)}); err != nil {

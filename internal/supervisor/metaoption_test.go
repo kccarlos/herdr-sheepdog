@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// docs/eval/eval-campaign-2026-10-03.md H2 (bench-askuser-meta-options):
+// docs/dev/eval/eval-campaign-2026-10-03.md H2 (bench-askuser-meta-options):
 // Claude Code's "Type something." reached the orchestrator as an ordinary
 // option, and it was offered as a choice. The orchestrator now sees it flagged
 // as a free-text entry; the phone card still leaves it out.

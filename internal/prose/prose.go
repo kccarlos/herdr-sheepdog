@@ -119,7 +119,7 @@ var (
 	// file ." once a path is gone): it is joined back to the word before
 	// only when it ends a token, so the space before a "." that opens a
 	// path or command token stays ("go test -race ./..." was spoken as
-	// "-race./....", docs/eval/eval-campaign-2026-10-03.md H3).
+	// "-race./....", docs/dev/eval/eval-campaign-2026-10-03.md H3).
 	reOrphan   = regexp.MustCompile(`\s+([,.;:!?]+)(\s|$)`)
 	reSentence = regexp.MustCompile(`[.!?]+["')\]]*(?:\s+|$)|[。！？]+[”’」』）"')\]]*\s*`)
 )

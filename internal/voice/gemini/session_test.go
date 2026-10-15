@@ -73,7 +73,7 @@ func TestLiveConfigMatchesPlan(t *testing.T) {
 			t.Errorf("%s not NON_BLOCKING", fd.Name)
 		}
 	}
-	// The voice is declared exactly two tools (docs/roles.md "One
+	// The voice is declared exactly two tools (docs/dev/roles.md "One
 	// decision-maker"): it relays and it stops, it never executes.
 	if len(decls) != 2 {
 		t.Errorf("%d tool declarations, want 2: %v", len(decls), names)
@@ -393,7 +393,7 @@ func TestToolResponseWaitTimesOut(t *testing.T) {
 // TestToolResultDeferredWhileSpeaking: a tool result asking to INTERRUPT
 // is downgraded to WHEN_IDLE, at send time, when the model has started
 // speaking a new generation while the handler was still working — the
-// same rule as a push (docs/roles.md "Pushes").
+// same rule as a push (docs/dev/roles.md "Pushes").
 func TestToolResultDeferredWhileSpeaking(t *testing.T) {
 	c := newFakeConn("c1")
 	gate := make(chan struct{})
@@ -427,7 +427,7 @@ func TestToolResultDeferredWhileSpeaking(t *testing.T) {
 }
 
 // TestStopToolStaysInterruptWhileSpeaking: stop() is the one tool result
-// the user is always owed at once (docs/roles.md "Pushes"), so it
+// the user is always owed at once (docs/dev/roles.md "Pushes"), so it
 // keeps INTERRUPT scheduling even while the model is speaking.
 func TestStopToolStaysInterruptWhileSpeaking(t *testing.T) {
 	c := newFakeConn("c1")
@@ -534,7 +534,7 @@ func TestPushSilentAndInterrupt(t *testing.T) {
 	}
 
 	// Nobody is speaking: an interrupt push flushes and goes out at once
-	// (docs/roles.md "Pushes" only defers while the model is speaking).
+	// (docs/dev/roles.md "Pushes" only defers while the model is speaking).
 	if h.s.Speaking() {
 		t.Fatal("not speaking yet")
 	}
@@ -605,7 +605,7 @@ func TestSpeakingLifecycle(t *testing.T) {
 
 // TestAudioTimingLoggedPerTurn: two output-audio chunks in one turn log a
 // single voice.audio_timing line on turnComplete with the expected shape
-// (WP: audible gaps investigation, docs/history/audio-e2e-results.md).
+// (WP: audible gaps investigation, docs/dev/history/audio-e2e-results.md).
 func TestAudioTimingLoggedPerTurn(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
@@ -635,7 +635,7 @@ func TestAudioTimingLoggedPerTurn(t *testing.T) {
 
 // TestPushInterruptDeferredWhileSpeaking: an untagged INTERRUPT push
 // asked for while the model is speaking is deferred to WHEN_IDLE
-// (docs/roles.md "Pushes": nothing interrupts the model mid-sentence
+// (docs/dev/roles.md "Pushes": nothing interrupts the model mid-sentence
 // except the user) — it waits like any idle push and is not the
 // local flush an immediate interrupt would be.
 func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
@@ -672,7 +672,7 @@ func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
 }
 
 // TestPushExemptTagsStayInterruptWhileSpeaking: due_promise and
-// needs_user are the two exceptions (docs/roles.md "Pushes") that keep
+// needs_user are the two exceptions (docs/dev/roles.md "Pushes") that keep
 // INTERRUPT scheduling even while the model is speaking.
 func TestPushExemptTagsStayInterruptWhileSpeaking(t *testing.T) {
 	for _, tag := range []string{"due_promise", "needs_user", "stop"} {
@@ -752,7 +752,7 @@ func TestPushNotWhileUserSpeaking(t *testing.T) {
 		t.Fatalf("push sent while user speaking: %s", describe(c.sentMsgs()))
 	}
 	// The interrupt overtakes the idle line queued before it
-	// (docs/timelines.md C29), once the user has stopped.
+	// (docs/dev/timelines.md C29), once the user has stopped.
 	c.waitSent(t, "interrupt push after speech hold", isContent("auth crashed"))
 	if el := time.Since(start); el < 180*time.Millisecond {
 		t.Errorf("push went out after %v, want >= 200ms speech hold", el)

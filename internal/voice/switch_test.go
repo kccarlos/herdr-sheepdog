@@ -269,7 +269,7 @@ func (l *lineLog) of(typ string) []map[string]any {
 	return out
 }
 
-// TestProviderSwitchCarriesQueuedPushes: docs/timelines.md C15 — the
+// TestProviderSwitchCarriesQueuedPushes: docs/dev/timelines.md C15 — the
 // pushes queued in the old session (a held answer, a silent line) move
 // to the new one, in order and with their tags, instead of being closed
 // with it without an event; one the new session refuses is logged

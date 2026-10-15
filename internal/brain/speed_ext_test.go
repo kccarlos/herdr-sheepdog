@@ -30,7 +30,7 @@ func announce(h *harness) (Reply, error) {
 
 // An event turn is sent with thinking disabled and no reasoning effort
 // whatever deepseek.thinking says, and carries no reasoning_content; a
-// user turn keeps the configured thinking (docs/iteration-2.md WP5).
+// user turn keeps the configured thinking (docs/dev/iteration-2.md WP5).
 func TestThinkingOffForEventTurnsDeepSeek(t *testing.T) {
 	srv := newCompatServer(t,
 		toolCalls("Look at the screen first.", [3]string{"call_a", ToolReadScreen, `{"agent":"auth"}`}),
@@ -123,7 +123,7 @@ func commonPrefix(a, b string) int {
 }
 
 // Consecutive requests share a long prefix: nothing per-turn sits before
-// the state block, which travels last (docs/iteration-2.md WP5). Within
+// the state block, which travels last (docs/dev/iteration-2.md WP5). Within
 // a turn the next step shares everything before the previous step's
 // state block — system prompt, tools, the whole conversation. From one
 // turn to the next it shares everything before the previous turn: that

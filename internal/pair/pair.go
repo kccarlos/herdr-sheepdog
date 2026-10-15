@@ -3,7 +3,7 @@
 // and its web token, in one sheepdog:// URL shown as a QR code by
 // `sheepdog pair` (terminal) and /debug (SVG).
 //
-// The URL scheme (docs/ws-contract.md "Pairing"):
+// The URL scheme (docs/dev/ws-contract.md "Pairing"):
 //
 //	sheepdog://pair?u=<base URL>&u=<base URL>…&t=<token>
 //

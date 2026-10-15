@@ -2,7 +2,7 @@ package gptlive
 
 import "testing"
 
-// Reset ("New conversation", docs/roles.md) closes an open billed
+// Reset ("New conversation", docs/dev/roles.md) closes an open billed
 // session (no recap kept) so the one that reopens later carries none of
 // the earlier conversation.
 func TestResetClosesLiveSessionAndDropsRecap(t *testing.T) {

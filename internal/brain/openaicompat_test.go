@@ -184,7 +184,7 @@ func TestOpenAICompatConfig(t *testing.T) {
 // orchestrator's tools as JSON Schema (the golden tools file), user lines
 // merged, an own two-call step replayed from Raw (ids included, its
 // second Raw-less message skipped; its reasoning_content dropped, the
-// step belonging to an earlier turn — docs/iteration-2.md WP5), tool
+// step belonging to an earlier turn — docs/dev/iteration-2.md WP5), tool
 // messages with the calls' ids, a reply of an earlier turn without its
 // reasoning_content, a step by another model rebuilt from the neutral
 // fields without reasoning, an answer-only step as tool_choice none, and
@@ -398,7 +398,7 @@ func TestOpenAICompatGenerateContents(t *testing.T) {
 // next request replays one assistant message (reasoning_content and
 // both tool_calls) followed by two tool messages with matching ids and
 // the state block; the reply's reasoning is stored but not replayed on
-// the next turn (only the current turn's is, docs/iteration-2.md WP5);
+// the next turn (only the current turn's is, docs/dev/iteration-2.md WP5);
 // tokens reach brain.step and brain.turn. After a switch to another
 // provider the same step is rebuilt as plain function calls for Gemini;
 // switched back, the DeepSeek adapter gets the Gemini step rebuilt and

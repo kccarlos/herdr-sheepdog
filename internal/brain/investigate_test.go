@@ -235,7 +235,7 @@ func waitForQueue(t *testing.T, h *harness, n int) {
 }
 
 // "Ask it why" goes to the worker's own memory: the tool's source reaches
-// the Host, which forks the worker's session (docs/history/dive-deep.md §3).
+// the Host, which forks the worker's session (docs/dev/history/dive-deep.md §3).
 func TestInvestigateSourceWorkerReachesTheHost(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolInvestigate, map[string]any{"agent": "auth", "question": "why did you skip the migration?", "source": "worker"})}},

@@ -390,7 +390,7 @@ func TestInvestigationNeedsAQueryTool(t *testing.T) {
 	}
 }
 
-// P2-10 (docs/eval/eval-campaign-2026-10-03.md run C, deepseek,
+// P2-10 (docs/dev/eval/eval-campaign-2026-10-03.md run C, deepseek,
 // detail-what-exactly r5): "The look into bench-claude did not get
 // through" gave no reason, and the orchestrator then had the worker read its
 // README out itself. The cause is now a fact on the record (the orchestrator's

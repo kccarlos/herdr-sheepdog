@@ -97,7 +97,7 @@ export class Grouper {
         this.closeAssistant();
         // scheduling_sent differs from the requested urgency only when a
         // speaking model deferred an INTERRUPT to WHEN_IDLE
-        // (docs/roles.md "Pushes"); voice.push_deferred carries the reason.
+        // (docs/dev/roles.md "Pushes"); voice.push_deferred carries the reason.
         const deferred = p.urgency === 'interrupt' && p.scheduling_sent === 'when_idle';
         const item = this.push({
           kind: 'push', ts: ev.ts, text: p.text || '', urgency: p.urgency || 'idle', skipped: !!p.skipped,
@@ -229,7 +229,7 @@ export class Grouper {
       // The real answer follows on its own (an investigation).
       pendingAnswer: !!p.pending,
       // A speaking model deferred an INTERRUPT result to WHEN_IDLE
-      // (docs/roles.md "Pushes"); voice.push_deferred carries the reason.
+      // (docs/dev/roles.md "Pushes"); voice.push_deferred carries the reason.
       deferred: p.scheduling === 'interrupt' && p.scheduling_sent === 'when_idle',
     };
     item.resultTs = ev.ts;

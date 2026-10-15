@@ -28,7 +28,7 @@ func queue(s *Session, text string, tags map[string]any) {
 	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags, at: s.now()})
 }
 
-// TestGPTLiveOwedPushOvertakesIdleNews: docs/timelines.md C29 on
+// TestGPTLiveOwedPushOvertakesIdleNews: docs/dev/timelines.md C29 on
 // GPT-Live — the answer to the user's utterance queued behind idle
 // news goes first once the voice stops speaking.
 func TestGPTLiveOwedPushOvertakesIdleNews(t *testing.T) {

@@ -311,7 +311,7 @@ func (s *Store) Update(paneID string, fn func(*Agent)) (Agent, error) {
 }
 
 // AppendJournal adds e to the agent's work journal, dropping the oldest
-// entries past MaxJournal, and persists (docs/iteration-2.md WP4).
+// entries past MaxJournal, and persists (docs/dev/iteration-2.md WP4).
 func (s *Store) AppendJournal(paneID string, e JournalEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

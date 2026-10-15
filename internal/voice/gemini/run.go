@@ -27,7 +27,7 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 
 		// Rendered fresh on every connect (not cached at New) so a
 		// prompts.Loader.Reload() between reconnects takes effect without
-		// restarting the daemon (docs/roles.md "Prompt files").
+		// restarting the daemon (docs/dev/roles.md "Prompt files").
 		prompt, perr := systemPrompt(s.cfg)
 		if perr != nil {
 			return nil, false, perr

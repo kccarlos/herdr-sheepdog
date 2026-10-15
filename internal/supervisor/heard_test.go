@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// docs/eval/eval-campaign-2026-10-03.md H6, j4-finish-finding r2 (B-deepseek):
+// docs/dev/eval/eval-campaign-2026-10-03.md H6, j4-finish-finding r2 (B-deepseek):
 // the user said "Yes, let me know when it's done." to the orchestrator's offer;
 // a second later the finish line "Want it to fix those two links?" went
 // to the voice, and the orchestrator took the yes for that newer question. The

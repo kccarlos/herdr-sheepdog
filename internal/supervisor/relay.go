@@ -7,7 +7,7 @@ import (
 )
 
 // The daemon relays an utterance the voice left unanswered
-// (docs/roles.md "One decision-maker"). On 2026-09-24 00:16:55 the
+// (docs/dev/roles.md "One decision-maker"). On 2026-09-24 00:16:55 the
 // user asked "What's the progress of a Discord Copilot so far?"; the
 // voice model neither called a tool nor said anything (voice.turn
 // {responded: false, tool_calls: 0}), and the question was lost — the
@@ -29,13 +29,13 @@ import (
 //
 // An acknowledgement used to be judged in code (ackCues, #108/#114: a
 // short "On it." or "I'll check" with no tool call relayed the words
-// anyway). The voice now owns that judgment (docs/design/dual-brain.md):
+// anyway). The voice now owns that judgment (docs/dev/design/dual-brain.md):
 // what it said is its answer. The watch still relays words the voice
 // met with no speech and no tool call at all, a lost utterance.
 
 // relayUnansweredAfter is how long an input of the user's speech may
 // go with no tool call and no speech of the voice's own before the
-// daemon relays it (docs/iteration-2.md's lost-utterance metric counts
+// daemon relays it (docs/dev/iteration-2.md's lost-utterance metric counts
 // 5 s; the voice's own tool call arrives within a second when it comes).
 const relayUnansweredAfter = 4 * time.Second
 

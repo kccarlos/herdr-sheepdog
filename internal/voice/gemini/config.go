@@ -29,7 +29,7 @@ type Config struct {
 	// the input transcription CustomVocabulary.
 	Aliases []string
 	// Names, when set, returns the agents' current spoken names
-	// (docs/roles.md "Agent names") and replaces Aliases: read at every
+	// (docs/dev/roles.md "Agent names") and replaces Aliases: read at every
 	// (re)connect, so the system prompt and the vocabulary follow the
 	// roster; the supervisor's silent names line covers a running
 	// connection. An empty result falls back to Aliases.
@@ -37,7 +37,7 @@ type Config struct {
 	// AgentNow, when set, returns an agent's spoken name and a sentence
 	// of its state as of now ("idle for 4 min; it last finished work 4
 	// min ago"), by alias: every briefing about an agent carries both,
-	// computed when the briefing reaches the model (docs/design/
+	// computed when the briefing reaches the model (docs/dev/design/
 	// dual-brain.md, prompt v5). ok is false for an unknown alias.
 	AgentNow func(alias string) (name, state string, ok bool)
 	// DecisionsNow, when set, says whether any agent is waiting for the
@@ -60,7 +60,7 @@ type Config struct {
 	// in both.
 	SystemPrompt string
 	// Prompts resolves prompts/assistant.md against its override
-	// (docs/roles.md "Prompt files"); nil uses the embedded default.
+	// (docs/dev/roles.md "Prompt files"); nil uses the embedded default.
 	// Re-rendered on every (re)connect, so a Reload takes effect on the
 	// next reconnect, not mid-session.
 	Prompts *prompts.Loader

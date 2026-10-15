@@ -3,7 +3,7 @@
 // here touches the DOM or the Web Audio API, so the same code runs in an
 // AudioWorkletGlobalScope, the page and node.
 
-/** Sample rate of client→server PCM16 (docs/ws-contract.md). */
+/** Sample rate of client→server PCM16 (docs/dev/ws-contract.md). */
 export const CAPTURE_RATE = 16000;
 /** Sample rate of server→client PCM16. */
 export const PLAYBACK_RATE = 24000;
@@ -269,7 +269,7 @@ export class RingBuffer {
 }
 
 /**
- * Playback policy per voice provider (docs/ws-contract.md "Playback jitter
+ * Playback policy per voice provider (docs/dev/ws-contract.md "Playback jitter
  * buffer"; the iOS app uses the same numbers). `startMs` is the jitter
  * buffer target a session starts with (and its floor), `capMs` the most it
  * adapts up to on underruns. GPT-Live delivered audio at 0.72–0.86× real
@@ -536,7 +536,7 @@ export class Wsola {
  * audio counts as an underrun; one followed by nothing is simply the end
  * of the utterance.
  *
- * The jitter buffer target adapts within a session (docs/ws-contract.md,
+ * The jitter buffer target adapts within a session (docs/dev/ws-contract.md,
  * "Playback jitter buffer"): it starts at `prebuffer` (150 ms), rises by
  * `adaptStep` (100 ms) on every mid-utterance underrun up to `maxTarget`
  * (500 ms), and decays by `decayStep` (20 ms) after every utterance that
@@ -619,7 +619,7 @@ export class Player {
     // stretched: output samples played at a rate other than 1.0
     // (wall-clock time under time-stretch, either direction).
     this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0, stretched: 0 };
-    // Playback reports (docs/ws-contract.md "Playback reports"):
+    // Playback reports (docs/dev/ws-contract.md "Playback reports"):
     // onPlayback(state, playedMs) is called with 'started' when playing
     // begins after being empty, 'drained' once the ring ran dry and
     // stayed dry for underrunWindow (an underrun that resumes within it
@@ -869,9 +869,9 @@ export class CapturePipeline {
 }
 
 /**
- * Silence gate for capture frames (docs/ws-contract.md, "Silence gate").
+ * Silence gate for capture frames (docs/dev/ws-contract.md, "Silence gate").
  * Near-zero PCM streamed continuously degrades the Gemini session
- * (docs/history/e2e-results.md, "zero-valued audio frames"), so frames whose peak
+ * (docs/dev/history/e2e-results.md, "zero-valued audio frames"), so frames whose peak
  * stays below `floor` (Int16 LSB) for `holdMs` are not sent at all. The
  * last `prerollMs` of gated frames are kept in a ring and released with
  * the first loud frame so the first syllable is not clipped.

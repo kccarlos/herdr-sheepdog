@@ -6,7 +6,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
-// Account problems on /ws (docs/ws-contract.md "Account problems"): an
+// Account problems on /ws (docs/dev/ws-contract.md "Account problems"): an
 // invalid key, a used-up quota or balance of the orchestrator's or the
 // voice's provider is shown as an error message naming the service and
 // the fix, once when it starts and again to every client that attaches

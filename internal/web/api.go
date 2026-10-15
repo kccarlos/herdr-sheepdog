@@ -514,7 +514,7 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 
 // typed records text as something the user typed, before it reaches
 // the voice model or the text router: the one rail reads these inputs,
-// never the tool argument the model relays (docs/roles.md "The one
+// never the tool argument the model relays (docs/dev/roles.md "The one
 // rail").
 func (s *Server) typed(text string) {
 	if s.deps.Supervisor != nil {

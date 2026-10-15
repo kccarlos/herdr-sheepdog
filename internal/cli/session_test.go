@@ -11,7 +11,7 @@ import (
 // follow-up: the session id comes out of each backend's own output
 // (codex's thread.started, claude's session_id), and the resume template
 // is rendered with it — the argv verified against the real CLIs in
-// docs/cli-query-tools.md §3, exercised here against the fake binary.
+// docs/dev/cli-query-tools.md §3, exercised here against the fake binary.
 func TestSessionCaptureAndResume(t *testing.T) {
 	bin := fakeBinPath(t)
 	cfg := Config{

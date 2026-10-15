@@ -8,7 +8,7 @@ import (
 )
 
 // duplicateWindow and duplicateOverlapThreshold implement
-// docs/iteration-2.md's duplicate-speech check: "a voice.push text and a
+// docs/dev/iteration-2.md's duplicate-speech check: "a voice.push text and a
 // voice.tool_result.spoken within 10 s that share ≥ 60 % of words (the
 // 'started on…' then 'Sent —…' pattern)".
 const (
@@ -25,7 +25,7 @@ type DuplicateInstance struct {
 	Spoken       string
 }
 
-// DuplicateReport is docs/iteration-2.md's duplicate-speech check.
+// DuplicateReport is docs/dev/iteration-2.md's duplicate-speech check.
 type DuplicateReport struct {
 	Instances []DuplicateInstance
 	Count     int

@@ -19,7 +19,7 @@ import (
 // blocked), for the one rail's reading of when a first-recorded or
 // revived prompt really appeared (inputs.go's promptSinceLocked): a
 // synthetic blocked -> blocked transition never moves state_since
-// (docs/roles.md "blocked -> blocked is a block"), so this is the true
+// (docs/dev/roles.md "blocked -> blocked is a block"), so this is the true
 // time even for a reprompt or a reconcile. Caller holds s.mu.
 func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias string, blockedSince time.Time) state.PendingAction {
 	now := s.cfg.Now()
@@ -42,7 +42,7 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta})
 	}
 	// Remembered so the post-answer poll and the reconciler can tell a
-	// new prompt from this one (docs/roles.md "blocked -> blocked is a
+	// new prompt from this one (docs/dev/roles.md "blocked -> blocked is a
 	// block", reprompt.go): every answer_prompt pending action is built
 	// here, whether the block is real or synthetic.
 	sig := promptSignature(prompt)
@@ -144,7 +144,7 @@ func (s *Supervisor) dropPendingFor(paneID, reason string, kinds ...state.Pendin
 // ExpirePending drops a send_instruction pending action whose TTL has
 // passed, logging pending.expired. Run calls this on every tick.
 //
-// An answer_prompt never expires on the clock (docs/history/bench-2026-10-03.md
+// An answer_prompt never expires on the clock (docs/dev/history/bench-2026-10-03.md
 // #8): on 2026-10-02 bench-claude's "do you want to proceed" stayed on
 // screen from 23:55:47 to 00:03:15, but its pending expired at 23:57:48
 // after pending_ttl_s, and the phone card with it. It lives while the
@@ -172,7 +172,7 @@ func (s *Supervisor) ExpirePending() {
 // was dropped without being answered (another pane's block or an
 // instruction took the one slot), or was never recorded at all — so the
 // prompt still on screen can still be answered
-// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
+// (docs/dev/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"). Revival always re-reads the screen rather than trusting
 // what was dropped: the pane may already be asking something else.
 //
@@ -397,7 +397,7 @@ func answerOptions(p state.PendingAction) []state.Option {
 
 // replacedLine is the spoken line for a question that displaces another
 // pane's: in the user's language, like the summary it carries (no
-// "。." seam, docs/eval/eval-campaign-2026-10-03.md H1/H4).
+// "。." seam, docs/dev/eval/eval-campaign-2026-10-03.md H1/H4).
 func replacedLine(oldAlias, summary string, zh bool) string {
 	if zh {
 		return "先放下 " + oldAlias + " 之前的问题。现在 " + prose.Terminate(summary)

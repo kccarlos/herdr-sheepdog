@@ -52,7 +52,7 @@ type OpenAICompatConfig struct {
 	// (one of ReasoningEfforts). A call whose config asks for the
 	// minimal thinking level (an event turn, a compaction summary:
 	// thinkingOff) is sent disabled whatever these say
-	// (docs/iteration-2.md WP5). A nil Thinking (a generic
+	// (docs/dev/iteration-2.md WP5). A nil Thinking (a generic
 	// OpenAI-compatible provider) sends none of DeepSeek's extensions:
 	// no thinking field, no reasoning_effort and no reasoning_content
 	// replay.
@@ -555,7 +555,7 @@ func schemaOf(s *genai.Schema) map[string]any {
 // for the messages of the newest turn in msgs (Message.Turn; a window
 // with no turn numbers replays all) — the older blobs were ~20 k
 // characters of every captured request, uncounted by the window's
-// estimate (docs/iteration-2.md WP5) — and never into a call with
+// estimate (docs/dev/iteration-2.md WP5) — and never into a call with
 // thinking disabled (buildRequest).
 func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessage {
 	return m.messagesOfTraced(msgs, model, nil)

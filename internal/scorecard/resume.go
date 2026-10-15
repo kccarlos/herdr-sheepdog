@@ -9,10 +9,10 @@ import (
 )
 
 // ResumeReport is the Gemini Live resume-retention measure (work item
-// "Gemini Live context retention across resumes", docs/handover-2026-10-04.md):
+// "Gemini Live context retention across resumes", docs/dev/handover-2026-10-04.md):
 // at every resumed connection, the prompt token count before the resume
 // against the first one after it, per UTC day. Tokens are not recall: a
-// smaller prompt may or may not have lost facts (docs/research/
+// smaller prompt may or may not have lost facts (docs/dev/research/
 // live-resume-context-2026-10-04.md). Measurement only.
 //
 // Rows come from voice.resume_context where the log has it (with
@@ -44,7 +44,7 @@ type ResumeDay struct {
 	// before (generation 1), Later* the resumes of an already resumed
 	// session (generation 2 and up): the canary found that a handle
 	// issued by a resumed connection restores only that connection's own
-	// content (docs/research/live-resume-context-2026-10-04.md).
+	// content (docs/dev/research/live-resume-context-2026-10-04.md).
 	// FreshAfterResume counts the reconnects that opened a fresh session
 	// instead of resuming a resumed one (voice.handle_dropped reason
 	// resumed_twice, the user's option 1): re-seeded, not resumed, so not

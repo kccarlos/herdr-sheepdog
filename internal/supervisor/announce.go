@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Push judgment (docs/roles.md "Pushes"): on a worker's block or finish
+// Push judgment (docs/dev/roles.md "Pushes"): on a worker's block or finish
 // the orchestrator — when one is attached — runs one announce event turn with
 // the daemon's own sentence, the pane read already taken, the promises
 // the event keeps and its transcript, and decides *whether* the voice
@@ -212,7 +212,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 			// The promises were marked kept before the turn ran
 			// (keepMatching) and their line is now dropped with the
 			// stale block: say so, or the promise ends without a trace
-			// (docs/timelines.md C20).
+			// (docs/dev/timelines.md C20).
 			s.log.Log("voice", "voice.push_dropped", a.row.PaneID, map[string]any{
 				"reason": "stale_block", "text": spoken, "pending": a.pending, "agent": aliasOr(a.row.Alias), voice.TagKeepsPromiseIDs: promiseIDs(kept),
 			})
@@ -250,7 +250,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 }
 
 // announceTags marks a push as one of the exceptions that keep INTERRUPT
-// scheduling even while the model is speaking (docs/roles.md "Pushes"):
+// scheduling even while the model is speaking (docs/dev/roles.md "Pushes"):
 // a kept promise past its due time, or a decision on a block whose
 // pending action this event created — not an addition to one already
 // spoken. nil when u is not interrupt, or neither applies.
@@ -273,7 +273,7 @@ func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) ma
 
 // keptTags adds keeps_promise_ids — the promises a line keeps — to
 // tags: a kept promise is owed to the user, so the voice push queue
-// lets it pass plain idle news (voice/pushclass.go, docs/timelines.md
+// lets it pass plain idle news (voice/pushclass.go, docs/dev/timelines.md
 // C29). tags is returned as is when nothing is kept.
 func keptTags(tags map[string]any, kept []state.Promise) map[string]any {
 	if len(kept) == 0 {
@@ -459,7 +459,7 @@ func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply, overf
 }
 
 // recordFinish stores what was announced about a finish as the agent's
-// last result (docs/roles.md: "last_result is the orchestrator's finish line");
+// last result (docs/dev/roles.md: "last_result is the orchestrator's finish line");
 // with no line — the orchestrator was off, late or silent — the record says
 // only that the agent finished.
 func (s *Supervisor) recordFinish(a announcement, spoken string) {

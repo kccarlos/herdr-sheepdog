@@ -88,7 +88,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
 	// An utterance may turn out to be an instruction, so it gets the
-	// longer budget: the orchestrator decides what it is (docs/roles.md "One
+	// longer budget: the orchestrator decides what it is (docs/dev/roles.md "One
 	// decision-maker").
 	timeout := b.cfg.UtteranceTimeout
 	switch {
@@ -101,7 +101,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	case req.Kind.IsEvent():
 		timeout = b.cfg.AnnounceTurnTimeout
 		if req.Owed || len(req.Promises) > 0 {
-			// The user is owed this line (docs/roles.md "Pushes"):
+			// The user is owed this line (docs/dev/roles.md "Pushes"):
 			// it gets the longer budget.
 			timeout = b.cfg.AnnounceTimeout
 		}
@@ -112,7 +112,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	// behind other turns is not the model's time: with it counted, an
 	// announce turn that waited 8 s of its 9 s behind a user turn started
 	// a step with 1 s left and timed out while steps take ~2 s
-	// (docs/eval/analysis-clustered-events-2026-10-12.md). A user turn
+	// (docs/dev/eval/analysis-clustered-events-2026-10-12.md). A user turn
 	// waits at most its own budget (event turns yield to it, so it waits
 	// for a step in flight or another user turn). An event turn waits
 	// behind user turns, so it may wait as long as one user turn may hold
@@ -199,7 +199,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
 		// What the worker itself wrote for a human, before its screen:
 		// the finding in its words, not its working notes
-		// (docs/iteration-2.md WP4).
+		// (docs/dev/iteration-2.md WP4).
 		if a, ok := b.host.Resolve(t.req.Agent); ok {
 			if text := workerWrote(a); text != "" {
 				b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "transcript", text), Agent: t.req.Agent,
@@ -295,7 +295,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 					// The provider's prefix cache (DeepSeek's
 					// prompt_cache_hit_tokens, Gemini's cached content):
 					// how much of the stable prefix was reused
-					// (docs/iteration-2.md WP5).
+					// (docs/dev/iteration-2.md WP5).
 					payload["cache_hit_tokens"] = u.CachedContentTokenCount
 				}
 				t.tokIn += int(u.PromptTokenCount)
@@ -467,7 +467,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 // started blocked heard the block twice) — wrote its line as the news
 // the template had already carried. The update goes in the window and
 // one more answer-only step runs; whether to skip, add or correct is the
-// model's (docs/timelines.md, "announce wait"). Once per turn, never past MaxSteps,
+// model's (docs/dev/timelines.md, "announce wait"). Once per turn, never past MaxSteps,
 // never for a user turn, never for a line that would not be spoken.
 func (b *Brain) recheck(t *turn, step int, reply Reply) bool {
 	if t.prior != nil || t.req.Trigger != TriggerEvent || t.req.Facts == nil || step >= b.cfg.MaxSteps {
@@ -630,7 +630,7 @@ func (b *Brain) Quiesce() { b.after.Wait() }
 // time), which travels after the window instead (withState): anything
 // per-turn in the system message would end the provider's prefix cache
 // before the conversation, which is most of the prompt
-// (docs/iteration-2.md WP5; the captures showed a flat 2.7 k cached
+// (docs/dev/iteration-2.md WP5; the captures showed a flat 2.7 k cached
 // tokens out of ~20 k).
 func (b *Brain) systemPrompt() (string, []PromptSection, string) {
 	b.mu.Lock()
@@ -812,7 +812,7 @@ func reasonFor(err error) string {
 // thought: thinking off whatever is configured — Gemini's minimal level,
 // DeepSeek's thinking disabled (buildRequest reads the minimal level so)
 // — which the captures priced at ~470 reasoning tokens, ~2.3 s, per step
-// (docs/iteration-2.md WP5). A user turn keeps the configured level.
+// (docs/dev/iteration-2.md WP5). A user turn keeps the configured level.
 func turnThinking(trigger Trigger, level string) *genai.ThinkingConfig {
 	if trigger == TriggerEvent {
 		return thinkingOff()

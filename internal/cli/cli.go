@@ -74,7 +74,7 @@ func (e *ExitError) Is(target error) bool {
 // ExitCode is the process's exit code.
 func (e *ExitError) ExitCode() int { return e.Code }
 
-// Default config values (plan §3.5, docs/cli-query-tools.md §3).
+// Default config values (plan §3.5, docs/dev/cli-query-tools.md §3).
 const (
 	DefaultTimeout        = 60 * time.Second
 	DefaultMaxOutputBytes = 16 << 10
@@ -86,7 +86,7 @@ const (
 )
 
 // defaultCodexCmd and defaultClaudeCmd are the verified argv templates from
-// docs/cli-query-tools.md §3. {question}, {cwd}, {model} and {reasoning}
+// docs/dev/cli-query-tools.md §3. {question}, {cwd}, {model} and {reasoning}
 // are substituted; nothing is ever passed through a shell. Both backends
 // keep their session (codex writes it under ~/.codex/sessions, claude
 // under ~/.claude/projects), so an investigation's follow-up can resume
@@ -140,7 +140,7 @@ var (
 )
 
 // The fork templates ask a worker's *own* session a side question
-// without writing into it (docs/cli-query-tools.md §2c, verified
+// without writing into it (docs/dev/cli-query-tools.md §2c, verified
 // 2026-09-25): claude's --fork-session copies the history under a new
 // session id, `codex exec fork` starts a new thread that reads the
 // worker's rollout up to a byte offset. `codex exec resume` would append

@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// Agent names have three layers (docs/roles.md "Agent names"): the pane
+// Agent names have three layers (docs/dev/roles.md "Agent names"): the pane
 // id, which code, the app and the API use and nobody ever hears; the
 // alias, unique and stable, which the orchestrator's tool calls use; and the
 // spoken name, computed here, which is what the user hears and says.

@@ -7,7 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Reset ("New conversation", docs/roles.md) drops the resumption handle
+// Reset ("New conversation", docs/dev/roles.md) drops the resumption handle
 // and reconnects fresh: the next dial carries no handle and the
 // supervisor sees EventResumed{ContextLost:true} so it re-learns the
 // roster, exactly like any other context-losing reconnect.

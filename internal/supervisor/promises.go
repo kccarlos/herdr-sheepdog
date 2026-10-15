@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Promised work (docs/roles.md "Promises"): "tell me when it's done" is
+// Promised work (docs/dev/roles.md "Promises"): "tell me when it's done" is
 // recorded by the orchestrator's promise tool (brainHost.Promise → createPromise),
 // persisted in the state file's session so a restart keeps it, and kept
 // at the matching worker event by the announcement (announce.go) with a
@@ -251,8 +251,8 @@ func promiseTrailer(open []state.Promise) string {
 }
 
 // announceStartupPromises speaks, once per daemon run, the open promises
-// an earlier run left behind (docs/history/roles-status.md,
-// docs/history/issues-2026-09-18.md "Smaller items"): this run's transcript has
+// an earlier run left behind (docs/dev/history/roles-status.md,
+// docs/dev/history/issues-2026-09-18.md "Smaller items"): this run's transcript has
 // no memory of making them, so the orchestrator's announce turns cannot be
 // trusted to bring them up, and the user is still owed an answer.
 // Called once, the first time SetVoiceConnected(true) fires (a live

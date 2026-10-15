@@ -23,7 +23,7 @@ import (
 func printBenchUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog bench <calibrate|run|render|validate|report|rejudge|northstar> [flags]")
 	fprintln(w, "")
-	fprintln(w, "The voice benchmark (docs/bench/README.md): synthetic speech (Gemini TTS on")
+	fprintln(w, "The voice benchmark (docs/dev/bench/README.md): synthetic speech (Gemini TTS on")
 	fprintln(w, "Vertex) from a phone emulator into scratch daemons on ports 7790-7792 with the")
 	fprintln(w, "real voice model and orchestrator over a mock herdr scripted from the eval sim worlds.")
 	fprintln(w, "")

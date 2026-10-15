@@ -11,8 +11,8 @@ import (
 )
 
 // toolDeclarations returns the voice's two tools as NON_BLOCKING
-// function declarations (docs/roles.md "One decision-maker";
-// docs/gemini-live-notes.md §5). The voice classifies nothing and
+// function declarations (docs/dev/roles.md "One decision-maker";
+// docs/dev/gemini-live-notes.md §5). The voice classifies nothing and
 // executes nothing: it hands the user's words to the supervisor and
 // says stop when they do.
 func toolDeclarations() []*genai.Tool {
@@ -136,7 +136,7 @@ const (
 // text, as two parts of one turn. With the marker glued to the text
 // (one part) the voice read it aloud in 25 utterances of the 2026-10-03
 // tier-2 campaign ("[system event, not spoken by the user] bench-codex
-// wants…"; docs/bench/tier2-2026-10-03.md #4). Measured on
+// wants…"; docs/dev/bench/tier2-2026-10-03.md #4). Measured on
 // barge-in-hold-to-talk, status-en and deferral-zh, 3 runs each, with
 // the same prompt (prompts/assistant.md explains the marker): glued,
 // 3 of 17 spoken pushes began with the marker; as its own part, 0 of 19;
