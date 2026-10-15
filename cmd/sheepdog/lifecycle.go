@@ -37,6 +37,8 @@ type lifecycle struct {
 	envFile    string // as given ("" = default), passed on to serve
 	mgr        service.Manager
 	out, errw  io.Writer
+	// fromSetup: started by sheepdog setup, which opens the page itself.
+	fromSetup bool
 }
 
 // lifecycleFlags adds --config and --env-file to fs.
@@ -167,7 +169,7 @@ func (l *lifecycle) start(ctx context.Context) int {
 	fprintf(l.out, "sheepdog started %s (pid %d)\n", how, info.PID)
 	fprintf(l.out, "  voice page  %s/voice\n", info.URL)
 	fprintln(l.out, "  logs        sheepdog logs -f")
-	if onboard.CheckVoice(l.cfg).Status == onboard.Fail {
+	if onboard.CheckVoice(l.cfg).Status == onboard.Fail && !l.fromSetup {
 		fprintf(l.out, "  setup       no voice key yet, so the voice is off: run `sheepdog setup` (%s/setup)\n", info.URL)
 	}
 	return 0
@@ -422,7 +424,7 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fprintf(stdout, "opening %s\n", url)
-	if l.cfg.Web.Token != "" {
+	if l.cfg.Web.Token != "" && page != "setup" {
 		fprintln(stdout, "The page asks once for the web token: web.token in your config, or SHEEPDOG_WEB_TOKEN in "+config.DefaultEnvPath()+".")
 	}
 	if err := openBrowser(url); err != nil {

@@ -39,10 +39,13 @@ notifications, a Live Activity while you talk, earbud remote controls.
    herdr plugin install kccarlos/herdr-sheepdog
    ```
 
-2. **Run the "Set up sheepdog" action** in herdr. It runs `sheepdog init`: it
-   checks herdr, asks for one [Gemini key](https://aistudio.google.com/apikey)
-   and validates it.
-3. **Run "Pair your phone"** and scan the QR code with the iOS app,
+2. **Run `sheepdog setup`** (or the "Set up sheepdog" action in herdr). It
+   starts sheepdog and opens its setup page in your browser: paste one free
+   [Gemini key](https://aistudio.google.com/apikey) (checked on the spot),
+   see the checks, turn on start at login, pair your phone, and press
+   "Talk to it now". No config file to edit. Over SSH it asks the same
+   questions in the terminal.
+3. **Pair your phone** on that page: scan the QR code with the iOS app,
    "Sheepdog for herdr" ([TestFlight link: TODO](#), source:
    [herdr-sheepdog-ios](https://github.com/kccarlos/herdr-sheepdog-ios)).
 

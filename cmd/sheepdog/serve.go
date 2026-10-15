@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -20,7 +22,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
+	"github.com/kccarlos/herdr-sheepdog/internal/service"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
+	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
 // defaultEnvFile is what `serve --env-file` loads when the flag is not
@@ -176,7 +180,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	defer lock.Release()
+	defer func() { lock.Release() }() // lock is re-taken after a failed hand-over
 	port := cfg.Web.Port
 	if o.port > 0 {
 		port = o.port
@@ -213,6 +217,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	// file and config are read again and the daemon rebuilt in this
 	// process (same pid, same lock), so nothing outside notices.
 	var cur atomic.Pointer[app.App]
+	sdemo := newSetupDemo(stdout)
+	defer sdemo.Stop("the daemon stopped")
 
 	// SIGHUP re-reads the prompt override directory (docs/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
@@ -237,6 +243,12 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}()
 
 	for run := 0; ; run++ {
+		opts.Setup = setupOptions(cfg, o, sdemo, func() error {
+			if a := cur.Load(); a != nil {
+				a.RequestRestart(app.ReasonServiceHandoff)
+			}
+			return nil
+		})
 		a, err := app.Build(cfg, opts)
 		if err != nil {
 			fprintf(stderr, "sheepdog serve: %v\n", err)
@@ -256,7 +268,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		if serveBuilt != nil {
 			serveBuilt(a)
 		}
-		_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: a.URL(), Version: version, StartedAt: startedAt, Background: o.background})
+		_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: localURLOf(a, cfg), Version: version, StartedAt: startedAt, Background: o.background})
 		if run == 0 {
 			fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
 			fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
@@ -273,7 +285,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			}
 		}
 		if a.SetupNeeded() {
-			fprintf(stdout, "  setup       %s/setup  (no voice key yet: the voice is off until you add one)\n", a.URL())
+			fprintf(stdout, "  setup       %s/setup  (no voice key yet: the voice is off until you add one)\n", localURLOf(a, cfg))
 		}
 		if run == 0 {
 			fprintf(stdout, "  voice page  %s/voice\n", a.URL())
@@ -285,6 +297,24 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 
 		err = a.Run(ctx)
+		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil && a.RestartReason() == app.ReasonServiceHandoff {
+			// "Start at login" on the setup page: this daemon steps
+			// aside (lock and port free) and the login service starts its
+			// own, which serves the same page.
+			sdemo.Stop("the daemon moved to the login service")
+			lock.Release()
+			herr := handOverToService(ctx, cfg, o)
+			if herr == nil {
+				fprintln(stdout, "sheepdog handed over to the login service; this process exits")
+				return 0
+			}
+			fprintf(stderr, "sheepdog serve: the login service did not install (%v); carrying on here\n", herr)
+			if lock, err = daemon.Acquire(cfg.DataDir); err != nil {
+				fprintf(stderr, "%v\n", err)
+				return 1
+			}
+			continue
+		}
 		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil {
 			next, ok := reloadServeConfig(baseEnv, o, stderr)
 			if ok {
@@ -312,9 +342,62 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 }
 
+// setupOptions are the setup page's files and hooks for this serve: the
+// env file serve loads (an explicit --env-file, else the one it finds,
+// else the default secret file), the config file and the login service.
+func setupOptions(cfg config.Config, o serveOpts, sdemo *setupDemo, handoff func() error) *app.SetupOptions {
+	envPath := o.envFile
+	if envPath == "" {
+		envPath = implicitEnvFile()
+		if _, err := os.Stat(envPath); err != nil {
+			envPath = configEnvPath()
+		}
+	}
+	if envPath == "" {
+		envPath = config.DefaultEnvPath()
+	}
+	if abs, err := filepath.Abs(envPath); err == nil {
+		envPath = abs
+	}
+	cfgPath := o.configPath
+	if cfgPath == "" {
+		cfgPath = config.DefaultPath()
+	}
+	so := &app.SetupOptions{ConfigPath: cfgPath, EnvPath: envPath, Endpoints: onboardEndpoints(), Demo: sdemo}
+	if spec, err := serviceSpecFor(cfg, o.configPath, o.envFile, ""); err == nil {
+		m := service.Manager{Spec: spec, Run: serviceRunner}
+		so.Service = func(context.Context) web.ServiceState {
+			return web.ServiceState{Supported: true, Installed: m.Installed()}
+		}
+		so.InstallService = handoff
+	}
+	return so
+}
+
+// handOverToService installs the login service (it starts its own
+// daemon, which takes the port this one has just freed).
+var handOverToService = func(ctx context.Context, cfg config.Config, o serveOpts) error {
+	spec, err := serviceSpecFor(cfg, o.configPath, o.envFile, "")
+	if err != nil {
+		return err
+	}
+	return service.Manager{Spec: spec, Run: serviceRunner}.Install(ctx)
+}
+
 // serveBuilt, when set (tests), gets each daemon serve builds, once it
 // listens.
 var serveBuilt func(*app.App)
+
+// localURLOf is the URL this computer reaches the daemon on (the pid
+// file's): 127.0.0.1 for a bind on every address, not http://[::]:port.
+func localURLOf(a *app.App, cfg config.Config) string {
+	_, p, err := net.SplitHostPort(strings.TrimPrefix(a.URL(), "http://"))
+	port, _ := strconv.Atoi(p)
+	if err != nil || port == 0 {
+		return a.URL()
+	}
+	return daemon.LocalURL(cfg.Web.Bind, port)
+}
 
 // listenRetry binds the web port. After a reload the old listener has
 // just closed; a few short retries cover the moment it takes.

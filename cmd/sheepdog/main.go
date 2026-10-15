@@ -43,6 +43,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "setup":
+		return runSetup(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "init":
 		return runInit(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "doctor":
@@ -162,7 +164,8 @@ func printUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog <command> [flags]      (sheepdog <command> --help for its flags)")
 	fprintln(w, "")
 	fprintln(w, "Set up:")
-	fprintln(w, "  init        set up: check herdr, ask for and validate a key, write config + secrets")
+	fprintln(w, "  setup       set up in your browser: key, checks, start at login, phone, talk (start here)")
+	fprintln(w, "  init        the same setup as terminal questions (also: sheepdog setup --terminal)")
 	fprintln(w, "  doctor      check the setup, with fixes; --report: a redacted bundle for a bug report")
 	fprintln(w, "  pair        show the QR code the iOS app scans")
 	fprintln(w, "  demo        try it without herdr: scripted workers (needs GEMINI_API_KEY)")

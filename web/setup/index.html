@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up sheepdog</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="/static/logo-solid.svg">
+<link rel="stylesheet" href="/setup/style.css">
+</head>
+<body>
+<header>
+  <picture class="logo">
+    <source srcset="/static/logo-transparent.svg" media="(prefers-color-scheme: dark)">
+    <img src="/static/logo-solid.svg" alt="" width="28" height="28">
+  </picture>
+  <h1>Set up sheepdog</h1>
+  <span id="voice-badge" class="badge" role="status" aria-live="polite">checking…</span>
+</header>
+
+<main>
+  <p class="lead">Five short steps, about three minutes. Nothing here leaves this computer except the key checks, which go to the provider you choose.</p>
+  <p id="offline" class="error hidden" role="alert">sheepdog is not answering. If it is restarting, this page reconnects by itself; otherwise run <code>sheepdog setup</code> again.</p>
+
+  <!-- 1. Models -->
+  <section class="card step" id="step-models" aria-labelledby="h-models">
+    <h2 id="h-models"><span class="num" aria-hidden="true">1</span> Models <span class="state" id="models-state"></span></h2>
+    <p>sheepdog needs one free Gemini API key: it runs the voice and the model that reads your agents.</p>
+    <div class="field">
+      <label for="gemini-key">Gemini API key</label>
+      <div class="row">
+        <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with AIza…)" aria-describedby="gemini-result">
+        <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
+      </div>
+      <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+      <p id="gemini-result" class="result" aria-live="polite"></p>
+    </div>
+
+    <details id="advanced">
+      <summary>Advanced: other voice or orchestrator models</summary>
+      <fieldset>
+        <legend>Voice</legend>
+        <label><input type="radio" name="voice" value="gemini" checked> Gemini Live (uses the Gemini key)</label>
+        <label><input type="radio" name="voice" value="openai"> GPT-Live (needs an OpenAI key, billed per minute)</label>
+        <div class="field indent hidden" id="openai-field">
+          <label for="openai-key">OpenAI API key</label>
+          <input id="openai-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="openai-result">
+          <p id="openai-result" class="result" aria-live="polite"></p>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Orchestrator (reads and acts on your agents)</legend>
+        <label><input type="radio" name="orch" value="gemini" checked> Gemini (uses the Gemini key)</label>
+        <label><input type="radio" name="orch" value="deepseek"> DeepSeek (paid per token)</label>
+        <label><input type="radio" name="orch" value="compat"> Any OpenAI-compatible endpoint (OpenRouter, Groq, Ollama, …)</label>
+        <div class="field indent hidden" id="deepseek-field">
+          <label for="deepseek-key">DeepSeek API key</label>
+          <input id="deepseek-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="deepseek-result">
+          <p id="deepseek-result" class="result" aria-live="polite"></p>
+        </div>
+        <div class="field indent hidden" id="compat-field">
+          <label for="compat-name">Name</label>
+          <input id="compat-name" type="text" placeholder="openrouter" autocomplete="off">
+          <label for="compat-base">Base URL</label>
+          <input id="compat-base" type="url" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
+          <label for="compat-model">Model (must support tool calling)</label>
+          <input id="compat-model" type="text" autocomplete="off">
+          <label for="compat-key">API key (empty for a local server)</label>
+          <input id="compat-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="compat-result">
+          <p id="compat-result" class="result" aria-live="polite"></p>
+        </div>
+      </fieldset>
+      <p class="small">Which model does what, and what it costs: <a id="models-doc" href="#" target="_blank" rel="noopener">docs/models.md</a>.</p>
+    </details>
+
+    <div class="row actions">
+      <button id="save-models" class="primary">Save and start the voice</button>
+      <span id="models-msg" class="muted small" aria-live="polite"></span>
+    </div>
+    <p class="muted small">Keys are saved only in <code id="env-file">~/.config/sheepdog/.env</code> (readable by you alone) and never shown again.</p>
+  </section>
+
+  <!-- 2. Checks -->
+  <section class="card step" id="step-checks" aria-labelledby="h-checks">
+    <h2 id="h-checks"><span class="num" aria-hidden="true">2</span> Checks <span class="state" id="checks-state"></span></h2>
+    <ul id="checks" class="checks" aria-live="polite"></ul>
+    <div class="row actions"><button id="run-checks">Run the checks again</button></div>
+  </section>
+
+  <!-- 3. Start at login -->
+  <section class="card step" id="step-service" aria-labelledby="h-service">
+    <h2 id="h-service"><span class="num" aria-hidden="true">3</span> Start at login <span class="state" id="service-state"></span></h2>
+    <label class="check"><input type="checkbox" id="service-on" checked> Start sheepdog when I log in, and restart it if it crashes</label>
+    <div class="row actions">
+      <button id="save-service">Apply</button>
+      <span id="service-msg" class="muted small" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <!-- 4. Phone -->
+  <section class="card step" id="step-phone" aria-labelledby="h-phone">
+    <h2 id="h-phone"><span class="num" aria-hidden="true">4</span> Pair your phone <span class="state" id="phone-state"></span></h2>
+    <div id="phone-off">
+      <p>Optional. Turning phone access on lets the iOS app reach sheepdog on your network, protected by a long secret token.</p>
+      <div class="row actions"><button id="phone-enable" class="primary">Turn on phone access</button><span id="phone-msg" class="muted small" aria-live="polite"></span></div>
+    </div>
+    <div id="phone-on" class="hidden">
+      <div class="pair">
+        <img id="qr" alt="Pairing code for the sheepdog iOS app" width="220" height="220">
+        <div>
+          <p>In the iOS app: Settings → <strong>Scan pairing code</strong>.</p>
+          <p id="phone-connected" class="result" aria-live="polite">Waiting for the phone…</p>
+          <p class="small"><span id="testflight"></span> <a id="ios-repo" href="#" target="_blank" rel="noopener">or build the app yourself</a>.</p>
+          <p class="small muted" id="addresses"></p>
+        </div>
+      </div>
+      <p id="remote-hint" class="hint small"></p>
+      <div class="row actions">
+        <button id="new-token">New token</button>
+        <button id="phone-disable">Turn phone access off</button>
+        <span id="phone-msg2" class="muted small" aria-live="polite"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Talk -->
+  <section class="card step" id="step-talk" aria-labelledby="h-talk">
+    <h2 id="h-talk"><span class="num" aria-hidden="true">5</span> Talk to it now</h2>
+    <p id="talk-note" class="muted"></p>
+    <div class="row actions">
+      <a class="button primary big" id="talk" href="/voice" target="_blank" rel="noopener">Talk to it now</a>
+    </div>
+    <div id="demo" class="hidden">
+      <p>No agents in herdr yet? Try three scripted demo agents: they finish, ask for approval and fail, so you can hear what sheepdog does.</p>
+      <div class="row actions">
+        <button id="demo-start">Try it with demo agents</button>
+        <a class="button hidden" id="demo-open" href="#" target="_blank" rel="noopener">Open the demo</a>
+        <button id="demo-stop" class="danger hidden">Stop the demo</button>
+        <span id="demo-msg" class="muted small" aria-live="polite"></span>
+      </div>
+    </div>
+    <p class="small muted">The iOS app also has an offline demo that needs no computer: “Try the demo” on its first screen or in Settings.</p>
+  </section>
+</main>
+<script src="/setup/setup.js"></script>
+</body>
+</html>

@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
 )
 
 // ReadEnvFile parses a KEY=VALUE file the way config.LoadEnvFile does
@@ -51,6 +54,19 @@ func ReadEnvFile(path string) (map[string]string, error) {
 // written to a temporary file and renamed, with mode 0600, its directory
 // created 0700. Values are never printed.
 func UpsertEnvFile(path string, set map[string]string) error {
+	return EditEnvFile(path, set, nil)
+}
+
+// EditEnvFile is UpsertEnvFile that also removes the lines of the keys
+// in del (a choice undone: SHEEPDOG_BRAIN_MODEL when the orchestrator
+// goes back to the configured one).
+func EditEnvFile(path string, set map[string]string, del []string) error {
+	drop := map[string]bool{}
+	for _, k := range del {
+		if _, both := set[k]; !both {
+			drop[k] = true
+		}
+	}
 	for k, v := range set {
 		if k == "" || strings.ContainsAny(k, "= \t\r\n#") {
 			return fmt.Errorf("onboard: env key %q: not a variable name", k)
@@ -72,18 +88,28 @@ func UpsertEnvFile(path string, set map[string]string) error {
 		return err
 	}
 	done := map[string]bool{}
-	for i, line := range lines {
+	kept := lines[:0]
+	for _, line := range lines {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
+			kept = append(kept, line)
 			continue
 		}
 		k, _, ok := strings.Cut(t, "=")
 		k = strings.TrimSpace(k)
+		if ok && drop[k] {
+			continue
+		}
 		if v, want := set[k]; ok && want {
-			lines[i] = k + "=" + v
+			if done[k] {
+				continue // a duplicate line of a key being set
+			}
+			line = k + "=" + v
 			done[k] = true
 		}
+		kept = append(kept, line)
 	}
+	lines = kept
 	var add []string
 	for k := range set {
 		if !done[k] {
@@ -127,4 +153,107 @@ func NewToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// HasToken reports whether a web token exists anywhere the daemon reads
+// one: the process environment, the env file (env) or the config.
+// A token that exists is never replaced silently: the phone is paired
+// with it (`sheepdog init`, the setup page's "new token" is explicit).
+func HasToken(env map[string]string, cfg config.Config) bool {
+	return strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" || strings.TrimSpace(env["SHEEPDOG_WEB_TOKEN"]) != "" || cfg.Web.Token != ""
+}
+
+// WriteConfig writes a new config file: the commented template with the
+// chosen orchestrator (gemini, deepseek or compat) filled in, mode 0600.
+func WriteConfig(path, orch string, compat *config.OpenAICompat) error {
+	t := config.Template()
+	var lines string
+	switch orch {
+	case brain.ProviderDeepSeek:
+		lines = fmt.Sprintf("provider = %q\nmodel = %q\n", brain.ProviderDeepSeek, brain.DefaultDeepSeekModel)
+	case "compat":
+		lines = fmt.Sprintf("provider = %q\n", compat.Name)
+	}
+	if lines != "" {
+		if !strings.Contains(t, "\n[brain]\n") {
+			return errors.New("config template has no [brain] table")
+		}
+		t = strings.Replace(t, "\n[brain]\n", "\n[brain]\n"+lines, 1)
+	}
+	if compat != nil {
+		t += "\n" + CompatTOML(*compat)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(t), 0o600)
+}
+
+// CompatTOML renders one [[brain.openai_compat]] table.
+func CompatTOML(c config.OpenAICompat) string {
+	return fmt.Sprintf("[[brain.openai_compat]]\nname = %q\nbase_url = %q\napi_key_env = %q\nmodel = %q\n", c.Name, c.BaseURL, c.APIKeyEnv, c.Model)
+}
+
+// EnsureCompat makes the config at path define the OpenAI-compatible
+// provider c: a new config (the template, provider set to it) when there
+// is none, else its table appended when no provider of that name exists.
+// An existing table of that name is left as it is. The result must load.
+func EnsureCompat(path string, c config.OpenAICompat) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return WriteConfig(path, "compat", &c)
+	}
+	cur, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := cur.Brain.CompatProvider(c.Name); ok {
+		return nil
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := strings.TrimRight(string(old), "\n") + "\n\n" + CompatTOML(c)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return err
+	}
+	if _, err := config.Load(path); err != nil {
+		_ = os.WriteFile(path, old, 0o600)
+		return fmt.Errorf("the config with the new provider does not load (restored it): %w", err)
+	}
+	return nil
+}
+
+// PhoneBind is the web.bind phone access sets: every address of this
+// computer (its LAN and Tailscale ones), behind the web token. web.bind
+// is one address, so this is the narrowest setting that covers both.
+const PhoneBind = "0.0.0.0"
+
+// SetPhoneAccess writes phone access to the env file: enable sets
+// SHEEPDOG_WEB_BIND to PhoneBind (off: back to loopback) and creates a
+// token when none exists anywhere (HasToken); newToken replaces the
+// token, which a paired phone must then scan again. It reports whether
+// a token was written. cfg is the config in force (its token counts).
+func SetPhoneAccess(envPath string, cfg config.Config, enable, newToken bool) (bool, error) {
+	saved, err := ReadEnvFile(envPath)
+	if err != nil {
+		return false, err
+	}
+	set := map[string]string{"SHEEPDOG_WEB_BIND": config.DefaultWebBind}
+	if enable {
+		set["SHEEPDOG_WEB_BIND"] = PhoneBind
+	}
+	created := false
+	if newToken || (enable && !HasToken(saved, cfg)) {
+		if newToken && saved["SHEEPDOG_WEB_TOKEN"] == "" && strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" && os.Getenv("SHEEPDOG_WEB_TOKEN") == cfg.Web.Token {
+			return false, errors.New("the token comes from the environment variable SHEEPDOG_WEB_TOKEN, not the env file; change it there")
+		}
+		tok, err := NewToken()
+		if err != nil {
+			return false, err
+		}
+		set["SHEEPDOG_WEB_TOKEN"] = tok
+		created = true
+	}
+	return created, UpsertEnvFile(envPath, set)
 }

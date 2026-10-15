@@ -23,6 +23,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/observe"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -107,6 +109,21 @@ type Options struct {
 	// model. For harnesses that stand in for the user (`sheepdog
 	// bench run --tier 3`); `serve --heard-echo`.
 	HeardEcho bool
+	// Setup, when set, serves the setup page (/setup, loopback only)
+	// that writes these files (sheepdog serve sets it; the bench and the
+	// demo do not).
+	Setup *SetupOptions
+}
+
+// SetupOptions are what the setup page needs from the process that runs
+// the daemon: the files it writes and the hooks that outlive one build
+// of the daemon (the login service, the demo).
+type SetupOptions struct {
+	ConfigPath, EnvPath string
+	Endpoints           onboard.Endpoints
+	Service             func(ctx context.Context) web.ServiceState
+	InstallService      func() error
+	Demo                web.DemoControl
 }
 
 func (o Options) withDefaults() Options {
@@ -181,8 +198,21 @@ type App struct {
 	issueMu    sync.Mutex
 	voiceIssue string
 	// restart asks Run to shut down and return ErrRestart (RequestRestart).
-	restart     chan string
-	restartOnce sync.Once
+	restart       chan string
+	restartOnce   sync.Once
+	restartReason string
+}
+
+// ReasonServiceHandoff is the restart reason that hands the daemon over
+// to the login service: serve installs the service and exits instead of
+// building the daemon again.
+const ReasonServiceHandoff = "setup: start at login"
+
+// RestartReason is the reason RequestRestart was given ("" before).
+func (a *App) RestartReason() string {
+	a.issueMu.Lock()
+	defer a.issueMu.Unlock()
+	return a.restartReason
 }
 
 // ErrRestart is what Run returns after RequestRestart: the caller
@@ -196,6 +226,9 @@ var ErrRestart = errors.New("app: restart requested")
 func (a *App) RequestRestart(reason string) {
 	a.restartOnce.Do(func() {
 		a.log.Log("daemon", "daemon.restart_requested", "", map[string]any{"reason": reason})
+		a.issueMu.Lock()
+		a.restartReason = reason
+		a.issueMu.Unlock()
 		a.restart <- reason
 	})
 }
@@ -516,6 +549,16 @@ func (a *App) wire() error {
 	}
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent
+	}
+	if so := opts.Setup; so != nil {
+		deps.Setup = &web.SetupDeps{
+			ConfigPath: so.ConfigPath, EnvPath: so.EnvPath, Config: cfg, Endpoints: so.Endpoints,
+			Service: so.Service, InstallService: so.InstallService, Demo: so.Demo,
+			ClearOverrides: func() error {
+				return store.UpdateSession(func(s *state.Session) { s.VoiceProvider, s.BrainProvider, s.BrainModel = "", "", "" })
+			},
+			SysAddrs: pair.SystemAddrs, TailscaleCLI: web.TailscaleInstalled, Boot: time.Now(),
+		}
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
