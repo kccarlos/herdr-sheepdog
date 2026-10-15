@@ -427,7 +427,7 @@ func CheckPush(a config.APNs) Result {
 	}
 	switch {
 	case set == 0:
-		return Result{Name: name, Status: Skip, Detail: "push not configured (optional; docs/dev/push.md)"}
+		return Result{Name: name, Status: Skip, Detail: "push not configured (optional; docs/iphone-app.md)"}
 	case set < 4:
 		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("[push.apns] has %d of its 4 values", set), Fix: "set key_path, key_id, team_id and topic, or none (docs/dev/push.md)"}
 	}

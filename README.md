@@ -5,123 +5,78 @@
   </picture>
 </p>
 
-# Talk to your Herdr agents. From anywhere.
+<p align="center">
+  <a href="#install">install</a> · <a href="docs/quick-start.md">quick start</a> · <a href="docs/README.md">docs</a> · <a href="docs/iphone-app.md">iPhone app</a>
+</p>
 
-**Hear who's stuck, approve with a word, ask what broke. Right from your phone, no need to go back to your desk.**
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-666666?labelColor=333333" alt="MIT license" /></a>
+  <a href="https://github.com/kccarlos/herdr-sheepdog/releases/latest"><img src="https://img.shields.io/github/v/release/kccarlos/herdr-sheepdog?label=release&labelColor=333333&color=666666" alt="latest release" /></a>
+  <a href="https://github.com/kccarlos/herdr-sheepdog/stargazers"><img src="https://img.shields.io/github/stars/kccarlos/herdr-sheepdog?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/kccarlos/herdr-sheepdog/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kccarlos/herdr-sheepdog/ci.yml?branch=main&label=CI&labelColor=333333" alt="CI status" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-666666?labelColor=333333" alt="platform: macOS and Linux" />
+  <a href="https://herdr.dev/plugins/"><img src="https://img.shields.io/badge/herdr-plugin-666666?labelColor=333333" alt="herdr plugin" /></a>
+  <!-- TESTFLIGHT_LINK: replace the placeholder URL in this line and in docs/iphone-app.md once the public link exists. -->
+  <a href="https://testflight.apple.com/join/TESTFLIGHT_LINK"><img src="https://img.shields.io/badge/iOS-TestFlight-666666?logo=apple&logoColor=white&labelColor=333333" alt="iOS TestFlight" /></a>
+</p>
 
-<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: codex-payments' approval arrives on the lock screen; you say approve, ask what's going on and why the migration failed, and sheepdog answers" width="800"></a></p>
-<p align="center"><a href="assets/readme/hero.mp4">▶ Watch the 60-second demo</a></p>
+---
 
-**herdr-sheepdog** (sheepdog for short) is a voice supervisor for the coding agents you run in
-[herdr](https://github.com/herdrdev/herdr) (Claude Code, Codex, agy). You
-use it **away from your desk**: an iPhone and earbuds, lock-screen
-notifications, a Live Activity while you talk, earbud remote controls.
+# Manage your Herdr agents by voice.
 
-## Why it is different
+**Hands-free, from anywhere. Hear who's stuck, approve with a word, ask what broke.**
 
-- **It watches the whole fleet and tells you who is blocked first.** One
-  question, "what's going on?", covers every agent: who needs you, who
-  finished, who failed.
-- **It investigates instead of guessing.** Behind the realtime voice (Gemini
-  Live or GPT-Live) a stateful orchestrator reads the agents' screens and
-  session records, and asks a read-only fork of the worker what a screen
-  cannot say. It remembers "tell me when claude-auth is done", and comes back to a
-  question it could not answer.
-- **Every change is measured.** Prompts and harness changes merge only past
-  an eval suite with confidence intervals, and several that looked good
-  lost ([how we measure](#how-we-measure)).
+<!-- The final video will be a GitHub user-attachments URL (drag the file into an issue or PR comment and paste the link here). -->
+<p align="center"><a href="assets/readme/hero.mp4"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: an approval arrives on the lock screen; you say approve, ask what is going on and why the migration failed, and sheepdog answers" width="800"></a></p>
 
-## Install
+- **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. [quick start →](docs/quick-start.md)
+- **who's stuck, first** — "what's going on?" covers the whole fleet and names who needs you before anyone else. [commands →](docs/commands.md)
+- **approve by voice** — an approval is answered only on your own words, enforced in code, not a prompt. [safety →](docs/safety.md)
+- **ask why** — it reads screens and session records, and asks a read-only fork of the agent when a screen is not enough. [faq →](docs/faq.md)
+- **it remembers** — "tell me when claude-auth is done", and it comes back to a question it could not answer. [faq →](docs/faq.md)
+- **iPhone app** — notifications, Live Activity, earbud remote and QR pairing. [iPhone app →](docs/iphone-app.md)
+- **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
+- **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 
-1. **Install the plugin** (a herdr plugin):
+---
 
-   ```sh
-   herdr plugin install kccarlos/herdr-sheepdog
-   ```
+## install
 
-2. **Run `sheepdog setup`** (or the "Set up sheepdog" action in herdr). It
-   starts sheepdog and opens its setup page in your browser: paste one free
-   [Gemini key](https://aistudio.google.com/apikey) (checked on the spot),
-   see the checks, turn on start at login, pair your phone, and press
-   "Talk to it now". No config file to edit. Over SSH it asks the same
-   questions in the terminal.
-3. **Pair your phone** on that page: scan the QR code with the iOS app,
-   "Sheepdog for herdr" ([TestFlight link: TODO](#), source:
-   [herdr-sheepdog-ios](https://github.com/kccarlos/herdr-sheepdog-ios)).
+**You need:** [herdr](https://github.com/herdrdev/herdr), macOS or Linux, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)).
 
-**Try it without herdr:** `GEMINI_API_KEY=… sheepdog demo` runs three
-scripted agents you can talk to in the browser, and the iOS app has a demo
-mode that needs no daemon and no key. By-hand install and everything else:
-[docs/dev/development.md](docs/dev/development.md).
-
-<table>
-  <tr>
-    <td align="center"><img src="assets/readme/status.gif" alt="Asking what is going on" width="240"><br>What is going on?</td>
-    <td align="center"><img src="assets/readme/phone.gif" alt="Approving from the phone" width="240"><br>Approve from the phone</td>
-    <td align="center"><img src="assets/readme/plugin.gif" alt="Pairing the phone from the herdr plugin" width="240"><br>Pair from herdr</td>
-  </tr>
-</table>
-
-## What it sounds like
-
-An illustration of one exchange (not a transcript):
-
-```text
-sheepdog  Codex in "api" needs your approval to run the migration. The other
-          two are working.
-you       What does the migration touch?
-sheepdog  Checking... It adds an index on orders, no data changes.
-you       Approve.
-sheepdog  Approved. Tell you when it is done?
-you       Yes. And ask claude-auth why the tests failed.
-sheepdog  Asking claude-auth. I'll come back with that.
+```bash
+herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
+sheepdog setup                                  # 2. the browser wizard: key, checks, start at login
+sheepdog pair                                   # 3. show the QR code for your phone (also in the wizard)
 ```
 
-## How it works
+<!-- install.gif: another agent re-records it; keep this slot. -->
+<p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 
-```mermaid
-flowchart LR
-    U((You, phone + earbuds)) <-->|speech| V["Voice<br/>Gemini Live or GPT-Live"]
-    V <-->|"your words, briefings"| O["Orchestrator<br/>stateful, tool-calling"]
-    O <-->|"read screens, investigate,<br/>prompt, send keys"| H["herdr"]
-    H <--> W1["Claude Code"]
-    H <--> W2["Codex"]
-    H <--> W3["agy"]
-```
+Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No herdr yet? `sheepdog demo` runs three scripted agents you can talk to.
 
-The voice owns the conversation; it has two tools and no hands. The
-orchestrator does the work behind code rails. Design:
-[docs/dev/design-overview.md](docs/dev/design-overview.md).
+**iPhone app:** [TestFlight](https://testflight.apple.com/join/TESTFLIGHT_LINK), or [build it yourself](https://github.com/kccarlos/herdr-sheepdog-ios). It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
 
-## Safety
+**Away from home:** install [Tailscale](https://tailscale.com) on the computer and the phone, sign into the same account, then pair again. [remote access →](docs/remote-access.md)
 
-- **Approvals need your words.** A worker's approval prompt is answered only
-  on your own recorded words (or a tap) in that turn, with a key from the
-  prompt's own options. Code enforces it, not a prompt.
-- **Investigations are read-only, and the workers' own prompts stay on.**
-  Instructions reach an agent right after sheepdog echoes them, so never
-  point it at an agent started in a fully auto-approve mode
-  ([which flags to avoid](docs/dev/development.md#safety-details)).
-- **No TLS.** The daemon listens on loopback by default and refuses a
-  non-loopback bind without a token. Use your LAN or Tailscale, never the
-  open internet.
+Something wrong? Run `sheepdog doctor`; every problem prints its fix. [troubleshooting →](docs/troubleshooting.md)
 
-## How we measure
+## docs
 
-- **Four numbers on every report:** Understood, Done, Low effort and Safe,
-  from simulated workdays with several agents, through text, synthetic speech
-  and real herdr workers.
-- **A calibrated judge:** Claude Sonnet scores each segment (kappa 0.72
-  against 126 labelled pairs). A difference whose confidence interval spans
-  zero is not a result.
-- **Gated, with losses published:** letting the voice speak from briefings
-  lifted the tier-2 voice pass rate (scenarios without echo) from 51 % to 68 %; coming back to unanswered questions
-  raised "answered later" from 56 % to 100 %; the production orchestrator
-  (DeepSeek) scores 91 % segment Understood, Gemini 3.5 Flash 81 %. Index
-  with the rejected experiments: [docs/dev/eval/README.md](docs/dev/eval/README.md).
+[quick start](docs/quick-start.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
 
-## Links
+## thanks
 
-[Guide](docs/dev/development.md) · [Configuration](CONFIG.md) · [Design](docs/dev/design-overview.md) ·
-[Architecture](docs/dev/architecture.md) · [Evals](docs/dev/eval/README.md) · [iOS app](https://github.com/kccarlos/herdr-sheepdog-ios) ·
-[Changelog](CHANGELOG.md) · [License](LICENSE)
+If sheepdog helps you, a ⭐ helps others find it.
+
+## contributing
+
+Bug reports and ideas are welcome: [open an issue](https://github.com/kccarlos/herdr-sheepdog/issues/new/choose) (attach `sheepdog doctor --report`). Code changes: read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## agent instructions
+
+If you are an AI agent working on this repository, read [`AGENTS.md`](AGENTS.md) first.
+
+## license
+
+sheepdog is licensed under the [MIT License](LICENSE). Security reports: [SECURITY.md](SECURITY.md).
