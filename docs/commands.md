@@ -12,7 +12,7 @@
 | `sheepdog doctor` | One line per check with its fix: herdr, every key, the orchestrator's tool calling, the web port, bind and token, push, file permissions. Exit 1 on any FAIL. `--no-probe` spends no tokens. |
 | `sheepdog doctor --report` | A redacted diagnostic bundle for a bug report. `--out FILE` writes it (mode 0600); `--lines N` sets the log lines (default 200). |
 | `sheepdog pair` | The QR code the iPhone app scans. `--compact` for a small window, `--plain` for no colour. |
-| `sheepdog demo` | Three scripted agents, no herdr needed (needs `GEMINI_API_KEY`). `--port N`, `--no-open`. |
+| `sheepdog demo` | Three scripted agents, no herdr needed (needs the Gemini key: the one `sheepdog setup` saved, or `GEMINI_API_KEY`). `--port N`, `--no-open`. |
 
 ## Run
 
@@ -23,7 +23,7 @@
 | `sheepdog restart` | Stop, then start. |
 | `sheepdog status` | Running or not: pid, version, URL, models, herdr, phones, last error. `--json` for scripts. Exit 0 running, 3 not running, 1 error. |
 | `sheepdog logs` | The runtime log. `-f` follows, `-n N` sets the lines (default 100). |
-| `sheepdog open` | Open the voice page; `sheepdog open setup` and `sheepdog open debug` open the others. |
+| `sheepdog open` | Open the voice page; `sheepdog open setup` and `sheepdog open debug` open the others. Over SSH it opens nothing and prints the `ssh -N -L` line that reaches the page. |
 | `sheepdog serve` | Run the daemon in this terminal; Ctrl-C stops it. |
 
 ## Manage

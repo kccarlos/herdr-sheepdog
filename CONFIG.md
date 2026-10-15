@@ -89,9 +89,7 @@ so they have no `SHEEPDOG_*` override.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `state.path` | `SHEEPDOG_STATE_PATH` | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
-| `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
-| `~/.local/share/sheepdog/state.json` | JSON file the persisted state table is written to. It does not follow a changed `data_dir`: a second (scratch) daemon must set both. |
+| `state.path` | `SHEEPDOG_STATE_PATH` | `~/.local/share/sheepdog/state.json` | JSON file the persisted state table is written to. It does not follow a changed `data_dir`: a second (scratch) daemon must set both. |
 | `state.full_fsync` | `SHEEPDOG_STATE_FULL_FSYNC` | `false` | Turn on the hardware-durable fsync pass after a mutation (debounced to one flush per ~100ms burst, plus a final one on shutdown). Off by default: on macOS the durable path is `F_FULLFSYNC`, dramatically slower than the plain fsync used otherwise (see `internal/state`); turn it on only if the state table must survive a power loss, not just a process crash. |
 
 ## `[gemini]`

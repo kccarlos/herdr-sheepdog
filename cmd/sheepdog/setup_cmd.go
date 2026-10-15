@@ -156,9 +156,13 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 	fprintln(stdout, strings.Join([]string{
 		"Next:",
 		"  sheepdog start         start the daemon (if it is not running)",
-		"  sheepdog pair          the QR code for the iOS app (phone access needs web.bind; see the setup page)",
+		"  sheepdog pair          the QR code for the iOS app (needs phone access: run sheepdog setup again and answer y above)",
 		"  sheepdog open          the voice page, on this computer",
 	}, "\n"))
+	if !hasDisplay() {
+		fprintln(stdout, "")
+		fprintf(stdout, "No browser here? Talk from your own computer: ssh -N -L %[1]d:127.0.0.1:%[1]d <this host>, then open http://127.0.0.1:%[1]d/voice there.\n", l.cfg.Web.Port)
+	}
 	return 0
 }
 

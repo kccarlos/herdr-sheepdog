@@ -271,6 +271,9 @@ func TestOpen(t *testing.T) {
 	defer lock.Release()
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: base})
+	origDisplay := hasDisplay
+	hasDisplay = func() bool { return true }
+	defer func() { hasDisplay = origDisplay }()
 	if code, out, _ := runCLI("open", "--config", cfg); code != 0 || !strings.Contains(out, "opening "+base+"/voice") {
 		t.Errorf("voice: exit %d %q", code, out)
 	}
@@ -282,6 +285,12 @@ func TestOpen(t *testing.T) {
 	}
 	if strings.Join(opened, " ") != base+"/voice "+base+"/debug" {
 		t.Errorf("opened %q", opened)
+	}
+	// Over SSH it opens nothing and says how to reach the page.
+	hasDisplay = func() bool { return false }
+	opened = nil
+	if code, out, _ := runCLI("open", "--config", cfg); code != 0 || !strings.Contains(out, "ssh -N -L") || len(opened) != 0 {
+		t.Errorf("no display: exit %d %q opened %q", code, out, opened)
 	}
 }
 

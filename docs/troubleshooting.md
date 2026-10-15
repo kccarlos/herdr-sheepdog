@@ -12,12 +12,15 @@ you changed `web.port`.
 | You see | Cause | Fix |
 |---|---|---|
 | `plugin-fetch: no release found at …` | No published release for your machine yet. | Install Go and run the install again (it builds from source), or build from a checkout: `make install`. |
+| `plugin-fetch: no release to download and go is not on PATH. Install Go (…) and reinstall, or install a release by hand: …` | No release for your machine (Intel Mac, ARM Linux) or none published, and no Go. | Install Go from <https://go.dev/dl/> and run the install again, or download a release by hand ([quick-start.md](quick-start.md#other-ways-to-install)). |
 | `plugin-fetch: warning: … is not on your PATH` | `~/.local/bin` is not on PATH. | Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile, or run the linked path it prints. |
 | `plugin-fetch: … exists and is not a link; left it alone` | You already have a `sheepdog` file there. | Run `<plugin dir>/bin/sheepdog` directly, or remove the file and reinstall. |
 | `port 7777 is in use by another program, so sheepdog cannot listen on http://127.0.0.1:7777.` followed by `Find it with: lsof -nP -iTCP:7777 -sTCP:LISTEN` | Another program has the port. | Stop it, or set `web.port` in `~/.config/sheepdog/config.toml`. `sheepdog setup` then ends with `The setup page needs the daemon. Fix the above, or set up in the terminal: sheepdog setup --terminal`. |
 | `sheepdog is already running (pid N, http://127.0.0.1:7777)` | Not an error: one daemon at a time. | Use it: `sheepdog open`. `sheepdog restart` restarts it. |
 | `sheepdog is already running (http://…; no pid file: started by an older sheepdog or with another --data-dir)` | An older sheepdog holds the port and left no pid file. | `sheepdog status` shows `pid unknown`. `sheepdog stop` will not guess the pid (`a sheepdog is running at … but left no pid file`): Ctrl-C it where it was started, or find it with `lsof -nP -iTCP:7777 -sTCP:LISTEN`, then `sheepdog start`. |
 | `The running sheepdog (version …) is older and has no setup page.` | The daemon runs an old binary. | `sheepdog restart`. |
+| `sheepdog pair: the daemon listens on 127.0.0.1 only, so a phone cannot reach it: turn on phone access in step 4 of the setup page …` | Phone access is off (the default). | `sheepdog setup`, step 4 **Turn on phone access**, then `sheepdog pair`. |
+| `No browser here (SSH?): …` from `sheepdog open` | You are on SSH. | Run the printed `ssh -N -L …` on your own computer and open the URL there ([quick-start.md](quick-start.md#over-ssh-with-no-browser)). |
 | `The setup page only opens on the computer sheepdog runs on.` (HTTP 403) | You opened `/setup` from the LAN or Tailscale. | Open `http://127.0.0.1:7777/setup` on the computer. |
 | `sheepdog start: config: ~/.config/sheepdog/config.toml line 6, key brain.enabled: expected value but found "flase" instead` | A typo in the config. | Fix that line. Errors name the file, the line and the key; wrong types and invalid values read like `key web.port: wrong type: want an integer, got a string (in quotes)` and `key supervisor.chattiness: "loud" is not valid (want one of quiet, normal, chatty)`. |
 

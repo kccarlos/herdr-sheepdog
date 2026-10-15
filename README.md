@@ -16,8 +16,8 @@
   <a href="https://github.com/kccarlos/herdr-sheepdog/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kccarlos/herdr-sheepdog/ci.yml?branch=main&label=CI&labelColor=333333" alt="CI status" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-666666?labelColor=333333" alt="platform: macOS and Linux" />
   <a href="https://herdr.dev/plugins/"><img src="https://img.shields.io/badge/herdr-plugin-666666?labelColor=333333" alt="herdr plugin" /></a>
-  <!-- TESTFLIGHT_LINK: replace the placeholder URL in this line and in docs/iphone-app.md once the public link exists. -->
-  <a href="https://testflight.apple.com/join/TESTFLIGHT_LINK"><img src="https://img.shields.io/badge/iOS-TestFlight-666666?logo=apple&logoColor=white&labelColor=333333" alt="iOS TestFlight" /></a>
+  <!-- TESTFLIGHT_LINK: when the public link exists, wrap this badge in <a href="https://testflight.apple.com/join/..."> and restore the TestFlight link in "iPhone app" below and in docs/iphone-app.md. -->
+  <img src="https://img.shields.io/badge/iOS-TestFlight%20soon-666666?logo=apple&logoColor=white&labelColor=333333" alt="iOS TestFlight: public link coming soon" />
 </p>
 
 ---
@@ -42,20 +42,19 @@
 
 ## install
 
-**You need:** [herdr](https://github.com/herdrdev/herdr), macOS or Linux, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)).
+**You need:** [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The install downloads a prebuilt binary for Apple silicon Macs and x86-64 Linux; any other machine builds from source and needs [Go](https://go.dev/dl/).
 
 ```bash
 herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
-sheepdog setup                                  # 2. the browser wizard: key, checks, start at login
-sheepdog pair                                   # 3. show the QR code for your phone (also in the wizard)
+sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
 ```
 
 <!-- install.gif: another agent re-records it; keep this slot. -->
 <p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 
-Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No herdr yet? `sheepdog demo` runs three scripted agents you can talk to.
+Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
 
-**iPhone app:** [TestFlight](https://testflight.apple.com/join/TESTFLIGHT_LINK), or [build it yourself](https://github.com/kccarlos/herdr-sheepdog-ios). It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
+**iPhone app:** the public TestFlight link is coming; until then [build it yourself](https://github.com/kccarlos/herdr-sheepdog-ios). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
 
 **Away from home:** install [Tailscale](https://tailscale.com) on the computer and the phone, sign into the same account, then pair again. [remote access →](docs/remote-access.md)
 

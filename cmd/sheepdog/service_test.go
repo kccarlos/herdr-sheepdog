@@ -57,7 +57,7 @@ func TestServiceInstallStatusUninstall(t *testing.T) {
 	if code := run(context.Background(), append([]string{"service", "install"}, common...), &out, &errb); code != 0 {
 		t.Fatalf("install exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "does not exist yet (run sheepdog init)") {
+	if !strings.Contains(errb.String(), "does not exist yet (run sheepdog setup)") {
 		t.Errorf("no warning about the missing env file: %q", errb.String())
 	}
 	if len(*calls) == 0 {

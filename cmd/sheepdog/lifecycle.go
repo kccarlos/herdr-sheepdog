@@ -423,6 +423,10 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintln(stderr, "This version of sheepdog has no setup page yet. Run `sheepdog init` in a terminal to set it up.")
 		return 1
 	}
+	if !hasDisplay() {
+		fprintf(stdout, "No browser here (SSH?): %s is on this computer. From your own computer: ssh -N -L %[2]d:127.0.0.1:%[2]d <this host>, then open http://127.0.0.1:%[2]d%[3]s there.\n", url, l.cfg.Web.Port, path)
+		return 0
+	}
 	fprintf(stdout, "opening %s\n", url)
 	if l.cfg.Web.Token != "" && page != "setup" {
 		fprintln(stdout, "The page asks once for the web token: web.token in your config, or SHEEPDOG_WEB_TOKEN in "+config.DefaultEnvPath()+".")

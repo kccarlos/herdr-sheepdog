@@ -187,7 +187,7 @@ func keyFailure(name, service, keyVar, consoleURL string, err error) Result {
 func CheckGeminiKey(ctx context.Context, ep Endpoints, key string) Result {
 	const name, console = "gemini key", "https://aistudio.google.com/apikey"
 	if key == "" {
-		return Result{Name: name, Status: Fail, Detail: "GEMINI_API_KEY is not set", Fix: "create a free key at " + console + " and run sheepdog init"}
+		return Result{Name: name, Status: Fail, Detail: "GEMINI_API_KEY is not set", Fix: "create a free key at " + console + " and run sheepdog setup"}
 	}
 	var out struct {
 		Models []struct {
@@ -242,7 +242,7 @@ const probeTool = "report_ready"
 func CheckCompat(ctx context.Context, ep Endpoints, c Compat, probe bool) []Result {
 	name := c.Name + " key"
 	if c.APIKey == "" && !c.NoKey {
-		return []Result{{Name: name, Status: Fail, Detail: c.KeyEnv + " is not set", Fix: "put the key in " + c.KeyEnv + " (sheepdog init writes it)"}}
+		return []Result{{Name: name, Status: Fail, Detail: c.KeyEnv + " is not set", Fix: "put the key in " + c.KeyEnv + " (sheepdog setup writes it)"}}
 	}
 	m, err := brain.NewOpenAICompatModel(brain.OpenAICompatConfig{Provider: c.Name, BaseURL: c.BaseURL, APIKey: c.APIKey, NoKey: c.NoKey, Thinking: c.Thinking, HTTPClient: ep.client()})
 	if err != nil {
@@ -409,7 +409,7 @@ func CheckBindToken(w config.Web) Result {
 	case w.IsLoopback():
 		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (the phone cannot connect; set web.bind to a LAN or Tailscale address for it)"}
 	case w.Token == "":
-		return Result{Name: name, Status: Fail, Detail: "bind " + w.Bind + " is reachable from the network but web.token is empty (serve refuses to start)", Fix: "run sheepdog init to generate a token, or set SHEEPDOG_WEB_TOKEN"}
+		return Result{Name: name, Status: Fail, Detail: "bind " + w.Bind + " is reachable from the network but web.token is empty (serve refuses to start)", Fix: "run sheepdog setup to generate a token, or set SHEEPDOG_WEB_TOKEN"}
 	case len(w.Token) < MinTokenLen:
 		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("bind %s with a short token (%d characters)", w.Bind, len(w.Token)), Fix: fmt.Sprintf("use a random token of at least %d characters (re-pair the phone after changing it)", MinTokenLen)}
 	}
@@ -461,7 +461,7 @@ func CheckVoice(cfg config.Config) Result {
 		have = append(have, "openai")
 	}
 	if (cfg.Voice.Provider == "gemini" && !geminiOK) || (cfg.Voice.Provider == "openai" && !openaiOK) {
-		fix := "set GEMINI_API_KEY (sheepdog init)"
+		fix := "set GEMINI_API_KEY (sheepdog setup)"
 		switch {
 		case cfg.Voice.Provider == "openai":
 			fix = "set OPENAI_API_KEY, or voice.provider = \"gemini\""

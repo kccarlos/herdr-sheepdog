@@ -49,7 +49,7 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 			if cfg.Brain.Provider == c.Name {
 				st = Fail
 			}
-			out = append(out, Result{Name: c.Name + " key", Status: st, Detail: c.APIKeyEnv + " is not set", Fix: "put the key in " + c.APIKeyEnv + " (sheepdog init writes it)"})
+			out = append(out, Result{Name: c.Name + " key", Status: st, Detail: c.APIKeyEnv + " is not set", Fix: "put the key in " + c.APIKeyEnv + " (sheepdog setup writes it)"})
 			continue
 		}
 		out = append(out, CheckCompat(ctx, o.Endpoints, Compat{Name: c.Name, BaseURL: c.BaseURL, APIKey: c.APIKey, KeyEnv: c.APIKeyEnv, NoKey: c.KeyOptional(), Model: c.Model}, o.Probe)...)
@@ -122,7 +122,7 @@ func checkOrchestrator(cfg config.Config) Result {
 		}
 	}
 	if missing != "" {
-		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("brain.provider %s has no %s: the orchestrator would be off", p, missing), Fix: "set " + missing + " (sheepdog init), or pick another brain.provider"}
+		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("brain.provider %s has no %s: the orchestrator would be off", p, missing), Fix: "set " + missing + " (sheepdog setup), or pick another brain.provider"}
 	}
 	return Result{Name: name, Status: OK, Detail: fmt.Sprintf("starts on %s/%s", p, cfg.Brain.Model)}
 }
