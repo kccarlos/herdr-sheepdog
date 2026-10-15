@@ -212,6 +212,10 @@ is kept, is in [`CONFIG.md`](../CONFIG.md) "What sheepdog stores".
 | `sheepdog serve` | The daemon in the foreground: herdr watcher, supervisor, orchestrator, voice session, web server (`/voice`, `/debug`, `/ws`, `/events`, `/api/*`). |
 | `sheepdog service install` \| `uninstall` \| `status` | Run the daemon at login (launchd / systemd --user). |
 | `sheepdog config show` \| `init` | Print the effective config (redacted) \| scaffold `config.toml`. |
+| `sheepdog doctor --report [--out FILE]` | A diagnostic bundle for a GitHub issue: versions, OS, config, doctor, status and the last log lines, with every secret, key and token redacted. |
+| `sheepdog update` | Check the latest GitHub release and print how to upgrade for your install (herdr plugin, Homebrew, source or binary). It changes nothing. |
+| `sheepdog uninstall [--yes\|--keep-data]` | Stop the daemon, remove the login service and the `~/.local/bin/sheepdog` link to it, ask before deleting config and data, then print `herdr plugin uninstall kccarlos.sheepdog`. |
+| `sheepdog data clear [--events\|--all]` | Delete the event log and transcripts now, or all data (asks first). |
 
 The developer commands are under `sheepdog dev` (`sheepdog dev --help`);
 each also still runs under its older top-level name (`sheepdog eval` =

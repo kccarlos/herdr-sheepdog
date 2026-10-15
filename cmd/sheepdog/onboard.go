@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -36,6 +37,11 @@ func printDoctorUsage(w io.Writer) {
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH   env file (default ./.env, else ~/.config/sheepdog/.env, as serve)")
 	fprintln(w, "  --no-probe        skip the tool-calling probe (no tokens spent)")
+	fprintln(w, "  --report          print a diagnostic bundle for a bug report instead: versions,")
+	fprintln(w, "                    OS, config, doctor, status and the last log lines, with every")
+	fprintln(w, "                    secret, key and token redacted")
+	fprintln(w, "  --out FILE        with --report: write it to FILE (mode 0600) instead of stdout")
+	fprintln(w, "  --lines N         with --report: log lines to include (default 200)")
 }
 
 // runDoctor implements `sheepdog doctor`.
@@ -46,6 +52,9 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	configPath := fs.String("config", "", "config file")
 	envFile := fs.String("env-file", "", "env file")
 	noProbe := fs.Bool("no-probe", false, "skip the tool-calling probe")
+	report := fs.Bool("report", false, "diagnostic bundle")
+	out := fs.String("out", "", "report file")
+	lines := fs.Int("lines", 200, "log lines in the report")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -64,6 +73,22 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		cfgPath = config.DefaultPath()
 	}
 	cfg, err := config.Load(cfgPath)
+	if *report {
+		if err != nil {
+			cfg = config.Default()
+		}
+		text := buildReport(ctx, reportOptions{configPath: cfgPath, envPath: envPath, cfg: cfg, loadErr: err, lines: *lines, now: time.Now()})
+		if *out == "" {
+			fprintln(stdout, text)
+			return 0
+		}
+		if werr := os.WriteFile(*out, []byte(text+"\n"), 0o600); werr != nil {
+			fprintf(stderr, "sheepdog doctor: %v\n", werr)
+			return 1
+		}
+		fprintf(stdout, "wrote %s: review it, then paste it into a GitHub issue (https://github.com/%s/issues/new)\n", *out, releaseRepo)
+		return 0
+	}
 	if err != nil {
 		fprintf(stdout, "%s\n", onboard.Result{Name: "config", Status: onboard.Fail, Detail: err.Error(), Fix: "fix the file, or move it away and run sheepdog init"}.Line())
 		return 1

@@ -32,6 +32,8 @@ const minSecretLen = 6
 var shapes = []*regexp.Regexp{
 	// Google API keys (AI Studio, Vertex express).
 	regexp.MustCompile(`()AIza[0-9A-Za-z_\-]{20,}`),
+	// A key a provider echoed back half-masked (sk-abcd****1234).
+	regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]*\*{3,}[0-9A-Za-z_\-]*`),
 	// OpenAI / DeepSeek / OpenRouter / Anthropic style keys.
 	regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]{12,}`),
 	// Authorization headers.
