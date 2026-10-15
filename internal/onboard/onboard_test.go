@@ -192,22 +192,45 @@ func TestCheckBindTokenPushVoice(t *testing.T) {
 		t.Errorf("long: %+v", r)
 	}
 
-	if r := CheckPush(config.APNs{}); r.Status != Skip {
-		t.Errorf("none: %+v", r)
+	ctx := context.Background()
+	if r := CheckPush(ctx, Endpoints{}, config.Push{Mode: config.PushModeOff}); r.Status != Skip {
+		t.Errorf("off: %+v", r)
 	}
-	if r := CheckPush(config.APNs{KeyID: "K"}); r.Status != Fail {
+	if r := CheckPush(ctx, Endpoints{}, config.Push{APNs: config.APNs{KeyID: "K"}, Relay: config.PushRelay{URL: "https://relay.example"}}); r.Status != Fail {
 		t.Errorf("partial: %+v", r)
+	}
+	if r := CheckPush(ctx, Endpoints{}, config.Push{Mode: config.PushModeAPNs}); r.Status != Fail {
+		t.Errorf("apns, empty: %+v", r)
+	}
+	// The shared relay's URL before its first deploy is a placeholder.
+	if r := CheckPush(ctx, Endpoints{}, config.Push{Relay: config.PushRelay{URL: "https://sheepdog-relay.REPLACE.workers.dev"}}); r.Status != Warn || !strings.Contains(r.Detail, "not deployed") {
+		t.Errorf("placeholder relay: %+v", r)
+	}
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/health" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"version":"1.0.0"}`))
+	}))
+	defer relay.Close()
+	if r := CheckPush(ctx, Endpoints{HTTP: relay.Client()}, config.Push{Relay: config.PushRelay{URL: relay.URL}}); r.Status != OK || !strings.Contains(r.Detail, "end-to-end") {
+		t.Errorf("relay up: %+v", r)
+	}
+	if r := CheckPush(ctx, Endpoints{HTTP: relay.Client()}, config.Push{Relay: config.PushRelay{URL: relay.URL + "/nope"}}); r.Status != Fail {
+		t.Errorf("relay wrong: %+v", r)
 	}
 	p8 := filepath.Join(t.TempDir(), "AuthKey.p8")
 	if err := os.WriteFile(p8, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := config.APNs{KeyPath: p8, KeyID: "K", TeamID: "T", Topic: "com.example.app"}
-	if r := CheckPush(a); r.Status != Warn {
+	// A complete [push.apns] with the mode unset is the apns mode.
+	a := config.Push{APNs: config.APNs{KeyPath: p8, KeyID: "K", TeamID: "T", Topic: "com.example.app"}}
+	if r := CheckPush(ctx, Endpoints{}, a); r.Status != Warn {
 		t.Errorf("readable: %+v", r)
 	}
 	_ = os.Chmod(p8, 0o600)
-	if r := CheckPush(a); r.Status != OK {
+	if r := CheckPush(ctx, Endpoints{}, a); r.Status != OK || !strings.Contains(r.Detail, "apns") {
 		t.Errorf("ok: %+v", r)
 	}
 
@@ -268,6 +291,7 @@ func TestDoctor(t *testing.T) {
 	cfg.Gemini.APIKeys = []string{goodKey}
 	cfg.Brain.OpenAICompat = []config.OpenAICompat{{Name: "openrouter", BaseURL: f.srv.URL + "/v1", APIKeyEnv: "OPENROUTER_API_KEY", Model: "x/y", APIKey: "good"}, {Name: "groq", BaseURL: "https://api.groq.com/openai/v1", APIKeyEnv: "GROQ_API_KEY", Model: "m"}}
 	cfg.Brain.Provider = "openrouter"
+	cfg.Push.Mode = config.PushModeOff // the relay check has its own test; no network here
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	cfg.Web.Port = l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()

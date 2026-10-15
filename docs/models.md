@@ -62,7 +62,8 @@ Skip it with `sheepdog doctor --no-probe`.
 |---|---|---|
 | Voice (Google or OpenAI) | Your microphone audio, and the briefings the daemon writes for the voice | While a voice session is open |
 | Orchestrator (Google, DeepSeek or your endpoint) | What you said as text, the agents' screens, session records and command output the orchestrator reads | On each of your questions and each agent event |
-| Nobody else | | sheepdog has no server and no telemetry |
+| sheepdog's push relay, then Apple | Phone notifications, end-to-end encrypted: the relay sees the phone's push token, the timing and the kind, never the content | When an agent needs you and a phone is registered (`push.mode`, [iphone-app.md](iphone-app.md)) |
+| Nobody else | | No telemetry |
 
 A local Ollama orchestrator keeps agent screens on your machine; the voice
 still goes to Google or OpenAI. Details and deletion: [privacy.md](privacy.md).

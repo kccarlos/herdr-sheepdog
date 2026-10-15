@@ -61,13 +61,33 @@ When an agent needs you, the daemon sends a time-sensitive notification through
 Apple's push service, even if the app is closed. **Approve** and **Decline**
 work from it (both need your passcode); tapping it opens that agent.
 
-This needs an Apple push key configured on the daemon (`[push.apns]`, see
-[dev/push.md](dev/push.md)), and Apple only accepts a push key from the team
-that owns the app. The daemon's `sheepdog doctor` line `push` says
-`push not configured (optional…)` when it is off. Without push, the app still
-works while it is open and connected, with the Live Activity and the earbud
-remote, but nothing arrives while it is closed. If you build the app under
-your own Apple team, configure your own key.
+Apple only delivers a notification sent with the push key of the team that
+publishes the app, so there are three ways to set this up (`push.mode` in
+[CONFIG.md](../CONFIG.md)):
+
+1. **The shared relay (the default, nothing to set up).** The daemon sends
+   each notification through sheepdog's push relay, which holds the App
+   Store app's key. The content is end-to-end encrypted: the daemon gives
+   your phone its own key when the phone registers, and encrypts every
+   notification with it. The relay sees your phone's push token, when a
+   notification is sent, its size and its kind (approval, blocked, done),
+   never the agent, the text or the options
+   ([privacy.md](privacy.md), "Phone notifications").
+2. **Your own key, with an app you build yourself.** Build the app under
+   your own Apple team, create an APNs key, put it in `[push.apns]` and the
+   daemon talks to Apple directly; no relay is involved. With all four
+   `[push.apns]` values set and `push.mode` unset, this is what the daemon
+   uses.
+3. **Your own relay.** Deploy `relay/` to your own Cloudflare account with
+   your own Apple key and point `push.relay.url` at it
+   ([relay/README.md](../relay/README.md)). This keeps a self-built app's
+   key off your computer, or serves several computers from one key.
+
+`sheepdog doctor`'s `push` line shows the mode and whether the relay
+answers. `push.mode = "off"` turns notifications off. Without them the app
+still works while it is open and connected, with the Live Activity and the
+earbud remote, but nothing arrives while it is closed. The architecture is
+in [dev/push.md](dev/push.md).
 
 ## Troubleshooting
 

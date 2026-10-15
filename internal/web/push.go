@@ -10,7 +10,7 @@ import (
 // PushService is the device registry and status of the phone
 // notification sender (*push.Sender).
 type PushService interface {
-	Register(token, environment, name string) error
+	RegisterDevice(push.Registration) (push.Device, error)
 	Unregister(token string) error
 	Status() push.Status
 }
@@ -18,11 +18,22 @@ type PushService interface {
 // pushRegisterRequest is the body of POST and DELETE /api/push/register.
 type pushRegisterRequest struct {
 	Token       string `json:"token"`
+	RelayToken  string `json:"relay_token"`
 	Environment string `json:"environment"`
 	Device      string `json:"device"`
 }
 
-// handlePushRegister stores the iOS app's device token (idempotent).
+// pushRegisterResponse answers POST /api/push/register: the phone's
+// end-to-end content key, which the app keeps for its notification
+// service extension (docs/dev/push.md "End-to-end encryption").
+type pushRegisterResponse struct {
+	OK         bool   `json:"ok"`
+	ContentKey string `json:"content_key"`
+	Encryption string `json:"encryption"`
+}
+
+// handlePushRegister stores the iOS app's device token or relay token
+// (idempotent) and answers with the phone's content key.
 func (s *Server) handlePushRegister(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Push == nil {
 		writeError(w, http.StatusServiceUnavailable, "push not available")
@@ -33,11 +44,12 @@ func (s *Server) handlePushRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if err := s.deps.Push.Register(req.Token, req.Environment, req.Device); err != nil {
+	dev, err := s.deps.Push.RegisterDevice(push.Registration{Token: req.Token, RelayToken: req.RelayToken, Environment: req.Environment, Name: req.Device})
+	if err != nil {
 		writePushError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, pushRegisterResponse{OK: true, ContentKey: dev.ContentKey, Encryption: "aes-256-gcm"})
 }
 
 // handlePushUnregister removes a device token; an unknown one is fine.
@@ -51,7 +63,11 @@ func (s *Server) handlePushUnregister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if err := s.deps.Push.Unregister(req.Token); err != nil {
+	tok := req.Token
+	if tok == "" {
+		tok = req.RelayToken
+	}
+	if err := s.deps.Push.Unregister(tok); err != nil {
 		writePushError(w, err)
 		return
 	}
@@ -69,7 +85,7 @@ func (s *Server) handlePushStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func writePushError(w http.ResponseWriter, err error) {
-	if errors.Is(err, push.ErrBadToken) || errors.Is(err, push.ErrBadEnvironment) {
+	if errors.Is(err, push.ErrBadToken) || errors.Is(err, push.ErrBadRelayToken) || errors.Is(err, push.ErrBadEnvironment) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
