@@ -31,7 +31,7 @@ type Result struct {
 	// SkippedChecks names the checks the case sets that this run could
 	// not apply (offline: the live-only ones about phrasing and
 	// judgement), so a pass never hides what was not checked
-	// (docs/iteration-2.md WP0b).
+	// (docs/dev/iteration-2.md WP0b).
 	SkippedChecks []string
 	// Pending is the case's pending_check: what it should assert but the
 	// harness cannot yet.

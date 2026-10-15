@@ -229,7 +229,7 @@
           }
         ]
       },
-      "note": "Tier-2 measurement for docs/research/live-resume-context-2026-10-04.md: facts briefed before one forced Gemini resume, asked about after it. Read the voice.resume_context event and whether the last answer came from the voice (no voice.tool_call to_supervisor after the resume) or from the brain.",
+      "note": "Tier-2 measurement for docs/dev/research/live-resume-context-2026-10-04.md: facts briefed before one forced Gemini resume, asked about after it. Read the voice.resume_context event and whether the last answer came from the voice (no voice.tool_call to_supervisor after the resume) or from the brain.",
       "seed": 303
     },
     {
@@ -304,7 +304,7 @@
           }
         ]
       },
-      "note": "Tier-2 check of the CEO's option 1 (docs/handover-2026-10-04.md): facts told before two forced recycles, with a turn on the resumed connection between them, asked about after both. Without the rail the second resume would restore only the resumed connection's own content (docs/research/live-resume-context-2026-10-04.md). Read whether the last answer came from the voice (no voice.tool_call to_supervisor after the second recycle) or from the brain.",
+      "note": "Tier-2 check of the CEO's option 1 (docs/dev/handover-2026-10-04.md): facts told before two forced recycles, with a turn on the resumed connection between them, asked about after both. Without the rail the second resume would restore only the resumed connection's own content (docs/dev/research/live-resume-context-2026-10-04.md). Read whether the last answer came from the voice (no voice.tool_call to_supervisor after the second recycle) or from the brain.",
       "seed": 304
     }
   ]

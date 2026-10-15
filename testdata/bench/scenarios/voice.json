@@ -95,7 +95,7 @@
       "id": "echo-instruct",
       "category": "echo",
       "from_sim": "j3-instruction-notify",
-      "note": "The phone's speaker leaks into the mic (-18 dB, 120 ms): a phone without working echo cancellation (a compliant handset leaves 40 dB or more, which never opens the capture gate; docs/research/echo-2026-10-03.md).",
+      "note": "The phone's speaker leaks into the mic (-18 dB, 120 ms): a phone without working echo cancellation (a compliant handset leaves 40 dB or more, which never opens the capture gate; docs/dev/research/echo-2026-10-03.md).",
       "audio": {
         "echo": {
           "delay_ms": 120,

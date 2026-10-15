@@ -13,7 +13,7 @@ import (
 
 // GET /api/conversation: the conversation between the user and the
 // voice, rebuilt server-side from the event log across day files and
-// restarts (docs/ws-contract.md "History and resume"), newest last and
+// restarts (docs/dev/ws-contract.md "History and resume"), newest last and
 // paged backwards by event id. The merging rules are
 // web/debug/conversation.js's, for the kinds a chat view shows:
 //
@@ -362,7 +362,7 @@ type conversationResetRequest struct {
 var conversationResetVias = map[string]bool{"app": true, "debug": true, "voice_page": true}
 
 // handleConversationReset resets the orchestrator's transcript window and the
-// voice session's memory ("New conversation", docs/roles.md): body
+// voice session's memory ("New conversation", docs/dev/roles.md): body
 // {"via":"app"|"debug"|"voice_page"} → {"ok":true,"reset_id":"…",
 // "at":"…"}. Logs conversation.reset (supervisor.ResetConversation);
 // GET /api/conversation shows a "New conversation" divider at this

@@ -52,7 +52,7 @@ notifications, a Live Activity while you talk, earbud remote controls.
 **Try it without herdr:** `GEMINI_API_KEY=… sheepdog demo` runs three
 scripted agents you can talk to in the browser, and the iOS app has a demo
 mode that needs no daemon and no key. By-hand install and everything else:
-[docs/guide.md](docs/guide.md).
+[docs/dev/development.md](docs/dev/development.md).
 
 <table>
   <tr>
@@ -91,7 +91,7 @@ flowchart LR
 
 The voice owns the conversation; it has two tools and no hands. The
 orchestrator does the work behind code rails. Design:
-[docs/design-overview.md](docs/design-overview.md).
+[docs/dev/design-overview.md](docs/dev/design-overview.md).
 
 ## Safety
 
@@ -101,7 +101,7 @@ orchestrator does the work behind code rails. Design:
 - **Investigations are read-only, and the workers' own prompts stay on.**
   Instructions reach an agent right after sheepdog echoes them, so never
   point it at an agent started in a fully auto-approve mode
-  ([which flags to avoid](docs/guide.md#safety-details)).
+  ([which flags to avoid](docs/dev/development.md#safety-details)).
 - **No TLS.** The daemon listens on loopback by default and refuses a
   non-loopback bind without a token. Use your LAN or Tailscale, never the
   open internet.
@@ -118,10 +118,10 @@ orchestrator does the work behind code rails. Design:
   lifted the tier-2 voice pass rate (scenarios without echo) from 51 % to 68 %; coming back to unanswered questions
   raised "answered later" from 56 % to 100 %; the production orchestrator
   (DeepSeek) scores 91 % segment Understood, Gemini 3.5 Flash 81 %. Index
-  with the rejected experiments: [docs/eval/README.md](docs/eval/README.md).
+  with the rejected experiments: [docs/dev/eval/README.md](docs/dev/eval/README.md).
 
 ## Links
 
-[Guide](docs/guide.md) · [Configuration](CONFIG.md) · [Design](docs/design-overview.md) ·
-[Architecture](docs/architecture.md) · [Evals](docs/eval/README.md) · [iOS app](https://github.com/kccarlos/herdr-sheepdog-ios) ·
+[Guide](docs/dev/development.md) · [Configuration](CONFIG.md) · [Design](docs/dev/design-overview.md) ·
+[Architecture](docs/dev/architecture.md) · [Evals](docs/dev/eval/README.md) · [iOS app](https://github.com/kccarlos/herdr-sheepdog-ios) ·
 [Changelog](CHANGELOG.md) · [License](LICENSE)

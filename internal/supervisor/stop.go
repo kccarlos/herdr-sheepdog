@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The stop procedure (docs/roles.md "Stop"). "Stop" means something
+// The stop procedure (docs/dev/roles.md "Stop"). "Stop" means something
 // different per phase and the daemon knows the phase from state it
 // already has, so no model decides *what* to stop: the phases below are
 // resolved in order, the first that applies is carried out, and the

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const calibItems = "../../docs/eval/calibration/2026-10-05/items.json"
+const calibItems = "../../docs/dev/eval/calibration/2026-10-05/items.json"
 
 // The calibration set loads, and its rubric is the production rubric
 // (CalibRubric), so the user labels exactly what the judge is asked.

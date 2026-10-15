@@ -255,7 +255,7 @@ func TestParsePromptDescribedListNotAPrompt(t *testing.T) {
 	}
 }
 
-// AskUserQuestion's own rows are not answers (docs/history/bench-2026-10-03.md
+// AskUserQuestion's own rows are not answers (docs/dev/history/bench-2026-10-03.md
 // #2): "Type something." is kept for the rail but marked Meta and left out
 // of Answers (the phone card, the spoken choices, the fast yes/no);
 // "Chat about this" is dropped altogether, with or without the rule above
@@ -301,7 +301,7 @@ func TestParsePromptMetaOptions(t *testing.T) {
 	}
 }
 
-// docs/eval/eval-campaign-2026-10-03.md H3: the block template read the raw
+// docs/dev/eval/eval-campaign-2026-10-03.md H3: the block template read the raw
 // command aloud ("bench-codex asks to run go test -race./...."). Only the
 // command's plain leading words are spoken; the full command stays in
 // Prompt.Command.

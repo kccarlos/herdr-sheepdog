@@ -2,7 +2,7 @@ package scorecard
 
 import "github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 
-// DropReport is docs/iteration-2.md's "brain-line drop rate
+// DropReport is docs/dev/iteration-2.md's "brain-line drop rate
 // (brain.push_late added:false, split by needs_user)", plus
 // brain.fallback counted by reason (the turns that never produced a line
 // at all).

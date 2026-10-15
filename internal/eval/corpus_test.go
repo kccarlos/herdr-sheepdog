@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 )
 
-// corpusFiles are the L0 sets `make eval` runs offline (docs/iteration-2.md
+// corpusFiles are the L0 sets `make eval` runs offline (docs/dev/iteration-2.md
 // WP0b), besides svp.jsonl, which TestRunSVPOffline covers.
 func corpusFiles(t *testing.T) []string {
 	t.Helper()
@@ -26,7 +26,7 @@ func corpusFiles(t *testing.T) []string {
 // regression, extracted and expanded case runs through the orchestrator with the
 // scripted model, and a regression that pins its baseline must still
 // catch the logged failure. The corpus must stay fast enough to run on
-// every change (docs/iteration-2.md: hundreds of cases, free).
+// every change (docs/dev/iteration-2.md: hundreds of cases, free).
 func TestRunCorpusOffline(t *testing.T) {
 	start := time.Now()
 	total := 0
@@ -79,7 +79,7 @@ func TestRegressionsCatchLoggedFailures(t *testing.T) {
 		"finish-line-needs-user-spoken": false,
 		"status-needs-you-first":        true,
 		"detail-question-not-no-change": true,
-		// docs/history/dive-deep.md WP8a/WP8b: the logged turns never read the
+		// docs/dev/history/dive-deep.md WP8a/WP8b: the logged turns never read the
 		// worker's session.
 		"detail-what-are-the-seven-glitches": true,
 		"detail-what-exactly-did-it-say":     true,

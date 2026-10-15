@@ -4,7 +4,7 @@
 // daemon's /ws exactly like a client (16 kHz PCM16 in 40 ms frames at
 // real-time pace, with the same silence-gate messages the apps send),
 // records every server message and the /events stream, and checks the
-// scenario's expectations (docs/history/audio-e2e-results.md).
+// scenario's expectations (docs/dev/history/audio-e2e-results.md).
 package audioe2e
 
 import (

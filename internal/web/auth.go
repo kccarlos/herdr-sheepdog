@@ -59,7 +59,7 @@ func constEqual(a, b string) bool {
 }
 
 // HelloResponse is the body of GET /api/hello: public, so a client (a
-// phone app, docs/ws-contract.md "Auth") can check it found a sheepdog
+// phone app, docs/dev/ws-contract.md "Auth") can check it found a sheepdog
 // daemon, whether it needs a token, and the audio format /ws expects
 // before it connects.
 type HelloResponse struct {
@@ -78,14 +78,14 @@ type HelloResponse struct {
 	VoiceProvider string `json:"voice_provider"`
 	VoiceModel    string `json:"voice_model"`
 	// Protocol is the /ws protocol this daemon speaks and MinProtocol
-	// the oldest client protocol it serves (docs/ws-contract.md
+	// the oldest client protocol it serves (docs/dev/ws-contract.md
 	// "Protocol version and handshake"). Version is the binary's
 	// version; the two ship and move separately.
 	Protocol    int `json:"protocol"`
 	MinProtocol int `json:"min_protocol"`
 }
 
-// HelloAudio is the /ws audio contract (docs/ws-contract.md): what a
+// HelloAudio is the /ws audio contract (docs/dev/ws-contract.md): what a
 // client must send and should expect back.
 type HelloAudio struct {
 	InHz   int    `json:"in_hz"`
@@ -107,7 +107,7 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 }
 
 // LoginRequest is the body of POST /api/login: the token typed once into
-// the /voice or /debug prompt (docs/ws-contract.md "Auth").
+// the /voice or /debug prompt (docs/dev/ws-contract.md "Auth").
 type LoginRequest struct {
 	Token string `json:"token"`
 }

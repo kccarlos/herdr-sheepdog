@@ -4,7 +4,7 @@
 // model and the real orchestrator over a mock herdr whose workers follow the
 // eval sim's scripted worlds (internal/bench/world); an LLM plays the
 // user, hearing the bot through the voice model's output transcription,
-// and the eval judge grades the call (docs/bench/README.md).
+// and the eval judge grades the call (docs/dev/bench/README.md).
 package bench
 
 import (

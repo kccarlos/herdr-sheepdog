@@ -38,7 +38,7 @@ const (
 // DefaultJudgeKind is the judge backend when neither --judge nor
 // SHEEPDOG_JUDGE says otherwise: Claude Sonnet through the Claude Code
 // CLI (claudecli.go), the winner of the 2026-10-06 bake-off
-// (docs/eval/calibration/README.md). Flash-Lite stays selectable with
+// (docs/dev/eval/calibration/README.md). Flash-Lite stays selectable with
 // --judge vertex.
 const DefaultJudgeKind = BackendClaude
 
@@ -139,7 +139,7 @@ var Prices = map[string]Price{
 	"gemini-3.1-pro-preview": {In: 2.00, Out: 12.00},
 	// The Claude judge runs through the Claude Code CLI on the user's
 	// subscription: no API spend (its list-price equivalent is in
-	// docs/eval/calibration/README.md).
+	// docs/dev/eval/calibration/README.md).
 	DefaultClaudeModel: {},
 	"deepseek-flash":   {In: 0.30, Out: 0.60},
 	"deepseek-chat":    {In: 0.30, Out: 0.60},

@@ -216,7 +216,7 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 // TestInjectScreenEndpoint: /api/inject/screen swaps a synthetic pane's
 // text without a transition — no new pending action, no push — the mock
 // counterpart of a worker showing a new prompt with herdr's own status
-// report unchanged (docs/roles.md "blocked -> blocked is a block").
+// report unchanged (docs/dev/roles.md "blocked -> blocked is a block").
 func TestInjectScreenEndpoint(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil)

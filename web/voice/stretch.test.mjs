@@ -1,7 +1,7 @@
 // The adaptive time-stretch (audio-util.js Wsola, stretchRate, slewRate,
 // Player.setPolicy): pitch preserved, duration scaled, no clicks at frame
 // joins, exact at rate 1, and the shared rate policy table
-// (docs/ws-contract.md "Playback jitter buffer"; the iOS app matches it).
+// (docs/dev/ws-contract.md "Playback jitter buffer"; the iOS app matches it).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

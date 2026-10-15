@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The /debug Context tab's record of this session (docs/architecture.md
+// The /debug Context tab's record of this session (docs/dev/architecture.md
 // "Context capture"). Gemini Live keeps the conversation on the server
 // and it cannot be read back, so the voice context is reconstructed from
 // what the daemon sent: every connection is wrapped in a recConn that

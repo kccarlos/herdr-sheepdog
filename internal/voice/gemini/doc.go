@@ -1,5 +1,5 @@
 // Package gemini implements voice.Session for the Gemini Live API (plan
-// §3.7, §6; field names verified in docs/gemini-live-notes.md).
+// §3.7, §6; field names verified in docs/dev/gemini-live-notes.md).
 //
 // One Session owns one WebSocket connection at a time for the lifetime of
 // the daemon. Connections are ~10 minutes; the *session* outlives them

@@ -26,7 +26,7 @@ func printEvalCalibUsage(w io.Writer) {
 	fprintln(w, "call per item and rubric id, with the judge's quoted evidence), and their")
 	fprintln(w, "agreement per rubric item and per segment with Cohen's kappa. The judge sees")
 	fprintln(w, "the segment's context as facts and its turns as the conversation. See")
-	fprintln(w, "docs/eval/calibration/README.md.")
+	fprintln(w, "docs/dev/eval/calibration/README.md.")
 	fprintln(w, "")
 	fprintln(w, "judge flags:")
 	fprintln(w, judgeHelp)

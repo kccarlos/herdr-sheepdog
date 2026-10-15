@@ -1,7 +1,7 @@
 package voice
 
 // Push arbitration shared by the providers' push queues
-// (docs/timelines.md §4 (a)(b)(e), C29). The queue used to look at its
+// (docs/dev/timelines.md §4 (a)(b)(e), C29). The queue used to look at its
 // head only, so an urgent or owed line waited behind an idle line that
 // was itself waiting for a pause — up to TurnTimeout, 30 s (log
 // 2026-09-24: voice.push_timeout at 00:24:11 and 16:21:42, an idle head
@@ -66,7 +66,7 @@ func PushUtterance(tags map[string]any) string {
 }
 
 // TagUtteranceID is the push tag naming the user utterance a reply push
-// answers, for the event log's utterance_id (docs/architecture.md "Event
+// answers, for the event log's utterance_id (docs/dev/architecture.md "Event
 // ids").
 const TagUtteranceID = "utterance_id"
 

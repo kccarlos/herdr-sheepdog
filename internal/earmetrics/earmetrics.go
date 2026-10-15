@@ -4,7 +4,7 @@
 // already strip. It is pure (no I/O, no clock) so `internal/scorecard`
 // and tests can call it over any text, live or recorded.
 //
-// docs/iteration-2.md "Scorecard metrics" is the brief: "words, sentences,
+// docs/dev/iteration-2.md "Scorecard metrics" is the brief: "words, sentences,
 // dashes/semicolons, technical tokens (PR numbers, ms, versions) and
 // unfamiliar terms per spoken line". This package is the pure-function
 // half of that; `internal/scorecard` is the part that walks the event
@@ -20,7 +20,7 @@ import (
 
 // Closers is the small, checked-in list of short closing sentences a
 // spoken line may end with instead of a question (J1/J4 in
-// docs/iteration-2.md: "closes explicitly when there is no ask"). It is a
+// docs/dev/iteration-2.md: "closes explicitly when there is no ask"). It is a
 // package var, like Jargon, so a real transcript can add to it.
 var Closers = []string{
 	"That's all.",

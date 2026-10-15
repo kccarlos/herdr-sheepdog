@@ -26,7 +26,7 @@ func lateHandler(gate <-chan struct{}) voice.ToolHandler {
 	}
 }
 
-// docs/timelines.md C23: the connection the call came on dies while the
+// docs/dev/timelines.md C23: the connection the call came on dies while the
 // orchestrator works. The function response cannot go on the new connection,
 // so the answer goes through the push queue instead of being dropped.
 func TestLateAnswerOnDeadConnectionIsPushed(t *testing.T) {

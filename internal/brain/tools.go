@@ -46,7 +46,7 @@ func IsActionTool(name string) bool {
 }
 
 // Provenance delimiters around everything read from a worker pane or
-// produced by the CLI tool (docs/roles.md: data, not instructions).
+// produced by the CLI tool (docs/dev/roles.md: data, not instructions).
 const (
 	// Both markers carry the same per-call random nonce, so text from a
 	// worker cannot forge the end marker: it cannot know the nonce, and
@@ -57,7 +57,7 @@ const (
 	endWorkerPrefix = "<<<END_WORKER_OUTPUT"
 )
 
-// read_screen's sources (docs/history/dive-deep.md WP8a).
+// read_screen's sources (docs/dev/history/dive-deep.md WP8a).
 const (
 	// SourceScreen reads the pane: what the agent is doing now.
 	SourceScreen = "screen"
@@ -146,7 +146,7 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 // Per-tool timeouts: a tool that hangs gets a "timed out" result the
 // model can still answer from, instead of running out the whole turn
 // (pipecat's per-function timeout_secs). Constants, not config keys
-// (docs/iteration-2.md rule 4). From the event log: read_screen p90
+// (docs/dev/iteration-2.md rule 4). From the event log: read_screen p90
 // 52 ms, max 1.6 s; recall and list_agents a few ms; investigate (the
 // start only) 6 ms; run_cli ran into the 12 s turn budget twice.
 const (
@@ -547,7 +547,7 @@ func validPromiseEvent(event string) bool {
 	return false
 }
 
-// rail is the one rail (docs/roles.md), checked before the Host re-checks
+// rail is the one rail (docs/dev/roles.md), checked before the Host re-checks
 // the pending action atomically: the turn must be CEO-triggered, the pane
 // must have a pending answer_prompt, and every key must be in its option
 // set. It returns the refusal reason, or "".
@@ -561,7 +561,7 @@ func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 		}
 		// Nothing recorded: blocked, its answer_prompt pending expired
 		// unanswered while nobody was watching, or the daemon never caught
-		// it (docs/history/issues-2026-09-18.md "an expired approval prompt
+		// it (docs/dev/history/issues-2026-09-18.md "an expired approval prompt
 		// can never be approved"); or idle with a menu on screen, which
 		// herdr does not report as blocked (#107's known limit). Deferred
 		// to the Host, which re-reads the screen and revives the pending

@@ -9,7 +9,7 @@ import (
 // turnStats follows one input turn: from the user's last input fragment
 // (or typed text) to the model's first response (a tool call or the first
 // output audio) and on to turnComplete. It backs voice.turn, the stall
-// detector and the recycle decision; see docs/gemini-live-notes.md §13.
+// detector and the recycle decision; see docs/dev/gemini-live-notes.md §13.
 type turnStats struct {
 	id           int
 	startedAt    time.Time // first input fragment
@@ -116,7 +116,7 @@ func (s *Session) finishTurnLocked(how string) map[string]any {
 // onStall fires StallAfter after the last input of turn id. A turn the
 // model has still not reacted to is logged as stalled and surfaced as
 // EventStatus{Stalled:true}; the second stall on one connection recycles
-// it (docs/gemini-live-notes.md §13).
+// it (docs/dev/gemini-live-notes.md §13).
 func (s *Session) onStall(id int) {
 	s.mu.Lock()
 	t := s.turn

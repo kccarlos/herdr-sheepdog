@@ -28,7 +28,7 @@
 // its result carry `parentKey` = that inner call.
 import { NESTED_TYPES, DIVIDERS, DAEMON_DIVIDERS, argSummary, eventSummary, fmtMs, ToolPairer, Fragments, toolFamily, withProvider } from './grouping.js';
 
-// The names of docs/roles.md: the user operates, the voice's two
+// The names of docs/dev/roles.md: the user operates, the voice's two
 // halves are its voice and its orchestrator, the workers are the herdr workers.
 // Lane ids stay as they are: they key the event routing, not the label.
 export const LANES = [
@@ -182,7 +182,7 @@ class Builder {
       case 'voice.push_deferred':
         // The model was speaking: the push or tool result right after
         // this carries scheduling_sent when_idle instead of the
-        // interrupt it asked for (docs/roles.md "Pushes").
+        // interrupt it asked for (docs/dev/roles.md "Pushes").
         return this.plain(ev, 'voice', { title: 'push deferred', summary: `${p.kind || '?'}${p.name ? ` ${p.name}` : ''} · interrupt → when_idle · ${p.reason || ''}`, cls: ['minor'] });
       case 'voice.usage':
         return this.plain(ev, 'voice', { title: 'usage', summary: `${p.prompt ?? '?'} prompt · ${p.response ?? '?'} response · ${p.total ?? '?'} total`, cls: ['minor', 'stats'], stats: true });
@@ -272,7 +272,7 @@ class Builder {
     const call = this.tools.close(p.id, p.name);
     const failed = !!(p.error || p.cancelled || p.send_error);
     // Asked to interrupt, sent when idle: the model was mid-sentence
-    // (docs/roles.md "Pushes").
+    // (docs/dev/roles.md "Pushes").
     const deferred = p.scheduling === 'interrupt' && p.scheduling_sent === 'when_idle';
     const card = this.plain(ev, 'sup', {
       title: `${p.cancelled ? 'cancelled' : 'result'} ${p.name || '?'}${deferred ? ' · deferred' : ''}`, name: p.name || '?', id: p.id || '',
@@ -307,7 +307,7 @@ class Builder {
     this.closeFragments();
     const urgency = p.urgency || 'idle';
     // Asked to interrupt, sent when idle: the model was mid-sentence
-    // (docs/roles.md "Pushes"); coloured the same as any other push,
+    // (docs/dev/roles.md "Pushes"); coloured the same as any other push,
     // just marked.
     const deferred = urgency === 'interrupt' && p.scheduling_sent === 'when_idle';
     const card = this.plain(ev, 'sup', {

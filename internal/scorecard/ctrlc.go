@@ -9,7 +9,7 @@ import (
 
 // stopWindow is how close a voice.tool_call(stop) has to precede a
 // Ctrl-C send to count as "the stop word caused this", per J6 in
-// docs/iteration-2.md ("never Ctrl-C on 'never mind'").
+// docs/dev/iteration-2.md ("never Ctrl-C on 'never mind'").
 const stopWindow = 5 * time.Second
 
 // CtrlCSend is one Ctrl-C keystroke the daemon sent to a pane.
@@ -23,7 +23,7 @@ type CtrlCSend struct {
 	TriggerText string
 }
 
-// CtrlCReport is docs/iteration-2.md's "Ctrl-C sends without a stop word".
+// CtrlCReport is docs/dev/iteration-2.md's "Ctrl-C sends without a stop word".
 type CtrlCReport struct {
 	Sends               []CtrlCSend
 	Total               int

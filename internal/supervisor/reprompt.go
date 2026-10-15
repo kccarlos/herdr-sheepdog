@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
-// blocked -> blocked is a block (docs/history/issues-2026-09-18.md, docs/roles.md
+// blocked -> blocked is a block (docs/dev/history/issues-2026-09-18.md, docs/dev/roles.md
 // "Not yet"): herdr reports a pane's status only on change, so a worker
 // that answers one approval prompt and is already showing the next
 // within herdr's own poll window never leaves `blocked` — there is no
@@ -35,7 +35,7 @@ import (
 // whichever mechanism is asking.
 
 // defaultRepromptPollInterval is the poll's cadence
-// (docs/history/issues-2026-09-18.md: 1 s). Config.RepromptPollInterval exists
+// (docs/dev/history/issues-2026-09-18.md: 1 s). Config.RepromptPollInterval exists
 // only so tests can shrink it; production always gets this value.
 const defaultRepromptPollInterval = time.Second
 
@@ -143,7 +143,7 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 }
 
 // checkOpenPrompt is the open answer_prompt's lifetime check, on every
-// reconcile tick (docs/history/bench-2026-10-03.md #8): the pending action lives
+// reconcile tick (docs/dev/history/bench-2026-10-03.md #8): the pending action lives
 // while its pane is at the same prompt. A transition off blocked ends it
 // (transitions.go); here the screen decides: no prompt ends it
 // (pending.cancelled {prompt_gone}), and a different prompt replaces it

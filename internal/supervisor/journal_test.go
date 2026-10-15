@@ -54,7 +54,7 @@ func claudeTurn(t *testing.T, h *harness, pane, final string) {
 
 // A finish appends a journal entry from the worker's own transcript, and
 // the announce turn hears what the worker wrote before its screen
-// (docs/iteration-2.md WP4: the orchestrator relayed working notes because the
+// (docs/dev/iteration-2.md WP4: the orchestrator relayed working notes because the
 // screen was all it had).
 func TestDoneJournalsAndTheAnnounceHearsTheWorkerFirst(t *testing.T) {
 	m := braintest.NewModel()

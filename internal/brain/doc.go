@@ -1,4 +1,4 @@
-// Package orchestrator is the orchestrator, the orchestrator of docs/roles.md (plan
+// Package orchestrator is the orchestrator, the orchestrator of docs/dev/roles.md (plan
 // D7-revised): a stateful agent that answers the user's relayed
 // utterances and the supervisor's event requests by reasoning with tools
 // over a function-calling model,
@@ -11,7 +11,7 @@
 // transcript after the user's verbatim words, the context window is
 // assembled into model contents, and the loop calls the Model; every
 // function call it returns is executed (read_screen — the pane, or with
-// source session the worker's own session record, docs/history/dive-deep.md
+// source session the worker's own session record, docs/dev/history/dive-deep.md
 // WP8a — run_cli, list_agents, recall; prompt, send_keys, interrupt,
 // promise, note, investigate)
 // through the Host, the responses are
@@ -34,7 +34,7 @@
 //
 // # Event turns
 //
-// The supervisor runs one KindAnnounce turn on a worker event (docs/roles.md
+// The supervisor runs one KindAnnounce turn on a worker event (docs/dev/roles.md
 // "Pushes"): the request carries the code sentence the daemon speaks when
 // the orchestrator does not answer in time, the pane read as a KindEventScreen
 // message instead of reading again, and the promises the event keeps. The reply
@@ -49,11 +49,11 @@
 // promise, or Request.Owed),
 // declared only the read tools (the executor refuses prompt, send_keys,
 // interrupt, promise and investigate in any event turn), sent with
-// thinking off whatever is configured (docs/iteration-2.md WP5:
+// thinking off whatever is configured (docs/dev/iteration-2.md WP5:
 // turnThinking), and yield to a waiting user turn.
 //
 // A KindInvestigation turn is the other event turn: it delivers a
-// finished background job (the investigate tool, docs/roles.md
+// finished background job (the investigate tool, docs/dev/roles.md
 // "Investigations and explanations"). Its request carries the job's
 // question, the user's own words and the sub-agent's answer wrapped as
 // worker output, and its reply is the explanation the supervisor pushes
@@ -95,7 +95,7 @@
 // one-line stub after Config.PruneAfterTurns turns, and compacts the
 // oldest half into one summary message of at most 600 tokens when the
 // window exceeds Config.WindowTokens (estimated; 12 k by default since
-// docs/iteration-2.md WP5) — after the turn lock is released, and only
+// docs/dev/iteration-2.md WP5) — after the turn lock is released, and only
 // over the messages it summarised if they are still there. The seam for the memory system (plan
 // P6) is that interface: Ingest / Assemble / Compact / AfterTurn, borrowed
 // from OpenClaw. A memory-backed engine plugs in through Config.Engine and
@@ -116,7 +116,7 @@
 // rule, the one rail and the answer contract (prompts/svp/RULES.md) and
 // USER.md. The dynamic part — agent roster, ledger excerpt,
 // investigations, time last — is the state block, the last message of
-// every request (KindState, never ingested; docs/iteration-2.md WP5),
+// every request (KindState, never ingested; docs/dev/iteration-2.md WP5),
 // every free text in it clipped so four agents stay near 2.5 k
 // characters.
 //

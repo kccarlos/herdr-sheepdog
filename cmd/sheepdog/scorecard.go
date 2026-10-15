@@ -14,7 +14,7 @@ import (
 func printScorecardUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog scorecard [flags]")
 	fprintln(w, "")
-	fprintln(w, "Computes docs/iteration-2.md's scorecard metrics (latency and the")
+	fprintln(w, "Computes docs/dev/iteration-2.md's scorecard metrics (latency and the")
 	fprintln(w, "per-utterance turn.latency breakdown, ear-metrics")
 	fprintln(w, "quality of spoken lines, repeat-ask rate, lost-utterance rate, the brain-line")
 	fprintln(w, "drop rate, Ctrl-C sends, comprehension follow-ups, duplicate speech, and the")
@@ -60,7 +60,7 @@ func parseScorecardFlags(args []string, stderr io.Writer) (scorecardOpts, int, b
 	return o, 0, true
 }
 
-// runScorecard implements `sheepdog scorecard` (docs/iteration-2.md WP0a).
+// runScorecard implements `sheepdog scorecard` (docs/dev/iteration-2.md WP0a).
 func runScorecard(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	o, code, run := parseScorecardFlags(args, stderr)
 	if !run {

@@ -427,13 +427,13 @@ func CheckPush(a config.APNs) Result {
 	}
 	switch {
 	case set == 0:
-		return Result{Name: name, Status: Skip, Detail: "push not configured (optional; docs/push.md)"}
+		return Result{Name: name, Status: Skip, Detail: "push not configured (optional; docs/dev/push.md)"}
 	case set < 4:
-		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("[push.apns] has %d of its 4 values", set), Fix: "set key_path, key_id, team_id and topic, or none (docs/push.md)"}
+		return Result{Name: name, Status: Fail, Detail: fmt.Sprintf("[push.apns] has %d of its 4 values", set), Fix: "set key_path, key_id, team_id and topic, or none (docs/dev/push.md)"}
 	}
 	st, err := os.Stat(a.KeyPath)
 	if err != nil {
-		return Result{Name: name, Status: Fail, Detail: "APNs key file: " + err.Error(), Fix: "point push.apns.key_path at the .p8 file (docs/push.md)"}
+		return Result{Name: name, Status: Fail, Detail: "APNs key file: " + err.Error(), Fix: "point push.apns.key_path at the .p8 file (docs/dev/push.md)"}
 	}
 	if st.Mode().Perm()&0o077 != 0 {
 		return Result{Name: name, Status: Warn, Detail: "APNs key file is readable by other users", Fix: "chmod 600 " + a.KeyPath}

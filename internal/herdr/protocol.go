@@ -9,7 +9,7 @@ import (
 // State is herdr's AgentStatus enum, exactly as the server spells it.
 type State string
 
-// The five agent states (docs/herdr-protocol.md §2).
+// The five agent states (docs/dev/herdr-protocol.md §2).
 const (
 	StateIdle    State = "idle"
 	StateWorking State = "working"
@@ -85,7 +85,7 @@ type Pong struct {
 	Protocol int    `json:"protocol"`
 }
 
-// AgentInfo is herdr's AgentInfo object (docs/herdr-protocol.md §3).
+// AgentInfo is herdr's AgentInfo object (docs/dev/herdr-protocol.md §3).
 // Fields sheepdog does not use are left out; unknown fields are ignored.
 type AgentInfo struct {
 	PaneID        string `json:"pane_id"`
@@ -106,9 +106,9 @@ type AgentInfo struct {
 	Session *AgentSession `json:"agent_session,omitempty"`
 }
 
-// AgentSession is herdr's agent_session object (docs/herdr-protocol.md
+// AgentSession is herdr's agent_session object (docs/dev/herdr-protocol.md
 // §3, §9): the session the pane's agent reported at SessionStart, so the
-// daemon can read the worker's own transcript (docs/iteration-2.md WP4).
+// daemon can read the worker's own transcript (docs/dev/iteration-2.md WP4).
 // Every recorded sample reports Kind "id" — Codex, Claude Code and agy
 // alike; "path" (Claude's agent_session_path) is decoded but not seen.
 type AgentSession struct {
@@ -177,7 +177,7 @@ func (s *Snapshot) WorkspaceLabel(id string) string {
 // ReadSource selects which buffer `pane.read` returns.
 type ReadSource string
 
-// Read sources (docs/herdr-protocol.md §5). RecentUnwrapped is the best
+// Read sources (docs/dev/herdr-protocol.md §5). RecentUnwrapped is the best
 // choice for feeding an LLM; Visible is the rendered viewport.
 const (
 	SourceVisible         ReadSource = "visible"

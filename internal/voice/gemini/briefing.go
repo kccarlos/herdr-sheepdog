@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The briefing channel (docs/design/dual-brain.md): everything the
+// The briefing channel (docs/dev/design/dual-brain.md): everything the
 // daemon and the orchestrator tell the voice model — answers, worker
 // news, context — reaches it as a function response, never as a
 // user-role turn. Gemini Live has no mid-session system role; a

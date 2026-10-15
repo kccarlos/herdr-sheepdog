@@ -8,7 +8,7 @@
 #
 # Deliberately not here:
 # - a `brews:` section. The darwin binary is signed and notarized on the
-#   maintainer's Mac after the release (`make release-sign`, docs/signing.md),
+#   maintainer's Mac after the release (`make release-sign`, docs/dev/signing.md),
 #   which replaces its tarball and checksums.txt, so a formula goreleaser
 #   wrote at release time would carry the unsigned tarball's sha256. The
 #   formula comes from packaging/homebrew/sheepdog.rb.tmpl, rendered after

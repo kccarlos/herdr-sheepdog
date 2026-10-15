@@ -134,7 +134,7 @@ test('pushes render as supervisor messages with their urgency and the events tha
 test('a push the model was speaking through is marked deferred; a tool result the same way', () => {
   const items = groupEvents([
     // Requested interrupt, actually sent when_idle: the model was
-    // speaking (docs/roles.md "Pushes"); voice.push_deferred precedes it.
+    // speaking (docs/dev/roles.md "Pushes"); voice.push_deferred precedes it.
     ev('voice.push_deferred', { kind: 'push', reason: 'speaking', urgency_requested: 'interrupt' }),
     ev('voice.push', { text: 'auth crashed.', urgency: 'interrupt', scheduling_sent: 'when_idle' }),
     // An ordinary interrupt push (not speaking) is not marked.

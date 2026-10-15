@@ -34,7 +34,7 @@ type pushItem struct {
 // exempt reports whether tags mark this push as one of the exceptions
 // that keep INTERRUPT scheduling even while the model is speaking: a due
 // promise, a decision on a block whose pending action this event
-// created (docs/roles.md "Pushes"), or the stop button's reply (tag
+// created (docs/dev/roles.md "Pushes"), or the stop button's reply (tag
 // stop, as GPT-Live has it): the user asked for silence, so what
 // was playing is cut regardless.
 func exempt(tags map[string]any) bool {
@@ -113,7 +113,7 @@ const heldPushTTL = 5 * time.Minute
 //
 // Per item, as before for the head: an INTERRUPT push is downgraded to
 // WHEN_IDLE, in place and once, while the model is speaking and no tag
-// exempts it (docs/roles.md "Pushes": nothing interrupts the model
+// exempts it (docs/dev/roles.md "Pushes": nothing interrupts the model
 // mid-sentence except the user); a spoken push is held while no /ws
 // client is attached, so the model does not speak it to nobody
 // (2026-09-24 18:22:04: a 12 s answer spoken with the page closed) —
@@ -312,7 +312,7 @@ func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Durat
 }
 
 // Silent context waits for the voice to be quiet (campaign D N1,
-// docs/eval/campaign-d-2026-10-03.md): it used to go out at once, as a
+// docs/dev/eval/campaign-d-2026-10-03.md): it used to go out at once, as a
 // user-role client turn, even while a spoken push was being generated.
 // 11 of 135 spoken pushes stopped mid-sentence for 3–24 s and their
 // tail came back only at the next turn, glued to the reply to the
@@ -409,7 +409,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.emit(voice.EventError{Err: err})
 		if !requeue {
 			// Given up on: say so, or the line is lost without a trace
-			// (docs/timelines.md C23, §5 "a spoken push is heard or
+			// (docs/dev/timelines.md C23, §5 "a spoken push is heard or
 			// recorded unheard").
 			p := heldPayload(item, "send_failed", 0)
 			p["retries"] = item.retries

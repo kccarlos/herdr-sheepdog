@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// docs/eval/eval-campaign-2026-10-03.md H4: after the user spoke Chinese,
+// docs/dev/eval/eval-campaign-2026-10-03.md H4: after the user spoke Chinese,
 // the daemon's own code sentences were English (j2-approve-zh,
 // j1-status-zh). The block template and a tapped answer follow the
 // language of their last words.

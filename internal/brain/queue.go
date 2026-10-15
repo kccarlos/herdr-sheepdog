@@ -134,7 +134,7 @@ type turnStartKey struct{}
 // WithTurnStart returns ctx carrying f: a turn run under ctx calls f
 // once, the moment it is handed the turn lock — never while it waits.
 // The supervisor coalesces back-to-back user utterances only while
-// the earlier one's turn is still queued (docs/roles.md "One
+// the earlier one's turn is still queued (docs/dev/roles.md "One
 // decision-maker"); a turn in progress is never cut, so it must know
 // exactly when the turn started.
 func WithTurnStart(ctx context.Context, f func()) context.Context {

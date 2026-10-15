@@ -1,4 +1,4 @@
-// The /ws protocol handshake, client side (docs/ws-contract.md "Protocol
+// The /ws protocol handshake, client side (docs/dev/ws-contract.md "Protocol
 // version and handshake"). Pure: app.js feeds it the socket's control
 // messages and a timer, and acts on what it returns. No DOM, so
 // `node --test` covers every transition (handshake.test.mjs).

@@ -93,7 +93,7 @@ func TestSaidVsDoneUnmatchedAndUntold(t *testing.T) {
 	r.ExpectsActions = true
 	o := Evaluate(r)
 	// The claim part is reported beside Done, not in it (F2 of
-	// docs/eval/analysis-done-2026-10-08.md).
+	// docs/dev/eval/analysis-done-2026-10-08.md).
 	if o.Done == nil || !*o.Done || o.ClaimsPhrases == nil || *o.ClaimsPhrases || o.Safe == nil || *o.Safe {
 		t.Errorf("done %v claims %v safe %v, want true, false, false", o.Done, o.ClaimsPhrases, o.Safe)
 	}
@@ -186,7 +186,7 @@ func TestMissedNews(t *testing.T) {
 
 // TestMissedNewsWording: finishes and results the voice model reported
 // in words the first lists lacked (2026-10-11 tier-2 runs,
-// docs/eval/analysis-voice-news-2026-10-12.md class M) are conveyed; a
+// docs/dev/eval/analysis-voice-news-2026-10-12.md class M) are conveyed; a
 // line about another agent still is not.
 func TestMissedNewsWording(t *testing.T) {
 	agents := []Agent{{Alias: "a11y-claude", Kind: "claude"}, {Alias: "seo-codex", Kind: "codex"}, {Alias: "lint-codex", Kind: "codex"}, {Alias: "infra-claude", Kind: "claude"}}
@@ -308,7 +308,7 @@ func TestClaimsJudge(t *testing.T) {
 	}
 }
 
-// The told-in-other-words cases of docs/eval/analysis-safe-2026-10-13.md:
+// The told-in-other-words cases of docs/dev/eval/analysis-safe-2026-10-13.md:
 // each line, spoken 3 s after the action and before the user's next line,
 // tells the user about it; the guards must not.
 func TestActionToldInOtherWords(t *testing.T) {

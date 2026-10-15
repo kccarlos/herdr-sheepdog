@@ -81,7 +81,7 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 // A orchestrator that cannot answer leaves the daemon with one honest line and
 // nothing else: no second model phrases anything, no roster answers a
 // question that may not have been about status, and an instruction is
-// never sent on a guess (docs/roles.md "Hot paths that stay code").
+// never sent on a guess (docs/dev/roles.md "Hot paths that stay code").
 func TestBrainFallbackSaysSoAndSendsNothing(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Err: braintest.ErrBoom})
 	h := newBrainHarness(t, m)
@@ -227,7 +227,7 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 // still on the pane's screen (another pane's block or an instruction took
 // the one slot), a later send_keys revives it from the screen and the
 // rail's normal checks apply to what is actually there
-// (docs/history/issues-2026-09-18.md "an expired approval prompt can never
+// (docs/dev/history/issues-2026-09-18.md "an expired approval prompt can never
 // be approved"). Here it is dropped while the orchestrator's turn runs.
 func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 	var h *harness
@@ -401,7 +401,7 @@ func TestToolResultFromReply(t *testing.T) {
 	}
 }
 
-// The ear contract (docs/iteration-2.md WP1): the 2026-09-24 line the
+// The ear contract (docs/dev/iteration-2.md WP1): the 2026-09-24 line the
 // user heard (101 words, dashes, two PR numbers), said twice over so it
 // is a runaway, is cut at the runaway cap, the ask is heard last, and the
 // overflow lands in detail after the plain explanation.

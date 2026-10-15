@@ -1,5 +1,5 @@
 // Package feedback backs the user's "that paused" marks (POST
-// /api/feedback, docs/ws-contract.md "Feedback and drains"): a short-term
+// /api/feedback, docs/dev/ws-contract.md "Feedback and drains"): a short-term
 // record of the voice's output audio as the daemon received and sent it,
 // the snapshot of the last 30 s a user.feedback event carries, and the
 // diagnosis `sheepdog feedback` reads off it (model gap, delivery gap or

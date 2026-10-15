@@ -41,11 +41,11 @@ type Kind string
 
 // The turn kinds. Utterance is the user turn of D1-revised: the voice
 // relays what the user said verbatim and the orchestrator decides what it is
-// (docs/roles.md "One decision-maker"). (The older classified user
+// (docs/dev/roles.md "One decision-maker"). (The older classified user
 // turns, ask and propose, are gone; their request lines still appear in
 // transcripts written before, and /debug still reads them.)
 // Announce is the event turn the supervisor runs on a worker's block or
-// finish (docs/roles.md "Push judgment"). (The stop procedure's closing
+// finish (docs/dev/roles.md "Push judgment"). (The stop procedure's closing
 // turn, kind stop, is gone too: the daemon acknowledges a stop with its
 // own sentence and records it as a context line, Brain.Daemon.)
 const (
@@ -60,7 +60,7 @@ const (
 	KindAnnounce Kind = "announce"
 	// KindInvestigation delivers a finished investigation: the job's
 	// question, the user's own words and the sub-agent's answer come
-	// back as an event turn that composes the explanation (docs/roles.md
+	// back as an event turn that composes the explanation (docs/dev/roles.md
 	// "Investigations and explanations"). Read tools only; the user
 	// is expecting it, so its line is pushed at the next pause.
 	KindInvestigation Kind = "investigation"
@@ -118,7 +118,7 @@ type Request struct {
 	// is byte-identical to the one last delivered, within
 	// supervisor.repeat_window_s: requestText adds a note so the orchestrator
 	// can say "no change since I last checked" itself rather than
-	// repeat the roster (docs/history/issues-2026-09-18.md "Smaller items").
+	// repeat the roster (docs/dev/history/issues-2026-09-18.md "Smaller items").
 	RosterUnchangedFor time.Duration
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
@@ -163,7 +163,7 @@ type Request struct {
 	// utterance, "evt:<id>" for the worker event an announce is about.
 	Link string
 	// Facts, when set, is what the daemon knows now and the orchestrator cannot
-	// see: about the event of an announce turn (docs/history/bench-2026-10-03.md
+	// see: about the event of an announce turn (docs/dev/history/bench-2026-10-03.md
 	// #15b), or, on an utterance turn, what the user had heard when they
 	// began speaking (Heard): called when the turn starts, after the turn lock — the
 	// template line may have gone out while the turn was queued — and
@@ -190,7 +190,7 @@ type EventFacts struct {
 	Prompt string
 	// Heard is set on an utterance turn: when the user began saying the
 	// words and the spoken lines the voice was given around then
-	// (docs/eval/eval-campaign-2026-10-03.md H6: a "yes" to one question was
+	// (docs/dev/eval/eval-campaign-2026-10-03.md H6: a "yes" to one question was
 	// taken as the answer to a question pushed after the user spoke).
 	Heard *HeardFacts
 	// Language is the language of the user's last words, LanguageChinese
@@ -201,7 +201,7 @@ type EventFacts struct {
 	// OpenPrompt is set on an utterance turn when a worker's prompt is
 	// open and the user has likely not heard its announcement (another
 	// line buried it, or the voice judged it unheard) before these words
-	// (docs/bench/tier3-2026-10-03.md #9): the fact, as a sentence.
+	// (docs/dev/bench/tier3-2026-10-03.md #9): the fact, as a sentence.
 	OpenPrompt string
 	// Decisions is set on an announce turn: which agents are waiting
 	// for the user's answer right now, as a sentence ("Decisions open
@@ -247,7 +247,7 @@ const (
 	PromptGone     = "gone"
 )
 
-// Reply is the answer contract (docs/roles.md): what the assistant says,
+// Reply is the answer contract (docs/dev/roles.md): what the assistant says,
 // what it may use for follow-ups, and whether the user must act.
 //
 // The ear contract: Spoken is the headline (short by default, longer when
@@ -266,7 +266,7 @@ type Reply struct {
 	Clarify   bool       `json:"clarify"`
 	// Pending marks an answer that is not the final one: the orchestrator said
 	// how long it will take and the result follows on its own (the
-	// investigations work of docs/roles.md). Plumbed through to the
+	// investigations work of docs/dev/roles.md). Plumbed through to the
 	// voice's tool result; nothing produces it yet.
 	Pending bool `json:"pending,omitempty"`
 	// RelatesTo names the user's request the event fulfils, when an
@@ -383,7 +383,7 @@ const (
 	InvestigationSourceCLI = "cli"
 	// InvestigationSourceWorker is the worker itself: its own session,
 	// asked through a read-only fork that never writes into the session
-	// or touches the pane (docs/history/dive-deep.md §3).
+	// or touches the pane (docs/dev/history/dive-deep.md §3).
 	InvestigationSourceWorker = "worker"
 )
 
@@ -450,7 +450,7 @@ type InvestigationInfo struct {
 type AgentInfo struct {
 	PaneID string
 	Alias  string
-	// Spoken is the name the user hears and says (docs/roles.md
+	// Spoken is the name the user hears and says (docs/dev/roles.md
 	// "Agent names"): the orchestrator speaks it verbatim, while tool calls
 	// take the alias. SpokenWas is its previous spoken name while the
 	// change is recent, so the orchestrator mentions the old name once. Title
@@ -480,12 +480,12 @@ type AgentInfo struct {
 	Pending *PendingPrompt
 	// Journal is the agent's work journal, oldest first: what the worker
 	// wrote at each finish or block, read from its own transcript
-	// (docs/roles.md "Worker history").
+	// (docs/dev/roles.md "Worker history").
 	Journal []JournalEntry
 }
 
 // SessionRead is what Host.ReadSession found at the end of a worker's
-// own session transcript (internal/workerlog, docs/history/dive-deep.md WP8a):
+// own session transcript (internal/workerlog, docs/dev/history/dive-deep.md WP8a):
 // the worker's last message for a human, whole; the last instruction it
 // received; and what it did for that instruction. The executor caps and
 // wraps it as worker output.
@@ -521,7 +521,7 @@ type PendingPrompt struct {
 	// AskedAt is when the prompt was announced (the pending action's
 	// creation): the roster says how long it has waited, a fact the
 	// orchestrator weighs when the user's words may or may not answer it
-	// (docs/history/bench-2026-10-03.md #8).
+	// (docs/dev/history/bench-2026-10-03.md #8).
 	AskedAt time.Time
 	Options []Option
 	YesKeys []string
@@ -535,7 +535,7 @@ type Option struct {
 	// Meta marks an entry that is not an answer (Claude Code's "Type
 	// something." free-text box): the roster says so, so the orchestrator knows
 	// it exists for a free-text answer and never offers it as a choice
-	// (docs/eval/eval-campaign-2026-10-03.md H2).
+	// (docs/dev/eval/eval-campaign-2026-10-03.md H2).
 	Meta bool
 }
 
@@ -554,7 +554,7 @@ func (p PendingPrompt) AllowedKeys() []string {
 // of the prompt's options (or its yes/no shorthand). AllowedKeys alone
 // is not enough to validate a call: "y" and "enter" can each belong to
 // a different option, and sending both could answer this prompt and
-// then confirm whatever the pane asks next (docs/roles.md "the one
+// then confirm whatever the pane asks next (docs/dev/roles.md "the one
 // rail").
 func (p PendingPrompt) SelectedBy(keys []string) bool {
 	same := func(a []string) bool {
@@ -657,7 +657,7 @@ type Host interface {
 	// returns the spoken echo.
 	Interrupt(ctx context.Context, paneID string) (string, error)
 	// Promise records promised work: tell the user req.Text when the
-	// pane's next event of kind req.Event happens (docs/roles.md
+	// pane's next event of kind req.Event happens (docs/dev/roles.md
 	// "Promises"). It returns the record (with its id) and is only
 	// called in user turns.
 	Promise(ctx context.Context, paneID string, req PromiseRequest) (PromiseInfo, error)

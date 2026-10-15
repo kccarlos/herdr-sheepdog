@@ -1,4 +1,4 @@
-// Echo-cancellation check for /voice (docs/ws-contract.md `ping` `aec`).
+// Echo-cancellation check for /voice (docs/dev/ws-contract.md `ping` `aec`).
 // Pure, so node can test it without a browser.
 
 /** The hint the page shows when the browser's echo cancellation is off. */
@@ -34,7 +34,7 @@ export function aecStatus(settings) {
  * aecWarn decides whether to show AEC_HINT: always when echo cancellation
  * is off (the model hears itself and interrupts itself), and when it is
  * unknown on a mobile browser, where it has not been verified
- * (docs/research/voice-frameworks-2026-09-24.md P2). Desktop browsers
+ * (docs/dev/research/voice-frameworks-2026-09-24.md P2). Desktop browsers
  * that do not say are left alone: desktop Chrome cancels echo.
  * @param {'true'|'false'|'unknown'} aec
  * @param {boolean} mobile

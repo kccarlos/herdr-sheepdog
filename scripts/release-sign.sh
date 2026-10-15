@@ -2,7 +2,7 @@
 # Signs and notarizes the darwin binary of a published GitHub release, on
 # this Mac, and replaces the release's darwin tarball and checksums.txt.
 # The release workflow builds on ubuntu only (no macOS runner minutes), so
-# the darwin asset is unsigned until this runs. See docs/signing.md.
+# the darwin asset is unsigned until this runs. See docs/dev/signing.md.
 #
 #   scripts/release-sign.sh [--dry-run] <tag>     # or: make release-sign TAG=<tag>
 #

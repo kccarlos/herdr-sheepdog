@@ -7,7 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Campaign D approve-zh-hurried r2 (docs/eval/campaign-d-2026-10-03.md
+// Campaign D approve-zh-hurried r2 (docs/dev/eval/campaign-d-2026-10-03.md
 // N1), as logged.
 const (
 	n1Push  = "bench-codex wants to run the full test suite with the race detector, and it's waiting on your yes or no. Approve the test run?"

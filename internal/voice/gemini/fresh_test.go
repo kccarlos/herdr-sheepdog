@@ -11,7 +11,7 @@ import (
 
 // Never resume a resumed session (handle.go): a handle issued by a
 // connection that was itself opened by a resume restores only that
-// connection's own content (docs/research/live-resume-context-2026-10-04.md),
+// connection's own content (docs/dev/research/live-resume-context-2026-10-04.md),
 // so the reconnect after it opens a fresh session and re-seeds it.
 
 // waitResumes waits until n EventResumed were emitted and returns the

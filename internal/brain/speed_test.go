@@ -68,7 +68,7 @@ func busyFlock() ([]AgentInfo, []string, []PromiseInfo, []InvestigationInfo) {
 
 // The state block (roster, ledger, investigations, time) stays within
 // 2.5 k characters for four busy agents, all three journal lines kept
-// (docs/iteration-2.md WP5: the captures had a 6 k-character ledger).
+// (docs/dev/iteration-2.md WP5: the captures had a 6 k-character ledger).
 func TestStateBlockBudgetBusy(t *testing.T) {
 	agents, notes, promises, invs := busyFlock()
 	body := joinSections(dynamicSections(agents, notes, promises, invs, nil, "", speedNow, ""))

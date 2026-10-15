@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// Heard detection (docs/history/bench-2026-10-03.md #17, #18, #19). A push that
+// Heard detection (docs/dev/history/bench-2026-10-03.md #17, #18, #19). A push that
 // was sent is not a push that was heard. In run 2 (2026-10-03) a kept
 // promise went out at 00:48:38.760 just as the user spoke again
 // (transcript.in 0.5 s later): the model answered them and never voiced
@@ -401,7 +401,7 @@ func coverageTokens(text string) []string {
 	return out
 }
 
-// Re-queue timing (docs/bench/tier2-2026-10-03.md #5). In
+// Re-queue timing (docs/dev/bench/tier2-2026-10-03.md #5). In
 // collision-finish-push r1 the user talked over a finish push; it was cut
 // and judged unheard (user_turn) at 30.3 s, and re-queued at 33.0 s — the
 // moment the client's speech detector had closed and its 300 ms release

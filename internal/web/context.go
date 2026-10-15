@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 )
 
-// The Context tab's API (docs/architecture.md "Context capture"): the
+// The Context tab's API (docs/dev/architecture.md "Context capture"): the
 // orchestrator's exact request at a step, the voice model's reconstructed
 // context at a turn, and the timeline of both. The tab follows live on
 // the context.step event.

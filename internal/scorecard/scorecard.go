@@ -1,4 +1,4 @@
-// Package scorecard computes docs/iteration-2.md's "Scorecard metrics"
+// Package scorecard computes docs/dev/iteration-2.md's "Scorecard metrics"
 // from a recorded event log: latency (time to first word, time to
 // answer, orchestrator turn duration and prompt tokens), the ear-metrics
 // quality of every spoken line (internal/earmetrics), repeat-ask rate,
@@ -7,7 +7,7 @@
 // measurement-only: nothing here changes daemon behaviour, and nothing
 // here writes to the event log it reads.
 //
-// The event log (internal/eventlog, docs/architecture.md "Event types")
+// The event log (internal/eventlog, docs/dev/architecture.md "Event types")
 // is one JSONL file per UTC day under <data_dir>/events/. Its schema has
 // drifted across days (fields added, a few removed) and, per that doc,
 // "Every ... call's type" is the ground truth, not a fixed contract, so
@@ -114,7 +114,7 @@ func readDayFile(path string) ([]eventlog.Event, error) {
 // decode unmarshals raw into a T, returning the zero value on any error
 // (missing fields, a field of an unexpected type from an older day) so a
 // single odd line never aborts a report. Callers should only read the
-// fields they need from T; docs/architecture.md notes the same field name
+// fields they need from T; docs/dev/architecture.md notes the same field name
 // can carry a different JSON type across event kinds (e.g. "acted" is a
 // count on brain.turn but a bool on brain.fallback), so a payload struct
 // here is scoped to one event type, never shared.

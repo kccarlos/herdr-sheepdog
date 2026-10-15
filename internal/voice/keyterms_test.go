@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// KeyTermCoverage on run-2-like lines (docs/history/bench-2026-10-03.md #17,
+// KeyTermCoverage on run-2-like lines (docs/dev/history/bench-2026-10-03.md #17,
 // #19), in both languages: a paraphrase that keeps the agent, the
 // numbers and the choice is heard; a reply about something else, or
 // nothing at all, is not.

@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// contractDoc is docs/ws-contract.md, relative to this package.
-var contractDoc = filepath.Join("..", "..", "..", "docs", "ws-contract.md")
+// contractDoc is docs/dev/ws-contract.md, relative to this package.
+var contractDoc = filepath.Join("..", "..", "..", "docs", "dev", "ws-contract.md")
 
 // docExample is one line of a fenced json block in the contract.
 type docExample struct {
@@ -51,7 +51,7 @@ func contractExamples(t *testing.T) []docExample {
 	return out
 }
 
-// TestContractExamplesRoundTrip keeps docs/ws-contract.md and this
+// TestContractExamplesRoundTrip keeps docs/dev/ws-contract.md and this
 // package from drifting: every example parses into Message with no
 // unknown field, validates, and re-encodes to the same JSON (ignoring
 // key order), so a field the type would drop fails too.

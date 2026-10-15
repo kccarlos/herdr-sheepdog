@@ -1,5 +1,5 @@
 // Package northstar computes the eval suite's north-star block
-// (docs/handover-2026-10-04.md "Evals first", step 2) and the
+// (docs/dev/handover-2026-10-04.md "Evals first", step 2) and the
 // programmatic checks under it, from recorded runs and event logs:
 //
 //   - said vs done: every claim in what sheepdog said that something was

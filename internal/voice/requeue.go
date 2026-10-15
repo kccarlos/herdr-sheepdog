@@ -11,7 +11,7 @@ import (
 // then goes back in the push queue once — or is dropped, when what the
 // line was for has already happened.
 //
-// Campaign D (docs/eval/campaign-d-2026-10-03.md N3): of the 15
+// Campaign D (docs/dev/eval/campaign-d-2026-10-03.md N3): of the 15
 // unheard pushes that were not re-queued, 13 answered the user's own
 // question (answers_utterance). The voice had said "On it." or
 // "Checking." in their place, or the line was cut, and the answer was

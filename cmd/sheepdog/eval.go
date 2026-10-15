@@ -68,7 +68,7 @@ type evalOpts struct {
 }
 
 // evalSets are the --set names and the files each reads, relative to
-// --dir (docs/iteration-2.md WP0b: the L0 corpus).
+// --dir (docs/dev/iteration-2.md WP0b: the L0 corpus).
 var evalSets = map[string]struct{ svp, assistant []string }{
 	"assistant":   {assistant: []string{"assistant.jsonl"}},
 	"svp":         {svp: []string{"svp.jsonl"}},

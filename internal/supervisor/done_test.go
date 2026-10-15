@@ -17,7 +17,7 @@ import (
 // through a finish with no orchestrator attached: the pane tail is read (200
 // lines) so the orchestrator would have it, the daemon speaks its own sentence
 // and the record keeps that the agent finished — no model phrases
-// anything (docs/roles.md "Hot paths that stay code").
+// anything (docs/dev/roles.md "Hot paths that stay code").
 func TestDonePushIsTheCodeSentence(t *testing.T) {
 	for _, screen := range []string{"codex-after-approval.screen.txt", "claude-after-approval.screen.txt", "codex-after-ctrl-c.screen.txt", "codex-declined-esc.screen.txt"} {
 		t.Run(screen, func(t *testing.T) {
@@ -261,7 +261,7 @@ func TestFinishEdges(t *testing.T) {
 // TestFinishAfterApproval: a worker that ran the command sheepdog
 // approved and stopped without herdr reporting working in between goes
 // blocked -> done (or idle when focused); that is a finish and is
-// announced like one (docs/eval/analysis-voice-news-2026-10-12.md, class
+// announced like one (docs/dev/eval/analysis-voice-news-2026-10-12.md, class
 // N1). A declined prompt, or one answered outside sheepdog, is not.
 func TestFinishAfterApproval(t *testing.T) {
 	for _, to := range []herdr.State{herdr.StateDone, herdr.StateIdle} {

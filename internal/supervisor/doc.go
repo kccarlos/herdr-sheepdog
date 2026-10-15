@@ -13,7 +13,7 @@
 // as "<alias> finished." unless the orchestrator phrases it; an agent that
 // exits mid-work gets an interrupting push.
 //
-// The voice's two tools (docs/roles.md "One decision-maker") are
+// The voice's two tools (docs/dev/roles.md "One decision-maker") are
 // ToSupervisor and Stop; Handler adapts them to voice.ToolHandler.
 // to_supervisor runs the code fast paths — a bare answer to the one open
 // prompt, a bare stop word — and then one orchestrator turn over the user's
@@ -27,7 +27,7 @@
 // any of this (the echo guard, utterance.go).
 //
 // investigate.go owns the background jobs the orchestrator's investigate tool
-// starts (docs/roles.md "Investigations and explanations"): one live job
+// starts (docs/dev/roles.md "Investigations and explanations"): one live job
 // per agent, the read-only CLI sub-agent in the worker's repository with
 // its own ceiling, the ledger in the state file's session, the delivery
 // event turn whose line is pushed at the next pause, and cancellation

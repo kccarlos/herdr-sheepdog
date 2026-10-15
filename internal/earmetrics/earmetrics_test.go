@@ -6,7 +6,7 @@ import (
 )
 
 // contextTabLine is the real merged-PRs line from the 2026-09-23 log that
-// docs/iteration-2.md's WP0a brief quotes for this test (roughly 98
+// docs/dev/iteration-2.md's WP0a brief quotes for this test (roughly 98
 // words by strings.Fields, 4 em dashes, at least 2 PR numbers, several
 // jargon hits, ending in neither a question nor a closer). The brief's
 // "~101 words, dashes 5" is a rough hand count from reading it aloud, not

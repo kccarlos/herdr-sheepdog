@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Re-seeding a connection that lost its context (docs/timelines.md C23,
+// Re-seeding a connection that lost its context (docs/dev/timelines.md C23,
 // §6 rank 1). A 1011 from the server drops the resumption handle, so the
 // next connection starts with no memory of the conversation: on
 // 2026-09-23..25, 68 of 77 resumes came back resumed:false. Until now it

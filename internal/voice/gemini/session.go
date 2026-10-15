@@ -669,7 +669,7 @@ func (s *Session) replaceFocusLocked(text string, u voice.Urgency, tags map[stri
 // Reset implements the optional voice.Session Reset: it drops the
 // resumption handle and reconnects, so the fresh connection starts with
 // no memory of the conversation so far ("New conversation",
-// docs/roles.md). The supervisor re-learns the roster on the resulting
+// docs/dev/roles.md). The supervisor re-learns the roster on the resulting
 // EventResumed{ContextLost:true} the same way it does after any other
 // context-losing reconnect. No-op before Start or after Close.
 func (s *Session) Reset(reason string) error {
@@ -783,7 +783,7 @@ func (s *Session) speakingLocked(now time.Time) bool {
 }
 
 // ClientPlayback applies a /ws client playback report
-// (docs/ws-contract.md "Playback reports"): it logs voice.playback,
+// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback,
 // wakes the push queue (a drained reply may release a push), and when a
 // flushed run was cut short emits the heard part as a cut transcript
 // for the orchestrator.

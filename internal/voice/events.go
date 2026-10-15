@@ -11,7 +11,7 @@ const (
 	StatusClosed
 )
 
-// String returns the wire name (docs/ws-contract.md).
+// String returns the wire name (docs/dev/ws-contract.md).
 func (s Status) String() string {
 	switch s {
 	case StatusConnecting:

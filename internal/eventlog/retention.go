@@ -10,7 +10,7 @@ import (
 )
 
 // protected reports whether dir must never be pruned: the repository's
-// recorded benchmark and eval data (docs/bench, docs/eval, testdata)
+// recorded benchmark and eval data (docs/dev/bench, docs/dev/eval, testdata)
 // is kept whatever retention says, even if a data_dir points into it.
 func protected(dir string) bool {
 	abs, err := filepath.Abs(dir)
@@ -80,7 +80,7 @@ func BrainFiles(dataDir string) ([]string, error) {
 // started before then and were last written before then, and returns
 // the deleted paths. days <= 0 deletes nothing (keep
 // forever). It never recurses, follows a symlink or touches a file that
-// is not a day file, and never runs under docs/bench, docs/eval or
+// is not a day file, and never runs under docs/dev/bench, docs/dev/eval or
 // testdata.
 func Prune(dataDir string, days int, now time.Time) ([]string, error) {
 	if days <= 0 || protected(dataDir) {

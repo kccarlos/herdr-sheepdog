@@ -8,7 +8,7 @@ import (
 )
 
 // TestForkArgv pins the fork command line of each backend, verified
-// against the real CLIs in docs/cli-query-tools.md §2c: claude resumes
+// against the real CLIs in docs/dev/cli-query-tools.md §2c: claude resumes
 // the worker's session with --fork-session and no --model; codex uses
 // `exec fork`, never `exec resume`, which would append to the worker's
 // live rollout. The fork's own id is the session a follow-up resumes.

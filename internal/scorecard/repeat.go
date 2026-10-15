@@ -9,7 +9,7 @@ import (
 )
 
 // repeatWindow is how close together two utterances have to be to count
-// as the user re-asking the same thing (docs/iteration-2.md
+// as the user re-asking the same thing (docs/dev/iteration-2.md
 // "repeat-ask rate (same intent re-asked within 60 s)").
 const repeatWindow = 60 * time.Second
 
@@ -18,7 +18,7 @@ const repeatWindow = 60 * time.Second
 // treated as the same ask restated.
 const repeatOverlapThreshold = 0.6
 
-// RepeatAskReport is docs/iteration-2.md's repeat-ask rate.
+// RepeatAskReport is docs/dev/iteration-2.md's repeat-ask rate.
 type RepeatAskReport struct {
 	Total   int // utterances considered
 	Repeats int // consecutive pairs judged a re-ask
@@ -31,7 +31,7 @@ var repeatCueWords = []string{"again", "repeat", "say again", "i mean"}
 // stream is every voice.tool_call(to_supervisor) text and every final
 // voice.transcript.in text, merged in time order (real logs carry almost
 // none of the latter — "final" is essentially never true in practice, see
-// docs/history/scorecard-baseline-2026-09-24.md — so this is a fallback, not the
+// docs/dev/history/scorecard-baseline-2026-09-24.md — so this is a fallback, not the
 // primary source).
 func computeRepeatAsk(events []eventlog.Event) RepeatAskReport {
 	utterances := utteranceTexts(events)

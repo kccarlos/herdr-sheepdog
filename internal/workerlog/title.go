@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// The worker's session title (docs/roles.md "Agent names"): the short
+// The worker's session title (docs/dev/roles.md "Agent names"): the short
 // name its own CLI gives the conversation, which the daemon reads as a
 // fact so it can tell two agents of one kind in one project apart by
 // ear ("README Claude"). Read-only, like everything here.

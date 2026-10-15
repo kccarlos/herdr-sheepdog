@@ -41,7 +41,7 @@ type Result struct {
 	Forked bool
 
 	// NumTurns, DurationMS and TotalCostUSD come from claude's own JSON
-	// result object (docs/cli-query-tools.md §2) when present; nil for
+	// result object (docs/dev/cli-query-tools.md §2) when present; nil for
 	// codex or when claude's stdout was not JSON. DurationMS is claude's
 	// self-reported wall time and is distinct from DurMS above, which
 	// Runner measures itself around the whole process.
@@ -66,7 +66,7 @@ type Query struct {
 	Session string
 	// Fork asks Session through the fork templates instead: a copy of
 	// the session answers and the original is not written to
-	// (docs/cli-query-tools.md §2c). It is how a worker's own session is
+	// (docs/dev/cli-query-tools.md §2c). It is how a worker's own session is
 	// asked; Backend must name the worker's backend and Session is
 	// required.
 	Fork bool
@@ -236,7 +236,7 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 
 // template returns the argv template and binary for backend; resume
 // picks the follow-up template and fork the fork template (fixed argv,
-// docs/cli-query-tools.md §2c).
+// docs/dev/cli-query-tools.md §2c).
 func (r *Runner) template(backend Backend, resume, fork bool) ([]string, string, error) {
 	switch {
 	case backend == Codex && fork:
@@ -352,7 +352,7 @@ func (r *Runner) log(result Result, fullArgv []string, question string, resErr e
 	if resErr != nil {
 		payload["error"] = resErr.Error()
 	}
-	// claude's own accounting (docs/cli-query-tools.md §2), when its JSON
+	// claude's own accounting (docs/dev/cli-query-tools.md §2), when its JSON
 	// output included it; nil (unset) for codex or non-JSON stdout.
 	if result.NumTurns != nil {
 		payload["num_turns"] = *result.NumTurns

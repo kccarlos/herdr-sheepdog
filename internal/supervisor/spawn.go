@@ -17,7 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Starting a new agent by voice (docs/roles.md "Starting an agent"): the
+// Starting a new agent by voice (docs/dev/roles.md "Starting an agent"): the
 // orchestrator's prompt tool with new_agent_dir. The judgement — which project
 // the user meant, which kind, whether to ask — is the orchestrator's; the daemon
 // gives it the candidate directories when a name does not resolve, and

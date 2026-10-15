@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 )
 
-// The ear cap (docs/history/bench-2026-10-03.md #13): the harness does not judge
+// The ear cap (docs/dev/history/bench-2026-10-03.md #13): the harness does not judge
 // how much a spoken line should say, the orchestrator's prompt does (short by
 // default, longer when the user asks for detail). The code only stops
 // a runaway: one high cap for every spoken line, about 45 seconds of

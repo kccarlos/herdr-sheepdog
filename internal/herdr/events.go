@@ -27,7 +27,7 @@ type StatusEvent struct {
 // FleetKind is the lifecycle event kind, in herdr's snake_case spelling.
 type FleetKind string
 
-// Lifecycle events used for fleet discovery (docs/herdr-protocol.md §4).
+// Lifecycle events used for fleet discovery (docs/dev/herdr-protocol.md §4).
 const (
 	FleetAgentDetected   FleetKind = "pane_agent_detected"
 	FleetPaneCreated     FleetKind = "pane_created"

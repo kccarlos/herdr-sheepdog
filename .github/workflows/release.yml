@@ -12,7 +12,7 @@ permissions:
 jobs:
   # Ubuntu only: macOS runners bill at 10x. The darwin binary is released
   # unsigned here and signed + notarized afterwards on a Mac with
-  # `make release-sign TAG=<tag>` (docs/signing.md).
+  # `make release-sign TAG=<tag>` (docs/dev/signing.md).
   release:
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
@@ -63,4 +63,4 @@ jobs:
             release/checksums.txt
 
       - name: Note the unsigned darwin asset
-        run: echo "::notice title=darwin binary unsigned::sheepdog_${GITHUB_REF_NAME}_darwin_arm64.tar.gz is unsigned until 'make release-sign TAG=${GITHUB_REF_NAME}' runs on a Mac (docs/signing.md)."
+        run: echo "::notice title=darwin binary unsigned::sheepdog_${GITHUB_REF_NAME}_darwin_arm64.tar.gz is unsigned until 'make release-sign TAG=${GITHUB_REF_NAME}' runs on a Mac (docs/dev/signing.md)."

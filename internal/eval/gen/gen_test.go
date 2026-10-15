@@ -26,7 +26,7 @@ func TestParaphraseTable(t *testing.T) {
 		}
 	}
 	// "never mind" is never a stop, and a stop is never a never mind
-	// (docs/iteration-2.md J6): the two lists must not overlap in intent.
+	// (docs/dev/iteration-2.md J6): the two lists must not overlap in intent.
 	for _, p := range Paraphrases["J6-nevermind"] {
 		if strings.Contains(strings.ToLower(p), "stop") {
 			t.Errorf("J6-nevermind paraphrase %q says stop", p)

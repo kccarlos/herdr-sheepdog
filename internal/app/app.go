@@ -468,7 +468,7 @@ func (a *App) wire() error {
 		Voice:   cfg.Gemini.Voice,
 		Aliases: a.aliases(),
 		// The running agents' spoken names, read at every (re)connect
-		// (docs/roles.md "Agent names").
+		// (docs/dev/roles.md "Agent names").
 		Names: sup.SpokenNames,
 		// Every briefing about an agent names it by its spoken name and
 		// says its state as of delivery (information, prompt v5).

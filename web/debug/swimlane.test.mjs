@@ -22,7 +22,7 @@ const types = (rows) => rows.map((r) => (r.kind === 'card' ? r.type : r.kind));
 
 test('lanes and helpers', () => {
   assert.deepEqual(LANES.map((l) => l.id), ['you', 'voice', 'sup', 'herdr']);
-  // The names of docs/roles.md; the ids behind them do not change.
+  // The names of docs/dev/roles.md; the ids behind them do not change.
   assert.deepEqual(LANES.map((l) => l.label), ['User', 'Voice', 'Orchestrator', 'Workers / CLI']);
   assert.equal(latencyLevel(null), null);
   assert.equal(latencyLevel(200), 'ok');

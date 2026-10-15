@@ -109,7 +109,7 @@ func TestBriefingReflectsResultsAndAges(t *testing.T) {
 }
 
 // TestBriefingRepeatNoteWithBrain covers supervisor.repeat_window_s
-// (docs/history/issues-2026-09-18.md "Smaller items"): an identical roster
+// (docs/dev/history/issues-2026-09-18.md "Smaller items"): an identical roster
 // delivered again within the window gets a context note the orchestrator can
 // act on ("no change since I last checked") and a
 // supervisor.briefing_repeat log with the age; a worker transition, or

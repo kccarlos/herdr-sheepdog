@@ -1,6 +1,6 @@
 // Context tab of /debug: the logic behind the two panes (the orchestrator's
 // exact request on the left, the voice model's reconstructed context on
-// the right; docs/architecture.md "Context capture"). Pure functions over
+// the right; docs/dev/architecture.md "Context capture"). Pure functions over
 // the /api/context/* responses, so node --test covers them; the DOM lives
 // in context-view.js. Vanilla JS, no framework (decision D11).
 

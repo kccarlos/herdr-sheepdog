@@ -47,7 +47,7 @@ func TestExtractClaims(t *testing.T) {
 		{"需要我让 Codex 修复这个 bug 吗？", nil},
 		{"还没有发送。", nil},
 		// Rephrasings the voice model used in the 2026-10-11 tier-2 runs
-		// (docs/eval/analysis-voice-news-2026-10-12.md).
+		// (docs/dev/eval/analysis-voice-news-2026-10-12.md).
 		{"I have confirmed that refactor-codex is stopped.", []ClaimKind{ClaimStopped, ClaimVerified}},
 		{"好的，我已经让 refactor-codex 停下来并处于空闲状态了。", []ClaimKind{ClaimStopped}},
 		{"已为您停止 refactor-codex 的任务。", []ClaimKind{ClaimStopped}},

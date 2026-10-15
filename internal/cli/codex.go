@@ -8,7 +8,7 @@ import (
 // codexEvent is the subset of one `codex exec --json` JSONL line Runner
 // needs (verified 2026-09-21, codex-cli 0.154.0): `thread.started` carries
 // the thread id a later `codex exec resume` takes, and the answer is the
-// text of the last `agent_message` item (docs/cli-query-tools.md §1).
+// text of the last `agent_message` item (docs/dev/cli-query-tools.md §1).
 type codexEvent struct {
 	Type     string `json:"type"`
 	ThreadID string `json:"thread_id"`

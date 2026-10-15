@@ -77,7 +77,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// re-announces, so a new prompt gets its own pending action and
 		// push; state_since does not move (Store.Apply is a no-op when
 		// the state does not change), so nothing is recorded as a
-		// "started on" or a finish (docs/roles.md "blocked -> blocked is
+		// "started on" or a finish (docs/dev/roles.md "blocked -> blocked is
 		// a block"). A new block adds a journal entry first, so its
 		// announce turn hears what the worker last wrote.
 		if from != herdr.StateBlocked {
@@ -160,7 +160,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 // approved and stopped without herdr reporting working in between (a
 // short command inside herdr's poll window, or a status event missed
 // and recovered by the snapshot diff), so nothing else tells the user
-// it is done (docs/eval/analysis-voice-news-2026-10-12.md: 33 of 83
+// it is done (docs/dev/eval/analysis-voice-news-2026-10-12.md: 33 of 83
 // missed news items in the 2026-10-11 tier-2 runs). After a decline
 // (esc, "no") the worker idles with nothing finished, and the tool
 // result already said so.
@@ -196,7 +196,7 @@ func (s *Supervisor) startedInstruction(paneID string, from herdr.State) (starte
 }
 
 // pushStarted pushes "<alias> started on …" under the chatty level
-// (docs/roles.md "Pushes"). When the orchestrator's own prompt went out just now
+// (docs/dev/roles.md "Pushes"). When the orchestrator's own prompt went out just now
 // the push is silent, context only: the tool result already told the
 // user it was sent, and "started on" as well was the duplicate
 // speech of 2026-09-24 00:13:02. An instruction picked up long after it

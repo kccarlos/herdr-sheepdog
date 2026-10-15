@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Playback truth (docs/ws-contract.md "Playback reports"): the /ws client
+// Playback truth (docs/dev/ws-contract.md "Playback reports"): the /ws client
 // reports when its player starts, drains and flushes, and how much of the
 // spoken run it actually played. The sessions use that to keep "the
 // model is speaking" true until the user has heard the end of the

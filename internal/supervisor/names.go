@@ -14,7 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Agent names (docs/roles.md "Agent names"). The store computes every
+// Agent names (docs/dev/roles.md "Agent names"). The store computes every
 // agent's spoken name (state/spoken.go); here the supervisor feeds it
 // the workers' own session titles, tells the voice model the current
 // names whenever they change (a silent context line, so its alias list

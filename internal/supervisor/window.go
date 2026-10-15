@@ -17,7 +17,7 @@ import (
 
 // The agent window: the user looking at an agent's terminal and operating
 // it himself from the app (GET /api/agents/{pane}/screen, POST
-// /api/agents/{pane}/input; docs/ws-contract.md "Agent window"). The
+// /api/agents/{pane}/input; docs/dev/ws-contract.md "Agent window"). The
 // authority for an input is his own tap, so it does not pass the one
 // rail; the orchestrator is told what he did so its picture stays right.
 

@@ -19,7 +19,7 @@ func converse(t *testing.T, h *harness, c *fakeConn, heard, said string) {
 	h.waitEvent("turn complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
 }
 
-// TestReconnectAfter1011ReseedsTheConversation is docs/timelines.md C23:
+// TestReconnectAfter1011ReseedsTheConversation is docs/dev/timelines.md C23:
 // a 1011 drops the resumption handle (68 of 77 resumes came back
 // resumed:false on 2026-09-23..25), and the fresh connection used to
 // get back only the silent briefing. It is now seeded first, silently

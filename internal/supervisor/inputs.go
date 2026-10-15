@@ -12,10 +12,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The one rail reads the user's real input (docs/roles.md "The one
+// The one rail reads the user's real input (docs/dev/roles.md "The one
 // rail"), and so does everything else: the words an utterance runs on
 // are the ones the daemon recorded, never the voice model's
-// to_supervisor argument (docs/roles.md "One decision-maker"). The
+// to_supervisor argument (docs/dev/roles.md "One decision-maker"). The
 // argument is only what the model chose to relay: on 2026-09-23 it
 // relayed a push back as if the user had said it, called
 // to_supervisor {text: "yes"} on its own while the user's microphone
@@ -211,7 +211,7 @@ func (s *Supervisor) heard(text string, final bool) {
 // so they are neither glued onto the next relay nor relayed by the
 // daemon (relay.go).
 //
-// An output that is not speech is no answer (docs/history/bench-2026-10-03.md
+// An output that is not speech is no answer (docs/dev/history/bench-2026-10-03.md
 // #11): on 2026-10-02 23:55:05 and 23:55:13 Gemini's whole output was
 // the transcript "<no speech detected>" with 0.2 ms of audio, and the
 // user's "结果。" / "你说。" counted as answered, so nobody relayed
@@ -326,7 +326,7 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 // (transcript.in 18.277), a late reply was queued at 19.220 and moved
 // the gate, the voice relayed the words at 19.414 — refused at 20.9 as
 // its own initiative — and the push only went to the model at 21.9.
-// The instruction was lost (docs/history/bench-2026-10-03.md #10).
+// The instruction was lost (docs/dev/history/bench-2026-10-03.md #10).
 func (s *Supervisor) markPushed(text string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq

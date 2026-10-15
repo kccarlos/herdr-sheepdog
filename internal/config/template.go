@@ -136,7 +136,7 @@ func Template() string {
 # dir = %[29]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
 
 [push.apns]
-# Phone notifications for the iOS companion app (docs/push.md). All four
+# Phone notifications for the iOS companion app (docs/dev/push.md). All four
 # are needed; leave them unset to keep push disabled.
 # key_path = ""   # the .p8 APNs auth key (ES256); never logged
 # key_id = ""     # the key's 10-character id

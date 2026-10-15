@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// "New conversation" (docs/roles.md): resets the orchestrator's transcript
+// "New conversation" (docs/dev/roles.md): resets the orchestrator's transcript
 // window and the voice model's session, so both start from scratch. The
 // roster and its ledger, open approval prompts, promises, notes, running
 // investigations and the event log itself are untouched — they never
@@ -39,7 +39,7 @@ var bareResetTriggerWords = map[string]bool{
 
 // bareResetConfirmWords are the whole-utterance phrases that confirm a
 // pending reset; a bare "yes" is deliberately not among them — it keeps
-// its ordinary approval-prompt meaning (docs/roles.md "The one rail").
+// its ordinary approval-prompt meaning (docs/dev/roles.md "The one rail").
 var bareResetConfirmWords = map[string]bool{
 	"yes start over": true, // "yes, start over" normalises to this too
 	"confirm reset":  true,
@@ -121,7 +121,7 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	return id, at, nil
 }
 
-// resetConfirmFastPath is the voice bare-phrase trigger (docs/roles.md
+// resetConfirmFastPath is the voice bare-phrase trigger (docs/dev/roles.md
 // "Triggers" (b)): a code fast path, like bareStop — no model. Called
 // from ToSupervisor with the user's already-validated input text
 // (claimInput ran first, so only real user input reaches here — "the
@@ -159,7 +159,7 @@ func (s *Supervisor) resetConfirmFastPath(ctx context.Context, text string) (voi
 }
 
 // performReset runs ResetConversation and speaks the fresh-start line
-// (docs/roles.md "Triggers" (b)), or a gentle apology on failure —
+// (docs/dev/roles.md "Triggers" (b)), or a gentle apology on failure —
 // either way this is a fast path's result, not an orchestrator turn's.
 func (s *Supervisor) performReset(ctx context.Context, via string) (voice.ToolResult, bool) {
 	if _, _, err := s.ResetConversation(ctx, via); err != nil {

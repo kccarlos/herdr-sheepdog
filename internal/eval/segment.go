@@ -377,7 +377,7 @@ func SegmentCriteria(s SimScenario, seg Segment, heard bool) []SegmentCriterion 
 }
 
 // SegmentClaimItem is the segment judge's said-vs-done item
-// (docs/eval/analysis-done-2026-10-08.md, F1): the judge, not a phrase
+// (docs/dev/eval/analysis-done-2026-10-08.md, F1): the judge, not a phrase
 // list, decides which of sheepdog's lines claim an action of its own,
 // and checks each against the ACTIONS block.
 const SegmentClaimItem = "said_vs_done"

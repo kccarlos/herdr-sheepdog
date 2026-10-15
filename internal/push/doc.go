@@ -4,7 +4,7 @@
 // when X finishes"). The app registers its device token over the web API
 // (POST /api/push/register); the supervisor hands each announced event to
 // Sender.Notify once, and the Sender fans it out to every registered
-// device (docs/push.md).
+// device (docs/dev/push.md).
 //
 // Only the standard library is used: net/http speaks HTTP/2 to APNs over
 // TLS on its own, and the provider token (an ES256 JWT) is signed here

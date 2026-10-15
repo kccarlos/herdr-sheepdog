@@ -3,7 +3,7 @@
   "model": "gpt-live-1",
   "scenario": "instruction-promise",
   "recorded": "2026-09-23",
-  "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session (scratch daemon, port 7799); see docs/history/audio-e2e-results.md.",
+  "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session (scratch daemon, port 7799); see docs/dev/history/audio-e2e-results.md.",
   "chunks": [
     {
       "at_ms": 0,

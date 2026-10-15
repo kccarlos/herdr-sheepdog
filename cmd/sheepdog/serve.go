@@ -220,7 +220,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	sdemo := newSetupDemo(stdout)
 	defer sdemo.Stop("the daemon stopped")
 
-	// SIGHUP re-reads the prompt override directory (docs/roles.md
+	// SIGHUP re-reads the prompt override directory (docs/dev/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
 	// restart: the orchestrator picks it up on its next turn, the voice session
 	// on its next (re)connect. Separate from the INT/TERM context so a

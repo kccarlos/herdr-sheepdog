@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
-// Closing an agent by voice (docs/roles.md "Closing an agent"): the
+// Closing an agent by voice (docs/dev/roles.md "Closing an agent"): the
 // orchestrator's interrupt tool with close true. Which agent the user meant is
 // the orchestrator's judgement; the daemon holds the rails, which are about
 // authority only:

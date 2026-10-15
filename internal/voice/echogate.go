@@ -10,9 +10,9 @@ import (
 
 // EchoGate keeps the voice's own speech, leaking from the phone's speaker
 // back into its microphone, from reaching the voice model
-// (docs/research/echo-2026-10-03.md). Gemini Live's activity detection
+// (docs/dev/research/echo-2026-10-03.md). Gemini Live's activity detection
 // takes that echo for the user: it cuts the reply off, transcribes
-// it and answers itself (docs/bench/tier2-2026-10-03.md finding 3).
+// it and answers itself (docs/dev/bench/tier2-2026-10-03.md finding 3).
 //
 // While the client reports that it plays the model's audio (playback
 // started until drained, plus an echo tail), microphone frames are held

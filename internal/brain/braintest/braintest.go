@@ -70,7 +70,7 @@ func (c Call) IsEvent() bool {
 // System returns the prompt as the orchestrator assembles it: the system
 // instruction text, then the state block (roster, ledger,
 // investigations, time), which travels as the last user content since
-// docs/iteration-2.md WP5 (State returns it alone).
+// docs/dev/iteration-2.md WP5 (State returns it alone).
 func (c Call) System() string {
 	var b strings.Builder
 	if c.Config != nil && c.Config.SystemInstruction != nil {
@@ -846,7 +846,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 }
 
 // readCall is the reflex's read of an agent: its session record when the
-// question asks what it said, found or changed in detail (docs/history/dive-deep.md
+// question asks what it said, found or changed in detail (docs/dev/history/dive-deep.md
 // WP8a), else its screen.
 func readCall(alias, question string) *genai.FunctionCall {
 	if reSessionWords.MatchString(question) {

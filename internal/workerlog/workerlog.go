@@ -1,7 +1,7 @@
 // Package workerlog reads a worker's own session transcript — the JSONL
 // file Claude Code or Codex writes as it works — so the orchestrator can hear
 // what the worker wrote for a human instead of relaying its screen
-// (docs/iteration-2.md WP4, docs/roles.md "Worker history").
+// (docs/dev/iteration-2.md WP4, docs/dev/roles.md "Worker history").
 //
 // The session comes from herdr's agent_session (internal/herdr
 // AgentSession, kept on the state row). Files can be many megabytes, so
@@ -379,7 +379,7 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 
 // Tail summarises the end of sess's transcript — its last TailWindow
 // bytes — without touching any pane's cursor: the orchestrator's read_screen
-// with source "session" (docs/history/dive-deep.md WP8a) asks what the worker
+// with source "session" (docs/dev/history/dive-deep.md WP8a) asks what the worker
 // last said at any moment, and must not make the journal's next Read
 // miss what it has not recorded yet. Fresh is set when the window holds
 // a message for a human; Instructions, Tools and Files are those of the

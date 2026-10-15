@@ -25,7 +25,7 @@ const maxLine = 4 << 20
 // Client talks to one herdr server over its unix socket. Every method opens
 // a fresh connection, sends one NDJSON request and reads one response line,
 // because the server closes the connection after each reply
-// (docs/herdr-protocol.md §1). Subscriptions live in events.go.
+// (docs/dev/herdr-protocol.md §1). Subscriptions live in events.go.
 //
 // A Client is safe for concurrent use.
 type Client struct {

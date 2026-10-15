@@ -21,7 +21,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
-// Investigations (docs/roles.md "Investigations and explanations"): the
+// Investigations (docs/dev/roles.md "Investigations and explanations"): the
 // user cannot see the screen, so "why did that fail" is a first-class
 // request the screen often cannot answer. The orchestrator's investigate tool
 // starts a background job here and returns at once with its id and a
@@ -41,11 +41,11 @@ import (
 // running one (investigation.cancelled {reason: superseded}), as does a
 // stop and the daemon shutting down.
 //
-// Two sources (docs/history/dive-deep.md §3). The default, cli, starts a fresh
+// Two sources (docs/dev/history/dive-deep.md §3). The default, cli, starts a fresh
 // read-only sub-agent in the worker's repository: it has not heard the
 // conversation and never saw what the worker tried. worker asks the
 // worker's own session instead, through a read-only fork of it (claude
-// --fork-session, codex exec fork; docs/cli-query-tools.md §2c): the
+// --fork-session, codex exec fork; docs/dev/cli-query-tools.md §2c): the
 // fork starts with everything the worker saw and did, answers from that
 // memory, and writes only a session of its own, never into the one the
 // worker's TUI has open and never into its pane. The fork's id is the
@@ -448,7 +448,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 }
 
 // deliverInvestigation runs the delivery event turn and pushes its line
-// at the next pause (docs/roles.md: the user is expecting it, so it
+// at the next pause (docs/dev/roles.md: the user is expecting it, so it
 // never interrupts). With no orchestrator, or one that could not answer, the
 // daemon says fallback (for a finished look: it is done, and the answer
 // is in the ledger). A look that failed carries its cause in inv.Err.
@@ -679,7 +679,7 @@ func investigationInfo(inv state.Investigation, resumable bool) brain.Investigat
 	}
 }
 
-// failCause is why an investigation failed (docs/eval/eval-campaign-2026-10-03.md
+// failCause is why an investigation failed (docs/dev/eval/eval-campaign-2026-10-03.md
 // P2-10: "did not get through" said nothing, and the orchestrator then had the
 // worker read its README out itself): a name for the log, a fact for
 // the orchestrator's record and a short honest reason for the ear.

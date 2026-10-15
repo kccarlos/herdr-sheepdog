@@ -15,7 +15,7 @@ func TestRenderAssistant(t *testing.T) {
 	if !strings.HasPrefix(s, "You are Rex,") || strings.Contains(s, "{name}") {
 		t.Errorf("name not substituted: %q", firstWords(s))
 	}
-	// The voice has exactly two tools since D1-revised (docs/roles.md
+	// The voice has exactly two tools since D1-revised (docs/dev/roles.md
 	// "One decision-maker"); the seven it used to classify into are
 	// gone, and no name of one may creep back in as an instruction.
 	for _, tool := range []string{"to_supervisor", "stop()"} {
@@ -30,7 +30,7 @@ func TestRenderAssistant(t *testing.T) {
 			t.Errorf("prompt does not explain the push prefix %q", prefix)
 		}
 	}
-	// The fast brain (docs/design/dual-brain.md): it owns the
+	// The fast brain (docs/dev/design/dual-brain.md): it owns the
 	// conversation, briefings are facts with provenance it tells in its
 	// own words, it answers follow-ups and simple status from them, it
 	// hands anything else to the slow brain with the CEO's exact words,
@@ -44,7 +44,7 @@ func TestRenderAssistant(t *testing.T) {
 		"never answer it for them and never suggest yes",
 		"You cannot act on an agent yourself",
 		"Pass their exact words in text; your own reading goes only in reading",
-		// Prompt v5 (docs/design/dual-brain.md): grounding first, a
+		// Prompt v5 (docs/dev/design/dual-brain.md): grounding first, a
 		// narrow self-answer set, everything new handed off, waiting
 		// talk about what is being done (phone test 2026-10-04).
 		"Grounding comes first",
@@ -89,7 +89,7 @@ func TestRenderAssistant(t *testing.T) {
 	if words := len(strings.Fields(s)); words > 630 {
 		t.Errorf("prompt is %d words; keep it short (<= 630)", words)
 	}
-	// Harness iteration 1 (docs/eval/iteration-1-nc-2026-10-12.md).
+	// Harness iteration 1 (docs/dev/eval/iteration-1-nc-2026-10-12.md).
 	if !strings.Contains(s, "Never compress or shorten the orchestrator's spoken text") {
 		t.Error("prompt lost the never-compress rule")
 	}
@@ -123,7 +123,7 @@ func TestRenderAssistantGPTLive(t *testing.T) {
 	}
 }
 
-// TestRULESEarContract guards the brain's ear rules (docs/iteration-2.md
+// TestRULESEarContract guards the brain's ear rules (docs/dev/iteration-2.md
 // WP1): the For the ear and Explaining sections and the ask field.
 func TestRULESEarContract(t *testing.T) {
 	text, err := embeddedText(SVPRules)
@@ -132,7 +132,7 @@ func TestRULESEarContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## For the ear",
-		// docs/history/bench-2026-10-03.md #13-#15: short by default, the prompt (not
+		// docs/dev/history/bench-2026-10-03.md #13-#15: short by default, the prompt (not
 		// the code) decides length; the language the user last used; ask
 		// only for an open decision; names as given.
 		"`spoken` is short by default",
@@ -147,7 +147,7 @@ func TestRULESEarContract(t *testing.T) {
 		`End with "Clearer?" as the ` + "`ask`",
 		`"ask": ""`,
 		"Never more than one question per reply",
-		// docs/history/dive-deep.md WP8a/WP8b: which read is for what, and detail
+		// docs/dev/history/dive-deep.md WP8a/WP8b: which read is for what, and detail
 		// on request within the reply cap.
 		"`source` session is its own session record",
 		`"what exactly", "tell me more", "what were the N things", "go on", "read it to me"`,
@@ -196,7 +196,7 @@ func TestRULESProtectedSentences(t *testing.T) {
 		t.Errorf("RULES.md lost the provenance sentence %q", ProvenanceSentence)
 	}
 	// The nonce'd markers and the worker-derived roster fields are covered
-	// by the same rule (docs/history/bench-2026-10-03.md, provenance hardening).
+	// by the same rule (docs/dev/history/bench-2026-10-03.md, provenance hardening).
 	for _, want := range []string{"carries the same `nonce`", "`worker_data`", "pending question", "are worker data too"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("RULES.md provenance rule lacks %q", want)

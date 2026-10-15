@@ -8,7 +8,7 @@ import (
 )
 
 // The journal adds at most ~800 characters to the ledger for four agents
-// with full journals (docs/iteration-2.md WP4), every prompt.
+// with full journals (docs/dev/iteration-2.md WP4), every prompt.
 func TestJournalLedgerBudget(t *testing.T) {
 	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
 	long := strings.Repeat("The worker wrote a long careful summary of what it did. ", 12)

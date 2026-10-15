@@ -1,5 +1,5 @@
 // Package prompts embeds the prompt files shipped in the binary (plan
-// §7, §8; docs/roles.md "Prompt files"). They use {name} placeholders;
+// §7, §8; docs/dev/roles.md "Prompt files"). They use {name} placeholders;
 // Loader.Render substitutes them.
 //
 // assistant.md, USER.md and svp/{SOUL,RULES}.md are the "prompt
@@ -57,7 +57,7 @@ const (
 )
 
 // The two sentences RULES.md must always contain, verbatim, whatever an
-// override says (docs/roles.md "the one rail" and the provenance rule):
+// override says (docs/dev/roles.md "the one rail" and the provenance rule):
 // the rail is enforced in internal/brain/tools.go, not by the prompt, but
 // an override that even claims otherwise is rejected rather than shipped.
 const (
@@ -69,7 +69,7 @@ const (
 const logSource = "prompts"
 
 // DefaultName is the dog's name when config voice.name is empty
-// (docs/roles.md "Names"); it must match config.DefaultVoiceName.
+// (docs/dev/roles.md "Names"); it must match config.DefaultVoiceName.
 const DefaultName = "Sheepdog"
 
 // AssistantVars builds assistant.md's substitutions: {name}, the dog's

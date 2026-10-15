@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// TestUnheardPushReachesTheBrainAsAFact is docs/history/bench-2026-10-03.md
+// TestUnheardPushReachesTheBrainAsAFact is docs/dev/history/bench-2026-10-03.md
 // #17/#18: a push the user did not hear (run 2, 00:48:12: an approval cut
 // the answer after its first phrase) becomes a transcript line the
 // orchestrator sees on its next turn, with the part that was heard; it decides

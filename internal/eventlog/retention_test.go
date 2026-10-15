@@ -47,13 +47,13 @@ func TestPruneNeverTouchesRepoBenchData(t *testing.T) {
 	old := filepath.Join(data, "events", "2020-01-01.jsonl")
 	touch(t, old)
 	if r, _ := Prune(data, 1, time.Now()); len(r) != 0 {
-		t.Errorf("pruned %q under docs/bench", r)
+		t.Errorf("pruned %q under docs/dev/bench", r)
 	}
 	if r, _ := Clear(data); len(r) != 0 {
-		t.Errorf("cleared %q under docs/bench", r)
+		t.Errorf("cleared %q under docs/dev/bench", r)
 	}
 	if _, err := os.Stat(old); err != nil {
-		t.Error("docs/bench file deleted")
+		t.Error("docs/dev/bench file deleted")
 	}
 }
 

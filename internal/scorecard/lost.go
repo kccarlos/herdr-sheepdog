@@ -7,12 +7,12 @@ import (
 )
 
 // lostWindow is how long a final utterance can go unanswered before it
-// counts as lost (docs/iteration-2.md "lost-utterance rate
+// counts as lost (docs/dev/iteration-2.md "lost-utterance rate
 // (voice.transcript.in final with no tool call and no spoken output
 // within 5 s)").
 const lostWindow = 5 * time.Second
 
-// LostReport is docs/iteration-2.md's lost-utterance rate, plus the two
+// LostReport is docs/dev/iteration-2.md's lost-utterance rate, plus the two
 // supervisor guard counters that are closely related: an utterance the
 // daemon deliberately did not act on (voice_initiative_ignored,
 // echo_ignored) rather than one that fell through the cracks.

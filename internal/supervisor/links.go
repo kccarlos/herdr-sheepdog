@@ -3,7 +3,7 @@ package supervisor
 import "github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 
 // Link ids tie a piece of the orchestrator's request to its counterpart in the
-// voice model's context (the /debug Context tab, docs/architecture.md
+// voice model's context (the /debug Context tab, docs/dev/architecture.md
 // "Context capture"): a push's id travels on its voice.push tags and on
 // the orchestrator's push message; a worker event's id on the orchestrator's
 // worker_event message, the announce turn's request and every push about

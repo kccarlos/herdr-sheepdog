@@ -9,7 +9,7 @@ import (
 )
 
 // FeedbackRequest is the body of POST /api/feedback: the user marked a
-// moment of the conversation (docs/ws-contract.md "Feedback and drains").
+// moment of the conversation (docs/dev/ws-contract.md "Feedback and drains").
 type FeedbackRequest struct {
 	// Tag is one of feedback.Tags; empty means "paused".
 	Tag string `json:"tag"`

@@ -298,7 +298,7 @@ func TestRunnerCodexHasNoClaudeMeta(t *testing.T) {
 }
 
 // TestRunnerClaudeFallsBackToRawText proves non-JSON stdout from claude is
-// still returned (fallback per docs/cli-query-tools.md).
+// still returned (fallback per docs/dev/cli-query-tools.md).
 func TestRunnerClaudeFallsBackToRawText(t *testing.T) {
 	bin := fakeBinPath(t)
 	cfg := Config{ClaudeBin: bin, ClaudeCmd: []string{bin, "{question}"}}

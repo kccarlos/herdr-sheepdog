@@ -35,7 +35,7 @@ func speakReply(h *harness, c *fakeConn, words []string, perWordMs int) {
 }
 
 // TestInterruptPushAfterTurnCompleteWaitsForDrained is P4
-// (docs/research/voice-frameworks-2026-09-24.md): Gemini generates ~4×
+// (docs/dev/research/voice-frameworks-2026-09-24.md): Gemini generates ~4×
 // real time, so its turnComplete arrives while the client is still
 // playing. An INTERRUPT push then must not cut the sentence being heard:
 // it is deferred until the client reports drained.

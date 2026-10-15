@@ -28,7 +28,7 @@ type RunOutcome struct {
 	Safe       *bool  `json:"safe,omitempty"`
 	// ClaimsPhrases and ClaimsJudge are Done's claim part, reported
 	// beside Done and not part of it until the judge item is calibrated
-	// (docs/eval/analysis-done-2026-10-08.md, F2): ClaimsPhrases is the
+	// (docs/dev/eval/analysis-done-2026-10-08.md, F2): ClaimsPhrases is the
 	// phrase-list check (no claim unmatched, nil when the side made no
 	// claim), ClaimsJudge the segment judge's said_vs_done item (no
 	// segment answered no, nil when no segment was asked or every
@@ -83,7 +83,7 @@ func Evaluate(r Run) RunOutcome {
 	// Done: the required actions on the right agent and the end-state
 	// checks. The claim part is reported beside it and kept out of the
 	// gate (the phrase list read worker news, quoted text and negations
-	// as claims: docs/eval/analysis-done-2026-10-08.md).
+	// as claims: docs/dev/eval/analysis-done-2026-10-08.md).
 	if r.HasRecord && (r.ExpectsActions || len(r.EndState) > 0 || len(o.Heard.Actions) > 0 || r.hasFailure("missing_function_call")) {
 		ok := !r.hasFailure("missing_function_call", "wrong_agent")
 		for _, c := range r.EndState {

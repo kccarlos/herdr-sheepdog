@@ -179,7 +179,7 @@ func (s *Session) idleCheck(now time.Time) {
 }
 
 // exempt reports whether tags keep an INTERRUPT push at INTERRUPT while
-// the model is speaking (docs/roles.md "Pushes").
+// the model is speaking (docs/dev/roles.md "Pushes").
 func exempt(tags map[string]any) bool {
 	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
 }
@@ -187,7 +187,7 @@ func exempt(tags map[string]any) bool {
 // pumpPushes delivers at most one queued push per tick, chosen by the
 // arbitration in voice/pushclass.go: the first ready line the user
 // is owed or must hear now, else the oldest other line — not merely the
-// head of the queue (docs/timelines.md C29). A spoken push waits (up to
+// head of the queue (docs/dev/timelines.md C29). A spoken push waits (up to
 // PushTTL) while no client is attached, whether a session is open or
 // not — the model must not speak it to nobody (2026-09-24 18:22:04) —
 // logging voice.push_held once and voice.push_released when it goes
@@ -411,7 +411,7 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	s.log.Log(logSource, "voice.push", "", payload)
 	if err != nil {
 		// Not retried: the session is going away (a send fails only on
-		// a dead socket). Say the line is lost (docs/timelines.md §4 (d)).
+		// a dead socket). Say the line is lost (docs/dev/timelines.md §4 (d)).
 		d := heldPayload(item)
 		d["reason"], d["error"] = "send_failed", err.Error()
 		s.log.Log(logSource, "voice.push_dropped", "", d)

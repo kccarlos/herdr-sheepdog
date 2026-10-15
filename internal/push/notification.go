@@ -69,7 +69,7 @@ func (n Notification) CollapseID() string {
 
 func (n Notification) priority() string { return "10" }
 
-// Payload is the APNs JSON body (docs/push.md).
+// Payload is the APNs JSON body (docs/dev/push.md).
 func (n Notification) Payload() map[string]any {
 	title := n.Agent
 	if title == "" {

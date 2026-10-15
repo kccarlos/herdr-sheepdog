@@ -64,7 +64,7 @@ const (
 	// KindState is the per-call state block — roster, ledger,
 	// investigations, time — the loop appends after the window on every
 	// model call so the prefix before it stays byte-stable
-	// (docs/iteration-2.md WP5). Never ingested: not in the transcript
+	// (docs/dev/iteration-2.md WP5). Never ingested: not in the transcript
 	// and not in the window.
 	KindState MessageKind = "state"
 )
@@ -217,7 +217,7 @@ func (t *Transcript) Append(m Message) Message {
 
 // Reset closes the current file (if any) and starts a fresh, empty
 // transcript at newPath ("" keeps it in memory only): a "New
-// conversation" (Brain.Reset, docs/roles.md). The old file on disk is
+// conversation" (Brain.Reset, docs/dev/roles.md). The old file on disk is
 // left as is — it is simply no longer appended to. Safe for concurrent
 // use, though the caller (Brain.Reset) holds the turn lock across it so
 // no turn's messages land on the wrong side of the reset.

@@ -74,7 +74,7 @@ type WindowReporter interface {
 }
 
 // Resettable is the optional part of a ContextEngine that empties the
-// window for a "New conversation" (docs/roles.md, Brain.Reset): the
+// window for a "New conversation" (docs/dev/roles.md, Brain.Reset): the
 // default engine implements it. An engine that does not (a future
 // memory-backed one, plan P6) is simply left as is — Brain.Reset always
 // starts a fresh transcript segment regardless.
@@ -152,7 +152,7 @@ func (e *DefaultEngine) Ingest(m Message, turn int) {
 
 // windowResultBytes caps a live tool result (or event screen) in the
 // window: the tail, the part that holds the latest output
-// (docs/iteration-2.md WP5; a 200-line screen was ~16 KB, 4 k tokens of
+// (docs/dev/iteration-2.md WP5; a 200-line screen was ~16 KB, 4 k tokens of
 // every step for two turns). Fixed, not a knob.
 const windowResultBytes = 4 << 10
 
@@ -355,7 +355,7 @@ func samePrefix(window, old []entry) bool {
 
 // summaryMaxTokens caps a compaction summary (estimated tokens): a
 // 12 k window cannot afford a summary that grows with every compaction
-// (docs/iteration-2.md WP5).
+// (docs/dev/iteration-2.md WP5).
 const summaryMaxTokens = 600
 
 // capSummary cuts a summary to summaryMaxTokens at a line boundary when

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// The roster says how long a prompt has waited (docs/history/bench-2026-10-03.md
+// The roster says how long a prompt has waited (docs/dev/history/bench-2026-10-03.md
 // #8): past the fast-path minute the user's words reach the orchestrator, which
 // weighs that fact itself.
 func TestRosterSaysHowLongAPromptWaited(t *testing.T) {

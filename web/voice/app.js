@@ -2,7 +2,7 @@
 // D2 and D11). Microphone → capture worklet (16 kHz PCM16 frames) → /ws;
 // /ws (24 kHz PCM16) → playback worklet (ring buffer) → speaker. No model
 // logic lives here: the page only moves audio and a few control messages
-// (docs/ws-contract.md). Vanilla JS module, no build step.
+// (docs/dev/ws-contract.md). Vanilla JS module, no build step.
 
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
@@ -56,7 +56,7 @@ const state = {
   bytesIn: 0,
   framesDropped: 0,
   level: { peak: 0, rms: 0, muted: false, gated: false, gatedFrames: 0 },
-  gate: { opts: {}, on: false, transitions: 0 }, // silence gate (docs/ws-contract.md)
+  gate: { opts: {}, on: false, transitions: 0 }, // silence gate (docs/dev/ws-contract.md)
   playback: { speaking: false, state: 'idle', bufferedMs: 0, targetMs: 150, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0, rate: 1, stretchedMs: 0 },
   // The voice provider the playback policy was last set for (status.provider).
   playbackProvider: '',
@@ -64,7 +64,7 @@ const state = {
   flushSeq: 0,
   pendingFlushes: new Map(), // id → { kind, t0 }
   // aec: the microphone's echo cancellation as the browser reports it
-  // ('true'/'false'/'unknown'), sent on the ping (docs/ws-contract.md).
+  // ('true'/'false'/'unknown'), sent on the ping (docs/dev/ws-contract.md).
   aec: 'unknown',
   lastStopMs: null,
   lastFlushMs: null,
@@ -154,7 +154,7 @@ function onCaptureMessage(m) {
 }
 
 // setPlaybackPolicy tells the playback worklet which provider's jitter
-// buffer policy to use (docs/ws-contract.md "Playback jitter buffer").
+// buffer policy to use (docs/dev/ws-contract.md "Playback jitter buffer").
 // Remembered so a worklet created later (audio starts on a gesture) gets
 // it too.
 function setPlaybackPolicy(provider) {
@@ -171,7 +171,7 @@ function onPlaybackMessage(m) {
   if (m.type === 'playback') {
     // The daemon keeps "the voice is speaking" true until the reply has
     // actually played, and trims a cut-off reply to what was heard
-    // (docs/ws-contract.md "Playback reports").
+    // (docs/dev/ws-contract.md "Playback reports").
     send({ type: 'playback', state: m.state, played_ms: m.playedMs });
     if (m.state !== 'started') console.log(`[voice] playback ${m.state} after ${m.playedMs} ms`);
     return;
@@ -335,7 +335,7 @@ function openWS() {
     state.wsState = 'open';
     state.reconnectDelay = RECONNECT_MIN_MS;
     // client-ready goes first, before anything else on the connection
-    // (docs/ws-contract.md "Protocol version and handshake"); nothing
+    // (docs/dev/ws-contract.md "Protocol version and handshake"); nothing
     // waits for bot-ready — an older daemon never sends one.
     state.handshake = new Handshake();
     send(clientReady());
@@ -375,7 +375,7 @@ function openWS() {
     if (e.reason === 'replaced') {
       // Another client (a second tab, the phone) took the session over.
       // Reconnecting would take it back, and that client would do the
-      // same, in a loop (docs/timelines.md C14): stop, as the iOS app
+      // same, in a loop (docs/dev/timelines.md C14): stop, as the iOS app
       // does, and let the user press Connect to take it back.
       disconnect();
       showError('Another client took over the voice session. Press Connect to take it back.');
@@ -420,7 +420,7 @@ function startPing() {
     }
     state.pingSentAt = performance.now();
     // The ping carries the gate counters and the jitter buffer's playback
-    // stats so web.client.stats can report them (docs/ws-contract.md).
+    // stats so web.client.stats can report them (docs/dev/ws-contract.md).
     state.pingOutstanding = send({
       type: 'ping',
       gated_frames: state.level.gatedFrames || 0,
@@ -582,7 +582,7 @@ function stop() {
 
 // resetConversation is the "New conversation" button: it resets the
 // orchestrator's transcript window and the voice session's memory
-// (docs/roles.md) through POST /api/conversation/reset {via:
+// (docs/dev/roles.md) through POST /api/conversation/reset {via:
 // "voice_page"}; a confirm() guards it since it clears the shown
 // conversation (the agents, promises, notes and pending prompts are
 // unaffected).
@@ -628,7 +628,7 @@ function showError(msg, ms = 12000) {
   console.warn(`[voice] ${msg}`);
 }
 
-// showAccountProblem shows an account problem (docs/ws-contract.md
+// showAccountProblem shows an account problem (docs/dev/ws-contract.md
 // "Account problems") with its fix, longer than a passing error. When it
 // is the voice's own provider, the voice cannot say it, so the browser
 // says it once per problem.

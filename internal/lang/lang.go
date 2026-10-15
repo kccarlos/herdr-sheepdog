@@ -1,6 +1,6 @@
 // Package lang is the user's language preference: the catalog of
 // languages the settings offer and the one line of information both
-// brains get about the choice (docs/design/language-preference.md).
+// brains get about the choice (docs/dev/design/language-preference.md).
 //
 // It is information, not judgment: the daemon never decides which
 // language an utterance is in or which one to answer in. It tells the

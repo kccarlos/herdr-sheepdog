@@ -11,15 +11,15 @@ and grades the answers by keywords. It measures; nothing reacts to the
 result and no exit code depends on it.
 
 Work item: "Gemini Live context retention across resumes"
-(docs/handover-2026-10-04.md, part B). Results and the write-up:
-docs/research/live-resume-context-2026-10-04.md; raw JSONL in
-docs/research/live-resume-context-results/.
+(docs/dev/handover-2026-10-04.md, part B). Results and the write-up:
+docs/dev/research/live-resume-context-2026-10-04.md; raw JSONL in
+docs/dev/research/live-resume-context-results/.
 
 ## Running it
 
 ```sh
 set -a; . ./.env; set +a          # VERTEX_API_KEY, VERTEX_PROJECT
-go run ./cmd/livecanary -arm resume -out docs/research/live-resume-context-results
+go run ./cmd/livecanary -arm resume -out docs/dev/research/live-resume-context-results
 ```
 
 Flags: `-arm`, `-no-resume` (the same arm without the resume: the

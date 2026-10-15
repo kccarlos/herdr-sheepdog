@@ -1,5 +1,5 @@
 // Package wsproto defines the JSON control messages exchanged over the
-// browser ↔ daemon WebSocket (docs/ws-contract.md). Binary frames carry raw
+// browser ↔ daemon WebSocket (docs/dev/ws-contract.md). Binary frames carry raw
 // PCM16 and need no types; every text frame is one Message.
 //
 // Both the WS server (WP5/WP7) and the tests for the browser page (WP6)
@@ -20,7 +20,7 @@ const (
 	ServerSampleRate = 24000
 )
 
-// Protocol versions of the /ws contract (docs/ws-contract.md "Protocol
+// Protocol versions of the /ws contract (docs/dev/ws-contract.md "Protocol
 // version and handshake"). ProtocolVersion is what this build speaks;
 // MinProtocolVersion is the oldest client protocol the daemon still
 // serves. A client that never sends client-ready is protocol 1.
@@ -60,7 +60,7 @@ const (
 	// /api/conversation/reset and POST /api/pending/answer ("History
 	// and resume").
 	FeatureHistory = "history"
-	// FeaturePush: APNs registration (docs/push.md); absent when the
+	// FeaturePush: APNs registration (docs/dev/push.md); absent when the
 	// daemon has no push service.
 	FeaturePush = "push"
 	// FeatureModels: the orchestrator model picker (GET /api/brain/models, PUT
@@ -110,7 +110,7 @@ const (
 	VoiceClosed       = "closed"
 )
 
-// Playback states carried by a playback message (docs/ws-contract.md
+// Playback states carried by a playback message (docs/dev/ws-contract.md
 // "Playback reports").
 const (
 	PlaybackStarted = "started"
@@ -161,7 +161,7 @@ type Screen struct {
 type Message struct {
 	Type string `json:"type"`
 
-	// client-ready and bot-ready (docs/ws-contract.md "Protocol version
+	// client-ready and bot-ready (docs/dev/ws-contract.md "Protocol version
 	// and handshake"): the protocol the client speaks / the daemon will
 	// speak on this connection, who is talking, and the daemon's
 	// optional features. MinProtocol (bot-ready) is the oldest client
@@ -181,7 +181,7 @@ type Message struct {
 	State    string `json:"state,omitempty"`
 	PlayedMs *int   `json:"played_ms,omitempty"`
 
-	// drain: the client's player ran dry (docs/ws-contract.md "Feedback
+	// drain: the client's player ran dry (docs/dev/ws-contract.md "Feedback
 	// and drains"). At is when, on the client's clock (RFC 3339 with
 	// milliseconds); PlayedMs and ReceivedMs are the run's stream ms
 	// played and received by then, BufferMs what the client believed was
@@ -202,7 +202,7 @@ type Message struct {
 	BufferMs  *int `json:"buffer_ms,omitempty"`
 	// Rate and StretchedMs are the adaptive time-stretch's current
 	// playback rate and the total wall-clock ms played at a rate other
-	// than 1.0, docs/ws-contract.md "Playback jitter buffer".
+	// than 1.0, docs/dev/ws-contract.md "Playback jitter buffer".
 	Rate        *float64 `json:"rate,omitempty"`
 	StretchedMs *int     `json:"stretched_ms,omitempty"`
 	// AudioState is the page's AudioContext state ("running",
@@ -233,7 +233,7 @@ type Message struct {
 
 	// error and screen-error
 	Message string `json:"message,omitempty"`
-	// error about an account problem (docs/ws-contract.md "Account
+	// error about an account problem (docs/dev/ws-contract.md "Account
 	// problems"): Problem is invalid_key, quota or balance, Role what it
 	// blocks (orchestrator, voice), Provider (above) the service, and Fix
 	// the one-line fix. Absent on any other error.
@@ -268,11 +268,11 @@ func Mute(on bool) Message { return Message{Type: TypeMute, On: &on} }
 
 // Silence builds a client→server silence-gate message: on means the
 // client's capture gate closed (near-zero input, no frames follow until
-// off). See docs/ws-contract.md, "Silence gate".
+// off). See docs/dev/ws-contract.md, "Silence gate".
 func Silence(on bool) Message { return Message{Type: TypeSilence, On: &on} }
 
 // Speaking builds a client→server speech-detector message: on means the
-// client hears the user speaking. See docs/ws-contract.md, "Client
+// client hears the user speaking. See docs/dev/ws-contract.md, "Client
 // speech detector".
 func Speaking(on bool) Message { return Message{Type: TypeSpeaking, On: &on} }
 

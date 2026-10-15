@@ -34,7 +34,7 @@ type Transition struct {
 	// Session is the agent's reported session as last seen in a snapshot
 	// (the status events do not carry it), and Cwd the pane's working
 	// directory; the supervisor reads the worker's own transcript from
-	// them (docs/iteration-2.md WP4). Not logged: a session names a
+	// them (docs/dev/iteration-2.md WP4). Not logged: a session names a
 	// transcript on disk.
 	Session *AgentSession `json:"-"`
 	Cwd     string        `json:"-"`

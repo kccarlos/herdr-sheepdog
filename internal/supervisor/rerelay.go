@@ -17,7 +17,7 @@ import (
 // user has said nothing new" — true, and useless: the voice went
 // quiet, and the user heard nothing for five minutes.
 //
-// The gate still stands on recorded input (docs/roles.md "The one
+// The gate still stands on recorded input (docs/dev/roles.md "The one
 // rail"): what is retried is the user's own claimed words, never the
 // voice's argument, and only when nothing newer was said. So:
 //

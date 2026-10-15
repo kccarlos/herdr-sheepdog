@@ -19,7 +19,7 @@ import (
 // key is used or read: ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN are
 // removed from the child's environment, so a key in the shell can never
 // turn the judge into API spend. Picked by the 2026-10-06 judge bake-off
-// (docs/eval/calibration/README.md).
+// (docs/dev/eval/calibration/README.md).
 //
 // One call is one `claude -p` process with no tools, no MCP servers, no
 // settings files, no CLAUDE.md (an empty working directory) and no saved

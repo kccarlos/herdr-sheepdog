@@ -41,7 +41,7 @@ the bind/token pairing, `[push.apns]` and the secret files' permissions.
 It exits 1 on any failure.
 `sheepdog pair` prints the QR code the iOS app scans: every LAN and
 Tailscale address the daemon listens on (from `web.bind`/`web.port`) and
-`web.token`, as `sheepdog://pair?u=…&u=…&t=…` (docs/ws-contract.md
+`web.token`, as `sheepdog://pair?u=…&u=…&t=…` (docs/dev/ws-contract.md
 "Pairing"); on a terminal it draws the code in explicit colours, so it scans on a light or a dark theme (`--plain` and `--invert` otherwise). It needs a non-loopback bind.
 `sheepdog start` runs the daemon in the background and `stop`, `restart`,
 `status [--json]` and `logs [-f] [-n N]` manage it, with or without the
@@ -106,7 +106,7 @@ The Gemini Live voice session.
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
 | `gemini.start_sensitivity` | `SHEEPDOG_GEMINI_START_SENSITIVITY` | `low` | Live's automatic activity detection, start of speech: `low`, `high` or `default` (the server's own). `low` needs clearer speech before a turn starts, so room noise is not transcribed as words ("fishing", "Discord" were heard from noise at the default). |
 | `gemini.end_sensitivity` | `SHEEPDOG_GEMINI_END_SENSITIVITY` | `default` | End of speech: `low` (waits longer before closing the turn), `high` (closes sooner) or `default`. |
-| `gemini.briefing_channel` | `SHEEPDOG_GEMINI_BRIEFING_CHANNEL` | `function_response` | How the daemon's and the orchestrator's words reach the Live model: `function_response` (a function response to a call the model never made, named `briefing`, labelled with who it comes from, the time and how it relates to earlier briefings; docs/design/dual-brain.md) or `user_turn` (the older marked user-role client turn). |
+| `gemini.briefing_channel` | `SHEEPDOG_GEMINI_BRIEFING_CHANNEL` | `function_response` | How the daemon's and the orchestrator's words reach the Live model: `function_response` (a function response to a call the model never made, named `briefing`, labelled with who it comes from, the time and how it relates to earlier briefings; docs/dev/design/dual-brain.md) or `user_turn` (the older marked user-role client turn). |
 | `gemini.backend` | `SHEEPDOG_GEMINI_BACKEND` | `aistudio` | Where the Gemini Live connection goes: `aistudio` (Google AI Studio, the `gemini.api_keys` pool) or `vertex` (Vertex AI, `[gemini.vertex]`). Only the connection differs: session, pushes, re-seed, tools and playback are the same. The `/debug` voice picker labels the backend ("Gemini Live (Vertex)") and `voice.connect` carries `backend`. The orchestrator uses the AI Studio pool as provider `gemini`; with `[gemini.vertex]` key and project set it can also run on Vertex as provider `vertex`, whatever this says (`[brain]`). |
 
 ### `[gemini.vertex]`
@@ -119,7 +119,7 @@ retries the same key, never a hot retry. The Live socket is
 with the key in an `x-goog-api-key` header; `gemini.model` stays the bare
 id (`gemini-3.8-live`) and the daemon names it
 `projects/{project}/locations/{location}/publishers/google/models/{model}`
-in the setup. See `docs/research/vertex-live-spike-2026-09-29.md`.
+in the setup. See `docs/dev/research/vertex-live-spike-2026-09-29.md`.
 
 The same key and project also back the orchestrator's `vertex`
 provider ("Gemini (Vertex)" in the `/debug` picker), whatever
@@ -147,7 +147,7 @@ fixed list: `gemini-3.8-flash`, `gemini-3.5-flash`,
 ## `[voice]`
 
 The voice's spoken half, as the operator meets it
-([`docs/roles.md`](docs/roles.md) "Names").
+([`docs/dev/roles.md`](docs/dev/roles.md) "Names").
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
@@ -192,7 +192,7 @@ turn is sent with `"thinking": {"type": "disabled"}` and no
 `reasoning_effort`, whatever `deepseek.thinking` says (on Gemini: the
 `minimal` thinking level, `low` on a Pro model); so is the compaction
 summary: reasoning tokens cost latency, and a judgement call on an
-announce does not need them (docs/iteration-2.md WP5). User turns
+announce does not need them (docs/dev/iteration-2.md WP5). User turns
 keep the setting below.
 
 **The reasoning replay trade-off.** DeepSeek's thinking mode returns a
@@ -237,7 +237,7 @@ default; a phone on the LAN or over Tailscale can reach it once
 
 The read-only CLI query tool: codex and/or claude,
 invoked non-interactively and read-only to answer questions the orchestrator
-cannot answer from a screen alone (its `run_cli` tool). See `docs/cli-query-tools.md` for why each
+cannot answer from a screen alone (its `run_cli` tool). See `docs/dev/cli-query-tools.md` for why each
 flag in the argv templates is there.
 
 | Key | Env override | Default | Meaning |
@@ -264,13 +264,13 @@ it?" for what each level announces.
 | `supervisor.chattiness` | `SHEEPDOG_SUPERVISOR_CHATTINESS` | `chatty` | The initial push policy: `quiet` (agent questions and exits, plus what you are owed at every level: a kept promise, the finish of an instruction you gave), `normal` (plus the finish of any agent you dealt with recently, with a one-line result), or `chatty` (every finish, plus "started on …" when an instruction you sent is picked up). Changeable at runtime from the `/debug` header or `PUT /api/settings {"chattiness": …}`; the runtime choice is kept in the state file's `session.chattiness` and wins over this value on restart. |
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
 | `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
-| `supervisor.cancel_window_s` | `SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S` | `30` | How soon after an instruction went to a *working* agent a "stop" still interrupts it with Ctrl-C (the stop procedure's phase 3, [`docs/roles.md`](docs/roles.md) "Stop"). Past it a stop no longer touches the agent: use an instruction ("tell it to revert that") instead. |
-| `supervisor.reprompt_poll_s` | `SHEEPDOG_SUPERVISOR_REPROMPT_POLL_S` | `10` | How long the post-answer poll watches a pane, once every second, after keys go to it: herdr reports a pane's status only on change, so a worker that answers one prompt and is already showing the next within herdr's own poll window never leaves `blocked` ([`docs/roles.md`](docs/roles.md) "blocked → blocked is a block"). A periodic reconciler (the `snapshot_interval_s` cadence) and a startup sweep catch what the poll's window missed. |
-| `supervisor.repeat_window_s` | `SHEEPDOG_SUPERVISOR_REPEAT_WINDOW_S` | `60` | How long an identical roster sentence counts as "already reported": a status question inside the window carries a note the orchestrator can act on ("no change since I last checked") instead of the roster spoken again in full; with the orchestrator off, the daemon's own fallback sentence is prefixed the same way (`docs/history/issues-2026-09-18.md` "Smaller items"). |
-| `supervisor.authorise_window_s` | `SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S` | `30` | How recent the user's own words must be to answer a worker's approval prompt (the one rail, [`docs/roles.md`](docs/roles.md)). The daemon records every user input — a voice transcript, typed text (`/api/inject/utterance`, the `/voice` text box) or a tap (`POST /api/pending/answer`) — and `send_keys` or the bare-answer fast path runs only when one arrived after the prompt appeared and within this many seconds, and that input's own text (never the voice model's tool argument) answers it. A refusal logs `brain.rail_blocked {reason}`. |
-| `supervisor.project_roots` | `SHEEPDOG_SUPERVISOR_PROJECT_ROOTS` (`:`-separated) | `["~/Documents"]` | Where the orchestrator may start a new Claude Code or Codex agent by voice ("open a new Claude in sheepdog-bench", the `prompt` tool's `new_agent_*` parameters, [`docs/roles.md`](docs/roles.md) "Starting an agent"). A new agent may start in an immediate subdirectory of one of these directories, or in the directory of an existing herdr workspace; any other path is refused, symlinks included (`supervisor.spawn_refused {reason}`). A leading `~/` is the home directory. |
+| `supervisor.cancel_window_s` | `SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S` | `30` | How soon after an instruction went to a *working* agent a "stop" still interrupts it with Ctrl-C (the stop procedure's phase 3, [`docs/dev/roles.md`](docs/dev/roles.md) "Stop"). Past it a stop no longer touches the agent: use an instruction ("tell it to revert that") instead. |
+| `supervisor.reprompt_poll_s` | `SHEEPDOG_SUPERVISOR_REPROMPT_POLL_S` | `10` | How long the post-answer poll watches a pane, once every second, after keys go to it: herdr reports a pane's status only on change, so a worker that answers one prompt and is already showing the next within herdr's own poll window never leaves `blocked` ([`docs/dev/roles.md`](docs/dev/roles.md) "blocked → blocked is a block"). A periodic reconciler (the `snapshot_interval_s` cadence) and a startup sweep catch what the poll's window missed. |
+| `supervisor.repeat_window_s` | `SHEEPDOG_SUPERVISOR_REPEAT_WINDOW_S` | `60` | How long an identical roster sentence counts as "already reported": a status question inside the window carries a note the orchestrator can act on ("no change since I last checked") instead of the roster spoken again in full; with the orchestrator off, the daemon's own fallback sentence is prefixed the same way (`docs/dev/history/issues-2026-09-18.md` "Smaller items"). |
+| `supervisor.authorise_window_s` | `SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S` | `30` | How recent the user's own words must be to answer a worker's approval prompt (the one rail, [`docs/dev/roles.md`](docs/dev/roles.md)). The daemon records every user input — a voice transcript, typed text (`/api/inject/utterance`, the `/voice` text box) or a tap (`POST /api/pending/answer`) — and `send_keys` or the bare-answer fast path runs only when one arrived after the prompt appeared and within this many seconds, and that input's own text (never the voice model's tool argument) answers it. A refusal logs `brain.rail_blocked {reason}`. |
+| `supervisor.project_roots` | `SHEEPDOG_SUPERVISOR_PROJECT_ROOTS` (`:`-separated) | `["~/Documents"]` | Where the orchestrator may start a new Claude Code or Codex agent by voice ("open a new Claude in sheepdog-bench", the `prompt` tool's `new_agent_*` parameters, [`docs/dev/roles.md`](docs/dev/roles.md) "Starting an agent"). A new agent may start in an immediate subdirectory of one of these directories, or in the directory of an existing herdr workspace; any other path is refused, symlinks included (`supervisor.spawn_refused {reason}`). A leading `~/` is the home directory. |
 
-Two timings are fixed, not options ([`docs/roles.md`](docs/roles.md) "One
+Two timings are fixed, not options ([`docs/dev/roles.md`](docs/dev/roles.md) "One
 decision-maker"): a `to_supervisor` call with no fresh user input
 waits up to 1.5 s for the input transcription (it and the tool call reach
 the daemon on different paths, and Gemini's transcription can trail the
@@ -279,7 +279,7 @@ tool call and no speech from the voice for 4 s is relayed by the daemon.
 
 ## `[brain]`
 
-The orchestrator (plan D7-revised, [`docs/roles.md`](docs/roles.md)):
+The orchestrator (plan D7-revised, [`docs/dev/roles.md`](docs/dev/roles.md)):
 a stateful agent behind `to_supervisor` (one utterance turn per thing the
 user says) and the workers' announcements, that reasons with tools
 (`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
@@ -330,10 +330,10 @@ announce wait elapse.
 | `brain.step_reserve_s` | `SHEEPDOG_BRAIN_STEP_RESERVE_S` | `0` (default `3`) | When less of the turn's timeout remains after a tool round than this, the next model call is answer-only (no more tools), so the turn ends with an answer instead of another read. `0` takes the package default (3s); negative is rejected. |
 | `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the code sentence. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
 | `brain.announce_turn_timeout_s` | `SHEEPDOG_BRAIN_ANNOUNCE_TURN_TIMEOUT_S` | `6` | Budget of an ordinary event turn: the `announce` turn that decides what the assistant says about a block or finish and how urgently (README "How chatty is it?"). A finish waits this long (plus `brain.final_grace_s`) for the orchestrator's line before anything is said about it; on expiry the daemon's own sentence is spoken instead (`brain.push_decision {via: template, reason: timeout, wait: turn}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. An announce the user is owed gets the longer `brain.announce_timeout_s` instead. Formerly `brain.enrich_timeout_s` (still accepted). |
-| `brain.announce_timeout_s` | `SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S` | `15` | Budget of an announce turn the user is owed: a finish (or block) that keeps a promise, or the finish of an instruction the user gave this run. Such a finish waits up to this long for the orchestrator's line with the finding and speaks it alone; if the turn times out, the one line is the code sentence saying the findings could not be had ("auth finished, but I couldn't get its findings in time. Ask me and I'll read its screen."; docs/roles.md "Pushes"). Every other event turn keeps `brain.announce_turn_timeout_s`. A timed-out model call logs `prompt_tokens_est` on its `brain.step`. Note: one model call can run this long, and a user utterance waiting behind it only overtakes it between steps. |
+| `brain.announce_timeout_s` | `SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S` | `15` | Budget of an announce turn the user is owed: a finish (or block) that keeps a promise, or the finish of an instruction the user gave this run. Such a finish waits up to this long for the orchestrator's line with the finding and speaks it alone; if the turn times out, the one line is the code sentence saying the findings could not be had ("auth finished, but I couldn't get its findings in time. Ask me and I'll read its screen."; docs/dev/roles.md "Pushes"). Every other event turn keeps `brain.announce_turn_timeout_s`. A timed-out model call logs `prompt_tokens_est` on its `brain.step`. Note: one model call can run this long, and a user utterance waiting behind it only overtakes it between steps. |
 | `brain.announce_wait_s` | `SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S` | `2` | How long a **block** (an approval prompt, or a finish that left a prompt on screen) waits for the orchestrator's announce turn before the daemon speaks its own code sentence, the parsed prompt (`brain.push_decision {via: template, reason: wait, wait: announce_wait}`). A finish does not use it: a finish is not urgent and waits for the announce turn's own budget (`brain.announce_turn_timeout_s`, or `brain.announce_timeout_s` when owed). A orchestrator line that lands after the prompt was spoken is dropped (`brain.push_late`) unless it says the user must act (`needs_user`), or it is the finding of an owed finish that also asked; either is added once at idle. A line about a prompt that was answered meanwhile is dropped too. |
 | `brain.reply_wait_s` | `SHEEPDOG_BRAIN_REPLY_WAIT_S` | `2` | How long a `to_supervisor` call waits for the orchestrator's reply. A reply inside the wait is the tool result, as before; past it the call returns at once with a silent `pending` result (the voice has already said "on it"; `brain.reply_pending`) and the reply is pushed at the next pause when it lands, tagged `answers_utterance` (`brain.reply_delivered`). A late reply is stale once the user's next request was accepted: dropped if the turn sent nothing (`brain.reply_stale`), pushed silently as context if it acted. A stop still cancels the turn and nothing is delivered. `0` takes the default; negative waits for the whole turn (the synchronous behaviour, which `--voice=off` and `brain-test` always use). |
-| `brain.investigate_max_s` | `SHEEPDOG_BRAIN_INVESTIGATE_MAX_S` | `600` | Sanity ceiling of one background investigation (`investigate`, docs/roles.md "Investigations and explanations") — the only limit on how long its answer may take, so a stuck job dies. What is bounded tightly is the acknowledgement, which is an ordinary orchestrator turn. A job past the ceiling is killed and logged as `investigation.error`. |
+| `brain.investigate_max_s` | `SHEEPDOG_BRAIN_INVESTIGATE_MAX_S` | `600` | Sanity ceiling of one background investigation (`investigate`, docs/dev/roles.md "Investigations and explanations") — the only limit on how long its answer may take, so a stuck job dies. What is bounded tightly is the acknowledgement, which is an ordinary orchestrator turn. A job past the ceiling is killed and logged as `investigation.error`. |
 | `brain.investigate_session_ttl_s` | `SHEEPDOG_BRAIN_INVESTIGATE_SESSION_TTL_S` | `3600` | How long a finished investigation's sub-agent session stays resumable: within it, `investigate(follow_up_of: …)` continues the same CLI session (`cli.codex_resume_cmd` / `cli.claude_resume_cmd`); past it the follow-up starts a fresh sub-agent with the previous answer prepended to the question. The ledger row itself stays either way (`session.investigations`, the last 20). |
 | `brain.openai_compat` | — (the key: the variable `api_key_env` names) | none | Extra orchestrator providers over any OpenAI-compatible chat completions endpoint, one `[[brain.openai_compat]]` table each (below). |
 
@@ -357,7 +357,7 @@ The requests are the plain OpenAI shape: `model`, `messages`, `tools`,
 support **tool calling**: a model without it fails every turn
 (`brain.step` error) and the daemon answers for itself. How good the
 orchestrator is depends on the model; the evaluated ones are Gemini 3.5
-Flash (`gemini`/`vertex`) and `deepseek-flash` (docs/eval/README.md).
+Flash (`gemini`/`vertex`) and `deepseek-flash` (docs/dev/eval/README.md).
 
 ```toml
 [[brain.openai_compat]]
@@ -404,7 +404,7 @@ name of a renamed key sets the new one unless the new name is set too
 
 Tuned from logs and kept as constants: the Gemini voice session refresh
 (30 min away or 2 h of age, `voice.session_refreshed`,
-[`docs/timelines.md`](docs/timelines.md) §1.4); the orchestrator's per-tool
+[`docs/dev/timelines.md`](docs/dev/timelines.md) §1.4); the orchestrator's per-tool
 timeouts (2 s in-memory reads, 4 s `read_screen`, 5 s starting an
 investigation, 8 s `run_cli`; `brain.tool_timeout`); provider failover
 (one retry of a step on the next registered provider on 429 / 5xx /
@@ -413,7 +413,7 @@ event (4th within 30 s dropped).
 
 ## `[prompts]`
 
-The prompt workspace (docs/roles.md "Prompt files"): user overrides of
+The prompt workspace (docs/dev/roles.md "Prompt files"): user overrides of
 the embedded `assistant.md`, `assistant-gptlive.md`, `USER.md` and
 `svp/{SOUL,RULES}.md`.
 
@@ -440,7 +440,7 @@ before a line is written.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `events.retention_days` | `SHEEPDOG_EVENTS_RETENTION_DAYS` | `14` | Days of event log kept. The event log (`<data_dir>/events/YYYY-MM-DD.jsonl`) holds transcripts of what you said and what the voice and the orchestrator answered; so do the orchestrator's transcripts in `<data_dir>/brain/`. Day files older than this (UTC), and transcripts of runs that started and were last written before then, are deleted when the daemon starts and once a day while it runs (`events.pruned`); `0` keeps them forever. Only `YYYY-MM-DD.jsonl` files directly in `events/` and `<run id>[.requests].jsonl` files directly in `brain/` are deleted — never another file, a subdirectory or a symlink — and never under a `docs/bench`, `docs/eval` or `testdata` directory. `sheepdog dev scorecard`, `dev feedback` and `dev eval extract` read this directory, so keep a longer retention if you analyse older days. `sheepdog data clear` deletes it now. |
+| `events.retention_days` | `SHEEPDOG_EVENTS_RETENTION_DAYS` | `14` | Days of event log kept. The event log (`<data_dir>/events/YYYY-MM-DD.jsonl`) holds transcripts of what you said and what the voice and the orchestrator answered; so do the orchestrator's transcripts in `<data_dir>/brain/`. Day files older than this (UTC), and transcripts of runs that started and were last written before then, are deleted when the daemon starts and once a day while it runs (`events.pruned`); `0` keeps them forever. Only `YYYY-MM-DD.jsonl` files directly in `events/` and `<run id>[.requests].jsonl` files directly in `brain/` are deleted — never another file, a subdirectory or a symlink — and never under a `docs/dev/bench`, `docs/dev/eval` or `testdata` directory. `sheepdog dev scorecard`, `dev feedback` and `dev eval extract` read this directory, so keep a longer retention if you analyse older days. `sheepdog data clear` deletes it now. |
 
 ## What sheepdog stores
 
@@ -468,7 +468,7 @@ service and asks before deleting either directory.
 ## `[push.apns]`
 
 Phone notifications for the iOS companion app over the Apple Push
-Notification service (docs/push.md). All four keys are needed; with any
+Notification service (docs/dev/push.md). All four keys are needed; with any
 one empty, sending is disabled and `push.disabled` at startup says which
 are missing (devices can still register, so nothing is lost while the key
 is being set up). `config show` prints `key_path` as set/unset only; the

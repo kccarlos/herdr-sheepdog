@@ -1,5 +1,5 @@
 // Package herdr implements the client for the herdr unix socket protocol
-// (docs/herdr-protocol.md) and the Watcher that turns its event streams
+// (docs/dev/herdr-protocol.md) and the Watcher that turns its event streams
 // into deduplicated, debounced agent state Transitions.
 //
 // Client covers the one-shot methods sheepdog needs (ping, agent.list,
