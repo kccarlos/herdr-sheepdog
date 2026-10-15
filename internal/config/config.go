@@ -241,8 +241,7 @@ type DeepSeek struct {
 // deepseek.reasoning_effort.
 var DeepSeekReasoningEfforts = []string{"low", "high", "max"}
 
-// Supervisor tunes how proactive the voice side is (README "How chatty
-// is it?").
+// Supervisor tunes how proactive the voice side is (docs/faq.md "How talkative is it?").
 type Supervisor struct {
 	// Chattiness is the initial push policy: "quiet" (agent questions and
 	// exits only), "normal" (plus finishes of agents you dealt with

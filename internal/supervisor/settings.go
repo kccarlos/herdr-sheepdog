@@ -10,7 +10,7 @@ import (
 )
 
 // Chattiness is the push policy: how much the supervisor volunteers
-// without being asked (README "How chatty is it?").
+// without being asked (docs/faq.md "How talkative is it?").
 type Chattiness string
 
 // The three levels, quietest first.

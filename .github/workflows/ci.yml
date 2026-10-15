@@ -28,6 +28,11 @@ jobs:
       # The plugin's install script: download, checksum, go fallback, the
       # ~/.local/bin link (into a temp dir) and the next-step line.
       - run: sh scripts/plugin-fetch_test.sh
+      # Docs: every relative link in the Markdown files resolves, and every
+      # `sheepdog ...` command in the user docs exists in --help. Offline.
+      # (Also part of go test above; kept as its own step so a docs failure
+      # is named in the checks list.)
+      - run: go test -run 'TestMarkdownLinks|TestDocCommandsExist|TestCommandExtraction' ./internal/docscheck
 
   lint:
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
@@ -61,7 +66,7 @@ jobs:
         run: |
           # bracketed characters keep this step from matching itself
           if grep -rnEi --include='*.yml' --include='*.yaml' 'macos[-]|xcodebuil[d]' .github/workflows; then
-            echo "::error::macOS runners and Xcode builds are not allowed in GitHub Actions (see README, CI/CD)"
+            echo "::error::macOS runners and Xcode builds are not allowed in GitHub Actions (see docs/dev/development.md, CI/CD)"
             exit 1
           fi
 

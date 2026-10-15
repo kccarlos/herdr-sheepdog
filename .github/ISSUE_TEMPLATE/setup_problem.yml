@@ -1,0 +1,38 @@
+name: Setup problem
+description: You could not get from install to your first spoken answer.
+labels: [setup]
+body:
+  - type: markdown
+    attributes:
+      value: Please check [docs/troubleshooting.md](https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/troubleshooting.md) first.
+  - type: dropdown
+    id: stall
+    attributes:
+      label: Where did you get stuck?
+      options:
+        - Installing the herdr plugin
+        - sheepdog setup (the browser page or the terminal)
+        - The Gemini key or another model
+        - Starting the daemon
+        - Pairing the iPhone app
+        - Away from home (Tailscale)
+        - Talking (no sound, no answer)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: minutes
+    attributes:
+      label: How many minutes since you started?
+  - type: textarea
+    id: output
+    attributes:
+      label: The exact message you saw
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Output of `sheepdog doctor --report`
+      description: If sheepdog does not run at all, say so and paste `sheepdog version`.
+      render: markdown
