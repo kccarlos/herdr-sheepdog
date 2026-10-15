@@ -253,16 +253,22 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 // scheduling even while the model is speaking (docs/dev/roles.md "Pushes"):
 // a kept promise past its due time, or a decision on a block whose
 // pending action this event created — not an addition to one already
-// spoken. nil when u is not interrupt, or neither applies.
+// spoken. nil when neither applies. An idle line that needs the user also
+// carries needs_user (see below), so held lines release it first.
 func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) map[string]any {
-	if u != voice.UrgencyInterrupt {
-		return nil
-	}
 	tags := map[string]any{}
-	if duePassed {
-		tags["due_promise"] = true
-	}
-	if needsUser && pending != "" {
+	if u == voice.UrgencyInterrupt {
+		if duePassed {
+			tags["due_promise"] = true
+		}
+		if needsUser && pending != "" {
+			tags["needs_user"] = true
+		}
+	} else if u == voice.UrgencyIdle && needsUser {
+		// A line that asks the user to decide or act, spoken at idle, is
+		// still owed to them: the tag lets the voice queue release it
+		// ahead of plain news (voice/pushclass.go). It cannot keep
+		// INTERRUPT scheduling: that exception applies to interrupts only.
 		tags["needs_user"] = true
 	}
 	if len(tags) == 0 {

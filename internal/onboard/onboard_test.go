@@ -315,3 +315,35 @@ func TestAccountProblemOf(t *testing.T) {
 		}
 	}
 }
+
+// doctor checks the Gemini key only when a configured provider uses it: not
+// for an OpenAI voice with a non-Gemini (or disabled) orchestrator, even
+// with no key or a stale one in the env file.
+func TestGeminiKeyOnlyWhenNeeded(t *testing.T) {
+	f := newFakeAPI(t)
+	cfg := config.Default()
+	cfg.Voice.Provider = "openai"
+	cfg.Brain.Provider = "deepseek"
+	for _, keys := range [][]string{nil, {"stale-key"}} {
+		cfg.Gemini.APIKeys = keys
+		rs := checkGeminiKeys(context.Background(), f.endpoints(), cfg)
+		if len(rs) != 1 || rs[0].Status != Skip {
+			t.Errorf("openai voice + deepseek, keys %v: %+v, want one Skip", keys, rs)
+		}
+	}
+	cfg.Gemini.APIKeys = nil
+	cfg.Brain.Provider = "gemini"
+	cfg.Brain.Enabled = false
+	if rs := checkGeminiKeys(context.Background(), f.endpoints(), cfg); rs[0].Status != Skip {
+		t.Errorf("openai voice + disabled gemini orchestrator: %+v, want Skip", rs)
+	}
+	cfg.Brain.Enabled = true
+	if rs := checkGeminiKeys(context.Background(), f.endpoints(), cfg); rs[0].Status != Fail {
+		t.Errorf("openai voice + enabled gemini orchestrator, no key: %+v, want Fail", rs)
+	}
+	cfg.Voice.Provider = "gemini"
+	cfg.Brain.Provider = "deepseek"
+	if rs := checkGeminiKeys(context.Background(), f.endpoints(), cfg); rs[0].Status != Fail {
+		t.Errorf("gemini voice, no key: %+v, want Fail", rs)
+	}
+}

@@ -91,6 +91,7 @@
   <section class="card step" id="step-service" aria-labelledby="h-service">
     <h2 id="h-service"><span class="num" aria-hidden="true">3</span> Start at login <span class="state" id="service-state"></span></h2>
     <label class="check"><input type="checkbox" id="service-on" checked> Start sheepdog when I log in, and restart it if it crashes</label>
+    <p class="muted small">Installs a background service for your user (launchd on macOS, systemd on Linux), no admin rights. Undo with <code>sheepdog service uninstall</code>.</p>
     <div class="row actions">
       <button id="save-service">Apply</button>
       <span id="service-msg" class="muted small" aria-live="polite"></span>

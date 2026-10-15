@@ -34,7 +34,7 @@
 - **approve by voice** — an approval is answered only on your own words, enforced in code, not a prompt. [safety →](docs/safety.md)
 - **ask why** — it reads screens and session records, and asks a read-only fork of the agent when a screen is not enough. [faq →](docs/faq.md)
 - **it remembers** — "tell me when claude-auth is done", and it comes back to a question it could not answer. [faq →](docs/faq.md)
-- **iPhone app** — notifications, Live Activity, earbud remote and QR pairing. [iPhone app →](docs/iphone-app.md)
+- **iPhone app** — QR pairing, Live Activity and earbud remote while it is open. Notifications with the app closed need an app you build with your own Apple push key. [iPhone app →](docs/iphone-app.md)
 - **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
 - **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 

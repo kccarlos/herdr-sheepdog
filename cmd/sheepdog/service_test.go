@@ -131,7 +131,7 @@ func TestInitOffersService(t *testing.T) {
 	}
 
 	code, out := runInitTest(t, initGeminiKey+"\nn\n", args()...)
-	if code != 0 || !strings.Contains(out, "Install sheepdog as a login service") || !strings.Contains(out, "skipped") {
+	if code != 0 || !strings.Contains(out, "Start at login (optional)") || !strings.Contains(out, "skipped") {
 		t.Fatalf("decline: code %d: %s", code, out)
 	}
 	if len(*calls) != 0 {

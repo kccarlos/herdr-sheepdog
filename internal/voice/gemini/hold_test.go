@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +135,51 @@ func TestEveryWaitingPushIsLoggedHeld(t *testing.T) {
 	c.waitSent(t, "second line", isContent("line push-tmd8v4-107"))
 	if rel := h.log.payloads("voice.push_released"); len(rel) != 2 {
 		t.Errorf("voice.push_released = %v, want both lines", rel)
+	}
+}
+
+// TestHeldPushesReleaseOwedFirst: lines held while no client was attached
+// are released with what the user must act on first, then the plain news,
+// each class in arrival order. The tag, not the text, decides.
+func TestHeldPushesReleaseOwedFirst(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(false)
+
+	for _, p := range []struct {
+		text string
+		u    voice.Urgency
+		tags map[string]any
+	}{
+		{"docs finished", voice.UrgencyIdle, nil},
+		{"tests needs your approval", voice.UrgencyIdle, map[string]any{"needs_user": true}},
+		{"lint finished", voice.UrgencyIdle, nil},
+		{"build asks which branch", voice.UrgencyInterrupt, nil},
+	} {
+		if err := h.s.PushTagged(p.text, p.u, p.tags); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(150 * time.Millisecond)
+	if n := c.count("content"); n != 0 {
+		t.Fatalf("pushes sent with no client attached: %s", describe(c.sentMsgs()))
+	}
+	h.s.ClientAttached(true)
+	c.waitSent(t, "build question", isContent("build asks which branch"))
+	var got []string
+	for _, m := range c.sentMsgs() {
+		if m.kind == "content" {
+			got = append(got, turnText(m.content.Turns[0]))
+		}
+	}
+	// The plain news waits behind both (and for the model's turn); only
+	// the owed lines may have gone, the older approval first.
+	if len(got) < 2 || !strings.Contains(got[0], "approval") || !strings.Contains(got[1], "branch") {
+		t.Fatalf("release order = %q, want the approval then the branch question first", got)
+	}
+	for _, g := range got {
+		if strings.Contains(g, "docs") || strings.Contains(g, "lint") {
+			t.Fatalf("plain news released ahead of an owed line: %q", got)
+		}
 	}
 }

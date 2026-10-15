@@ -3,7 +3,7 @@
 **Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for
-notifications). It needs iOS 17 or newer.
+notifications, if you set up push). It needs iOS 17 or newer.
 
 ## Install
 
@@ -28,7 +28,8 @@ setup.
 2. In the app: Settings, Daemon, **Scan pairing code**. (Or point the iPhone
    Camera at the code and open the `sheepdog://pair` link; the app asks
    "Pair with <host>?" first.)
-3. Allow the microphone and, when asked, notifications. Tap the orb to connect.
+3. Allow the microphone. Tap the orb to connect. (Notifications with the app
+   closed need your own push key: see [Notifications](#notifications).)
 
 Prefer typing: `sheepdog serve` prints a `lan url` line; enter its host and
 port (for example `<lan-address>:7777`, no scheme) and the token in Settings,
