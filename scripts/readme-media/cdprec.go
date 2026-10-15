@@ -101,6 +101,13 @@ func main() {
 	fileSel := flag.String("file-selector", "#file-input", "file input that -file goes into")
 	file := flag.String("file", "", "file to set on -file-selector, -file-at seconds after the click")
 	fileAt := flag.Float64("file-at", 3, "seconds after the click to set -file")
+	fileWhen := flag.String("file-when", "", "JS expression: also wait until it has been true for -hold seconds before setting -file")
+	file2When := flag.String("file2-when", "", "JS expression: also wait until it has been true for -hold seconds before setting -file2")
+	hold := flag.Float64("hold", 0.8, "how long -file-when must stay true")
+	hold2 := flag.Float64("hold2", 0.8, "how long -file2-when must stay true")
+	after2 := flag.Float64("after2", 0, "stop this many seconds after -file2 is set (0: run the full -seconds)")
+	file2 := flag.String("file2", "", "a second file (a follow-up), set on -file-selector -file2-at seconds after the click")
+	file2At := flag.Float64("file2-at", 12, "seconds after the click to set -file2")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -186,6 +193,41 @@ func main() {
 	clicked := false
 	var clickedAt time.Time
 	fileSet := *file == ""
+	file2Set := *file2 == ""
+	// ready reports whether the JS expression expr has held for -hold
+	// seconds (always true for an empty expr); since is its state.
+	ready := func(expr string, since *time.Time, hold float64) bool {
+		if expr == "" {
+			return true
+		}
+		var r struct {
+			Result struct {
+				Result struct{ Value bool }
+			}
+		}
+		_ = json.Unmarshal(must("Runtime.evaluate", map[string]any{"expression": "!!(" + expr + ")", "returnByValue": true}), &r)
+		if !r.Result.Result.Value {
+			*since = time.Time{}
+			return false
+		}
+		if since.IsZero() {
+			*since = time.Now()
+		}
+		return time.Since(*since).Seconds() >= hold
+	}
+	var whenSince, when2Since time.Time
+	setFile := func(path string) {
+		abs, _ := filepath.Abs(path)
+		var doc struct {
+			Result struct{ Root struct{ NodeID int } }
+		}
+		_ = json.Unmarshal(must("DOM.getDocument", map[string]any{}), &doc)
+		var q struct {
+			Result struct{ NodeID int }
+		}
+		_ = json.Unmarshal(must("DOM.querySelector", map[string]any{"nodeId": doc.Result.Root.NodeID, "selector": *fileSel}), &q)
+		must("DOM.setFileInputFiles", map[string]any{"files": []string{abs}, "nodeId": q.Result.NodeID})
+	}
 	n := 0
 	var lastName string
 	var lastAt float64
@@ -204,19 +246,18 @@ loop:
 				clickedAt = time.Now()
 				fmt.Printf("click %.2f\n", time.Since(start).Seconds())
 			}
-			if clicked && !fileSet && time.Since(clickedAt).Seconds() >= *fileAt {
-				abs, _ := filepath.Abs(*file)
-				var doc struct {
-					Result struct{ Root struct{ NodeID int } }
-				}
-				_ = json.Unmarshal(must("DOM.getDocument", map[string]any{}), &doc)
-				var q struct {
-					Result struct{ NodeID int }
-				}
-				_ = json.Unmarshal(must("DOM.querySelector", map[string]any{"nodeId": doc.Result.Root.NodeID, "selector": *fileSel}), &q)
-				must("DOM.setFileInputFiles", map[string]any{"files": []string{abs}, "nodeId": q.Result.NodeID})
+			if clicked && !fileSet && time.Since(clickedAt).Seconds() >= *fileAt && ready(*fileWhen, &whenSince, *hold) {
+				setFile(*file)
 				fileSet = true
 				fmt.Printf("file %.2f\n", time.Since(start).Seconds())
+			}
+			if clicked && !file2Set && fileSet && time.Since(clickedAt).Seconds() >= *file2At && ready(*file2When, &when2Since, *hold2) {
+				setFile(*file2)
+				file2Set = true
+				fmt.Printf("file2 %.2f\n", time.Since(start).Seconds())
+				if *after2 > 0 {
+					deadline = time.After(time.Duration(*after2*1000) * time.Millisecond)
+				}
 			}
 		case ev, ok := <-c.events:
 			if !ok {
