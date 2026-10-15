@@ -524,7 +524,7 @@ const (
 var PushModes = []string{PushModeRelay, PushModeAPNs, PushModeOff}
 
 // DefaultRelayURL is sheepdog's shared push relay (relay/README.md).
-const DefaultRelayURL = "https://sheepdog-relay.REPLACE.workers.dev"
+const DefaultRelayURL = "https://sheepdog-relay.kccarlos-an.workers.dev"
 
 // PushRelay configures the push relay.
 type PushRelay struct {

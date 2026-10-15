@@ -28,6 +28,9 @@ func TestMain(m *testing.M) {
 			_ = os.Unsetenv(k)
 		}
 	}
+	// The default push mode is the deployed shared relay: keep doctor and
+	// setup checks from calling it over the network.
+	_ = os.Setenv("SHEEPDOG_PUSH_MODE", "off")
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
