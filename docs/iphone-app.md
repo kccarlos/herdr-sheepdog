@@ -9,8 +9,7 @@ notifications, if you set up push). It needs iOS 17 or newer.
 
 ## Install
 
-<!-- TESTFLIGHT_LINK: when the public link exists, restore the bullet: "**TestFlight:** [join](https://testflight.apple.com/join/...). Install the TestFlight app first, then open the link." -->
-- **TestFlight:** the public link is coming; until it exists, build the app yourself (next bullet). The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
+- **TestFlight:** [join the beta](https://testflight.apple.com/join/bjCaFYgK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
 - **Build it yourself:** the source is in [`ios/`](../ios/README.md) in this
   repository, with the steps (XcodeGen, Xcode, your own Apple team).
 
