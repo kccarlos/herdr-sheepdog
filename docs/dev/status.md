@@ -24,9 +24,10 @@ minutes ran out again on 2026-10-05, so since #162 every job runs on
 self-hosted ephemeral runners in a Cloud Run worker pool (GCP project
 `herdr-sheepdog-ci`, scaled 0–3 by a webhook, about $0.07 per CI run on
 trial credit; [`infra/ci-runners`](../../infra/ci-runners/README.md)); the repo
-variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow is Ubuntu-only; the darwin binary is
-signed and notarized locally with `make release-sign`
-([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
+variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow builds on Ubuntu; after the maintainer
+approves the `release` environment it signs and notarizes the darwin binary
+on a GitHub-hosted Mac and pushes the Homebrew formula to the tap
+([`signing.md`](signing.md); `make release-sign` is the local fallback). The iOS
 companion app ([`ios/`](../../ios/README.md), until 2026-10-15 the separate
 `herdr-sheepdog-ios` repository) is built and shipped by Xcode Cloud,
 not GitHub Actions; TestFlight build 0.1.3 (35) (Settings ▸ Languages)
@@ -239,9 +240,10 @@ What is in:
   busy Claude Code pane interrupts the running turn but the queued prompt
   still runs (acceptance run, 2026-10-02 00:34). An idle-then-working
   agent stops cleanly.
-- **`v0.1.0` of the daemon is not tagged** (the release workflow builds
-  on Ubuntu; the darwin binary is then signed and notarized on the Mac
-  with `make release-sign`, see [`signing.md`](signing.md)).
+- **`v0.1.0` of the daemon is tagged (2026-10-16) but its darwin binary
+  is not signed yet**: signing moved into the release workflow afterwards,
+  and v0.1.0's own workflow file has no dispatch trigger (see
+  [`signing.md`](signing.md#re-signing-an-existing-release)).
 - **Not yet checked on a device:** AirPods and route changes, and a
   multi-question (tabbed) AskUserQuestion widget.
 - **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as

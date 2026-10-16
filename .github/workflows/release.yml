@@ -1,19 +1,34 @@
 name: Release
 
+# Tag push: build -> (approve the `release` environment) -> sign and
+# notarize the darwin binary -> publish the Homebrew formula.
+# Dispatch: re-sign and re-publish an existing release without rebuilding it
+# (docs/dev/signing.md has the commands).
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release to sign and publish to the tap, e.g. v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
-# Self-hosted Cloud Run runner by default; CI_RUNNER=ubuntu-latest switches back (infra/ci-runners).
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  # Ubuntu only: macOS runners bill at 10x. The darwin binary is released
-  # unsigned here and signed + notarized afterwards on a Mac with
-  # `make release-sign TAG=<tag>` (docs/dev/signing.md).
+  # Builds both binaries and creates the GitHub Release. Self-hosted Cloud
+  # Run runner by default; CI_RUNNER=ubuntu-latest switches back
+  # (infra/ci-runners). Tag pushes only: a dispatch must not rebuild and
+  # overwrite the signed assets.
   release:
+    if: github.event_name == 'push'
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
@@ -63,4 +78,222 @@ jobs:
             release/checksums.txt
 
       - name: Note the unsigned darwin asset
-        run: echo "::notice title=darwin binary unsigned::sheepdog_${GITHUB_REF_NAME}_darwin_arm64.tar.gz is unsigned until 'make release-sign TAG=${GITHUB_REF_NAME}' runs on a Mac (docs/dev/signing.md)."
+        run: echo "::notice title=darwin binary unsigned::sheepdog_${GITHUB_REF_NAME}_darwin_arm64.tar.gz stays unsigned until the sign-macos job runs, after the release environment is approved (docs/dev/signing.md)."
+
+  # Signs and notarizes the darwin binary with scripts/release-sign.sh (the
+  # same script as `make release-sign`), replacing the tarball and
+  # checksums.txt on the release. The only job outside ios.yml that may use a
+  # GitHub-hosted Mac, and only because it runs in the `release` environment
+  # (maintainer approval, v* tags only); the policy check enforces that.
+  sign-macos:
+    needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || (needs.release.result == 'skipped' && github.event_name == 'workflow_dispatch')) }}
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: ${{ github.repository }}
+      NOTARY_ISSUER_ID: 686fbf99-b25d-4e9c-af7c-2b7cb2c3f1eb
+      NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+    steps:
+      - name: Signing credentials present?
+        id: creds
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9] ]] || { echo "::error::tag must look like v1.2.3, got '$TAG'"; exit 1; }
+          missing=""
+          [ -n "$MACOS_CERT_P12_BASE64" ] || missing="$missing MACOS_CERT_P12_BASE64"
+          [ -n "$MACOS_CERT_PASSWORD" ] || missing="$missing MACOS_CERT_PASSWORD"
+          [ -n "$NOTARY_API_KEY_P8" ] || missing="$missing NOTARY_API_KEY_P8"
+          [ -n "$NOTARY_KEY_ID" ] || missing="$missing NOTARY_KEY_ID(variable)"
+          if [ -n "$missing" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=darwin binary not signed::the release environment lacks${missing}: skipping signing and the Homebrew formula (docs/dev/signing.md)"
+            exit 0
+          fi
+          gh release view "$TAG" -R "$RELEASE_REPO" --json tagName -q .tagName > /dev/null \
+            || { echo "::error::no GitHub Release for $TAG"; exit 1; }
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/checkout@v7
+
+      - name: Import the Developer ID certificate into a temporary keychain
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          kc="$RUNNER_TEMP/sheepdog-sign.keychain-db"
+          p12="$RUNNER_TEMP/sheepdog-sign.p12"
+          kc_pw="$(openssl rand -hex 32)"
+          printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$p12"
+          security create-keychain -p "$kc_pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$kc_pw" "$kc"
+          security import "$p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$p12"
+          # The Developer ID G2 intermediate, in case the .p12 lacks the chain
+          # (a public Apple CA certificate).
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$kc" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pw" "$kc" > /dev/null
+          # Put it in the search list so codesign can build the chain.
+          existing="$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')"
+          # shellcheck disable=SC2086 # one keychain path per word
+          security list-keychains -d user -s "$kc" $existing
+          if ! security find-identity -v -p codesigning "$kc" | grep -q '"Developer ID Application: .*(GV776BZVA8)"'; then
+            security find-identity -p codesigning "$kc" || true
+            echo "::error::no valid Developer ID Application identity for team GV776BZVA8 in MACOS_CERT_P12_BASE64"
+            exit 1
+          fi
+          echo "SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: Write the App Store Connect API key
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/notary"
+          key="$RUNNER_TEMP/notary/AuthKey.p8"
+          # The secret is the .p8 file's text; a base64 of it works too.
+          if printf '%s' "$NOTARY_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$NOTARY_API_KEY_P8" > "$key"
+          else
+            printf '%s' "$NOTARY_API_KEY_P8" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          grep -q 'BEGIN PRIVATE KEY' "$key" || { echo "::error::NOTARY_API_KEY_P8 is not a .p8 private key"; exit 1; }
+          echo "NOTARY_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Sign, notarize and upload (scripts/release-sign.sh)
+        id: sign
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          NOTARY_ISSUER: ${{ env.NOTARY_ISSUER_ID }}
+          SIGN_IDENTITY_MATCH: "Developer ID Application"
+        run: |
+          set -euo pipefail
+          ./scripts/release-sign.sh "$TAG"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the published darwin tarball
+        if: steps.sign.outputs.signed == 'true'
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/verify"
+          rm -rf "$d"; mkdir -p "$d/bin"
+          asset="sheepdog_${TAG}_darwin_arm64.tar.gz"
+          gh release download "$TAG" -R "$RELEASE_REPO" -D "$d" -p "$asset" -p checksums.txt
+          (cd "$d" && shasum -a 256 -c checksums.txt --ignore-missing)
+          grep -q "_linux_amd64.tar.gz" "$d/checksums.txt" || { echo "::error::checksums.txt lost the linux line"; exit 1; }
+          tar -xzf "$d/$asset" -C "$d/bin"
+          codesign --verify --strict --verbose=2 "$d/bin/sheepdog"
+          codesign --display --verbose=2 "$d/bin/sheepdog" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp|CodeDirectory)'
+          codesign --display --verbose=2 "$d/bin/sheepdog" 2>&1 | grep -q '^TeamIdentifier=GV776BZVA8$'
+          # Bare Mach-O: `spctl -t install` is for .pkg and `-t execute` rejects
+          # every CLI binary; this context reports the notarization.
+          spctl --assess --type open --context context:primary-signature -vv "$d/bin/sheepdog" 2>&1 | tee "$d/spctl.txt"
+          grep -q 'source=Notarized Developer ID' "$d/spctl.txt"
+          echo "::notice title=darwin binary signed::$asset is signed and notarized"
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          if [ -n "${SIGN_KEYCHAIN:-}" ]; then security delete-keychain "$SIGN_KEYCHAIN" || true; fi
+          rm -rf "$RUNNER_TEMP/notary" "$RUNNER_TEMP/sheepdog-sign.p12" "$RUNNER_TEMP/sheepdog-sign.keychain-db"
+
+  # Renders Formula/sheepdog.rb from the signed checksums and pushes it to
+  # kccarlos/homebrew-tap. GitHub-hosted ubuntu-latest (Homebrew and Ruby
+  # preinstalled, a fresh VM per run) rather than the Cloud Run runner.
+  homebrew:
+    needs: sign-macos
+    if: ${{ !cancelled() && needs.sign-macos.outputs.signed == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - name: Tap token present?
+        id: creds
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Homebrew formula not published::the release environment lacks HOMEBREW_TAP_TOKEN: skipping the tap update (docs/dev/signing.md)"
+          fi
+
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/checkout@v7
+
+      - name: Render the formula from the signed checksums
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          packaging/homebrew/render.sh "$TAG" > "$RUNNER_TEMP/sheepdog.rb"
+          ruby -c "$RUNNER_TEMP/sheepdog.rb"
+          cat "$RUNNER_TEMP/sheepdog.rb"
+
+      - name: brew audit --strict
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          t="$(brew --repository)/Library/Taps/sheepdog-ci/homebrew-audit"
+          mkdir -p "$t/Formula"
+          cp "$RUNNER_TEMP/sheepdog.rb" "$t/Formula/sheepdog.rb"
+          git -C "$t" init -q
+          brew audit --strict --formula sheepdog-ci/audit/sheepdog
+          rm -rf "$t"
+
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: kccarlos/homebrew-tap
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Commit and push Formula/sheepdog.rb
+        id: tap
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          packaging/homebrew/tap-update.sh homebrew-tap "$RUNNER_TEMP/sheepdog.rb" "$TAG" | tee "$RUNNER_TEMP/tap-update.txt"
+          if grep -q '^changed=true$' "$RUNNER_TEMP/tap-update.txt"; then
+            git -C homebrew-tap push origin HEAD:main
+          fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install from the tap (Linux smoke test)
+        if: steps.tap.outputs.pushed == 'true'
+        run: |
+          set -euo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew tap kccarlos/tap
+          brew install --formula kccarlos/tap/sheepdog
+          sheepdog version
+          brew test kccarlos/tap/sheepdog

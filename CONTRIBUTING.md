@@ -54,8 +54,8 @@ To build onto a device under your own Apple team, see [ios/README.md](ios/README
 
 - Logic goes in `ios/Sources/SheepdogKit` with a unit test. A flow the user sees gets an XCUITest, and it should run without a daemon when it can (see `ios/Tests/SheepdogUITests/StubDaemon.swift`).
 - **Design the unhappy paths.** A new screen needs its empty state and its error states with a plain fix, and it must work in dark mode, at the largest Dynamic Type size and on a small iPhone.
-- **iOS CI.** Every PR that touches `ios/` runs the app's tests on Xcode Cloud ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)) and the unit tests on a GitHub-hosted Mac (`.github/workflows/ios.yml`, no secrets). Do not add macOS jobs to any other workflow; the `policy` check fails if one does.
-- App releases are `ios-v*` tags (`ios-v` + `MARKETING_VERSION`); plain `v*` tags are daemon releases.
+- **iOS CI.** Every PR that touches `ios/` runs the app's tests on Xcode Cloud ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)) and the unit tests on a GitHub-hosted Mac (`.github/workflows/ios.yml`, no secrets). The only other macOS job is `release.yml`'s signing job, in the approval-gated `release` environment ([docs/dev/signing.md](docs/dev/signing.md)); do not add macOS jobs anywhere else, the `policy` check fails if one does.
+- App releases are `ios-v*` tags (`ios-v` + `MARKETING_VERSION`); plain `v*` tags are daemon releases: the tag builds the release, and after the maintainer approves the `release` environment, Actions signs and notarizes the macOS binary and publishes the Homebrew formula ([docs/dev/signing.md](docs/dev/signing.md)).
 
 ## License
 
