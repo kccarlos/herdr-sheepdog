@@ -100,22 +100,17 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_REPO: ${{ github.repository }}
       NOTARY_ISSUER_ID: 686fbf99-b25d-4e9c-af7c-2b7cb2c3f1eb
-      NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
     steps:
+      # Signing material is in 1Password (vault github); this is the token.
       - name: Signing credentials present?
         id: creds
         env:
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
         run: |
           set -euo pipefail
           [[ "$TAG" =~ ^v[0-9] ]] || { echo "::error::tag must look like v1.2.3, got '$TAG'"; exit 1; }
           missing=""
-          [ -n "$MACOS_CERT_P12_BASE64" ] || missing="$missing MACOS_CERT_P12_BASE64"
-          [ -n "$MACOS_CERT_PASSWORD" ] || missing="$missing MACOS_CERT_PASSWORD"
-          [ -n "$NOTARY_API_KEY_P8" ] || missing="$missing NOTARY_API_KEY_P8"
-          [ -n "$NOTARY_KEY_ID" ] || missing="$missing NOTARY_KEY_ID(variable)"
+          [ -n "$OP_SERVICE_ACCOUNT_TOKEN" ] || missing="$missing OP_SERVICE_ACCOUNT_TOKEN"
           if [ -n "$missing" ]; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=darwin binary not signed::the release environment lacks${missing}: skipping signing and the Homebrew formula (docs/dev/signing.md)"
@@ -128,11 +123,25 @@ jobs:
       - if: steps.creds.outputs.ok == 'true'
         uses: actions/checkout@v7
 
+      # Signing secrets from 1Password; step outputs, so only the steps that name them see the values.
+      - name: Secrets from 1Password
+        id: op
+        if: steps.creds.outputs.ok == 'true'
+        uses: 1password/load-secrets-action@v5
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          MACOS_CERT_P12_BASE64: op://github/apple-developer-id-application/p12_base64
+          MACOS_CERT_PASSWORD: op://github/apple-developer-id-application/password
+          NOTARY_API_KEY_P8: op://github/app-store-connect-api-key/p8_base64
+          NOTARY_KEY_ID: op://github/app-store-connect-api-key/key_id
+
       - name: Import the Developer ID certificate into a temporary keychain
         if: steps.creds.outputs.ok == 'true'
         env:
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_CERT_P12_BASE64: ${{ steps.op.outputs.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ steps.op.outputs.MACOS_CERT_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
@@ -156,7 +165,7 @@ jobs:
           security list-keychains -d user -s "$kc" $existing
           if ! security find-identity -v -p codesigning "$kc" | grep -q '"Developer ID Application: .*(GV776BZVA8)"'; then
             security find-identity -p codesigning "$kc" || true
-            echo "::error::no valid Developer ID Application identity for team GV776BZVA8 in MACOS_CERT_P12_BASE64"
+            echo "::error::no valid Developer ID Application identity for team GV776BZVA8 in 1Password item apple-developer-id-application"
             exit 1
           fi
           echo "SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
@@ -164,7 +173,7 @@ jobs:
       - name: Write the App Store Connect API key
         if: steps.creds.outputs.ok == 'true'
         env:
-          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_API_KEY_P8: ${{ steps.op.outputs.NOTARY_API_KEY_P8 }}
         run: |
           set -euo pipefail
           umask 077
@@ -185,6 +194,7 @@ jobs:
         if: steps.creds.outputs.ok == 'true'
         env:
           NOTARY_ISSUER: ${{ env.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_ID: ${{ steps.op.outputs.NOTARY_KEY_ID }}
           SIGN_IDENTITY_MATCH: "Developer ID Application"
         run: |
           set -euo pipefail
@@ -237,17 +247,28 @@ jobs:
       - name: Tap token present?
         id: creds
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
         run: |
-          if [ -n "$HOMEBREW_TAP_TOKEN" ]; then
+          if [ -n "$OP_SERVICE_ACCOUNT_TOKEN" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Homebrew formula not published::the release environment lacks HOMEBREW_TAP_TOKEN: skipping the tap update (docs/dev/signing.md)"
+            echo "::notice title=Homebrew formula not published::the release environment lacks OP_SERVICE_ACCOUNT_TOKEN: skipping the tap update (docs/dev/signing.md)"
           fi
 
       - if: steps.creds.outputs.ok == 'true'
         uses: actions/checkout@v7
+
+      # The tap token from 1Password (homebrew-tap-token).
+      - name: Secrets from 1Password
+        id: op
+        if: steps.creds.outputs.ok == 'true'
+        uses: 1password/load-secrets-action@v5
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          HOMEBREW_TAP_TOKEN: op://github/homebrew-tap-token/credential
 
       - name: Render the formula from the signed checksums
         if: steps.creds.outputs.ok == 'true'
@@ -274,7 +295,7 @@ jobs:
         with:
           repository: kccarlos/homebrew-tap
           ref: main
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.op.outputs.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
       - name: Commit and push Formula/sheepdog.rb
