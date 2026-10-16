@@ -13,3 +13,13 @@ Raised by workstream A (tokens and shared assets). Each has a default that is al
 9. **Header logo.** The three pages now show `logo-color.svg` in both modes (the old picture swapped a solid and a transparent file). D replaces it with the shared mono header.
 10. **Favicons.** `favicon.svg` is the mono logo with ink/cream by colour scheme; the 32px and 180px PNGs are the cream mono logo on `#1B1D22`. The 180px has 14% padding. Want a different crop?
 11. **`internal/web/auth_test.go`** requests `/static/logo-color.svg` now; the one line the CEO allowed.
+
+## Workstream E (iOS app)
+
+12. **Nav title font.** Titles use SF Rounded through `UINavigationBarAppearance` (set in the app delegate; `.fontDesign` on a view does not reach the bar). Setting it in `App.init` turned the global tint back to system blue, so it lives in `didFinishLaunching`. The rounded title is subtle on the iOS 27 glass bar; check it on a device.
+13. **No brand mark in the Live Activity.** The lock-screen Live Activity and the Dynamic Island show only phase glyphs, so there was no mark to swap; nothing was added (that would be a layout change). Want a 20 pt cream mono logo in the compact leading slot? The `LogoMono` image set is in the app target only; the widget extension would need its own copy. The "waiting" amber text on the white lock-screen card (`PhaseLook.waitingInk`) is under 4.5:1; not touched here.
+14. **"All done" state.** The app has no explicit all-done screen. The celebrating mascot is on the Agents pane when agents exist but none is running ("No agent is running right now."). Is that the intended place, or should it wait for a real "everything finished" signal?
+15. **Mascot background.** The sheet is a JPEG with a soft ground shadow, so a clean cut-out was not possible; the crops keep the cream background in a rounded card (a cream card on dark mode).
+16. **About header.** About had no logo or title row. Added the 96 pt colour logo, "sheepdog for herdr" and the version above the existing rows; there were no links to keep.
+17. **Speaking is still system blue in the Live Activity** (`PhaseLook`, `.blue`): the widget extension has no asset catalog, so it cannot use `Theme.working`. Same for `.green`/`.purple`/`.red`.
+18. **Orange fills now use ink text** (`OnAccent`): "Try the demo", the approval default option, the feedback "paused" button. System white was about 2.7:1.

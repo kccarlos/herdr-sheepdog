@@ -350,10 +350,12 @@ struct BannerView: View {
                             .font(.caption.weight(.semibold))
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            .tint(Theme.primaryText)
                     }
                     if let help = banner.help {
                         Link("How to fix this", destination: help)
                             .font(.caption.weight(.semibold))
+                            .tint(Theme.primaryText)
                             .accessibilityIdentifier("banner.help")
                     }
                 }
@@ -510,7 +512,7 @@ struct DemoHeader: View {
             HStack(spacing: 8) {
                 Label("Demo", systemImage: "play.circle.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.primaryText)
                 Text("Scripted agents, on this phone only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -518,6 +520,7 @@ struct DemoHeader: View {
                 Spacer(minLength: 4)
                 Button("Leave") { model.leaveDemo() }
                     .font(.subheadline.weight(.medium))
+                    .tint(Theme.primaryText)
                     .accessibilityIdentifier("demo.leave")
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -527,6 +530,7 @@ struct DemoHeader: View {
                             .font(.footnote.weight(.medium))
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
+                            .tint(Theme.primaryText)
                             .disabled(model.sendingTyped)
                             .accessibilityIdentifier("demo.question.\(index)")
                     }

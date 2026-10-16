@@ -99,6 +99,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: done)
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("settings.done")
                         .disabled(firstRun && !model.isConfigured && DaemonEndpoint(text: address) == nil)
                 }

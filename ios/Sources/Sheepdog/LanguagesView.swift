@@ -28,7 +28,7 @@ struct LanguagesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if model.daemonSettings?.chosenLanguages.isEmpty == false {
-                EditButton()
+                EditButton().tint(Theme.primaryText)
             }
         }
         .task { await model.loadDaemonSettings() }

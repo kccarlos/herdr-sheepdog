@@ -263,7 +263,7 @@ struct AgentScreenView: View {
                             .padding(.horizontal, 6)
                     }
                     .buttonStyle(.bordered)
-                    .tint(key.needsConfirmation ? Color(.systemRed) : .accentColor)
+                    .tint(key.needsConfirmation ? Color(.systemRed) : Theme.primaryText)
                     .disabled(!screen.canOperate)
                     .accessibilityLabel(key.accessibilityLabel)
                     .accessibilityIdentifier("agentScreen.key.\(key.rawValue)")

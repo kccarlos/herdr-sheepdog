@@ -23,7 +23,11 @@ struct FlockUnavailableView: View {
                 }
             case .empty:
                 ContentUnavailableView {
-                    Label("No agents yet", systemImage: "pawprint")
+                    Label {
+                        Text("No agents yet").fontDesign(.rounded)
+                    } icon: {
+                        MascotCard(name: "MascotSleeping", width: 200)
+                    }
                 } description: {
                     Text("Start a coding agent in herdr on your computer and it shows up here.")
                 } actions: {
@@ -48,6 +52,7 @@ struct FlockUnavailableView: View {
                     Button("Try again") { model.reconnect() }
                         .accessibilityIdentifier("flock.unreachable.retry")
                     Link("How to fix this", destination: SetupHelp.remoteAccessURL)
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("flock.unreachable.help")
                 }
             case .tokenRefused:
@@ -74,7 +79,25 @@ struct FlockUnavailableView: View {
                 EmptyView()
             }
         }
+        .tint(Theme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A brand mascot pose from the asset catalog, on the illustration's own
+/// cream background in a rounded card. Decorative: VoiceOver skips it. Only
+/// the two Agents-pane empty states use one.
+struct MascotCard: View {
+    let name: String
+    var width: CGFloat = 160
+
+    var body: some View {
+        Image(decorative: name)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: width)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

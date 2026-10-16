@@ -44,6 +44,7 @@ struct PairingScannerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("scan.cancel")
                 }
             }
