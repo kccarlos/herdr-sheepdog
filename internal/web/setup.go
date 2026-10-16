@@ -187,6 +187,8 @@ func (s *Server) setupRoutes() error {
 		"GET /api/setup/state":     s.handleSetupState,
 		"POST /api/setup/validate": s.handleSetupValidate,
 		"POST /api/setup/keys":     s.handleSetupKeys,
+		"POST /api/setup/models":   s.handleSetupModels,
+		"POST /api/setup/probe":    s.handleSetupProbe,
 		"GET /api/setup/checks":    s.handleSetupChecks,
 		"POST /api/setup/service":  s.handleSetupService,
 		"POST /api/setup/phone":    s.handleSetupPhone,

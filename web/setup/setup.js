@@ -1,7 +1,7 @@
 // The setup page (/setup): the five steps of `sheepdog setup`. It talks
 // only to /api/setup/* (loopback only, no token); keys are posted once
 // and never come back.
-'use strict';
+import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -61,6 +61,7 @@ function render() {
   const s = state;
   $('env-file').textContent = s.env_file;
   $('models-doc').href = s.links.models_doc;
+  $('which-doc').href = s.links.models_doc;
   $('get-key').href = s.links.get_key;
   $('ios-repo').href = s.links.ios_repo;
 
@@ -177,7 +178,7 @@ function showAdvancedFields() {
 }
 
 // Live validation: a pasted key is checked (debounced) before saving.
-function liveValidate(input, result, kind, extra) {
+function liveValidate(input, result, kind, extra, onOk) {
   let timer = null;
   let seq = 0;
   input.addEventListener('input', () => {
@@ -192,6 +193,7 @@ function liveValidate(input, result, kind, extra) {
       const r = await api('validate', body).catch(() => ({ status: 'fail', detail: 'sheepdog did not answer' }));
       if (mine !== seq) return;
       setResult(result, r.status === 'fail' ? 'fail' : 'ok', r.status === 'fail' ? checkText(r) : '✓ Valid key');
+      if (r.status !== 'fail' && onOk) onOk();
     }, 600);
   });
 }
@@ -289,11 +291,67 @@ function stopDemoOnClose() {
   }
 }
 
+// Find models: GET {base}/models through the daemon, and fill the Model
+// input's datalist. Free; it also runs once after the compat key checks out.
+let findSeq = 0;
+async function findModels() {
+  const status = $('compat-models-status');
+  const base = $('compat-base').value.trim();
+  if (!base) { setResult(status, 'fail', 'Type the Base URL first (it usually ends in /v1). You can still type the model name.'); return; }
+  const mine = ++findSeq;
+  $('find-models').disabled = true;
+  setResult(status, 'wait', 'Looking for models…');
+  const r = await api('models', { name: $('compat-name').value.trim(), base_url: base, key: $('compat-key').value.trim() }).catch(() => null);
+  if (mine !== findSeq) return;
+  $('find-models').disabled = false;
+  const st = modelsStatus(r);
+  fillModels(st.kind === 'ok' ? r.models : []);
+  setResult(status, st.kind, st.text);
+}
+
+function fillModels(models) {
+  const list = $('compat-models');
+  list.textContent = '';
+  for (const o of datalistOptions(models)) {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    if (o.label) opt.label = o.label;
+    list.appendChild(opt);
+  }
+}
+
+// Test tool calling: one small request, only on this click.
+async function probeTools() {
+  const btn = $('probe-tools');
+  const out = $('probe-result');
+  btn.disabled = true;
+  setResult(out, 'wait', 'Asking the model to call a tool…');
+  const r = await api('probe', { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), key: $('compat-key').value.trim(), model: $('compat-model').value.trim() }).catch(() => null);
+  const st = probeStatus(r);
+  setResult(out, st.kind, st.text);
+  btn.disabled = !$('compat-model').value.trim();
+}
+
 function init() {
+  $('find-models').addEventListener('click', findModels);
+  $('probe-tools').addEventListener('click', probeTools);
+  $('compat-model').addEventListener('input', () => {
+    $('probe-tools').disabled = !$('compat-model').value.trim();
+    setResult($('probe-result'), '', '');
+  });
+  for (const id of ['compat-base', 'compat-name']) {
+    $(id).addEventListener('input', () => {
+      findSeq++;
+      $('find-models').disabled = false;
+      fillModels([]);
+      setResult($('compat-models-status'), '', '');
+      setResult($('probe-result'), '', '');
+    });
+  }
   liveValidate($('gemini-key'), $('gemini-result'), 'gemini');
   liveValidate($('openai-key'), $('openai-result'), 'openai');
   liveValidate($('deepseek-key'), $('deepseek-result'), 'deepseek');
-  liveValidate($('compat-key'), $('compat-result'), 'compat', () => ({ base_url: $('compat-base').value.trim(), name: $('compat-name').value.trim() }));
+  liveValidate($('compat-key'), $('compat-result'), 'compat', () => ({ base_url: $('compat-base').value.trim(), name: $('compat-name').value.trim() }), () => findModels());
   for (const r of document.querySelectorAll('input[name=voice], input[name=orch]')) r.addEventListener('change', showAdvancedFields);
   $('save-models').addEventListener('click', saveModels);
   $('run-checks').addEventListener('click', runChecks);

@@ -27,6 +27,7 @@
   <section class="card step" id="step-models" aria-labelledby="h-models">
     <h2 id="h-models"><span class="num" aria-hidden="true">1</span> Models <span class="state" id="models-state"></span></h2>
     <p>sheepdog needs one free Gemini API key: it runs the voice and the model that reads your agents.</p>
+    <p class="recommend" id="orch-tip">One free Gemini key is enough to start. For steadier answers we recommend also choosing a separate orchestrator model under Advanced (DeepSeek or any OpenAI-compatible model): the free Gemini model can be slow or busy at times. <a id="which-doc" href="#" target="_blank" rel="noopener">Which to choose &rarr;</a></p>
     <div class="field">
       <label for="gemini-key">Gemini API key</label>
       <div class="row">
@@ -38,7 +39,7 @@
     </div>
 
     <details id="advanced">
-      <summary>Advanced: other voice or orchestrator models</summary>
+      <summary>Advanced: a separate orchestrator model (recommended), or another voice</summary>
       <fieldset>
         <legend>Voice</legend>
         <label><input type="radio" name="voice" value="gemini" checked> Gemini Live (uses the Gemini key)</label>
@@ -51,9 +52,9 @@
       </fieldset>
       <fieldset>
         <legend>Orchestrator (reads and acts on your agents)</legend>
-        <label><input type="radio" name="orch" value="gemini" checked> Gemini (uses the Gemini key)</label>
-        <label><input type="radio" name="orch" value="deepseek"> DeepSeek (paid per token)</label>
-        <label><input type="radio" name="orch" value="compat"> Any OpenAI-compatible endpoint (OpenRouter, Groq, Ollama, …)</label>
+        <label><input type="radio" name="orch" value="gemini" checked> Gemini (the default: uses the Gemini key, free, can be slow or busy)</label>
+        <label><input type="radio" name="orch" value="deepseek"> DeepSeek (recommended for steadier answers, paid per token)</label>
+        <label><input type="radio" name="orch" value="compat"> Any OpenAI-compatible endpoint (OpenRouter, Groq, Ollama, …): pick a model that supports tool calling</label>
         <div class="field indent hidden" id="deepseek-field">
           <label for="deepseek-key">DeepSeek API key</label>
           <input id="deepseek-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="deepseek-result">
@@ -65,10 +66,20 @@
           <label for="compat-base">Base URL</label>
           <input id="compat-base" type="url" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
           <label for="compat-model">Model (must support tool calling)</label>
-          <input id="compat-model" type="text" autocomplete="off">
+          <div class="row">
+            <input id="compat-model" type="text" list="compat-models" autocomplete="off" spellcheck="false" aria-describedby="compat-models-status">
+            <button type="button" id="find-models">Find models</button>
+          </div>
+          <datalist id="compat-models"></datalist>
+          <p id="compat-models-status" class="result" role="status" aria-live="polite"></p>
           <label for="compat-key">API key (empty for a local server)</label>
           <input id="compat-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="compat-result">
           <p id="compat-result" class="result" aria-live="polite"></p>
+          <div class="row">
+            <button type="button" id="probe-tools" disabled aria-describedby="probe-note probe-result">Test tool calling</button>
+          </div>
+          <p id="probe-note" class="muted small">Sends one small request to the endpoint, which may be billed. Nothing is sent until you press the button.</p>
+          <p id="probe-result" class="result" role="status" aria-live="polite"></p>
         </div>
       </fieldset>
       <p class="small">Which model does what, and what it costs: <a id="models-doc" href="#" target="_blank" rel="noopener">docs/models.md</a>.</p>
@@ -145,6 +156,6 @@
     <p class="small muted">The iOS app also has an offline demo that needs no computer: “Try the demo” on its first screen or in Settings.</p>
   </section>
 </main>
-<script src="/setup/setup.js"></script>
+<script type="module" src="/setup/setup.js"></script>
 </body>
 </html>

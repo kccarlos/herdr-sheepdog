@@ -55,6 +55,8 @@ base_url = "https://api.groq.com/openai/v1"
 model = "openai/gpt-oss-120b"
 ```
 
+On the setup page, **Find models** lists the models an OpenAI-compatible endpoint offers (free, and it marks the ones that support tool calling when the endpoint says so), and **Test tool calling** sends one small request to the model you typed (it may be billed, and it only runs when you press it). Typing the model name by hand always works.
+
 `sheepdog doctor` sends a few tokens to check that the model can call tools.
 Skip it with `sheepdog doctor --no-probe`.
 
