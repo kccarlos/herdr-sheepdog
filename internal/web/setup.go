@@ -251,14 +251,16 @@ type SetupHerdr struct {
 
 // SetupPhone is the phone-access step's state.
 type SetupPhone struct {
-	Enabled     bool           `json:"enabled"`
-	Bind        string         `json:"bind"`
-	HasToken    bool           `json:"has_token"`
-	Addresses   []pair.Address `json:"addresses"`
-	Tailscale   bool           `json:"tailscale"`
-	Connected   bool           `json:"connected"`
-	ConnectedAt *time.Time     `json:"connected_at,omitempty"`
-	Remote      string         `json:"remote,omitempty"`
+	Enabled   bool           `json:"enabled"`
+	Bind      string         `json:"bind"`
+	HasToken  bool           `json:"has_token"`
+	Addresses []pair.Address `json:"addresses"`
+	Tailscale bool           `json:"tailscale"`
+	// Explain says which address the QR leads with (pair.Explain).
+	Explain     string     `json:"explain,omitempty"`
+	Connected   bool       `json:"connected"`
+	ConnectedAt *time.Time `json:"connected_at,omitempty"`
+	Remote      string     `json:"remote,omitempty"`
 }
 
 func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
@@ -319,6 +321,7 @@ func (s *Server) setupPhone() SetupPhone {
 	if p.Enabled {
 		if addrs, _, err := s.pairing(); err == nil {
 			p.Addresses = addrs
+			p.Explain = pair.Explain(addrs)
 		}
 	}
 	if at, remote := s.phones.last(); !at.IsZero() && s.deps.Now().Sub(at) < phoneSeenFresh {

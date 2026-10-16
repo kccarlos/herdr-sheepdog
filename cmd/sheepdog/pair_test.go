@@ -43,7 +43,7 @@ func TestPair(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	text := out.String()
-	for _, want := range []string{"lan       http://192.168.1.20:7777", "tailscale http://100.101.102.103:7777", "not printed", "▀"} {
+	for _, want := range []string{"lan       http://192.168.1.20:7777", "tailscale http://100.101.102.103:7777", "not printed", "▀", "Uses your Tailscale address 100.101.102.103"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output lacks %q:\n%s", want, text)
 		}
@@ -114,7 +114,7 @@ func TestPairCompactFitsThePluginPopup(t *testing.T) {
 		}
 	}
 	t.Logf("compact pair output: %d columns x %d rows", width, len(lines))
-	if width > 70 || len(lines) > 36 {
+	if width > 70 || len(lines) > 40 {
 		t.Errorf("%d x %d does not fit the 72 x 42 popup", width, len(lines))
 	}
 }

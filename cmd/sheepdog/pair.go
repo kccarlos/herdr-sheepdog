@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
@@ -88,7 +89,8 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintln(stdout, "Does not scan? Try --invert (for a light background).")
 		fprintln(stdout, "")
 	}
-	fprintln(stdout, "It holds these addresses (the app uses the first that answers):")
+	fprintln(stdout, pair.Explain(addrs))
+	fprintln(stdout, "The code holds these addresses (the app keeps the first that answers):")
 	for _, a := range addrs {
 		fprintf(stdout, "  %-9s %s\n", a.Kind, a.URL)
 	}
@@ -115,6 +117,7 @@ func isTerminal(w io.Writer) bool {
 func printPairCompact(w io.Writer, code string, addrs []pair.Address, hasToken bool) int {
 	fprintln(w, "Scan in the iOS app (Settings → Scan pairing code):")
 	_, _ = io.WriteString(w, code)
+	fprintln(w, wrapText(pair.Explain(addrs), 68))
 	for _, a := range addrs {
 		fprintln(w, a.URL)
 	}
@@ -124,4 +127,20 @@ func printPairCompact(w io.Writer, code string, addrs []pair.Address, hasToken b
 		fprintln(w, "No web.token is set: anyone on these networks can use the daemon (sheepdog setup sets one).")
 	}
 	return 0
+}
+
+// wrapText breaks s at spaces into lines of at most width runes.
+func wrapText(s string, width int) string {
+	var out, line strings.Builder
+	for _, w := range strings.Fields(s) {
+		if line.Len() > 0 && line.Len()+1+len(w) > width {
+			out.WriteString(line.String() + "\n")
+			line.Reset()
+		}
+		if line.Len() > 0 {
+			line.WriteByte(' ')
+		}
+		line.WriteString(w)
+	}
+	return out.String() + line.String()
 }

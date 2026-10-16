@@ -120,24 +120,22 @@ function render() {
       $('qr').dataset.boot = s.boot;
     }
     setResult($('phone-connected'), p.connected ? 'ok' : 'wait', p.connected ? 'Connected ✓ (' + p.remote + ')' : 'Waiting for the phone…');
-    $('addresses').textContent = p.addresses.length ? 'It reaches this computer at ' + p.addresses.map((a) => a.url).join(', ') : 'No network address found: is this computer on Wi-Fi?';
+    $('addresses').textContent = p.addresses.length ? p.explain + ' (' + p.addresses.map((a) => a.url).join(', ') + ')' : 'No network address found: is this computer on Wi-Fi?';
     const tf = $('testflight');
     tf.textContent = '';
     if (s.links.testflight) {
       const a = document.createElement('a');
       a.href = s.links.testflight; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Get the app on TestFlight';
       tf.append(a);
-    } else {
-      tf.textContent = 'The TestFlight link is coming soon;';
     }
     const hint = $('remote-hint');
     hint.textContent = '';
     const doc = document.createElement('a');
     doc.href = s.links.remote_doc; doc.target = '_blank'; doc.rel = 'noopener'; doc.textContent = 'docs/remote-access.md';
     if (p.tailscale) {
-      hint.append('Tailscale is on this computer: with Tailscale on your phone too (same account), the app works away from home. More: ', doc);
+      hint.append('Install Tailscale on your phone too (same account) to use the app away from home. More: ', doc);
     } else {
-      hint.append('Works on the same Wi-Fi. To use it away from home, install Tailscale on this computer and your phone. More: ', doc);
+      hint.append('To use the app away from home, install Tailscale on this computer and your phone. More: ', doc);
     }
   } else {
     $('phone-state').textContent = '';

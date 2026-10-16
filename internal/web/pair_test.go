@@ -47,7 +47,7 @@ func TestPairAllInterfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	urls, tok, err := pair.Parse(link)
-	if err != nil || tok != pairToken || len(urls) != 2 || urls[0] != "http://192.168.1.20:7777" || urls[1] != "http://100.101.102.103:7777" || len(addrs) != 2 {
+	if err != nil || tok != pairToken || len(urls) != 2 || urls[0] != "http://100.101.102.103:7777" || urls[1] != "http://192.168.1.20:7777" || len(addrs) != 2 {
 		t.Errorf("link = %q %q %v", urls, tok, err)
 	}
 	req := h.authedRequest("GET", "/api/pair", pairToken, nil, nil)

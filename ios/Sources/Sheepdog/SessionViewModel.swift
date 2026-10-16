@@ -1867,7 +1867,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// The first of a pairing link's addresses that answers `GET /api/hello`
-    /// (LAN before Tailscale); with none, a probe that says so. Shared by
+    /// (Tailscale before LAN); with none, a probe that says so. Shared by
     /// Settings' scanner and links from outside the app.
     func resolvePairing(_ link: PairingLink) async -> (address: String?, probe: Probe) {
         let secret = link.token
