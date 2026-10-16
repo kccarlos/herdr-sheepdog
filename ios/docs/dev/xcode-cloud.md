@@ -1,7 +1,8 @@
 # Xcode Cloud: tests on every PR, TestFlight on every tag
 
-GitHub Actions does not build the app; all iOS builds and tests run on Xcode
-Cloud (macOS runners on GitHub Actions are too expensive).
+Xcode Cloud archives every TestFlight build. GitHub Actions also runs the
+unit tests on a hosted Mac for PRs that touch `ios/` (`.github/workflows/ios.yml`,
+simulator only, no secrets; [development.md](../../../docs/dev/development.md#cicd)).
 Apple's Xcode Cloud builds and tests every pull request and every push to
 `main` that changes `ios/`, and an `ios-v*` tag archives the app and puts it
 in TestFlight. The app lives in `ios/` of the sheepdog repository (until

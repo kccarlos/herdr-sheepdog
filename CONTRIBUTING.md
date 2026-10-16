@@ -54,7 +54,7 @@ To build onto a device under your own Apple team, see [ios/README.md](ios/README
 
 - Logic goes in `ios/Sources/SheepdogKit` with a unit test. A flow the user sees gets an XCUITest, and it should run without a daemon when it can (see `ios/Tests/SheepdogUITests/StubDaemon.swift`).
 - **Design the unhappy paths.** A new screen needs its empty state and its error states with a plain fix, and it must work in dark mode, at the largest Dynamic Type size and on a small iPhone.
-- **iOS CI is Xcode Cloud.** Every PR that touches `ios/` runs the app's tests there ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)). Do not add GitHub Actions macOS jobs; the `policy` check fails if a workflow uses one.
+- **iOS CI.** Every PR that touches `ios/` runs the app's tests on Xcode Cloud ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)) and the unit tests on a GitHub-hosted Mac (`.github/workflows/ios.yml`, no secrets). Do not add macOS jobs to any other workflow; the `policy` check fails if one does.
 - App releases are `ios-v*` tags (`ios-v` + `MARKETING_VERSION`); plain `v*` tags are daemon releases.
 
 ## License
