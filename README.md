@@ -18,8 +18,7 @@
   <a href="https://github.com/kccarlos/herdr-sheepdog/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kccarlos/herdr-sheepdog/ci.yml?branch=main&label=CI&labelColor=1F1F22&color=8E929A" alt="CI status" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-8E929A?labelColor=1F1F22" alt="platform: macOS and Linux" />
   <a href="https://herdr.dev/plugins/"><img src="https://img.shields.io/badge/herdr-plugin-F39C1F?labelColor=1F1F22" alt="herdr plugin" /></a>
-  <!-- TESTFLIGHT_LINK: when the public link exists, wrap this badge in <a href="https://testflight.apple.com/join/..."> and restore the TestFlight link in "iPhone app" below and in docs/iphone-app.md. -->
-  <img src="https://img.shields.io/badge/iOS-TestFlight%20soon-8E929A?logo=apple&logoColor=white&labelColor=1F1F22" alt="iOS TestFlight: public link coming soon" />
+  <a href="https://testflight.apple.com/join/bjCaFYgK"><img src="https://img.shields.io/badge/iOS-TestFlight-F39C1F?logo=apple&logoColor=white&labelColor=1F1F22" alt="iOS app on TestFlight" /></a>
 </p>
 
 ---
@@ -57,7 +56,7 @@ sheepdog setup                                  # 2. the browser wizard: key, ch
 
 Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
 
-**iPhone app:** the public TestFlight link is coming; until then [build it yourself](ios/README.md). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
+**iPhone app:** [join the TestFlight beta](https://testflight.apple.com/join/bjCaFYgK) (install the TestFlight app first), or [build it yourself](ios/README.md). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
 
 **Away from home:** install [Tailscale](https://tailscale.com) on the computer and the phone, sign into the same account, then pair again. [remote access →](docs/remote-access.md)
 

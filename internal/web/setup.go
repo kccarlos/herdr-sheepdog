@@ -26,10 +26,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 )
 
-// Links the setup page shows. TestFlightURL is empty until the public
-// TestFlight link exists; the page then says the link is coming.
+// Links the setup page shows. TestFlightURL is the public TestFlight
+// link (empty would make the page say the link is coming).
 const (
-	TestFlightURL  = ""
+	TestFlightURL  = "https://testflight.apple.com/join/bjCaFYgK"
 	IOSRepoURL     = "https://github.com/kccarlos/herdr-sheepdog/tree/main/ios"
 	GeminiKeyURL   = "https://aistudio.google.com/apikey"
 	ModelsDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/models.md"
