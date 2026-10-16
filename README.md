@@ -52,6 +52,8 @@ herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
 sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
 ```
 
+Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. herdr 0.9.4 or newer is needed for the plugin.
+
 <p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 
 Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
