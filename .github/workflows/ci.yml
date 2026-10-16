@@ -16,7 +16,8 @@ concurrency:
 # Jobs run on self-hosted runners on Cloud Run worker pools (infra/ci-runners).
 # Switch back to GitHub-hosted: gh variable set CI_RUNNER --body ubuntu-latest
 #
-# ios/ is the iPhone app, which only Xcode Cloud builds. The required jobs
+# ios/ is the iPhone app (Xcode Cloud archives it; ios.yml runs its unit
+# tests on a hosted Mac). The required jobs
 # below must report a result on every PR, so they always start, and their
 # steps run only when something outside ios/ changed (changes.outputs.code).
 # Do not use workflow-level paths-ignore: it leaves required checks pending.
@@ -36,7 +37,7 @@ jobs:
               - '**'
               - '!ios/**'
       - if: steps.filter.outputs.code != 'true'
-        run: echo "::notice::Only ios/ changed; the Go, web and eval jobs pass without running their heavy steps (Xcode Cloud builds the app)."
+        run: echo "::notice::Only ios/ changed; the Go, web and eval jobs pass without running their heavy steps (ios.yml and Xcode Cloud test the app)."
 
   test:
     needs: changes
@@ -95,15 +96,21 @@ jobs:
         run: make eval
 
   policy:
-    # Xcode/iOS work runs only on Xcode Cloud; macOS runners are too expensive.
+    # macOS runners and Xcode builds are allowed in ios.yml only (simulator
+    # unit tests, public repo). Signing and TestFlight stay on Xcode Cloud,
+    # so ios.yml must not read any secret.
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
-      - name: No macOS runners or Xcode builds in workflows
+      - name: macOS runners and Xcode builds only in ios.yml, which uses no secrets
         run: |
           # bracketed characters keep this step from matching itself
-          if grep -rnEi --include='*.yml' --include='*.yaml' 'macos[-]|xcodebuil[d]' .github/workflows; then
-            echo "::error::macOS runners and Xcode builds are not allowed in GitHub Actions (see docs/dev/development.md, CI/CD)"
+          if grep -rnEi --include='*.yml' --include='*.yaml' --exclude='ios.yml' 'macos[-]|xcode-[0-9]|xcodebuil[d]' .github/workflows; then
+            echo "::error::macOS runners and Xcode builds belong in .github/workflows/ios.yml only (see docs/dev/development.md, CI/CD)"
+            exit 1
+          fi
+          if grep -nEi 'secret[s]\.|GITHUB_TOKE[N]|id-token' .github/workflows/ios.yml; then
+            echo "::error::ios.yml must not use secrets: signing and TestFlight stay on Xcode Cloud (see docs/dev/development.md, CI/CD)"
             exit 1
           fi
 

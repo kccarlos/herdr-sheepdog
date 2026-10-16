@@ -94,17 +94,22 @@ make release-sign TAG=v0.1.0   # sign and notarize a release's darwin binary (si
 
 ### CI/CD
 
-GitHub Actions runs Linux jobs only, on self-hosted runners in Cloud Run
+GitHub Actions runs Linux jobs, on self-hosted runners in Cloud Run
 worker pools ([infra/ci-runners](../../infra/ci-runners/README.md); repo variable
 `CI_RUNNER=ubuntu-latest` switches back to GitHub-hosted): vet, test, lint, web
 tests, the offline eval, the policy guard and the cross-compile on every PR, and the
-Ubuntu release on `v*` tags. Anything Xcode- or iOS-related (build, test,
-archive, TestFlight) runs only on Xcode Cloud, never on GitHub Actions,
-because macOS runners are too expensive; the `policy` CI job fails if a
-workflow uses a `macos-*` runner or calls `xcodebuild`. Signing the darwin
-release binary stays on the maintainer's Mac ([signing.md](signing.md)).
+Ubuntu release on `v*` tags. The one exception is `ios.yml`: since the
+repository went public (2026-10-15) it runs the app's unit tests
+(`SheepdogKitTests`) on a GitHub-hosted Mac (the `xcode-27` image, Xcode
+27.0) for PRs and pushes to `main` that touch `ios/`. It builds for the
+simulator only and uses no secrets; it is not a required check. Archives,
+signing and TestFlight stay on Xcode Cloud, and no signing certificate or
+App Store Connect key goes into GitHub. The `policy` CI job fails if any
+other workflow uses a macOS runner or calls `xcodebuild`, or if `ios.yml`
+reads a secret. Signing the darwin release binary stays on the
+maintainer's Mac ([signing.md](signing.md)).
 
-The iPhone app lives in [`ios/`](../../ios/README.md) and is built only by
+The iPhone app lives in [`ios/`](../../ios/README.md) and is archived by
 Xcode Cloud ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`
 job in `ci.yml` (dorny/paths-filter) tells the other jobs whether anything
 outside `ios/` changed. On an ios-only PR every required check still starts
