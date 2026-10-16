@@ -6,6 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/shared.css">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
@@ -13,8 +15,7 @@
 </head>
 <body>
 <header>
-  <span class="logo"><img src="/static/logo-color.svg" alt="" width="28" height="28"></span>
-  <h1>sheepdog <span class="muted">debug</span></h1>
+  <h1><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">debug</span></h1>
   <div id="voice-indicator" class="indicator" title="voice session">
     <span class="dot" id="voice-dot"></span>
     <span id="voice-text">voice: …</span>

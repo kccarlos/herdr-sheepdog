@@ -7,21 +7,17 @@
   --meter: var(--done); --meter-bg: var(--line); --in: var(--working); --out: var(--thinking);
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.2rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
-header h1 { font-size: 1.1rem; margin: 0; }
-header .logo { display: inline-flex; margin-right: -.7rem; }
-header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block; }
+body { margin: 0; font-size: 15px; line-height: 1.45; }
 header a { margin-left: auto; color: var(--primary-text); }
 main { max-width: 44rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .8rem; }
 h2 { font-size: .95rem; margin: 0 0 .4rem; }
 .muted { color: var(--muted); font-weight: normal; }
 .small { font-size: .85em; }
 .hidden { display: none !important; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .9rem; }
 .row { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: center; margin: .3rem 0; }
 .row.buttons button { min-width: 6.5em; padding: .5rem .8rem; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; background: var(--code); padding: 0 .25em; border-radius: 3px; }
+code { font-size: .92em; background: var(--code); padding: 0 .25em; border-radius: 3px; }
 kbd { font: inherit; font-size: .85em; border: 1px solid var(--btn-line); border-radius: 3px; padding: 0 .3em; }
 button { font: inherit; padding: .3rem .7rem; border: 1px solid var(--btn-line); border-radius: 4px; background: var(--btn); color: var(--fg); cursor: pointer; }
 button:hover:not(:disabled) { background: var(--btn-hover); }
@@ -39,6 +35,18 @@ input[type=file] { max-width: 100%; }
 .dot.connecting, .dot.reconnecting { background: var(--blocked); }
 .dot.closed, .dot.error, .dot.stalled { background: var(--danger); }
 .dot.off, .dot.idle { background: var(--idle); }
+
+/* The voice orb is #voice-dot. Colours follow iOS Theme.color(for: session): live (open) = listening =
+   orange with the sticker outline (3px cream ring at 60%) and a 2s breathe; speaking = working; thinking = thinking;
+   connecting and stalled = blocked. The ring is the brand's signature outline, not a drop shadow, and the
+   breathe runs only while listening. */
+#voice-dot { width: 16px; height: 16px; }
+#voice-dot.open { background: var(--primary); box-shadow: 0 0 0 var(--sticker-stroke) color-mix(in srgb, var(--cream) 60%, transparent); animation: orb-breathe 2s cubic-bezier(.2,.8,.2,1) infinite; }
+#voice-dot.open.speaking { background: var(--working); animation: none; }
+#voice-dot.thinking { background: var(--thinking); }
+#voice-dot.stalled { background: var(--blocked); }
+@keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) { #voice-dot.open { animation: none; } }
 
 .pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: var(--on-primary); background: var(--blocked); }
 .pill.speaking { background: var(--out); color: var(--card); }

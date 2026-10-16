@@ -16,3 +16,11 @@ Raised by workstream A (tokens and shared assets). Each has a default that is al
 12. **Launch video not re-rendered (B).** Only `assets/readme/launch-poster.png` was regenerated (banner framing plus a play button); `assets/readme/launch.mp4` and its lock-screen frames still use the old look. Re-render when the media scripts move to the new logos?
 13. **Social preview upload (B).** `assets/brand/social-preview.png` (1280x640) is in the repo; a maintainer has to upload it in Settings, General, Social preview.
 14. **Poster background (B).** The banner's own background is about `#14171E`, not `#1B1D22`; the poster keeps the banner pixels so the flock and dog are untouched. Flatten to `#1B1D22`?
+
+## Raised by workstream D (web pages)
+
+15. **No listening orb existed on `/voice`.** The page only had status dots. D treats `#voice-dot` as the orb: `open` = listening (orange, 3px cream ring at 60 %, 2 s breathe, off under `prefers-reduced-motion`), `open speaking` = `--working` (render() adds the `speaking` class), `.thinking` = `--thinking` (the web has no thinking signal yet, so it is CSS only), `stalled` = `--blocked`. Want a larger standalone orb?
+16. **`--muted` on `--code` is 4.41:1 in light.** The token is the authority, so D left it; no page puts muted text on a code background. Darken `--muted` slightly if that ever happens.
+17. **Focus ring.** `--focus` (orange) is about 2:1 on the light surfaces, below the 3:1 for a control outline, so `shared.css` adds a 2px ring in the text colour inside it. Keep, or make `--focus` darker on light?
+18. **Question 5 answered:** `/debug` primary buttons and the user bubble now follow `--primary` (orange, ink text). Blue stays the herdr source/lane colour. Question 7 (QR) and 8 (lane hues with no token) are unchanged: raw hues are kept, and the two that were used as text (`--web`, `--eventlog`, the You lane) are mixed toward `--fg` to pass 4.5:1.
+19. **Pre-existing, not touched:** on `/debug` the swimlane toolbar shows a tall empty box between the "supervisor" and "brain" toggles (it also does on main).

@@ -6,16 +6,13 @@
   --btn-line: color-mix(in srgb, var(--slate) 70%, var(--card));
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
-header h1 { font-size: 1.1rem; margin: 0; }
-header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block; }
+body { margin: 0; font-size: 16px; line-height: 1.5; }
 main { max-width: 42rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .9rem; }
 .lead { margin: .2rem 0; color: var(--muted); }
 h2 { font-size: 1.05rem; margin: 0 0 .5rem; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--primary); color: var(--on-primary); font-size: .9rem; }
 .state { font-size: .85rem; font-weight: normal; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem 1rem; }
 .card p { margin: .4rem 0; }
 .muted { color: var(--muted); }
 .small { font-size: .9em; }
@@ -26,14 +23,15 @@ h2 { font-size: 1.05rem; margin: 0 0 .5rem; display: flex; align-items: center; 
 .field label { font-weight: 600; font-size: .95em; }
 .field .row input { flex: 1 1 16em; min-width: 0; }
 .indent { margin-left: 1.6rem; }
-fieldset { border: 1px solid var(--line); border-radius: 6px; margin: .6rem 0; padding: .4rem .8rem .6rem; }
+fieldset { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: .6rem 0; padding: .4rem .8rem .6rem; }
 fieldset > label { display: block; margin: .2rem 0; }
 legend { font-weight: 600; padding: 0 .3rem; }
 details { margin: .6rem 0; }
 summary { cursor: pointer; color: var(--primary-text); }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; background: var(--code); padding: 0 .25em; border-radius: 3px; overflow-wrap: anywhere; }
+code { font-size: .9em; background: var(--code); padding: 0 .25em; border-radius: 3px; overflow-wrap: anywhere; }
 a { color: var(--primary-text); }
 button, a.button { font: inherit; display: inline-block; padding: .45rem .9rem; border: 1px solid var(--btn-line); border-radius: 6px; background: var(--btn); color: var(--fg); cursor: pointer; text-decoration: none; }
+a.button { color: var(--fg); }
 button:hover:not(:disabled), a.button:hover { background: var(--btn-hover); }
 button:disabled { opacity: .55; cursor: default; }
 .primary, a.button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
@@ -41,7 +39,6 @@ button:disabled { opacity: .55; cursor: default; }
 .danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
 a.button.big { font-size: 1.15rem; padding: .8rem 1.6rem; }
 input { font: inherit; padding: .45rem .55rem; border: 1px solid var(--btn-line); border-radius: 6px; background: var(--card); color: var(--fg); }
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 label.check { display: flex; gap: .5rem; align-items: flex-start; }
 label.check input { margin-top: .3rem; }
 .result:empty { display: none; }
