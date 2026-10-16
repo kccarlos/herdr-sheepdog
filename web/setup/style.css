@@ -1,17 +1,9 @@
-/* The palette and controls of /voice (web/voice/style.css), so the pages match. */
+/* Colours come from /static/tokens.css (linked first in index.html). Only the
+   variables that file has no token for are defined here, in terms of tokens. */
 :root {
-  --bg: #fafafa; --fg: #1d1d1f; --muted: #5f5f66; --line: #e2e2e6; --card: #fff; --code: #f0f0f3;
-  --primary: #2b6cb0; --danger: #c53030; --danger-bg: #fff5f5; --danger-line: #f5c2c2;
-  --ok: #276749; --ok-bg: #f0fff4; --warn: #975a16; --idle: #718096;
-  --btn: #f6f6f8; --btn-hover: #ececf0; --btn-line: #bbb; --focus: #2b6cb0;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131316; --fg: #e6e6ea; --muted: #a5a5ad; --line: #2c2c33; --card: #1c1c21; --code: #26262d;
-    --primary: #4c8ed6; --danger: #f28b8b; --danger-bg: #2a1c1c; --danger-line: #5a2a2a;
-    --ok: #68d391; --ok-bg: #16261c; --warn: #f6c05c;
-    --btn: #26262d; --btn-hover: #31313a; --btn-line: #44444d; --focus: #63a4e8;
-  }
+  --ok: var(--done); --ok-bg: color-mix(in srgb, var(--done) 12%, var(--card)); --warn: var(--blocked-text);
+  --btn: var(--code); --btn-hover: color-mix(in srgb, var(--fg) 8%, var(--code));
+  --btn-line: color-mix(in srgb, var(--slate) 70%, var(--card));
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 16px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
@@ -21,7 +13,7 @@ header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block
 main { max-width: 42rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .9rem; }
 .lead { margin: .2rem 0; color: var(--muted); }
 h2 { font-size: 1.05rem; margin: 0 0 .5rem; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--primary); color: #fff; font-size: .9rem; }
+.num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--primary); color: var(--on-primary); font-size: .9rem; }
 .state { font-size: .85rem; font-weight: normal; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; }
 .card p { margin: .4rem 0; }
@@ -38,13 +30,13 @@ fieldset { border: 1px solid var(--line); border-radius: 6px; margin: .6rem 0; p
 fieldset > label { display: block; margin: .2rem 0; }
 legend { font-weight: 600; padding: 0 .3rem; }
 details { margin: .6rem 0; }
-summary { cursor: pointer; color: var(--primary); }
+summary { cursor: pointer; color: var(--primary-text); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; background: var(--code); padding: 0 .25em; border-radius: 3px; overflow-wrap: anywhere; }
-a { color: var(--primary); }
+a { color: var(--primary-text); }
 button, a.button { font: inherit; display: inline-block; padding: .45rem .9rem; border: 1px solid var(--btn-line); border-radius: 6px; background: var(--btn); color: var(--fg); cursor: pointer; text-decoration: none; }
 button:hover:not(:disabled), a.button:hover { background: var(--btn-hover); }
 button:disabled { opacity: .55; cursor: default; }
-.primary, a.button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.primary, a.button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .primary:hover:not(:disabled), a.button.primary:hover { background: var(--primary); filter: brightness(1.08); }
 .danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
 a.button.big { font-size: 1.15rem; padding: .8rem 1.6rem; }
@@ -71,7 +63,7 @@ label.check input { margin-top: .3rem; }
 .checks .skip .icon { color: var(--idle); }
 .checks .fix { grid-column: 2; font-size: .9em; color: var(--muted); }
 .pair { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
-.pair img { background: #fff; border-radius: 6px; padding: 6px; border: 1px solid var(--line); }
+.pair img { background: var(--cream); border-radius: 6px; padding: 6px; border: 1px solid var(--line); }
 .pair > div { flex: 1 1 14rem; }
 .hint { border-left: 3px solid var(--primary); padding: .3rem .6rem; margin: .6rem 0 0; }
 .error { color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 6px; padding: .5rem .7rem; margin: 0; }

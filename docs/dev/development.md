@@ -82,7 +82,7 @@ and Node for the browser tests.
 make build         # bin/sheepdog
 make run-dev       # serve --voice=off --herdr=mock --dev, for poking at /debug
 make test          # go test -race ./...
-make test-web      # web/voice and web/debug *.test.mjs (skipped without node)
+make test-web      # web/voice, web/debug and web/static *.test.mjs (skipped without node)
 make vet lint
 make eval          # offline eval sets (no network)
 make eval-live     # the small eval sets against the real model (burns quota)

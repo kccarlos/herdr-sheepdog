@@ -1,0 +1,67 @@
+/* sheepdog brand tokens — single source of truth for web/setup, web/voice, web/debug.
+   Light is the default; dark follows the system. Every page imports this file first
+   and then uses ONLY these variables. No raw hex in page stylesheets. */
+
+:root {
+  /* brand */
+  --ink:        #1F1F22;   /* the dog's fur; primary text on light */
+  --cream:      #F5F2EA;   /* the dog's blaze; primary text on dark, light-mode surfaces */
+  --orange:     #F39C1F;   /* the headset; THE accent */
+  --orange-deep:#D98718;   /* accent pressed / accent on light where 4.5:1 is needed for text */
+  --slate:      #8E929A;   /* muted text, dividers */
+
+  /* surfaces (light) */
+  --bg:         #FAF8F3;   /* warm off-white, not pure white */
+  --card:       #FFFFFF;
+  --code:       #F1EEE7;
+  --line:       #E4E0D7;
+  --fg:         var(--ink);
+  --muted:      #6B6E75;
+
+  /* accent in use */
+  --primary:        var(--orange);
+  --primary-text:   #8A5700;         /* orange for WORDS on light (AA) */
+  --on-primary:     var(--ink);      /* text/glyphs on an orange fill — never white */
+  --primary-soft:   #FDF1DC;         /* tinted background behind orange content */
+  --focus:          var(--orange);
+
+  /* agent states — identical meaning on web and iOS. Blocked is amber, not red:
+     a blocked agent is only waiting for you (same call iOS already made). */
+  --blocked:      #D99417;  --blocked-text: #8A5700;
+  --working:      #1F5F9E;
+  --done:         #1D6B46;
+  --idle:         #5C6370;
+  --unknown:      #646A75;
+  --thinking:     #6A46B0;  /* orchestrator / "thinking" purple, unchanged */
+  --danger:       #B42318;  --danger-bg: #FEF3F2;  --danger-line: #F4C7C3;
+
+  /* type */
+  --font-ui:      "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Outfit", "Inter", system-ui, sans-serif;  /* headings + wordmark only */
+  --font-mono:    ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* shape */
+  --radius-sm: 8px;  --radius: 14px;  --radius-lg: 22px;  --radius-pill: 999px;
+  --sticker-stroke: 3px;  /* the cream outline that makes anything read as "sheepdog" */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:     #16181C;   --card: #1F2126;   --code: #26292F;   --line: #2E3138;
+    --fg:     var(--cream);  --muted: #A3A7AF;
+    --primary-text: #F5B83D;  --primary-soft: #2A2416;
+    --blocked: #F0A92A;  --blocked-text: #F5B83D;
+    --working: #6AA8EB;  --done: #5CC792;  --idle: #9AA1AD;  --unknown: #8E95A0;
+    --thinking: #B195F0;
+    --danger: #F28B8B;  --danger-bg: #2A1C1C;  --danger-line: #5A2A2A;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:     #16181C;   --card: #1F2126;   --code: #26292F;   --line: #2E3138;
+  --fg:     var(--cream);  --muted: #A3A7AF;
+  --primary-text: #F5B83D;  --primary-soft: #2A2416;
+  --blocked: #F0A92A;  --blocked-text: #F5B83D;
+  --working: #6AA8EB;  --done: #5CC792;  --idle: #9AA1AD;  --unknown: #8E95A0;
+  --thinking: #B195F0;
+  --danger: #F28B8B;  --danger-bg: #2A1C1C;  --danger-line: #5A2A2A;
+}

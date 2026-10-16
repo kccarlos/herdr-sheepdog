@@ -1,0 +1,33 @@
+{
+  "brand": {
+    "ink":         "#1F1F22",
+    "cream":       "#F5F2EA",
+    "orange":      "#F39C1F",
+    "orangeDeep":  "#D98718",
+    "slate":       "#8E929A"
+  },
+  "surface": {
+    "light": { "bg": "#FAF8F3", "card": "#FFFFFF", "code": "#F1EEE7", "line": "#E4E0D7", "fg": "#1F1F22", "muted": "#6B6E75" },
+    "dark":  { "bg": "#16181C", "card": "#1F2126", "code": "#26292F", "line": "#2E3138", "fg": "#F5F2EA", "muted": "#A3A7AF" }
+  },
+  "accent": {
+    "primary":     "#F39C1F",
+    "primaryText": { "light": "#8A5700", "dark": "#F5B83D" },
+    "onPrimary":   "#1F1F22",
+    "primarySoft": { "light": "#FDF1DC", "dark": "#2A2416" }
+  },
+  "agentState": {
+    "blocked":     { "light": "#D99417", "dark": "#F0A92A" },
+    "blockedText": { "light": "#8A5700", "dark": "#F5B83D" },
+    "working":     { "light": "#1F5F9E", "dark": "#6AA8EB" },
+    "done":        { "light": "#1D6B46", "dark": "#5CC792" },
+    "idle":        { "light": "#5C6370", "dark": "#9AA1AD" },
+    "unknown":     { "light": "#646A75", "dark": "#8E95A0" },
+    "thinking":    { "light": "#6A46B0", "dark": "#B195F0" }
+  },
+  "appIcon": { "background": "#1B1D22" },
+  "ios": {
+    "AccentColor": { "light": "#D98718", "dark": "#F39C1F" },
+    "note": "AccentColor is the only new colorset needed; the existing state colorsets already match agentState above. Use .fontDesign(.rounded) for titles only."
+  }
+}

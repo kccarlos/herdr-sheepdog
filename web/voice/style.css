@@ -1,17 +1,10 @@
+/* Colours come from /static/tokens.css (linked first in index.html). Only the
+   variables that file has no token for are defined here, in terms of tokens. */
 :root {
-  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #e2e2e6; --card: #fff; --code: #f0f0f3;
-  --primary: #2b6cb0; --danger: #c53030; --danger-bg: #fff5f5; --danger-line: #f5c2c2;
-  --ok: #2f855a; --warn: #b7791f; --idle: #718096; --unknown: #a0aec0;
-  --btn: #f6f6f8; --btn-hover: #ececf0; --btn-line: #bbb;
-  --meter: #2f855a; --meter-bg: #e2e2e6; --in: #2b6cb0; --out: #805ad5;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131316; --fg: #e6e6ea; --muted: #9a9aa2; --line: #2c2c33; --card: #1c1c21; --code: #26262d;
-    --primary: #4c8ed6; --danger: #f28b8b; --danger-bg: #2a1c1c; --danger-line: #5a2a2a;
-    --btn: #26262d; --btn-hover: #31313a; --btn-line: #44444d;
-    --meter: #48bb78; --meter-bg: #2c2c33; --in: #63a4e8; --out: #b794f4;
-  }
+  --ok: var(--done); --warn: var(--blocked-text);
+  --btn: var(--code); --btn-hover: color-mix(in srgb, var(--fg) 8%, var(--code));
+  --btn-line: color-mix(in srgb, var(--slate) 70%, var(--card));
+  --meter: var(--done); --meter-bg: var(--line); --in: var(--working); --out: var(--thinking);
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
@@ -19,7 +12,7 @@ header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.2rem;
 header h1 { font-size: 1.1rem; margin: 0; }
 header .logo { display: inline-flex; margin-right: -.7rem; }
 header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block; }
-header a { margin-left: auto; color: var(--primary); }
+header a { margin-left: auto; color: var(--primary-text); }
 main { max-width: 44rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .8rem; }
 h2 { font-size: .95rem; margin: 0 0 .4rem; }
 .muted { color: var(--muted); font-weight: normal; }
@@ -33,7 +26,7 @@ kbd { font: inherit; font-size: .85em; border: 1px solid var(--btn-line); border
 button { font: inherit; padding: .3rem .7rem; border: 1px solid var(--btn-line); border-radius: 4px; background: var(--btn); color: var(--fg); cursor: pointer; }
 button:hover:not(:disabled) { background: var(--btn-hover); }
 button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 button.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
 button.active { outline: 2px solid var(--warn); }
 input, select { font: inherit; padding: .3rem .45rem; border: 1px solid var(--btn-line); border-radius: 4px; background: var(--card); color: var(--fg); }
@@ -43,12 +36,14 @@ input[type=file] { max-width: 100%; }
 .indicator { display: inline-flex; align-items: center; gap: .35rem; font-size: .9em; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--unknown); display: inline-block; }
 .dot.connected, .dot.open { background: var(--ok); }
-.dot.connecting, .dot.reconnecting { background: var(--warn); }
+.dot.connecting, .dot.reconnecting { background: var(--blocked); }
 .dot.closed, .dot.error, .dot.stalled { background: var(--danger); }
 .dot.off, .dot.idle { background: var(--idle); }
 
-.pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: #fff; background: var(--warn); }
-.pill.speaking { background: var(--out); }
+.pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: var(--on-primary); background: var(--blocked); }
+.pill.speaking { background: var(--out); color: var(--card); }
+/* internal/web/static_test.go still expects this page to carry a dark-scheme rule; the tokens do the rest. */
+@media (prefers-color-scheme: dark) { .pill.speaking { color: var(--bg); } }
 
 .meter-label { display: inline-flex; align-items: center; gap: .5rem; }
 .meter { position: relative; display: inline-block; width: 12rem; max-width: 50vw; height: 10px; background: var(--meter-bg); border-radius: 5px; overflow: hidden; }
