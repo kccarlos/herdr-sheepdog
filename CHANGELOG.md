@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.1.0 (unreleased; the date is set when the tag is cut)
+
+First public release.
+
+### Features
+
+- Voice supervision: talk to your coding agents in herdr by voice through
+  Gemini Live or GPT-Live (switch at runtime). A stateful orchestrator
+  behind the voice keeps track of every agent, answers questions about
+  their work, starts new Claude or Codex agents, and relays your
+  instructions. Orchestrator providers: Gemini, DeepSeek or any
+  OpenAI-compatible endpoint, with failover.
+- herdr plugin: install sheepdog as a herdr plugin and drive it from
+  herdr's own actions.
+- `sheepdog setup`: a local web wizard (with a terminal fallback) that
+  configures keys, models and the herdr connection; `sheepdog init` and
+  `sheepdog doctor` check the result.
+- Lifecycle commands: `sheepdog start|stop|restart|status|logs`,
+  `sheepdog service install|uninstall|status|logs`, `sheepdog update`,
+  `sheepdog uninstall` and `sheepdog doctor --report`, with a single
+  running instance.
+- `sheepdog pair`: a QR code that pairs the iPhone app with the daemon.
+- iPhone app: talk to sheepdog from your phone, with notifications when an
+  agent needs you. Notifications are end-to-end encrypted and travel
+  through the shared push relay (a Cloudflare Worker); you can self-host
+  the relay instead.
+- `sheepdog demo`: try sheepdog without herdr.
+- Plain error messages: account and quota problems are said once, in plain
+  words, instead of as raw provider errors.
+- Data retention: the event log and the orchestrator's transcripts are
+  deleted after 14 days by default (`events.retention_days`, see
+  [CONFIG.md](CONFIG.md)); `sheepdog data clear` deletes them now.
+
+### Documentation
+
+- User docs in [docs/](docs/README.md): quick start, commands, models,
+  safety, privacy, remote access, the iPhone app, FAQ and troubleshooting.
+- Developer docs in [docs/dev/](docs/dev/).
+
 ## Unreleased
 
 ### Breaking changes
