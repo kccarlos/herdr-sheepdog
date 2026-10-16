@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/brand/logo/sheepdog-logo-mono-cream.svg">
+    <img src="../assets/brand/logo/sheepdog-logo-mono-ink.svg" alt="sheepdog logo" width="96" height="96">
+  </picture>
+</p>
+
 # Documentation
 
 For people who use sheepdog. Start with the quick start.
