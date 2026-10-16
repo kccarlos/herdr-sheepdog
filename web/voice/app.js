@@ -669,7 +669,7 @@ function render() {
   setDot('ws', open ? 'open' : state.wsState === 'connecting' ? 'connecting' : state.wsState === 'closed' ? 'closed' : 'idle',
     `ws: ${state.wsState}${state.wsState === 'closed' && connected ? ' (reconnecting)' : ''}`);
   const v = connected ? state.voice : '…';
-  setDot('voice', v === '…' ? 'idle' : state.voiceStalled ? 'stalled' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}${state.voiceStalled && open ? ' · stalled (no reply)' : ''}`);
+  setDot('voice', v === '…' ? 'idle' : state.voiceStalled ? 'stalled' : v === 'open' && state.playback.speaking ? 'open speaking' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}${state.voiceStalled && open ? ' · stalled (no reply)' : ''}`);
 
   const btnConnect = $('btn-connect');
   btnConnect.textContent = connected ? 'Disconnect' : 'Connect';
