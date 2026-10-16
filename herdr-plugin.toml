@@ -1,10 +1,13 @@
 id = "kccarlos.sheepdog"
 name = "sheepdog — voice control for your agents"
 version = "0.1.0"
-# 0.9.0: plugin popups with width/height arrived in 0.7.4 and startup
-# hooks in 0.7.3 (herdr CHANGELOG); 0.9.0 is the floor of the 0.9 line
-# and the plugin was linked and its actions listed on herdr 0.9.3.
-min_herdr_version = "0.9.0"
+# 0.9.4: herdr 0.9.4 runs the build step in the plugin's final
+# installation directory. herdr 0.9.3 built in a temporary checkout and moved
+# it afterwards, so the ~/.local/bin/sheepdog link plugin-fetch.sh makes was
+# left dangling (checked 2026-10-15 with herdr 0.9.3 and 0.9.5). 0.9.4 is
+# also the first with `herdr plugin update`, which `sheepdog update` tells
+# plugin users to run.
+min_herdr_version = "0.9.4"
 description = "Talk to your coding agents from your phone or a browser. Runs the sheepdog daemon next to herdr: set up, pair your phone, check, logs."
 platforms = ["macos", "linux"]
 
