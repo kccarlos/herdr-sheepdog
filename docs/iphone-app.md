@@ -1,5 +1,7 @@
 # iPhone app
 
+**Sheepdog for herdr puts the microphone, the speaker and the lock screen in your pocket.**
+
 **Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for

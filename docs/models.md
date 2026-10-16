@@ -1,4 +1,6 @@
-# Models
+# models
+
+**The two models sheepdog needs, and the keys that run them.**
 
 sheepdog needs two models. They never share a role:
 

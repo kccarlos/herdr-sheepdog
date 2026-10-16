@@ -1,4 +1,6 @@
-# Commands
+# commands
+
+**Every sheepdog command, grouped by what you want to do.**
 
 `sheepdog --help` lists these; `--help` after a command (`sheepdog doctor --help`) gives its flags. Developer commands live under `sheepdog dev` and are covered in
 [dev/development.md](dev/development.md).

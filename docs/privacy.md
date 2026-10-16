@@ -1,4 +1,6 @@
-# Privacy
+# privacy
+
+**What stays on your computer, what leaves it, and what the project never collects.**
 
 sheepdog is open-source software that runs on your computer. There is no
 account and **no telemetry**. The project runs one small service: an

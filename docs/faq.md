@@ -1,4 +1,6 @@
-# FAQ
+# faq
+
+**Short answers to what people ask first.**
 
 **Do I need herdr?** For real use, yes: sheepdog watches the agents herdr runs
 (Claude Code, Codex, agy). To try it without herdr, use `sheepdog demo` or the

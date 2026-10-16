@@ -1,4 +1,6 @@
-# Troubleshooting
+# troubleshooting
+
+**Find the fix for what went wrong, and gather what a bug report needs.**
 
 Start with `sheepdog doctor`: one line per check, with the fix. Then
 `sheepdog status` and `sheepdog logs`. For a bug report, run

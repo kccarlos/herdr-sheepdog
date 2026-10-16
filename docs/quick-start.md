@@ -1,6 +1,8 @@
-# Quick start
+# quick start
 
-From install to your first spoken answer, about three minutes. You need
+**From install to your first spoken answer, in about three minutes.**
+
+You need
 [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a
 microphone (on this computer, or over SSH: see below) and one free Gemini API
 key (the setup page links to it; [models.md](models.md) lists the
