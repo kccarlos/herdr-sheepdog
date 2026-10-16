@@ -1,3 +1,8 @@
+//go:build ignore
+
+// Run with `go run scripts/push-e2e-vector.go` from ios/. The build tag keeps
+// it out of the daemon module's `go build ./...` and `go test ./...`.
+//
 // Seals a fixed notification exactly like herdr-sheepdog internal/push.Seal
 // (AES-256-GCM, 12-byte nonce, tag appended, no AD), with a fixed key and nonce.
 package main

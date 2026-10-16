@@ -51,7 +51,7 @@ jobs:
       - name: Generate release notes
         run: |
           set -euo pipefail
-          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          PREV_TAG="$(git describe --tags --match 'v*' --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           ./scripts/changelog.sh "${PREV_TAG:+${PREV_TAG}..}${GITHUB_REF_NAME}" "${GITHUB_REF_NAME}" > release/notes.md
 
       - name: Create GitHub Release
