@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-# Documentation
+# documentation
 
-For people who use sheepdog. Start with the quick start.
+**For people who use sheepdog. Start with the quick start.**
 
 | Doc | Type | Read it to |
 |---|---|---|

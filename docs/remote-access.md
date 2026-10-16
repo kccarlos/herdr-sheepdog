@@ -1,4 +1,6 @@
-# Remote access
+# remote access
+
+**Reach sheepdog from your phone, at home or away, without opening it to the internet.**
 
 By default sheepdog listens on `127.0.0.1`, which only this computer can
 reach. Turning on **phone access** (step 4 of `sheepdog setup`, or
