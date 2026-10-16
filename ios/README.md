@@ -35,7 +35,7 @@ xcodegen generate
 open Sheepdog.xcodeproj
 ```
 
-Every command on this page runs in `ios/`.
+Every command on this page runs in `ios/` (test).
 
 **Signing with your own team.** In `project.yml`, set `DEVELOPMENT_TEAM` to
 your Team ID. Change the bundle IDs (`bundleIdPrefix` and the
