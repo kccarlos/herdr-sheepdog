@@ -151,6 +151,7 @@ private struct ConnectionDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .tint(Theme.primaryText)
                 }
             }
             .task {

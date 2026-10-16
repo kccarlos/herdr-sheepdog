@@ -28,6 +28,10 @@ struct FlockView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     if flock.running.isEmpty {
+                        // Every agent has finished: the one celebration.
+                        MascotCard(name: "MascotCelebrating", width: 140)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
                         Text("No agent is running right now.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)

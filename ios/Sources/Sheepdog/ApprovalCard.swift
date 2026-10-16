@@ -156,7 +156,8 @@ private struct OptionButton: View {
 
         Group {
             if option.isDefault && !option.isNegative {
-                Button(action: action) { label }
+                // Ink on the orange fill (the system's white is 2:1).
+                Button(action: action) { label.foregroundStyle(Color("OnAccent")) }
                     .buttonStyle(.borderedProminent)
             } else if option.isNegative {
                 Button(role: .destructive, action: action) { label }
@@ -164,6 +165,7 @@ private struct OptionButton: View {
             } else {
                 Button(action: action) { label }
                     .buttonStyle(.bordered)
+                    .tint(Theme.primaryText)
             }
         }
         .controlSize(.large)

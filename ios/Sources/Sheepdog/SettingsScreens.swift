@@ -99,6 +99,7 @@ struct DaemonSettingsView: View {
                         }
                         if let help = probe.help {
                             Link("How to fix this", destination: help)
+                                .tint(Theme.primaryText)
                                 .font(.caption.weight(.semibold))
                                 .accessibilityIdentifier("settings.probe.help")
                         }
@@ -117,6 +118,7 @@ struct DaemonSettingsView: View {
             if firstRun {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: done)
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("settings.done")
                         .disabled(DaemonEndpoint(text: address) == nil)
                 }
@@ -157,6 +159,7 @@ struct DaemonSettingsView: View {
                     Label("How to set up sheepdog", systemImage: "arrow.up.right.square")
                         .font(.subheadline)
                 }
+                .tint(Theme.primaryText)
                 .accessibilityIdentifier("settings.firstRun.guide")
             }
             .padding(.vertical, 4)
@@ -172,6 +175,7 @@ struct DaemonSettingsView: View {
             } label: {
                 Label("Try the demo", systemImage: "play.circle.fill")
                     .labelStyle(.titleOnly)
+                    .foregroundStyle(Color("OnAccent"))
                     .font(.body.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -382,6 +386,26 @@ struct AboutView: View {
 
     var body: some View {
         Form {
+            Section {
+                VStack(spacing: 8) {
+                    Image("LogoColor")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 96, height: 96)
+                        .accessibilityHidden(true)
+                    Text("sheepdog for herdr")
+                        .font(.title3.weight(.semibold))
+                        .fontDesign(.rounded)
+                    Text(Bundle.appVersion)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("about.header")
+            }
+
             Section {
                 LabeledContent("App", value: Bundle.appVersion)
                 LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")

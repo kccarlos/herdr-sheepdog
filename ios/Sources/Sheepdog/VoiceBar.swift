@@ -261,6 +261,8 @@ struct OrbGlyph: View {
     var muted = false
 
     @State private var pulse = false
+    /// The 2 s listening breathe (1 to 1.04); never runs under Reduce Motion.
+    @State private var breathe = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tint: Color { Theme.color(for: state) }
@@ -317,6 +319,16 @@ struct OrbGlyph: View {
             }
         }
         .frame(width: size, height: size)
+        .overlay {
+            // The brand's sticker outline while listening.
+            if state == .listening {
+                Circle()
+                    .strokeBorder(Theme.cream.opacity(0.6), lineWidth: 3)
+                    .frame(width: size * 0.82, height: size * 0.82)
+                    .accessibilityHidden(true)
+            }
+        }
+        .scaleEffect(state == .listening && breathe ? 1.04 : 1)
         .onAppear { startPulse() }
         .onChange(of: state) { _, _ in startPulse() }
     }
@@ -364,6 +376,12 @@ struct OrbGlyph: View {
     }
 
     private func startPulse() {
+        if state == .listening, !reduceMotion {
+            breathe = false
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { breathe = true }
+        } else {
+            withAnimation(nil) { breathe = false }
+        }
         guard breathing, !reduceMotion else {
             pulse = false
             return

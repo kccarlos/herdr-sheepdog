@@ -23,6 +23,13 @@ enum Theme {
     static let done = Color("Done")
     static let idle = Color("Idle")
     static let unknown = Color("Unknown")
+    /// The brand accent as words on light surfaces (links, text buttons,
+    /// labels): the accent itself is about 2.7:1 on white, this is 4.5:1 or
+    /// better in both modes. Fills and glyphs keep `AccentColor`; text on an
+    /// orange fill uses `OnAccent` (ink).
+    static let primaryText = Color("PrimaryText")
+    /// Brand cream: the outline ring on the listening orb.
+    static let cream = Color("Cream")
     /// The orb's "thinking" purple, which is the orchestrator's colour too.
     static let thinking = Color("Thinking")
 

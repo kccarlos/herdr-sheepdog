@@ -107,7 +107,10 @@ targets:
         LSRequiresIPhoneOS: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        # Brand launch screen: #1B1D22 with the cream mono logo at 80 pt.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
         UIBackgroundModes:
           - audio
         # The voice session's Live Activity (SheepdogWidgets). Started and
