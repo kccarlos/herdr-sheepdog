@@ -1,0 +1,90 @@
+import Foundation
+import SheepdogKit
+
+#if DEBUG
+/// Every `-sheepdog*` launch argument the debug app and the UI tests read,
+/// gathered in one place instead of a `ProcessInfo.processInfo.arguments`
+/// scattered through `SheepdogApp` and `SessionViewModel`. Debug builds only:
+/// nothing here compiles into a release.
+enum DebugLaunch {
+    private static var arguments: [String] { ProcessInfo.processInfo.arguments }
+
+    /// `-sheepdogResetState`: the walkthrough and screenshots start from a
+    /// clean slate rather than whatever the last run saved.
+    static var resetState: Bool { arguments.contains("-sheepdogResetState") }
+    /// `-sheepdogResetHints`: clears the one-time hints (also implied by
+    /// `resetState`).
+    static var resetHints: Bool { arguments.contains("-sheepdogResetHints") }
+    /// `-sheepdogFakeVoice`: the voice states without a live session or a
+    /// microphone.
+    static var fakeVoice: Bool { arguments.contains("-sheepdogFakeVoice") }
+    /// `-sheepdogFakeProviders`: the contract's example provider list,
+    /// against a `--voice=off` daemon that reports none.
+    static var fakeProviders: Bool { arguments.contains("-sheepdogFakeProviders") }
+    /// `-sheepdogShowStreamErrors`: `/events` failures become notices in the
+    /// conversation, instead of only a log line.
+    static var showStreamErrors: Bool { arguments.contains("-sheepdogShowStreamErrors") }
+    /// `-sheepdogAskPush`: ask for notification permission after connecting
+    /// even when started with `-sheepdogAddress` (the UI tests otherwise
+    /// skip it, so no system alert covers what they tap).
+    static var askPush: Bool { arguments.contains("-sheepdogAskPush") }
+    /// `-sheepdogDemoSilent`: the demo without speech synthesis or speech
+    /// recognition, so no audio unit starts and no permission is asked.
+    /// For the UI tests: on Xcode Cloud's simulators the audio server hangs
+    /// and the app aborts in `AURemoteIO::Initialize` (an RPC timeout).
+    static var demoSilent: Bool { arguments.contains("-sheepdogDemoSilent") }
+    /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
+    /// message are markdown, for screenshots (the fixture daemon cannot
+    /// produce a worker transcript).
+    static var demoMarkdown: Bool { arguments.contains("-sheepdogDemoMarkdown") }
+    /// `-sheepdogDemoLiveActivity speaking|muted|listening`: show the voice
+    /// session's Live Activity with two agents waiting, without a session,
+    /// for the lock-screen and Dynamic Island screenshots.
+    static var demoLiveActivity: SessionState? {
+        guard let i = arguments.firstIndex(of: "-sheepdogDemoLiveActivity"), i + 1 < arguments.count else { return nil }
+        return SessionState(rawValue: arguments[i + 1])
+    }
+    /// The agent `-sheepdogDemoMarkdown` adds.
+    static let markdownAgent = Agent(
+        paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),
+        lastTask: "Write the **install** section of the README and check `make install` on a clean machine",
+        journal: [Agent.JournalEntry(
+            at: Date().addingTimeInterval(-240), event: "done",
+            lastAssistant: "## Summary\nDone. The README now has an *Install* section:\n\n- `make install` copies the binary to `~/.local/bin`\n- a note on **unlinking first** on macOS\n1. build\n2. install\n\n```\nmake build && make install\n```\nSee [the docs](https://github.com/kccarlos/herdr-sheepdog).",
+            filesTouched: ["README.md"], tools: ["Edit": 3, "Bash": 2]
+        )]
+    )
+    /// `-sheepdogAddress 127.0.0.1:7799`: start configured, for the history
+    /// walkthrough and screenshots.
+    static var address: String? {
+        guard let i = arguments.firstIndex(of: "-sheepdogAddress"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
+    }
+}
+
+/// Drives the voice states without a live session or a microphone
+/// (`-sheepdogFakeVoice`): a slow sine for the mic level and matching gate
+/// diagnostics, so screenshots and UI tests against a `--voice=off` daemon
+/// show something moving.
+struct FakeVoiceDriver {
+    private var phase = 0.0
+
+    mutating func tick(talkMode: TalkMode, holding: Bool, isMuted: Bool) -> (level: Float, diagnostics: CaptureGate.Diagnostics) {
+        phase += 0.35
+        let speakingNow = !isMuted && (talkMode == .openMic || holding)
+        let level: Float = speakingNow ? Float(0.25 + 0.2 * sin(phase)) : 0
+        let diagnostics = CaptureGate.Diagnostics(
+            levelDBFS: speakingNow ? -31 + 4 * sin(phase) : -58,
+            floorDBFS: -62,
+            marginDB: 6,
+            isOpen: speakingNow,
+            opens: 4,
+            spuriousOpens: 0,
+            gatedFrames: 812,
+            peak: speakingNow ? 9_400 : 30,
+            manual: talkMode == .holdToTalk ? holding : nil
+        )
+        return (level, diagnostics)
+    }
+}
+#endif
