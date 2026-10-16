@@ -65,11 +65,10 @@ Both sign-macos and homebrew run in the `release` environment, so a run
 asks for approval twice: once before signing, and again when homebrew
 becomes pending after signing succeeds.
 
-If an environment secret (or the `NOTARY_KEY_ID` variable) is missing,
+If `OP_SERVICE_ACCOUNT_TOKEN` is missing from the environment,
 sign-macos skips with a notice and the darwin tarball stays unsigned;
 homebrew runs only after a successful signing, so the tap never points at
-an unsigned binary. Without `HOMEBREW_TAP_TOKEN` only the tap update is
-skipped.
+an unsigned binary. The tap token comes from the same 1Password vault.
 
 The `policy` CI check (`scripts/workflow-policy.sh`) allows a macOS runner
 and these secrets in `release.yml` only inside a job that declares
@@ -78,51 +77,47 @@ and these secrets in `release.yml` only inside a job that declares
 ### The `release` environment
 
 Settings ▸ Environments ▸ `release`: required reviewer the maintainer,
-deployment policy "tags matching `v*`". Everything below is an
-**environment** secret or variable, not a repository one, so only jobs
-that pass the approval can read it.
+deployment policy "tags matching `v*`". Its one secret is
+`OP_SERVICE_ACCOUNT_TOKEN`, a 1Password service account token that can
+read only the vault `github`; the jobs load everything else with
+`1password/load-secrets-action` into step outputs. It is an **environment**
+secret, not a repository one, so only jobs that pass the approval can read it.
 
-| Name | Kind | What |
+| 1Password item (vault `github`) | Fields | Workflow name |
 | --- | --- | --- |
-| `MACOS_CERT_P12_BASE64` | secret | base64 of the Developer ID Application `.p12` (certificate and private key) for team `GV776BZVA8` |
-| `MACOS_CERT_PASSWORD` | secret | the password the `.p12` was exported with |
-| `NOTARY_API_KEY_P8` | secret | the App Store Connect API key's `.p8` text (Developer role is enough; base64 of it also works) |
-| `HOMEBREW_TAP_TOKEN` | secret | fine-grained PAT, repository `kccarlos/homebrew-tap` only, Contents read and write |
-| `NOTARY_KEY_ID` | variable | the API key's Key ID |
+| `apple-developer-id-application` | `p12_base64`, `password` | `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`: the Developer ID Application `.p12` (certificate and private key) for team `GV776BZVA8` |
+| `app-store-connect-api-key` | `p8_base64`, `key_id` | `NOTARY_API_KEY_P8`, `NOTARY_KEY_ID`: the App Store Connect API key (base64 of the `.p8`) and its Key ID |
+| `homebrew-tap-token` | `credential` | `HOMEBREW_TAP_TOKEN`: fine-grained PAT, repository `kccarlos/homebrew-tap` only, Contents read and write |
 
 The issuer ID (`686fbf99-b25d-4e9c-af7c-2b7cb2c3f1eb`) is not secret and is
 set in the workflow as `NOTARY_ISSUER_ID`.
 
-Setting them (values come from stdin or a file, never the command line):
+Setting the token (from 1Password, never the command line):
 
 ```sh
-# Keychain Access ▸ My Certificates ▸ "Developer ID Application: … (GV776BZVA8)"
-# ▸ Export ▸ .p12, with a password
-base64 -i DeveloperID.p12 | gh secret set MACOS_CERT_P12_BASE64 --env release
-gh secret set MACOS_CERT_PASSWORD --env release          # prompts
-gh secret set NOTARY_API_KEY_P8 --env release < AuthKey_XXXXXXXXXX.p8
-gh secret set HOMEBREW_TAP_TOKEN --env release           # prompts
-gh variable set NOTARY_KEY_ID --env release --body XXXXXXXXXX
+op read "op://Private/OP service account github-actions/credential" \
+  | gh secret set OP_SERVICE_ACCOUNT_TOKEN --env release
 ```
 
 Export the identity (certificate with its private key) as the `.p12`;
 the job also imports Apple's Developer ID G2 intermediate, so the chain
 need not be in the file. Delete the local `.p12` and `.p8` copies after
-setting the secrets.
+storing them in 1Password.
 
 ### Rotating
 
 - **Certificate** (expires after five years, or if revoked): create a new
   Developer ID Application certificate (see [the local
   setup](#2-the-developer-id-application-certificate)), export it, and
-  `gh secret set` both `MACOS_CERT_P12_BASE64` and `MACOS_CERT_PASSWORD`.
+  update both fields of the 1Password item `apple-developer-id-application`.
   Binaries signed with the old certificate keep working unless it is
   revoked.
 - **API key**: create a new key in App Store Connect ▸ Users and Access ▸
-  Integrations, set `NOTARY_API_KEY_P8` and `NOTARY_KEY_ID`, then revoke
-  the old key.
+  Integrations, update the 1Password item `app-store-connect-api-key`, then
+  revoke the old key.
 - **Tap token**: fine-grained PATs expire; create a new one with the same
-  scope, set `HOMEBREW_TAP_TOKEN`, delete the old one.
+  scope, update `homebrew-tap-token` in vault `github` (and
+  `GITHUB_PAT_HOMEBREW` in `Developer`, the same token), delete the old one.
 
 The next run picks them up; nothing in the repository changes.
 
@@ -336,11 +331,11 @@ runs.
 | notarytool `HTTP status code: 401` | wrong app-specific password / API key, or it was revoked |
 | notarytool `403` | an agreement is pending at developer.apple.com |
 | notarization `Invalid` | the log printed by the script names the file and the issue (e.g. missing hardened runtime or timestamp) |
-| sign-macos: `no valid Developer ID Application identity` | `MACOS_CERT_P12_BASE64` holds the certificate without its private key, the wrong certificate, or an expired one |
-| sign-macos: `security import` fails | `MACOS_CERT_PASSWORD` does not match the `.p12` |
-| sign-macos skipped with a notice | an environment secret or `NOTARY_KEY_ID` is not set |
+| sign-macos: `no valid Developer ID Application identity` | the 1Password item `apple-developer-id-application` holds the certificate without its private key, the wrong certificate, or an expired one |
+| sign-macos: `security import` fails | the item's `password` does not match its `.p12` |
+| sign-macos skipped with a notice | `OP_SERVICE_ACCOUNT_TOKEN` is not set in the `release` environment |
 | dispatch refused by the environment | the run was not dispatched on a `v*` tag ref |
-| homebrew: push rejected (403) | `HOMEBREW_TAP_TOKEN` expired or lacks Contents write on the tap |
+| homebrew: push rejected (403) | `homebrew-tap-token` expired or lacks Contents write on the tap |
 | `sha256 mismatch` | the release asset does not match its `checksums.txt`; do not sign it, rebuild the release |
 
 ## Testing without the real certificate
