@@ -153,7 +153,8 @@ The plugin is the supported path. The daemon is also a plain binary:
   PATH. The macOS binary is signed and notarized.
 - **From source** (Go, see `go.mod`): `git clone https://github.com/kccarlos/herdr-sheepdog.git`,
   then `make install` builds it and copies it to `~/.local/bin/`.
-- **Homebrew:** not published yet.
+- **Homebrew:** `brew install kccarlos/tap/sheepdog` (macOS and Linux;
+  the macOS binary is signed and notarized). `brew upgrade sheepdog` updates it.
 
 Then run `sheepdog setup` as above. `sheepdog update` prints the upgrade steps
 for the way you installed.
