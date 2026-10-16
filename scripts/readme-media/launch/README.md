@@ -7,12 +7,11 @@ first strong frame) and `assets/readme/install.gif` (800 px, about 18 s).
 ## Video
 
 ```sh
-IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/launch/make.sh
+scripts/readme-media/launch/make.sh
 STEPS=compose WORK=<dir from the last run> scripts/readme-media/launch/make.sh   # re-cut only
 ```
 
-`IOS_REPO` needs `HeroRecordingUITests` and `LaunchRecordingUITests`
-(kccarlos/herdr-sheepdog-ios). Needs Xcode, xcodegen, Go, ffmpeg and uv.
+`IOS_REPO` (default: `ios/` of this repository) needs `HeroRecordingUITests` and `LaunchRecordingUITests`. Needs Xcode, xcodegen, Go, ffmpeg and uv.
 
 What is real:
 

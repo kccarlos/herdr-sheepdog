@@ -36,7 +36,26 @@ Never commit a key, a token, a `.env` file or a log that has not been through `s
 - **Docs travel with the code.** A user-visible change updates the matching page in [docs/](docs/README.md); a new config key needs its entry in [CONFIG.md](CONFIG.md) (`go test` fails otherwise). Every relative link and every `sheepdog …` command in the user docs is checked by `go test ./internal/docscheck`.
 - **Conventional Commits** for every commit and PR title: `feat(scope): …`, `fix(scope): …`, `docs: …`, `test:`, `refactor:`, `ci:`, `build:`, `perf:`, `chore:`. The changelog is generated from them.
 - **Pull requests** target `main`, use the template, and merge by squash once CI is green. Describe what a user sees, with the exact output when it changed.
-- **CI** runs vet, race tests, lint, web tests, the offline eval and cross-builds on Linux only. Anything Xcode or iOS lives in the [iOS repository](https://github.com/kccarlos/herdr-sheepdog-ios).
+- **CI** runs vet, race tests, lint, web tests, the offline eval and cross-builds on Linux only. A PR that changes only `ios/` skips those steps; the iPhone app builds on Xcode Cloud (see below).
+
+## The iPhone app (ios/)
+
+The SwiftUI app lives in [ios/](ios/README.md). For an app problem, include the app version (Settings > About) and the iOS version in the issue, plus `sheepdog doctor --report` for a connection problem.
+
+You need a Mac with Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46 or newer:
+
+```sh
+cd ios
+xcodegen generate
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+To build onto a device under your own Apple team, see [ios/README.md](ios/README.md#build-it-yourself). The UI tests that need a daemon skip themselves without one; to run them, start the fixture daemons described in [ios/docs/dev/status.md](ios/docs/dev/status.md#running-the-tests). Read [ios/docs/dev/architecture.md](ios/docs/dev/architecture.md) before you change the app.
+
+- Logic goes in `ios/Sources/SheepdogKit` with a unit test. A flow the user sees gets an XCUITest, and it should run without a daemon when it can (see `ios/Tests/SheepdogUITests/StubDaemon.swift`).
+- **Design the unhappy paths.** A new screen needs its empty state and its error states with a plain fix, and it must work in dark mode, at the largest Dynamic Type size and on a small iPhone.
+- **iOS CI is Xcode Cloud.** Every PR that touches `ios/` runs the app's tests there ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)). Do not add GitHub Actions macOS jobs; the `policy` check fails if a workflow uses one.
+- App releases are `ios-v*` tags (`ios-v` + `MARKETING_VERSION`); plain `v*` tags are daemon releases.
 
 ## License
 

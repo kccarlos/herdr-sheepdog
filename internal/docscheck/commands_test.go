@@ -11,12 +11,12 @@ import (
 	"testing"
 )
 
-// The user-facing docs: the README, the community files and everything in
-// docs/ except docs/dev. Developer docs describe commands that change with
+// The user-facing docs: the README, the community files, everything in
+// docs/ except docs/dev, and the iPhone app's README (ios/README.md). Developer docs describe commands that change with
 // the code and are not held to this check.
 func userDocs(t testing.TB, root string) []string {
 	t.Helper()
-	files := []string{"README.md", "CONTRIBUTING.md", "SECURITY.md"}
+	files := []string{"README.md", "CONTRIBUTING.md", "SECURITY.md", "ios/README.md"}
 	entries, err := os.ReadDir(filepath.Join(root, "docs"))
 	if err != nil {
 		t.Fatal(err)

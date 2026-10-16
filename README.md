@@ -53,7 +53,7 @@ sheepdog setup                                  # 2. the browser wizard: key, ch
 
 Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
 
-**iPhone app:** the public TestFlight link is coming; until then [build it yourself](https://github.com/kccarlos/herdr-sheepdog-ios). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
+**iPhone app:** the public TestFlight link is coming; until then [build it yourself](ios/README.md). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
 
 **Away from home:** install [Tailscale](https://tailscale.com) on the computer and the phone, sign into the same account, then pair again. [remote access →](docs/remote-access.md)
 
@@ -62,6 +62,10 @@ Something wrong? Run `sheepdog doctor`; every problem prints its fix. [troublesh
 ## docs
 
 [quick start](docs/quick-start.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
+
+## iPhone app
+
+The iPhone app, **Sheepdog for herdr**, lives in [`ios/`](ios/README.md) in this repository: talk to your agents, answer approvals from the lock screen and watch their screens away from your desk. Using it: [docs/iphone-app.md](docs/iphone-app.md). Building it with your own Apple team (XcodeGen, signing, push keys): [ios/README.md](ios/README.md).
 
 ## thanks
 

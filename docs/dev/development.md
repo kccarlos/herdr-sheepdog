@@ -104,6 +104,17 @@ because macOS runners are too expensive; the `policy` CI job fails if a
 workflow uses a `macos-*` runner or calls `xcodebuild`. Signing the darwin
 release binary stays on the maintainer's Mac ([signing.md](signing.md)).
 
+The iPhone app lives in [`ios/`](../../ios/README.md) and is built only by
+Xcode Cloud ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`
+job in `ci.yml` (dorny/paths-filter) tells the other jobs whether anything
+outside `ios/` changed. On an ios-only PR every required check still starts
+and passes, but skips its heavy steps; only the policy guard and the docs
+check (`TestMarkdownLinks`, `TestDocCommandsExist`) run, so the app's
+Markdown links are still checked. Never move this to workflow-level
+`paths-ignore`: a required check that never starts stays pending and blocks
+the merge. The relay workflow runs only for `relay/**`. The app's tags are
+`ios-v*` (they start the TestFlight build); the daemon's releases are `v*`.
+
 The original v1 plan and older run reports are in
 [`history/`](history/).
 

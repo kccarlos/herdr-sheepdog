@@ -30,7 +30,7 @@ import (
 // TestFlight link exists; the page then says the link is coming.
 const (
 	TestFlightURL  = ""
-	IOSRepoURL     = "https://github.com/kccarlos/herdr-sheepdog-ios"
+	IOSRepoURL     = "https://github.com/kccarlos/herdr-sheepdog/tree/main/ios"
 	GeminiKeyURL   = "https://aistudio.google.com/apikey"
 	ModelsDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/models.md"
 	RemoteDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/remote-access.md"

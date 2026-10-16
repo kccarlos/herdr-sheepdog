@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read # dorny/paths-filter lists a PR's files through the API
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,20 +15,48 @@ concurrency:
 
 # Jobs run on self-hosted runners on Cloud Run worker pools (infra/ci-runners).
 # Switch back to GitHub-hosted: gh variable set CI_RUNNER --body ubuntu-latest
+#
+# ios/ is the iPhone app, which only Xcode Cloud builds. The required jobs
+# below must report a result on every PR, so they always start, and their
+# steps run only when something outside ios/ changed (changes.outputs.code).
+# Do not use workflow-level paths-ignore: it leaves required checks pending.
 jobs:
+  changes:
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '**'
+              - '!ios/**'
+      - if: steps.filter.outputs.code != 'true'
+        run: echo "::notice::Only ios/ changed; the Go, web and eval jobs pass without running their heavy steps (Xcode Cloud builds the app)."
+
   test:
+    needs: changes
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
+      # Checkout, Go and the docs check run for every change, ios/ included
+      # (ios/**/*.md links and ios/README.md's sheepdog commands are checked).
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - run: go vet ./...
-      - run: go test -race ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go vet ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go test -race ./...
       # The plugin's install script: download, checksum, go fallback, the
       # ~/.local/bin link (into a temp dir) and the next-step line.
-      - run: sh scripts/plugin-fetch_test.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: sh scripts/plugin-fetch_test.sh
       # Docs: every relative link in the Markdown files resolves, and every
       # `sheepdog ...` command in the user docs exists in --help. Offline.
       # (Also part of go test above; kept as its own step so a docs failure
@@ -35,27 +64,35 @@ jobs:
       - run: go test -run 'TestMarkdownLinks|TestDocCommandsExist|TestCommandExtraction' ./internal/docscheck
 
   lint:
+    needs: changes
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v9
+      - if: needs.changes.outputs.code == 'true'
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13
 
   eval:
+    needs: changes
     # Offline brain eval: fake model, no network, no API keys (make eval).
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - run: make eval
+      - if: needs.changes.outputs.code == 'true'
+        run: make eval
 
   policy:
     # Xcode/iOS work runs only on Xcode Cloud; macOS runners are too expensive.
@@ -71,15 +108,20 @@ jobs:
           fi
 
   web:
+    needs: changes
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'
+      - if: needs.changes.outputs.code == 'true'
+        run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'
 
   cross:
+    needs: changes
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     strategy:
       matrix:
@@ -89,12 +131,15 @@ jobs:
           - goos: linux
             goarch: amd64
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build
+      - if: needs.changes.outputs.code == 'true'
+        name: Build
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}

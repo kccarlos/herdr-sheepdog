@@ -10,12 +10,12 @@ codex-payments, claude-migration, codex-docs) and has not been re-cut;
 the old story.
 
 ```sh
-IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/hero/make.sh
+scripts/readme-media/hero/make.sh
 STEPS=compose WORK=<dir from the last run> scripts/readme-media/hero/make.sh   # re-cut only
 ```
 
-`IOS_REPO` must be a herdr-sheepdog-ios checkout that has
-`HeroRecordingUITests` (kccarlos/herdr-sheepdog-ios#52). Needs Xcode and xcodegen, Go, herdr, vhs, ffmpeg,
+`IOS_REPO` (default: `ios/` of this repository) must have
+`HeroRecordingUITests` (added in the old herdr-sheepdog-ios repository, #52). Needs Xcode and xcodegen, Go, herdr, vhs, ffmpeg,
 gifsicle and uv (for Pillow; Homebrew's ffmpeg has no drawtext, so every
 caption is a PNG).
 
