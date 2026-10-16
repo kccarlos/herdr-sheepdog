@@ -23,23 +23,24 @@ binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/relea
 herdr plugin install kccarlos/herdr-sheepdog
 ```
 
-herdr shows the build step before it runs it. It downloads the `sheepdog`
-binary for your machine (Apple silicon Mac or x86-64 Linux), checks its
-sha256, links it into `~/.local/bin` and ends with:
+It needs herdr 0.9.4 or newer (`herdr --version`; update herdr the way you
+installed it). herdr shows the build step before it runs it. The build step
+downloads the `sheepdog` binary for your machine (Apple silicon Mac or x86-64
+Linux), checks its sha256 and links it into `~/.local/bin`; herdr then prints:
 
 ```text
-Next: run `sheepdog setup` (or open the "Set up sheepdog" action in herdr).
+Installed kccarlos.sheepdog from kccarlos/herdr-sheepdog.
 ```
 
-If it warns that `~/.local/bin` is not on your PATH, add it as the message
-says (then open a new terminal), or run the printed path directly.
+herdr does not show the build step's own messages when it succeeds. If
+`sheepdog` is then not found, `~/.local/bin` is not on your PATH: add
+`export PATH="$HOME/.local/bin:$PATH"` to your shell profile and open a new
+terminal, or run `~/.local/bin/sheepdog` directly.
 
 Any other machine (an Intel Mac, ARM Linux), or a release that is not
-published yet, builds from source instead and needs [Go](https://go.dev/dl/).
-You then see `plugin-fetch: no release found at …` and `plugin-fetch:
-building from source with go`; that takes about ten seconds on a fast
-connection. Without Go the install stops and says so
-([troubleshooting.md](troubleshooting.md)).
+published yet, builds from source instead and needs [Go](https://go.dev/dl/);
+that takes about ten seconds on a fast connection. Without Go the install
+stops and says so ([troubleshooting.md](troubleshooting.md)).
 
 ## 2. Set up in your browser
 
