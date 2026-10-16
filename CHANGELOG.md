@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 (unreleased; the date is set when the tag is cut)
+## v0.1.0 (2026-10-15)
 
 First public release.
 
