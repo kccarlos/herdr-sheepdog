@@ -19,7 +19,7 @@ final class ConversationCacheTests: XCTestCase {
 
     func testRoundTripKeepsItemsPagingAndTheResumeID() throws {
         let cache = ConversationCache(directory: directory)
-        let endpoint = DaemonEndpoint(text: "192.168.8.141:7777", token: "s3cret")!
+        let endpoint = DaemonEndpoint(text: "192.168.1.20:7777", token: "s3cret")!
         let page = try DaemonClient.decoder.decode(ConversationPage.self, from: Data(Fixtures.conversationPage.utf8))
         var history = ConversationHistory()
         history.applyNewest(page)
@@ -31,7 +31,7 @@ final class ConversationCacheTests: XCTestCase {
         XCTAssertEqual(loaded.items.first { $0.kind == .approval && $0.resolution == .confirmed }?.options?.count, 3)
         XCTAssertEqual(loaded.nextBefore, page.nextBefore)
         XCTAssertEqual(loaded.lastEventID, 1_790_127_642_099_438)
-        XCTAssertEqual(loaded.endpoint, "192.168.8.141:7777")
+        XCTAssertEqual(loaded.endpoint, "192.168.1.20:7777")
         for (a, b) in zip(loaded.items, history.items) {
             XCTAssertEqual(a.ts.timeIntervalSince1970, b.ts.timeIntervalSince1970, accuracy: 0.001)
         }
@@ -60,20 +60,20 @@ final class ConversationCacheTests: XCTestCase {
     }
 
     func testKeyedByHostAndPortNotToken() {
-        let a = DaemonEndpoint(text: "192.168.8.141:7777", token: "one")!
-        let b = DaemonEndpoint(text: "http://192.168.8.141:7777", token: "two")!
-        let c = DaemonEndpoint(text: "192.168.8.141:7799")!
+        let a = DaemonEndpoint(text: "192.168.1.20:7777", token: "one")!
+        let b = DaemonEndpoint(text: "http://192.168.1.20:7777", token: "two")!
+        let c = DaemonEndpoint(text: "192.168.1.20:7799")!
         let v6 = DaemonEndpoint(text: "[fd7a::1]:7777")!
         XCTAssertEqual(ConversationCache.key(for: a), ConversationCache.key(for: b))
         XCTAssertNotEqual(ConversationCache.key(for: a), ConversationCache.key(for: c))
-        XCTAssertEqual(ConversationCache.key(for: a), "192.168.8.141_7777")
+        XCTAssertEqual(ConversationCache.key(for: a), "192.168.1.20_7777")
         XCTAssertEqual(ConversationCache.key(for: v6), "fd7a__1_7777")
         XCTAssertEqual(ConversationCache.key(for: DaemonEndpoint(text: "Mac.Local")!), "mac.local_7777")
     }
 
     func testEachDaemonHasItsOwnConversation() throws {
         let cache = ConversationCache(directory: directory)
-        let home = DaemonEndpoint(text: "192.168.8.141:7777")!
+        let home = DaemonEndpoint(text: "192.168.1.20:7777")!
         let work = DaemonEndpoint(text: "100.64.0.2:7777")!
         try cache.save(ConversationSnapshot(endpoint: home, history: ConversationHistory(items: [item(1)]), lastEventID: 1), for: home)
         try cache.save(ConversationSnapshot(endpoint: work, history: ConversationHistory(items: [item(2), item(3)]), lastEventID: 3), for: work)

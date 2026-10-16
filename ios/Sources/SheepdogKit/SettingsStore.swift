@@ -19,7 +19,7 @@ public final class SettingsStore {
         self.secrets = secrets
     }
 
-    /// The address exactly as typed, e.g. `192.168.8.141:7777`.
+    /// The address exactly as typed, e.g. `192.168.1.20:7777`.
     public var address: String {
         get { defaults.string(forKey: Key.address) ?? "" }
         set { defaults.set(newValue, forKey: Key.address) }

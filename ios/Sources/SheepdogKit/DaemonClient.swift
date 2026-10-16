@@ -14,7 +14,7 @@ public struct DaemonEndpoint: Equatable, Sendable {
         self.token = token
     }
 
-    /// Parses what someone types into Settings: `192.168.8.141:7777`,
+    /// Parses what someone types into Settings: `192.168.1.20:7777`,
     /// `http://mac.local:7777`, `mac.local`. No TLS in v1 (docs/ws-contract.md
     /// "Non-goals"), but an `https://` prefix is honoured if it is typed.
     public init?(text: String, defaultPort: Int = 7777, token: String = "") {
@@ -53,7 +53,7 @@ public struct DaemonEndpoint: Equatable, Sendable {
     public var scheme: String { secure ? "https" : "http" }
     public var webSocketScheme: String { secure ? "wss" : "ws" }
 
-    /// What the error banners say: `192.168.8.141:7777`.
+    /// What the error banners say: `192.168.1.20:7777`.
     public var display: String { "\(host):\(port)" }
 
     public var webSocketURL: URL? { URL(string: "\(webSocketScheme)://\(hostForURL):\(port)/ws") }

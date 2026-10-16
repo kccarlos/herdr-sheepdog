@@ -3,7 +3,7 @@ import XCTest
 
 final class DaemonEndpointTests: XCTestCase {
     func testParsesWhatSomeoneActuallyTypes() {
-        XCTAssertEqual(DaemonEndpoint(text: "192.168.8.141:7777")?.display, "192.168.8.141:7777")
+        XCTAssertEqual(DaemonEndpoint(text: "192.168.1.20:7777")?.display, "192.168.1.20:7777")
         XCTAssertEqual(DaemonEndpoint(text: "http://mac.local:7799")?.display, "mac.local:7799")
         XCTAssertEqual(DaemonEndpoint(text: "  mac.local  ")?.display, "mac.local:7777")
         XCTAssertEqual(DaemonEndpoint(text: "http://100.101.102.103:7777/voice")?.display, "100.101.102.103:7777")
@@ -136,8 +136,8 @@ final class DaemonModelTests: XCTestCase {
 
     func testEveryErrorReadsLikeASentenceAndNamesTheDaemon() {
         XCTAssertEqual(
-            DaemonError.unreachable(endpoint: "192.168.8.141:7777", detail: "").message,
-            "Can't reach the daemon at 192.168.8.141:7777 — is it running?"
+            DaemonError.unreachable(endpoint: "192.168.1.20:7777", detail: "").message,
+            "Can't reach the daemon at 192.168.1.20:7777 — is it running?"
         )
         XCTAssertTrue(DaemonError.unauthorized(endpoint: "mac:7777").message.contains("token"))
         XCTAssertTrue(DaemonError.notSheepdog(endpoint: "mac:80").message.contains("isn't a sheepdog daemon"))
