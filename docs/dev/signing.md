@@ -61,6 +61,10 @@ homebrew (GitHub-hosted ubuntu-latest, environment: release)
    ends by installing the formula from the tap on Linux and running `brew
    test`.
 
+Both sign-macos and homebrew run in the `release` environment, so a run
+asks for approval twice: once before signing, and again when homebrew
+becomes pending after signing succeeds.
+
 If an environment secret (or the `NOTARY_KEY_ID` variable) is missing,
 sign-macos skips with a notice and the darwin tarball stays unsigned;
 homebrew runs only after a successful signing, so the tap never points at
