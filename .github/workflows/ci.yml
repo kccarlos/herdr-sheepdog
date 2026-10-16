@@ -121,7 +121,7 @@ jobs:
         with:
           node-version: "22"
       - if: needs.changes.outputs.code == 'true'
-        run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'
+        run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs' 'web/static/*.test.mjs'
 
   cross:
     needs: changes

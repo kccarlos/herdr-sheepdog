@@ -46,7 +46,7 @@ test:
 # stays Go-only.
 test-web:
 	@if command -v node >/dev/null 2>&1; then \
-		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'; \
+		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs' 'web/static/*.test.mjs'; \
 	else \
 		echo "test-web: node not found, skipping"; \
 	fi

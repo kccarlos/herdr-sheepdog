@@ -177,7 +177,7 @@ func TestAPILoginSetsCookie(t *testing.T) {
 func TestStaticPagesAndAssetsStayPublic(t *testing.T) {
 	dir := t.TempDir()
 	h := newHarness(t, harnessOpts{token: "s3cr3t", devTestdata: dir})
-	for _, path := range []string{"/", "/voice", "/voice/", "/voice/app.js", "/debug", "/debug/", "/static/logo-solid.svg"} {
+	for _, path := range []string{"/", "/voice", "/voice/", "/voice/app.js", "/debug", "/debug/", "/static/logo-color.svg"} {
 		if code := h.getJSON(path, nil); code != http.StatusOK && code != http.StatusFound {
 			t.Errorf("GET %s = %d, want public", path, code)
 		}

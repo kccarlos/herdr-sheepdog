@@ -589,7 +589,7 @@ struct SpeechBubble: View {
                     isShepherd ? Color.accentColor : Color(.secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                 )
-                .foregroundStyle(isShepherd ? Color.white : Color.primary)
+                .foregroundStyle(isShepherd ? Color("OnAccent") : Color.primary)
                 .frame(maxWidth: 300, alignment: isShepherd ? .trailing : .leading)
             if !isShepherd { Spacer(minLength: 44) }
         }
