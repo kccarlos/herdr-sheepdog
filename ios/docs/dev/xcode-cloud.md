@@ -1,13 +1,18 @@
 # Xcode Cloud: tests on every PR, TestFlight on every tag
 
-GitHub Actions is not used for this repo; all builds and tests run on Xcode
+GitHub Actions does not build the app; all iOS builds and tests run on Xcode
 Cloud (macOS runners on GitHub Actions are too expensive).
 Apple's Xcode Cloud builds and tests every pull request and every push to
-`main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
+`main` that changes `ios/`, and an `ios-v*` tag archives the app and puts it
+in TestFlight. The app lives in `ios/` of the sheepdog repository (until
+2026-10-15 it was the separate `herdr-sheepdog-ios` repository; the switch
+of the workflows is in
+[xcode-cloud-monorepo.md](../../../docs/dev/xcode-cloud-monorepo.md), and the
+old `v*` tags are now `ios-v*`). Xcode
 Cloud minutes are included in the Apple Developer Program.
 
 The latest build in TestFlight is **0.1.5 (57)** (internal group **Me**),
-built from tag `v0.1.5` (`b414dda`, #41).
+built from tag `ios-v0.1.5` (`b414dda`, #41).
 
 | | |
 |---|---|
@@ -20,7 +25,7 @@ built from tag `v0.1.5` (`b414dda`, #41).
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.5 (57)`, from tag `v0.1.5` (`b414dda`) |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.5 (57)`, from tag `ios-v0.1.5` (`b414dda`) |
 | TestFlight internal group | **Me** (tester: the Account Holder). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
@@ -124,7 +129,7 @@ Accounts). Accept any pending agreement first:
 onboarding fails with errors that do not always say "agreement".
 
 ```sh
-cd herdr-sheepdog-ios
+cd herdr-sheepdog/ios
 git checkout main && git pull
 xcodegen generate
 open Sheepdog.xcodeproj
@@ -138,11 +143,11 @@ open Sheepdog.xcodeproj
 3. Xcode shows a default workflow. Leave it for now or edit it straight
    into the **PR** workflow below (section 2). Next.
 4. **Grant access to your source code**: Xcode sees
-   `github.com/kccarlos/herdr-sheepdog-ios` and asks for access. Click
+   `github.com/kccarlos/herdr-sheepdog` and asks for access. Click
    **Grant Access**. The browser opens App Store Connect ▸ **Connect** ▸
    GitHub asks to install the **Xcode Cloud** GitHub App: install it on the
    account `kccarlos`, **Only select repositories** ▸
-   `herdr-sheepdog-ios` ▸ Install. Back in Xcode, the repository shows as
+   `herdr-sheepdog` ▸ Install. Back in Xcode, the repository shows as
    connected. **The remote must be an HTTPS GitHub URL** — see the
    troubleshooting entry below if Xcode Cloud says it cannot find the
    repository.
@@ -166,9 +171,9 @@ Manage Workflows).
 
 | Section | Setting |
 |---|---|
-| General | Name `PR`. Restrict editing: off. Repository: `kccarlos/herdr-sheepdog-ios`. Project: `Sheepdog.xcodeproj` |
+| General | Name `PR`. Restrict editing: off. Repository: `kccarlos/herdr-sheepdog`. Project: `ios/Sheepdog.xcodeproj` |
 | Environment | Xcode version **Latest Release**, macOS version **Latest Release**. Clean: off |
-| Start Conditions | **Pull Request Changes**: source branch Any, target branch `main`. Add a second one: **Branch Changes**: custom branch `main`. Leave "Auto-cancel builds" on |
+| Start Conditions | **Pull Request Changes**: source branch Any, target branch `main`, Files and Folders ▸ Start a build if any file changes in directory `ios`. Add a second one: **Branch Changes**: custom branch `main`, same Files and Folders rule. Leave "Auto-cancel builds" on |
 | Actions | **Test** ▸ Platform iOS, Scheme **Sheepdog**, Test Plan "Use Scheme Settings", Destination **iOS Simulator ▸ one recent iPhone (e.g. iPhone 17 Pro), Latest Release** |
 | Post-Actions | none |
 
@@ -183,7 +188,7 @@ request as a GitHub check.
 |---|---|
 | General | Name `TestFlight` |
 | Environment | Xcode **Latest Release**, macOS **Latest Release** |
-| Start Conditions | **Tag Changes**: Custom Tags ▸ tag begins with `v`. Remove any branch condition |
+| Start Conditions | **Tag Changes**: Custom Tags ▸ tag begins with `ios-v` (plain `v*` tags are daemon releases). Remove any branch condition |
 | Actions | **Archive** ▸ Platform iOS, Scheme **Sheepdog**, Deployment Preparation **TestFlight (Internal Testing Only)** |
 | Post-Actions | **TestFlight Internal Testing** ▸ group **Me** (section 4) |
 
@@ -248,14 +253,14 @@ needs no justification for this. External testers or the App Store would.
 ```sh
 # project.yml: MARKETING_VERSION: "0.1.1" (bump it in a PR first: the next release is 0.1.2 or 0.2.0)
 git checkout main && git pull
-git tag v0.1.1   # the tag must be v + MARKETING_VERSION and unused
-git push origin v0.1.1
+git tag ios-v0.1.1   # the tag must be ios-v + MARKETING_VERSION and unused
+git push origin ios-v0.1.1
 ```
 
 The TestFlight workflow starts on the tag, archives, uploads, and adds the
 build to the `Me` group; TestFlight shows it as `0.1.1 (N)` with `N` the
 Xcode Cloud build number. A tag is used once: for the next build, bump
-`MARKETING_VERSION` (e.g. to `0.1.2`) and tag `v0.1.2`. To send another
+`MARKETING_VERSION` (e.g. to `0.1.2`) and tag `ios-v0.1.2`. To send another
 build of the same version instead, start the TestFlight workflow by hand in
 Xcode (Report navigator ▸ Cloud ▸ right-click TestFlight ▸ Start Build ▸
 branch `main`); it gets a new build number, and a manual start on a branch
@@ -268,10 +273,10 @@ and download the log artifacts (`~/.claude/skills/asc/SKILL.md`).
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Fails in "Run ci_post_clone.sh" with `tag vX does not match MARKETING_VERSION` | the tag and `project.yml` disagree | delete the tag (`git push --delete origin vX`), fix `MARKETING_VERSION` on `main`, tag again |
+| Fails in "Run ci_post_clone.sh" with `tag ios-vX does not match MARKETING_VERSION` | the tag and `project.yml` disagree | delete the tag (`git push --delete origin ios-vX`), fix `MARKETING_VERSION` on `main`, tag again |
 | Fails in "Run ci_post_clone.sh" with a download or `shasum` error, then a Homebrew error | GitHub or Homebrew unreachable from Xcode Cloud | re-run; if it persists, check `XCODEGEN_VERSION`/`XCODEGEN_SHA256` in the script against the release |
 | `xcodegen` errors in the post-clone log | `project.yml` does not generate | run `xcodegen generate` locally; the same error shows |
-| Post-clone script not run at all ("Could not find Sheepdog.xcodeproj") | the script is not executable or not at `ci_scripts/ci_post_clone.sh` | `git update-index --chmod=+x ci_scripts/ci_post_clone.sh`, keep the directory at the repository root next to `project.yml` |
+| Post-clone script not run at all ("Could not find Sheepdog.xcodeproj") | the script is not executable or not at `ci_scripts/ci_post_clone.sh` | `git update-index --chmod=+x ios/ci_scripts/ci_post_clone.sh`, keep the directory in `ios/` next to `project.yml` and the generated project |
 | "Scheme Sheepdog is not shared" / the scheme is missing in the workflow editor | the scheme came from a hand-made project, or `schemes:` was removed from `project.yml` | keep the `schemes:` block; XcodeGen writes it to `Sheepdog.xcodeproj/xcshareddata/xcschemes/`. Regenerate locally and reopen the workflow editor |
 | `No profiles for 'com.github.kccarlos.herdr-sheepdog-ios'` / `Automatic signing is disabled` / "requires a development team" | the bundle ID is not registered on team `GV776BZVA8`, or `DEVELOPMENT_TEAM` changed | check <https://developer.apple.com/account/resources/identifiers/list>; register it by hand if onboarding did not; keep `DEVELOPMENT_TEAM: GV776BZVA8` and `CODE_SIGN_STYLE: Automatic` |
 | Export fails with "Automatic signing cannot update bundle identifier" (build 9), or the archive fails because the profile "doesn't include the aps-environment entitlement" / "doesn't support the Push Notifications capability" (or Time Sensitive Notifications) | the App ID does not have the capability; Xcode Cloud will not add it | enable Push Notifications and Time Sensitive Notifications on `com.github.kccarlos.herdr-sheepdog-ios` in the developer portal (Identifiers), then re-run ("How the build works" ▸ Push notifications) |
@@ -280,5 +285,5 @@ and download the log artifacts (`~/.claude/skills/asc/SKILL.md`).
 | Build sits at "Missing Compliance" | `ITSAppUsesNonExemptEncryption` missing from the built Info.plist | it is in `project.yml`; check it survived an edit |
 | The TestFlight post-action has no group to pick | no internal group yet | section 4, then edit the workflow |
 | Tests pass locally, fail on Xcode Cloud in the UI tests | a fixture daemon answered on 127.0.0.1:7799 locally | on Xcode Cloud they should skip; look for a test that does not call `XCTSkip` without a daemon |
-| "No source code repositories were found for this project" when connecting the repository | `origin` used the SSH host alias `git@github-kccarlos:…` (an `~/.ssh/config` `Host` alias for a multi-account setup); Xcode Cloud can't resolve it, and a git `url.<alias>.insteadOf` rewrite doesn't help — Xcode applies the remote URL as written | point `origin` at plain HTTPS: `git remote set-url origin https://github.com/kccarlos/herdr-sheepdog-ios.git`, then `gh auth setup-git` (with `gh` logged in as `kccarlos`) so git's credential helper handles push/pull without the SSH alias |
+| "No source code repositories were found for this project" when connecting the repository | `origin` used the SSH host alias `git@github-kccarlos:…` (an `~/.ssh/config` `Host` alias for a multi-account setup); Xcode Cloud can't resolve it, and a git `url.<alias>.insteadOf` rewrite doesn't help — Xcode applies the remote URL as written | point `origin` at plain HTTPS: `git remote set-url origin https://github.com/kccarlos/herdr-sheepdog.git`, then `gh auth setup-git` (with `gh` logged in as `kccarlos`) so git's credential helper handles push/pull without the SSH alias |
 | Yellow warning in the workflow editor: "the scheme Sheepdog may only exist locally and may not be accessible to Xcode Cloud" | expected — `Sheepdog.xcodeproj` is gitignored, so Xcode Cloud can't see the scheme in the repository itself | ignore it; `ci_scripts/ci_post_clone.sh` generates the project (and the scheme with it) on the runner before the scheme is needed |

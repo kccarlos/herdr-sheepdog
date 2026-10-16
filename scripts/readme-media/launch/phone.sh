@@ -4,7 +4,7 @@
 # `simctl io recordVideo` films it, plus the lock screen with the approval
 # notification as two screenshots.
 #
-#   IOS_REPO=/path/to/herdr-sheepdog-ios WORK=/tmp/launch scripts/readme-media/launch/phone.sh
+#   WORK=/tmp/launch scripts/readme-media/launch/phone.sh
 #
 # Two passes on the simulator "$SIM_NAME" (made when missing; default
 # "Sheepdog Launch"), light mode, 9:41 status bar:
@@ -22,7 +22,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-ios=$(cd "${IOS_REPO:?set IOS_REPO to a herdr-sheepdog-ios checkout with LaunchRecordingUITests}" && pwd)
+ios=$(cd "${IOS_REPO:-$repo/ios}" && pwd)
 work=${WORK:?set WORK}/phone
 mkdir -p "$work"
 name=${SIM_NAME:-Sheepdog Launch}

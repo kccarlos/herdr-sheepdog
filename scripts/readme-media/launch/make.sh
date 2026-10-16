@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The launch video: see README.md.
-#   IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/launch/make.sh
+#   scripts/readme-media/launch/make.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)

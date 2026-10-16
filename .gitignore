@@ -46,3 +46,14 @@ go.work.sum
 *.wav
 !cmd/livecanary/audio/*.wav
 /sheepdog
+
+# iPhone app (ios/): Xcode build output and XcodeGen's generated project
+# (generate with `cd ios && xcodegen generate`)
+/ios/build/
+/ios/DerivedData/
+/ios/.swiftpm/
+/ios/*.xcodeproj
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate

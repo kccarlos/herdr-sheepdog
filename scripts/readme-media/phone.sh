@@ -7,7 +7,7 @@
 # films the simulator, then cuts the scripted waits out with ffmpeg.
 #
 #   scripts/readme-media/phone.sh            # writes assets/readme/phone.{gif,mp4}
-#   IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/phone.sh
+#   scripts/readme-media/phone.sh
 #
 # Needs Xcode, xcodegen, ffmpeg (gifsicle optional). Uses its own simulator
 # ("Sheepdog README", an iPhone 18 Pro by default; DEVICE_TYPE overrides)
@@ -17,7 +17,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 . "$here/lib.sh"
-ios=${IOS_REPO:-$repo/../herdr-sheepdog-ios}
+ios=${IOS_REPO:-$repo/ios}
 ios=$(cd "$ios" && pwd)
 device_type=${DEVICE_TYPE:-iPhone 18 Pro}
 name="Sheepdog README"

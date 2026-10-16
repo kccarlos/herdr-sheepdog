@@ -27,9 +27,10 @@ trial credit; [`infra/ci-runners`](../../infra/ci-runners/README.md)); the repo
 variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow is Ubuntu-only; the darwin binary is
 signed and notarized locally with `make release-sign`
 ([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
-companion app (`herdr-sheepdog-ios`) is built and shipped by Xcode Cloud,
+companion app ([`ios/`](../../ios/README.md), until 2026-10-15 the separate
+`herdr-sheepdog-ios` repository) is built and shipped by Xcode Cloud,
 not GitHub Actions; TestFlight build 0.1.3 (35) (Settings ▸ Languages)
-is in the internal **Me** group (iOS status: `herdr-sheepdog-ios` `docs/status.md`).
+is in the internal **Me** group (iOS status: [`ios/docs/dev/status.md`](../../ios/docs/dev/status.md)).
 
 What is in:
 

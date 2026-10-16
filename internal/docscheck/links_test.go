@@ -137,7 +137,7 @@ func TestMarkdownLinks(t *testing.T) {
 				bad++
 				continue
 			}
-			userDoc := dest == "README.md" || (strings.HasPrefix(dest, "docs/") && !strings.HasPrefix(dest, "docs/dev/")) || dest == "CONFIG.md" || dest == "CONTRIBUTING.md"
+			userDoc := dest == "README.md" || (strings.HasPrefix(dest, "docs/") && !strings.HasPrefix(dest, "docs/dev/")) || dest == "CONFIG.md" || dest == "CONTRIBUTING.md" || dest == "ios/README.md"
 			if frag == "" || !userDoc || !strings.HasSuffix(dest, ".md") {
 				continue
 			}

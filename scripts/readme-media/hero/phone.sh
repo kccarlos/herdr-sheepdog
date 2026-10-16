@@ -5,7 +5,7 @@
 # script sends codex-payments' approval as a notification with `xcrun simctl
 # push` (the payload is the daemon's own, from payload.go).
 #
-#   IOS_REPO=/path/to/herdr-sheepdog-ios WORK=/tmp/hero scripts/readme-media/hero/phone.sh
+#   WORK=/tmp/hero scripts/readme-media/hero/phone.sh
 #
 # Writes $WORK/phone/lock0.png and lock1.png (the lock screen before and
 # after the notification), cfr2.mp4 (the app after the unlock), rec2.t0
@@ -25,7 +25,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-ios=$(cd "${IOS_REPO:?set IOS_REPO to a herdr-sheepdog-ios checkout with HeroRecordingUITests}" && pwd)
+ios=$(cd "${IOS_REPO:-$repo/ios}" && pwd)
 work=${WORK:?set WORK}/phone
 mkdir -p "$work"
 device_type=${DEVICE_TYPE:-iPhone 18 Pro}

@@ -28,8 +28,8 @@ are the "before" for chip, Flock, Health and Settings).
 ## Distribution
 
 TestFlight build **0.1.5 (57)**, internal group **Me** (VALID, IN_BETA_TESTING),
-from tag `v0.1.5` (`b414dda`, PR #41): the agent window streams over /ws (#40).
-Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
+from tag `ios-v0.1.5` (`b414dda`, PR #41): the agent window streams over /ws (#40).
+Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `ios-v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
 workflow, the first signed archive with the widget extension; it exported with
 no signing change. It adds the UI polish (#36) and the Live Activity widget,
 App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
@@ -116,18 +116,18 @@ every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
 so Xcode Cloud stays green without a daemon.
 
 To run the UI tests for real, start two fixture daemons from the daemon
-repository. Neither needs a model key: `--brain=fake` is a scripted local
+repository root (`..` from `ios/`). Neither needs a model key: `--brain=fake` is a scripted local
 model, and `--voice=off` means there is no live session.
 
 ```sh
-cd ../herdr-sheepdog
+cd ..   # the repository root; build bin/sheepdog first with make build
 SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios/state.json \
   bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7799 --env-file /dev/null &
 SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-token SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-token/state.json \
   SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_TOKEN=devtoken \
   bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7798 --env-file /dev/null &
 
-cd ../herdr-sheepdog-ios
+cd ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
 xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```

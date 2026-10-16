@@ -2,7 +2,7 @@
 # The README's hero GIF (12 s, looping): the real iPhone app on the left,
 # the conversation as chat bubbles on the right, then the end tag.
 #
-#   IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/bubbles/make.sh
+#   scripts/readme-media/bubbles/make.sh
 #   STEPS=compose WORK=<dir from the last run> scripts/readme-media/bubbles/make.sh   # re-draw only
 #
 # The phone take is the hero video's (scripts/readme-media/hero/phone.sh:
