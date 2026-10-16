@@ -89,7 +89,7 @@ make eval-live     # the small eval sets against the real model (burns quota)
 make cross         # dist/sheepdog-darwin-arm64, dist/sheepdog-linux-amd64
 make install       # copy bin/sheepdog to ~/.local/bin/
 make changelog     # regenerate CHANGELOG.md
-make release-sign TAG=v0.1.0   # sign and notarize a release's darwin binary (signing.md)
+make release-sign TAG=v0.1.0   # local fallback: sign and notarize a release's darwin binary (signing.md)
 ```
 
 ### CI/CD
@@ -104,10 +104,16 @@ repository went public (2026-10-15) it runs the app's unit tests
 27.0) for PRs and pushes to `main` that touch `ios/`. It builds for the
 simulator only and uses no secrets; it is not a required check. Archives,
 signing and TestFlight stay on Xcode Cloud, and no signing certificate or
-App Store Connect key goes into GitHub. The `policy` CI job fails if any
-other workflow uses a macOS runner or calls `xcodebuild`, or if `ios.yml`
-reads a secret. Signing the darwin release binary stays on the
-maintainer's Mac ([signing.md](signing.md)).
+App Store Connect key for the app goes into GitHub. The other exception
+is `release.yml`'s `sign-macos` job, which signs and notarizes the daemon's
+darwin binary on a GitHub-hosted Mac in the `release` environment
+(maintainer approval, `v*` tags only), followed by the `homebrew` job that
+pushes the formula to the tap ([signing.md](signing.md)). The `policy` CI
+job (`scripts/workflow-policy.sh`, tested by
+`scripts/workflow-policy_test.sh`) fails if a macOS runner or `xcodebuild`
+appears anywhere else, including a `release.yml` job without
+`environment: release`, if `release.yml` reads a secret other than
+`GITHUB_TOKEN` outside such a job, or if `ios.yml` reads any secret.
 
 The iPhone app lives in [`ios/`](../../ios/README.md) and is archived by
 Xcode Cloud ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`

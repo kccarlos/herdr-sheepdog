@@ -58,6 +58,9 @@ jobs:
       # ~/.local/bin link (into a temp dir) and the next-step line.
       - if: needs.changes.outputs.code == 'true'
         run: sh scripts/plugin-fetch_test.sh
+      # The Homebrew formula render and the tap commit (scratch repo, no push).
+      - if: needs.changes.outputs.code == 'true'
+        run: bash packaging/homebrew/tap-update_test.sh
       # Docs: every relative link in the Markdown files resolves, and every
       # `sheepdog ...` command in the user docs exists in --help. Offline.
       # (Also part of go test above; kept as its own step so a docs failure
@@ -96,23 +99,16 @@ jobs:
         run: make eval
 
   policy:
-    # macOS runners and Xcode builds are allowed in ios.yml only (simulator
-    # unit tests, public repo). Signing and TestFlight stay on Xcode Cloud,
-    # so ios.yml must not read any secret.
+    # Where macOS runners, Xcode and secrets may appear (scripts/workflow-policy.sh):
+    # ios.yml (simulator unit tests, no secrets at all), and release.yml's
+    # jobs that declare `environment: release` (signing; maintainer approval).
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
-      - name: macOS runners and Xcode builds only in ios.yml, which uses no secrets
-        run: |
-          # bracketed characters keep this step from matching itself
-          if grep -rnEi --include='*.yml' --include='*.yaml' --exclude='ios.yml' 'macos[-]|xcode-[0-9]|xcodebuil[d]' .github/workflows; then
-            echo "::error::macOS runners and Xcode builds belong in .github/workflows/ios.yml only (see docs/dev/development.md, CI/CD)"
-            exit 1
-          fi
-          if grep -nEi 'secret[s]\.|GITHUB_TOKE[N]|id-token' .github/workflows/ios.yml; then
-            echo "::error::ios.yml must not use secrets: signing and TestFlight stay on Xcode Cloud (see docs/dev/development.md, CI/CD)"
-            exit 1
-          fi
+      - name: The policy script's tests
+        run: bash scripts/workflow-policy_test.sh
+      - name: macOS and secrets only where the policy allows
+        run: bash scripts/workflow-policy.sh
 
   web:
     needs: changes
