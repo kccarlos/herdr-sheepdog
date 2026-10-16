@@ -3,7 +3,7 @@ import Foundation
 /// The pairing code `sheepdog pair` prints (and the daemon's /debug
 /// shows): `sheepdog://pair?u=<base URL>&u=<base URL>…&t=<token>`
 /// (docs/ws-contract.md "Pairing" in the daemon repository). The base
-/// URLs come LAN first, then Tailscale; `t` is `web.token`, absent when
+/// URLs come Tailscale first, then LAN; `t` is `web.token`, absent when
 /// the daemon has none.
 public struct PairingLink: Equatable, Sendable {
     /// The daemon's addresses as Settings stores them (`host:port`, no

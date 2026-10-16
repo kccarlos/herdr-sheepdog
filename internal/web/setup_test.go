@@ -336,6 +336,35 @@ func TestSetupPhoneConnected(t *testing.T) {
 	}
 }
 
+// TestSetupPhoneExplain: the state says which address the QR leads with.
+func TestSetupPhoneExplain(t *testing.T) {
+	cfg := config.Default()
+	cfg.Web.Bind, cfg.Web.Token = "0.0.0.0", "a-token-of-thirty-two-characters!"
+	f := newSetupFixture(t, cfg, cfg.Web.Token)
+	old := pairSysAddrs
+	t.Cleanup(func() { pairSysAddrs = old })
+	if err := f.h.srv.Listen("0.0.0.0:0"); err != nil { // the daemon as phone access binds it
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		sys  []pair.IfaceAddr
+		want string
+	}{
+		{[]pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun3", IP: net.ParseIP("198.18.0.1")}}, "Uses your Wi-Fi address 192.168.1.20: the phone must be on the same Wi-Fi"},
+		{[]pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun5", IP: net.ParseIP("100.101.102.103")}}, "Uses your Tailscale address 100.101.102.103: works anywhere your phone is on Tailscale"},
+	} {
+		sys := c.sys
+		pairSysAddrs = func() ([]pair.IfaceAddr, error) { return sys, nil }
+		var st SetupState
+		if err := json.Unmarshal([]byte(f.get(t, "/api/setup/state")), &st); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(st.Phone.Explain, c.want) {
+			t.Errorf("explain = %q, want %q", st.Phone.Explain, c.want)
+		}
+	}
+}
+
 // TestSetupDemoRoutes: start, ping and stop go to the demo control.
 func TestSetupDemoRoutes(t *testing.T) {
 	f := newSetupFixture(t, config.Default(), "")

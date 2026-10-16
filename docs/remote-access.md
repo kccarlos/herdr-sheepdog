@@ -16,8 +16,11 @@ sheepdog pair
 ```
 
 Scan the QR code in the app (Settings, Daemon, Scan pairing code). The code
-holds every LAN and Tailscale address the daemon listens on, plus the token;
-the app uses the first address that answers. See [iphone-app.md](iphone-app.md).
+holds the computer's Tailscale address first (when Tailscale is running),
+then its Wi-Fi/LAN address (a private 192.168.x, 10.x or 172.16-31.x address;
+VPN, proxy and container addresses are left out), plus the token. With no
+Tailscale it holds the Wi-Fi address only, so the phone must be on the same
+Wi-Fi. The app saves the first address that answers. See [iphone-app.md](iphone-app.md).
 
 ## Away from home: Tailscale
 
