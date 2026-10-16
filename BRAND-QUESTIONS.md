@@ -2,7 +2,7 @@
 
 Raised by workstream A (tokens and shared assets). Each has a default that is already in the PR.
 
-1. **Old `assets/logo-solid.svg` and `assets/logo-transparent.svg`.** Kept as files; the README, `ios/README.md` and the `scripts/readme-media/*` scripts still use them (workstream B). Nothing in `web/` uses them any more. Can they be deleted once B and the media scripts move to `assets/brand/logo/`?
+1. **Old `assets/logo-solid.svg` and `assets/logo-transparent.svg`.** Kept as files; B moved the README and `ios/README.md` to `assets/brand/logo/`. Still using the old files: `scripts/readme-media/launch/make.sh` and `hero/make.sh` (`assets/logo-transparent.svg`), and `ios/assets/logo-*.svg` (its own copies, now unreferenced by `ios/README.md`). Nothing in `web/` uses them any more. Can they be deleted once B and the media scripts move to `assets/brand/logo/`?
 2. **User bubble text on the accent (iOS).** With `AccentColor` orange, the white text on the user's bubble in `ConversationView` failed 4.5:1, so this PR makes that one line use a new `OnAccent` colour (ink). Workstream E may fold it into `Theme.swift`.
 3. **Accent as text on light surfaces (iOS).** `ModelsView` and `AgentScreenView` draw `Color.accentColor` as a foreground (icons, the send arrow). `AccentColor` light is `#D98718`, about 2.7:1 on white, fine for glyphs and large controls but below 4.5:1 for words. Is a `primaryText` colourset (`#8A5700` / `#F5B83D`, already in `colors.json`) wanted for any text drawn in the accent? Left for E.
 4. **`/debug` swimlane keeps red for blocked.** Both the agent state "blocked" and errors use `--danger` for now, so the page looks as before. D flips the state to `--blocked` (amber) and keeps `--danger` for errors.
@@ -13,11 +13,14 @@ Raised by workstream A (tokens and shared assets). Each has a default that is al
 9. **Header logo.** The three pages now show `logo-color.svg` in both modes (the old picture swapped a solid and a transparent file). D replaces it with the shared mono header.
 10. **Favicons.** `favicon.svg` is the mono logo with ink/cream by colour scheme; the 32px and 180px PNGs are the cream mono logo on `#1B1D22`. The 180px has 14% padding. Want a different crop?
 11. **`internal/web/auth_test.go`** requests `/static/logo-color.svg` now; the one line the CEO allowed.
+12. **Launch video not re-rendered (B).** Only `assets/readme/launch-poster.png` was regenerated (banner framing plus a play button); `assets/readme/launch.mp4` and its lock-screen frames still use the old look. Re-render when the media scripts move to the new logos?
+13. **Social preview upload (B).** `assets/brand/social-preview.png` (1280x640) is in the repo; a maintainer has to upload it in Settings, General, Social preview.
+14. **Poster background (B).** The banner's own background is about `#14171E`, not `#1B1D22`; the poster keeps the banner pixels so the flock and dog are untouched. Flatten to `#1B1D22`?
 
 ## Raised by workstream D (web pages)
 
-12. **No listening orb existed on `/voice`.** The page only had status dots. D treats `#voice-dot` as the orb: `open` = listening (orange, 3px cream ring at 60 %, 2 s breathe, off under `prefers-reduced-motion`), `open speaking` = `--working` (render() adds the `speaking` class), `.thinking` = `--thinking` (the web has no thinking signal yet, so it is CSS only), `stalled` = `--blocked`. Want a larger standalone orb?
-13. **`--muted` on `--code` is 4.41:1 in light.** The token is the authority, so D left it; no page puts muted text on a code background. Darken `--muted` slightly if that ever happens.
-14. **Focus ring.** `--focus` (orange) is about 2:1 on the light surfaces, below the 3:1 for a control outline, so `shared.css` adds a 2px ring in the text colour inside it. Keep, or make `--focus` darker on light?
-15. **Question 5 answered:** `/debug` primary buttons and the user bubble now follow `--primary` (orange, ink text). Blue stays the herdr source/lane colour. Question 7 (QR) and 8 (lane hues with no token) are unchanged: raw hues are kept, and the two that were used as text (`--web`, `--eventlog`, the You lane) are mixed toward `--fg` to pass 4.5:1.
-16. **Pre-existing, not touched:** on `/debug` the swimlane toolbar shows a tall empty box between the "supervisor" and "brain" toggles (it also does on main).
+15. **No listening orb existed on `/voice`.** The page only had status dots. D treats `#voice-dot` as the orb: `open` = listening (orange, 3px cream ring at 60 %, 2 s breathe, off under `prefers-reduced-motion`), `open speaking` = `--working` (render() adds the `speaking` class), `.thinking` = `--thinking` (the web has no thinking signal yet, so it is CSS only), `stalled` = `--blocked`. Want a larger standalone orb?
+16. **`--muted` on `--code` is 4.41:1 in light.** The token is the authority, so D left it; no page puts muted text on a code background. Darken `--muted` slightly if that ever happens.
+17. **Focus ring.** `--focus` (orange) is about 2:1 on the light surfaces, below the 3:1 for a control outline, so `shared.css` adds a 2px ring in the text colour inside it. Keep, or make `--focus` darker on light?
+18. **Question 5 answered:** `/debug` primary buttons and the user bubble now follow `--primary` (orange, ink text). Blue stays the herdr source/lane colour. Question 7 (QR) and 8 (lane hues with no token) are unchanged: raw hues are kept, and the two that were used as text (`--web`, `--eventlog`, the You lane) are mixed toward `--fg` to pass 4.5:1.
+19. **Pre-existing, not touched:** on `/debug` the swimlane toolbar shows a tall empty box between the "supervisor" and "brain" toggles (it also does on main).
