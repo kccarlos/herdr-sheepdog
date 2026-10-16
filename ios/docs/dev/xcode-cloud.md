@@ -189,13 +189,11 @@ request as a GitHub check.
 | General | Name `TestFlight` |
 | Environment | Xcode **Latest Release**, macOS **Latest Release** |
 | Start Conditions | **Tag Changes**: Custom Tags ▸ tag begins with `ios-v` (plain `v*` tags are daemon releases). Remove any branch condition |
-| Actions | **Archive** ▸ Platform iOS, Scheme **Sheepdog**, Deployment Preparation **TestFlight (Internal Testing Only)** |
-| Post-Actions | **TestFlight Internal Testing** ▸ group **Me** (section 4) |
+| Actions | **Archive** ▸ Platform iOS, Scheme **Sheepdog**, Deployment Preparation **TestFlight and App Store** (the API shows `APP_STORE_ELIGIBLE`; external testing needs it) |
+| Post-Actions | **TestFlight External Testing** ▸ group **Public**, and **TestFlight Internal Testing** ▸ group **Me** (section 4) |
 
-"TestFlight (Internal Testing Only)" skips the App Store checks that only
-matter for external testers and the store; switch it to "TestFlight and App
-Store" if the app ever goes further. The post-action needs the internal
-group to exist, so create the group (section 4) before adding it.
+The post-actions need their groups to exist, so create them (section 4)
+before adding them.
 
 ### Internal TestFlight Build
 
