@@ -29,6 +29,7 @@
 
 https://github.com/user-attachments/assets/32b0f208-399c-44b6-8100-91ac8ce8194a
 
+- **a voice-first agent harness** — a realtime voice model and a stateful orchestrator that reads your agents, wired together with rails in code (approvals only on your words) and tuned by evals, not prompt tricks. [how it works →](docs/dev/design-overview.md)
 - **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. Real-time voice by the latest Gemini 3.8 Live or GPT-Live. [quick start →](docs/quick-start.md)
 - **who's stuck, first** — "what's going on?" covers the whole fleet and names who needs you before anyone else. [commands →](docs/commands.md)
 - **approve by voice** — an approval is answered only on your own words, enforced in code, not a prompt. [safety →](docs/safety.md)
