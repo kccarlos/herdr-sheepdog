@@ -28,8 +28,9 @@ setup.
 2. In the app: Settings, Daemon, **Scan pairing code**. (Or point the iPhone
    Camera at the code and open the `sheepdog://pair` link; the app asks
    "Pair with <host>?" first.)
-3. Allow the microphone. Tap the orb to connect. (Notifications with the app
-   closed need your own push key: see [Notifications](#notifications).)
+3. Allow the microphone and notifications. Tap the orb to connect.
+   Notifications reach you even with the app closed: see
+   [Notifications](#notifications).
 
 Prefer typing: `sheepdog serve` prints a `lan url` line; enter its host and
 port (for example `<lan-address>:7777`, no scheme) and the token in Settings,
