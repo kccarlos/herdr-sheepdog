@@ -27,8 +27,7 @@
 
 **Hands-free, from anywhere. Hear who's stuck, approve with a word, ask what broke.**
 
-<!-- replace with the user-attachments URL: drag launch.mp4 into the GitHub web editor -->
-<p align="center"><a href="assets/readme/launch.mp4"><img src="assets/readme/launch-poster.png" alt="Play the 36 second video: an approval arrives on the lock screen, you say approve, ask what is going on and why the migration failed, and sheepdog answers out loud (sound on, captions burned in; the agents are scripted demo agents)" width="800"></a></p>
+https://github.com/user-attachments/assets/32b0f208-399c-44b6-8100-91ac8ce8194a
 
 - **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. [quick start →](docs/quick-start.md)
 - **who's stuck, first** — "what's going on?" covers the whole fleet and names who needs you before anyone else. [commands →](docs/commands.md)
