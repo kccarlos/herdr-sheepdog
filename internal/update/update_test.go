@@ -118,7 +118,7 @@ func TestRunChecksOnceThenUsesFreshCache(t *testing.T) {
 	dir := t.TempDir()
 	tr := NewTracker(dir, "v0.1.0", "brew upgrade sheepdog", true)
 	var calls atomic.Int32
-	fetch := func(context.Context) (Release, error) {
+	fetch := func(context.Context) (Release, error) { //nolint:unparam // a stub that always succeeds
 		calls.Add(1)
 		return Release{TagName: "v0.2.0", HTMLURL: "u"}, nil
 	}

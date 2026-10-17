@@ -443,7 +443,7 @@ before a line is written.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, the setup and voice pages and the iPhone app's Settings. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
+| `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, and the setup and voice pages. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
 | `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one, but only while it is idle: no voice client connected, no orchestrator turn running, no approval waiting, no demo running on the setup page. It checks every minute and never interrupts a live session. `false` leaves the restart to you (`sheepdog restart`); the pages and `sheepdog status` still say "update installed, restart to finish". |
 
 ## What sheepdog stores
@@ -464,6 +464,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
+| `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
 `sheepdog data clear --events` deletes the event log, `--all` everything
 under `data_dir`; both ask first. `sheepdog uninstall` removes the

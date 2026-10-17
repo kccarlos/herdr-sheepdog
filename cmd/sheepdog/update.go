@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"github.com/kccarlos/herdr-sheepdog/internal/config"
-	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
 
 // releaseRepo is the GitHub repository releases are published in.

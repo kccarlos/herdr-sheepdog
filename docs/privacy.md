@@ -23,6 +23,17 @@ free-tier keys. A local Ollama orchestrator keeps screens and text on your
 machine. Your API keys are used only to call those providers, and are never
 logged.
 
+## The daily update check
+
+Once a day (and shortly after the daemon starts, if the last check is older
+than a day) the daemon sends one request to `api.github.com` asking for the
+latest release of sheepdog, to tell you when a new version exists. The
+request carries nothing about you, your agents or your setup beyond what any
+web request carries (your IP address, and a generic user agent). The answer
+is cached in `~/.local/share/sheepdog/update-check.json`. Turn it off with
+`update.check = false` ([CONFIG.md](../CONFIG.md)); `sheepdog update` makes
+the same request when you run it.
+
 ## What is stored on your computer
 
 Everything is in two directories you own; `data_dir` moves the second.
@@ -40,6 +51,7 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log, with secrets redacted. | Rotated at 10 MB, 3 old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log; normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version. | While it runs. |
+| `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
 (Source of truth: [CONFIG.md](../CONFIG.md), "What sheepdog stores".)
 

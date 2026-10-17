@@ -32,7 +32,7 @@
 
 | Command | What it does |
 |---|---|
-| `sheepdog update` | Check for a new release and print how to upgrade for the way you installed it. Changes nothing. |
+| `sheepdog update` | Check for a new release now and print how to upgrade for the way you installed it. Changes nothing. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
 | `sheepdog uninstall` | Stop, remove the login service and the `~/.local/bin/sheepdog` link, ask before deleting config and data, then print the herdr command that finishes the job. `--yes` deletes without asking; `--keep-data` keeps everything. |
 | `sheepdog service install` | Start at login (launchd on macOS, `systemd --user` on Linux). Also `uninstall`, `start`, `status`, `logs`; `install --dry-run` prints the unit. |
 | `sheepdog data clear` | Delete the event log and transcripts (`--events`, the default) or everything under the data directory (`--all`). Asks first; `--yes` skips. Stop the daemon first. |

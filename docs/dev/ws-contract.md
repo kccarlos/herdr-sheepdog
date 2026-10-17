@@ -659,7 +659,15 @@ control messages; the daemon resamples for GPT-Live (which runs at
   with `--voice=off`.
 - `GET /api/state` has top-level `voice_provider` and `voice_model`, and
   `conversation_started_at`: when the current conversation began (the
-  last "New conversation" reset, below, or daemon start).
+  last "New conversation" reset, below, or daemon start), and `update`,
+  the update notice (omitted when the daemon does not track updates):
+  `{current, latest, available, how, url, restart_pending, restart_to,
+  auto_restart}`. `available`: `latest` is a newer `v*` release than
+  `current` (never for a development build); `how` is the upgrade command
+  for the install method; `restart_pending`: the program on disk is not the
+  one running ("update installed, restart to finish"), `restart_to` its
+  version. Display only: the voice never speaks it
+  ([`update.md`](update.md)).
 - **GPT-Live is billed per second of open session**, so the daemon opens
   one only while a client is attached (`/ws` connected) and unmuted and
   there is speech (a frame loud enough) or a push to say, and closes it

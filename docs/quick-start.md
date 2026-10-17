@@ -143,6 +143,34 @@ that sheepdog does not change.
 | No microphone prompt, or "blocked" | Allow your browser under System Settings, Privacy & Security, Microphone; permission is per address ([faq.md](faq.md)). |
 | Anything else | `sheepdog doctor`, then [troubleshooting.md](troubleshooting.md). |
 
+## Update
+
+sheepdog checks for a new release once a day (one request to
+`api.github.com`, nothing personal sent; [privacy.md](privacy.md)). When there
+is one, `sheepdog status` and the setup and voice pages
+say so, with the command for the way you installed. The voice never
+speaks it. Update with the command for your install method:
+
+| You installed with | Update with |
+|---|---|
+| herdr plugin | `herdr plugin update kccarlos.sheepdog` |
+| Homebrew | `brew upgrade sheepdog` |
+| From source | `git pull` in your clone, then `make install` |
+| Release download | Download the new archive from the release page and replace the binary |
+
+Then the running daemon has to start the new version:
+
+- **It restarts itself when idle.** The daemon notices that its program was
+  replaced and restarts into it as soon as nobody is using it: no voice
+  client connected, no orchestrator turn running, no approval waiting, no
+  demo running. It checks every minute and never interrupts a live session.
+  Turn it off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md)).
+- **Or restart it yourself:** `sheepdog restart`. Any command that finds the
+  daemon older than the installed program says so and prints this.
+
+`update.check = false` turns the daily check and its notices off.
+`sheepdog update` checks right now and prints the steps.
+
 ## Other ways to install
 
 The plugin is the supported path. The daemon is also a plain binary:
