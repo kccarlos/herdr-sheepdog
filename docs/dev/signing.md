@@ -79,8 +79,10 @@ and these secrets in `release.yml` only inside a job that declares
 Settings ▸ Environments ▸ `release`: required reviewer the maintainer,
 deployment policy "tags matching `v*`". Its one secret is
 `OP_SERVICE_ACCOUNT_TOKEN`, a 1Password service account token that can
-read only the vault `github`; the jobs load everything else with
-`1password/load-secrets-action` into step outputs. It is an **environment**
+read only the vault `github`; the jobs install the 1Password CLI
+(`1password/install-cli-action`) and load everything else into step outputs
+with `scripts/op-load.sh`, which retries each `op read` up to four times with
+growing sleeps (1Password is sometimes flaky) and masks every value. It is an **environment**
 secret, not a repository one, so only jobs that pass the approval can read it.
 
 | 1Password item (vault `github`) | Fields | Workflow name |

@@ -123,19 +123,23 @@ jobs:
       - if: steps.creds.outputs.ok == 'true'
         uses: actions/checkout@v7
 
-      # Signing secrets from 1Password; step outputs, so only the steps that name them see the values.
+      - name: Install the 1Password CLI
+        if: steps.creds.outputs.ok == 'true'
+        uses: 1password/install-cli-action@v4
+
+      # Signing secrets from 1Password, each read retried (scripts/op-load.sh);
+      # step outputs, so only the steps that name them see the values.
       - name: Secrets from 1Password
         id: op
         if: steps.creds.outputs.ok == 'true'
-        uses: 1password/load-secrets-action@v5
-        with:
-          export-env: false
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          MACOS_CERT_P12_BASE64: op://github/apple-developer-id-application/p12_base64
-          MACOS_CERT_PASSWORD: op://github/apple-developer-id-application/password
-          NOTARY_API_KEY_P8: op://github/app-store-connect-api-key/p8_base64
-          NOTARY_KEY_ID: op://github/app-store-connect-api-key/key_id
+        run: >-
+          scripts/op-load.sh
+          MACOS_CERT_P12_BASE64=op://github/apple-developer-id-application/p12_base64
+          MACOS_CERT_PASSWORD=op://github/apple-developer-id-application/password
+          NOTARY_API_KEY_P8=op://github/app-store-connect-api-key/p8_base64
+          NOTARY_KEY_ID=op://github/app-store-connect-api-key/key_id
 
       - name: Import the Developer ID certificate into a temporary keychain
         if: steps.creds.outputs.ok == 'true'
@@ -259,16 +263,17 @@ jobs:
       - if: steps.creds.outputs.ok == 'true'
         uses: actions/checkout@v7
 
-      # The tap token from 1Password (homebrew-tap-token).
+      - name: Install the 1Password CLI
+        if: steps.creds.outputs.ok == 'true'
+        uses: 1password/install-cli-action@v4
+
+      # The tap token from 1Password (homebrew-tap-token), retried (scripts/op-load.sh).
       - name: Secrets from 1Password
         id: op
         if: steps.creds.outputs.ok == 'true'
-        uses: 1password/load-secrets-action@v5
-        with:
-          export-env: false
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          HOMEBREW_TAP_TOKEN: op://github/homebrew-tap-token/credential
+        run: scripts/op-load.sh HOMEBREW_TAP_TOKEN=op://github/homebrew-tap-token/credential
 
       - name: Render the formula from the signed checksums
         if: steps.creds.outputs.ok == 'true'
