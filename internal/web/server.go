@@ -23,6 +23,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
@@ -129,6 +130,8 @@ type Deps struct {
 	// /api/state so the pages can label its side of the conversation.
 	VoiceName string
 	Version   string
+	// Update, when set, backs /api/state's update field.
+	Update func() update.Status
 	// ReloadPrompts, when set, backs POST /api/prompts/reload: it
 	// rescans the prompt override directory and returns the resulting
 	// file list for the response and the prompts.reloaded log line.

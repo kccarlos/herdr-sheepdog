@@ -29,7 +29,9 @@ var (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	cliNotices(ctx, os.Args[1:], os.Stderr)
+	os.Exit(code)
 }
 
 // run implements the CLI and returns the process exit code. It is

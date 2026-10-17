@@ -17,6 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
 
 // statusReport is `sheepdog status --json`.
@@ -41,8 +42,11 @@ type statusReport struct {
 	// Phones is known only while the daemon runs.
 	Phones    *statusPhones    `json:"phones,omitempty"`
 	LastError *statusLastError `json:"last_error,omitempty"`
-	LogFile   string           `json:"log_file"`
-	DataDir   string           `json:"data_dir"`
+	// Update is the update notice: from the running daemon, else from the
+	// cache (omitted with update.check off).
+	Update  *update.Status `json:"update,omitempty"`
+	LogFile string         `json:"log_file"`
+	DataDir string         `json:"data_dir"`
 }
 
 type statusVoice struct {
@@ -169,6 +173,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 				ClientConnected bool   `json:"client_connected"`
 				Problem         string `json:"problem"`
 			} `json:"voice"`
+			Update *update.Status `json:"update"`
 		}
 		if err := getJSON(ctx, r.URL, "/api/state", cfg.Web.Token, &st); err == nil {
 			r.Orchestrator = statusOrchestrator{Source: "daemon"}
@@ -181,7 +186,19 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			_ = getJSON(ctx, r.URL, "/api/push/status", cfg.Web.Token, &push)
 			r.Phones = &statusPhones{PushDevices: push.Devices, VoiceClientConnected: st.Voice.ClientConnected}
 			r.Voice.Problem = st.Voice.Problem
+			r.Update = st.Update
 		}
+	}
+	if r.Update == nil && cfg.Update.Check {
+		c, _ := update.ReadCache(cfg.DataDir)
+		u := update.Compute(version, c, installHow())
+		if r.Running && r.Version != "" {
+			u.Current = r.Version
+		}
+		r.Update = &u
+	}
+	if !cfg.Update.Check && r.Update != nil && !r.Update.RestartPending {
+		r.Update = nil
 	}
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
 	return r
@@ -213,6 +230,9 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 			row("pid", fmt.Sprint(r.PID))
 		}
 		row("version", r.Version)
+		if r.Version != "" && r.Version != r.CLIVersion {
+			row("", fmt.Sprintf("this sheepdog is %s: run `sheepdog restart` to use it", r.CLIVersion))
+		}
 		row("url", r.URL+"/voice")
 	} else {
 		fprintln(w, "sheepdog is not running (start it with: sheepdog start)")
@@ -259,6 +279,7 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 	} else {
 		row("last error", "none recorded")
 	}
+	printUpdate(row, r)
 	row("log", r.LogFile)
 	if !r.Running && fileSize(daemon.StdioFile(r.DataDir)) > 0 {
 		row("crash output", daemon.StdioFile(r.DataDir))
@@ -323,4 +344,29 @@ func lastErrorIn(path string, red *redact.Redactor) *statusLastError {
 		last = e
 	}
 	return last
+}
+
+// printUpdate adds the update lines: a newer release, and an upgrade that
+// is installed but not running yet.
+func printUpdate(row func(k, v string), r statusReport) {
+	u := r.Update
+	if u == nil {
+		return
+	}
+	if u.RestartPending {
+		to := ""
+		if u.RestartTo != "" {
+			to = " (" + u.RestartTo + ")"
+		}
+		msg := "update installed" + to + ", restart to finish: sheepdog restart"
+		if u.AutoRestart {
+			msg += " (or it restarts itself when idle)"
+		}
+		row("update", msg)
+		return
+	}
+	if u.Available {
+		row("update", fmt.Sprintf("%s is available (you have %s)", u.Latest, u.Current))
+		row("", "to update: "+u.How+", then sheepdog restart")
+	}
 }

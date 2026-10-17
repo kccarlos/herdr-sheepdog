@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/genai"
@@ -177,9 +178,11 @@ type Brain struct {
 	// setting closed (under mu), so a turn never runs into a closed
 	// transcript and no Add on after races Close's Wait.
 	inFlight sync.WaitGroup
-	closed   bool
-	ctx      context.Context // ends on Close (bounds after-turn work)
-	stop     context.CancelFunc
+	// activeTurns counts the same turns for Busy.
+	activeTurns atomic.Int32
+	closed      bool
+	ctx         context.Context // ends on Close (bounds after-turn work)
+	stop        context.CancelFunc
 
 	mu     sync.Mutex
 	host   Host
@@ -793,6 +796,20 @@ func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 		return "", errors.New("brain: empty summary")
 	}
 	return out, nil
+}
+
+// Busy reports whether a turn or its after-turn work is running now: the
+// daemon does not restart itself then (internal/update).
+func (b *Brain) Busy() bool {
+	if b == nil {
+		return false
+	}
+	if b.activeTurns.Load() > 0 {
+		return true
+	}
+	b.after.mu.Lock()
+	defer b.after.mu.Unlock()
+	return b.after.n > 0
 }
 
 // afterWork counts after-turn work in flight. Unlike sync.WaitGroup, Add

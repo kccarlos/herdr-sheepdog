@@ -78,12 +78,14 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	host, closed := b.host, b.closed
 	if !closed {
 		b.inFlight.Add(1)
+		b.activeTurns.Add(1)
 	}
 	b.mu.Unlock()
 	if closed {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrClosed)
 	}
 	defer b.inFlight.Done()
+	defer b.activeTurns.Add(-1)
 	if host == nil {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}

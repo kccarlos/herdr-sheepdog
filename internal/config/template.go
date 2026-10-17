@@ -154,6 +154,13 @@ func Template() string {
 # The event log, <data_dir>/events/YYYY-MM-DD.jsonl, holds transcripts of
 # what you said. Day files older than this are deleted at startup and daily.
 # retention_days = %[50]d   # 0 keeps them forever
+
+[update]
+# Once a day the daemon asks api.github.com for the latest release (one
+# request, nothing personal sent) and tells you when a newer one exists.
+# check = %[51]t
+# After an upgrade the daemon restarts itself when nobody is using it.
+# auto_restart = %[52]t
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -180,5 +187,6 @@ func Template() string {
 		d.Brain.ReplyWaitS,
 		d.Log.Level, d.Log.MaxSizeMB, d.Log.MaxFiles,
 		d.Events.RetentionDays,
+		d.Update.Check, d.Update.AutoRestart,
 	)
 }

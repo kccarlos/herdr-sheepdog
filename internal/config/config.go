@@ -55,6 +55,7 @@ type Config struct {
 	Push       Push       `toml:"push"`
 	Log        Log        `toml:"log"`
 	Events     Events     `toml:"events"`
+	Update     Update     `toml:"update"`
 
 	// deprecations are the notes about deprecated keys Load read
 	// (Deprecations, deprecated.go).
@@ -499,6 +500,17 @@ type Events struct {
 	RetentionDays int `toml:"retention_days"`
 }
 
+// Update configures the daily update check and the restart after an
+// upgrade (docs/dev/update.md).
+type Update struct {
+	// Check turns on the check for a newer release once a day: one GET to
+	// api.github.com, nothing personal sent. Default true.
+	Check bool `toml:"check"`
+	// AutoRestart restarts the daemon by itself when its executable on
+	// disk changed (after an upgrade) and nobody is using it. Default true.
+	AutoRestart bool `toml:"auto_restart"`
+}
+
 // LogLevels are the valid log.level values.
 var LogLevels = []string{"debug", "info", "warn", "error"}
 
@@ -611,6 +623,7 @@ func Default() Config {
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 		Log:               Log{Level: "info", MaxSizeMB: 10, MaxFiles: 3},
 		Events:            Events{RetentionDays: 14},
+		Update:            Update{Check: true, AutoRestart: true},
 		Push:              Push{Relay: PushRelay{URL: DefaultRelayURL}},
 	}
 }
@@ -1009,6 +1022,20 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_EVENTS_RETENTION_DAYS=%q: want 0 (keep forever) or a number of days", v)
 		}
 		cfg.Events.RetentionDays = n
+	}
+	if v, ok := lookup("SHEEPDOG_UPDATE_CHECK"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_UPDATE_CHECK=%q: want true or false", v)
+		}
+		cfg.Update.Check = b
+	}
+	if v, ok := lookup("SHEEPDOG_UPDATE_AUTO_RESTART"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_UPDATE_AUTO_RESTART=%q: want true or false", v)
+		}
+		cfg.Update.AutoRestart = b
 	}
 	if v, ok := lookup("SHEEPDOG_HERDR_SOCKET"); ok {
 		cfg.Herdr.Socket = v

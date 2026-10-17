@@ -28,7 +28,7 @@ const mix = (a, b, pct) => a.map((x, i) => Math.round(x * pct + b[i] * (1 - pct)
 const pairs = [
   ['--fg', '--bg'], ['--fg', '--card'], ['--fg', '--code'],
   ['--muted', '--bg'], ['--muted', '--card'],
-  ['--primary-text', '--bg'], ['--primary-text', '--card'], ['--primary-text', '--primary-soft'],
+  ['--primary-text', '--bg'], ['--primary-text', '--card'], ['--primary-text', '--primary-soft'], ['--fg', '--primary-soft'],
   ['--on-primary', '--primary'], ['--on-primary', '--blocked'],
   ['--blocked-text', '--card'], ['--blocked-text', '--bg'],
   ['--danger', '--card'], ['--danger', '--bg'], ['--danger', '--danger-bg'],

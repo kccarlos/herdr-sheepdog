@@ -23,6 +23,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
@@ -220,6 +221,14 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	sdemo := newSetupDemo(stdout)
 	defer sdemo.Stop("the daemon stopped")
 
+	// The update notice and the restart after an upgrade
+	// (docs/dev/update.md): the tracker is the notice /api/state shows;
+	// the watcher asks for the restart when the executable on disk changed
+	// and the daemon is idle.
+	tracker := update.NewTracker(cfg.DataDir, version, installHow(), cfg.Update.AutoRestart)
+	opts.Update = tracker.Status
+	var pendingUpdate atomic.Pointer[[2]string] // from, to version lines
+
 	// SIGHUP re-reads the prompt override directory (docs/dev/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
 	// restart: the orchestrator picks it up on its next turn, the voice session
@@ -294,9 +303,61 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			fprintf(stdout, "  log         %s\n", rot.Path())
 			// Event retention (events.retention_days): at startup, then daily.
 			go pruneEvents(ctx, cfg, func() logging.Logger { return cur.Load().Log() }, stdout)
+			startUpdateWatchers(ctx, cfg, tracker,
+				func() string {
+					if sdemo.State().Running {
+						return "the setup page's demo is running"
+					}
+					if a := cur.Load(); a != nil {
+						return a.Idle()
+					}
+					return "starting"
+				},
+				func(from, to string) error {
+					a := cur.Load()
+					if a == nil {
+						return update.ErrBusy
+					}
+					pendingUpdate.Store(&[2]string{from, to})
+					via := "exec"
+					if underService() {
+						via = "service"
+					}
+					a.Log().Log("daemon", "daemon.restart", "", map[string]any{"from": update.VersionOf(from), "to": update.VersionOf(to), "via": via})
+					a.RequestRestart(app.ReasonUpdate)
+					if a.RestartReason() != app.ReasonUpdate {
+						return update.ErrBusy // a reload is already in progress
+					}
+					return nil
+				},
+				func(f string, a ...any) { fprintf(stderr, "sheepdog: "+f+"\n", a...) })
 		}
 
 		err = a.Run(ctx)
+		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil && a.RestartReason() == app.ReasonUpdate {
+			from, to := [2]string{version, ""}, ""
+			if p := pendingUpdate.Load(); p != nil {
+				from[0], to = p[0], p[1]
+			}
+			next, code, resumed := restartForUpdate(updateRestart{
+				cfg: cfg, args: args, baseEnv: baseEnv, from: from[0], to: to,
+				stdout: stdout, stderr: stderr, flush: logw.Flush,
+				stopDemo: func() { sdemo.Stop("the daemon is restarting after an update") },
+				release:  func() { lock.Release() },
+			})
+			if !resumed {
+				return code
+			}
+			// The exec failed: the new executable cannot start. Take the lock
+			// back and carry on with this one; the notice stays.
+			tracker.SetRestart(true, next, true)
+			_, _ = loadServeEnvFile(o.envFile, stderr)
+			if lock, err = daemon.Acquire(cfg.DataDir); err != nil {
+				fprintf(stderr, "%v\n", err)
+				return 1
+			}
+			continue
+		}
 		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil && a.RestartReason() == app.ReasonServiceHandoff {
 			// "Start at login" on the setup page: this daemon steps
 			// aside (lock and port free) and the login service starts its

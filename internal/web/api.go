@@ -14,6 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/lang"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
@@ -38,6 +39,11 @@ type StateResponse struct {
 	// ConversationStartedAt is when the current conversation began: the
 	// last "New conversation" reset, or daemon start.
 	ConversationStartedAt time.Time `json:"conversation_started_at"`
+	// Update is the update notice: the newest release, whether it is
+	// newer, how to upgrade, and whether an upgrade is installed but not
+	// running yet. Omitted when the daemon does not track updates. The
+	// voice never speaks it.
+	Update *update.Status `json:"update,omitempty"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -131,8 +137,22 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		VoiceProvider:         s.voiceProvider(),
 		VoiceModel:            s.voiceModel(),
 		ConversationStartedAt: s.conversationStartedAt(),
+		Update:                s.updateStatus(),
 	})
 }
+
+// updateStatus is /api/state's update object (nil without a tracker).
+func (s *Server) updateStatus() *update.Status {
+	if s.deps.Update == nil {
+		return nil
+	}
+	st := s.deps.Update()
+	return &st
+}
+
+// VoiceClientConnected reports whether a browser or phone holds the voice
+// connection now.
+func (s *Server) VoiceClientConnected() bool { return s.hub.state().client }
 
 // conversationStartedAt is StateResponse's conversation_started_at (the
 // zero time when there is no supervisor).

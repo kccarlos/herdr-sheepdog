@@ -439,6 +439,13 @@ before a line is written.
 |---|---|---|---|
 | `events.retention_days` | `SHEEPDOG_EVENTS_RETENTION_DAYS` | `14` | Days of event log kept. The event log (`<data_dir>/events/YYYY-MM-DD.jsonl`) holds transcripts of what you said and what the voice and the orchestrator answered; so do the orchestrator's transcripts in `<data_dir>/brain/`. Day files older than this (UTC), and transcripts of runs that started and were last written before then, are deleted when the daemon starts and once a day while it runs (`events.pruned`); `0` keeps them forever. Only `YYYY-MM-DD.jsonl` files directly in `events/` and `<run id>[.requests].jsonl` files directly in `brain/` are deleted — never another file, a subdirectory or a symlink — and never under a `docs/dev/bench`, `docs/dev/eval` or `testdata` directory. `sheepdog dev scorecard`, `dev feedback` and `dev eval extract` read this directory, so keep a longer retention if you analyse older days. `sheepdog data clear` deletes it now. |
 
+## `[update]`
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, and the setup and voice pages. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
+| `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one, but only while it is idle: no voice client connected, no orchestrator turn running, no approval waiting, no demo running on the setup page. It checks every minute and never interrupts a live session. `false` leaves the restart to you (`sheepdog restart`); the pages and `sheepdog status` still say "update installed, restart to finish". |
+
 ## What sheepdog stores
 
 Everything is under two directories (and `data_dir` moves the second).
@@ -457,6 +464,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
+| `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
 `sheepdog data clear --events` deletes the event log, `--all` everything
 under `data_dir`; both ask first. `sheepdog uninstall` removes the
