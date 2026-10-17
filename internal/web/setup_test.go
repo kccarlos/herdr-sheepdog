@@ -137,6 +137,9 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 		{"post from another origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}, 403},
 		{"form post", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "text/plain"}, 403},
 		{"post from this origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "http://127.0.0.1:7777"}, 200},
+		{"models from the LAN", "POST", "/api/setup/models", "192.168.1.50:5000", "192.168.1.20:7777", json, 403},
+		{"probe from the LAN", "POST", "/api/setup/probe", "192.168.1.50:5000", "192.168.1.20:7777", json, 403},
+		{"models from another origin", "POST", "/api/setup/models", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}, 403},
 		{"post without origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", json, 200},
 	}
 	for _, c := range cases {

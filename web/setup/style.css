@@ -68,3 +68,6 @@ label.check input { margin-top: .3rem; }
   .pair img { width: 100%; height: auto; max-width: 260px; }
   .indent { margin-left: .4rem; }
 }
+
+.recommend { padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+#probe-note { margin: .1rem 0; }
