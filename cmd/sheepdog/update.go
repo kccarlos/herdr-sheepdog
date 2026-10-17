@@ -2,21 +2,20 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // releaseRepo is the GitHub repository releases are published in.
-const releaseRepo = "kccarlos/herdr-sheepdog"
+const releaseRepo = update.Repo
 
 // releaseAPI is the GitHub API root (tests point it at a stub).
 var releaseAPI = "https://api.github.com"
@@ -76,74 +75,44 @@ func upgradeSteps(m installMethod, releaseURL string) []string {
 	return []string{"download it from " + releaseURL + " and replace " + m.Path, "sheepdog restart"}
 }
 
-// release is the part of GitHub's release JSON update reads.
-type release struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
+// updateDataDir is the data directory the update cache lives in ("" when
+// the config does not load). Tests replace it.
+var updateDataDir = func() string {
+	if cfg, err := config.Load(""); err == nil {
+		return cfg.DataDir
+	}
+	return ""
 }
+
+// release is a published release.
+type release = update.Release
 
 // errNoRelease: the repository is private or has no published release
 // (GitHub answers 404 for both).
-var errNoRelease = errors.New("no published release")
+var errNoRelease = update.ErrNoRelease
 
+// latestRelease is the newest v* release (ios-v* tags, drafts and
+// prereleases are ignored).
 func latestRelease(ctx context.Context) (release, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releaseAPI+"/repos/"+releaseRepo+"/releases/latest", nil)
-	if err != nil {
-		return release{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := releaseClient.Do(req)
-	if err != nil {
-		return release{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return release{}, errNoRelease
-	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
-		return release{}, fmt.Errorf("GitHub refused the request (%s; its rate limit for anonymous requests is 60 an hour)", resp.Status)
-	case resp.StatusCode != http.StatusOK:
-		return release{}, fmt.Errorf("GitHub answered %s", resp.Status)
-	}
-	var r release
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r); err != nil {
-		return release{}, err
-	}
-	if r.TagName == "" {
-		return release{}, errNoRelease
-	}
-	return r, nil
+	return update.Latest(ctx, releaseClient, releaseAPI)
 }
 
-// semver parses "v1.2.3" (a suffix after - or + is ignored); ok is false
-// for anything else ("dev", a commit).
-func semver(v string) (out [3]int, ok bool) {
-	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	if i := strings.IndexAny(v, "-+"); i >= 0 {
-		v = v[:i]
+// upgradeCommand is the one command that upgrades for m (the "how" of the
+// update notice), without the restart step.
+func upgradeCommand(m installMethod, releaseURL string) string {
+	switch m.Kind {
+	case "herdr plugin":
+		return "herdr plugin update kccarlos.sheepdog"
+	case "homebrew":
+		return "brew upgrade sheepdog"
+	case "source":
+		root := filepath.Dir(filepath.Dir(m.Path))
+		return "git -C " + root + " pull && make -C " + root + " build"
 	}
-	parts := strings.Split(v, ".")
-	if len(parts) != 3 {
-		return out, false
+	if releaseURL == "" {
+		releaseURL = "https://github.com/" + releaseRepo + "/releases/latest"
 	}
-	for i, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return out, false
-		}
-		out[i] = n
-	}
-	return out, true
-}
-
-// newer reports whether version a is newer than b.
-func newer(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] > b[i]
-		}
-	}
-	return false
+	return "download it from " + releaseURL + " and replace " + m.Path
 }
 
 // runUpdate implements `sheepdog update`: it checks the latest release
@@ -174,12 +143,16 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fprintln(stderr, "Check your internet connection and try again.")
 		return 1
 	}
-	latest, okL := semver(r.TagName)
-	cur, okC := semver(version)
+	if dir := updateDataDir(); dir != "" {
+		// Remember the answer for the notices (status, the pages).
+		_ = update.WriteCache(dir, update.Cache{CheckedAt: time.Now().UTC(), Tag: r.TagName, URL: r.HTMLURL})
+	}
+	latest, okL := update.Semver(r.TagName)
+	cur, okC := update.Semver(version)
 	switch {
 	case !okC:
 		fprintf(stdout, "The latest release is %s; this is a development build (%s), which cannot be compared.\n", r.TagName, version)
-	case okL && !newer(latest, cur):
+	case okL && !update.Newer(latest, cur):
 		fprintf(stdout, "sheepdog %s is up to date (latest release %s).\n", version, r.TagName)
 		return 0
 	default:

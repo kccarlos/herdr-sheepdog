@@ -140,7 +140,7 @@ func TestUpdate(t *testing.T) {
 	var status int
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/kccarlos/herdr-sheepdog/releases/latest" {
+		if r.URL.Path != "/repos/kccarlos/herdr-sheepdog/releases" {
 			http.NotFound(w, r)
 			return
 		}
@@ -151,6 +151,10 @@ func TestUpdate(t *testing.T) {
 	oldAPI, oldVersion, oldExe := releaseAPI, version, osExecutable
 	t.Cleanup(func() { releaseAPI, version, osExecutable = oldAPI, oldVersion, oldExe })
 	releaseAPI = srv.URL
+	cache := t.TempDir()
+	oldDir := updateDataDir
+	t.Cleanup(func() { updateDataDir = oldDir })
+	updateDataDir = func() string { return cache }
 	osExecutable = func() (string, error) { return "/opt/homebrew/Cellar/sheepdog/0.1.0/bin/sheepdog", nil }
 	version = "v0.1.0"
 
@@ -159,7 +163,7 @@ func TestUpdate(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "No published release found for kccarlos/herdr-sheepdog: the repository is private or has no release yet.") {
 		t.Errorf("no release: exit %d %q", code, out)
 	}
-	status, body = 200, `{"tag_name":"v0.2.0","html_url":"https://github.com/kccarlos/herdr-sheepdog/releases/tag/v0.2.0"}`
+	status, body = 200, `[{"tag_name":"ios-v9.0.0","html_url":"https://example/ios"},{"tag_name":"v0.2.0","html_url":"https://github.com/kccarlos/herdr-sheepdog/releases/tag/v0.2.0"}]`
 	code, out, _ = runCLI("update")
 	if code != 0 || !strings.Contains(out, "sheepdog v0.2.0 is available (you have v0.1.0)") || !strings.Contains(out, "brew upgrade sheepdog") {
 		t.Errorf("newer: exit %d %q", code, out)

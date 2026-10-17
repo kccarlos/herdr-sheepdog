@@ -28,6 +28,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gptlive"
@@ -87,6 +88,8 @@ type Options struct {
 	Dev bool
 	// Version is reported in daemon.start and /api/state.
 	Version string
+	// Update, when set, is the update notice /api/state reports.
+	Update func() update.Status
 	// Stderr receives one-line warnings; nil means os.Stderr.
 	Stderr io.Writer
 	// Drain bounds the HTTP shutdown (default 5 s).
@@ -201,6 +204,26 @@ type App struct {
 	restart       chan string
 	restartOnce   sync.Once
 	restartReason string
+}
+
+// ReasonUpdate is the restart reason that moves the daemon into a new
+// executable after an upgrade: serve re-executes it (or exits for the
+// login service to start it).
+const ReasonUpdate = "update installed"
+
+// Idle returns "" when nobody is using the daemon, else why not: a voice
+// client (browser or phone) is connected, the orchestrator is in a turn,
+// or an approval question is open. The update restart waits for "".
+func (a *App) Idle() string {
+	switch {
+	case a.web != nil && a.web.VoiceClientConnected():
+		return "a voice client is connected"
+	case a.brain.Busy():
+		return "the orchestrator is working"
+	case a.store != nil && a.store.Snapshot().PendingAction != nil:
+		return "an approval question is open"
+	}
+	return ""
 }
 
 // ReasonServiceHandoff is the restart reason that hands the daemon over
@@ -529,6 +552,7 @@ func (a *App) wire() error {
 		Injector:   injector,
 		Router:     &inject.Router{},
 		Version:    opts.Version,
+		Update:     opts.Update,
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
 

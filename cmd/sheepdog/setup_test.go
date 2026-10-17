@@ -31,6 +31,8 @@ func TestMain(m *testing.M) {
 	// The default push mode is the deployed shared relay: keep doctor and
 	// setup checks from calling it over the network.
 	_ = os.Setenv("SHEEPDOG_PUSH_MODE", "off")
+	// No test asks GitHub: the daily check points at a closed port.
+	releaseAPI = "http://127.0.0.1:9"
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
