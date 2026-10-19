@@ -224,7 +224,10 @@ type SetupState struct {
 	Orchestrator SetupOrchestrator `json:"orchestrator"`
 	// Presets are the orchestrator choices, in the order the page shows
 	// them, with whether each one's key is saved.
-	Presets []SetupPreset     `json:"presets"`
+	Presets []SetupPreset `json:"presets"`
+	// Start is the starting-point cards, the summary template and the
+	// cost lines (onboard.Start): the terminal setup prints the same.
+	Start   onboard.StartInfo `json:"start"`
 	Herdr   SetupHerdr        `json:"herdr"`
 	Phone   SetupPhone        `json:"phone"`
 	Service ServiceState      `json:"service"`
@@ -353,6 +356,7 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 	}
 	st.Orchestrator.Preset, st.Orchestrator.BaseURL = s.presetOf(st.Orchestrator.Provider)
 	st.Presets = s.setupPresets()
+	st.Start = onboard.Start()
 	h := onboard.CheckHerdr(cfg.Herdr.Socket)
 	st.Herdr = SetupHerdr{OK: h.Status == onboard.OK, Detail: h.Detail, Fix: h.Fix, Agents: len(s.deps.Store.List())}
 	if s.deps.HerdrMode == "mock" {

@@ -2,31 +2,22 @@
 // (no DOM): `make test-web`. A card only pre-fills the voice and
 // orchestrator radios; nothing is saved until Save.
 
-// startCards are the four starting points, in the order the page shows
-// them. voice and orch are the radio values a card selects ('' = Custom,
-// which changes nothing).
-export const startCards = [
-  { id: 'recommended', label: 'Recommended', voice: 'gemini', orch: 'anthropic',
-    note: 'The strongest orchestrator: understands your agents best.', need: 'Needs an Anthropic API key (paid).' },
-  { id: 'cost', label: 'Cost-effective', voice: 'gemini', orch: 'deepseek',
-    note: 'Cost-effective, and it did well in our tests.', need: '' },
-  { id: 'free', label: 'Free quick start', voice: 'gemini', orch: 'gemini',
-    note: 'One free key for both. Good for trying; can be slow or busy. Upgrade any time.', need: '' },
-  { id: 'custom', label: 'Custom', voice: '', orch: '',
-    note: 'Pick each part yourself.', need: '' },
-];
+// The cards, the cost lines and the summary template come from the daemon
+// (/api/setup/state, start; internal/onboard/start.go), the same table the
+// terminal setup prints, so the two never disagree. `info` below is that
+// object.
 
 // cardRadios is the voice and orchestrator a card selects, or null for
 // Custom (and unknown ids).
-export function cardRadios(id) {
-  const c = startCards.find((x) => x.id === id);
+export function cardRadios(info, id) {
+  const c = info.cards.find((x) => x.id === id);
   return c && c.voice ? { voice: c.voice, orch: c.orch } : null;
 }
 
 // cardFor is the card matching a voice and orchestrator choice, or
 // 'custom'. The models inside a choice do not matter: they stay editable.
-export function cardFor(voice, orch) {
-  const c = startCards.find((x) => x.voice && x.voice === voice && x.orch === orch);
+export function cardFor(info, voice, orch) {
+  const c = info.cards.find((x) => x.voice && x.voice === voice && x.orch === orch);
   return c ? c.id : 'custom';
 }
 
@@ -34,10 +25,11 @@ export function cardFor(voice, orch) {
 // (the voice has no credentials) the Recommended card, else the saved
 // voice and orchestrator, and the card that matches them.
 export function initialChoice(state, savedVoice, savedOrch) {
+  const info = state.start;
   const hasAnthropic = ((state && state.presets) || []).some((p) => p.id === 'anthropic');
   const fresh = !!(state && state.voice && state.voice.setup_needed);
   if (fresh && hasAnthropic) return { card: 'recommended', voice: 'gemini', orch: 'anthropic' };
-  return { card: cardFor(savedVoice, savedOrch), voice: savedVoice, orch: savedOrch };
+  return { card: cardFor(info, savedVoice, savedOrch), voice: savedVoice, orch: savedOrch };
 }
 
 // nextCard is the card index an arrow key moves to (wrapping), or -1 for
@@ -53,45 +45,36 @@ export function nextCard(key, index, count) {
   }
 }
 
-const VOICE_PROVIDER = { gemini: 'Google AI Studio', vertex: 'Google Vertex AI', openai: 'OpenAI' };
-const VOICE_COST = {
-  gemini: 'free with daily limits',
-  vertex: 'billed to your Google Cloud project',
-  openai: '$0.05/min of open session',
-};
-// Anthropic prices per million input/output tokens (docs/models.md).
-const ANTHROPIC_COST = [
-  [/opus-5-5/, '$4/$20 per million tokens'],
-  [/sonnet-5-5/, '$2/$10 per million tokens'],
-  [/haiku-5-5/, '$0.10/$0.50 per million tokens'],
-];
-
 // voiceCost is the voice's cost line.
-export function voiceCost(voice) {
-  return VOICE_COST[voice] || 'pay per use';
+export function voiceCost(info, voice) {
+  return info.voice_costs[voice] || info.pay_per_use;
 }
 
 // orchCost is the orchestrator's cost line for a preset and model.
-export function orchCost(preset, model) {
-  if (!preset) return 'pay per use';
-  if (preset.local) return 'free on this computer';
-  if (preset.id === 'gemini') return 'free with daily limits';
-  if (preset.id === 'vertex') return 'billed to your Google Cloud project';
+export function orchCost(info, preset, model) {
+  if (!preset) return info.pay_per_use;
+  if (preset.local) return info.free_local;
+  if (preset.id === 'gemini') return info.free_daily;
+  if (preset.id === 'vertex') return info.billed;
   if (preset.id === 'anthropic') {
-    const hit = ANTHROPIC_COST.find(([re]) => re.test(model || ''));
-    return hit ? hit[1] : 'pay per use';
+    const hit = info.anthropic_costs.find((r) => (model || '').includes(r.contains));
+    if (hit) return hit.cost;
   }
-  return 'pay per use';
+  return info.pay_per_use;
 }
 
-// summary is the bar's text. in: voice, voiceModel, preset (the preset
+// summary is the bar's text. f: voice, voiceModel, preset (the preset
 // object or null), orchModel, otherName (the typed name for Other URL).
-export function summary(f) {
-  const vModel = f.voiceModel || 'a Live model';
+export function summary(info, f) {
   const p = f.preset;
-  const provider = p && p.kind === 'other' ? (f.otherName || 'your server') : (p ? p.label : 'Gemini');
-  const oModel = f.orchModel || 'a model of your choice';
-  return 'You talk to ' + vModel + ' (' + (VOICE_PROVIDER[f.voice] || 'Google AI Studio') + '). '
-    + 'Your agents are handled by ' + oModel + ' (' + provider + '). '
-    + 'Cost: ' + voiceCost(f.voice) + ' · ' + orchCost(p, f.orchModel);
+  const provider = p && p.kind === 'other' ? (f.otherName || info.other_fallback) : (p ? p.label : 'Gemini');
+  const vals = {
+    voice_model: f.voiceModel || info.voice_model_fallback,
+    voice_provider: info.voice_providers[f.voice] || info.voice_providers.gemini,
+    orch_model: f.orchModel || info.orch_model_fallback,
+    orch_provider: provider,
+    voice_cost: voiceCost(info, f.voice),
+    orch_cost: orchCost(info, p, f.orchModel),
+  };
+  return info.template.replace(/\{(\w+)\}/g, (_, k) => vals[k]);
 }

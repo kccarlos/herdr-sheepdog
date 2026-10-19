@@ -4,7 +4,7 @@
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
-import { startCards, cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
+import { cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
@@ -218,7 +218,8 @@ function renderStartGrid(selected) {
   const grid = $('start-grid');
   grid.textContent = '';
   const inputs = [];
-  startCards.forEach((c, i) => {
+  const cards = state.start.cards;
+  cards.forEach((c, i) => {
     const label = document.createElement('label');
     label.className = 'preset';
     const input = document.createElement('input');
@@ -226,7 +227,7 @@ function renderStartGrid(selected) {
     input.checked = c.id === selected;
     input.addEventListener('change', () => { if (input.checked) applyCard(c.id); });
     input.addEventListener('keydown', (e) => {
-      const j = nextCard(e.key, i, startCards.length);
+      const j = nextCard(e.key, i, cards.length);
       if (j < 0) return;
       e.preventDefault();
       inputs[j].focus();
@@ -251,7 +252,7 @@ function renderStartGrid(selected) {
 // applyCard sets the voice and orchestrator radios for a card and shows
 // their fields. Custom leaves them as they are.
 function applyCard(id) {
-  const r = cardRadios(id);
+  const r = cardRadios(state.start, id);
   if (r) {
     for (const [name, value] of [['voice', r.voice], ['orch', r.orch]]) {
       const el = document.querySelector('input[name=' + name + '][value="' + value + '"]');
@@ -267,7 +268,7 @@ function applyCard(id) {
 // radios: the card that matches them, else Custom.
 function syncCard() {
   const { voice, orch } = choices();
-  const el = document.querySelector('input[name=start][value="' + cardFor(voice, orch) + '"]');
+  const el = document.querySelector('input[name=start][value="' + cardFor(state.start, voice, orch) + '"]');
   if (el && !el.checked) el.checked = true;
 }
 
@@ -289,7 +290,7 @@ function renderSummary() {
   const p = currentPreset();
   const c = chosen[family(voice)];
   const shown = !$('voice-pick').classList.contains('hidden') && c;
-  $('summary').textContent = summary({
+  $('summary').textContent = summary(state.start, {
     voice, voiceModel: shown ? c.model : pickOf(state, voice).model,
     preset: p, orchModel: orchModelShown(p), otherName: $('compat-name').value.trim(),
   });
