@@ -218,11 +218,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	}
 
 	system, secs, state := b.systemPrompt()
-	tools := b.tools
-	if t.req.Kind.ReadOnly() {
-		tools = b.readTools
-	}
-	base := genai.GenerateContentConfig{Tools: tools, ThinkingConfig: turnThinking(t.req.Trigger, b.cfg.ThinkingLevel)}
+	base := b.turnConfig(t.req.Kind, t.req.Trigger)
 	corrected := false
 	for step := 1; step <= b.cfg.MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -260,10 +256,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 		}
 		asm := b.engine.Assemble(b.cfg.WindowTokens)
-		text := system
-		if asm.SystemAddition != "" {
-			text += "\n\n" + asm.SystemAddition
-		}
+		text := systemWith(system, asm.SystemAddition)
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
 		if step > 1 {
 			state = b.stateNow()
@@ -302,6 +295,12 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				}
 				t.tokIn += int(u.PromptTokenCount)
 				t.tokOut += int(u.CandidatesTokenCount)
+			}
+			if resp.ModelVersion != "" {
+				// The model that actually answered, as the provider
+				// reports it: under Anthropic's server-side fallbacks it
+				// can differ from model, which is what was asked for.
+				payload["served_model"] = resp.ModelVersion
 			}
 			calls = resp.FunctionCalls()
 			names := make([]string, 0, len(calls))
@@ -807,6 +806,27 @@ func reasonFor(err error) string {
 	default:
 		return "model_error"
 	}
+}
+
+// turnConfig is the per-turn part of a model call's config: the tools
+// (read-only on event turns) and the thinking setting. The system
+// instruction is set per step (systemWith). The cache warm-up builds
+// its request from the same function, so its prefix is the turn's.
+func (b *Brain) turnConfig(kind Kind, trigger Trigger) genai.GenerateContentConfig {
+	tools := b.tools
+	if kind.ReadOnly() {
+		tools = b.readTools
+	}
+	return genai.GenerateContentConfig{Tools: tools, ThinkingConfig: turnThinking(trigger, b.cfg.ThinkingLevel)}
+}
+
+// systemWith is the system text a step sends: the stable text plus the
+// context engine's addition, when it has one.
+func systemWith(system, addition string) string {
+	if addition != "" {
+		return system + "\n\n" + addition
+	}
+	return system
 }
 
 // turnThinking is a turn's thinking setting. An event turn (announce,

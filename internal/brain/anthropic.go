@@ -229,6 +229,29 @@ func (m *AnthropicModel) call(ctx context.Context, model string, build func(thin
 	return m.response(model, msg, meta)
 }
 
+// WarmCache implements CacheWarmer: the request a turn's first step
+// would send (params: model, betas, thinking, effort, fallbacks, tools,
+// system with its breakpoint), with max_tokens 0 and one placeholder
+// user line that carries no breakpoint. The API runs the prefill, writes
+// the cache at the system breakpoint (tools + system) and returns no
+// content; no output is billed. Not streamed: max_tokens 0 is a 400 with
+// stream true, and streaming is not part of the cached prefix.
+func (m *AnthropicModel) WarmCache(ctx context.Context, model string, cfg *genai.GenerateContentConfig) (WarmUsage, error) {
+	params, err := m.params(model, []amsg{{role: "user", blocks: []ablock{{p: anthropic.NewBetaTextBlock("warm-up")}}}}, cfg, true)
+	if err != nil {
+		return WarmUsage{}, err
+	}
+	params.MaxTokens = 0
+	// A fresh block, without the breakpoint renderMessages put on the
+	// last one: an entry keyed to the placeholder would never be read.
+	params.Messages = []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("warm-up"))}
+	msg, err := m.client.Beta.Messages.New(ctx, params)
+	if err != nil {
+		return WarmUsage{}, m.mapError(model, err)
+	}
+	return WarmUsage{CacheWriteTokens: msg.Usage.CacheCreationInputTokens, CacheReadTokens: msg.Usage.CacheReadInputTokens}, nil
+}
+
 // strippable is a 400 that a request without thinking blocks and
 // without betas avoids: an invalid or foreign thinking signature, or a
 // beta header the endpoint does not know (a proxy at a custom base URL).
@@ -495,9 +518,15 @@ func (m *AnthropicModel) response(model string, msg anthropic.BetaMessage, meta 
 		return nil, nil, fmt.Errorf("%w (category %s)", ErrRefused, cat)
 	}
 	cut := -1
+	served := msg.Model
 	for i, b := range msg.Content {
 		if b.Type == "fallback" {
+			// A mid-output switch: message_start named the model that
+			// started, the block names the one that produced the rest.
 			cut = i
+			if to := b.AsFallback().To.Model; to != "" {
+				served = to
+			}
 		}
 	}
 	var parts []*genai.Part
@@ -536,7 +565,7 @@ func (m *AnthropicModel) response(model string, msg anthropic.BetaMessage, meta 
 	if len(text) > 0 {
 		parts = append([]*genai.Part{{Text: strings.Join(text, "")}}, parts...)
 	}
-	resp := &genai.GenerateContentResponse{Candidates: []*genai.Candidate{{Content: &genai.Content{Role: genai.RoleModel, Parts: parts}, FinishReason: anthropicFinish(msg.StopReason)}}}
+	resp := &genai.GenerateContentResponse{ModelVersion: served, Candidates: []*genai.Candidate{{Content: &genai.Content{Role: genai.RoleModel, Parts: parts}, FinishReason: anthropicFinish(msg.StopReason)}}}
 	u := msg.Usage
 	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 	resp.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
@@ -547,7 +576,7 @@ func (m *AnthropicModel) response(model string, msg anthropic.BetaMessage, meta 
 		return resp, nil, nil
 	}
 	r := *meta
-	r.Content, r.Served = keep, msg.Model
+	r.Content, r.Served = keep, served
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return nil, nil, fmt.Errorf("brain: anthropic: encode raw: %w", err)
