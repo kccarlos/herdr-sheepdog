@@ -52,7 +52,7 @@ func TestBriefingIsAFunctionResponse(t *testing.T) {
 	if c.count("content") != 0 {
 		t.Errorf("a user-role turn was sent")
 	}
-	if p := h.log.payloads("voice.push"); len(p) != 1 || p[0]["briefing"] != "b-1" || p[0]["channel"] != ChannelFunctionResponse {
+	if p := h.pushesLogged(1); len(p) != 1 || p[0]["briefing"] != "b-1" || p[0]["channel"] != ChannelFunctionResponse {
 		t.Errorf("voice.push = %v", p)
 	}
 }

@@ -960,10 +960,17 @@ func TestQueuedEventTurnGetsItsFullBudget(t *testing.T) {
 
 	// The wait is bounded on its own: a turn still queued when a user
 	// turn's budget has run out falls back with queue_timeout and never
-	// runs.
+	// runs. The user turn's step ignores its context and holds the lock
+	// until the end of the test, so the bound is the only thing that can
+	// end the wait (with a step that returned at the user turn's own
+	// timeout, the lock was handed over a few ms before or after the
+	// queued turn's bound, depending on the scheduler).
 	block := make(chan struct{})
 	defer close(block)
-	m2 := braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("first", "")})
+	m2 := braintest.NewModel(braintest.Step{Fn: func(braintest.Call) (*genai.GenerateContentResponse, error) {
+		<-block
+		return braintest.Response(braintest.Step{Text: braintest.Reply("first", "")}), nil
+	}})
 	h2 := newHarness(t, m2, func(c *Config) {
 		c.AnnounceTurnTimeout, c.UtteranceTimeout, c.FinalGrace = 50*time.Millisecond, 80*time.Millisecond, -1
 	})

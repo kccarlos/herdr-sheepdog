@@ -47,7 +47,7 @@ func TestSilentContextWaitsForTheVoiceToBeQuiet(t *testing.T) {
 	}
 	h.s.ClientPlayback(voice.PlaybackDrained, 1500)
 	c.waitSent(t, "names line once quiet", isContent(n1Names))
-	if p := h.log.payloads("voice.push"); len(p) != 2 || p[1]["scheduling_sent"] != "silent" {
+	if p := h.pushesLogged(2); len(p) != 2 || p[1]["scheduling_sent"] != "silent" {
 		t.Errorf("voice.push = %v", p)
 	}
 }

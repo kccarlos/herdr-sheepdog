@@ -69,7 +69,7 @@ func TestInterruptPushAfterTurnCompleteWaitsForDrained(t *testing.T) {
 	if el := time.Since(drained); el < voice.PlaybackGapHold {
 		t.Errorf("push %v after drained, want >= the %v gap hold", el, voice.PlaybackGapHold)
 	}
-	p := h.log.payloads("voice.push")
+	p := h.pushesLogged(1)
 	if len(p) != 1 || p[0]["scheduling_sent"] != "when_idle" {
 		t.Errorf("voice.push = %v, want scheduling_sent when_idle", p)
 	}
@@ -108,7 +108,7 @@ func TestInterruptPushAfterDrainedInterrupts(t *testing.T) {
 	if h.log.has("voice.push_deferred") {
 		t.Error("push deferred with nothing playing")
 	}
-	p := h.log.payloads("voice.push")
+	p := h.pushesLogged(1)
 	if len(p) != 1 || p[0]["scheduling_sent"] != "interrupt" {
 		t.Errorf("voice.push = %v, want scheduling_sent interrupt", p)
 	}
