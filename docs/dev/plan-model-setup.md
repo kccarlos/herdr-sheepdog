@@ -58,7 +58,7 @@ The orchestrator is Go, so the adapter uses the official Go SDK (`github.com/ant
 - **Tool choice:** forced `tool_choice` `any`/`tool` returns 400 on Opus 5.5; use `auto` (plus `none` for the answer-only step the brain already has) and `strict: true` tools.
 - **Prompt caching:** the daemon already keeps a stable system prefix (`TestSystemTextIsStable`); put `cache_control` after tools + system. Check `usage.cache_read_input_tokens` in logs.
 - **Refusals:** check `stop_reason == "refusal"` before reading content; enable server-side `fallbacks: "default"` (beta) and tell the user in docs.
-- **Preserved thinking (the main design risk):** on Opus 5.5, thinking blocks must be passed back unchanged, and editing earlier turns invalidates them; accounts created after 2026-08-31 get a 400 on edited history. The brain prunes old tool results and compacts (`brain.prune_after_turns`, compaction). Before coding, read the Claude API guide's preserved-thinking section and choose: server-side context editing / compaction instead of local pruning for this provider, or an append-only history. This decides the adapter's shape.
+- **Preserved thinking (the main design risk):** on Opus 5.5, thinking blocks must be passed back unchanged, and editing earlier turns invalidates them; accounts created after 2026-08-31 get a 400 on edited history. The brain prunes old tool results and compacts (`brain.prune_after_turns`, compaction). Before coding, read the Claude API guide's preserved-thinking section and choose: server-side context editing / compaction instead of local pruning for this provider, or an append-only history. This decides the adapter's shape. **Decided in [anthropic-adapter.md](anthropic-adapter.md#2-preserved-thinking-the-decision):** thinking is replayed for the current turn only, the turn is kept append-only, and `drop_block` plus one strip-and-retry back it up.
 - **Keys and models:** `x-api-key` from `ANTHROPIC_API_KEY`; validation and the model list via `GET /v1/models`; doctor check; `/debug` picker; failover (`brain.provider_down`) like the other providers; account problems (401/402/429) said plainly through `brain.AccountProblemOf`.
 - **Cost note for docs:** Opus 5.5 $4 / $20 per MTok input/output, cache reads $0.20; Sonnet 5.5 $2 / $10; Haiku 5.5 $0.10 / $0.50 (first-party API, 2026-10).
 
@@ -72,7 +72,7 @@ The orchestrator is Go, so the adapter uses the official Go SDK (`github.com/ant
 1. **Presets and orchestrator section** (OpenRouter, OpenAI, Ollama, LM Studio, Vertex, Gemini model choice): config preset table, `[[brain.openai_compat]]` generated from presets, local server detection, OpenAI key-reuse consent. Screenshots for review.
 2. **Voice section:** Gemini Live model and voice choice from the key's models, Vertex fields, GPT-Live as an option with its model and voice.
 3. **Cards and summary bar** (visual; CEO reviews screenshots before merge).
-4. **Anthropic adapter** (after the preserved-thinking decision above), with unit tests against a fake server, doctor, `/debug`, failover.
+4. **Anthropic adapter** (design: [anthropic-adapter.md](anthropic-adapter.md)), with unit tests against a fake server, doctor, `/debug`, failover.
 5. **Eval run** for Opus 5.5 vs DeepSeek; update labels and docs/models.md with measured numbers.
 6. **Docs:** docs/models.md, docs/quick-start.md, CONFIG.md.
 
