@@ -1,10 +1,11 @@
 // Unit tests for the setup page's orchestrator preset helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { presetById, savedPreset, orchValue, panel, keyLabel, keyEnv, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus } from './presets.js';
+import { presetById, savedPreset, orchValue, panel, keyLabel, keyEnv, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
 
 // The shape /api/setup/state sends (internal/onboard/presets.go).
 const presets = [
+  { id: 'anthropic', label: 'Anthropic', kind: 'native', key_env: 'ANTHROPIC_API_KEY', key_needed: true, default_model: 'claude-opus-5-5', note: '★ most recommended' },
   { id: 'gemini', label: 'Gemini', kind: 'native', key_env: 'GEMINI_API_KEY', key_needed: true, default_model: 'gemini-3.5-flash', note: 'free, can be slow or busy', key_saved: true },
   { id: 'deepseek', label: 'DeepSeek', kind: 'native', key_env: 'DEEPSEEK_API_KEY', key_needed: true, note: 'cost-effective · did well in our tests' },
   { id: 'vertex', label: 'Vertex AI', kind: 'native', key_env: 'VERTEX_API_KEY', key_needed: true, note: 'Gemini on Google Cloud' },
@@ -19,7 +20,8 @@ const P = (id) => presetById(presets, id);
 test('the saved orchestrator selects its preset, unknown ones fall back to Gemini', () => {
   assert.equal(savedPreset({ presets, orchestrator: { preset: 'ollama' } }), 'ollama');
   assert.equal(savedPreset({ presets, orchestrator: { preset: 'other' } }), 'other');
-  assert.equal(savedPreset({ presets, orchestrator: { preset: 'anthropic' } }), 'gemini');
+  assert.equal(savedPreset({ presets, orchestrator: { preset: 'anthropic' } }), 'anthropic');
+  assert.equal(savedPreset({ presets, orchestrator: { preset: 'mistral' } }), 'gemini');
   assert.equal(savedPreset({ presets, orchestrator: {} }), 'gemini');
   assert.equal(savedPreset(null), 'gemini');
   assert.equal(orchValue('other'), 'compat');
@@ -30,6 +32,7 @@ test('native presets show their own block', () => {
   assert.equal(panel(P('gemini')).field, 'gemini');
   assert.equal(panel(P('deepseek')).field, 'deepseek');
   assert.equal(panel(P('vertex')).field, 'vertex');
+  assert.equal(panel(P('anthropic')).field, 'anthropic');
   assert.equal(panel(null).field, 'gemini');
 });
 
@@ -123,4 +126,11 @@ test('the Gemini model line', () => {
   assert.deepEqual(geminiStatus({ models: ['gemini-3.8-flash', 'gemini-3.5-flash'], default: 'gemini-3.5-flash' }), { kind: 'ok', text: '2 models this key can use. The default is gemini-3.5-flash.' });
   assert.equal(geminiStatus({ models: [], error: 'Gemini (AI Studio) rejected the key', fix: 'paste a valid key' }).text, 'Gemini (AI Studio) rejected the key — paste a valid key');
   assert.equal(geminiStatus(null).kind, 'fail');
+});
+
+test('the Anthropic model line says the count and the suggestion, or the fix', () => {
+  assert.deepEqual(anthropicModelsLine({ models: [{ id: 'claude-opus-5-5' }], suggested: 'claude-opus-5-5' }), { kind: 'ok', text: '1 model this key can use. Suggested: claude-opus-5-5.' });
+  assert.deepEqual(anthropicModelsLine({ models: [{ id: 'a' }, { id: 'b' }] }), { kind: 'ok', text: '2 models this key can use.' });
+  assert.equal(anthropicModelsLine({ models: [], error: 'Anthropic rejected the key', fix: 'paste a valid key' }).text, 'Anthropic rejected the key — paste a valid key');
+  assert.equal(anthropicModelsLine(null).kind, 'fail');
 });

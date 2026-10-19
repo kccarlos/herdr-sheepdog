@@ -38,7 +38,9 @@ func TestPresetTable(t *testing.T) {
 		if p.Label == "" || p.Note == "" {
 			t.Errorf("%s: no label or note", p.ID)
 		}
-		if p.ID != "deepseek" && claims.MatchString(p.Note) {
+		// Anthropic's "★ most recommended" is the project's pick, not a
+		// measured quality claim; DeepSeek's is measured.
+		if p.ID != "deepseek" && p.ID != "anthropic" && claims.MatchString(p.Note) {
 			t.Errorf("%s: quality claim in %q (only our measured ones may claim)", p.ID, p.Note)
 		}
 		if p.Kind == PresetCompat {
@@ -48,8 +50,9 @@ func TestPresetTable(t *testing.T) {
 			}
 		}
 	}
-	if seen["anthropic"] {
-		t.Error("the Anthropic preset is listed before its adapter exists")
+	a := Presets()[0]
+	if a.ID != "anthropic" || a.Kind != PresetNative || a.KeyEnv != "ANTHROPIC_API_KEY" || !a.KeyNeeded || a.DefaultModel != "claude-opus-5-5" || !strings.Contains(a.Note, "★ most recommended") {
+		t.Errorf("first preset = %+v, want the native Anthropic one", a)
 	}
 }
 

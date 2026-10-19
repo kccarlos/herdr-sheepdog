@@ -188,19 +188,21 @@ func (s *Server) setupRoutes() error {
 		return err
 	}
 	routes := map[string]http.HandlerFunc{
-		"GET /api/setup/state":          s.handleSetupState,
-		"POST /api/setup/validate":      s.handleSetupValidate,
-		"POST /api/setup/keys":          s.handleSetupKeys,
-		"POST /api/setup/models":        s.handleSetupModels,
-		"POST /api/setup/probe":         s.handleSetupProbe,
-		"POST /api/setup/gemini-models": s.handleSetupGeminiModels,
-		"POST /api/setup/voice-models":  s.handleSetupVoiceModels,
-		"GET /api/setup/checks":         s.handleSetupChecks,
-		"POST /api/setup/service":       s.handleSetupService,
-		"POST /api/setup/phone":         s.handleSetupPhone,
-		"GET /api/setup/qr.svg":         s.handleSetupQR,
-		"POST /api/setup/login":         s.handleSetupLogin,
-		"POST /api/setup/demo":          s.handleSetupDemo,
+		"GET /api/setup/state":             s.handleSetupState,
+		"POST /api/setup/validate":         s.handleSetupValidate,
+		"POST /api/setup/keys":             s.handleSetupKeys,
+		"POST /api/setup/models":           s.handleSetupModels,
+		"POST /api/setup/probe":            s.handleSetupProbe,
+		"POST /api/setup/gemini-models":    s.handleSetupGeminiModels,
+		"POST /api/setup/anthropic-models": s.handleSetupAnthropicModels,
+		"POST /api/setup/anthropic-probe":  s.handleSetupAnthropicProbe,
+		"POST /api/setup/voice-models":     s.handleSetupVoiceModels,
+		"GET /api/setup/checks":            s.handleSetupChecks,
+		"POST /api/setup/service":          s.handleSetupService,
+		"POST /api/setup/phone":            s.handleSetupPhone,
+		"GET /api/setup/qr.svg":            s.handleSetupQR,
+		"POST /api/setup/login":            s.handleSetupLogin,
+		"POST /api/setup/demo":             s.handleSetupDemo,
 	}
 	for pattern, h := range routes {
 		s.mux.HandleFunc(pattern, s.localOnly(h))
@@ -236,7 +238,8 @@ type SetupKeys struct {
 	OpenAI   bool `json:"openai"`
 	DeepSeek bool `json:"deepseek"`
 	// Vertex: a Vertex AI key is saved (for Vertex.Project only).
-	Vertex bool `json:"vertex"`
+	Vertex    bool `json:"vertex"`
+	Anthropic bool `json:"anthropic"`
 }
 
 // SetupVertex is the Vertex AI block's state: the saved project and
@@ -330,7 +333,7 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 	st := SetupState{
 		Boot: sd.Boot.UTC().Format(time.RFC3339Nano), Version: s.deps.Version, URL: "http://" + s.Addr(),
 		EnvFile: sd.EnvPath, ConfigFile: sd.ConfigPath,
-		Keys:   SetupKeys{Gemini: len(cfg.Gemini.APIKeys) > 0, OpenAI: cfg.Voice.OpenAI.APIKey != "", DeepSeek: cfg.DeepSeek.APIKey != "", Vertex: cfg.Gemini.Vertex.APIKey != ""},
+		Keys:   SetupKeys{Gemini: len(cfg.Gemini.APIKeys) > 0, OpenAI: cfg.Voice.OpenAI.APIKey != "", DeepSeek: cfg.DeepSeek.APIKey != "", Vertex: cfg.Gemini.Vertex.APIKey != "", Anthropic: s.savedKey("ANTHROPIC_API_KEY") != ""},
 		Voice:  SetupVoice{Provider: s.voiceProvider(), Backend: cfg.Gemini.Backend, Status: hs.status.String()},
 		Vertex: setupVertex(cfg),
 		Links:  map[string]string{"get_key": GeminiKeyURL, "testflight": TestFlightURL, "ios_repo": IOSRepoURL, "models_doc": ModelsDocURL, "remote_doc": RemoteDocURL},
@@ -422,6 +425,8 @@ func (s *Server) savedKey(env string) string {
 		return cfg.Voice.OpenAI.APIKey
 	case "DEEPSEEK_API_KEY":
 		return cfg.DeepSeek.APIKey
+	case "ANTHROPIC_API_KEY":
+		return cfg.Anthropic.APIKey
 	case "VERTEX_API_KEY":
 		return cfg.Gemini.Vertex.APIKey
 	case "GEMINI_API_KEY":
@@ -525,7 +530,7 @@ func (s *Server) setupPhone() SetupPhone {
 // SetupValidateRequest is POST /api/setup/validate: one key to check
 // live, before anything is saved.
 type SetupValidateRequest struct {
-	// Kind is gemini, openai, deepseek, compat or vertex.
+	// Kind is gemini, openai, deepseek, anthropic, compat or vertex.
 	Kind string `json:"kind"`
 	Key  string `json:"key"`
 	// BaseURL and Name are the compat provider's; a compat Preset id
@@ -575,6 +580,12 @@ func (s *Server) validateKey(ctx context.Context, req SetupValidateRequest) Setu
 	case "deepseek":
 		off := false
 		return checkOf(onboard.CheckCompat(ctx, ep, onboard.Compat{Name: brain.ProviderDeepSeek, BaseURL: config.DefaultDeepSeekBaseURL, APIKey: key, KeyEnv: "DEEPSEEK_API_KEY", Thinking: &off}, false)[0])
+	case "anthropic":
+		c := checkOf(onboard.CheckAnthropicKey(ctx, s.anthropicEndpoints(), key))
+		if c.Status == "fail" && strings.Contains(c.Detail, "rejected the key") {
+			c.Fix = "check that you copied the whole key, or create a new one at " + brain.ServiceOf(brain.ProviderAnthropic).Console
+		}
+		return c
 	case "compat":
 		name, base := s.compatTarget(req.Preset, req.Name, req.BaseURL)
 		c := config.OpenAICompat{Name: name, BaseURL: base}
@@ -651,8 +662,9 @@ type SetupKeysRequest struct {
 	// and voice.openai.voice. An unknown voice saves nothing.
 	VoiceModel string `json:"voice_model"`
 	VoiceName  string `json:"voice_name"`
-	// Orchestrator is a preset id (gemini, the default; deepseek, vertex,
-	// openrouter, openai, ollama, lmstudio) or compat (Other URL).
+	// Orchestrator is a preset id (gemini, the default; anthropic,
+	// deepseek, vertex, openrouter, openai, ollama, lmstudio) or compat
+	// (Other URL).
 	Orchestrator string `json:"orchestrator"`
 	// GeminiModel is the Gemini orchestrator's model ("": the default).
 	GeminiModel string `json:"gemini_model"`
@@ -666,6 +678,10 @@ type SetupKeysRequest struct {
 		Model    string `json:"model"`
 	} `json:"vertex"`
 	DeepSeekKey string `json:"deepseek_key"`
+	// AnthropicKey and AnthropicModel are the Anthropic orchestrator's
+	// ("" model: brain.DefaultAnthropicModel).
+	AnthropicKey   string `json:"anthropic_key"`
+	AnthropicModel string `json:"anthropic_model"`
 	// Compat is the OpenAI-compatible orchestrator: a compat preset
 	// fixes the name and base URL. ReuseKey (OpenAI preset only) points it
 	// at the voice's OPENAI_API_KEY instead of a key of its own; Key is
@@ -766,10 +782,16 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	case brain.ProviderDeepSeek:
 		needs = append(needs, need{kind: "deepseek", env: "DEEPSEEK_API_KEY", given: req.DeepSeekKey, have: cfg.DeepSeek.APIKey != ""})
 		brainModel = brain.DefaultDeepSeekModel
+	case brain.ProviderAnthropic:
+		brainModel = orDefault(req.AnthropicModel, brain.DefaultAnthropicModel)
+		if !onboard.ValidModelName(brainModel) {
+			return SetupKeysResponse{Error: "the Anthropic model name may only hold letters, digits and . _ / -"}, http.StatusBadRequest
+		}
+		needs = append(needs, need{kind: "anthropic", env: "ANTHROPIC_API_KEY", given: req.AnthropicKey, have: s.savedKey("ANTHROPIC_API_KEY") != ""})
 	default:
 		preset, isPreset := s.compatPreset(orch)
 		if !isPreset && orch != "compat" && orch != onboard.PresetOther {
-			return SetupKeysResponse{Error: "orchestrator must be gemini, deepseek, vertex, openrouter, openai, ollama, lmstudio or compat"}, http.StatusBadRequest
+			return SetupKeysResponse{Error: "orchestrator must be anthropic, gemini, deepseek, vertex, openrouter, openai, ollama, lmstudio or compat"}, http.StatusBadRequest
 		}
 		c := config.OpenAICompat{Name: compatName(req.Compat.Name), BaseURL: strings.TrimSpace(req.Compat.BaseURL), Model: strings.TrimSpace(req.Compat.Model)}
 		if isPreset {
@@ -778,7 +800,7 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		if c.BaseURL == "" || c.Model == "" {
 			return SetupKeysResponse{Error: "an OpenAI-compatible orchestrator needs its base URL and a model that supports tool calling"}, http.StatusBadRequest
 		}
-		if c.Name == brain.ProviderGemini || c.Name == brain.ProviderDeepSeek || c.Name == brain.ProviderVertex {
+		if c.Name == brain.ProviderGemini || c.Name == brain.ProviderDeepSeek || c.Name == brain.ProviderVertex || c.Name == brain.ProviderAnthropic {
 			return SetupKeysResponse{Error: fmt.Sprintf("%q is a built-in provider name; pick another name", c.Name)}, http.StatusBadRequest
 		}
 		reuse := isPreset && preset.ReuseEnv != "" && req.Compat.ReuseKey
@@ -826,6 +848,9 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 			fix := "paste the key"
 			if n.kind == "gemini" {
 				fix = "get a free key at " + GeminiKeyURL + " and paste it here"
+			}
+			if n.kind == "anthropic" {
+				fix = "create a key at " + brain.ServiceOf(brain.ProviderAnthropic).Console + " and paste it here"
 			}
 			if n.kind == "vertex" {
 				fix = "paste a Vertex AI API key bound to a service account in that project (" + onboard.VertexKeyDocURL + ")"

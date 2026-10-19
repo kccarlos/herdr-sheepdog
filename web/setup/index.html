@@ -73,6 +73,28 @@
       <legend>Your orchestrator: reads your agents and acts</legend>
       <div class="preset-grid" id="preset-grid"></div>
 
+      <div class="field panel hidden" id="anthropic-field">
+        <label for="anthropic-key">Anthropic API key</label>
+        <div class="row">
+          <input id="anthropic-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with sk-ant-…)" aria-describedby="anthropic-saved anthropic-result">
+          <a class="button" id="anthropic-get-key" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a>
+        </div>
+        <p id="anthropic-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="anthropic-result" class="result" aria-live="polite"></p>
+        <label for="anthropic-model">Model</label>
+        <div class="row">
+          <input id="anthropic-model" type="text" list="anthropic-models" autocomplete="off" spellcheck="false" aria-describedby="anthropic-models-status">
+          <button type="button" id="anthropic-find">Find models</button>
+        </div>
+        <datalist id="anthropic-models"></datalist>
+        <select id="anthropic-model-pick" class="hidden" aria-label="Anthropic models this key can use"></select>
+        <p id="anthropic-models-status" class="result" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button type="button" id="anthropic-probe" aria-describedby="anthropic-probe-note anthropic-probe-result">Test tool calling</button>
+        </div>
+        <p id="anthropic-probe-note" class="muted small">Anthropic is paid per token. The test sends one small request, which is billed. Nothing is sent until you press the button.</p>
+        <p id="anthropic-probe-result" class="result" role="status" aria-live="polite"></p>
+      </div>
       <div class="field panel hidden" id="gemini-orch-field">
         <label for="gemini-model">Model</label>
         <input id="gemini-model" type="text" list="gemini-models" autocomplete="off" spellcheck="false" aria-describedby="gemini-models-status gemini-model-note">

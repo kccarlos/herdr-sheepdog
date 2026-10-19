@@ -59,6 +59,7 @@ model or the voice later, run `sheepdog setup` again, or set `gemini.model`,
 |---|---|---|---|
 | **Gemini** (default, `gemini-3.5-flash`) | the same `GEMINI_API_KEY` | Free tier; the daily cap is per model | Segment Understood 290/359 = 81 % (CI 77–85), 30 simulated-workday runs |
 | **DeepSeek** (`deepseek-flash`) | `DEEPSEEK_API_KEY` | Paid per token | Segment Understood 365/402 = 91 % (CI 87–94), 34 runs. Our measured best. |
+| **Anthropic** (`claude-opus-5-5`) | `ANTHROPIC_API_KEY` | Paid per token ([below](#anthropic)) | Not yet evaluated: no numbers until the eval runs. |
 | **Vertex AI** (Gemini on Google Cloud) | the same `VERTEX_API_KEY` and project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same Gemini models as above; the Gemini numbers were measured on Vertex. |
 | **Any OpenAI-compatible endpoint** | its own key (none for a local server) | Whatever the provider charges | Not evaluated. The model **must support tool calling**. |
 
@@ -70,6 +71,7 @@ known provider. The base URL stays visible, read-only, under **Details**.
 
 | Preset | Base URL (filled in) | Key | Model | Note on the page |
 |---|---|---|---|---|
+| **Anthropic** | built in (Messages API) | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, or any model from the key's list | ★ most recommended |
 | **Gemini** | built in (AI Studio) | the Gemini key | `gemini-3.5-flash`, or any model from the key's list | free, can be slow or busy |
 | **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | cost-effective · did well in our tests |
 | **Vertex AI** | built in | `VERTEX_API_KEY` and a project | the models we checked on Vertex | Gemini on Google Cloud |
@@ -127,6 +129,37 @@ On the setup page, **Find models** lists the models an OpenAI-compatible endpoin
 `sheepdog doctor` sends a few tokens to check that the model can call tools.
 Skip it with `sheepdog doctor --no-probe`.
 
+## Anthropic
+
+The Anthropic preset talks to Claude through Anthropic's own Messages API, not
+an OpenAI-compatible shim. The default model is Claude Opus 5.5
+(`claude-opus-5-5`). **Find models** lists what your key can use (`GET
+/v1/models`, free), and **Test tool calling** sends one small billed request.
+`sheepdog doctor` checks the key with the same free model list; Anthropic does
+not report a balance.
+
+What it costs (Anthropic's first-party prices per million tokens, October
+2026):
+
+| Model | Input | Output | Cache reads |
+|---|---|---|---|
+| Claude Opus 5.5 (`claude-opus-5-5`, default) | $4 | $20 | $0.20 |
+| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | $2 | $10 | $0.20 |
+| Claude Haiku 5.5 (`claude-haiku-5-5`) | $0.10 | $0.50 | |
+
+The system prompt and tools are cached between calls, so most of each
+request's prompt is billed at the cache-read price. Claude always thinks, and
+its thinking is billed as output. Your questions run at effort `medium` and
+agent events at `low` (`anthropic.effort`, `anthropic.event_effort`).
+
+**Refusals and fallbacks.** Anthropic's safety classifiers can decline a
+request. sheepdog turns on Anthropic's server-side fallbacks by default: a
+declined request is answered, in the same call, by the model Anthropic
+recommends for that case, which may be an older Claude model. A request that
+is still declined fails that turn, and sheepdog answers in its own words.
+Turn the fallbacks off with `anthropic.fallbacks = false`
+([CONFIG.md](../CONFIG.md#anthropic)).
+
 ## Vertex AI
 
 For people who already use Google Cloud and want the voice, the orchestrator
@@ -163,7 +196,7 @@ offers the models we checked there. Details: [CONFIG.md](../CONFIG.md).
 | Provider | Receives | When |
 |---|---|---|
 | Voice (Google or OpenAI) | Your microphone audio, and the briefings the daemon writes for the voice | While a voice session is open |
-| Orchestrator (Google, DeepSeek or your endpoint) | What you said as text, the agents' screens, session records and command output the orchestrator reads | On each of your questions and each agent event |
+| Orchestrator (Google, DeepSeek, Anthropic or your endpoint) | What you said as text, the agents' screens, session records and command output the orchestrator reads | On each of your questions and each agent event |
 | sheepdog's push relay, then Apple | Phone notifications, end-to-end encrypted: the relay sees the phone's push token, the timing and the kind, never the content | When an agent needs you and a phone is registered (`push.mode`, [iphone-app.md](iphone-app.md)) |
 | Nobody else | | No telemetry |
 

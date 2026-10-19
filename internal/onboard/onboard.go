@@ -84,6 +84,9 @@ type Endpoints struct {
 	// VertexLive opens a setup-only Gemini Live session on Vertex AI and
 	// closes it (CheckVertex's location check); nil skips that check.
 	VertexLive func(ctx context.Context, apiKey, project, location, model string) error
+	// AnthropicBase is the Anthropic API root ("":
+	// https://api.anthropic.com).
+	AnthropicBase string
 	// HTTP is the client (default: a 10 s timeout).
 	HTTP *http.Client
 }
@@ -275,8 +278,14 @@ func CheckCompat(ctx context.Context, ep Endpoints, c Compat, probe bool) []Resu
 	return out
 }
 
+// generator is the one call the tool-calling probe makes (an
+// OpenAI-compatible or an Anthropic model).
+type generator interface {
+	Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
+}
+
 // probeToolCall runs one tiny turn that must call probeTool.
-func probeToolCall(ctx context.Context, m *brain.OpenAICompatModel, c Compat, console string) Result {
+func probeToolCall(ctx context.Context, m generator, c Compat, console string) Result {
 	name := c.Name + " tools"
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -286,6 +295,9 @@ func probeToolCall(ctx context.Context, m *brain.OpenAICompatModel, c Compat, co
 		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelMinimal},
 	}
 	resp, err := m.Generate(ctx, c.Model, []*genai.Content{genai.NewContentFromText("Call the tool now.", genai.RoleUser)}, cfg)
+	if errors.Is(err, brain.ErrRefused) {
+		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("model %s declined the probe request", c.Model), Fix: "try again, or pick another model"}
+	}
 	if err != nil {
 		r := keyFailure(name, c.Name, c.KeyEnv, console, err)
 		if status, _ := statusOf(err); status == http.StatusNotFound || status == http.StatusBadRequest {
@@ -304,6 +316,8 @@ func consoleOf(name, base string) string {
 	switch {
 	case name == brain.ProviderDeepSeek:
 		return "https://platform.deepseek.com"
+	case name == brain.ProviderAnthropic:
+		return brain.ServiceOf(brain.ProviderAnthropic).Console
 	case strings.Contains(base, "openrouter.ai"):
 		return "https://openrouter.ai/settings/keys"
 	case strings.Contains(base, "groq.com"):

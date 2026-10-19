@@ -236,3 +236,84 @@ func (s *Server) handleSetupGeminiModels(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// anthropicEndpoints are the setup endpoints with the Anthropic API root:
+// the test's, else the configured anthropic.base_url. The page never
+// sends a host for Anthropic, so a saved key only goes where the daemon
+// itself would send it.
+func (s *Server) anthropicEndpoints() onboard.Endpoints {
+	ep := s.deps.Setup.Endpoints
+	if ep.AnthropicBase == "" {
+		ep.AnthropicBase = s.deps.Setup.Config.Anthropic.BaseURL
+	}
+	return ep
+}
+
+// anthropicKey is the typed key, else the saved one.
+func (s *Server) anthropicKey(typed string) string {
+	if k := strings.TrimSpace(typed); k != "" {
+		return k
+	}
+	return s.savedKey("ANTHROPIC_API_KEY")
+}
+
+// SetupAnthropicModelsRequest is POST /api/setup/anthropic-models: the
+// models the Anthropic key can use (empty Key: the saved one).
+type SetupAnthropicModelsRequest struct {
+	Key string `json:"key,omitempty"`
+}
+
+func (s *Server) handleSetupAnthropicModels(w http.ResponseWriter, r *http.Request) {
+	var req SetupAnthropicModelsRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	resp := SetupModelsResponse{Models: []SetupModel{}}
+	key := s.anthropicKey(req.Key)
+	if key == "" {
+		resp.Error = "No Anthropic key yet."
+		resp.Fix = "Paste the key above first. You can still type the model name."
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	list, res := onboard.ListAnthropicModels(r.Context(), s.anthropicEndpoints(), key)
+	if res.Status != onboard.OK {
+		resp.Error, resp.Fix = res.Detail, res.Fix
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	for _, m := range list {
+		resp.Models = append(resp.Models, SetupModel{ID: m.ID, Tools: m.Tools})
+		resp.ToolInfo = resp.ToolInfo || m.Tools != nil
+	}
+	if p, ok := onboard.PresetByID(s.presets(), brain.ProviderAnthropic); ok {
+		resp.Suggested = onboard.SuggestModel(p, list)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// SetupAnthropicProbeRequest is POST /api/setup/anthropic-probe: one
+// tool-calling turn on Model (empty Key: the saved one).
+type SetupAnthropicProbeRequest struct {
+	Key   string `json:"key,omitempty"`
+	Model string `json:"model"`
+}
+
+func (s *Server) handleSetupAnthropicProbe(w http.ResponseWriter, r *http.Request) {
+	var req SetupAnthropicProbeRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+	res := onboard.ProbeAnthropic(ctx, s.anthropicEndpoints(), s.anthropicKey(req.Key), strings.TrimSpace(req.Model))
+	switch {
+	case res.Status != onboard.OK && strings.Contains(res.Fix, "doctor again"):
+		res.Fix = "check the model name and the key, then press Test tool calling again"
+	case res.Status != onboard.OK && strings.Contains(res.Fix, "sheepdog setup"):
+		res.Fix = "paste the Anthropic key above, then press Test tool calling again"
+	}
+	writeJSON(w, http.StatusOK, SetupProbeResponse{OK: res.Status == onboard.OK, Detail: res.Detail, Fix: res.Fix})
+}

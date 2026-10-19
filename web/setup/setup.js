@@ -4,7 +4,7 @@
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
-import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus } from './presets.js';
+import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -16,6 +16,7 @@ const modelBy = {}; // the model typed or filled per preset: { value, auto }
 let compatKeyValid = false; // the typed compat key checked out
 let geminiValid = false; // the typed Gemini key checked out
 let openaiValid = false; // the typed OpenAI key checked out
+let anthropicValid = false; // the typed Anthropic key checked out
 const chosen = {}; // the model and voice picked per family (gemini, openai)
 const voiceLists = {}; // the last model list per card and key
 
@@ -116,6 +117,7 @@ function render() {
     showFields();
   }
   $('deepseek-saved').classList.toggle('hidden', !s.keys.deepseek);
+  $('anthropic-saved').classList.toggle('hidden', !s.keys.anthropic);
 
   // 3. Service
   const svc = s.service;
@@ -263,6 +265,8 @@ function rememberSaved(s, orch) {
     $('compat-base').value = s.orchestrator.base_url || '';
   }
   const g = presetById(s.presets, 'gemini');
+  const a = presetById(s.presets, 'anthropic');
+  if (a && !$('anthropic-model').value) $('anthropic-model').value = orch === 'anthropic' && s.orchestrator.model ? s.orchestrator.model : a.default_model || '';
   if (!$('gemini-model').value) $('gemini-model').value = orch === 'gemini' && s.orchestrator.model ? s.orchestrator.model : (g && g.default_model) || '';
   if (p && p.reuse_offered && p.reuse_active) $('openai-reuse').checked = true;
 }
@@ -287,6 +291,7 @@ function showFields() {
   $('vertex-voice-wait').classList.toggle('hidden', voice !== 'vertex' || vertexOK);
   $('gemini-orch-field').classList.toggle('hidden', pn.field !== 'gemini');
   $('deepseek-field').classList.toggle('hidden', pn.field !== 'deepseek');
+  $('anthropic-field').classList.toggle('hidden', pn.field !== 'anthropic');
   $('compat-field').classList.toggle('hidden', pn.field !== 'compat');
   $('vertex-orch-field').classList.toggle('hidden', !f.orchModel);
   $('vertex-block').classList.toggle('hidden', !f.block);
@@ -306,6 +311,7 @@ function switchPreset(orch) {
   const p = currentPreset();
   if (!p) return;
   if (p.id === 'gemini') { loadGeminiModels(); return; }
+  if (p.id === 'anthropic') { if (state.keys.anthropic || anthropicValid) loadAnthropicModels(); return; }
   if (p.kind === 'native') return;
   const m = modelBy[orch] || { value: '', auto: false };
   $('compat-model').value = m.value;
@@ -370,6 +376,43 @@ async function loadGeminiModels() {
   const list = $('gemini-models');
   list.textContent = '';
   for (const id of ids) { const o = document.createElement('option'); o.value = id; list.appendChild(o); }
+}
+
+// Anthropic orchestrator: the models the key can use (free), and the
+// tool-calling test (one small billed request, only on a click).
+let anthropicSeq = 0;
+async function loadAnthropicModels() {
+  const status = $('anthropic-models-status');
+  if (!state || (!state.keys.anthropic && !$('anthropic-key').value.trim())) {
+    setResult(status, 'fail', 'Paste the Anthropic key above first. You can still type the model name.');
+    return;
+  }
+  const mine = ++anthropicSeq;
+  $('anthropic-find').disabled = true;
+  setResult(status, 'wait', 'Listing the models this key can use…');
+  const r = await api('anthropic-models', { key: $('anthropic-key').value.trim() }).catch(() => null);
+  if (mine !== anthropicSeq) return;
+  $('anthropic-find').disabled = false;
+  const st = anthropicModelsLine(r);
+  setResult(status, st.kind, st.text);
+  const ids = (r && !r.error && r.models ? r.models : []).map((m) => m.id);
+  const list = $('anthropic-models');
+  list.textContent = '';
+  for (const id of ids) { const o = document.createElement('option'); o.value = id; list.appendChild(o); }
+  if (!$('anthropic-model').value.trim() && r && r.suggested) $('anthropic-model').value = r.suggested;
+  fillPick($('anthropic-model-pick'), [{ label: '', ids }], $('anthropic-model').value, 'Choose from this key\'s models');
+  $('anthropic-probe').disabled = !$('anthropic-model').value.trim();
+}
+
+async function probeAnthropic() {
+  const btn = $('anthropic-probe');
+  const out = $('anthropic-probe-result');
+  btn.disabled = true;
+  setResult(out, 'wait', 'Asking the model to call a tool…');
+  const r = await api('anthropic-probe', { key: $('anthropic-key').value.trim(), model: $('anthropic-model').value.trim() }).catch(() => null);
+  const st = probeStatus(r);
+  setResult(out, st.kind, st.text);
+  btn.disabled = !$('anthropic-model').value.trim();
 }
 
 // fillPick fills a model <select> (hidden when empty); picking one puts
@@ -522,7 +565,8 @@ async function saveModels() {
   const body = {
     ...pickBody,
     gemini_key: $('gemini-key').value.trim(), voice, openai_key: $('openai-key').value.trim(),
-    orchestrator: orchValue(orch), deepseek_key: $('deepseek-key').value.trim(), gemini_model: $('gemini-model').value.trim(),
+    orchestrator: orchValue(orch), deepseek_key: $('deepseek-key').value.trim(),
+    anthropic_key: $('anthropic-key').value.trim(), anthropic_model: $('anthropic-model').value.trim(), gemini_model: $('gemini-model').value.trim(),
     compat: { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), model: $('compat-model').value.trim(), key: $('compat-key').value.trim(), reuse_key: $('openai-reuse').checked },
     vertex: { key: $('vertex-key').value.trim(), project: $('vertex-project').value.trim(), location: $('vertex-location').value.trim(), model: $('vertex-model').value.trim() },
   };
@@ -533,17 +577,17 @@ async function saveModels() {
   if (!r.ok) {
     btn.disabled = false;
     $('models-msg').textContent = r.error || 'Not saved.';
-    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: voice === 'openai' ? 'openai-result' : 'compat-result', DEEPSEEK_API_KEY: 'deepseek-result', VERTEX_API_KEY: 'vertex-result' };
+    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: voice === 'openai' ? 'openai-result' : 'compat-result', DEEPSEEK_API_KEY: 'deepseek-result', VERTEX_API_KEY: 'vertex-result', ANTHROPIC_API_KEY: 'anthropic-result' };
     const p = currentPreset();
     if (p && p.kind !== 'native' && p.key_env) byEnv[p.key_env] = 'compat-result';
     for (const c of r.checks || []) {
-      const id = byEnv[c.name] || (/gemini/.test(c.name) ? 'gemini-result' : /openai/.test(c.name) ? 'openai-result' : /deepseek/.test(c.name) ? 'deepseek-result' : 'compat-result');
+      const id = byEnv[c.name] || (/gemini/.test(c.name) ? 'gemini-result' : /openai/.test(c.name) ? 'openai-result' : /deepseek/.test(c.name) ? 'deepseek-result' : /anthropic/.test(c.name) ? 'anthropic-result' : 'compat-result');
       if (c.status === 'fail') setResult($(id), 'fail', checkText(c));
     }
     return;
   }
-  for (const id of ['gemini-key', 'openai-key', 'deepseek-key', 'compat-key', 'vertex-key']) $(id).value = '';
-  geminiValid = false; openaiValid = false;
+  for (const id of ['gemini-key', 'openai-key', 'deepseek-key', 'anthropic-key', 'compat-key', 'vertex-key']) $(id).value = '';
+  geminiValid = false; openaiValid = false; anthropicValid = false;
   $('models-msg').textContent = 'Saved. Restarting sheepdog with your keys…';
   const reloaded = await waitForReload(old, 20000);
   btn.disabled = false;
@@ -731,6 +775,21 @@ function init() {
     showTalkLine();
   });
   liveValidate($('deepseek-key'), $('deepseek-result'), 'deepseek');
+  liveValidate($('anthropic-key'), $('anthropic-result'), 'anthropic', null, () => { anthropicValid = true; loadAnthropicModels(); });
+  $('anthropic-key').addEventListener('input', () => { anthropicValid = false; });
+  $('anthropic-find').addEventListener('click', loadAnthropicModels);
+  $('anthropic-probe').addEventListener('click', probeAnthropic);
+  $('anthropic-model').addEventListener('input', () => {
+    $('anthropic-probe').disabled = !$('anthropic-model').value.trim();
+    setResult($('anthropic-probe-result'), '', '');
+  });
+  $('anthropic-model-pick').addEventListener('change', () => {
+    const v = $('anthropic-model-pick').value;
+    if (!v) return;
+    $('anthropic-model').value = v;
+    $('anthropic-probe').disabled = false;
+    setResult($('anthropic-probe-result'), '', '');
+  });
   liveValidate($('compat-key'), $('compat-result'), 'compat', () => { const b = compatBody(); return { base_url: b.base_url, name: b.name, preset: b.preset }; }, () => { compatKeyValid = true; findModels(); });
   $('compat-key').addEventListener('input', () => { compatKeyValid = false; });
   for (const id of ['vertex-key', 'vertex-project', 'vertex-location']) $(id).addEventListener('input', () => checkVertex(false));

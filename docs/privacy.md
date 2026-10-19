@@ -14,13 +14,22 @@ app "Sheepdog for herdr". Questions: kccarlos.opensource@gmail.com.
 | Data | Goes to | Why |
 |---|---|---|
 | Your microphone audio | The **voice provider** you chose (Google Gemini Live or OpenAI GPT-Live), through the daemon with your own API key | So the voice can hear you |
-| What you said (text), agent screens, session records, command output | The **orchestrator provider** you chose (Google Gemini, DeepSeek, or your OpenAI-compatible endpoint) | So it can answer and act |
+| What you said (text), agent screens, session records, command output | The **orchestrator provider** you chose (Google Gemini, DeepSeek, Anthropic, or your OpenAI-compatible endpoint) | So it can answer and act |
 | The daemon's briefings to the voice (short summaries of agent events) | The voice provider | So the voice can tell you the news |
 | A phone notification: which agent needs you and what it asks | Encrypted, through sheepdog's push relay to Apple's push service (APNs); or straight to APNs with your own key (`push.mode = "apns"`) | The lock-screen notification |
 
 Each provider handles that data under its own terms; read them, especially for
 free-tier keys. A local Ollama orchestrator keeps screens and text on your
-machine. Your API keys are used only to call those providers, and are never
+machine.
+
+With the **Anthropic** orchestrator, each call sends Anthropic the
+orchestrator's instructions, its tool list, the recent conversation (your
+words as text, what the assistant said, agent events) and the screen excerpts,
+session records and command output it read, plus your API key in the
+`x-api-key` header. When Anthropic's safety classifiers decline a request,
+Anthropic's server-side fallback (on by default, `anthropic.fallbacks`) sends
+the same request to another Claude model inside Anthropic. Nothing else goes
+to Anthropic: the voice audio never does. Your API keys are used only to call those providers, and are never
 logged.
 
 ## The daily update check

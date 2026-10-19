@@ -75,6 +75,18 @@ func Template() string {
 # thinking = %[34]t   # DeepSeek's thinking mode
 # reasoning_effort = %[35]q   # "low" | "high" | "max"; low fits the 8 s ask budget
 
+[anthropic]
+# The native Anthropic orchestrator provider, Claude (paid per token;
+# docs/models.md). api_key is normally left unset here:
+# ANTHROPIC_API_KEY is read from the environment instead. With a key,
+# anthropic appears in the /debug model picker whatever brain.provider
+# says; brain.provider = "anthropic" starts on claude-opus-5-5.
+# api_key = ""
+# base_url = %[53]q
+# effort = %[54]q   # utterance turns: "low" | "medium" | "high" | "xhigh" | "max"
+# event_effort = %[55]q   # event and announce turns
+# fallbacks = %[56]t   # server-side refusal fallbacks (fallbacks "default")
+
 [web]
 # bind = %[43]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
 # port = %[10]d
@@ -106,7 +118,7 @@ func Template() string {
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides
-# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]) | the name of a [[brain.openai_compat]] entry: the provider the brain starts on; the /debug picker switches at runtime
+# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]) | "anthropic" | the name of a [[brain.openai_compat]] entry: the provider the brain starts on; the /debug picker switches at runtime
 # model = %[22]q   # a function-calling model of that provider
 # max_steps = %[23]d   # model calls per turn before the daemon answers for itself
 # utterance_timeout_s = %[24]d   # budget of one turn over your relayed words (tools included)
@@ -188,5 +200,6 @@ func Template() string {
 		d.Log.Level, d.Log.MaxSizeMB, d.Log.MaxFiles,
 		d.Events.RetentionDays,
 		d.Update.Check, d.Update.AutoRestart,
+		d.Anthropic.BaseURL, d.Anthropic.Effort, d.Anthropic.EventEffort, d.Anthropic.Fallbacks,
 	)
 }
