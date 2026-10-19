@@ -55,6 +55,11 @@ type AnthropicConfig struct {
 	// when empty).
 	Effort      string
 	EventEffort string
+	// PruneAfterTurns is the brain's brain.prune_after_turns
+	// (DefaultPruneAfterTurns when 0): the adapter puts its cache
+	// breakpoints on the part of the window that pruning has finished
+	// with (renderMessages).
+	PruneAfterTurns int
 	// NoFallbacks turns the server-side refusal fallbacks off (they are
 	// on by default: fallbacks "default").
 	NoFallbacks bool
@@ -93,6 +98,9 @@ func NewAnthropicModel(cfg AnthropicConfig) (*AnthropicModel, error) {
 	}
 	if cfg.Effort == "" {
 		cfg.Effort = "medium"
+	}
+	if cfg.PruneAfterTurns <= 0 {
+		cfg.PruneAfterTurns = DefaultPruneAfterTurns
 	}
 	if cfg.EventEffort == "" {
 		cfg.EventEffort = "low"
@@ -167,6 +175,9 @@ type ablock struct {
 	// state marks the state block (the cache breakpoint goes before
 	// the current one).
 	state bool
+	// stable marks the last block of a prefix that the next turn sends
+	// unchanged (messagesOf): a cache breakpoint goes on it.
+	stable bool
 }
 
 type amsg struct {
@@ -279,8 +290,9 @@ func (m *AnthropicModel) effortFor(cfg *genai.GenerateContentConfig) string {
 }
 
 // renderMessages turns the request messages into SDK params: consecutive
-// messages of one role merged, the cache breakpoint on the last block
-// before the current state (else the last block), and a check that the
+// messages of one role merged, cache breakpoints on the stable blocks
+// (at most two, messagesOf) and on the last block before the current
+// state (else the last block), and a check that the
 // request starts with the user and does not end on an assistant
 // message (a prefill: a 400 on the current models).
 func renderMessages(msgs []amsg) ([]anthropic.BetaMessageParam, error) {
@@ -310,6 +322,13 @@ func renderMessages(msgs []amsg) ([]anthropic.BetaMessageParam, error) {
 		mark--
 	}
 	setCacheControl(&last.blocks[mark])
+	for i := range merged {
+		for j := range merged[i].blocks {
+			if merged[i].blocks[j].stable {
+				setCacheControl(&merged[i].blocks[j])
+			}
+		}
+	}
 	out := make([]anthropic.BetaMessageParam, 0, len(merged))
 	for _, a := range merged {
 		parts := make([]json.RawMessage, 0, len(a.blocks))
@@ -336,11 +355,23 @@ func renderMessages(msgs []amsg) ([]anthropic.BetaMessageParam, error) {
 	return out, nil
 }
 
-// setCacheControl puts the ephemeral breakpoint on a built text or
-// tool_result block (a replayed block is never a user block).
+// setCacheControl puts the ephemeral breakpoint on a block: a built
+// text or tool_result block, or a replayed text or tool_use block (an
+// earlier turn's; thinking blocks take none).
 func setCacheControl(b *ablock) {
 	switch {
 	case b.raw != nil:
+		if t := blockType(b.raw); t != "text" && t != "tool_use" {
+			return
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(b.raw, &fields) != nil {
+			return
+		}
+		fields["cache_control"] = json.RawMessage(`{"type":"ephemeral"}`)
+		if data, err := json.Marshal(fields); err == nil {
+			b.raw = data
+		}
 	case b.p.OfText != nil:
 		b.p.OfText.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
 	case b.p.OfToolResult != nil:
@@ -702,6 +733,29 @@ func (m *AnthropicModel) messagesOf(msgs []Message, model string, thinking bool)
 	current := func(msg Message) bool { return cur > 0 && msg.Turn == cur }
 
 	var out []amsg
+	// The stable prefixes: pruning stubs a turn's tool results once
+	// PruneAfterTurns turns have ended after it, and earlier turns are
+	// sent without thinking, so everything before turn cur-P is sent
+	// unchanged by the next turns. Its end gets a breakpoint (written
+	// now, read next turn), and so does the end of the prefix before
+	// turn cur-P-1, the previous turn's breakpoint (read now). Anthropic
+	// matches the cache only at breakpoints (and a short lookback), so
+	// the newest-block breakpoint alone never matched across turns.
+	p := m.cfg.PruneAfterTurns
+	if p <= 0 {
+		p = DefaultPruneAfterTurns
+	}
+	marks := []int{cur - p - 1, cur - p}
+	markStable := func(turn int) {
+		for len(marks) > 0 && turn >= marks[0] {
+			marks = marks[1:]
+			if n := len(out); n > 0 {
+				blocks := out[n-1].blocks
+				blocks[len(blocks)-1].stable = true
+			}
+		}
+	}
+
 	user := func(b ablock) { out = append(out, amsg{role: "user", blocks: []ablock{b}}) }
 	var pending []int // context lines not yet emitted
 	var held []int    // late context, emitted after the step
@@ -768,6 +822,9 @@ func (m *AnthropicModel) messagesOf(msgs []Message, model string, thinking bool)
 
 	for _, mi := range modelOrder(msgs) {
 		msg := msgs[mi]
+		if cur > 0 {
+			markStable(msg.Turn)
+		}
 		stepItem := msg.Kind == KindToolCall || msg.Kind == KindToolResult
 		if !stepItem && inStep {
 			inStep, rawCovers, afterResult = false, false, false
