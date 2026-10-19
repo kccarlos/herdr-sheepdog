@@ -1,7 +1,7 @@
 // Unit tests for the setup page's voice helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed } from './voice.js';
+import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 
 const state = {
   voice: {
@@ -57,6 +57,14 @@ test('model list lines and options', () => {
   assert.deepEqual(modelOptions({ models: ['x', 'y'] }, 'old'), ['old', 'x', 'y']);
   assert.deepEqual(modelOptions({ models: ['x', 'y'] }, 'y'), ['x', 'y']);
   assert.deepEqual(modelOptions(null, 'cur'), ['cur']);
+});
+
+test('switching to Vertex keeps only a model Vertex serves', () => {
+  const v = { live_model: 'gemini-3.8-live', live_models: ['gemini-3.8-live'] };
+  assert.equal(vertexModel(v, 'gemini-3.8-live'), 'gemini-3.8-live');
+  assert.equal(vertexModel(v, 'gemini-3.5-flash-live'), 'gemini-3.8-live');
+  assert.equal(vertexModel({ live_model: 'x', live_models: ['a', 'b'] }, 'c'), 'a');
+  assert.equal(vertexModel(undefined, 'c'), 'c');
 });
 
 test('a save sends only what changed', () => {

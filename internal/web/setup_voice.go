@@ -83,7 +83,7 @@ func (s *Server) handleSetupVoiceModels(w http.ResponseWriter, r *http.Request) 
 	case onboard.VoiceVertex:
 		out = SetupVoiceModelsResponse{Current: g.Model, Default: g.DefaultModel,
 			Note: "Vertex AI does not list its models for an API key, so these are the Live models we checked on Vertex."}
-		out.Models = withFirst(gemini.VertexModels, g.Model)
+		out.Models = setupVertex(s.deps.Setup.Config).LiveModels
 		writeJSON(w, http.StatusOK, out)
 		return
 	case onboard.VoiceOpenAI:

@@ -3,7 +3,7 @@
 // and never come back.
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
-import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed } from './voice.js';
+import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
@@ -108,6 +108,7 @@ function render() {
     const voice = voiceChoice(s.voice);
     renderVoiceGrid(s, voice);
     for (const k of Object.keys(chosen)) delete chosen[k];
+    for (const k of Object.keys(voiceLists)) delete voiceLists[k];
     const orch = savedPreset(s);
     renderGrid(s.presets, orch);
     rememberSaved(s, orch);
@@ -217,6 +218,8 @@ function renderVoiceGrid(s, selected) {
     input.type = 'radio'; input.name = 'voice'; input.value = c.value;
     input.checked = c.value === selected;
     input.addEventListener('change', () => {
+      // The two Gemini cards share the pick, but Vertex serves fewer models.
+      if (c.value === 'vertex' && chosen.gemini) chosen.gemini.model = vertexModel(s.vertex, chosen.gemini.model);
       showFields();
       if (c.value === 'vertex' || $('vertex-result').textContent) checkVertex();
     });
@@ -478,7 +481,14 @@ function checkVertex(keepPick) {
     if (mine !== vertexSeq) return;
     const st = checkLine(r);
     setResult(out, st.kind, st.text);
-    vertexOK = voice && r && r.status !== 'fail';
+    const ok = voice && r && r.status !== 'fail';
+    if (keepPick && !ok) {
+      // The picked model failed at this location: the pickers stay, so
+      // another model can be picked.
+      setResult($('voice-models-status'), 'fail', st.text);
+      return;
+    }
+    vertexOK = ok;
     refreshVoicePick();
   }, 600);
 }

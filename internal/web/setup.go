@@ -24,6 +24,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
 
 // Links the setup page shows. TestFlightURL is the public TestFlight
@@ -243,14 +244,18 @@ type SetupKeys struct {
 // and the orchestrator models known to answer on Vertex (its model
 // listing refuses an API key, so the list is brain.VertexModels).
 type SetupVertex struct {
-	Project         string   `json:"project"`
-	Location        string   `json:"location"`
-	DefaultLocation string   `json:"default_location"`
-	LiveModel       string   `json:"live_model"`
-	Voice           string   `json:"voice"`
-	Models          []string `json:"models"`
-	DefaultModel    string   `json:"default_model"`
-	APIURL          string   `json:"api_url"`
+	Project         string `json:"project"`
+	Location        string `json:"location"`
+	DefaultLocation string `json:"default_location"`
+	LiveModel       string `json:"live_model"`
+	// LiveModels are the Live models the Vertex voice offers: the ones
+	// checked on Vertex, and the configured one when the voice is on
+	// Vertex already.
+	LiveModels   []string `json:"live_models"`
+	Voice        string   `json:"voice"`
+	Models       []string `json:"models"`
+	DefaultModel string   `json:"default_model"`
+	APIURL       string   `json:"api_url"`
 }
 
 // SetupVoice is the voice side of SetupState.
@@ -478,7 +483,12 @@ func setupVertex(cfg config.Config) SetupVertex {
 	v := SetupVertex{
 		Project: cfg.Gemini.Vertex.Project, Location: cfg.Gemini.Vertex.Location, DefaultLocation: DefaultVertexLocation,
 		LiveModel: cfg.Gemini.Model, Voice: cfg.Gemini.Voice, DefaultModel: brain.DefaultModel, APIURL: onboard.VertexAPIURL,
-		Models: []string{},
+		Models: []string{}, LiveModels: append([]string(nil), gemini.VertexModels...),
+	}
+	// The configured model counts as known on Vertex only when the voice
+	// already runs there; an AI Studio pick may not be served on Vertex.
+	if cfg.Gemini.Backend == "vertex" {
+		v.LiveModels = withFirst(gemini.VertexModels, cfg.Gemini.Model)
 	}
 	for _, m := range brain.VertexModels {
 		v.Models = append(v.Models, m.Name)

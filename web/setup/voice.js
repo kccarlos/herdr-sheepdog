@@ -57,6 +57,15 @@ export function modelOptions(r, current) {
   return list;
 }
 
+// vertexModel is the model to keep when switching to the Vertex card:
+// the picked one if Vertex serves it (vertex.live_models), else the
+// configured one.
+export function vertexModel(vertex, model) {
+  const list = (vertex && vertex.live_models) || [];
+  if (!list.length || list.includes(model)) return model;
+  return list.includes(vertex.live_model) ? vertex.live_model : list[0];
+}
+
 // changed is what a save sends for the voice: only a model or voice that
 // differs from the configured one, so the defaults are not pinned in the
 // env file.

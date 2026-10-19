@@ -99,6 +99,16 @@ func TestSetupVoiceModelsKeepsLiveModels(t *testing.T) {
 	if strings.Join(r.Models, ",") != "gemini-3.8-live" || r.Listed || r.Note == "" {
 		t.Errorf("vertex: %s", raw)
 	}
+	// An AI Studio pick is not offered on Vertex; a model the Vertex voice
+	// already runs on is.
+	f.sd.Config.Gemini.Model = "gemini-3.5-flash-live"
+	if r, raw = voiceModels(t, f, `{"provider":"vertex"}`); strings.Join(r.Models, ",") != "gemini-3.8-live" {
+		t.Errorf("vertex after an AI Studio pick: %s", raw)
+	}
+	f.sd.Config.Gemini.Backend = "vertex"
+	if r, raw = voiceModels(t, f, `{"provider":"vertex"}`); strings.Join(r.Models, ",") != "gemini-3.5-flash-live,gemini-3.8-live" {
+		t.Errorf("vertex with its own model: %s", raw)
+	}
 	if code, _ := f.post(t, "/api/setup/voice-models", `{"provider":"elevenlabs"}`); code != 400 {
 		t.Errorf("unknown provider: %d", code)
 	}
