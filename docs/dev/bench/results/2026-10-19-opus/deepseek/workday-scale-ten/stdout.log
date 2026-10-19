@@ -1,0 +1,14 @@
+[1/3] workday-scale-ten r3: pass (end_call, ) ≈ $0.1347, total ≈ $0.135
+[2/3] workday-scale-ten r2: pass (end_call, ) ≈ $0.1485, total ≈ $0.283
+[3/3] workday-scale-ten r1: pass (end_call, ) ≈ $0.1537, total ≈ $0.437
+  pass    workday-scale-ten r1  end_call  12 turns   83.7s                         ≈ $0.1537
+  pass    workday-scale-ten r2  end_call  12 turns   80.2s                         ≈ $0.1485
+  pass    workday-scale-ten r3  end_call  12 turns   77.6s                         ≈ $0.1347
+-- 3 runs, spend ≈ $0.4370 (estimate at list prices) --
+reports: docs/dev/bench/results/2026-10-19-opus/deepseek/workday-scale-ten/report.json, docs/dev/bench/results/2026-10-19-opus/deepseek/workday-scale-ten/report.md
+== eval sim, repeat 3 ==
+  workday-scale-ten  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL              runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   101  in   1349417  out    15277  reasoning     3973  ≈ $0.4164 --
+-- spend simuser  deepseek-flash           calls    33  in     67313  out      660  reasoning        0  ≈ $0.0206 --
+-- spend total ≈ $0.4370 (estimate at list prices) --
