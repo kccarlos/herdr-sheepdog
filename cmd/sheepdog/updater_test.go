@@ -25,10 +25,10 @@ const (
 	newLine     = "sheepdog v0.2.0 (commit bbb, built d)"
 )
 
-// fakeInstall writes a script that answers `version` with line, the
+// fakeInstall writes a script that answers `version` with runningLine, the
 // stand-in for the executable an upgrade replaces, and makes the test
 // daemon believe it was started from it.
-func fakeInstall(t *testing.T, line string) (write func(string)) {
+func fakeInstall(t *testing.T) (write func(string)) {
 	t.Helper()
 	exe := filepath.Join(t.TempDir(), "sheepdog")
 	write = func(l string) {
@@ -41,7 +41,7 @@ func fakeInstall(t *testing.T, line string) (write func(string)) {
 			t.Fatal(err)
 		}
 	}
-	write(line)
+	write(runningLine)
 	oldArgs, oldExe, oldVer, oldCommit, oldDate := os.Args, osExecutable, version, commit, date
 	t.Cleanup(func() { os.Args, osExecutable, version, commit, date = oldArgs, oldExe, oldVer, oldCommit, oldDate })
 	os.Args = []string{exe}
@@ -100,7 +100,7 @@ func tryStateUpdate(base string) (update.Status, bool) {
 }
 
 func TestServeReexecsIntoNewBinaryWhenIdle(t *testing.T) {
-	upgrade := fakeInstall(t, runningLine)
+	upgrade := fakeInstall(t)
 	type call struct {
 		path string
 		argv []string
@@ -170,7 +170,7 @@ func TestServeReexecsIntoNewBinaryWhenIdle(t *testing.T) {
 }
 
 func TestServeExitsForTheLoginServiceAfterAnUpgrade(t *testing.T) {
-	upgrade := fakeInstall(t, runningLine)
+	upgrade := fakeInstall(t)
 	oldExec, oldSvc := execSelf, underService
 	t.Cleanup(func() { execSelf, underService = oldExec, oldSvc })
 	underService = func() bool { return true }
@@ -196,7 +196,7 @@ func TestServeNoRestartWhenAutoRestartOffOrSameVersion(t *testing.T) {
 		"same version":     {"", runningLine},
 	} {
 		t.Run(name, func(t *testing.T) {
-			upgrade := fakeInstall(t, runningLine)
+			upgrade := fakeInstall(t)
 			oldExec, oldSvc := execSelf, underService
 			t.Cleanup(func() { execSelf, underService = oldExec, oldSvc })
 			underService = func() bool { return false }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -44,9 +45,48 @@ type statusReport struct {
 	LastError *statusLastError `json:"last_error,omitempty"`
 	// Update is the update notice: from the running daemon, else from the
 	// cache (omitted with update.check off).
-	Update  *update.Status `json:"update,omitempty"`
-	LogFile string         `json:"log_file"`
-	DataDir string         `json:"data_dir"`
+	Update *update.Status `json:"update,omitempty"`
+	// Keys says which env file the last daemon loaded its keys from
+	// (omitted when none was recorded).
+	Keys    *statusKeys `json:"keys,omitempty"`
+	LogFile string      `json:"log_file"`
+	DataDir string      `json:"data_dir"`
+}
+
+// statusKeys is the recorded env file (daemon.EnvRecord). Paths only.
+type statusKeys struct {
+	EnvFile string `json:"env_file"`
+	// Problem is set when the daemon had keys from that file and it is
+	// gone or unreadable.
+	Problem string `json:"problem,omitempty"`
+	// Advice is set when the file is not the default env file.
+	Advice string `json:"advice,omitempty"`
+}
+
+// keysStatus reads the record; nil when there is none.
+func keysStatus(dataDir string) *statusKeys {
+	rec := daemon.ReadEnvRecord(dataDir)
+	if rec.Path == "" {
+		return nil
+	}
+	k := &statusKeys{EnvFile: rec.Path}
+	f, err := os.Open(rec.Path)
+	if err != nil {
+		if rec.HadKeys {
+			k.Problem = "keys came from " + rec.Path + " last time; that file is gone or unreadable"
+		}
+		return k
+	}
+	_ = f.Close()
+	if rec.Path != configEnvPath() {
+		k.Advice = envFileAdvice(rec.Path)
+	}
+	return k
+}
+
+// envFileAdvice is the warning for keys kept outside the default env file.
+func envFileAdvice(path string) string {
+	return "keys come from " + path + ", not the default env file: copy it to " + config.DefaultEnvPath() + " (chmod 600)"
 }
 
 type statusVoice struct {
@@ -201,6 +241,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 		r.Update = nil
 	}
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
+	r.Keys = keysStatus(cfg.DataDir)
 	return r
 }
 
@@ -269,6 +310,18 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 			conn = "a voice client is connected"
 		}
 		row("phones", fmt.Sprintf("%d registered for push; %s", r.Phones.PushDevices, conn))
+	}
+	if k := r.Keys; k != nil {
+		switch {
+		case k.Problem != "":
+			row("keys", "NOT FOUND: "+k.Problem)
+			row("", "restore the file, or copy your keys to "+config.DefaultEnvPath()+" (chmod 600), or run `sheepdog setup`")
+		case k.Advice != "":
+			row("keys", "from "+k.EnvFile)
+			row("", "warning: "+k.Advice)
+		default:
+			row("keys", "from "+k.EnvFile)
+		}
 	}
 	if r.LastError != nil {
 		msg := r.LastError.What

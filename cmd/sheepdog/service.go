@@ -98,6 +98,14 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			fprintf(stdout, "would write %s:\n\n%s", spec.UnitPath(), data)
 			return 0
 		}
+		// The safer choice: the unit keeps the default env file (a ./.env
+		// in a repo is not something a login service should depend on);
+		// say so, and how to move the keys.
+		if dd := cfgDataDir(*configPath); dd != "" {
+			if rec := daemon.ReadEnvRecord(dd); rec.HadKeys && rec.Path != spec.EnvFile {
+				fprintf(stderr, "sheepdog service: warning: the last daemon had its keys from %s, but the service reads %s; copy it there (chmod 600), or pass --env-file %s\n", rec.Path, spec.EnvFile, rec.Path)
+			}
+		}
 		if _, err := os.Stat(spec.EnvFile); err != nil {
 			fprintf(stderr, "sheepdog service: warning: %s does not exist yet (run sheepdog setup); the daemon starts without its keys\n", spec.EnvFile)
 		}
@@ -150,6 +158,15 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runLogs(ctx, la, stdout, stderr)
 	}
 	return 2
+}
+
+// cfgDataDir is the data directory of the config at configPath ("" on error).
+func cfgDataDir(configPath string) string {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return ""
+	}
+	return cfg.DataDir
 }
 
 // serviceSpec is the service for this machine and user.

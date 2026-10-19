@@ -45,8 +45,10 @@ How it restarts (`restartForUpdate`):
   after any exit (10 s throttle); systemd's `Restart=on-failure` needs a non-zero exit, hence 75
   (EX_TEMPFAIL). The unit files did not change, so installed services keep working.
 - **Otherwise** (`sheepdog start`, `sheepdog serve` in a terminal): release the single-instance lock,
-  flush the log and `syscall.Exec` the launch path with `serve` and the same arguments and the
-  original environment. Same pid. A terminal run prints a line first. `daemon.restart {from, to,
+  flush the log and `syscall.Exec` the launch path with `serve`, `--env-file <absolute path of the
+  env file this run loaded>` (an `--env-file` already in the arguments wins) and the same other
+  arguments, in the same working directory, with the original environment. The explicit path means a
+  `./.env` that was found implicitly is not looked up again. Same pid. A terminal run prints a line first. `daemon.restart {from, to,
   via}` is logged when the restart is asked for.
 
 No loop: `<data_dir>/update-restart.json` records the target; a daemon never restarts into the same
