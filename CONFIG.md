@@ -231,6 +231,51 @@ finishes on the pair it started with.
 | `deepseek.thinking` | `SHEEPDOG_DEEPSEEK_THINKING` | `true` | DeepSeek's thinking mode for user turns (`"thinking": {"type": "enabled"}`); `false` sends `disabled`. Event turns and compaction summaries are always sent `disabled` (above). On, the orchestrator replays the current turn's `reasoning_content` as described above. |
 | `deepseek.reasoning_effort` | `SHEEPDOG_DEEPSEEK_REASONING_EFFORT` | `low` | `low`, `high` or `max`; sent only with thinking on (so never on an event turn). `low` and `high` measured the same latency on screen questions, so the cheaper one is the default; `max` is untested. |
 
+## `[anthropic]`
+
+The native Anthropic orchestrator provider: Claude over the Messages
+API (official Go SDK), **paid per token** (docs/models.md). With a key,
+`anthropic` is offered in the `/debug` model picker whatever
+`brain.provider` says, and `sheepdog brain-test --provider anthropic`
+runs a turn on it. `brain.provider = "anthropic"` without `brain.model`
+starts on `claude-opus-5-5`. The voice session never uses it. The design
+is in docs/dev/anthropic-adapter.md.
+
+**Thinking is always on** on the current models, so effort is the only
+control: `anthropic.effort` on user turns, `anthropic.event_effort` on
+announce and investigation-delivery turns and on the compaction summary.
+
+**Thinking blocks are replayed for the current turn only.** Claude's
+thinking blocks are bound to the conversation that produced them: an
+edited history (pruned tool results, a compaction, the refreshed state
+block) would invalidate them, and accounts created on or after
+2026-08-31 get a 400 for that. The orchestrator replays a block only
+in the turn that produced it and keeps that turn append-only. Every
+request also asks the API to drop, not reject, a block whose history
+changed (`thinking-binding-controls-2026-08-01`, `drop_block`). A
+drop is logged as `brain.thinking_dropped`. Earlier turns go back as
+their text and tool calls.
+
+**Refusals.** With `anthropic.fallbacks` on (the default), a request the
+safety classifiers decline is re-served inside the same call by the
+model Anthropic recommends for the category (`fallbacks: "default"`,
+beta `server-side-fallback-2026-07-01`; for Opus 5.5, Opus 5, Sonnet 5.5
+and Fable 5.1). A request still refused fails the turn (`refused
+(category …)` on `brain.step`) and the daemon answers for itself.
+
+The SDK client reads nothing from the environment besides what the
+table lists: `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` (which Claude
+Code sets for itself) are ignored. No SDK retries: a 429, a 529 or a 5xx
+fails the call and the orchestrator's failover decides.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `anthropic.api_key` | `ANTHROPIC_API_KEY` | `""` | The Anthropic API key (`x-api-key`). Normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no ANTHROPIC_API_KEY") and `brain.provider = "anthropic"` leaves the orchestrator off. A 401 or 402 marks the provider down (`brain.provider_down`) and the user is told which key to fix or to top up. |
+| `anthropic.base_url` | `SHEEPDOG_ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | API root. A proxy here that rejects the beta headers is retried once without them. |
+| `anthropic.effort` | `SHEEPDOG_ANTHROPIC_EFFORT` | `medium` | `output_config.effort` on user turns: `low`, `medium`, `high`, `xhigh` or `max`. `medium` is Opus 5.5's own default; not yet tuned with the eval. |
+| `anthropic.event_effort` | `SHEEPDOG_ANTHROPIC_EVENT_EFFORT` | `low` | The same on event turns and the compaction summary, which have the shortest budgets (`brain.announce_turn_timeout_s`). |
+| `anthropic.fallbacks` | `SHEEPDOG_ANTHROPIC_FALLBACKS` | `true` | Server-side refusal fallbacks (above). `false` sends none: a refusal fails the turn. |
+
 ## `[web]`
 
 The HTTP server. Binds to `web.bind:web.port`, loopback only by
@@ -296,8 +341,8 @@ a stateful agent behind `to_supervisor` (one utterance turn per thing the
 user says) and the workers' announcements, that reasons with tools
 (`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
 `prompt`, `send_keys`, `interrupt` over a function-calling model — Gemini
-(the key pool), DeepSeek (`[deepseek]`), Gemini on Vertex AI
-(`[gemini.vertex]`) or any OpenAI-compatible endpoint
+(the key pool), DeepSeek (`[deepseek]`), Anthropic (`[anthropic]`),
+Gemini on Vertex AI (`[gemini.vertex]`) or any OpenAI-compatible endpoint
 (`[[brain.openai_compat]]`, below), switchable at runtime —
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the daemon speaks its own code
@@ -333,7 +378,7 @@ announce wait elapse.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route the user's words (`to_supervisor`) and the workers' events through the orchestrator (`serve --brain` overrides). |
-| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the orchestrator starts on: `gemini` (the key pool, rotating on a rate limit), `deepseek` (`[deepseek]`, one key), `vertex` (Gemini on Vertex AI with the `[gemini.vertex]` key and project, location `global`; same model ids as `gemini`) or the `name` of a `[[brain.openai_compat]]` entry. Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). With an OpenAI-compatible provider and no `brain.model` in the file or the environment, the entry's own `model` is used. |
+| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the orchestrator starts on: `gemini` (the key pool, rotating on a rate limit), `deepseek` (`[deepseek]`, one key), `anthropic` (`[anthropic]`, one key; `claude-opus-5-5` when `brain.model` is not set), `vertex` (Gemini on Vertex AI with the `[gemini.vertex]` key and project, location `global`; same model ids as `gemini`) or the `name` of a `[[brain.openai_compat]]` entry. Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). With an OpenAI-compatible provider and no `brain.model` in the file or the environment, the entry's own `model` is used. |
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the orchestrator starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.utterance_timeout_s` | `SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S` | `25` | Wall-clock budget of one utterance turn — the orchestrator's turn over the user's relayed words, which may be a question or an instruction — and of an investigation's delivery turn, tool rounds included. When less than `brain.step_reserve_s` of it remains after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to `brain.final_grace_s` past the budget; only then does the daemon answer for itself. 25 s since the 2026-10-03 eval campaign (at 12 s, 45 of 130 Vertex runs had a turn time out); the voice answers "pending" within ~2 s and delivers the answer as a push (`brain.reply_wait_s`), so a longer budget only delays the slowest answers. Formerly `brain.propose_timeout_s` (still accepted, see "Deprecated keys"). |
@@ -391,7 +436,7 @@ model = "openai/gpt-oss-120b"
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | required | The provider id: lowercase letters, digits, `-`, `_` (at most 32); not `gemini`, `deepseek`, `vertex` or `fake…`; unique. |
+| `name` | required | The provider id: lowercase letters, digits, `-`, `_` (at most 32); not `gemini`, `deepseek`, `vertex`, `anthropic` or `fake…`; unique. |
 | `label` | `name` | The display name in the `/debug` picker. |
 | `base_url` | required | The API root, `http(s)://…`; `/chat/completions` and `/models` are appended (a trailing `/` is ignored). |
 | `api_key_env` | `<NAME>_API_KEY` (`-` as `_`) | The environment variable (or `--env-file` entry) holding the key. The key itself never goes in the TOML file. Not needed when `base_url` is a loopback address (`localhost`, `127.0.0.1`, `::1`): the provider is registered without a key and sends no `Authorization` header. |

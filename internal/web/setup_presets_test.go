@@ -131,7 +131,7 @@ func TestSetupStateListsThePresets(t *testing.T) {
 	for _, p := range st.Presets {
 		ids = append(ids, p.ID)
 	}
-	if got := strings.Join(ids, ","); got != "gemini,deepseek,vertex,openrouter,openai,ollama,lmstudio,other" {
+	if got := strings.Join(ids, ","); got != "anthropic,gemini,deepseek,vertex,openrouter,openai,ollama,lmstudio,other" {
 		t.Fatalf("presets = %s", got)
 	}
 	want := map[string]struct{ base, env, note string }{
@@ -141,6 +141,7 @@ func TestSetupStateListsThePresets(t *testing.T) {
 		"lmstudio":   {"http://localhost:1234/v1", "", ""},
 		"deepseek":   {"", "DEEPSEEK_API_KEY", "cost-effective · did well in our tests"},
 		"gemini":     {"", "GEMINI_API_KEY", "free, can be slow or busy"},
+		"anthropic":  {"", "ANTHROPIC_API_KEY", "★ most recommended"},
 	}
 	for _, p := range st.Presets {
 		w, ok := want[p.ID]
@@ -275,8 +276,10 @@ func TestSetupSaveOpenAIReuseOnAndOff(t *testing.T) {
 		t.Error("the ignored key was written")
 	}
 	f.sd.Config = got
-	if st := setupState(t, f); !st.Presets[4].ReuseActive {
-		t.Errorf("reuse not shown as active: %+v", st.Presets[4])
+	for _, p := range setupState(t, f).Presets {
+		if p.ID == "openai" && !p.ReuseActive {
+			t.Errorf("reuse not shown as active: %+v", p)
+		}
 	}
 
 	// Reuse off without a key of its own: the voice key does not count.
@@ -346,8 +349,8 @@ func TestSetupSavePresetNeedsAModel(t *testing.T) {
 	if code != 400 || !strings.Contains(body, "model") {
 		t.Errorf("%d %s", code, body)
 	}
-	code, body = f.post(t, "/api/setup/keys", saveReq("anthropic", nil))
-	if code != 400 {
+	code, body = f.post(t, "/api/setup/keys", saveReq("mistral", nil))
+	if code != 400 || !strings.Contains(body, "anthropic") {
 		t.Errorf("unknown preset: %d %s", code, body)
 	}
 }

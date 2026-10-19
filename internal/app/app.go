@@ -427,6 +427,8 @@ func (a *App) wire() error {
 		a.brainOff = "no Gemini key"
 	case cfg.Brain.Provider == brain.ProviderDeepSeek && cfg.DeepSeek.APIKey == "":
 		a.brainOff = "no DEEPSEEK_API_KEY"
+	case cfg.Brain.Provider == brain.ProviderAnthropic && cfg.Anthropic.APIKey == "":
+		a.brainOff = "no ANTHROPIC_API_KEY"
 	case cfg.Brain.Provider == brain.ProviderVertex && VertexBrainMissing(cfg.Gemini.Vertex) != "":
 		a.brainOff = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
 	case compatMissing(cfg, cfg.Brain.Provider) != "":
@@ -723,6 +725,7 @@ func (a *App) VoiceProvider() string {
 // buildBrain builds the orchestrator with the [brain] config
 // (BrainConfig) and a transcript under the data dir, over every provider
 // that has a key: gemini (the key pool), deepseek ([deepseek]),
+// anthropic ([anthropic]),
 // vertex ([gemini.vertex]) and each [[brain.openai_compat]] entry,
 // starting on brain.provider. The caller has checked that the initial
 // provider has a key.
@@ -754,7 +757,8 @@ func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*bra
 
 // BrainModels builds the orchestrator's Model of every provider the config
 // has a key for (shared with `sheepdog brain-test`): gemini over the
-// key pool, deepseek over the OpenAI-compatible adapter, vertex over
+// key pool, deepseek over the OpenAI-compatible adapter, anthropic over
+// the native Messages API adapter, vertex over
 // the Gemini adapter on Vertex AI (VertexBrainMissing), and each
 // [[brain.openai_compat]] entry over the same adapter without DeepSeek's
 // extensions (a loopback one even without a key). An empty map
@@ -776,6 +780,13 @@ func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model,
 		}
 		models[brain.ProviderDeepSeek] = m
 	}
+	if cfg.Anthropic.APIKey != "" {
+		m, err := brain.NewAnthropicModel(AnthropicConfig(cfg, log))
+		if err != nil {
+			return nil, err
+		}
+		models[brain.ProviderAnthropic] = m
+	}
 	if VertexBrainMissing(cfg.Gemini.Vertex) == "" {
 		m, err := brain.NewVertexModel(cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, log)
 		if err != nil {
@@ -794,6 +805,15 @@ func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model,
 		models[o.Name] = m
 	}
 	return models, nil
+}
+
+// AnthropicConfig maps the [anthropic] config onto the adapter's.
+func AnthropicConfig(cfg config.Config, log logging.Logger) brain.AnthropicConfig {
+	return brain.AnthropicConfig{
+		APIKey: cfg.Anthropic.APIKey, BaseURL: cfg.Anthropic.BaseURL,
+		Effort: cfg.Anthropic.Effort, EventEffort: cfg.Anthropic.EventEffort,
+		NoFallbacks: !cfg.Anthropic.Fallbacks, Log: log,
+	}
 }
 
 // compatMissing names the key variable the [[brain.openai_compat]]
@@ -833,11 +853,15 @@ func BrainProviders(cfg config.Config) []web.ProviderInfo {
 	if !deepseek.Available {
 		deepseek.Reason = "no DEEPSEEK_API_KEY"
 	}
+	anthropic := web.ProviderInfo{ID: brain.ProviderAnthropic, Label: web.ProviderLabel(brain.ProviderAnthropic), Available: cfg.Anthropic.APIKey != ""}
+	if !anthropic.Available {
+		anthropic.Reason = "no ANTHROPIC_API_KEY"
+	}
 	vertex := web.ProviderInfo{ID: brain.ProviderVertex, Label: web.ProviderLabel(brain.ProviderVertex), Available: VertexBrainMissing(cfg.Gemini.Vertex) == ""}
 	if !vertex.Available {
 		vertex.Reason = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
 	}
-	out := []web.ProviderInfo{gemini, deepseek, vertex}
+	out := []web.ProviderInfo{gemini, deepseek, anthropic, vertex}
 	for _, o := range cfg.Brain.OpenAICompat {
 		label := o.Label
 		if label == "" {

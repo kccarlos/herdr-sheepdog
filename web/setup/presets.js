@@ -109,3 +109,13 @@ export function geminiStatus(r) {
   const n = (r.models || []).length;
   return { kind: 'ok', text: n + (n === 1 ? ' model' : ' models') + ' this key can use. The default is ' + r.default + '.' };
 }
+
+// anthropicModelsLine is the line under the Anthropic model input after
+// a model list: the error with its fix, or the count and the suggestion.
+export function anthropicModelsLine(r) {
+  if (!r) return { kind: 'fail', text: 'sheepdog did not answer. You can still type the model name.' };
+  if (r.error) return { kind: 'fail', text: [r.error, r.fix].filter(Boolean).join(' — ') };
+  const n = (r.models || []).length;
+  const text = n + (n === 1 ? ' model' : ' models') + ' this key can use.';
+  return { kind: 'ok', text: r.suggested ? text + ' Suggested: ' + r.suggested + '.' : text };
+}

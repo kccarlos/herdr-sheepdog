@@ -43,6 +43,9 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 		off := false
 		out = append(out, CheckCompat(ctx, o.Endpoints, Compat{Name: brain.ProviderDeepSeek, BaseURL: cfg.DeepSeek.BaseURL, APIKey: cfg.DeepSeek.APIKey, KeyEnv: "DEEPSEEK_API_KEY", Model: model, Thinking: &off}, o.Probe)...)
 	}
+	if cfg.Anthropic.APIKey != "" {
+		out = append(out, checkAnthropic(ctx, o, cfg)...)
+	}
 	for _, c := range cfg.Brain.OpenAICompat {
 		if !c.Usable() {
 			st := Skip
@@ -65,6 +68,30 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	}
 	if o.ConfigPath != "" && cfg.Web.Token != "" {
 		out = append(out, CheckSecretFile("config file", o.ConfigPath))
+	}
+	return out
+}
+
+// checkAnthropic checks the Anthropic key with the free model list and,
+// with o.Probe, runs the tool-calling probe on the model the
+// orchestrator would use.
+func checkAnthropic(ctx context.Context, o DoctorOptions, cfg config.Config) []Result {
+	ep := o.Endpoints
+	if ep.AnthropicBase == "" {
+		ep.AnthropicBase = cfg.Anthropic.BaseURL
+	}
+	orch := cfg.Brain.Provider == brain.ProviderAnthropic
+	r := CheckAnthropicKey(ctx, ep, cfg.Anthropic.APIKey)
+	if orch {
+		r.Detail += " (the orchestrator)"
+	}
+	out := []Result{r}
+	if o.Probe && r.Status == OK {
+		model := brain.DefaultAnthropicModel
+		if orch && cfg.Brain.Model != "" {
+			model = cfg.Brain.Model
+		}
+		out = append(out, ProbeAnthropic(ctx, ep, cfg.Anthropic.APIKey, model))
 	}
 	return out
 }
@@ -120,6 +147,10 @@ func checkOrchestrator(cfg config.Config) Result {
 	case brain.ProviderDeepSeek:
 		if cfg.DeepSeek.APIKey == "" {
 			missing = "DEEPSEEK_API_KEY"
+		}
+	case brain.ProviderAnthropic:
+		if cfg.Anthropic.APIKey == "" {
+			missing = "ANTHROPIC_API_KEY"
 		}
 	case brain.ProviderVertex:
 		switch {

@@ -72,7 +72,7 @@ The orchestrator is Go, so the adapter uses the official Go SDK (`github.com/ant
 1. **Presets and orchestrator section** (OpenRouter, OpenAI, Ollama, LM Studio, Vertex, Gemini model choice): config preset table, `[[brain.openai_compat]]` generated from presets, local server detection, OpenAI key-reuse consent. Screenshots for review.
 2. **Voice section:** Gemini Live model and voice choice from the key's models, Vertex fields, GPT-Live as an option with its model and voice.
 3. **Cards and summary bar** (visual; CEO reviews screenshots before merge).
-4. **Anthropic adapter** (design: [anthropic-adapter.md](anthropic-adapter.md)), with unit tests against a fake server, doctor, `/debug`, failover.
+4. **Anthropic adapter** (design: [anthropic-adapter.md](anthropic-adapter.md); done, PR "feat(brain): Anthropic orchestrator"), with unit tests against a fake server, doctor, `/debug`, failover.
 5. **Eval run** for Opus 5.5 vs DeepSeek; update labels and docs/models.md with measured numbers.
 6. **Docs:** docs/models.md, docs/quick-start.md, CONFIG.md.
 

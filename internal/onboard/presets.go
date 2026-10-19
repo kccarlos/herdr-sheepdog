@@ -57,10 +57,8 @@ type Preset struct {
 // Presets are the orchestrator presets, in the order the page shows them.
 func Presets() []Preset {
 	return []Preset{
-		// ANTHROPIC PRESET GOES HERE (docs/dev/plan-model-setup.md, step 4):
-		// a native entry {ID: "anthropic", KeyEnv: "ANTHROPIC_API_KEY",
-		// DefaultModel: "claude-opus-5-5"} once the native adapter exists.
-		// Not listed before then: the page must not offer what cannot run.
+		{ID: brain.ProviderAnthropic, Label: "Anthropic", Kind: PresetNative, KeyEnv: "ANTHROPIC_API_KEY", KeyNeeded: true,
+			DocsURL: "https://console.anthropic.com/settings/keys", DefaultModel: brain.DefaultAnthropicModel, Note: "★ most recommended"},
 		{ID: brain.ProviderGemini, Label: "Gemini", Kind: PresetNative, KeyEnv: "GEMINI_API_KEY", KeyNeeded: true,
 			DocsURL: "https://aistudio.google.com/apikey", DefaultModel: brain.DefaultModel, Note: "free, can be slow or busy"},
 		{ID: brain.ProviderDeepSeek, Label: "DeepSeek", Kind: PresetNative, KeyEnv: "DEEPSEEK_API_KEY", KeyNeeded: true,

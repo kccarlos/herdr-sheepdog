@@ -47,6 +47,7 @@ type Config struct {
 	Gemini     Gemini     `toml:"gemini"`
 	Voice      Voice      `toml:"voice"`
 	DeepSeek   DeepSeek   `toml:"deepseek"`
+	Anthropic  Anthropic  `toml:"anthropic"`
 	Web        Web        `toml:"web"`
 	CLI        CLI        `toml:"cli"`
 	Supervisor Supervisor `toml:"supervisor"`
@@ -211,7 +212,7 @@ func (b Brain) CompatProvider(name string) (OpenAICompat, bool) {
 
 // BrainProviders are the built-in values of brain.provider; the names
 // of [[brain.openai_compat]] entries are accepted too.
-var BrainProviders = []string{"gemini", "deepseek", "vertex"}
+var BrainProviders = []string{"gemini", "deepseek", "vertex", "anthropic"}
 
 // compatNameRE is the shape of an [[brain.openai_compat]] name.
 var compatNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -237,6 +238,30 @@ type DeepSeek struct {
 	// low, measured against the 8 s ask budget; see CONFIG.md).
 	ReasoningEffort string `toml:"reasoning_effort"`
 }
+
+// Anthropic configures the native Anthropic orchestrator provider
+// (docs/dev/anthropic-adapter.md): the Messages API, paid per token.
+// Registered with the orchestrator when APIKey is set; selectable at
+// runtime from the /debug model picker whatever brain.provider says.
+type Anthropic struct {
+	// APIKey authenticates requests (env ANTHROPIC_API_KEY). Never
+	// logged.
+	APIKey string `toml:"api_key"`
+	// BaseURL is the API root (default https://api.anthropic.com).
+	BaseURL string `toml:"base_url"`
+	// Effort is output_config.effort on utterance turns (default
+	// medium); EventEffort on event turns and the compaction summary
+	// (default low).
+	Effort      string `toml:"effort"`
+	EventEffort string `toml:"event_effort"`
+	// Fallbacks turns on the server-side refusal fallbacks (default
+	// true).
+	Fallbacks bool `toml:"fallbacks"`
+}
+
+// AnthropicEfforts are the accepted values of anthropic.effort and
+// anthropic.event_effort.
+var AnthropicEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // DeepSeekReasoningEfforts are the accepted values of
 // deepseek.reasoning_effort.
@@ -615,6 +640,7 @@ func Default() Config {
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default", BriefingChannel: "function_response", Backend: "aistudio", Vertex: GeminiVertex{Location: "us-central1"}},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
+		Anthropic:         Anthropic{BaseURL: DefaultAnthropicBaseURL, Effort: "medium", EventEffort: "low", Fallbacks: true},
 		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
 		Voice:             Voice{Name: DefaultVoiceName, Provider: "gemini", OpenAI: VoiceOpenAI{Model: "gpt-live-1", Voice: "marin", IdleCloseS: 45}},
@@ -644,6 +670,13 @@ func DefaultPromptsDir() string {
 const (
 	DefaultBrainModel    = "gemini-3.5-flash"
 	DefaultBrainProvider = "gemini"
+)
+
+// The built-in [anthropic] defaults: the API root, and the model
+// brain.provider = "anthropic" runs when brain.model is not set.
+const (
+	DefaultAnthropicBaseURL = "https://api.anthropic.com"
+	DefaultAnthropicModel   = "claude-opus-5-5"
 )
 
 // The built-in [deepseek] defaults.
@@ -769,6 +802,9 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if _, ok := lookup("SHEEPDOG_BRAIN_MODEL"); ok {
 		modelSet = true
 	}
+	if cfg.Brain.Provider == "anthropic" && !modelSet {
+		cfg.Brain.Model = DefaultAnthropicModel
+	}
 	if o, ok := cfg.Brain.CompatProvider(cfg.Brain.Provider); ok && !modelSet {
 		// The built-in default model is Gemini's; an OpenAI-compatible
 		// provider starts on its own model unless brain.model says
@@ -806,6 +842,9 @@ func validate(cfg Config) error {
 		return err
 	}
 	if err := validateDeepSeek(cfg.DeepSeek); err != nil {
+		return err
+	}
+	if err := validateAnthropic(cfg.Anthropic); err != nil {
 		return err
 	}
 	if err := validateVoice(cfg); err != nil {
@@ -857,6 +896,20 @@ func validateVoice(cfg Config) error {
 	}
 	if cfg.Gemini.Backend == "vertex" && strings.TrimSpace(cfg.Gemini.Vertex.Location) == "" {
 		return errors.New("config: gemini.vertex.location must not be empty")
+	}
+	return nil
+}
+
+// validateAnthropic checks the [anthropic] values.
+func validateAnthropic(a Anthropic) error {
+	if strings.TrimSpace(a.BaseURL) == "" {
+		return errors.New("config: anthropic.base_url must not be empty")
+	}
+	if !oneOf(a.Effort, AnthropicEfforts) {
+		return fmt.Errorf("config: anthropic.effort=%q: want one of %s", a.Effort, strings.Join(AnthropicEfforts, ", "))
+	}
+	if !oneOf(a.EventEffort, AnthropicEfforts) {
+		return fmt.Errorf("config: anthropic.event_effort=%q: want one of %s", a.EventEffort, strings.Join(AnthropicEfforts, ", "))
 	}
 	return nil
 }
@@ -958,7 +1011,8 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
-//	SHEEPDOG_DEEPSEEK_REASONING_EFFORT,
+//	SHEEPDOG_DEEPSEEK_REASONING_EFFORT, ANTHROPIC_API_KEY, SHEEPDOG_ANTHROPIC_BASE_URL,
+//	SHEEPDOG_ANTHROPIC_EFFORT, SHEEPDOG_ANTHROPIC_EVENT_EFFORT, SHEEPDOG_ANTHROPIC_FALLBACKS,
 //	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_TOKEN,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
@@ -1008,6 +1062,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		cfg.Gemini.APIKeys = keys
 	}
 	if err := applyDeepSeekEnv(cfg, lookup); err != nil {
+		return err
+	}
+	if err := applyAnthropicEnv(cfg, lookup); err != nil {
 		return err
 	}
 	if v, ok := lookup("SHEEPDOG_DATA_DIR"); ok {
@@ -1217,6 +1274,34 @@ func applyDeepSeekEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	return nil
 }
 
+// applyAnthropicEnv overrides the [anthropic] keys: the key from
+// ANTHROPIC_API_KEY (no SHEEPDOG_ prefix, like DEEPSEEK_API_KEY), the
+// rest from SHEEPDOG_ANTHROPIC_*. ANTHROPIC_BASE_URL and
+// ANTHROPIC_AUTH_TOKEN are not read: Claude Code sets them for itself,
+// and the daemon must not follow them.
+func applyAnthropicEnv(cfg *Config, lookup func(string) (string, bool)) error {
+	if v, ok := lookup("ANTHROPIC_API_KEY"); ok && v != "" {
+		cfg.Anthropic.APIKey = v
+	}
+	if v, ok := lookup("SHEEPDOG_ANTHROPIC_BASE_URL"); ok {
+		cfg.Anthropic.BaseURL = v
+	}
+	if v, ok := lookup("SHEEPDOG_ANTHROPIC_EFFORT"); ok {
+		cfg.Anthropic.Effort = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_ANTHROPIC_EVENT_EFFORT"); ok {
+		cfg.Anthropic.EventEffort = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_ANTHROPIC_FALLBACKS"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_ANTHROPIC_FALLBACKS=%q: want true or false", v)
+		}
+		cfg.Anthropic.Fallbacks = b
+	}
+	return nil
+}
+
 // applyBrainEnv overrides the [brain] keys from SHEEPDOG_BRAIN_*.
 func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("SHEEPDOG_BRAIN_ENABLED"); ok {
@@ -1355,8 +1440,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s anthropic.api_key=%s anthropic.base_url=%s anthropic.effort=%s anthropic.event_effort=%s anthropic.fallbacks=%t web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, setOrUnset(c.Anthropic.APIKey), c.Anthropic.BaseURL, c.Anthropic.Effort, c.Anthropic.EventEffort, c.Anthropic.Fallbacks, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
 }
 
 // compatString renders the [[brain.openai_compat]] entries for String,
