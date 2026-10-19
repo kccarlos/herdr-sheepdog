@@ -2,11 +2,13 @@
 // only to /api/setup/* (loopback only, no token); keys are posted once
 // and never come back.
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
+import { voiceChoice, orchChoice, vertexFields, voiceLine, savedNote, validateBody, checkLine } from './vertex.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
 let demoTimer = null;
 let renderedBoot = null; // the choices are set from the daemon once per boot, not on every poll
+let vertexOK = false; // the Vertex block's last check passed for the voice
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -63,6 +65,7 @@ function render() {
   $('models-doc').href = s.links.models_doc;
   $('which-doc').href = s.links.models_doc;
   $('get-key').href = s.links.get_key;
+  $('vertex-doc').href = s.links.models_doc + '#vertex-ai';
   $('ios-repo').href = s.links.ios_repo;
 
   // Header badge: the voice.
@@ -78,6 +81,9 @@ function render() {
   // 1. Models
   const ms = $('models-state');
   $('gemini-saved').classList.toggle('hidden', !s.keys.gemini);
+  const note = savedNote(s);
+  $('vertex-saved').textContent = note;
+  $('vertex-saved').classList.toggle('hidden', !note);
   if (s.voice.status === 'connected') {
     ms.className = 'state ok'; ms.textContent = '✓ voice connected (' + s.voice.provider + ')';
   } else if (s.voice.setup_needed) {
@@ -89,10 +95,12 @@ function render() {
   }
   if (renderedBoot !== s.boot) {
     renderedBoot = s.boot;
-    for (const r of document.querySelectorAll('input[name=voice]')) r.checked = r.value === (s.voice.provider === 'openai' ? 'openai' : 'gemini');
-    const orch = ['gemini', 'deepseek'].includes(s.orchestrator.provider) ? s.orchestrator.provider : (s.orchestrator.provider ? 'compat' : 'gemini');
+    const voice = voiceChoice(s.voice);
+    for (const r of document.querySelectorAll('input[name=voice]')) r.checked = r.value === voice;
+    const orch = orchChoice(s.orchestrator.provider);
     for (const r of document.querySelectorAll('input[name=orch]')) r.checked = r.value === orch;
     if (orch === 'compat' && !$('compat-name').value) $('compat-name').value = s.orchestrator.provider;
+    renderVertex(s, voice, orch);
     showAdvancedFields();
   }
 
@@ -168,13 +176,71 @@ function renderDemo(d) {
   }
 }
 
+// renderVertex fills the Vertex block from the saved settings (once per boot).
+function renderVertex(s, voice, orch) {
+  const v = s.vertex;
+  if (!$('vertex-project').value) $('vertex-project').value = v.project || '';
+  if (!$('vertex-location').value) $('vertex-location').value = v.location || v.default_location;
+  const list = $('vertex-models');
+  list.textContent = '';
+  for (const m of v.models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    list.appendChild(opt);
+  }
+  if (!$('vertex-model').value) $('vertex-model').value = orch === 'vertex' && s.orchestrator.model ? s.orchestrator.model : v.default_model;
+  // Saved and in use: the voice line shows without a new check.
+  vertexOK = voice === 'vertex' && s.voice.backend === 'vertex' && s.keys.vertex && !s.voice.problem;
+}
+
+function choices() {
+  return { voice: document.querySelector('input[name=voice]:checked').value, orch: document.querySelector('input[name=orch]:checked').value };
+}
+
 function showAdvancedFields() {
-  const voice = document.querySelector('input[name=voice]:checked').value;
-  const orch = document.querySelector('input[name=orch]:checked').value;
+  const { voice, orch } = choices();
+  const f = vertexFields(voice, orch);
   $('openai-field').classList.toggle('hidden', voice !== 'openai');
   $('deepseek-field').classList.toggle('hidden', orch !== 'deepseek');
   $('compat-field').classList.toggle('hidden', orch !== 'compat');
+  $('vertex-orch-field').classList.toggle('hidden', !f.orchModel);
+  $('vertex-block').classList.toggle('hidden', !f.block);
+  $('vertex-location-field').classList.toggle('hidden', !f.location);
+  $('gemini-not-needed').classList.toggle('hidden', f.geminiNeeded);
+  showVoiceLine();
   if (voice !== 'gemini' || orch !== 'gemini') $('advanced').open = true;
+}
+
+function showVoiceLine() {
+  const el = $('vertex-voice-line');
+  const on = vertexOK && choices().voice === 'vertex' && state;
+  el.classList.toggle('hidden', !on);
+  if (on) setResult(el, 'ok', voiceLine(state.vertex));
+}
+
+// Live check of the Vertex block: the key (or the saved one, for its own
+// project), the project and, for the voice, the location.
+let vertexTimer = null;
+let vertexSeq = 0;
+function checkVertex() {
+  clearTimeout(vertexTimer);
+  const out = $('vertex-result');
+  const voice = choices().voice === 'vertex';
+  const body = validateBody({ key: $('vertex-key').value, project: $('vertex-project').value, location: $('vertex-location').value, voice }, state);
+  const mine = ++vertexSeq;
+  vertexOK = false;
+  showVoiceLine();
+  if (!body) { setResult(out, '', ''); return; }
+  if (body.wait) { setResult(out, 'wait', body.wait); return; }
+  setResult(out, 'wait', voice ? 'Checking the key, the project and the location…' : 'Checking the key and the project…');
+  vertexTimer = setTimeout(async () => {
+    const r = await api('validate', body).catch(() => null);
+    if (mine !== vertexSeq) return;
+    const st = checkLine(r);
+    setResult(out, st.kind, st.text);
+    vertexOK = voice && r && r.status !== 'fail';
+    showVoiceLine();
+  }, 600);
 }
 
 // Live validation: a pasted key is checked (debounced) before saving.
@@ -206,6 +272,7 @@ async function saveModels() {
     gemini_key: $('gemini-key').value.trim(), voice, openai_key: $('openai-key').value.trim(),
     orchestrator: orch, deepseek_key: $('deepseek-key').value.trim(),
     compat: { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), model: $('compat-model').value.trim(), key: $('compat-key').value.trim() },
+    vertex: { key: $('vertex-key').value.trim(), project: $('vertex-project').value.trim(), location: $('vertex-location').value.trim(), model: $('vertex-model').value.trim() },
   };
   btn.disabled = true;
   $('models-msg').textContent = 'Checking the keys…';
@@ -214,14 +281,14 @@ async function saveModels() {
   if (!r.ok) {
     btn.disabled = false;
     $('models-msg').textContent = r.error || 'Not saved.';
-    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: 'openai-result', DEEPSEEK_API_KEY: 'deepseek-result' };
+    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: 'openai-result', DEEPSEEK_API_KEY: 'deepseek-result', VERTEX_API_KEY: 'vertex-result' };
     for (const c of r.checks || []) {
       const id = byEnv[c.name] || (/gemini/.test(c.name) ? 'gemini-result' : /openai/.test(c.name) ? 'openai-result' : /deepseek/.test(c.name) ? 'deepseek-result' : 'compat-result');
       if (c.status === 'fail') setResult($(id), 'fail', checkText(c));
     }
     return;
   }
-  for (const id of ['gemini-key', 'openai-key', 'deepseek-key', 'compat-key']) $(id).value = '';
+  for (const id of ['gemini-key', 'openai-key', 'deepseek-key', 'compat-key', 'vertex-key']) $(id).value = '';
   $('models-msg').textContent = 'Saved. Restarting sheepdog with your keys…';
   const reloaded = await waitForReload(old, 20000);
   btn.disabled = false;
@@ -353,6 +420,8 @@ function init() {
   liveValidate($('deepseek-key'), $('deepseek-result'), 'deepseek');
   liveValidate($('compat-key'), $('compat-result'), 'compat', () => ({ base_url: $('compat-base').value.trim(), name: $('compat-name').value.trim() }), () => findModels());
   for (const r of document.querySelectorAll('input[name=voice], input[name=orch]')) r.addEventListener('change', showAdvancedFields);
+  for (const r of document.querySelectorAll('input[name=voice]')) r.addEventListener('change', () => { if (choices().voice === 'vertex' || $('vertex-result').textContent) checkVertex(); });
+  for (const id of ['vertex-key', 'vertex-project', 'vertex-location']) $(id).addEventListener('input', checkVertex);
   $('save-models').addEventListener('click', saveModels);
   $('run-checks').addEventListener('click', runChecks);
   $('save-service').addEventListener('click', saveService);

@@ -39,6 +39,7 @@ func fakeGemini(t *testing.T) string {
 
 type setupFixture struct {
 	h        *harness
+	sd       *SetupDeps
 	dir, env string
 	restarts chan string
 	demo     *fakeDemo
@@ -62,6 +63,7 @@ func newSetupFixture(t *testing.T, cfg config.Config, token string) *setupFixtur
 		},
 		TailscaleCLI: func() bool { return false },
 	}
+	f.sd = sd
 	f.h = newHarness(t, harnessOpts{setup: sd, token: token, restart: func(r string) { f.restarts <- r }})
 	return f
 }

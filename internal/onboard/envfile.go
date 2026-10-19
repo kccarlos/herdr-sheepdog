@@ -257,3 +257,80 @@ func SetPhoneAccess(envPath string, cfg config.Config, enable, newToken bool) (b
 	}
 	return created, UpsertEnvFile(envPath, set)
 }
+
+// SetVertexConfig writes project and, when not empty, location into the
+// config's [gemini.vertex] table (the key stays in the env file): a new
+// config from the template when there is none, the values set in place
+// (uncommented) when the table exists, else the table appended. The result
+// must load; otherwise the old file is restored.
+func SetVertexConfig(path, project, location string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err := WriteConfig(path, brain.ProviderGemini, nil); err != nil {
+			return err
+		}
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	set := [][2]string{{"project", project}}
+	if location != "" {
+		set = append(set, [2]string{"location", location})
+	}
+	body := setTOMLKeys(string(old), "gemini.vertex", set)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return err
+	}
+	if _, err := config.Load(path); err != nil {
+		_ = os.WriteFile(path, old, 0o600)
+		return fmt.Errorf("the config with the Vertex project does not load (restored it): %w", err)
+	}
+	return nil
+}
+
+// setTOMLKeys sets each key = "value" in table of the TOML text body:
+// replacing an uncommented assignment of that key inside the table, else
+// adding it right under the table header; a missing table is appended.
+func setTOMLKeys(body, table string, kv [][2]string) string {
+	lines := strings.Split(body, "\n")
+	header := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "["+table+"]" {
+			header = i
+			break
+		}
+	}
+	if header < 0 {
+		out := strings.TrimRight(body, "\n") + "\n\n[" + table + "]\n"
+		for _, p := range kv {
+			out += fmt.Sprintf("%s = %q\n", p[0], p[1])
+		}
+		return out
+	}
+	end := len(lines)
+	for i := header + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "[") {
+			end = i
+			break
+		}
+	}
+	var add []string
+	for _, p := range kv {
+		line := fmt.Sprintf("%s = %q", p[0], p[1])
+		found := false
+		for i := header + 1; i < end; i++ {
+			t := strings.TrimSpace(lines[i])
+			if k, _, ok := strings.Cut(t, "="); ok && !strings.HasPrefix(t, "#") && strings.TrimSpace(k) == p[0] {
+				lines[i], found = line, true
+				break
+			}
+		}
+		if !found {
+			add = append(add, line)
+		}
+	}
+	out := append([]string{}, lines[:header+1]...)
+	out = append(out, add...)
+	out = append(out, lines[header+1:]...)
+	return strings.Join(out, "\n")
+}
