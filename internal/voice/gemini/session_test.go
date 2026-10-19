@@ -665,7 +665,7 @@ func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
 	if !*m.content.TurnComplete {
 		t.Error("push must still complete the turn")
 	}
-	p := h.log.payloads("voice.push")
+	p := h.pushesLogged(1)
 	if len(p) != 1 || p[0]["urgency"] != "interrupt" || p[0]["scheduling_sent"] != "when_idle" {
 		t.Errorf("voice.push = %v, want urgency interrupt, scheduling_sent when_idle", p)
 	}
@@ -691,7 +691,7 @@ func TestPushExemptTagsStayInterruptWhileSpeaking(t *testing.T) {
 			if h.log.has("voice.push_deferred") {
 				t.Errorf("%s must not be deferred", tag)
 			}
-			p := h.log.payloads("voice.push")
+			p := h.pushesLogged(1)
 			if len(p) != 1 || p[0]["urgency"] != "interrupt" || p[0]["scheduling_sent"] != "interrupt" || p[0][tag] != true {
 				t.Errorf("voice.push = %v", p)
 			}

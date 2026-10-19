@@ -336,6 +336,22 @@ func (h *harness) waitEvent(what string, pred func(voice.Event) bool) voice.Even
 	return nil
 }
 
+// pushesLogged returns the voice.push payloads once there are at least
+// n of them (or after 3 s, for the caller's assertion to report): the
+// session logs a push after it sent it, so a test that has seen the send
+// must wait for the log line too.
+func (h *harness) pushesLogged(n int) []map[string]any {
+	h.t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		p := h.log.payloads("voice.push")
+		if len(p) >= n || time.Now().After(deadline) {
+			return p
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (h *harness) countEvents(pred func(voice.Event) bool) int {
 	h.evMu.Lock()
 	defer h.evMu.Unlock()
