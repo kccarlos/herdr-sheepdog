@@ -7,13 +7,6 @@ export function voiceChoice(voice) {
   return voice.backend === 'vertex' ? 'vertex' : 'gemini';
 }
 
-// orchChoice is the Orchestrator radio for a saved provider: the built-in
-// ones by name, any other name is an OpenAI-compatible entry.
-export function orchChoice(provider) {
-  if (['gemini', 'deepseek', 'vertex'].includes(provider)) return provider;
-  return provider ? 'compat' : 'gemini';
-}
-
 // vertexFields says which parts of the Vertex block show for the chosen
 // voice and orchestrator. The location is the voice's only: the
 // orchestrator always calls Vertex at global.

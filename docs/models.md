@@ -18,7 +18,7 @@ sheepdog needs two models. They never share a role:
 |---|---|---|---|
 | **Gemini Live** (default) | `GEMINI_API_KEY` | Free tier available, with Google's quota limits | Idle costs nothing. When a limit is hit the setup page says `Gemini (AI Studio) says the quota is used up (HTTP 429…)`: wait for the reset or add more keys. `GEMINI_API_KEY_1` … `GEMINI_API_KEY_9` form a pool that the voice rotates through on a 429. |
 | **Gemini Live on Vertex AI** | `VERTEX_API_KEY` and a project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same model and voice as Gemini Live, for Google Cloud users. |
-| **GPT-Live** | `OPENAI_API_KEY` | **$0.05 per minute of open session** | The session opens only for speech or a push and closes after 45 s idle (`voice.openai.idle_close_s`). The OpenAI key is for the voice only. |
+| **GPT-Live** | `OPENAI_API_KEY` | **$0.05 per minute of open session** | The session opens only for speech or a push and closes after 45 s idle (`voice.openai.idle_close_s`). The orchestrator uses this key only if you choose to reuse it ([presets](#presets-on-the-setup-page)). |
 
 ## Orchestrator
 
@@ -29,6 +29,38 @@ sheepdog needs two models. They never share a role:
 | **Vertex AI** (Gemini on Google Cloud) | the same `VERTEX_API_KEY` and project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same Gemini models as above; the Gemini numbers were measured on Vertex. |
 | **Any OpenAI-compatible endpoint** | its own key (none for a local server) | Whatever the provider charges | Not evaluated. The model **must support tool calling**. |
 
+### Presets on the setup page
+
+Step 1 of `sheepdog setup` shows the orchestrator as a grid of presets. Pick
+one and the page asks only for what it needs; you never type a base URL for a
+known provider. The base URL stays visible, read-only, under **Details**.
+
+| Preset | Base URL (filled in) | Key | Model | Note on the page |
+|---|---|---|---|---|
+| **Gemini** | built in (AI Studio) | the Gemini key | `gemini-3.5-flash`, or any model from the key's list | free, can be slow or busy |
+| **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | cost-effective · did well in our tests |
+| **Vertex AI** | built in | `VERTEX_API_KEY` and a project | the models we checked on Vertex | Gemini on Google Cloud |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | you pick from the list, tool-capable first | one key, many models |
+| **OpenAI** | `https://api.openai.com/v1` | `OPENAI_ORCH_API_KEY`, or the voice's key if you tick the box | the newest `gpt-…-mini` in your key's list, else you pick | paid per token |
+| **Ollama** | `http://localhost:11434/v1` | none | the first model you pulled | on this computer, no key |
+| **LM Studio** | `http://localhost:1234/v1` | none | the first model you loaded | on this computer, no key |
+| **Other URL** | you type it | optional | found or typed | any OpenAI-compatible endpoint |
+
+- Once the key checks out (or a key is already saved), the page lists the
+  models by itself and fills one in. You can always type another.
+- For Ollama and LM Studio the page checks that the server is running and
+  says "Ollama is running, 3 models" or "Not running: start Ollama, then press
+  Check again". Small local models may not handle tool calling well: press
+  **Test tool calling** before you save.
+- **OpenAI and the voice key.** `OPENAI_API_KEY` is the GPT-Live voice key.
+  The OpenAI orchestrator gets its own key (`OPENAI_ORCH_API_KEY`) unless you
+  tick **Use the same OpenAI key (also used for the voice)**, which is off by
+  default and only shown when a voice key is saved.
+- Saving writes a `[[brain.openai_compat]]` entry named after the preset
+  (`openrouter`, `openai`, `ollama`, `lmstudio`) to `config.toml`, or updates
+  it, and starts the orchestrator on it. Details:
+  [CONFIG.md](../CONFIG.md#brainopenai_compat).
+
 The two Understood numbers come from different runs on the same tier-1
 simulated-workday suite; DeepSeek minus Gemini is +10 points (CI +5 to +15).
 The Gemini runs went through Vertex AI. The report is
@@ -36,8 +68,8 @@ The Gemini runs went through Vertex AI. The report is
 number is produced is in [dev/eval/README.md](dev/eval/README.md).
 
 OpenAI-compatible examples (each is one `[[brain.openai_compat]]` table in
-`~/.config/sheepdog/config.toml`; the setup page's Advanced section writes it
-for you):
+`~/.config/sheepdog/config.toml`; the setup page's presets and its Other URL
+choice write it for you):
 
 ```toml
 [[brain.openai_compat]]
@@ -74,8 +106,8 @@ an option, not a recommendation: the free Gemini key is simpler.
 2. Create a service account in that project with the **Vertex AI User**
    role, then an **API key bound to that service account**, restricted to
    the Vertex AI API (`aiplatform.googleapis.com`).
-3. In `sheepdog setup`, step 1, Advanced: choose **Gemini Live on Vertex AI**
-   as the voice, **Vertex AI** as the orchestrator, or both. One "Google
+3. In `sheepdog setup`, step 1: choose **Vertex AI** as the orchestrator,
+   **Gemini Live on Vertex AI** as the voice (under Advanced), or both. One "Google
    Cloud (Vertex AI)" block takes the key, the project id and, for the
    voice, the location (`us-central1` by default: `gemini-3.8-live` is
    served there and from the `us` multi-region, not from `global`).
@@ -108,7 +140,7 @@ Check each provider's own terms, especially for free-tier keys.
 
 ## Switch models
 
-- **Setup page:** `sheepdog setup`, step 1, Advanced. Saving reloads the
+- **Setup page:** `sheepdog setup`, step 1 (the voice is under Advanced). Saving reloads the
   daemon in place.
 - **While it runs:** the `/debug` page header (`sheepdog open debug`) and the
   iPhone app's Settings, Models switch voice and orchestrator at the next

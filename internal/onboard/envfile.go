@@ -194,36 +194,6 @@ func CompatTOML(c config.OpenAICompat) string {
 	return fmt.Sprintf("[[brain.openai_compat]]\nname = %q\nbase_url = %q\napi_key_env = %q\nmodel = %q\n", c.Name, c.BaseURL, c.APIKeyEnv, c.Model)
 }
 
-// EnsureCompat makes the config at path define the OpenAI-compatible
-// provider c: a new config (the template, provider set to it) when there
-// is none, else its table appended when no provider of that name exists.
-// An existing table of that name is left as it is. The result must load.
-func EnsureCompat(path string, c config.OpenAICompat) error {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return WriteConfig(path, "compat", &c)
-	}
-	cur, err := config.Load(path)
-	if err != nil {
-		return err
-	}
-	if _, ok := cur.Brain.CompatProvider(c.Name); ok {
-		return nil
-	}
-	old, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	body := strings.TrimRight(string(old), "\n") + "\n\n" + CompatTOML(c)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		return err
-	}
-	if _, err := config.Load(path); err != nil {
-		_ = os.WriteFile(path, old, 0o600)
-		return fmt.Errorf("the config with the new provider does not load (restored it): %w", err)
-	}
-	return nil
-}
-
 // PhoneBind is the web.bind phone access sets: every address of this
 // computer (its LAN and Tailscale ones), behind the web token. web.bind
 // is one address, so this is the narrowest setting that covers both.
@@ -307,13 +277,15 @@ func setTOMLKeys(body, table string, kv [][2]string) string {
 		}
 		return out
 	}
-	end := len(lines)
-	for i := header + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "[") {
-			end = i
-			break
-		}
-	}
+	return strings.Join(setKeysAt(lines, header, kv), "\n")
+}
+
+// setKeysAt sets each key = "value" in the table whose header is
+// lines[header] (it ends at the next line starting with '['): an
+// uncommented assignment is replaced, a missing key is added right
+// under the header. Comments and other keys stay as they are.
+func setKeysAt(lines []string, header int, kv [][2]string) []string {
+	end := tableEnd(lines, header)
 	var add []string
 	for _, p := range kv {
 		line := fmt.Sprintf("%s = %q", p[0], p[1])
@@ -331,6 +303,76 @@ func setTOMLKeys(body, table string, kv [][2]string) string {
 	}
 	out := append([]string{}, lines[:header+1]...)
 	out = append(out, add...)
-	out = append(out, lines[header+1:]...)
-	return strings.Join(out, "\n")
+	return append(out, lines[header+1:]...)
+}
+
+// tableEnd is the index of the line after the table starting at header.
+func tableEnd(lines []string, header int) int {
+	for i := header + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "[") {
+			return i
+		}
+	}
+	return len(lines)
+}
+
+// UpsertCompat makes the config at path define the OpenAI-compatible
+// provider c with c's base_url, api_key_env and model: a new config (the
+// template, provider set to it) when there is none, the table appended
+// when no provider of that name exists, else those three keys set in
+// place in the existing table (its label and comments stay). The result
+// must load; otherwise the old file is restored.
+func UpsertCompat(path string, c config.OpenAICompat) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return WriteConfig(path, "compat", &c)
+	}
+	cur, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var body string
+	if _, ok := cur.Brain.CompatProvider(c.Name); !ok {
+		body = strings.TrimRight(string(old), "\n") + "\n\n" + CompatTOML(c)
+	} else {
+		lines := strings.Split(string(old), "\n")
+		header := compatHeader(lines, c.Name)
+		if header < 0 {
+			return fmt.Errorf("cannot find the [[brain.openai_compat]] table named %q to update; edit it by hand", c.Name)
+		}
+		body = strings.Join(setKeysAt(lines, header, [][2]string{{"base_url", c.BaseURL}, {"api_key_env", c.APIKeyEnv}, {"model", c.Model}}), "\n")
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return err
+	}
+	if _, err := config.Load(path); err != nil {
+		_ = os.WriteFile(path, old, 0o600)
+		return fmt.Errorf("the config with the provider does not load (restored it): %w", err)
+	}
+	return nil
+}
+
+// compatHeader is the line of the [[brain.openai_compat]] header whose
+// table has name = "<name>" (-1: none).
+func compatHeader(lines []string, name string) int {
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "[[brain.openai_compat]]" {
+			continue
+		}
+		for j := i + 1; j < tableEnd(lines, i); j++ {
+			t := strings.TrimSpace(lines[j])
+			k, v, ok := strings.Cut(t, "=")
+			if !ok || strings.HasPrefix(t, "#") || strings.TrimSpace(k) != "name" {
+				continue
+			}
+			v, _, _ = strings.Cut(strings.TrimSpace(v), " #")
+			if strings.ToLower(strings.Trim(strings.TrimSpace(v), `"'`)) == name {
+				return i
+			}
+		}
+	}
+	return -1
 }

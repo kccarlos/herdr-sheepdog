@@ -187,7 +187,7 @@ history. `voice.billed_seconds {total_s}` is logged at every close and
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `voice.openai.api_key` | `OPENAI_API_KEY` | `""` | The OpenAI API key for GPT-Live. The voice only: the orchestrator never uses it. Normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it `openai` is listed by `GET /api/voice/providers` as unavailable ("no OPENAI_API_KEY"). |
+| `voice.openai.api_key` | `OPENAI_API_KEY` | `""` | The OpenAI API key for GPT-Live. The voice only: the orchestrator uses it only when the user ticks "Use the same OpenAI key" for the OpenAI orchestrator preset ([the OpenAI key rule](#brainopenai_compat)). Normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it `openai` is listed by `GET /api/voice/providers` as unavailable ("no OPENAI_API_KEY"). |
 | `voice.openai.model` | `SHEEPDOG_VOICE_OPENAI_MODEL` | `gpt-live-1` | The Live model. |
 | `voice.openai.voice` | `SHEEPDOG_VOICE_OPENAI_VOICE` | `marin` | The output voice (`marin`, `cedar`, `quartz`, `vesper`, …; fixed per session). |
 | `voice.openai.idle_close_s` | `SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S` | `45` | Close the live GPT-Live session after this many seconds with no input transcript, no model speech, no delegation or push in flight. A client that disconnects, mutes or goes silent stops all of those, so this is also how long a forgotten session keeps billing. While the client is muted, loud frames sent just before the mute and an unsettled input transcript do not hold the session open: muted, nothing playing and no push pending is idle (a delegation in flight still holds it for its answer). After an idle close the same room noise does not reopen it: the next opening needs the client's silence gate to close first, a quiet second, an unmute or a reconnect. |
@@ -396,6 +396,28 @@ model = "openai/gpt-oss-120b"
 | `base_url` | required | The API root, `http(s)://…`; `/chat/completions` and `/models` are appended (a trailing `/` is ignored). |
 | `api_key_env` | `<NAME>_API_KEY` (`-` as `_`) | The environment variable (or `--env-file` entry) holding the key. The key itself never goes in the TOML file. Not needed when `base_url` is a loopback address (`localhost`, `127.0.0.1`, `::1`): the provider is registered without a key and sends no `Authorization` header. |
 | `model` | required | The model the provider runs by default: the initial `brain.model` when `brain.provider` names this entry and `brain.model` is not set, and the model a failover to this provider uses. |
+
+**Entries the setup page writes.** Picking the OpenRouter, OpenAI, Ollama or
+LM Studio preset in `sheepdog setup` creates the entry named after it, or
+updates its `base_url`, `api_key_env` and `model` in place (a `label` and
+comments stay), and sets `SHEEPDOG_BRAIN_PROVIDER` / `SHEEPDOG_BRAIN_MODEL`
+in the env file. The file must still load, or the old one is restored.
+
+| Preset | `name` | `base_url` | `api_key_env` |
+|---|---|---|---|
+| OpenRouter | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| OpenAI | `openai` | `https://api.openai.com/v1` | `OPENAI_ORCH_API_KEY`, or `OPENAI_API_KEY` when reused |
+| Ollama | `ollama` | `http://localhost:11434/v1` | none needed (loopback) |
+| LM Studio | `lmstudio` | `http://localhost:1234/v1` | none needed (loopback) |
+
+**The OpenAI key rule.** `OPENAI_API_KEY` is the GPT-Live voice key
+(`[voice.openai]`). The OpenAI orchestrator keeps its own key in
+`OPENAI_ORCH_API_KEY`, even when the name `openai` is typed under Other URL.
+Only when the user ticks "Use the same OpenAI key (also used for the voice)"
+(offered when a voice key is saved, off by default) does the entry point at
+the voice key with `api_key_env = "OPENAI_API_KEY"`; the setup page then
+writes no key. Unticking it later switches the same entry back to
+`OPENAI_ORCH_API_KEY`, which then needs a key.
 
 ### Deprecated keys
 

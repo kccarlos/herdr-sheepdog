@@ -1,7 +1,7 @@
 // Unit tests for the setup page's Vertex AI helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { voiceChoice, orchChoice, vertexFields, voiceLine, savedKeyFor, savedNote, validateBody, checkLine } from './vertex.js';
+import { voiceChoice, vertexFields, voiceLine, savedKeyFor, savedNote, validateBody, checkLine } from './vertex.js';
 
 const key = 'AQ.a-key-that-is-long-enough-0000';
 const saved = { keys: { vertex: true }, vertex: { project: 'p-1', default_location: 'us-central1', live_model: 'gemini-3.8-live', voice: 'Puck' } };
@@ -11,10 +11,6 @@ test('the saved settings pick the radios', () => {
   assert.equal(voiceChoice({ provider: 'gemini', backend: 'aistudio' }), 'gemini');
   assert.equal(voiceChoice({ provider: 'openai', backend: 'vertex' }), 'openai');
   assert.equal(voiceChoice(undefined), 'gemini');
-  assert.equal(orchChoice('vertex'), 'vertex');
-  assert.equal(orchChoice('deepseek'), 'deepseek');
-  assert.equal(orchChoice('openrouter'), 'compat');
-  assert.equal(orchChoice(''), 'gemini');
 });
 
 test('which Vertex fields show', () => {
