@@ -5,9 +5,9 @@ import { presetById, savedPreset, orchValue, panel, keyLabel, keyEnv, savedAs, a
 
 // The shape /api/setup/state sends (internal/onboard/presets.go).
 const presets = [
-  { id: 'anthropic', label: 'Anthropic', kind: 'native', key_env: 'ANTHROPIC_API_KEY', key_needed: true, default_model: 'claude-opus-5-5', note: '★ most recommended' },
+  { id: 'anthropic', label: 'Anthropic', kind: 'native', key_env: 'ANTHROPIC_API_KEY', key_needed: true, default_model: 'claude-opus-5-5', note: '★ most recommended · 92 % understood in our tests, fewer wrong facts · slower, about 10× the cost of DeepSeek' },
   { id: 'gemini', label: 'Gemini', kind: 'native', key_env: 'GEMINI_API_KEY', key_needed: true, default_model: 'gemini-3.5-flash', note: 'free, can be slow or busy', key_saved: true },
-  { id: 'deepseek', label: 'DeepSeek', kind: 'native', key_env: 'DEEPSEEK_API_KEY', key_needed: true, note: 'cost-effective · did well in our tests' },
+  { id: 'deepseek', label: 'DeepSeek', kind: 'native', key_env: 'DEEPSEEK_API_KEY', key_needed: true, note: 'cost-effective · 92 % understood in our tests, fast, about 1/10 the cost of Opus' },
   { id: 'vertex', label: 'Vertex AI', kind: 'native', key_env: 'VERTEX_API_KEY', key_needed: true, note: 'Gemini on Google Cloud' },
   { id: 'openrouter', label: 'OpenRouter', kind: 'compat', base_url: 'https://openrouter.ai/api/v1', key_env: 'OPENROUTER_API_KEY', key_needed: true, note: 'one key, many models' },
   { id: 'openai', label: 'OpenAI', kind: 'compat', base_url: 'https://api.openai.com/v1', key_env: 'OPENAI_ORCH_API_KEY', reuse_env: 'OPENAI_API_KEY', key_needed: true, note: 'paid per token', reuse_offered: true },

@@ -5,7 +5,7 @@
       "label": "Recommended",
       "voice": "gemini",
       "orch": "anthropic",
-      "note": "The strongest orchestrator: understands your agents best.",
+      "note": "Claude Opus 5.5: understood as well as DeepSeek in our tests (92 %), with fewer wrong facts. Slower replies (about 7 s).",
       "need": "Needs an Anthropic API key (paid)."
     },
     {
@@ -13,7 +13,7 @@
       "label": "Cost-effective",
       "voice": "gemini",
       "orch": "deepseek",
-      "note": "Cost-effective, and it did well in our tests.",
+      "note": "DeepSeek: 92 % understood in our tests, replies in about 3 s, about a tenth of the cost of Opus.",
       "need": ""
     },
     {
