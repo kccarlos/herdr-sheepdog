@@ -430,6 +430,9 @@ func (b *Brain) SetModel(provider, name, via string) error {
 	b.accounts.Clear(RoleOrchestrator, provider)
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)
+	// Caches are per model: write the new one's (a no-op unless it is a
+	// CacheWarmer).
+	b.WarmCache()
 	return nil
 }
 

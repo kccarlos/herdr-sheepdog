@@ -87,6 +87,8 @@ type fakeAnthropic struct {
 	// onRequest runs while request i is in flight (late context).
 	onRequest func(i int)
 	issued    map[string]bool
+	// warmStatus answers warm-up requests with this HTTP error.
+	warmStatus int
 }
 
 func newFakeAnthropic(t *testing.T, script ...fakeReply) *fakeAnthropic {
@@ -142,6 +144,10 @@ func (f *fakeAnthropic) serve(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	if err := json.Unmarshal(data, &body); err != nil {
 		f.t.Errorf("request body: %v", err)
+	}
+	if mt, ok := body["max_tokens"].(float64); ok && mt == 0 {
+		f.warm(w, r, body)
+		return
 	}
 	f.mu.Lock()
 	i := len(f.bodies)
@@ -209,6 +215,31 @@ func (f *fakeAnthropic) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	sig := "sig:" + prefixHash(body, msgs)
 	f.writeStream(w, body, reply, sig, transformations)
+}
+
+// warm answers a max_tokens 0 request (the cache warm-up) the way the
+// API does: no content, stop_reason max_tokens, the cache write in the
+// usage. It does not consume the script.
+func (f *fakeAnthropic) warm(w http.ResponseWriter, r *http.Request, body map[string]any) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.headers = append(f.headers, r.Header.Clone())
+	status := f.warmStatus
+	f.mu.Unlock()
+	if body["stream"] == true {
+		writeAnthropicError(w, 400, "invalid_request_error", "max_tokens: 0 is not supported with stream: true")
+		return
+	}
+	if status != 0 {
+		writeAnthropicError(w, status, "overloaded_error", "Overloaded")
+		return
+	}
+	model, _ := body["model"].(string)
+	w.Header().Set("Content-Type", "application/json")
+	b, _ := json.Marshal(map[string]any{"id": "msg_warm", "type": "message", "role": "assistant", "model": model, "content": []any{},
+		"stop_reason": "max_tokens", "stop_sequence": nil,
+		"usage": map[string]any{"input_tokens": 3, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 4000, "output_tokens": 0}})
+	_, _ = w.Write(b)
 }
 
 func writeAnthropicError(w http.ResponseWriter, status int, typ, msg string) {
@@ -504,6 +535,9 @@ func TestAnthropicRequestShape(t *testing.T) {
 	if step["prompt_tokens"] != int32(1050) || step["cache_hit_tokens"] != int32(900) || step["completion_tokens"] != int32(30) {
 		t.Errorf("brain.step usage = %v", step)
 	}
+	if step["served_model"] != "claude-opus-5-5" {
+		t.Errorf("brain.step served_model = %v", step["served_model"])
+	}
 
 	// An event turn: effort low.
 	h.brain.Quiesce()
@@ -565,6 +599,11 @@ func TestAnthropicFallbackBlock(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "toolu_x") || strings.Contains(string(raw), `"thinking"`) || strings.Contains(string(raw), `"fallback"`) {
 		t.Errorf("raw kept the declined attempt: %s", raw)
+	}
+	// The fallback model served the response (message_start still names
+	// the requested one): the response and the raw say so.
+	if resp.ModelVersion != "claude-opus-5" || !strings.Contains(string(raw), `"served":"claude-opus-5"`) {
+		t.Errorf("served model = %q, raw %s", resp.ModelVersion, raw)
 	}
 }
 
@@ -830,5 +869,97 @@ func TestAnthropicCacheBreakpointsStableAcrossTurns(t *testing.T) {
 	}
 	if f.dropped != 0 {
 		t.Errorf("dropped %d thinking blocks", f.dropped)
+	}
+}
+
+// The cache warm-up sends the prefix the first step of a turn sends:
+// for an event turn and then a user turn, the same system text (with
+// the roster's aliases), tools, thinking, effort, model, fallbacks and
+// betas, byte for byte, with max_tokens 0, not streamed, and no
+// breakpoint on its placeholder line. Otherwise the cache it writes is
+// never read.
+func TestAnthropicWarmCacheMatchesTurns(t *testing.T) {
+	f := newFakeAnthropic(t, answer("Auth finished."), answer("Fine."))
+	h, _ := anthropicHarness(t, f, nil)
+	h.brain.WarmCache()
+	h.brain.Quiesce()
+	if f.count() != 2 {
+		t.Fatalf("warm-up requests = %d, want 2", f.count())
+	}
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "finished"}); err != nil {
+		t.Fatalf("announce: %v", err)
+	}
+	h.brain.Quiesce()
+	if _, err := h.ask("how is it going?", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]int{{0, 2}, {1, 3}} {
+		warm, turn := f.body(pair[0]), f.body(pair[1])
+		if warm["max_tokens"] != float64(0) || warm["stream"] != nil {
+			t.Errorf("warm-up %d: max_tokens %v, stream %v", pair[0], warm["max_tokens"], warm["stream"])
+		}
+		if strings.Contains(mustJSONString(warm["messages"]), "cache_control") {
+			t.Errorf("warm-up %d: breakpoint on the placeholder: %s", pair[0], mustJSONString(warm["messages"]))
+		}
+		for _, k := range []string{"system", "tools", "thinking", "output_config", "model", "fallbacks"} {
+			if a, b := mustJSONString(warm[k]), mustJSONString(turn[k]); a != b {
+				t.Errorf("request %d vs %d: %s differs:\n%s\n%s", pair[0], pair[1], k, a, b)
+			}
+		}
+		if a, b := f.header(pair[0]).Get("anthropic-beta"), f.header(pair[1]).Get("anthropic-beta"); a != b {
+			t.Errorf("request %d vs %d: anthropic-beta %q vs %q", pair[0], pair[1], a, b)
+		}
+	}
+	sys := mustJSONString(f.body(0)["system"])
+	if !strings.Contains(sys, "auth") || !strings.Contains(sys, "docs") {
+		t.Errorf("warm-up system text without the roster's aliases: %.300s", sys)
+	}
+	if got := f.body(0)["output_config"].(map[string]any)["effort"]; got != "low" {
+		t.Errorf("event warm-up effort = %v", got)
+	}
+	if got := f.body(1)["output_config"].(map[string]any)["effort"]; got != "medium" {
+		t.Errorf("utterance warm-up effort = %v", got)
+	}
+	warm := h.log.ofType("brain.warmup")
+	if len(warm) != 2 {
+		t.Fatalf("brain.warmup events = %d", len(warm))
+	}
+	for i, e := range warm {
+		p := payload(e)
+		if p["error"] != nil || p["cache_write_tokens"] != int64(4000) || p["provider"] != ProviderAnthropic {
+			t.Errorf("brain.warmup %d = %v", i, p)
+		}
+	}
+	if got := payload(warm[0])["kind"]; got != string(KindAnnounce) {
+		t.Errorf("first warm-up kind = %v", got)
+	}
+	if n := h.log.count("brain.step"); n != 2 {
+		t.Errorf("brain.step events = %d, want 2 (the warm-up is not a step)", n)
+	}
+}
+
+// A failed warm-up is logged and changes nothing: the turn runs.
+func TestAnthropicWarmCacheFailureIsHarmless(t *testing.T) {
+	f := newFakeAnthropic(t, answer("Fine."))
+	f.warmStatus = 529
+	h, _ := anthropicHarness(t, f, nil)
+	h.brain.WarmCache()
+	h.brain.Quiesce()
+	warm := h.log.ofType("brain.warmup")
+	if len(warm) != 2 || payload(warm[0])["error"] == nil {
+		t.Fatalf("brain.warmup = %v", warm)
+	}
+	if _, err := h.ask("how is it going?", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Providers without a prompt cache to write ahead do nothing.
+func TestWarmCacheOtherProviders(t *testing.T) {
+	h := newHarness(t, braintest.NewModel(), nil)
+	h.brain.WarmCache()
+	h.brain.Quiesce()
+	if n := h.log.count("brain.warmup"); n != 0 {
+		t.Errorf("brain.warmup on a provider without CacheWarmer: %d", n)
 	}
 }

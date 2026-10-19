@@ -446,6 +446,11 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		// over) are spoken like any daemon line, in the user's language.
 		s.brain.SetNotifier(func(n brain.Notice) { s.push("", s.noticeText(n), voice.UrgencyIdle) })
 		s.restorePromises()
+		// The roster is loaded (state.Open ran before New), so the
+		// system text is what the first turn sends: write the prompt
+		// cache now, in the background, for a provider that needs it
+		// (Anthropic; a no-op for the others).
+		s.brain.WarmCache()
 	}
 	return s, nil
 }
