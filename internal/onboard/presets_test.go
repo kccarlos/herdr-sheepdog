@@ -38,8 +38,8 @@ func TestPresetTable(t *testing.T) {
 		if p.Label == "" || p.Note == "" {
 			t.Errorf("%s: no label or note", p.ID)
 		}
-		// Anthropic's "★ most recommended" is the project's pick, not a
-		// measured quality claim; DeepSeek's is measured.
+		// DeepSeek's "★ most recommended" is the project's pick (the
+		// 2026-10-19 decision); both notes carry measured numbers.
 		if p.ID != "deepseek" && p.ID != "anthropic" && claims.MatchString(p.Note) {
 			t.Errorf("%s: quality claim in %q (only our measured ones may claim)", p.ID, p.Note)
 		}
@@ -51,8 +51,11 @@ func TestPresetTable(t *testing.T) {
 		}
 	}
 	a := Presets()[0]
-	if a.ID != "anthropic" || a.Kind != PresetNative || a.KeyEnv != "ANTHROPIC_API_KEY" || !a.KeyNeeded || a.DefaultModel != "claude-opus-5-5" || !strings.Contains(a.Note, "★ most recommended") {
+	if a.ID != "anthropic" || a.Kind != PresetNative || a.KeyEnv != "ANTHROPIC_API_KEY" || !a.KeyNeeded || a.DefaultModel != "claude-opus-5-5" || strings.Contains(a.Note, "★") {
 		t.Errorf("first preset = %+v, want the native Anthropic one", a)
+	}
+	if d, _ := PresetByID(Presets(), "deepseek"); !strings.Contains(d.Note, "★ most recommended") {
+		t.Errorf("deepseek = %+v, want the star", d)
 	}
 }
 

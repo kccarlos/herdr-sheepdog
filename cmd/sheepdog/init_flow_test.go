@@ -253,19 +253,19 @@ func TestFlowCards(t *testing.T) {
 		labels  int
 	}{
 		{
-			// 1 Recommended: Gemini key; voice model and voice kept; the
+			// 2 Claude Opus 5.5: Gemini key; voice model and voice kept; the
 			// Anthropic key and model kept; no tool test.
-			name:    "recommended",
-			stdin:   answers("1", flowGemini, "", "", flowAnthropic, "", "n", "n"),
+			name:    "opus",
+			stdin:   answers("2", flowGemini, "", "", flowAnthropic, "", "n", "n"),
 			summary: "Summary: You talk to gemini-3.8-live (Google AI Studio). Your agents are handled by claude-opus-5-5 (Anthropic). Cost: free with daily limits · $4/$20 per million tokens",
 			keys:    map[string]string{"GEMINI_API_KEY": flowGemini, "ANTHROPIC_API_KEY": flowAnthropic},
 			input:   onboard.ModelsInput{Voice: "gemini", Orchestrator: "anthropic"},
 			labels:  2,
 		},
 		{
-			// 2 Cost-effective: DeepSeek, and the second Live model and a voice.
-			name:    "cost",
-			stdin:   answers("2", flowGemini, "2", "kore", flowDeepSeek, "n"),
+			// 1 Recommended: DeepSeek, and the second Live model and a voice.
+			name:    "recommended",
+			stdin:   answers("1", flowGemini, "2", "kore", flowDeepSeek, "n"),
 			summary: "Summary: You talk to gemini-3.5-live (Google AI Studio). Your agents are handled by deepseek-flash (DeepSeek). Cost: free with daily limits · pay per use",
 			keys:    map[string]string{"GEMINI_API_KEY": flowGemini, "DEEPSEEK_API_KEY": flowDeepSeek},
 			input:   onboard.ModelsInput{Voice: "gemini", Orchestrator: "deepseek", VoiceModel: "gemini-3.5-live", VoiceName: "Kore"},
@@ -316,8 +316,8 @@ func TestFlowDefaultCardIsRecommendedOnAFreshInstall(t *testing.T) {
 	fakeFlowAPI(t)
 	noOnboardKeys(t)
 	// Enter at the first question takes the default card.
-	r := runFlow(t, answers("", flowGemini, "", "", flowAnthropic, "", "n", "n"))
-	if r.code != 0 || !strings.Contains(r.out, "choice [1]") || !strings.Contains(r.out, "Starting point: Recommended") || r.env["SHEEPDOG_BRAIN_PROVIDER"] != "anthropic" {
+	r := runFlow(t, answers("", flowGemini, "", "", flowDeepSeek, "n"))
+	if r.code != 0 || !strings.Contains(r.out, "choice [1]") || !strings.Contains(r.out, "Starting point: Recommended") || r.env["SHEEPDOG_BRAIN_PROVIDER"] != "deepseek" {
 		t.Fatalf("code %d\n%s", r.code, r.out)
 	}
 }
@@ -468,7 +468,7 @@ func TestFlowNonInteractiveFlags(t *testing.T) {
 	// A card.
 	t.Setenv("DEEPSEEK_API_KEY", flowDeepSeek)
 	r := runFlow(t, "", "--non-interactive", "--card", "cost", "--voice-name", "Puck")
-	if r.code != 0 || r.env["SHEEPDOG_BRAIN_PROVIDER"] != "deepseek" || r.env["DEEPSEEK_API_KEY"] != flowDeepSeek || !strings.Contains(r.out, "Starting point: Cost-effective") {
+	if r.code != 0 || r.env["SHEEPDOG_BRAIN_PROVIDER"] != "deepseek" || r.env["DEEPSEEK_API_KEY"] != flowDeepSeek || !strings.Contains(r.out, "Starting point: Recommended") {
 		t.Fatalf("cost: code %d\n%s", r.code, r.out)
 	}
 	// Custom with flags: a preset, a model, a Live model.
@@ -484,9 +484,9 @@ func TestFlowNonInteractiveFlags(t *testing.T) {
 	}
 	// A missing key or an unknown choice is an error and writes nothing.
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	r = runFlow(t, "", "--non-interactive", "--card", "recommended")
+	r = runFlow(t, "", "--non-interactive", "--card", "opus")
 	if r.code == 0 || !strings.Contains(r.out, "ANTHROPIC_API_KEY") || len(r.env) > 0 {
-		t.Errorf("recommended without a key: code %d\n%s", r.code, r.out)
+		t.Errorf("opus without a key: code %d\n%s", r.code, r.out)
 	}
 	if r := runFlow(t, "", "--non-interactive", "--card", "nope"); r.code == 0 || !strings.Contains(r.out, "--card") {
 		t.Errorf("unknown card: %d %s", r.code, r.out)

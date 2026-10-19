@@ -31,7 +31,7 @@ func printInitUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog init [flags]")
 	fprintln(w, "")
 	fprintln(w, "Sets sheepdog up in the terminal, with the same choices as the setup page:")
-	fprintln(w, "a starting point (Recommended, Cost-effective, Free quick start or Custom),")
+	fprintln(w, "a starting point (Recommended, Claude Opus 5.5, Free quick start or Custom),")
 	fprintln(w, "the voice (Gemini Live on AI Studio or Vertex AI, or GPT-Live) with its model")
 	fprintln(w, "and voice, and the orchestrator (a preset: Anthropic, Gemini, DeepSeek, Vertex")
 	fprintln(w, "AI, OpenRouter, OpenAI, Ollama, LM Studio or any OpenAI-compatible URL) with")
@@ -47,7 +47,7 @@ func printInitUsage(w io.Writer) {
 	fprintln(w, "                         ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, OPENAI_API_KEY, VERTEX_API_KEY,")
 	fprintln(w, "                         OPENROUTER_API_KEY, OPENAI_ORCH_API_KEY, --compat-key-env) or are kept")
 	fprintln(w, "                         from the env file; without choices below: the Free quick start")
-	fprintln(w, "  --card ID              starting point: recommended | cost | free | custom")
+	fprintln(w, "  --card ID              starting point: recommended | opus | free | custom")
 	fprintln(w, "  --voice ID             gemini (AI Studio) | vertex | openai (GPT-Live)")
 	fprintln(w, "  --voice-model ID       the voice's Live model (default: the configured one)")
 	fprintln(w, "  --voice-name NAME      the voice (default: the configured one)")
@@ -329,7 +329,7 @@ func (f *initFlow) startingPoint() (onboard.StartCard, error) {
 	if f.o.card != "" {
 		c, ok := onboard.CardByID(f.o.card)
 		if !ok {
-			return c, fmt.Errorf("--card %q: want recommended, cost, free or custom", f.o.card)
+			return c, fmt.Errorf("--card %q: want recommended, opus, free or custom", f.o.card)
 		}
 		if c.Orch != "" && !f.hasPreset(c.Orch) {
 			return c, fmt.Errorf("--card %s needs the %s preset", c.ID, c.Orch)
@@ -344,7 +344,7 @@ func (f *initFlow) startingPoint() (onboard.StartCard, error) {
 		c, _ := onboard.CardByID(onboard.CardFree)
 		return f.announce(c), nil
 	}
-	init := onboard.InitialChoice(onboard.VoiceSetupNeeded(f.cur, f.existing), f.hasPreset(brain.ProviderAnthropic), f.savedVoice(), f.savedOrch())
+	init := onboard.InitialChoice(onboard.VoiceSetupNeeded(f.cur, f.existing), f.hasPreset(brain.ProviderDeepSeek), f.savedVoice(), f.savedOrch())
 	ids, labels := make([]string, len(cards)), make([]string, len(cards))
 	for i, c := range cards {
 		ids[i], labels[i] = c.ID, c.Label+": "+c.Note
@@ -558,8 +558,8 @@ func (f *initFlow) orchestratorStep(card onboard.StartCard, voice string) (strin
 			ids[i], labels[i] = p.ID, p.Label+": "+p.Note
 		}
 		def := f.savedOrch()
-		if onboard.VoiceSetupNeeded(f.cur, f.existing) && f.hasPreset(brain.ProviderAnthropic) {
-			def = brain.ProviderAnthropic
+		if onboard.VoiceSetupNeeded(f.cur, f.existing) && f.hasPreset(brain.ProviderDeepSeek) {
+			def = brain.ProviderDeepSeek
 		}
 		if f.in.nonInteractive {
 			def = brain.ProviderGemini

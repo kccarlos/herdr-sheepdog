@@ -1,6 +1,6 @@
 # Plan: choosing models in setup (step 1), and the Anthropic orchestrator
 
-Status: **steps 1–6 done (2026-10-19).** Approved in outline by the CEO on 2026-10-16. The Opus 5.5 eval is [eval/anthropic-opus-2026-10-19.md](eval/anthropic-opus-2026-10-19.md). Builds on #271 (model discovery and the tool-calling probe on the setup page).
+Status: **steps 1–6 done (2026-10-19).** **Decision (CEO, 2026-10-19): DeepSeek is the recommended orchestrator.** The eval measured Opus 5.5 and deepseek-flash equal on Understood (92 % of segments), Done and Safe; Opus had fewer unsupported statements (+5 pp, possibly chance) but was 2–3x slower (user turns p50 7.4 s vs 3.0 s) and about 70x more expensive. Approved in outline by the CEO on 2026-10-16. The Opus 5.5 eval is [eval/anthropic-opus-2026-10-19.md](eval/anthropic-opus-2026-10-19.md). Builds on #271 (model discovery and the tool-calling probe on the setup page).
 
 ## Goals
 
@@ -16,8 +16,8 @@ Status: **steps 1–6 done (2026-10-19).** Approved in outline by the CEO on 202
 
 | Card | Voice | Orchestrator | Copy (short) |
 |---|---|---|---|
-| **Recommended** (selected by default) | Gemini Live (free key) | **Anthropic, Claude Opus 5.5** | "Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s)." Needs an Anthropic API key (paid). (Was "The strongest orchestrator: understands your agents best."; the eval did not show that.) |
-| **Cost-effective** | Gemini Live | **DeepSeek** (deepseek-flash) | "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less." |
+| **Recommended** (selected by default) | Gemini Live (free key) | **DeepSeek** (deepseek-flash) | "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs little." Needs a DeepSeek API key (paid). (Until 2026-10-19 this was Opus 5.5, and DeepSeek was a separate Cost-effective card; `--card cost` still selects it.) |
+| **Claude Opus 5.5** | Gemini Live | **Anthropic, Claude Opus 5.5** | "92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower (about 7 s) and costs much more." Needs an Anthropic API key (paid). |
 | **Free quick start** | Gemini Live | Gemini (same key) | "One free key for both. Good for trying; can be slow or busy. Upgrade any time." |
 | **Custom** | any | any | Pick each part. |
 
@@ -33,8 +33,8 @@ Status: **steps 1–6 done (2026-10-19).** Approved in outline by the CEO on 202
 
 | Preset | Base URL (filled in) | Key | Default model | Label |
 |---|---|---|---|---|
-| **Anthropic** | Anthropic Messages API (native adapter, below) | yes | **claude-opus-5-5** (also lists Sonnet 5.5, Haiku 5.5 via `GET /v1/models`) | **★ Most recommended** |
-| **DeepSeek** | built in | yes | deepseek-flash | **Cost-effective** · 92 % understood in our tests · fast (eval/anthropic-opus-2026-10-19.md; 91 % vs 81 % for Gemini 3.5 Flash in eval/vertex-2026-10-11.md); shows the balance |
+| **Anthropic** | Anthropic Messages API (native adapter, below) | yes | **claude-opus-5-5** (also lists Sonnet 5.5, Haiku 5.5 via `GET /v1/models`) | 92 % understood in our tests · fewer unsupported statements · slower, costs more |
+| **DeepSeek** | built in | yes | deepseek-flash | **★ most recommended** · 92 % understood in our tests · fast, low cost (eval/anthropic-opus-2026-10-19.md; 91 % vs 81 % for Gemini 3.5 Flash in eval/vertex-2026-10-11.md); shows the balance |
 | OpenRouter | `https://openrouter.ai/api/v1` | yes | pick from the list (tool-capable first) | one key, many models; shows credit |
 | OpenAI | `https://api.openai.com/v1` | yes | a small tool-capable model | asks before reusing a GPT-Live key (the OpenAI key was voice-only by the CEO's earlier rule; reuse needs an explicit yes) |
 | Gemini | built in (AI Studio) | reuses the voice key | gemini-3.5-flash, changeable from the key's model list | free; can be slow or busy |
@@ -78,6 +78,6 @@ The orchestrator is Go, so the adapter uses the official Go SDK (`github.com/ant
 
 ## Open questions
 
-1. Default card: Recommended (Opus 5.5) needs a paid Anthropic account; is the extra signup acceptable for most users, or should "Free quick start" be preselected with Recommended highlighted?
+1. ~~Default card: Recommended (Opus 5.5) needs a paid Anthropic account; is the extra signup acceptable for most users, or should "Free quick start" be preselected with Recommended highlighted?~~ **Closed 2026-10-19:** Recommended is now DeepSeek (paid, but cheap and as good in our tests) and stays preselected on a fresh install; Opus 5.5 is its own card.
 2. OpenAI as an orchestrator: reuse the GPT-Live key only on an explicit yes (proposed).
 3. Budget for the eval runs (Anthropic API spend and Claude quota).

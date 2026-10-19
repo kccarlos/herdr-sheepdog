@@ -75,21 +75,24 @@ func TestCardsAndInitialChoice(t *testing.T) {
 		t.Errorf("cards = %v", ids)
 	}
 	for _, tc := range []struct{ v, o, want string }{
-		{"gemini", "anthropic", "recommended"}, {"gemini", "deepseek", "cost"}, {"gemini", "gemini", "free"},
+		{"gemini", "deepseek", "recommended"}, {"gemini", "anthropic", "opus"}, {"gemini", "gemini", "free"},
 		{"openai", "anthropic", "custom"}, {"vertex", "vertex", "custom"}, {"gemini", "ollama", "custom"},
 	} {
 		if got := CardFor(tc.v, tc.o); got != tc.want {
 			t.Errorf("CardFor(%s,%s) = %s, want %s", tc.v, tc.o, got, tc.want)
 		}
 	}
-	if c := InitialChoice(true, true, "gemini", "gemini"); c.Card != "recommended" || c.Orch != "anthropic" {
+	if c := InitialChoice(true, true, "gemini", "gemini"); c.Card != "recommended" || c.Orch != "deepseek" {
 		t.Errorf("fresh = %+v", c)
 	}
 	if c := InitialChoice(false, true, "gemini", "gemini"); c.Card != "free" {
 		t.Errorf("saved = %+v", c)
 	}
 	if c := InitialChoice(true, false, "gemini", "gemini"); c.Card != "free" {
-		t.Errorf("no anthropic preset = %+v", c)
+		t.Errorf("no deepseek preset = %+v", c)
+	}
+	if c, ok := CardByID("cost"); !ok || c.ID != "recommended" {
+		t.Errorf("the old cost card = %+v, %v", c, ok)
 	}
 }
 

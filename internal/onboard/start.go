@@ -14,9 +14,12 @@ import (
 // Starting-point card ids.
 const (
 	CardRecommended = "recommended"
-	CardCost        = "cost"
+	CardOpus        = "opus"
 	CardFree        = "free"
 	CardCustom      = "custom"
+	// cardCostAlias is the old Cost-effective card, now part of
+	// Recommended; `--card cost` still selects it.
+	cardCostAlias = "cost"
 )
 
 // StartCard is one starting point. Voice and Orch are the voice card and
@@ -34,10 +37,10 @@ type StartCard struct {
 // StartCards are the four starting points, in the order shown.
 func StartCards() []StartCard {
 	return []StartCard{
-		{ID: CardRecommended, Label: "Recommended", Voice: VoiceGemini, Orch: brain.ProviderAnthropic,
-			Note: "Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s).", Need: "Needs an Anthropic API key (paid)."},
-		{ID: CardCost, Label: "Cost-effective", Voice: VoiceGemini, Orch: brain.ProviderDeepSeek,
-			Note: "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less."},
+		{ID: CardRecommended, Label: "Recommended", Voice: VoiceGemini, Orch: brain.ProviderDeepSeek,
+			Note: "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs little.", Need: "Needs a DeepSeek API key (paid)."},
+		{ID: CardOpus, Label: "Claude Opus 5.5", Voice: VoiceGemini, Orch: brain.ProviderAnthropic,
+			Note: "92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower (about 7 s) and costs much more.", Need: "Needs an Anthropic API key (paid)."},
 		{ID: CardFree, Label: "Free quick start", Voice: VoiceGemini, Orch: brain.ProviderGemini,
 			Note: "One free key for both. Good for trying; can be slow or busy. Upgrade any time."},
 		{ID: CardCustom, Label: "Custom", Note: "Pick each part yourself."},
@@ -46,6 +49,9 @@ func StartCards() []StartCard {
 
 // CardByID finds a card.
 func CardByID(id string) (StartCard, bool) {
+	if id == cardCostAlias {
+		id = CardRecommended
+	}
 	for _, c := range StartCards() {
 		if c.ID == id {
 			return c, true
@@ -74,11 +80,11 @@ type StartChoice struct {
 
 // InitialChoice is what the setup starts on: with nothing saved (the
 // voice has no credentials) the Recommended card, else the saved voice
-// and orchestrator and the card that matches them. hasAnthropic: the
-// Anthropic preset exists (an older daemon keeps the saved choice).
-func InitialChoice(setupNeeded, hasAnthropic bool, savedVoice, savedOrch string) StartChoice {
-	if setupNeeded && hasAnthropic {
-		return StartChoice{Card: CardRecommended, Voice: VoiceGemini, Orch: brain.ProviderAnthropic}
+// and orchestrator and the card that matches them. hasDeepSeek: the
+// DeepSeek preset exists (an older daemon keeps the saved choice).
+func InitialChoice(setupNeeded, hasDeepSeek bool, savedVoice, savedOrch string) StartChoice {
+	if setupNeeded && hasDeepSeek {
+		return StartChoice{Card: CardRecommended, Voice: VoiceGemini, Orch: brain.ProviderDeepSeek}
 	}
 	return StartChoice{Card: CardFor(savedVoice, savedOrch), Voice: savedVoice, Orch: savedOrch}
 }
