@@ -724,8 +724,6 @@ func withName(c SetupCheck, name string) SetupCheck {
 	return c
 }
 
-func orDefault(v, def string) string { return onboard.OrDefault(v, def) }
-
 // restartSoon asks for the in-place restart once the response is out.
 func (s *Server) restartSoon(reason string) {
 	if s.deps.Restart == nil {

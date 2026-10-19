@@ -233,8 +233,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	orch, err := f.orchestratorStep(card, voice)
-	if err != nil {
+	if _, err := f.orchestratorStep(card, voice); err != nil {
 		return err
 	}
 
@@ -247,7 +246,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 		ch.Compat.APIKeyEnv = o.compat.APIKeyEnv
 	}
 	fprintln(out, "")
-	fprintln(out, "Summary: "+f.summary(ch, orch))
+	fprintln(out, "Summary: "+f.summary(ch))
 
 	// The web token: only for a new config, and never over one that
 	// exists anywhere (the phone is paired with it).
@@ -593,7 +592,7 @@ func (f *initFlow) orchestratorStep(card onboard.StartCard, voice string) (strin
 	case brain.ProviderVertex:
 		err = f.vertexOrch(voice)
 	default:
-		err = f.compatOrch(p, voice)
+		err = f.compatOrch(p)
 	}
 	return id, err
 }
@@ -688,7 +687,7 @@ func (f *initFlow) wantToolTest() bool {
 }
 
 // compatOrch handles OpenRouter, OpenAI, Ollama, LM Studio and Other URL.
-func (f *initFlow) compatOrch(p onboard.Preset, voice string) error {
+func (f *initFlow) compatOrch(p onboard.Preset) error {
 	name, base := p.ID, p.BaseURL
 	if p.Kind == onboard.PresetOther {
 		var err error
@@ -708,7 +707,7 @@ func (f *initFlow) compatOrch(p onboard.Preset, voice string) error {
 	reuse := false
 	var key string
 	if keyed || p.Kind == onboard.PresetOther {
-		reuse = p.ReuseEnv != "" && (f.o.reuseOpenAIKey || f.askReuse(p, voice))
+		reuse = p.ReuseEnv != "" && (f.o.reuseOpenAIKey || f.askReuse(p))
 		f.input.Compat.ReuseKey = reuse
 		env := onboard.CompatKeyEnv(f.cur, name, reuse)
 		if p.Kind == onboard.PresetOther && f.o.compat.APIKeyEnv != "" {
@@ -770,7 +769,7 @@ func pp(p onboard.Preset) string {
 
 // askReuse offers the voice's OpenAI key to the OpenAI orchestrator, only
 // on an explicit yes.
-func (f *initFlow) askReuse(p onboard.Preset, voice string) bool {
+func (f *initFlow) askReuse(p onboard.Preset) bool {
 	if f.in.nonInteractive || (f.have[p.ReuseEnv] == "" && f.existing[p.ReuseEnv] == "") {
 		return false
 	}
@@ -813,7 +812,7 @@ func isTool(m onboard.ModelInfo) bool { return m.Tools != nil && *m.Tools }
 func (f *initFlow) pickCompatModel(list onboard.ModelsResponse) (string, error) {
 	entries := make([]onboard.ModelEntry, len(list.Models))
 	for i, m := range list.Models {
-		entries[i] = onboard.ModelEntry{ID: m.ID, Tools: m.Tools}
+		entries[i] = onboard.ModelEntry(m)
 	}
 	return f.pickOrchModel(entries, list.Suggested, true)
 }
@@ -854,7 +853,7 @@ func (f *initFlow) pickOrchModel(entries []onboard.ModelEntry, def string, requi
 }
 
 // summary is the page's summary line for the resolved choice.
-func (f *initFlow) summary(ch onboard.ModelsChoice, orch string) string {
+func (f *initFlow) summary(ch onboard.ModelsChoice) string {
 	gp, op := onboard.VoicePicks(f.cur)
 	vm := gp.Model
 	if ch.Voice == onboard.VoiceOpenAI {

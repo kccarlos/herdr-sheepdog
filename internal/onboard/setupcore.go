@@ -379,7 +379,7 @@ func FindModels(ctx context.Context, client *http.Client, presets []Preset, req 
 	}
 	list = ChatModels(preset, list)
 	for _, m := range list {
-		resp.Models = append(resp.Models, ModelInfo{ID: m.ID, Tools: m.Tools})
+		resp.Models = append(resp.Models, ModelInfo(m))
 		if m.Tools != nil {
 			resp.ToolInfo = true
 		}

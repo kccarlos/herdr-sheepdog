@@ -195,12 +195,6 @@ func (p *prompter) ask(q, flag, def string) (string, error) {
 	}
 }
 
-// choose picks one of ids (flag, else a numbered menu; the first is the
-// default).
-func (p *prompter) choose(flag, q string, ids, labels []string) (string, error) {
-	return p.chooseDef(q, ids, labels, ids[0], flag)
-}
-
 // chooseDef picks one of ids: the flag if given, def when nothing is
 // asked (non-interactive), else a numbered menu where Enter takes def.
 func (p *prompter) chooseDef(q string, ids, labels []string, def string, flag ...string) (string, error) {

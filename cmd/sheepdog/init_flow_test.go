@@ -57,12 +57,10 @@ func jsonOK(w http.ResponseWriter, body string) {
 
 // fakeFlowAPI is every API the flow calls: Gemini (model list), OpenAI,
 // Anthropic, Vertex (countTokens), DeepSeek, OpenRouter and a local
-// Ollama. It records whether each one saw a request.
-func fakeFlowAPI(t *testing.T) (calls *[]string) {
+// Ollama.
+func fakeFlowAPI(t *testing.T) {
 	t.Helper()
-	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Method+" "+r.URL.Path)
 		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		p := r.URL.Path
 		switch {
@@ -143,7 +141,6 @@ func fakeFlowAPI(t *testing.T) (calls *[]string) {
 		return ps
 	}
 	t.Cleanup(func() { onboardEndpoints, initPresets = oldEp, oldPresets })
-	return &seen
 }
 
 // keyPrompts records the label of every hidden prompt for the test.
@@ -189,7 +186,7 @@ func runFlow(t *testing.T, stdin string, args ...string) flowRun {
 
 // webSave is what the setup page's save writes for the same choices: the
 // shared resolve and save, on a fresh directory.
-func webSave(t *testing.T, in onboard.ModelsInput, keys map[string]string) (env map[string]string, cfg string) {
+func webSave(t *testing.T, in onboard.ModelsInput) (env map[string]string, cfg string) {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath, envPath := filepath.Join(dir, "config.toml"), filepath.Join(dir, ".env")
@@ -197,7 +194,7 @@ func webSave(t *testing.T, in onboard.ModelsInput, keys map[string]string) (env 
 	if msg != "" {
 		t.Fatal(msg)
 	}
-	if _, err := onboard.SaveModels(cfgPath, envPath, map[string]string{}, ch, keys); err != nil {
+	if _, err := onboard.SaveModels(cfgPath, envPath, map[string]string{}, ch, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(cfgPath); err != nil {
@@ -303,7 +300,7 @@ func TestFlowCards(t *testing.T) {
 					t.Errorf("%s not saved", env)
 				}
 			}
-			wantEnv, wantCfg := webSave(t, c.input, nil)
+			wantEnv, wantCfg := webSave(t, c.input)
 			for k, v := range c.keys {
 				wantEnv[k] = v
 			}
@@ -351,7 +348,7 @@ func TestFlowCustomOllama(t *testing.T) {
 	}
 	in := onboard.ModelsInput{Voice: "gemini", Orchestrator: "ollama"}
 	in.Compat.Model = "llama3.2"
-	wantEnv, wantCfg := webSave(t, in, nil)
+	wantEnv, wantCfg := webSave(t, in)
 	wantEnv["GEMINI_API_KEY"] = flowGemini
 	sameSaved(t, r, wantEnv, wantCfg)
 	if !strings.Contains(r.cfg, `name = "ollama"`) || !strings.Contains(r.cfg, `base_url = "http://localhost:11434/v1"`) && !strings.Contains(r.cfg, "ollama.test") {
@@ -420,7 +417,7 @@ func TestFlowGPTLiveAndOpenAIOrchestratorReusingTheKey(t *testing.T) {
 	}
 	in := onboard.ModelsInput{Voice: "openai", Orchestrator: "openai", VoiceModel: "gpt-live-2"}
 	in.Compat.Model, in.Compat.ReuseKey = "gpt-5-mini", true
-	wantEnv, wantCfg := webSave(t, in, nil)
+	wantEnv, wantCfg := webSave(t, in)
 	wantEnv["OPENAI_API_KEY"] = flowOpenAI
 	sameSaved(t, r, wantEnv, wantCfg)
 }
@@ -449,7 +446,7 @@ func TestFlowVertexVoiceAndOrchestrator(t *testing.T) {
 	}
 	in := onboard.ModelsInput{Voice: "vertex", Orchestrator: "vertex"}
 	in.Vertex.Project = "my-project"
-	wantEnv, wantCfg := webSave(t, in, nil)
+	wantEnv, wantCfg := webSave(t, in)
 	wantEnv["VERTEX_API_KEY"] = flowVertex
 	sameSaved(t, r, wantEnv, wantCfg)
 }
@@ -488,7 +485,7 @@ func TestFlowNonInteractiveFlags(t *testing.T) {
 	// A missing key or an unknown choice is an error and writes nothing.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	r = runFlow(t, "", "--non-interactive", "--card", "recommended")
-	if r.code == 0 || !strings.Contains(r.out, "ANTHROPIC_API_KEY") || r.env != nil && len(r.env) > 0 {
+	if r.code == 0 || !strings.Contains(r.out, "ANTHROPIC_API_KEY") || len(r.env) > 0 {
 		t.Errorf("recommended without a key: code %d\n%s", r.code, r.out)
 	}
 	if r := runFlow(t, "", "--non-interactive", "--card", "nope"); r.code == 0 || !strings.Contains(r.out, "--card") {

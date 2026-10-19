@@ -189,7 +189,7 @@ func (s *Server) handleSetupAnthropicModels(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	for _, m := range list {
-		resp.Models = append(resp.Models, SetupModel{ID: m.ID, Tools: m.Tools})
+		resp.Models = append(resp.Models, SetupModel(m))
 		resp.ToolInfo = resp.ToolInfo || m.Tools != nil
 	}
 	if p, ok := onboard.PresetByID(s.presets(), brain.ProviderAnthropic); ok {
