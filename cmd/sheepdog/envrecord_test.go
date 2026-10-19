@@ -61,9 +61,19 @@ func TestAutoRestartPassesTheEnvFile(t *testing.T) {
 
 	cfgPath, dataDir, port := lifeSetup(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	var stdout, stderr syncBuffer
-	go run(ctx, []string{"serve", "--config", cfgPath, "--voice", "off", "--herdr", "mock"}, &stdout, &stderr)
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"serve", "--config", cfgPath, "--voice", "off", "--herdr", "mock"}, &stdout, &stderr)
+	}()
+	// Stop the daemon before the temp dirs go.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
+	})
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitFor(t, func() bool { _, err := daemon.GetHello(ctx, base); return err == nil })
 
