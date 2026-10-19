@@ -25,6 +25,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
 
 // Status is a check's outcome.
@@ -77,13 +78,19 @@ type Endpoints struct {
 	GeminiBase string
 	// OpenAIBase is the OpenAI API root (https://api.openai.com/v1).
 	OpenAIBase string
+	// VertexBase is the Vertex AI REST root for the key and project
+	// check ("": https://aiplatform.googleapis.com).
+	VertexBase string
+	// VertexLive opens a setup-only Gemini Live session on Vertex AI and
+	// closes it (CheckVertex's location check); nil skips that check.
+	VertexLive func(ctx context.Context, apiKey, project, location, model string) error
 	// HTTP is the client (default: a 10 s timeout).
 	HTTP *http.Client
 }
 
 // DefaultEndpoints are the real API roots.
 func DefaultEndpoints() Endpoints {
-	return Endpoints{GeminiBase: "https://generativelanguage.googleapis.com", OpenAIBase: "https://api.openai.com/v1"}
+	return Endpoints{GeminiBase: "https://generativelanguage.googleapis.com", OpenAIBase: "https://api.openai.com/v1", VertexLive: gemini.CheckVertexLive}
 }
 
 func (e Endpoints) client() *http.Client {

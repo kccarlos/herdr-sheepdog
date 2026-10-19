@@ -212,6 +212,7 @@ type SetupState struct {
 	// Keys says which keys are saved (never their values).
 	Keys         SetupKeys         `json:"keys"`
 	Voice        SetupVoice        `json:"voice"`
+	Vertex       SetupVertex       `json:"vertex"`
 	Orchestrator SetupOrchestrator `json:"orchestrator"`
 	Herdr        SetupHerdr        `json:"herdr"`
 	Phone        SetupPhone        `json:"phone"`
@@ -225,11 +226,30 @@ type SetupKeys struct {
 	Gemini   bool `json:"gemini"`
 	OpenAI   bool `json:"openai"`
 	DeepSeek bool `json:"deepseek"`
+	// Vertex: a Vertex AI key is saved (for Vertex.Project only).
+	Vertex bool `json:"vertex"`
+}
+
+// SetupVertex is the Vertex AI block's state: the saved project and
+// location (not secrets), the Live model and voice the Vertex voice uses,
+// and the orchestrator models known to answer on Vertex (its model
+// listing refuses an API key, so the list is brain.VertexModels).
+type SetupVertex struct {
+	Project         string   `json:"project"`
+	Location        string   `json:"location"`
+	DefaultLocation string   `json:"default_location"`
+	LiveModel       string   `json:"live_model"`
+	Voice           string   `json:"voice"`
+	Models          []string `json:"models"`
+	DefaultModel    string   `json:"default_model"`
+	APIURL          string   `json:"api_url"`
 }
 
 // SetupVoice is the voice side of SetupState.
 type SetupVoice struct {
-	Provider    string `json:"provider"`
+	Provider string `json:"provider"`
+	// Backend is the Gemini Live backend: aistudio or vertex.
+	Backend     string `json:"backend"`
 	Status      string `json:"status"`
 	Problem     string `json:"problem,omitempty"`
 	SetupNeeded bool   `json:"setup_needed"`
@@ -276,9 +296,10 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 	st := SetupState{
 		Boot: sd.Boot.UTC().Format(time.RFC3339Nano), Version: s.deps.Version, URL: "http://" + s.Addr(),
 		EnvFile: sd.EnvPath, ConfigFile: sd.ConfigPath,
-		Keys:  SetupKeys{Gemini: len(cfg.Gemini.APIKeys) > 0, OpenAI: cfg.Voice.OpenAI.APIKey != "", DeepSeek: cfg.DeepSeek.APIKey != ""},
-		Voice: SetupVoice{Provider: s.voiceProvider(), Status: hs.status.String()},
-		Links: map[string]string{"get_key": GeminiKeyURL, "testflight": TestFlightURL, "ios_repo": IOSRepoURL, "models_doc": ModelsDocURL, "remote_doc": RemoteDocURL},
+		Keys:   SetupKeys{Gemini: len(cfg.Gemini.APIKeys) > 0, OpenAI: cfg.Voice.OpenAI.APIKey != "", DeepSeek: cfg.DeepSeek.APIKey != "", Vertex: cfg.Gemini.Vertex.APIKey != ""},
+		Voice:  SetupVoice{Provider: s.voiceProvider(), Backend: cfg.Gemini.Backend, Status: hs.status.String()},
+		Vertex: setupVertex(cfg),
+		Links:  map[string]string{"get_key": GeminiKeyURL, "testflight": TestFlightURL, "ios_repo": IOSRepoURL, "models_doc": ModelsDocURL, "remote_doc": RemoteDocURL},
 	}
 	if s.deps.VoiceIssue != nil {
 		st.Voice.Problem = s.deps.VoiceIssue()
@@ -305,6 +326,23 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 		st.Demo = &d
 	}
 	return st
+}
+
+// DefaultVertexLocation is the location the setup page offers for the
+// Vertex voice: gemini-3.8-live is served from us-central1 and the us
+// multi-region, not from global (CONFIG.md, [gemini.vertex]).
+const DefaultVertexLocation = "us-central1"
+
+func setupVertex(cfg config.Config) SetupVertex {
+	v := SetupVertex{
+		Project: cfg.Gemini.Vertex.Project, Location: cfg.Gemini.Vertex.Location, DefaultLocation: DefaultVertexLocation,
+		LiveModel: cfg.Gemini.Model, Voice: cfg.Gemini.Voice, DefaultModel: brain.DefaultModel, APIURL: onboard.VertexAPIURL,
+		Models: []string{},
+	}
+	for _, m := range brain.VertexModels {
+		v.Models = append(v.Models, m.Name)
+	}
+	return v
 }
 
 func (s *Server) setupPhone() SetupPhone {
@@ -336,12 +374,18 @@ func (s *Server) setupPhone() SetupPhone {
 // SetupValidateRequest is POST /api/setup/validate: one key to check
 // live, before anything is saved.
 type SetupValidateRequest struct {
-	// Kind is gemini, openai, deepseek or compat.
+	// Kind is gemini, openai, deepseek, compat or vertex.
 	Kind string `json:"kind"`
 	Key  string `json:"key"`
 	// BaseURL and Name are the compat provider's.
 	BaseURL string `json:"base_url,omitempty"`
 	Name    string `json:"name,omitempty"`
+	// Project and Location are Vertex AI's; Voice also checks that the
+	// location serves the Live model. An empty Key uses the saved Vertex
+	// key, only for the project it was saved for.
+	Project  string `json:"project,omitempty"`
+	Location string `json:"location,omitempty"`
+	Voice    bool   `json:"voice,omitempty"`
 }
 
 // SetupCheck is one check's outcome for the page.
@@ -382,8 +426,29 @@ func (s *Server) validateKey(ctx context.Context, req SetupValidateRequest) Setu
 			return SetupCheck{Name: name + " key", Status: "fail", Detail: "no base URL", Fix: "give the API root, e.g. https://openrouter.ai/api/v1"}
 		}
 		return checkOf(onboard.CheckCompat(ctx, ep, onboard.Compat{Name: name, BaseURL: c.BaseURL, APIKey: key, KeyEnv: config.DefaultCompatKeyEnv(name), NoKey: c.KeyOptional()}, false)[0])
+	case "vertex":
+		project := strings.TrimSpace(req.Project)
+		if key == "" {
+			key = s.savedVertexKey(project)
+		}
+		live := ""
+		if req.Voice {
+			live = s.deps.Setup.Config.Gemini.Model
+		}
+		return checkOf(onboard.CheckVertex(ctx, ep, onboard.VertexCreds{APIKey: key, Project: project, Location: req.Location}, live))
 	}
 	return SetupCheck{Name: req.Kind, Status: "fail", Detail: "unknown key kind " + fmt.Sprintf("%q", req.Kind)}
+}
+
+// savedVertexKey is the saved Vertex key, only when project is the
+// project it was saved for: a key bound to one project's service account
+// is not tried on another.
+func (s *Server) savedVertexKey(project string) string {
+	v := s.deps.Setup.Config.Gemini.Vertex
+	if v.APIKey == "" || project == "" || v.Project != project {
+		return ""
+	}
+	return v.APIKey
 }
 
 func compatName(n string) string {
@@ -408,13 +473,23 @@ func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 // fails its live check, saves nothing.
 type SetupKeysRequest struct {
 	GeminiKey string `json:"gemini_key"`
-	// Voice is gemini (default) or openai (GPT-Live).
+	// Voice is gemini (default: Gemini Live on AI Studio), vertex (Gemini
+	// Live on Vertex AI) or openai (GPT-Live).
 	Voice     string `json:"voice"`
 	OpenAIKey string `json:"openai_key"`
-	// Orchestrator is gemini (default), deepseek or compat.
+	// Orchestrator is gemini (default), deepseek, vertex or compat.
 	Orchestrator string `json:"orchestrator"`
-	DeepSeekKey  string `json:"deepseek_key"`
-	Compat       struct {
+	// Vertex is the shared Vertex AI block (voice and orchestrator): the
+	// key (empty keeps the saved one, for the same project only), the
+	// project, the voice's location and the orchestrator's model.
+	Vertex struct {
+		Key      string `json:"key"`
+		Project  string `json:"project"`
+		Location string `json:"location"`
+		Model    string `json:"model"`
+	} `json:"vertex"`
+	DeepSeekKey string `json:"deepseek_key"`
+	Compat      struct {
 		Name    string `json:"name"`
 		BaseURL string `json:"base_url"`
 		Model   string `json:"model"`
@@ -454,16 +529,38 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	}
 	voiceP := orDefault(req.Voice, "gemini")
 	orch := orDefault(req.Orchestrator, brain.ProviderGemini)
-	if voiceP != "gemini" && voiceP != "openai" {
-		return SetupKeysResponse{Error: "voice must be gemini or openai"}, http.StatusBadRequest
+	if voiceP != "gemini" && voiceP != "vertex" && voiceP != "openai" {
+		return SetupKeysResponse{Error: "voice must be gemini, vertex or openai"}, http.StatusBadRequest
 	}
 	type need struct {
 		kind, env string
 		given     string
 		have      bool
 		req       SetupValidateRequest
+		// recheck: validate the saved key when none is given.
+		recheck bool
+		// missing replaces the "not saved yet" detail.
+		missing string
 	}
 	var needs []need
+	vertexProject, vertexLocation := strings.TrimSpace(req.Vertex.Project), ""
+	if voiceP == "vertex" || orch == brain.ProviderVertex {
+		if vertexProject == "" {
+			return SetupKeysResponse{Error: "Vertex AI needs the Google Cloud project id"}, http.StatusBadRequest
+		}
+		n := need{kind: "vertex", env: "VERTEX_API_KEY", given: req.Vertex.Key, have: s.savedVertexKey(vertexProject) != "",
+			req: SetupValidateRequest{Kind: "vertex", Project: vertexProject}}
+		if voiceP == "vertex" {
+			vertexLocation = orDefault(req.Vertex.Location, DefaultVertexLocation)
+			n.req.Location, n.req.Voice = vertexLocation, true
+			// A new location for the voice is checked with the saved key.
+			n.recheck = vertexLocation != cfg.Gemini.Vertex.Location
+		}
+		if cur := cfg.Gemini.Vertex; cur.APIKey != "" && cur.Project != vertexProject {
+			n.missing = fmt.Sprintf("the saved Vertex key is for project %s; paste the key for project %s", cur.Project, vertexProject)
+		}
+		needs = append(needs, n)
+	}
 	if voiceP == "gemini" || orch == brain.ProviderGemini {
 		needs = append(needs, need{kind: "gemini", env: "GEMINI_API_KEY", given: req.GeminiKey, have: len(cfg.Gemini.APIKeys) > 0})
 	}
@@ -474,6 +571,8 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	brainProvider, brainModel := orch, ""
 	switch orch {
 	case brain.ProviderGemini:
+	case brain.ProviderVertex:
+		brainModel = orDefault(req.Vertex.Model, brain.DefaultModel)
 	case brain.ProviderDeepSeek:
 		needs = append(needs, need{kind: "deepseek", env: "DEEPSEEK_API_KEY", given: req.DeepSeekKey, have: cfg.DeepSeek.APIKey != ""})
 		brainModel = brain.DefaultDeepSeekModel
@@ -498,7 +597,7 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		compat = &c
 		brainProvider, brainModel = c.Name, c.Model
 	default:
-		return SetupKeysResponse{Error: "orchestrator must be gemini, deepseek or compat"}, http.StatusBadRequest
+		return SetupKeysResponse{Error: "orchestrator must be gemini, deepseek, vertex or compat"}, http.StatusBadRequest
 	}
 
 	resp := SetupKeysResponse{Checks: []SetupCheck{}}
@@ -506,6 +605,15 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	failed := false
 	for _, n := range needs {
 		v := strings.TrimSpace(n.given)
+		if v == "" && n.have && n.recheck {
+			vr := n.req
+			c := s.validateKey(ctx, vr)
+			resp.Checks = append(resp.Checks, withName(c, n.env))
+			if c.Status == "fail" {
+				failed = true
+			}
+			continue
+		}
 		if v == "" {
 			if n.have {
 				resp.Checks = append(resp.Checks, SetupCheck{Name: n.env, Status: "ok", Detail: "keeping the saved key"})
@@ -516,7 +624,14 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 			if n.kind == "gemini" {
 				fix = "get a free key at " + GeminiKeyURL + " and paste it here"
 			}
-			resp.Checks = append(resp.Checks, SetupCheck{Name: n.env, Status: "fail", Detail: n.env + " is needed and not saved yet", Fix: fix})
+			if n.kind == "vertex" {
+				fix = "paste a Vertex AI API key bound to a service account in that project (" + onboard.VertexKeyDocURL + ")"
+			}
+			detail := n.env + " is needed and not saved yet"
+			if n.missing != "" {
+				detail = n.missing
+			}
+			resp.Checks = append(resp.Checks, SetupCheck{Name: n.env, Status: "fail", Detail: detail, Fix: fix})
 			continue
 		}
 		vr := n.req
@@ -525,6 +640,9 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		}
 		vr.Key = v
 		c := s.validateKey(ctx, vr)
+		if n.kind == "vertex" {
+			c = withName(c, n.env)
+		}
 		resp.Checks = append(resp.Checks, c)
 		if c.Status == "fail" {
 			failed = true
@@ -542,9 +660,28 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 			return resp, http.StatusInternalServerError
 		}
 	}
-	set["SHEEPDOG_VOICE_PROVIDER"] = voiceP
-	set["SHEEPDOG_BRAIN_PROVIDER"] = brainProvider
 	var del []string
+	if vertexProject != "" {
+		if err := onboard.SetVertexConfig(sd.ConfigPath, vertexProject, vertexLocation); err != nil {
+			resp.Error = "cannot write the Vertex project to " + sd.ConfigPath + ": " + err.Error()
+			return resp, http.StatusInternalServerError
+		}
+		// The env file overrides config.toml: values left there by hand
+		// would hide the ones just written.
+		del = append(del, "VERTEX_PROJECT")
+		if vertexLocation != "" {
+			del = append(del, "VERTEX_LOCATION")
+		}
+	}
+	switch voiceP {
+	case "vertex":
+		set["SHEEPDOG_VOICE_PROVIDER"], set["SHEEPDOG_GEMINI_BACKEND"] = "gemini", "vertex"
+	case "gemini":
+		set["SHEEPDOG_VOICE_PROVIDER"], set["SHEEPDOG_GEMINI_BACKEND"] = "gemini", "aistudio"
+	default:
+		set["SHEEPDOG_VOICE_PROVIDER"] = voiceP
+	}
+	set["SHEEPDOG_BRAIN_PROVIDER"] = brainProvider
 	if brainModel != "" {
 		set["SHEEPDOG_BRAIN_MODEL"] = brainModel
 	} else if p := saved["SHEEPDOG_BRAIN_PROVIDER"]; p != "" && p != brainProvider {
@@ -569,6 +706,12 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	resp.OK = true
 	resp.Restarting = s.deps.Restart != nil
 	return resp, http.StatusOK
+}
+
+// withName is c named name (the env variable the page maps results by).
+func withName(c SetupCheck, name string) SetupCheck {
+	c.Name = name
+	return c
 }
 
 func orDefault(v, def string) string {

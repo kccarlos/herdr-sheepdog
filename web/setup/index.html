@@ -35,6 +35,7 @@
         <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
       </div>
       <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+      <p id="gemini-not-needed" class="muted small hidden">Not needed with your choices below: the voice and the orchestrator both run on Vertex AI.</p>
       <p id="gemini-result" class="result" aria-live="polite"></p>
     </div>
 
@@ -42,7 +43,9 @@
       <summary>Advanced: a separate orchestrator model (recommended), or another voice</summary>
       <fieldset>
         <legend>Voice</legend>
-        <label><input type="radio" name="voice" value="gemini" checked> Gemini Live (uses the Gemini key)</label>
+        <label><input type="radio" name="voice" value="gemini" checked> Gemini Live on Google AI Studio (uses the Gemini key)</label>
+        <label><input type="radio" name="voice" value="vertex"> Gemini Live on Vertex AI (for Google Cloud: uses the Vertex AI key below)</label>
+        <p id="vertex-voice-line" class="result indent hidden" role="status" aria-live="polite"></p>
         <label><input type="radio" name="voice" value="openai"> GPT-Live (needs an OpenAI key, billed per minute)</label>
         <div class="field indent hidden" id="openai-field">
           <label for="openai-key">OpenAI API key</label>
@@ -54,11 +57,18 @@
         <legend>Orchestrator (reads and acts on your agents)</legend>
         <label><input type="radio" name="orch" value="gemini" checked> Gemini (the default: uses the Gemini key, free, can be slow or busy)</label>
         <label><input type="radio" name="orch" value="deepseek"> DeepSeek (recommended for steadier answers, paid per token)</label>
+        <label><input type="radio" name="orch" value="vertex"> Vertex AI (Gemini on Google Cloud: uses the Vertex AI key below)</label>
         <label><input type="radio" name="orch" value="compat"> Any OpenAI-compatible endpoint (OpenRouter, Groq, Ollama, …): pick a model that supports tool calling</label>
         <div class="field indent hidden" id="deepseek-field">
           <label for="deepseek-key">DeepSeek API key</label>
           <input id="deepseek-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="deepseek-result">
           <p id="deepseek-result" class="result" aria-live="polite"></p>
+        </div>
+        <div class="field indent hidden" id="vertex-orch-field">
+          <label for="vertex-model">Model</label>
+          <input id="vertex-model" type="text" list="vertex-models" autocomplete="off" spellcheck="false" aria-describedby="vertex-model-note">
+          <datalist id="vertex-models"></datalist>
+          <p id="vertex-model-note" class="muted small">Vertex AI does not list its models for an API key, so these are the ones we checked on Vertex. All of them call tools, so there is no tool-calling test here.</p>
         </div>
         <div class="field indent hidden" id="compat-field">
           <label for="compat-name">Name</label>
@@ -80,6 +90,23 @@
           </div>
           <p id="probe-note" class="muted small">Sends one small request to the endpoint, which may be billed. Nothing is sent until you press the button.</p>
           <p id="probe-result" class="result" role="status" aria-live="polite"></p>
+        </div>
+      </fieldset>
+      <fieldset id="vertex-block" class="hidden" aria-describedby="vertex-intro">
+        <legend>Google Cloud (Vertex AI)</legend>
+        <p id="vertex-intro" class="muted small">One key and project for both the voice and the orchestrator. Use an API key bound to a service account and restricted to the Vertex AI API. <a id="vertex-doc" href="#" target="_blank" rel="noopener">How to create it</a>.</p>
+        <div class="field">
+          <label for="vertex-key">Vertex AI API key</label>
+          <input id="vertex-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="vertex-saved vertex-result">
+          <p id="vertex-saved" class="muted small hidden"></p>
+          <label for="vertex-project">Project id</label>
+          <input id="vertex-project" type="text" autocomplete="off" spellcheck="false" placeholder="my-project-123" aria-describedby="vertex-result">
+          <div id="vertex-location-field" class="field hidden">
+            <label for="vertex-location">Location</label>
+            <input id="vertex-location" type="text" autocomplete="off" spellcheck="false" placeholder="us-central1" aria-describedby="vertex-location-note vertex-result">
+            <p id="vertex-location-note" class="muted small">For the voice only. gemini-3.8-live is served from us-central1 and the us multi-region, not from global.</p>
+          </div>
+          <p id="vertex-result" class="result" role="status" aria-live="polite"></p>
         </div>
       </fieldset>
       <p class="small">Which model does what, and what it costs: <a id="models-doc" href="#" target="_blank" rel="noopener">docs/models.md</a>.</p>

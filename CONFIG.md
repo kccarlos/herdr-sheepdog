@@ -149,6 +149,14 @@ fixed list: `gemini-3.8-flash`, `gemini-3.5-flash`,
 | `gemini.vertex.project` | `VERTEX_PROJECT` | `""` | The Google Cloud project id. |
 | `gemini.vertex.location` | `VERTEX_LOCATION` | `us-central1` | The Vertex AI location. `gemini-3.8-live` is served from `us-central1` and the `us` multi-region, not from `global` (the setup is refused with close 1008 "Publisher model … was not found"). |
 
+The setup page's "Google Cloud (Vertex AI)" block writes `project` and
+`location` here and the key to the env file as `VERTEX_API_KEY`; it removes
+`VERTEX_PROJECT` and `VERTEX_LOCATION` from the env file, which would
+otherwise override them (a variable exported in the shell that starts the
+daemon still wins). Choosing "Gemini Live on Vertex AI" also sets
+`SHEEPDOG_GEMINI_BACKEND=vertex` in the env file (`aistudio` for Gemini Live
+on AI Studio). A saved key is reused only for the project it was saved for.
+
 ## `[voice]`
 
 The voice's spoken half, as the operator meets it
