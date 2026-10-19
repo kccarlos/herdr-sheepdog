@@ -241,7 +241,7 @@ func (b *Brain) markDown(t *turn, provider, model string, p AccountProblem, err 
 // orchestrator does next is unchanged.
 func (b *Brain) noteAccount(t *turn, provider, model string, p AccountProblem) {
 	_, _, _, backup := b.failoverTarget(provider, model)
-	a := NewAccountAlert(RoleOrchestrator, provider, p, backup)
+	a := newAccountAlert(RoleOrchestrator, provider, b.serviceOf(provider), p, backup)
 	if !b.accounts.Report(a) {
 		return
 	}

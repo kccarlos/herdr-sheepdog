@@ -16,13 +16,6 @@ export function vertexFields(voice, orch) {
   return { block: v || o, location: v, orchModel: o, geminiNeeded: voice === 'gemini' || orch === 'gemini' };
 }
 
-// voiceLine is what the Vertex voice will be, once the credentials check out.
-export function voiceLine(vertex) {
-  const model = (vertex && vertex.live_model) || 'gemini-3.8-live';
-  const name = (vertex && vertex.voice) || 'Puck';
-  return "You'll talk to " + model + ' (Vertex), voice ' + name;
-}
-
 // savedKeyFor tells whether the saved Vertex key may be used for project:
 // only the project it was saved for.
 export function savedKeyFor(state, project) {
@@ -50,6 +43,7 @@ export function validateBody(f, state) {
   if (f.voice) {
     body.voice = true;
     body.location = (f.location || '').trim() || (state && state.vertex && state.vertex.default_location) || 'us-central1';
+    if (f.model) body.live_model = f.model;
   }
   return body;
 }

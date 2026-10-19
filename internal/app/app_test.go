@@ -792,3 +792,17 @@ func TestBuildQuerierOption(t *testing.T) {
 		t.Fatal("without Options.Querier the CLI querier is the default")
 	}
 }
+
+// BrainConfig hands the orchestrator each OpenAI-compatible entry's key
+// variable, so its account-problem fix line names the one in use.
+func TestBrainConfigKeyVars(t *testing.T) {
+	cfg := config.Default()
+	cfg.Brain.OpenAICompat = []config.OpenAICompat{
+		{Name: "openai", BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_ORCH_API_KEY"},
+		{Name: "ollama", BaseURL: "http://localhost:11434/v1"},
+	}
+	got := BrainConfig(cfg).KeyVars
+	if len(got) != 1 || got["openai"] != "OPENAI_ORCH_API_KEY" {
+		t.Errorf("KeyVars = %v", got)
+	}
+}

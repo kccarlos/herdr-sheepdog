@@ -148,6 +148,21 @@ func (c Config) Backend() string {
 // DefaultModel is the Live model used when Config.Model is empty.
 const DefaultModel = "gemini-3.8-live"
 
+// DefaultVoice is the prebuilt voice used when Config.Voice is empty.
+const DefaultVoice = "Puck"
+
+// Voices are the prebuilt voice names the setup page offers, DefaultVoice
+// first. Google has more; these four are the ones this repository has
+// used (the bench speaks its scenarios with them, internal/bench/speech),
+// so each is known to be a valid prebuilt voice name. A name set by hand
+// in gemini.voice still works.
+var Voices = []string{DefaultVoice, "Kore", "Charon", "Aoede"}
+
+// VertexModels are the Live models known to answer on Vertex AI (its
+// model listing refuses an API key): gemini-3.8-live, checked at
+// us-central1 by cmd/livecanary on 2026-10-04.
+var VertexModels = []string{DefaultModel}
+
 // ErrNoAPIKeys is returned by New when the key pool is empty.
 var ErrNoAPIKeys = errors.New("gemini: no API keys configured")
 
@@ -160,7 +175,7 @@ func (c Config) withDefaults() Config {
 		c.Model = DefaultModel
 	}
 	if c.Voice == "" {
-		c.Voice = "Puck"
+		c.Voice = DefaultVoice
 	}
 	if c.PushGap == 0 {
 		c.PushGap = 2 * time.Second

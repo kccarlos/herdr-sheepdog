@@ -24,6 +24,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
 
 // Links the setup page shows. TestFlightURL is the public TestFlight
@@ -193,6 +194,7 @@ func (s *Server) setupRoutes() error {
 		"POST /api/setup/models":        s.handleSetupModels,
 		"POST /api/setup/probe":         s.handleSetupProbe,
 		"POST /api/setup/gemini-models": s.handleSetupGeminiModels,
+		"POST /api/setup/voice-models":  s.handleSetupVoiceModels,
 		"GET /api/setup/checks":         s.handleSetupChecks,
 		"POST /api/setup/service":       s.handleSetupService,
 		"POST /api/setup/phone":         s.handleSetupPhone,
@@ -242,14 +244,18 @@ type SetupKeys struct {
 // and the orchestrator models known to answer on Vertex (its model
 // listing refuses an API key, so the list is brain.VertexModels).
 type SetupVertex struct {
-	Project         string   `json:"project"`
-	Location        string   `json:"location"`
-	DefaultLocation string   `json:"default_location"`
-	LiveModel       string   `json:"live_model"`
-	Voice           string   `json:"voice"`
-	Models          []string `json:"models"`
-	DefaultModel    string   `json:"default_model"`
-	APIURL          string   `json:"api_url"`
+	Project         string `json:"project"`
+	Location        string `json:"location"`
+	DefaultLocation string `json:"default_location"`
+	LiveModel       string `json:"live_model"`
+	// LiveModels are the Live models the Vertex voice offers: the ones
+	// checked on Vertex, and the configured one when the voice is on
+	// Vertex already.
+	LiveModels   []string `json:"live_models"`
+	Voice        string   `json:"voice"`
+	Models       []string `json:"models"`
+	DefaultModel string   `json:"default_model"`
+	APIURL       string   `json:"api_url"`
 }
 
 // SetupVoice is the voice side of SetupState.
@@ -260,6 +266,11 @@ type SetupVoice struct {
 	Status      string `json:"status"`
 	Problem     string `json:"problem,omitempty"`
 	SetupNeeded bool   `json:"setup_needed"`
+	// Gemini is the Gemini Live model and voice (AI Studio and Vertex
+	// share them), OpenAI GPT-Live's; OpenAIPrice is GPT-Live's price.
+	Gemini      SetupVoicePick `json:"gemini"`
+	OpenAI      SetupVoicePick `json:"openai"`
+	OpenAIPrice string         `json:"openai_price"`
 }
 
 // SetupOrchestrator is the orchestrator side of SetupState.
@@ -324,6 +335,8 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 		Vertex: setupVertex(cfg),
 		Links:  map[string]string{"get_key": GeminiKeyURL, "testflight": TestFlightURL, "ios_repo": IOSRepoURL, "models_doc": ModelsDocURL, "remote_doc": RemoteDocURL},
 	}
+	st.Voice.Gemini, st.Voice.OpenAI = s.setupVoicePicks()
+	st.Voice.OpenAIPrice = onboard.GPTLivePrice
 	if s.deps.VoiceIssue != nil {
 		st.Voice.Problem = s.deps.VoiceIssue()
 	}
@@ -470,7 +483,12 @@ func setupVertex(cfg config.Config) SetupVertex {
 	v := SetupVertex{
 		Project: cfg.Gemini.Vertex.Project, Location: cfg.Gemini.Vertex.Location, DefaultLocation: DefaultVertexLocation,
 		LiveModel: cfg.Gemini.Model, Voice: cfg.Gemini.Voice, DefaultModel: brain.DefaultModel, APIURL: onboard.VertexAPIURL,
-		Models: []string{},
+		Models: []string{}, LiveModels: append([]string(nil), gemini.VertexModels...),
+	}
+	// The configured model counts as known on Vertex only when the voice
+	// already runs there; an AI Studio pick may not be served on Vertex.
+	if cfg.Gemini.Backend == "vertex" {
+		v.LiveModels = withFirst(gemini.VertexModels, cfg.Gemini.Model)
 	}
 	for _, m := range brain.VertexModels {
 		v.Models = append(v.Models, m.Name)
@@ -521,6 +539,9 @@ type SetupValidateRequest struct {
 	Project  string `json:"project,omitempty"`
 	Location string `json:"location,omitempty"`
 	Voice    bool   `json:"voice,omitempty"`
+	// LiveModel is the Live model the voice check opens ("": the
+	// configured gemini.model).
+	LiveModel string `json:"live_model,omitempty"`
 }
 
 // SetupCheck is one check's outcome for the page.
@@ -568,7 +589,10 @@ func (s *Server) validateKey(ctx context.Context, req SetupValidateRequest) Setu
 		}
 		live := ""
 		if req.Voice {
-			live = s.deps.Setup.Config.Gemini.Model
+			live = orDefault(req.LiveModel, s.deps.Setup.Config.Gemini.Model)
+			if !onboard.ValidModelName(live) {
+				return SetupCheck{Name: "vertex", Status: "fail", Detail: "the voice model name may only hold letters, digits and . _ / -", Fix: "pick a model from the list"}
+			}
 		}
 		return checkOf(onboard.CheckVertex(ctx, ep, onboard.VertexCreds{APIKey: key, Project: project, Location: req.Location}, live))
 	}
@@ -621,6 +645,12 @@ type SetupKeysRequest struct {
 	// Live on Vertex AI) or openai (GPT-Live).
 	Voice     string `json:"voice"`
 	OpenAIKey string `json:"openai_key"`
+	// VoiceModel and VoiceName are the chosen voice's Live model and
+	// voice ("": keep the configured one). Gemini Live (either backend)
+	// writes gemini.model and gemini.voice, GPT-Live voice.openai.model
+	// and voice.openai.voice. An unknown voice saves nothing.
+	VoiceModel string `json:"voice_model"`
+	VoiceName  string `json:"voice_name"`
 	// Orchestrator is a preset id (gemini, the default; deepseek, vertex,
 	// openrouter, openai, ollama, lmstudio) or compat (Other URL).
 	Orchestrator string `json:"orchestrator"`
@@ -684,6 +714,10 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	if voiceP != "gemini" && voiceP != "vertex" && voiceP != "openai" {
 		return SetupKeysResponse{Error: "voice must be gemini, vertex or openai"}, http.StatusBadRequest
 	}
+	vc, msg := s.voiceChoice(voiceP, req.VoiceModel, req.VoiceName)
+	if msg != "" {
+		return SetupKeysResponse{Error: msg}, http.StatusBadRequest
+	}
 	type need struct {
 		kind, env string
 		given     string
@@ -706,9 +740,10 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 			req: SetupValidateRequest{Kind: "vertex", Project: vertexProject}}
 		if voiceP == "vertex" {
 			vertexLocation = orDefault(req.Vertex.Location, DefaultVertexLocation)
-			n.req.Location, n.req.Voice = vertexLocation, true
-			// A new location for the voice is checked with the saved key.
-			n.recheck = vertexLocation != cfg.Gemini.Vertex.Location
+			n.req.Location, n.req.Voice, n.req.LiveModel = vertexLocation, true, vc.model
+			// A new location or Live model for the voice is checked with
+			// the saved key: the model must be served there.
+			n.recheck = vertexLocation != cfg.Gemini.Vertex.Location || (vc.model != "" && vc.model != cfg.Gemini.Model)
 		}
 		if cur := cfg.Gemini.Vertex; cur.APIKey != "" && cur.Project != vertexProject {
 			n.missing = fmt.Sprintf("the saved Vertex key is for project %s; paste the key for project %s", cur.Project, vertexProject)
@@ -851,6 +886,12 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		set["SHEEPDOG_VOICE_PROVIDER"], set["SHEEPDOG_GEMINI_BACKEND"] = "gemini", "aistudio"
 	default:
 		set["SHEEPDOG_VOICE_PROVIDER"] = voiceP
+	}
+	if vc.model != "" {
+		set[vc.modelEnv] = vc.model
+	}
+	if vc.voice != "" {
+		set[vc.voiceEnv] = vc.voice
 	}
 	set["SHEEPDOG_BRAIN_PROVIDER"] = brainProvider
 	if brainModel != "" {

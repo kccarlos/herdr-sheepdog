@@ -26,21 +26,51 @@
   <!-- 1. Models -->
   <section class="card step" id="step-models" aria-labelledby="h-models">
     <h2 id="h-models"><span class="num" aria-hidden="true">1</span> Models <span class="state" id="models-state"></span></h2>
-    <p>sheepdog needs one free Gemini API key: it runs the voice and, unless you pick another below, the orchestrator that reads your agents.</p>
+    <p>Two parts: <strong>your voice</strong>, which hears you and speaks, and <strong>your orchestrator</strong>, which reads your agents and acts.</p>
     <p class="recommend" id="orch-tip">One free Gemini key is enough to start. For steadier answers, pick another orchestrator below: the free Gemini model can be slow or busy at times. <a id="which-doc" href="#" target="_blank" rel="noopener">Which to choose &rarr;</a></p>
-    <div class="field">
-      <label for="gemini-key">Gemini API key</label>
-      <div class="row">
-        <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with AIza…)" aria-describedby="gemini-result">
-        <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
+
+    <fieldset id="voice-set">
+      <legend>Your voice: hears you and speaks</legend>
+      <div class="preset-grid voice-grid" id="voice-grid"></div>
+
+      <div class="field panel" id="gemini-field">
+        <label for="gemini-key">Gemini API key</label>
+        <div class="row">
+          <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with AIza…)" aria-describedby="gemini-result">
+          <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
+        </div>
+        <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="gemini-orch-only" class="muted small hidden">For the Gemini orchestrator below.</p>
+        <p id="gemini-not-needed" class="muted small hidden">Not needed with your choices: neither the voice nor the orchestrator uses it.</p>
+        <p id="gemini-result" class="result" aria-live="polite"></p>
       </div>
-      <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
-      <p id="gemini-not-needed" class="muted small hidden">Not needed with your choices: neither the voice nor the orchestrator uses it.</p>
-      <p id="gemini-result" class="result" aria-live="polite"></p>
-    </div>
+      <div class="field panel hidden" id="openai-field">
+        <label for="openai-key">OpenAI API key</label>
+        <input id="openai-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="openai-saved openai-price openai-result">
+        <p id="openai-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="openai-price" class="muted small">GPT-Live is billed per minute while a session is open. sheepdog opens it only for speech or a notice and closes it after 45 s of quiet.</p>
+        <p id="openai-result" class="result" aria-live="polite"></p>
+      </div>
+      <p id="vertex-voice-wait" class="muted small hidden">Fill in the Google Cloud block below. Once it checks out, you can pick the model and the voice here.</p>
+
+      <div class="panel hidden" id="voice-pick">
+        <p id="voice-line" class="talk-line" role="status" aria-live="polite"></p>
+        <div class="pick-row">
+          <div class="field">
+            <label for="voice-model">Model</label>
+            <select id="voice-model" aria-describedby="voice-models-status"></select>
+          </div>
+          <div class="field">
+            <label for="voice-name">Voice</label>
+            <select id="voice-name"></select>
+          </div>
+        </div>
+        <p id="voice-models-status" class="result" role="status" aria-live="polite"></p>
+      </div>
+    </fieldset>
 
     <fieldset id="orch-set">
-      <legend>Orchestrator: reads your agents and acts</legend>
+      <legend>Your orchestrator: reads your agents and acts</legend>
       <div class="preset-grid" id="preset-grid"></div>
 
       <div class="field panel hidden" id="gemini-orch-field">
@@ -99,22 +129,6 @@
         </details>
       </div>
     </fieldset>
-
-    <details id="advanced">
-      <summary>Advanced: another voice (Vertex AI or GPT-Live)</summary>
-      <fieldset>
-        <legend>Voice</legend>
-        <label><input type="radio" name="voice" value="gemini" checked> Gemini Live on Google AI Studio (uses the Gemini key)</label>
-        <label><input type="radio" name="voice" value="vertex"> Gemini Live on Vertex AI (for Google Cloud: uses the Vertex AI key below)</label>
-        <p id="vertex-voice-line" class="result indent hidden" role="status" aria-live="polite"></p>
-        <label><input type="radio" name="voice" value="openai"> GPT-Live (needs an OpenAI key, billed per minute)</label>
-        <div class="field indent hidden" id="openai-field">
-          <label for="openai-key">OpenAI API key</label>
-          <input id="openai-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="openai-result">
-          <p id="openai-result" class="result" aria-live="polite"></p>
-        </div>
-      </fieldset>
-    </details>
 
     <fieldset id="vertex-block" class="hidden" aria-describedby="vertex-intro">
       <legend>Google Cloud (Vertex AI)</legend>

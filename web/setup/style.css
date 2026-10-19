@@ -86,3 +86,10 @@ label.check input { margin-top: .3rem; }
 .panel { border-top: 1px solid var(--line); padding-top: .5rem; }
 .panel select { font: inherit; padding: .4rem .5rem; border: 1px solid var(--btn-line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; }
 #compat-details { margin: .3rem 0 0; }
+
+/* The voice part: three cards, then "You'll talk to …" with its pickers. */
+.voice-grid { grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); }
+.talk-line { font-weight: 600; margin: .2rem 0 .3rem; }
+.pick-row { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.pick-row .field { flex: 1 1 12rem; margin: .2rem 0; }
+.result.muted { color: var(--muted); }
