@@ -69,7 +69,7 @@ model or the voice later, run `sheepdog setup` again, or set `gemini.model`,
 |---|---|---|---|
 | **Gemini** (default, `gemini-3.5-flash`) | the same `GEMINI_API_KEY` | Free tier; the daily cap is per model | Segment Understood 290/359 = 81 % (CI 77–85), 30 simulated-workday runs |
 | **DeepSeek** (`deepseek-flash`) | `DEEPSEEK_API_KEY` | Paid per token | Segment Understood 365/402 = 91 % (CI 87–94), 34 runs; 198/216 = 92 % in the 2026-10-19 batch next to Claude Opus 5.5. |
-| **Anthropic** (`claude-opus-5-5`) | `ANTHROPIC_API_KEY` | Paid per token ([below](#anthropic)) | Segment Understood 199/216 = 92 % (CI 87–96), 18 runs, the same as DeepSeek in the same batch (198/216 = 92 %). Fewer unsupported statements (94 % vs 89 % of segments without one). Slower: a reply takes 7.4 s at the median (DeepSeek 3.0 s). About $1.25 per simulated session (DeepSeek $0.12). |
+| **Anthropic** (`claude-opus-5-5`) | `ANTHROPIC_API_KEY` | Paid per token ([below](#anthropic)) | Segment Understood 199/216 = 92 % (CI 87–96), 18 runs, the same as DeepSeek in the same batch (198/216 = 92 %). Fewer unsupported statements (94 % vs 89 % of segments without one). Slower: a reply takes 7.4 s at the median (DeepSeek 3.0 s). About $1.25 per simulated session (estimate; DeepSeek about $0.02, from the account balance). |
 | **Vertex AI** (Gemini on Google Cloud) | the same `VERTEX_API_KEY` and project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same Gemini models as above; the Gemini numbers were measured on Vertex. |
 | **Any OpenAI-compatible endpoint** | its own key (none for a local server) | Whatever the provider charges | Not evaluated. The model **must support tool calling**. |
 
@@ -81,9 +81,9 @@ known provider. The base URL stays visible, read-only, under **Details**.
 
 | Preset | Base URL (filled in) | Key | Model | Note on the page |
 |---|---|---|---|---|
-| **Anthropic** | built in (Messages API) | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, or any model from the key's list | ★ most recommended · 92 % understood in our tests, fewer wrong facts · slower, about 10× the cost of DeepSeek |
+| **Anthropic** | built in (Messages API) | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, or any model from the key's list | ★ most recommended · 92 % understood in our tests · slower, costs more |
 | **Gemini** | built in (AI Studio) | the Gemini key | `gemini-3.5-flash`, or any model from the key's list | free, can be slow or busy |
-| **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | cost-effective · 92 % understood in our tests, fast, about 1/10 the cost of Opus |
+| **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | cost-effective · 92 % understood in our tests · fast |
 | **Vertex AI** | built in | `VERTEX_API_KEY` and a project | the models we checked on Vertex | Gemini on Google Cloud |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | you pick from the list, tool-capable first | one key, many models |
 | **OpenAI** | `https://api.openai.com/v1` | `OPENAI_ORCH_API_KEY`, or the voice's key if you tick the box | the newest `gpt-…-mini` in your key's list, else you pick | paid per token |
@@ -112,7 +112,7 @@ to +15). The Gemini runs went through Vertex AI. The report is
 [dev/eval/vertex-2026-10-11.md](dev/eval/vertex-2026-10-11.md). Claude Opus 5.5
 and DeepSeek ran side by side in one batch: Opus minus DeepSeek is +0 points (CI
 −5 to +6) on Understood, +5 points (CI +1 to +10) on segments without an
-unsupported statement; report:
+unsupported statement (one of about 20 comparisons, so possibly chance); report:
 [dev/eval/anthropic-opus-2026-10-19.md](dev/eval/anthropic-opus-2026-10-19.md).
 How every number is produced is in [dev/eval/README.md](dev/eval/README.md).
 
@@ -163,15 +163,16 @@ What it costs (Anthropic's first-party prices per million tokens, October
 
 The system prompt and tools are cached between calls; in our tests 61 % of
 prompt tokens were cache reads, and a simulated workday session of about three
-minutes cost about $1.25 with Opus 5.5 (about $0.12 with DeepSeek). Claude
+minutes cost about $1.25 with Opus 5.5 (an estimate from the token counts;
+DeepSeek about $0.02, read from its account balance). Claude
 always thinks, and its thinking is billed as output. Your questions run at
 effort `medium` and agent events at `low` (`anthropic.effort`,
 `anthropic.event_effort`).
 
 **Speed.** In our tests a reply to a question took 7.4 s at the median (12.5 s
-for the slowest tenth; DeepSeek 3.0 s and 5.6 s), so for about four answers in
-ten the voice first says it is checking and gives the answer a few seconds
-later. A line about an agent event took 4.8 s at the median (DeepSeek 1.6 s);
+for the slowest tenth; DeepSeek 3.0 s and 5.6 s). The voice says it is on it
+and tells you the answer when it lands, so a slow reply comes later, not lost.
+A line about an agent event took 4.8 s at the median (DeepSeek 1.6 s);
 about one in thirty ran past its 6 s budget (`brain.announce_turn_timeout_s`)
 and you heard sheepdog's own short sentence instead.
 

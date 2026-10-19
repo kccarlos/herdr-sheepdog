@@ -16,8 +16,8 @@ Status: **steps 1–6 done (2026-10-19).** Approved in outline by the CEO on 202
 
 | Card | Voice | Orchestrator | Copy (short) |
 |---|---|---|---|
-| **Recommended** (selected by default) | Gemini Live (free key) | **Anthropic, Claude Opus 5.5** | "Claude Opus 5.5: understood as well as DeepSeek in our tests (92 %), with fewer wrong facts. Slower replies (about 7 s)." Needs an Anthropic API key (paid). (Was "The strongest orchestrator: understands your agents best."; the eval did not show that.) |
-| **Cost-effective** | Gemini Live | **DeepSeek** (deepseek-flash) | "DeepSeek: 92 % understood in our tests, replies in about 3 s, about a tenth of the cost of Opus." |
+| **Recommended** (selected by default) | Gemini Live (free key) | **Anthropic, Claude Opus 5.5** | "Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s)." Needs an Anthropic API key (paid). (Was "The strongest orchestrator: understands your agents best."; the eval did not show that.) |
+| **Cost-effective** | Gemini Live | **DeepSeek** (deepseek-flash) | "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less." |
 | **Free quick start** | Gemini Live | Gemini (same key) | "One free key for both. Good for trying; can be slow or busy. Upgrade any time." |
 | **Custom** | any | any | Pick each part. |
 
@@ -34,7 +34,7 @@ Status: **steps 1–6 done (2026-10-19).** Approved in outline by the CEO on 202
 | Preset | Base URL (filled in) | Key | Default model | Label |
 |---|---|---|---|---|
 | **Anthropic** | Anthropic Messages API (native adapter, below) | yes | **claude-opus-5-5** (also lists Sonnet 5.5, Haiku 5.5 via `GET /v1/models`) | **★ Most recommended** |
-| **DeepSeek** | built in | yes | deepseek-flash | **Cost-effective** · 92 % understood in our tests, fast, about 1/10 the cost of Opus (eval/anthropic-opus-2026-10-19.md; 91 % vs 81 % for Gemini 3.5 Flash in eval/vertex-2026-10-11.md); shows the balance |
+| **DeepSeek** | built in | yes | deepseek-flash | **Cost-effective** · 92 % understood in our tests · fast (eval/anthropic-opus-2026-10-19.md; 91 % vs 81 % for Gemini 3.5 Flash in eval/vertex-2026-10-11.md); shows the balance |
 | OpenRouter | `https://openrouter.ai/api/v1` | yes | pick from the list (tool-capable first) | one key, many models; shows credit |
 | OpenAI | `https://api.openai.com/v1` | yes | a small tool-capable model | asks before reusing a GPT-Live key (the OpenAI key was voice-only by the CEO's earlier rule; reuse needs an explicit yes) |
 | Gemini | built in (AI Studio) | reuses the voice key | gemini-3.5-flash, changeable from the key's model list | free; can be slow or busy |

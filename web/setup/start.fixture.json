@@ -5,7 +5,7 @@
       "label": "Recommended",
       "voice": "gemini",
       "orch": "anthropic",
-      "note": "Claude Opus 5.5: understood as well as DeepSeek in our tests (92 %), with fewer wrong facts. Slower replies (about 7 s).",
+      "note": "Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s).",
       "need": "Needs an Anthropic API key (paid)."
     },
     {
@@ -13,7 +13,7 @@
       "label": "Cost-effective",
       "voice": "gemini",
       "orch": "deepseek",
-      "note": "DeepSeek: 92 % understood in our tests, replies in about 3 s, about a tenth of the cost of Opus.",
+      "note": "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less.",
       "need": ""
     },
     {

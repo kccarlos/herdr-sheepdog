@@ -150,8 +150,8 @@ you type is not shown):
 ```text
 $ sheepdog setup --terminal
 Step 1 of 3. Starting point:
-  1) Recommended: Claude Opus 5.5: understood as well as DeepSeek in our tests (92 %), with fewer wrong facts. Slower replies (about 7 s). Needs an Anthropic API key (paid).
-  2) Cost-effective: DeepSeek: 92 % understood in our tests, replies in about 3 s, about a tenth of the cost of Opus.
+  1) Recommended: Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s). Needs an Anthropic API key (paid).
+  2) Cost-effective: DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less.
   3) Free quick start: One free key for both. Good for trying; can be slow or busy. Upgrade any time.
   4) Custom: Pick each part yourself.
 choice [1]:
