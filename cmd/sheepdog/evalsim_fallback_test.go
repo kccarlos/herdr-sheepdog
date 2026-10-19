@@ -6,6 +6,8 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
 func TestFallbackModels(t *testing.T) {
@@ -41,9 +43,28 @@ func TestParseFallbackFlag(t *testing.T) {
 		{[]string{"--fallback-provider", "gemini", "--allow-ai-studio"}, true},
 		{[]string{"--fallback-provider", "bogus"}, false},
 		{[]string{"--live", "--provider", "vertex", "--fallback-provider", "vertex"}, false},
+		{[]string{"--live", "--provider", "anthropic", "--fallback-provider", "none"}, true},
+		{[]string{"--live", "--provider", "deepseek", "--fallback-provider", "anthropic"}, true},
+		{[]string{"--live", "--provider", "anthropic", "--fallback-provider", "anthropic"}, false},
+		{[]string{"--live", "--provider", "openai"}, false},
 	} {
 		if _, _, run := parseEvalSimFlags(tc.args, io.Discard); run != tc.ok {
 			t.Errorf("%v: run = %v, want %v", tc.args, run, tc.ok)
 		}
+	}
+}
+
+func TestSimSetupRecordsAnthropicEffort(t *testing.T) {
+	cfg := config.Default()
+	cfg.Anthropic.Effort, cfg.Anthropic.EventEffort = "low", "low"
+	opts := eval.SimOptions{}
+	opts.BrainConfig.Provider = brain.ProviderAnthropic
+	got := simSetup(evalSimOpts{live: true, provider: brain.ProviderAnthropic}, opts, cfg)
+	if got["anthropic effort"] != "low (user turns), low (event turns)" {
+		t.Errorf("anthropic effort = %q", got["anthropic effort"])
+	}
+	opts.BrainConfig.Provider = brain.ProviderDeepSeek
+	if _, ok := simSetup(evalSimOpts{live: true, provider: brain.ProviderDeepSeek}, opts, cfg)["anthropic effort"]; ok {
+		t.Error("a deepseek run should not record an anthropic effort")
 	}
 }

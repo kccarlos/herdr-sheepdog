@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -99,5 +100,21 @@ func TestCampaignBudgetStopsAsNotRun(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("markdown lacks %q:\n%s", want, b.String())
 		}
+	}
+}
+
+func TestCostPricesCacheReads(t *testing.T) {
+	// 1M input of which 0.8M read from the cache, 0.1M output, on Opus 5.5:
+	// 0.2M at the cache-write price ($5) + 0.8M at $0.20 + 0.1M at $20.
+	u := Usage{Calls: 1, In: 1_000_000, Cached: 800_000, Out: 100_000}
+	if got, want := Cost("claude-opus-5-5", u), 1.0+0.16+2.0; math.Abs(got-want) > 1e-9 {
+		t.Errorf("opus cost = %v, want %v", got, want)
+	}
+	// A model without a cache price bills cached tokens at In, as before.
+	if got, want := Cost("deepseek-flash", u), 0.30+0.06; math.Abs(got-want) > 1e-9 {
+		t.Errorf("deepseek cost = %v, want %v", got, want)
+	}
+	if got := stepUsage(map[string]any{"prompt_tokens": int32(10), "completion_tokens": int32(2), "cache_hit_tokens": int32(7)}); got.Cached != 7 || got.In != 10 {
+		t.Errorf("stepUsage = %+v", got)
 	}
 }
