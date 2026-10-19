@@ -272,8 +272,8 @@ fails the call and the orchestrator's failover decides.
 |---|---|---|---|
 | `anthropic.api_key` | `ANTHROPIC_API_KEY` | `""` | The Anthropic API key (`x-api-key`). Normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no ANTHROPIC_API_KEY") and `brain.provider = "anthropic"` leaves the orchestrator off. A 401 or 402 marks the provider down (`brain.provider_down`) and the user is told which key to fix or to top up. |
 | `anthropic.base_url` | `SHEEPDOG_ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | API root. A proxy here that rejects the beta headers is retried once without them. |
-| `anthropic.effort` | `SHEEPDOG_ANTHROPIC_EFFORT` | `medium` | `output_config.effort` on user turns: `low`, `medium`, `high`, `xhigh` or `max`. `medium` is Opus 5.5's own default; not yet tuned with the eval. |
-| `anthropic.event_effort` | `SHEEPDOG_ANTHROPIC_EVENT_EFFORT` | `low` | The same on event turns and the compaction summary, which have the shortest budgets (`brain.announce_turn_timeout_s`). |
+| `anthropic.effort` | `SHEEPDOG_ANTHROPIC_EFFORT` | `medium` | `output_config.effort` on user turns: `low`, `medium`, `high`, `xhigh` or `max`. `medium` is Opus 5.5's own default. Measured 2026-10-19 (docs/dev/eval/anthropic-opus-2026-10-19.md): user turns 7.4 s median, 12.5 s p90, well inside `brain.utterance_timeout_s`; `low` here is not yet measured. |
+| `anthropic.event_effort` | `SHEEPDOG_ANTHROPIC_EVENT_EFFORT` | `low` | The same on event turns and the compaction summary, which have the shortest budgets (`brain.announce_turn_timeout_s`). Measured at `low`: 4.8 s median, 7.2 s p90 against the 6 s budget. |
 | `anthropic.fallbacks` | `SHEEPDOG_ANTHROPIC_FALLBACKS` | `true` | Server-side refusal fallbacks (above). `false` sends none: a refusal fails the turn. |
 
 ## `[web]`

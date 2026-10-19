@@ -35,9 +35,9 @@ type StartCard struct {
 func StartCards() []StartCard {
 	return []StartCard{
 		{ID: CardRecommended, Label: "Recommended", Voice: VoiceGemini, Orch: brain.ProviderAnthropic,
-			Note: "The strongest orchestrator: understands your agents best.", Need: "Needs an Anthropic API key (paid)."},
+			Note: "Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s).", Need: "Needs an Anthropic API key (paid)."},
 		{ID: CardCost, Label: "Cost-effective", Voice: VoiceGemini, Orch: brain.ProviderDeepSeek,
-			Note: "Cost-effective, and it did well in our tests."},
+			Note: "DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less."},
 		{ID: CardFree, Label: "Free quick start", Voice: VoiceGemini, Orch: brain.ProviderGemini,
 			Note: "One free key for both. Good for trying; can be slow or busy. Upgrade any time."},
 		{ID: CardCustom, Label: "Custom", Note: "Pick each part yourself."},

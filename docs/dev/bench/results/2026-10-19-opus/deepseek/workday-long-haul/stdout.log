@@ -1,0 +1,14 @@
+[1/3] workday-long-haul r3: pass (end_call, ) ≈ $0.1787, total ≈ $0.179
+[2/3] workday-long-haul r1: pass (end_call, ) ≈ $0.2000, total ≈ $0.379
+[3/3] workday-long-haul r2: pass (end_call, ) ≈ $0.1616, total ≈ $0.540
+  pass    workday-long-haul r1  end_call  17 turns  123.2s                         ≈ $0.2000
+  pass    workday-long-haul r2  end_call  14 turns  128.3s                         ≈ $0.1616
+  pass    workday-long-haul r3  end_call  14 turns  101.7s                         ≈ $0.1787
+-- 3 runs, spend ≈ $0.5402 (estimate at list prices) --
+reports: docs/dev/bench/results/2026-10-19-opus/deepseek/workday-long-haul/report.json, docs/dev/bench/results/2026-10-19-opus/deepseek/workday-long-haul/report.md
+== eval sim, repeat 3 ==
+  workday-long-haul  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL              runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   118  in   1658729  out    19932  reasoning     7645  ≈ $0.5142 --
+-- spend simuser  deepseek-flash           calls    42  in     85550  out      697  reasoning        0  ≈ $0.0261 --
+-- spend total ≈ $0.5402 (estimate at list prices) --

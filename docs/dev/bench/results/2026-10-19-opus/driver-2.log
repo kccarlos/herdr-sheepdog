@@ -1,0 +1,45 @@
+exit 0 deepseek workday-zh-evening
+  TOTAL               runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    84  in   1032944  out    15468  reasoning     5813  ≈ $0.3227 --
+-- spend simuser  deepseek-flash           calls    36  in     70751  out     1029  reasoning        0  ≈ $0.0218 --
+-- spend total ≈ $0.3445 (estimate at list prices) --
+exit 0 opus-medium workday-zh-evening
+  TOTAL               runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    claude-opus-5-5          calls    80  in   1295025  out    19454  reasoning        0  ≈ $3.1020 --
+-- spend simuser  deepseek-flash           calls    33  in     70477  out      946  reasoning        0  ≈ $0.0217 --
+-- spend total ≈ $3.1237 (estimate at list prices) --
+deepseek balance: [('USD', '0.00'), ('CNY', '120.88')]
+exit 0 deepseek workday-interruptions
+  TOTAL                  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    79  in    892307  out    15107  reasoning     5769  ≈ $0.2802 --
+-- spend simuser  deepseek-flash           calls    34  in     64022  out      856  reasoning        0  ≈ $0.0197 --
+-- spend total ≈ $0.2999 (estimate at list prices) --
+exit 0 opus-medium workday-interruptions
+  TOTAL                  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    claude-opus-5-5          calls    64  in    908547  out    14006  reasoning        0  ≈ $1.9406 --
+-- spend simuser  deepseek-flash           calls    32  in     55988  out      855  reasoning        0  ≈ $0.0173 --
+-- spend total ≈ $1.9579 (estimate at list prices) --
+deepseek balance: [('USD', '0.00'), ('CNY', '120.57')]
+exit 0 deepseek workday-explain-deep
+  TOTAL                 runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    84  in   1064881  out    18978  reasoning     7349  ≈ $0.3353 --
+-- spend simuser  deepseek-flash           calls    37  in     84242  out     1109  reasoning        0  ≈ $0.0259 --
+-- spend total ≈ $0.3612 (estimate at list prices) --
+exit 0 opus-medium workday-explain-deep
+  TOTAL                 runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  brain_fallback ×1
+-- spend brain    claude-opus-5-5          calls   107  in   2081752  out    30458  reasoning        0  ≈ $4.5722 --
+-- spend simuser  deepseek-flash           calls    42  in    103148  out     1344  reasoning        0  ≈ $0.0318 --
+-- spend total ≈ $4.6040 (estimate at list prices) --
+deepseek balance: [('CNY', '119.88'), ('USD', '0.00')]
+exit 0 deepseek workday-long-haul
+  TOTAL              runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   118  in   1658729  out    19932  reasoning     7645  ≈ $0.5142 --
+-- spend simuser  deepseek-flash           calls    42  in     85550  out      697  reasoning        0  ≈ $0.0261 --
+-- spend total ≈ $0.5402 (estimate at list prices) --
+exit 0 opus-medium workday-long-haul
+  TOTAL              runs  3  pass  1  fail  2  err  0  not_run  0  rate   33%  timeout ×1, brain_fallback ×1
+-- spend brain    claude-opus-5-5          calls   101  in   1889722  out    25262  reasoning        0  ≈ $4.5438 --
+-- spend simuser  deepseek-flash           calls    39  in     78598  out      664  reasoning        0  ≈ $0.0240 --
+-- spend total ≈ $4.5678 (estimate at list prices) --
+deepseek balance: [('CNY', '119.60'), ('USD', '0.00')]
+DONE

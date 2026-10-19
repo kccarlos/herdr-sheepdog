@@ -150,8 +150,8 @@ you type is not shown):
 ```text
 $ sheepdog setup --terminal
 Step 1 of 3. Starting point:
-  1) Recommended: The strongest orchestrator: understands your agents best. Needs an Anthropic API key (paid).
-  2) Cost-effective: Cost-effective, and it did well in our tests.
+  1) Recommended: Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s). Needs an Anthropic API key (paid).
+  2) Cost-effective: DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less.
   3) Free quick start: One free key for both. Good for trying; can be slow or busy. Upgrade any time.
   4) Custom: Pick each part yourself.
 choice [1]:

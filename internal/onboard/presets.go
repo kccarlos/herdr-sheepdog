@@ -58,11 +58,11 @@ type Preset struct {
 func Presets() []Preset {
 	return []Preset{
 		{ID: brain.ProviderAnthropic, Label: "Anthropic", Kind: PresetNative, KeyEnv: "ANTHROPIC_API_KEY", KeyNeeded: true,
-			DocsURL: "https://console.anthropic.com/settings/keys", DefaultModel: brain.DefaultAnthropicModel, Note: "★ most recommended"},
+			DocsURL: "https://console.anthropic.com/settings/keys", DefaultModel: brain.DefaultAnthropicModel, Note: "★ most recommended · 92 % understood in our tests · slower, costs more"},
 		{ID: brain.ProviderGemini, Label: "Gemini", Kind: PresetNative, KeyEnv: "GEMINI_API_KEY", KeyNeeded: true,
 			DocsURL: "https://aistudio.google.com/apikey", DefaultModel: brain.DefaultModel, Note: "free, can be slow or busy"},
 		{ID: brain.ProviderDeepSeek, Label: "DeepSeek", Kind: PresetNative, KeyEnv: "DEEPSEEK_API_KEY", KeyNeeded: true,
-			DocsURL: "https://platform.deepseek.com/api_keys", DefaultModel: brain.DefaultDeepSeekModel, Note: "cost-effective · did well in our tests"},
+			DocsURL: "https://platform.deepseek.com/api_keys", DefaultModel: brain.DefaultDeepSeekModel, Note: "cost-effective · 92 % understood in our tests · fast"},
 		{ID: brain.ProviderVertex, Label: "Vertex AI", Kind: PresetNative, KeyEnv: "VERTEX_API_KEY", KeyNeeded: true,
 			DocsURL: VertexKeyDocURL, DefaultModel: brain.DefaultModel, Note: "Gemini on Google Cloud"},
 		{ID: "openrouter", Label: "OpenRouter", Kind: PresetCompat, BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "OPENROUTER_API_KEY", KeyNeeded: true,
