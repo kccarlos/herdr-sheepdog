@@ -123,8 +123,10 @@ func (u *Usage) add(o Usage) {
 }
 
 // Price is a model's list price in US dollars per million tokens.
-// Reasoning tokens bill as output.
-type Price struct{ In, Out float64 }
+// Reasoning tokens bill as output. Cached, when set, is the price of
+// input tokens read from the provider's prompt cache (Usage.Cached, a
+// part of Usage.In); zero bills them at In.
+type Price struct{ In, Out, Cached float64 }
 
 // Prices are ESTIMATES for spend logging, not quotes: the published list
 // prices as last known for the Gemini 3.x / DeepSeek families, which
@@ -142,7 +144,16 @@ var Prices = map[string]Price{
 	// docs/dev/eval/calibration/README.md).
 	DefaultClaudeModel: {},
 	"deepseek-flash":   {In: 0.30, Out: 0.60},
-	"deepseek-chat":    {In: 0.30, Out: 0.60},
+	// Anthropic first-party prices (2026-10). In is the 5-minute cache
+	// write price (1.25 x the $4 / $2 / $0.10 input price): the adapter
+	// puts a breakpoint before the state block, so nearly every input
+	// token not read from the cache is written to it, and the step log
+	// does not split writes from the few uncached tokens. A slight
+	// overestimate, on purpose.
+	"claude-opus-5-5":   {In: 5.00, Out: 20.00, Cached: 0.20},
+	"claude-sonnet-5-5": {In: 2.50, Out: 10.00, Cached: 0.20},
+	"claude-haiku-5-5":  {In: 0.125, Out: 0.50, Cached: 0.01},
+	"deepseek-chat":     {In: 0.30, Out: 0.60},
 	// The voice bench (internal/bench): Gemini TTS on Vertex, and the
 	// Live model's session tokens (voice.usage), priced at the native
 	// audio rates on the high side (audio in, audio out) since the log
@@ -167,7 +178,11 @@ func Cost(model string, u Usage) float64 {
 	if !ok {
 		p = UnknownPrice
 	}
-	return (float64(u.In)*p.In + float64(u.Out+u.Reasoning)*p.Out) / 1e6
+	in := float64(u.In) * p.In
+	if p.Cached > 0 && u.Cached > 0 && u.Cached <= u.In {
+		in = float64(u.In-u.Cached)*p.In + float64(u.Cached)*p.Cached
+	}
+	return (in + float64(u.Out+u.Reasoning)*p.Out) / 1e6
 }
 
 // Meter counts tokens per role ("orchestrator", "judge", "simuser") and model.
