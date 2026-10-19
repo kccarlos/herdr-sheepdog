@@ -52,7 +52,7 @@ at all it is the Free quick start. Every key is still checked live (unless
 
 | Flag | Meaning |
 |---|---|
-| `--card ID` | Starting point: `recommended`, `cost`, `free` or `custom`. |
+| `--card ID` | Starting point: `recommended` (DeepSeek), `opus` (Claude Opus 5.5), `free` or `custom`; `cost` is an older name for `recommended`. |
 | `--voice ID` | `gemini` (AI Studio), `vertex` or `openai` (GPT-Live). |
 | `--voice-model ID`, `--voice-name NAME` | The voice's Live model and voice; the configured ones by default. |
 | `--orchestrator ID` | `anthropic`, `gemini`, `deepseek`, `vertex`, `openrouter`, `openai`, `ollama`, `lmstudio` or `other` (`compat` is the same). |

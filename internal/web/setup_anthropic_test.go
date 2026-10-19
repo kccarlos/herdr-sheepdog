@@ -106,7 +106,7 @@ func TestSetupStateAnthropicPreset(t *testing.T) {
 	f, _ := anthropicFixture(t, config.Default())
 	st := setupState(t, f)
 	a := st.Presets[0]
-	if a.ID != "anthropic" || a.Label != "Anthropic" || a.Kind != onboard.PresetNative || a.DefaultModel != "claude-opus-5-5" || !strings.Contains(a.Note, "★ most recommended") || a.KeySaved {
+	if a.ID != "anthropic" || a.Label != "Anthropic" || a.Kind != onboard.PresetNative || a.DefaultModel != "claude-opus-5-5" || strings.Contains(a.Note, "★") || a.KeySaved {
 		t.Errorf("first preset = %+v", a)
 	}
 	if st.Keys.Anthropic || st.Orchestrator.Preset != "gemini" {

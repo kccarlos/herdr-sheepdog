@@ -26,9 +26,9 @@ export function cardFor(info, voice, orch) {
 // voice and orchestrator, and the card that matches them.
 export function initialChoice(state, savedVoice, savedOrch) {
   const info = state.start;
-  const hasAnthropic = ((state && state.presets) || []).some((p) => p.id === 'anthropic');
+  const hasDeepSeek = ((state && state.presets) || []).some((p) => p.id === 'deepseek');
   const fresh = !!(state && state.voice && state.voice.setup_needed);
-  if (fresh && hasAnthropic) return { card: 'recommended', voice: 'gemini', orch: 'anthropic' };
+  if (fresh && hasDeepSeek) return { card: 'recommended', voice: 'gemini', orch: 'deepseek' };
   return { card: cardFor(info, savedVoice, savedOrch), voice: savedVoice, orch: savedOrch };
 }
 

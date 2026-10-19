@@ -138,7 +138,7 @@ that sheepdog does not change.
 `sheepdog setup --terminal` (or `sheepdog init`) asks the same questions as the
 setup page's Models step: a starting point, the voice, then the orchestrator.
 The starting points are the page's cards: **Recommended** (Gemini Live and
-Claude Opus 5.5), **Cost-effective** (Gemini Live and DeepSeek), **Free quick
+DeepSeek), **Claude Opus 5.5** (Gemini Live and Anthropic), **Free quick
 start** (Gemini for both) and **Custom**, where you pick the voice (Gemini Live
 on AI Studio or Vertex AI, or GPT-Live) and the orchestrator preset yourself.
 On a fresh install Enter takes Recommended; otherwise it takes the card that
@@ -150,12 +150,12 @@ you type is not shown):
 ```text
 $ sheepdog setup --terminal
 Step 1 of 3. Starting point:
-  1) Recommended: Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower replies (about 7 s). Needs an Anthropic API key (paid).
-  2) Cost-effective: DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs far less.
+  1) Recommended: DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs little. Needs a DeepSeek API key (paid).
+  2) Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower (about 7 s) and costs much more. Needs an Anthropic API key (paid).
   3) Free quick start: One free key for both. Good for trying; can be slow or busy. Upgrade any time.
   4) Custom: Pick each part yourself.
 choice [1]:
-Starting point: Recommended (voice: Gemini Live on AI Studio, orchestrator: Anthropic)
+Starting point: Recommended (voice: Gemini Live on AI Studio, orchestrator: DeepSeek)
 Gemini API key (https://aistudio.google.com/apikey):
   ok    gemini key  valid (14 models); AI Studio does not expose the quota left
 Live model:
@@ -163,17 +163,12 @@ Live model:
 Live model [gemini-3.8-live] (Enter keeps it; a number or a name picks another):
 Voices: Puck, Kore, Charon, Aoede
 Voice (Enter keeps the default) [Puck]:
-Anthropic API key (https://console.anthropic.com/settings/keys):
-  ok    anthropic key  valid (3 models)
-Orchestrator model:
-  1) claude-opus-5-5 (default, tool calling)
-  2) claude-sonnet-5-5 (tool calling)
-Orchestrator model [claude-opus-5-5] (Enter keeps it; a number or a name picks another):
-Test tool calling on this model now? (a few tokens; a paid endpoint may bill them) [y/N]:
+DeepSeek API key (https://platform.deepseek.com/api_keys):
+  ok    deepseek key  valid (2 models)
 
-Summary: You talk to gemini-3.8-live (Google AI Studio). Your agents are handled by claude-opus-5-5 (Anthropic). Cost: free with daily limits · $4/$20 per million tokens
+Summary: You talk to gemini-3.8-live (Google AI Studio). Your agents are handled by deepseek-flash (DeepSeek). Cost: free with daily limits · pay per use
 sheepdog init: wrote ~/.config/sheepdog/config.toml (0600)
-sheepdog init: wrote ~/.config/sheepdog/.env (0600): ANTHROPIC_API_KEY, GEMINI_API_KEY, SHEEPDOG_BRAIN_PROVIDER, ...
+sheepdog init: wrote ~/.config/sheepdog/.env (0600): DEEPSEEK_API_KEY, GEMINI_API_KEY, SHEEPDOG_BRAIN_PROVIDER, ...
 ```
 
 Choose **Custom** to pick an orchestrator preset: OpenRouter, OpenAI, Ollama and

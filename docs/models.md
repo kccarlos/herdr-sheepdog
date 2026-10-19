@@ -24,9 +24,11 @@ sheepdog needs two models. They never share a role:
 
 Step 1 opens with four cards that fill in the two parts below; you can
 change anything afterwards, and nothing is saved until you press Save.
-**Recommended** is Gemini Live with the Anthropic orchestrator (needs a paid
-Anthropic key) and is selected on a first run. **Cost-effective** is Gemini
-Live with DeepSeek. **Free quick start** is Gemini Live with Gemini, one free
+**Recommended** is Gemini Live with DeepSeek (needs a paid DeepSeek key) and
+is selected on a first run: in our tests it understood as much as Claude Opus
+5.5, replied in about 3 s instead of 7 s and cost far less. **Claude Opus 5.5**
+is Gemini Live with the Anthropic orchestrator (needs a paid Anthropic key).
+**Free quick start** is Gemini Live with Gemini, one free
 key for both. **Custom** leaves your choices as they are. A bar above Save
 says which models you talk to and what they cost.
 
@@ -81,9 +83,9 @@ known provider. The base URL stays visible, read-only, under **Details**.
 
 | Preset | Base URL (filled in) | Key | Model | Note on the page |
 |---|---|---|---|---|
-| **Anthropic** | built in (Messages API) | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, or any model from the key's list | ★ most recommended · 92 % understood in our tests · slower, costs more |
+| **Anthropic** | built in (Messages API) | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, or any model from the key's list | 92 % understood in our tests · fewer unsupported statements · slower, costs more |
 | **Gemini** | built in (AI Studio) | the Gemini key | `gemini-3.5-flash`, or any model from the key's list | free, can be slow or busy |
-| **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | cost-effective · 92 % understood in our tests · fast |
+| **DeepSeek** | built in | `DEEPSEEK_API_KEY` | `deepseek-flash` | ★ most recommended · 92 % understood in our tests · fast, low cost |
 | **Vertex AI** | built in | `VERTEX_API_KEY` and a project | the models we checked on Vertex | Gemini on Google Cloud |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | you pick from the list, tool-capable first | one key, many models |
 | **OpenAI** | `https://api.openai.com/v1` | `OPENAI_ORCH_API_KEY`, or the voice's key if you tick the box | the newest `gpt-…-mini` in your key's list, else you pick | paid per token |

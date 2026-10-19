@@ -139,9 +139,9 @@ func TestSetupStateListsThePresets(t *testing.T) {
 		"openai":     {"https://api.openai.com/v1", "OPENAI_ORCH_API_KEY", ""},
 		"ollama":     {"http://localhost:11434/v1", "", ""},
 		"lmstudio":   {"http://localhost:1234/v1", "", ""},
-		"deepseek":   {"", "DEEPSEEK_API_KEY", "cost-effective · 92 % understood in our tests · fast"},
+		"deepseek":   {"", "DEEPSEEK_API_KEY", "★ most recommended · 92 % understood in our tests · fast, low cost"},
 		"gemini":     {"", "GEMINI_API_KEY", "free, can be slow or busy"},
-		"anthropic":  {"", "ANTHROPIC_API_KEY", "★ most recommended · 92 % understood in our tests · slower, costs more"},
+		"anthropic":  {"", "ANTHROPIC_API_KEY", "92 % understood in our tests · fewer unsupported statements · slower, costs more"},
 	}
 	for _, p := range st.Presets {
 		w, ok := want[p.ID]

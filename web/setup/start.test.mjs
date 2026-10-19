@@ -21,21 +21,22 @@ const presets = [
 const byId = (id) => presets.find((p) => p.id === id);
 
 test('four cards in order, Custom last', () => {
-  assert.deepEqual(info.cards.map((c) => c.id), ['recommended', 'cost', 'free', 'custom']);
-  assert.match(info.cards[0].need, /Anthropic API key \(paid\)/);
+  assert.deepEqual(info.cards.map((c) => c.id), ['recommended', 'opus', 'free', 'custom']);
+  assert.match(info.cards[0].need, /DeepSeek API key \(paid\)/);
+  assert.match(info.cards[1].need, /Anthropic API key \(paid\)/);
 });
 
 test('a card maps to the voice and orchestrator radios; Custom to none', () => {
-  assert.deepEqual(cardRadios(info, 'recommended'), { voice: 'gemini', orch: 'anthropic' });
-  assert.deepEqual(cardRadios(info, 'cost'), { voice: 'gemini', orch: 'deepseek' });
+  assert.deepEqual(cardRadios(info, 'recommended'), { voice: 'gemini', orch: 'deepseek' });
+  assert.deepEqual(cardRadios(info, 'opus'), { voice: 'gemini', orch: 'anthropic' });
   assert.deepEqual(cardRadios(info, 'free'), { voice: 'gemini', orch: 'gemini' });
   assert.equal(cardRadios(info, 'custom'), null);
   assert.equal(cardRadios(info, 'nope'), null);
 });
 
 test('the matching card for a saved setup, else Custom', () => {
-  assert.equal(cardFor(info, 'gemini', 'anthropic'), 'recommended');
-  assert.equal(cardFor(info, 'gemini', 'deepseek'), 'cost');
+  assert.equal(cardFor(info, 'gemini', 'deepseek'), 'recommended');
+  assert.equal(cardFor(info, 'gemini', 'anthropic'), 'opus');
   assert.equal(cardFor(info, 'gemini', 'gemini'), 'free');
   assert.equal(cardFor(info, 'openai', 'anthropic'), 'custom');
   assert.equal(cardFor(info, 'vertex', 'vertex'), 'custom');
@@ -44,11 +45,11 @@ test('the matching card for a saved setup, else Custom', () => {
 
 test('nothing saved selects Recommended; a saved setup selects its card', () => {
   const fresh = { voice: { setup_needed: true }, presets, start: info };
-  assert.deepEqual(initialChoice(fresh, 'gemini', 'gemini'), { card: 'recommended', voice: 'gemini', orch: 'anthropic' });
+  assert.deepEqual(initialChoice(fresh, 'gemini', 'gemini'), { card: 'recommended', voice: 'gemini', orch: 'deepseek' });
   const saved = { voice: { setup_needed: false }, presets, start: info };
   assert.deepEqual(initialChoice(saved, 'gemini', 'gemini'), { card: 'free', voice: 'gemini', orch: 'gemini' });
   assert.deepEqual(initialChoice(saved, 'openai', 'ollama'), { card: 'custom', voice: 'openai', orch: 'ollama' });
-  // No Anthropic preset (old daemon): keep the saved choice.
+  // No DeepSeek preset (old daemon): keep the saved choice.
   assert.equal(initialChoice({ voice: { setup_needed: true }, presets: [], start: info }, 'gemini', 'gemini').card, 'free');
 });
 
