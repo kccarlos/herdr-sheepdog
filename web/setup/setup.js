@@ -2,13 +2,17 @@
 // only to /api/setup/* (loopback only, no token); keys are posted once
 // and never come back.
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
-import { voiceChoice, orchChoice, vertexFields, voiceLine, savedNote, validateBody, checkLine } from './vertex.js';
+import { voiceChoice, vertexFields, voiceLine, savedNote, validateBody, checkLine } from './vertex.js';
+import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
 let demoTimer = null;
 let renderedBoot = null; // the choices are set from the daemon once per boot, not on every poll
 let vertexOK = false; // the Vertex block's last check passed for the voice
+let shownPreset = null; // the preset whose fields are on screen
+const modelBy = {}; // the model typed or filled per preset: { value, auto }
+let compatKeyValid = false; // the typed compat key checked out
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -97,12 +101,13 @@ function render() {
     renderedBoot = s.boot;
     const voice = voiceChoice(s.voice);
     for (const r of document.querySelectorAll('input[name=voice]')) r.checked = r.value === voice;
-    const orch = orchChoice(s.orchestrator.provider);
-    for (const r of document.querySelectorAll('input[name=orch]')) r.checked = r.value === orch;
-    if (orch === 'compat' && !$('compat-name').value) $('compat-name').value = s.orchestrator.provider;
+    const orch = savedPreset(s);
+    renderGrid(s.presets, orch);
+    rememberSaved(s, orch);
     renderVertex(s, voice, orch);
     showAdvancedFields();
   }
+  $('deepseek-saved').classList.toggle('hidden', !s.keys.deepseek);
 
   // 3. Service
   const svc = s.service;
@@ -193,22 +198,163 @@ function renderVertex(s, voice, orch) {
   vertexOK = voice === 'vertex' && s.voice.backend === 'vertex' && s.keys.vertex && !s.voice.problem;
 }
 
+// renderGrid builds the orchestrator preset radios from the daemon's
+// table: native radios in one group, so arrow keys move between them.
+function renderGrid(presets, selected) {
+  const grid = $('preset-grid');
+  grid.textContent = '';
+  for (const p of presets || []) {
+    const label = document.createElement('label');
+    label.className = 'preset';
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = 'orch'; input.value = p.id;
+    input.checked = p.id === selected;
+    input.addEventListener('change', showAdvancedFields);
+    const name = document.createElement('span');
+    name.className = 'p-label'; name.textContent = p.label;
+    const note = document.createElement('span');
+    note.className = 'p-note'; note.textContent = p.note;
+    label.append(input, name, note);
+    grid.append(label);
+  }
+}
+
+// rememberSaved fills the model inputs from the saved orchestrator (once
+// per boot), so switching presets and back keeps them.
+function rememberSaved(s, orch) {
+  const p = presetById(s.presets, orch);
+  if (p && p.kind !== 'native' && s.orchestrator.model && !modelBy[orch]) modelBy[orch] = { value: s.orchestrator.model, auto: false };
+  if (orch === 'other' && !$('compat-name').value) {
+    $('compat-name').value = s.orchestrator.provider;
+    $('compat-base').value = s.orchestrator.base_url || '';
+  }
+  const g = presetById(s.presets, 'gemini');
+  if (!$('gemini-model').value) $('gemini-model').value = orch === 'gemini' && s.orchestrator.model ? s.orchestrator.model : (g && g.default_model) || '';
+  if (p && p.reuse_offered && p.reuse_active) $('openai-reuse').checked = true;
+}
+
 function choices() {
-  return { voice: document.querySelector('input[name=voice]:checked').value, orch: document.querySelector('input[name=orch]:checked').value };
+  const o = document.querySelector('input[name=orch]:checked');
+  return { voice: document.querySelector('input[name=voice]:checked').value, orch: o ? o.value : 'gemini' };
+}
+
+function currentPreset() {
+  return state ? presetById(state.presets, choices().orch) : null;
 }
 
 function showAdvancedFields() {
   const { voice, orch } = choices();
   const f = vertexFields(voice, orch);
+  const pn = panel(currentPreset(), $('openai-reuse').checked);
   $('openai-field').classList.toggle('hidden', voice !== 'openai');
-  $('deepseek-field').classList.toggle('hidden', orch !== 'deepseek');
-  $('compat-field').classList.toggle('hidden', orch !== 'compat');
+  $('gemini-orch-field').classList.toggle('hidden', pn.field !== 'gemini');
+  $('deepseek-field').classList.toggle('hidden', pn.field !== 'deepseek');
+  $('compat-field').classList.toggle('hidden', pn.field !== 'compat');
   $('vertex-orch-field').classList.toggle('hidden', !f.orchModel);
   $('vertex-block').classList.toggle('hidden', !f.block);
   $('vertex-location-field').classList.toggle('hidden', !f.location);
   $('gemini-not-needed').classList.toggle('hidden', f.geminiNeeded);
   showVoiceLine();
-  if (voice !== 'gemini' || orch !== 'gemini') $('advanced').open = true;
+  if (voice !== 'gemini') $('advanced').open = true;
+  if (orch !== shownPreset) switchPreset(orch);
+}
+
+// switchPreset shows the fields of the newly selected preset: its model
+// comes back from modelBy, and its models are listed when they can be.
+function switchPreset(orch) {
+  const prev = shownPreset;
+  shownPreset = orch;
+  const pp = state && presetById(state.presets, prev);
+  if (pp && pp.kind !== 'native') modelBy[prev] = { value: $('compat-model').value, auto: $('compat-model').dataset.auto === '1' };
+  const p = currentPreset();
+  if (!p) return;
+  if (p.id === 'gemini') { loadGeminiModels(); return; }
+  if (p.kind === 'native') return;
+  const m = modelBy[orch] || { value: '', auto: false };
+  $('compat-model').value = m.value;
+  $('compat-model').dataset.auto = m.auto ? '1' : '';
+  $('compat-key').value = '';
+  compatKeyValid = false;
+  findSeq++;
+  fillModels([], false);
+  for (const id of ['compat-models-status', 'probe-result', 'compat-result', 'local-status']) setResult($(id), '', '');
+  $('probe-tools').disabled = !m.value;
+  renderCompatPanel();
+  if (autoFind(p, { reuse: $('openai-reuse').checked })) findModels();
+}
+
+// renderCompatPanel shows only what the selected OpenAI-compatible
+// preset needs: a key or nothing, the base URL read-only under Details.
+function renderCompatPanel() {
+  const p = currentPreset();
+  if (!p || p.kind === 'native') return;
+  const reuse = $('openai-reuse').checked;
+  const pn = panel(p, reuse);
+  const intro = $('preset-intro');
+  intro.textContent = '';
+  if (!pn.other) {
+    intro.append(p.label + ': ' + p.note + (p.local ? '. Small local models may not handle tool calling well: use Test tool calling. ' : '. '));
+    if (p.docs_url) {
+      const a = document.createElement('a');
+      a.href = p.docs_url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = p.local ? 'Get ' + p.label + ' →' : 'Get a key →';
+      intro.append(a);
+    }
+  } else {
+    intro.append('Any endpoint that speaks the OpenAI chat completions API. Pick a model that supports tool calling.');
+  }
+  $('reuse-field').classList.toggle('hidden', !pn.reuseOffered);
+  $('compat-other').classList.toggle('hidden', !pn.other);
+  $('compat-key-field').classList.toggle('hidden', !pn.askKey);
+  $('compat-key-label').textContent = keyLabel(p);
+  $('compat-key-saved').classList.toggle('hidden', !pn.keySaved);
+  $('compat-details').classList.toggle('hidden', !pn.details);
+  $('compat-base-shown').textContent = p.base_url || '';
+  $('compat-saved-as').textContent = savedAs(p, reuse);
+  $('find-models').textContent = pn.findLabel;
+  $('local-status').classList.toggle('hidden', !pn.local);
+}
+
+// Gemini orchestrator: the models the Gemini key can run.
+let geminiSeq = 0;
+async function loadGeminiModels() {
+  if (!state || (!state.keys.gemini && !$('gemini-key').value.trim())) {
+    setResult($('gemini-models-status'), '', '');
+    return;
+  }
+  const mine = ++geminiSeq;
+  setResult($('gemini-models-status'), 'wait', 'Listing the models this key can use…');
+  const r = await api('gemini-models', { key: $('gemini-key').value.trim() }).catch(() => null);
+  if (mine !== geminiSeq) return;
+  const st = geminiStatus(r);
+  setResult($('gemini-models-status'), st.kind, st.text);
+  const ids = (r && r.models) || [];
+  fillPick($('gemini-model-pick'), [{ label: '', ids }], $('gemini-model').value, 'Choose from this key\'s models');
+  const list = $('gemini-models');
+  list.textContent = '';
+  for (const id of ids) { const o = document.createElement('option'); o.value = id; list.appendChild(o); }
+}
+
+// fillPick fills a model <select> (hidden when empty); picking one puts
+// it in the text input, which stays editable.
+function fillPick(sel, groups, current, prompt) {
+  sel.textContent = '';
+  const n = groups.reduce((k, g) => k + g.ids.length, 0);
+  sel.classList.toggle('hidden', n === 0);
+  if (!n) return;
+  const first = document.createElement('option');
+  first.value = ''; first.textContent = prompt + ' (' + n + ')';
+  sel.appendChild(first);
+  for (const g of groups) {
+    const parent = g.label ? document.createElement('optgroup') : sel;
+    if (g.label) { parent.label = g.label; sel.appendChild(parent); }
+    for (const id of g.ids) {
+      const o = document.createElement('option');
+      o.value = id; o.textContent = id;
+      parent.appendChild(o);
+    }
+  }
+  sel.value = groups.some((g) => g.ids.includes(current)) ? current : '';
 }
 
 function showVoiceLine() {
@@ -267,11 +413,11 @@ function liveValidate(input, result, kind, extra, onOk) {
 async function saveModels() {
   const btn = $('save-models');
   const voice = document.querySelector('input[name=voice]:checked').value;
-  const orch = document.querySelector('input[name=orch]:checked').value;
+  const orch = choices().orch;
   const body = {
     gemini_key: $('gemini-key').value.trim(), voice, openai_key: $('openai-key').value.trim(),
-    orchestrator: orch, deepseek_key: $('deepseek-key').value.trim(),
-    compat: { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), model: $('compat-model').value.trim(), key: $('compat-key').value.trim() },
+    orchestrator: orchValue(orch), deepseek_key: $('deepseek-key').value.trim(), gemini_model: $('gemini-model').value.trim(),
+    compat: { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), model: $('compat-model').value.trim(), key: $('compat-key').value.trim(), reuse_key: $('openai-reuse').checked },
     vertex: { key: $('vertex-key').value.trim(), project: $('vertex-project').value.trim(), location: $('vertex-location').value.trim(), model: $('vertex-model').value.trim() },
   };
   btn.disabled = true;
@@ -281,7 +427,9 @@ async function saveModels() {
   if (!r.ok) {
     btn.disabled = false;
     $('models-msg').textContent = r.error || 'Not saved.';
-    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: 'openai-result', DEEPSEEK_API_KEY: 'deepseek-result', VERTEX_API_KEY: 'vertex-result' };
+    const byEnv = { GEMINI_API_KEY: 'gemini-result', OPENAI_API_KEY: voice === 'openai' ? 'openai-result' : 'compat-result', DEEPSEEK_API_KEY: 'deepseek-result', VERTEX_API_KEY: 'vertex-result' };
+    const p = currentPreset();
+    if (p && p.kind !== 'native' && p.key_env) byEnv[p.key_env] = 'compat-result';
     for (const c of r.checks || []) {
       const id = byEnv[c.name] || (/gemini/.test(c.name) ? 'gemini-result' : /openai/.test(c.name) ? 'openai-result' : /deepseek/.test(c.name) ? 'deepseek-result' : 'compat-result');
       if (c.status === 'fail') setResult($(id), 'fail', checkText(c));
@@ -361,22 +509,48 @@ function stopDemoOnClose() {
 // Find models: GET {base}/models through the daemon, and fill the Model
 // input's datalist. Free; it also runs once after the compat key checks out.
 let findSeq = 0;
-async function findModels() {
-  const status = $('compat-models-status');
-  const base = $('compat-base').value.trim();
-  if (!base) { setResult(status, 'fail', 'Type the Base URL first (it usually ends in /v1). You can still type the model name.'); return; }
-  const mine = ++findSeq;
-  $('find-models').disabled = true;
-  setResult(status, 'wait', 'Looking for models…');
-  const r = await api('models', { name: $('compat-name').value.trim(), base_url: base, key: $('compat-key').value.trim() }).catch(() => null);
-  if (mine !== findSeq) return;
-  $('find-models').disabled = false;
-  const st = modelsStatus(r);
-  fillModels(st.kind === 'ok' ? r.models : []);
-  setResult(status, st.kind, st.text);
+// compatBody is the preset, name, base URL, key and reuse choice of a
+// models, probe or validate request.
+function compatBody() {
+  const p = currentPreset();
+  const other = !p || p.kind === 'other';
+  return {
+    preset: other ? '' : p.id, name: other ? $('compat-name').value.trim() : p.id,
+    base_url: other ? $('compat-base').value.trim() : p.base_url,
+    key: $('compat-key').value.trim(), reuse: !other && !!p.reuse_offered && $('openai-reuse').checked,
+  };
 }
 
-function fillModels(models) {
+async function findModels() {
+  const status = $('compat-models-status');
+  const p = currentPreset();
+  const body = compatBody();
+  if (!body.base_url) { setResult(status, 'fail', 'Type the Base URL first (it usually ends in /v1). You can still type the model name.'); return; }
+  const mine = ++findSeq;
+  $('find-models').disabled = true;
+  setResult(status, 'wait', p && p.local ? 'Checking whether ' + p.label + ' is running…' : 'Looking for models…');
+  const r = await api('models', body).catch(() => null);
+  if (mine !== findSeq) return;
+  $('find-models').disabled = false;
+  if (p && p.local) {
+    const ll = localLine(p, r);
+    setResult($('local-status'), ll.kind, ll.text);
+  }
+  const st = modelsStatus(r);
+  const ok = st.kind === 'ok';
+  fillModels(ok ? r.models : [], ok && r.tool_info);
+  if (p && p.local && !ok) setResult(status, '', '');
+  else setResult(status, st.kind, st.text);
+  const fill = ok ? modelToFill($('compat-model').value, $('compat-model').dataset.auto === '1', r) : null;
+  if (fill) {
+    $('compat-model').value = fill;
+    $('compat-model').dataset.auto = '1';
+    $('compat-model-pick').value = fill;
+    $('probe-tools').disabled = false;
+  }
+}
+
+function fillModels(models, toolInfo) {
   const list = $('compat-models');
   list.textContent = '';
   for (const o of datalistOptions(models)) {
@@ -385,6 +559,7 @@ function fillModels(models) {
     if (o.label) opt.label = o.label;
     list.appendChild(opt);
   }
+  fillPick($('compat-model-pick'), pickGroups(models, toolInfo), $('compat-model').value, 'Choose from the models found');
 }
 
 // Test tool calling: one small request, only on this click.
@@ -393,7 +568,7 @@ async function probeTools() {
   const out = $('probe-result');
   btn.disabled = true;
   setResult(out, 'wait', 'Asking the model to call a tool…');
-  const r = await api('probe', { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), key: $('compat-key').value.trim(), model: $('compat-model').value.trim() }).catch(() => null);
+  const r = await api('probe', Object.assign(compatBody(), { model: $('compat-model').value.trim() })).catch(() => null);
   const st = probeStatus(r);
   setResult(out, st.kind, st.text);
   btn.disabled = !$('compat-model').value.trim();
@@ -403,23 +578,43 @@ function init() {
   $('find-models').addEventListener('click', findModels);
   $('probe-tools').addEventListener('click', probeTools);
   $('compat-model').addEventListener('input', () => {
+    $('compat-model').dataset.auto = '';
     $('probe-tools').disabled = !$('compat-model').value.trim();
     setResult($('probe-result'), '', '');
+  });
+  $('compat-model-pick').addEventListener('change', () => {
+    const v = $('compat-model-pick').value;
+    if (!v) return;
+    $('compat-model').value = v;
+    $('compat-model').dataset.auto = '';
+    $('probe-tools').disabled = false;
+    setResult($('probe-result'), '', '');
+  });
+  $('gemini-model-pick').addEventListener('change', () => {
+    if ($('gemini-model-pick').value) $('gemini-model').value = $('gemini-model-pick').value;
+  });
+  $('openai-reuse').addEventListener('change', () => {
+    renderCompatPanel();
+    findSeq++;
+    fillModels([], false);
+    setResult($('compat-models-status'), '', '');
+    if (autoFind(currentPreset(), { reuse: $('openai-reuse').checked, keyValid: compatKeyValid })) findModels();
   });
   for (const id of ['compat-base', 'compat-name']) {
     $(id).addEventListener('input', () => {
       findSeq++;
       $('find-models').disabled = false;
-      fillModels([]);
+      fillModels([], false);
       setResult($('compat-models-status'), '', '');
       setResult($('probe-result'), '', '');
     });
   }
-  liveValidate($('gemini-key'), $('gemini-result'), 'gemini');
+  liveValidate($('gemini-key'), $('gemini-result'), 'gemini', null, () => { if (choices().orch === 'gemini') loadGeminiModels(); });
   liveValidate($('openai-key'), $('openai-result'), 'openai');
   liveValidate($('deepseek-key'), $('deepseek-result'), 'deepseek');
-  liveValidate($('compat-key'), $('compat-result'), 'compat', () => ({ base_url: $('compat-base').value.trim(), name: $('compat-name').value.trim() }), () => findModels());
-  for (const r of document.querySelectorAll('input[name=voice], input[name=orch]')) r.addEventListener('change', showAdvancedFields);
+  liveValidate($('compat-key'), $('compat-result'), 'compat', () => { const b = compatBody(); return { base_url: b.base_url, name: b.name, preset: b.preset }; }, () => { compatKeyValid = true; findModels(); });
+  $('compat-key').addEventListener('input', () => { compatKeyValid = false; });
+  for (const r of document.querySelectorAll('input[name=voice]')) r.addEventListener('change', showAdvancedFields);
   for (const r of document.querySelectorAll('input[name=voice]')) r.addEventListener('change', () => { if (choices().voice === 'vertex' || $('vertex-result').textContent) checkVertex(); });
   for (const id of ['vertex-key', 'vertex-project', 'vertex-location']) $(id).addEventListener('input', checkVertex);
   $('save-models').addEventListener('click', saveModels);

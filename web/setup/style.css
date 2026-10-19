@@ -71,3 +71,18 @@ label.check input { margin-top: .3rem; }
 
 .recommend { padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 #probe-note { margin: .1rem 0; }
+
+/* Orchestrator presets: native radios in one group (arrow keys move
+   between them), laid out as compact cards. The selected card gets an ink
+   outline, not an orange fill: Save stays the one accent. */
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .45rem; margin: .3rem 0 .5rem; }
+.preset { display: grid; grid-template-columns: auto 1fr; column-gap: .45rem; align-items: start; align-content: start; padding: .5rem .6rem; border: 1px solid var(--btn-line); border-radius: var(--radius-sm); background: var(--card); cursor: pointer; }
+.preset input { margin: .25rem 0 0; grid-row: span 2; accent-color: var(--fg); }
+.preset .p-label { font-weight: 600; }
+.preset .p-note { grid-column: 2; font-size: .85em; color: var(--muted); line-height: 1.35; }
+.preset:hover { background: var(--btn-hover); }
+.preset:has(input:checked) { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.preset:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.panel { border-top: 1px solid var(--line); padding-top: .5rem; }
+.panel select { font: inherit; padding: .4rem .5rem; border: 1px solid var(--btn-line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; }
+#compat-details { margin: .3rem 0 0; }
