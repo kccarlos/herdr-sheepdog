@@ -130,19 +130,19 @@ func TestInitOffersService(t *testing.T) {
 		return []string{"--config", filepath.Join(t.TempDir(), "config.toml"), "--orchestrator", "gemini", "--skip-validate"}
 	}
 
-	code, out := runInitTest(t, initGeminiKey+"\nn\n", args()...)
+	code, out := runInitTest(t, "\n"+initGeminiKey+"\n\n\n\nn\n", args()...)
 	if code != 0 || !strings.Contains(out, "Start at login (optional)") || !strings.Contains(out, "skipped") {
 		t.Fatalf("decline: code %d: %s", code, out)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("declined, but ran %q", *calls)
 	}
-	code, out = runInitTest(t, initGeminiKey+"\ny\n", args()...)
+	code, out = runInitTest(t, "\n"+initGeminiKey+"\n\n\n\ny\n", args()...)
 	if code != 0 || len(*calls) == 0 || !strings.Contains(out, "wrote ") {
 		t.Fatalf("accept: code %d calls %q: %s", code, *calls, out)
 	}
 	*calls = nil
-	code, out = runInitTest(t, initGeminiKey+"\n", args()...)
+	code, out = runInitTest(t, "\n"+initGeminiKey+"\n\n\n\n", args()...)
 	if code != 0 || !strings.Contains(out, "already installed") || len(*calls) > 1 {
 		t.Errorf("already installed: code %d calls %q: %s", code, *calls, out)
 	}
