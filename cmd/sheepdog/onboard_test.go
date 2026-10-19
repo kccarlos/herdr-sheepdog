@@ -131,13 +131,16 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, out)
 	}
-	if data, _ := os.ReadFile(cfgPath); string(data) != orig {
-		t.Errorf("config changed: %q", data)
-	}
-	if !strings.Contains(out, `[[brain.openai_compat]]`) || !strings.Contains(out, `provider = "openrouter"`) {
-		t.Errorf("no config hint: %s", out)
+	// The page's save: the provider entry is added to the existing
+	// config (its other settings stay), the choice goes to the env file.
+	data, _ := os.ReadFile(cfgPath)
+	if !strings.HasPrefix(string(data), orig) || !strings.Contains(string(data), `[[brain.openai_compat]]`) || !strings.Contains(string(data), `base_url = "https://example.invalid/api/v1"`) {
+		t.Errorf("config = %q", data)
 	}
 	env, _ := onboard.ReadEnvFile(envPath)
+	if env["SHEEPDOG_BRAIN_PROVIDER"] != "openrouter" || env["SHEEPDOG_BRAIN_MODEL"] != "vendor/model-a" {
+		t.Errorf("brain env = %q %q", env["SHEEPDOG_BRAIN_PROVIDER"], env["SHEEPDOG_BRAIN_MODEL"])
+	}
 	if env["SHEEPDOG_WEB_TOKEN"] != "phone-paired-token" || env["OPENROUTER_API_KEY"] != initCompatKey || env["GEMINI_API_KEY"] != initGeminiKey {
 		t.Errorf("env = token %q, keys set %v %v", env["SHEEPDOG_WEB_TOKEN"], env["OPENROUTER_API_KEY"] != "", env["GEMINI_API_KEY"] != "")
 	}
@@ -178,15 +181,17 @@ func TestInitInvalidKeyWritesNothing(t *testing.T) {
 	}
 }
 
-// Interactive: pick the compat orchestrator from the menu, answer the
-// questions, retry a wrong key; the written config loads with the entry
-// as the provider and its model.
+// Interactive: Custom, Gemini voice, Other URL as the orchestrator;
+// answer the questions, retry a wrong key; the written config loads with
+// the entry as the provider and its model.
 func TestInitInteractiveCompat(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	stdin := strings.Join([]string{"3", "openrouter", "", "vendor/model-a", "AIza-wrong", initGeminiKey, initCompatKey}, "\n") + "\n"
+	// card Custom, voice Gemini, wrong key then the key, model and voice
+	// kept, orchestrator Other URL, name, base URL, key, model, no tool test.
+	stdin := strings.Join([]string{"4", "1", "AIza-wrong", initGeminiKey, "", "", "9", "openrouter", "", initCompatKey, "vendor/model-a", "n"}, "\n") + "\n"
 	code, out := runInitTest(t, stdin, "--config", cfgPath)
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, out)
@@ -195,13 +200,15 @@ func TestInitInteractiveCompat(t *testing.T) {
 		t.Error("a key was printed")
 	}
 	t.Setenv("OPENROUTER_API_KEY", initCompatKey)
+	t.Setenv("SHEEPDOG_BRAIN_PROVIDER", "openrouter")
+	t.Setenv("SHEEPDOG_BRAIN_MODEL", "vendor/model-a")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c, ok := cfg.Brain.CompatProvider("openrouter")
-	if !ok || cfg.Brain.Provider != "openrouter" || cfg.Brain.Model != "vendor/model-a" || c.BaseURL != "https://openrouter.ai/api/v1" || c.APIKey != initCompatKey {
-		t.Errorf("brain = %s/%s entry %+v", cfg.Brain.Provider, cfg.Brain.Model, c.BaseURL)
+	if !ok || c.BaseURL != "https://openrouter.ai/api/v1" || c.APIKey != initCompatKey {
+		t.Errorf("entry %+v", c.BaseURL)
 	}
 }
 

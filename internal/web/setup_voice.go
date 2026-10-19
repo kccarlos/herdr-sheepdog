@@ -8,35 +8,15 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
-	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
-	"github.com/kccarlos/herdr-sheepdog/internal/voice/gptlive"
 )
 
-// SetupVoicePick is one voice family's model and voice as configured,
-// its defaults and the voices the page offers (never a key).
-type SetupVoicePick struct {
-	Model        string   `json:"model"`
-	Voice        string   `json:"voice"`
-	DefaultModel string   `json:"default_model"`
-	DefaultVoice string   `json:"default_voice"`
-	Voices       []string `json:"voices"`
-}
+// SetupVoicePick is one voice family's model and voice as configured, its
+// defaults and the voices the page offers (never a key).
+type SetupVoicePick = onboard.VoicePick
 
-// setupVoicePicks are the Gemini Live (AI Studio and Vertex share
-// gemini.model and gemini.voice) and GPT-Live picks.
+// setupVoicePicks are the Gemini Live and GPT-Live picks.
 func (s *Server) setupVoicePicks() (SetupVoicePick, SetupVoicePick) {
-	cfg := s.deps.Setup.Config
-	g := SetupVoicePick{
-		Model: orDefault(cfg.Gemini.Model, gemini.DefaultModel), Voice: orDefault(cfg.Gemini.Voice, gemini.DefaultVoice),
-		DefaultModel: gemini.DefaultModel, DefaultVoice: gemini.DefaultVoice,
-	}
-	g.Voices = onboard.VoiceNames(onboard.VoiceGemini, g.Voice)
-	o := SetupVoicePick{
-		Model: orDefault(cfg.Voice.OpenAI.Model, gptlive.DefaultModel), Voice: orDefault(cfg.Voice.OpenAI.Voice, gptlive.DefaultVoice),
-		DefaultModel: gptlive.DefaultModel, DefaultVoice: gptlive.DefaultVoice,
-	}
-	o.Voices = onboard.VoiceNames(onboard.VoiceOpenAI, o.Voice)
-	return g, o
+	return onboard.VoicePicks(s.deps.Setup.Config)
 }
 
 // SetupVoiceModelsRequest is POST /api/setup/voice-models: the models a
@@ -110,61 +90,4 @@ func (s *Server) handleSetupVoiceModels(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
-// withFirst is list with first in front when list lacks it (no
-// duplicates, a new slice).
-func withFirst(list []string, first string) []string {
-	out := []string{}
-	if first != "" {
-		out = append(out, first)
-	}
-	for _, m := range list {
-		if m != first {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// voiceChoice is the model and voice a save writes for voice provider p,
-// with the env entries they go to. An empty model or voice in the
-// request keeps the configured one (nothing is written for it). msg is
-// a plain reason when either is refused.
-type voiceChoice struct {
-	modelEnv, model string
-	voiceEnv, voice string
-}
-
-func (s *Server) voiceChoice(p, model, voice string) (voiceChoice, string) {
-	g, o := s.setupVoicePicks()
-	pick, c := g, voiceChoice{modelEnv: "SHEEPDOG_GEMINI_MODEL", voiceEnv: "SHEEPDOG_GEMINI_VOICE"}
-	if p == onboard.VoiceOpenAI {
-		pick, c = o, voiceChoice{modelEnv: "SHEEPDOG_VOICE_OPENAI_MODEL", voiceEnv: "SHEEPDOG_VOICE_OPENAI_VOICE"}
-	}
-	if m := strings.TrimSpace(model); m != "" {
-		if !onboard.ValidModelName(m) {
-			return c, "the voice model name may only hold letters, digits and . _ / -"
-		}
-		c.model = m
-	}
-	if v := strings.TrimSpace(voice); v != "" {
-		name, ok := onboard.CanonicalVoice(p, v, pick.Voice)
-		if !ok {
-			return c, "unknown voice " + quoteShort(v) + "; pick one of " + strings.Join(pick.Voices, ", ")
-		}
-		c.voice = name
-	}
-	return c, ""
-}
-
-// quoteShort quotes a typed value for an error line, cut to 40 bytes.
-func quoteShort(v string) string {
-	if len(v) > 40 {
-		v = v[:40] + "…"
-	}
-	return `"` + strings.Map(func(r rune) rune {
-		if r < ' ' || r == '"' {
-			return -1
-		}
-		return r
-	}, v) + `"`
-}
+func withFirst(list []string, first string) []string { return onboard.WithFirst(list, first) }

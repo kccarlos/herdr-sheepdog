@@ -189,7 +189,7 @@ func TestSetupNoDisplayUsesTheTerminal(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	var out, errb strings.Builder
-	code := runSetup(context.Background(), []string{"--config", cfgPath}, strings.NewReader("1\n"+initGeminiKey+"\nn\n"), &out, &errb)
+	code := runSetup(context.Background(), []string{"--config", cfgPath}, strings.NewReader("3\n"+initGeminiKey+"\n\n\n\nn\n"), &out, &errb)
 	if code != 0 || !strings.Contains(out.String(), "No display here (SSH?): setting up in the terminal") || !strings.Contains(out.String(), "wrote "+cfgPath) {
 		t.Fatalf("exit %d\n%s\n%s", code, out.String(), errb.String())
 	}

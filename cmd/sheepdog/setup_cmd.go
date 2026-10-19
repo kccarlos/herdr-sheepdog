@@ -111,14 +111,15 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 	if envFile != "" {
 		initArgs = append(initArgs, "--env-file", envFile)
 	}
-	if code := runInit(ctx, initArgs, stdin, stdout, stderr); code != 0 {
+	shared := newPrompter(stdin, stdout, false)
+	if code := runInitWith(ctx, initArgs, shared, stdout, stderr); code != 0 {
 		return code
 	}
 	l, code, ok := loadLifecycle(ctx, "setup", configPath, envFile, stdout, stderr)
 	if !ok {
 		return code
 	}
-	if p := newPrompter(stdin, stdout, false); p.tty != nil && l.cfg.Web.IsLoopback() {
+	if p := shared; p.tty != nil && l.cfg.Web.IsLoopback() {
 		fprintln(stdout, "")
 		yes, err := p.yesNo("Let the iOS app reach sheepdog on your network (Wi-Fi, Tailscale), behind a long token?", false)
 		if err == nil && yes {

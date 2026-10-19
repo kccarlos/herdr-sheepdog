@@ -32,7 +32,7 @@ import (
 const (
 	TestFlightURL  = "https://testflight.apple.com/join/bjCaFYgK"
 	IOSRepoURL     = "https://github.com/kccarlos/herdr-sheepdog/tree/main/ios"
-	GeminiKeyURL   = "https://aistudio.google.com/apikey"
+	GeminiKeyURL   = onboard.GeminiKeyURL
 	ModelsDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/models.md"
 	RemoteDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/remote-access.md"
 	setupNotLocal  = "The setup page only opens on the computer sheepdog runs on. Open http://127.0.0.1:%s/setup there, or run `sheepdog setup` in its terminal."
@@ -224,7 +224,10 @@ type SetupState struct {
 	Orchestrator SetupOrchestrator `json:"orchestrator"`
 	// Presets are the orchestrator choices, in the order the page shows
 	// them, with whether each one's key is saved.
-	Presets []SetupPreset     `json:"presets"`
+	Presets []SetupPreset `json:"presets"`
+	// Start is the starting-point cards, the summary template and the
+	// cost lines (onboard.Start): the terminal setup prints the same.
+	Start   onboard.StartInfo `json:"start"`
 	Herdr   SetupHerdr        `json:"herdr"`
 	Phone   SetupPhone        `json:"phone"`
 	Service ServiceState      `json:"service"`
@@ -353,6 +356,7 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 	}
 	st.Orchestrator.Preset, st.Orchestrator.BaseURL = s.presetOf(st.Orchestrator.Provider)
 	st.Presets = s.setupPresets()
+	st.Start = onboard.Start()
 	h := onboard.CheckHerdr(cfg.Herdr.Socket)
 	st.Herdr = SetupHerdr{OK: h.Status == onboard.OK, Detail: h.Detail, Fix: h.Fix, Agents: len(s.deps.Store.List())}
 	if s.deps.HerdrMode == "mock" {
@@ -383,25 +387,12 @@ func (s *Server) compatPreset(id string) (onboard.Preset, bool) {
 	return p, ok && p.Kind == onboard.PresetCompat
 }
 
-func normURL(u string) string { return strings.TrimSuffix(strings.TrimSpace(u), "/") }
+func normURL(u string) string { return onboard.NormURL(u) }
 
 // presetOf is the preset a saved orchestrator provider matches, and the
 // base URL of its OpenAI-compatible entry.
 func (s *Server) presetOf(provider string) (string, string) {
-	if provider == "" {
-		return brain.ProviderGemini, ""
-	}
-	if p, ok := onboard.PresetByID(s.presets(), provider); ok && p.Kind == onboard.PresetNative {
-		return p.ID, ""
-	}
-	c, ok := s.deps.Setup.Config.Brain.CompatProvider(provider)
-	if !ok {
-		return onboard.PresetOther, ""
-	}
-	if p, ok := s.compatPreset(provider); ok && normURL(p.BaseURL) == normURL(c.BaseURL) {
-		return p.ID, c.BaseURL
-	}
-	return onboard.PresetOther, c.BaseURL
+	return onboard.PresetOf(s.presets(), s.deps.Setup.Config, provider)
 }
 
 // savedKey is the key saved under the env-file entry env ("" when none):
@@ -443,16 +434,9 @@ func (s *Server) savedKey(env string) string {
 }
 
 // compatKeyEnv is where the key of the OpenAI-compatible provider name
-// lives: a preset with a reusable key (OpenAI) by the reuse choice, else
-// the saved entry's api_key_env, else the preset's or the default name.
+// lives (see onboard.CompatKeyEnv).
 func (s *Server) compatKeyEnv(name string, reuse bool) string {
-	if p, ok := onboard.PresetByID(onboard.Presets(), name); ok && p.ReuseEnv != "" {
-		return onboard.PresetKeyEnv(name, reuse)
-	}
-	if c, ok := s.deps.Setup.Config.Brain.CompatProvider(name); ok && c.APIKeyEnv != "" {
-		return c.APIKeyEnv
-	}
-	return onboard.PresetKeyEnv(name, false)
+	return onboard.CompatKeyEnv(s.deps.Setup.Config, name, reuse)
 }
 
 // setupPresets is the preset list with what is saved for each.
@@ -480,9 +464,8 @@ func (s *Server) setupPresets() []SetupPreset {
 }
 
 // DefaultVertexLocation is the location the setup page offers for the
-// Vertex voice: gemini-3.8-live is served from us-central1 and the us
-// multi-region, not from global (CONFIG.md, [gemini.vertex]).
-const DefaultVertexLocation = "us-central1"
+// Vertex voice.
+const DefaultVertexLocation = onboard.DefaultVertexLocation
 
 func setupVertex(cfg config.Config) SetupVertex {
 	v := SetupVertex{
@@ -529,113 +512,27 @@ func (s *Server) setupPhone() SetupPhone {
 
 // SetupValidateRequest is POST /api/setup/validate: one key to check
 // live, before anything is saved.
-type SetupValidateRequest struct {
-	// Kind is gemini, openai, deepseek, anthropic, compat or vertex.
-	Kind string `json:"kind"`
-	Key  string `json:"key"`
-	// BaseURL and Name are the compat provider's; a compat Preset id
-	// sets both (the typed ones are ignored).
-	BaseURL string `json:"base_url,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Preset  string `json:"preset,omitempty"`
-	// Project and Location are Vertex AI's; Voice also checks that the
-	// location serves the Live model. An empty Key uses the saved Vertex
-	// key, only for the project it was saved for.
-	Project  string `json:"project,omitempty"`
-	Location string `json:"location,omitempty"`
-	Voice    bool   `json:"voice,omitempty"`
-	// LiveModel is the Live model the voice check opens ("": the
-	// configured gemini.model).
-	LiveModel string `json:"live_model,omitempty"`
-}
+type SetupValidateRequest = onboard.ValidateRequest
 
 // SetupCheck is one check's outcome for the page.
-type SetupCheck struct {
-	Name   string `json:"name"`
-	Status string `json:"status"` // ok | warn | fail | skip
-	Detail string `json:"detail"`
-	Fix    string `json:"fix,omitempty"`
-}
+type SetupCheck = onboard.Check
 
-func checkOf(r onboard.Result) SetupCheck {
-	return SetupCheck{Name: r.Name, Status: strings.ToLower(r.Status.String()), Detail: r.Detail, Fix: r.Fix}
-}
+func checkOf(r onboard.Result) SetupCheck { return onboard.CheckOf(r) }
 
 // validateKey checks one key live (no key in any result).
 func (s *Server) validateKey(ctx context.Context, req SetupValidateRequest) SetupCheck {
-	ep := s.deps.Setup.Endpoints
-	key := strings.TrimSpace(req.Key)
-	switch req.Kind {
-	case "gemini":
-		c := checkOf(onboard.CheckGeminiKey(ctx, ep, key))
-		if c.Status == "fail" && strings.Contains(c.Detail, "rejected the key") {
-			c.Fix = "check that you copied the whole key, or create a new one at " + GeminiKeyURL
-		}
-		return c
-	case "openai":
-		if key == "" {
-			return SetupCheck{Name: "openai voice key", Status: "fail", Detail: "no key given", Fix: "paste an OpenAI API key (https://platform.openai.com/api-keys)"}
-		}
-		return checkOf(onboard.CheckOpenAIVoiceKey(ctx, ep, key))
-	case "deepseek":
-		off := false
-		return checkOf(onboard.CheckCompat(ctx, ep, onboard.Compat{Name: brain.ProviderDeepSeek, BaseURL: config.DefaultDeepSeekBaseURL, APIKey: key, KeyEnv: "DEEPSEEK_API_KEY", Thinking: &off}, false)[0])
-	case "anthropic":
-		c := checkOf(onboard.CheckAnthropicKey(ctx, s.anthropicEndpoints(), key))
-		if c.Status == "fail" && strings.Contains(c.Detail, "rejected the key") {
-			c.Fix = "check that you copied the whole key, or create a new one at " + brain.ServiceOf(brain.ProviderAnthropic).Console
-		}
-		return c
-	case "compat":
-		name, base := s.compatTarget(req.Preset, req.Name, req.BaseURL)
-		c := config.OpenAICompat{Name: name, BaseURL: base}
-		if c.BaseURL == "" {
-			return SetupCheck{Name: name + " key", Status: "fail", Detail: "no base URL", Fix: "give the API root, e.g. https://openrouter.ai/api/v1"}
-		}
-		return checkOf(onboard.CheckCompat(ctx, ep, onboard.Compat{Name: name, BaseURL: c.BaseURL, APIKey: key, KeyEnv: s.compatKeyEnv(name, false), NoKey: c.KeyOptional()}, false)[0])
-	case "vertex":
-		project := strings.TrimSpace(req.Project)
-		if key == "" {
-			key = s.savedVertexKey(project)
-		}
-		live := ""
-		if req.Voice {
-			live = orDefault(req.LiveModel, s.deps.Setup.Config.Gemini.Model)
-			if !onboard.ValidModelName(live) {
-				return SetupCheck{Name: "vertex", Status: "fail", Detail: "the voice model name may only hold letters, digits and . _ / -", Fix: "pick a model from the list"}
-			}
-		}
-		return checkOf(onboard.CheckVertex(ctx, ep, onboard.VertexCreds{APIKey: key, Project: project, Location: req.Location}, live))
-	}
-	return SetupCheck{Name: req.Kind, Status: "fail", Detail: "unknown key kind " + fmt.Sprintf("%q", req.Kind)}
+	return onboard.ValidateKey(ctx, s.deps.Setup.Endpoints, s.deps.Setup.Config, s.presets(), req)
 }
 
-// savedVertexKey is the saved Vertex key, only when project is the
-// project it was saved for: a key bound to one project's service account
-// is not tried on another.
+// savedVertexKey is the saved Vertex key, only for the project it was
+// saved for.
 func (s *Server) savedVertexKey(project string) string {
-	v := s.deps.Setup.Config.Gemini.Vertex
-	if v.APIKey == "" || project == "" || v.Project != project {
-		return ""
-	}
-	return v.APIKey
+	return onboard.SavedVertexKey(s.deps.Setup.Config, project)
 }
 
-// compatTarget is the provider name and base URL a request means: a
-// compat preset id fixes both, else the typed ones.
+// compatTarget is the provider name and base URL a request means.
 func (s *Server) compatTarget(preset, name, base string) (string, string) {
-	if p, ok := s.compatPreset(preset); ok {
-		return p.ID, p.BaseURL
-	}
-	return compatName(name), strings.TrimSpace(base)
-}
-
-func compatName(n string) string {
-	n = strings.ToLower(strings.TrimSpace(n))
-	if n == "" {
-		return "openrouter"
-	}
-	return n
+	return onboard.CompatTarget(s.presets(), preset, name, base)
 }
 
 func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
@@ -650,50 +547,7 @@ func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 // SetupKeysRequest is POST /api/setup/keys: the models step. An empty
 // key keeps the saved one; a key that is needed and missing, or that
 // fails its live check, saves nothing.
-type SetupKeysRequest struct {
-	GeminiKey string `json:"gemini_key"`
-	// Voice is gemini (default: Gemini Live on AI Studio), vertex (Gemini
-	// Live on Vertex AI) or openai (GPT-Live).
-	Voice     string `json:"voice"`
-	OpenAIKey string `json:"openai_key"`
-	// VoiceModel and VoiceName are the chosen voice's Live model and
-	// voice ("": keep the configured one). Gemini Live (either backend)
-	// writes gemini.model and gemini.voice, GPT-Live voice.openai.model
-	// and voice.openai.voice. An unknown voice saves nothing.
-	VoiceModel string `json:"voice_model"`
-	VoiceName  string `json:"voice_name"`
-	// Orchestrator is a preset id (gemini, the default; anthropic,
-	// deepseek, vertex, openrouter, openai, ollama, lmstudio) or compat
-	// (Other URL).
-	Orchestrator string `json:"orchestrator"`
-	// GeminiModel is the Gemini orchestrator's model ("": the default).
-	GeminiModel string `json:"gemini_model"`
-	// Vertex is the shared Vertex AI block (voice and orchestrator): the
-	// key (empty keeps the saved one, for the same project only), the
-	// project, the voice's location and the orchestrator's model.
-	Vertex struct {
-		Key      string `json:"key"`
-		Project  string `json:"project"`
-		Location string `json:"location"`
-		Model    string `json:"model"`
-	} `json:"vertex"`
-	DeepSeekKey string `json:"deepseek_key"`
-	// AnthropicKey and AnthropicModel are the Anthropic orchestrator's
-	// ("" model: brain.DefaultAnthropicModel).
-	AnthropicKey   string `json:"anthropic_key"`
-	AnthropicModel string `json:"anthropic_model"`
-	// Compat is the OpenAI-compatible orchestrator: a compat preset
-	// fixes the name and base URL. ReuseKey (OpenAI preset only) points it
-	// at the voice's OPENAI_API_KEY instead of a key of its own; Key is
-	// then ignored.
-	Compat struct {
-		Name     string `json:"name"`
-		BaseURL  string `json:"base_url"`
-		Model    string `json:"model"`
-		Key      string `json:"key"`
-		ReuseKey bool   `json:"reuse_key"`
-	} `json:"compat"`
-}
+type SetupKeysRequest = onboard.ModelsInput
 
 // SetupKeysResponse answers the models step: each key's check, and
 // whether the daemon restarts with the saved settings.
@@ -725,15 +579,11 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	if err != nil {
 		return SetupKeysResponse{Error: "cannot read " + sd.EnvPath + ": " + err.Error()}, http.StatusInternalServerError
 	}
-	voiceP := orDefault(req.Voice, "gemini")
-	orch := orDefault(req.Orchestrator, brain.ProviderGemini)
-	if voiceP != "gemini" && voiceP != "vertex" && voiceP != "openai" {
-		return SetupKeysResponse{Error: "voice must be gemini, vertex or openai"}, http.StatusBadRequest
-	}
-	vc, msg := s.voiceChoice(voiceP, req.VoiceModel, req.VoiceName)
+	ch, msg := onboard.ResolveModels(cfg, s.presets(), req)
 	if msg != "" {
 		return SetupKeysResponse{Error: msg}, http.StatusBadRequest
 	}
+	voiceP, orch := ch.Voice, ch.Orch
 	type need struct {
 		kind, env string
 		given     string
@@ -747,19 +597,14 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		kept string
 	}
 	var needs []need
-	vertexProject, vertexLocation := strings.TrimSpace(req.Vertex.Project), ""
-	if voiceP == "vertex" || orch == brain.ProviderVertex {
-		if vertexProject == "" {
-			return SetupKeysResponse{Error: "Vertex AI needs the Google Cloud project id"}, http.StatusBadRequest
-		}
+	if vertexProject := ch.VertexProject; vertexProject != "" {
 		n := need{kind: "vertex", env: "VERTEX_API_KEY", given: req.Vertex.Key, have: s.savedVertexKey(vertexProject) != "",
 			req: SetupValidateRequest{Kind: "vertex", Project: vertexProject}}
 		if voiceP == "vertex" {
-			vertexLocation = orDefault(req.Vertex.Location, DefaultVertexLocation)
-			n.req.Location, n.req.Voice, n.req.LiveModel = vertexLocation, true, vc.model
+			n.req.Location, n.req.Voice, n.req.LiveModel = ch.VertexLocation, true, ch.VoiceSel.Model
 			// A new location or Live model for the voice is checked with
 			// the saved key: the model must be served there.
-			n.recheck = vertexLocation != cfg.Gemini.Vertex.Location || (vc.model != "" && vc.model != cfg.Gemini.Model)
+			n.recheck = ch.VertexLocation != cfg.Gemini.Vertex.Location || (ch.VoiceSel.Model != "" && ch.VoiceSel.Model != cfg.Gemini.Model)
 		}
 		if cur := cfg.Gemini.Vertex; cur.APIKey != "" && cur.Project != vertexProject {
 			n.missing = fmt.Sprintf("the saved Vertex key is for project %s; paste the key for project %s", cur.Project, vertexProject)
@@ -772,40 +617,14 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 	if voiceP == "openai" {
 		needs = append(needs, need{kind: "openai", env: "OPENAI_API_KEY", given: req.OpenAIKey, have: cfg.Voice.OpenAI.APIKey != ""})
 	}
-	var compat *config.OpenAICompat
-	brainProvider, brainModel := orch, ""
 	switch orch {
-	case brain.ProviderGemini:
-		brainModel = strings.TrimSpace(req.GeminiModel)
-	case brain.ProviderVertex:
-		brainModel = orDefault(req.Vertex.Model, brain.DefaultModel)
 	case brain.ProviderDeepSeek:
 		needs = append(needs, need{kind: "deepseek", env: "DEEPSEEK_API_KEY", given: req.DeepSeekKey, have: cfg.DeepSeek.APIKey != ""})
-		brainModel = brain.DefaultDeepSeekModel
 	case brain.ProviderAnthropic:
-		brainModel = orDefault(req.AnthropicModel, brain.DefaultAnthropicModel)
-		if !onboard.ValidModelName(brainModel) {
-			return SetupKeysResponse{Error: "the Anthropic model name may only hold letters, digits and . _ / -"}, http.StatusBadRequest
-		}
 		needs = append(needs, need{kind: "anthropic", env: "ANTHROPIC_API_KEY", given: req.AnthropicKey, have: s.savedKey("ANTHROPIC_API_KEY") != ""})
-	default:
-		preset, isPreset := s.compatPreset(orch)
-		if !isPreset && orch != "compat" && orch != onboard.PresetOther {
-			return SetupKeysResponse{Error: "orchestrator must be anthropic, gemini, deepseek, vertex, openrouter, openai, ollama, lmstudio or compat"}, http.StatusBadRequest
-		}
-		c := config.OpenAICompat{Name: compatName(req.Compat.Name), BaseURL: strings.TrimSpace(req.Compat.BaseURL), Model: strings.TrimSpace(req.Compat.Model)}
-		if isPreset {
-			c.Name, c.BaseURL = preset.ID, preset.BaseURL
-		}
-		if c.BaseURL == "" || c.Model == "" {
-			return SetupKeysResponse{Error: "an OpenAI-compatible orchestrator needs its base URL and a model that supports tool calling"}, http.StatusBadRequest
-		}
-		if c.Name == brain.ProviderGemini || c.Name == brain.ProviderDeepSeek || c.Name == brain.ProviderVertex || c.Name == brain.ProviderAnthropic {
-			return SetupKeysResponse{Error: fmt.Sprintf("%q is a built-in provider name; pick another name", c.Name)}, http.StatusBadRequest
-		}
-		reuse := isPreset && preset.ReuseEnv != "" && req.Compat.ReuseKey
-		c.APIKeyEnv = s.compatKeyEnv(c.Name, reuse)
-		if reuse {
+	}
+	if c := ch.Compat; c != nil {
+		if ch.Reuse {
 			// The voice's key, on the user's explicit yes: never written
 			// from here, only pointed at.
 			have := s.savedKey(c.APIKeyEnv) != "" || (voiceP == "openai" && strings.TrimSpace(req.OpenAIKey) != "")
@@ -814,12 +633,10 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		} else {
 			// A keyed preset always needs its key; a typed loopback URL
 			// (a local server) may run without one.
-			keyOptional := c.KeyOptional() && (!isPreset || !preset.KeyNeeded)
+			keyOptional := c.KeyOptional() && (!ch.IsPreset || !ch.Preset.KeyNeeded)
 			needs = append(needs, need{kind: "compat", env: c.APIKeyEnv, given: req.Compat.Key, have: s.savedKey(c.APIKeyEnv) != "" || keyOptional,
 				req: SetupValidateRequest{Kind: "compat", Name: c.Name, BaseURL: c.BaseURL}})
 		}
-		compat = &c
-		brainProvider, brainModel = c.Name, c.Model
 	}
 	resp := SetupKeysResponse{Checks: []SetupCheck{}}
 	set := map[string]string{}
@@ -885,49 +702,9 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 		resp.Error = "nothing was saved: fix the key marked above"
 		return resp, http.StatusUnprocessableEntity
 	}
-	if compat != nil {
-		if err := onboard.UpsertCompat(sd.ConfigPath, *compat); err != nil {
-			resp.Error = "cannot add the provider to " + sd.ConfigPath + ": " + err.Error()
-			return resp, http.StatusInternalServerError
-		}
-	}
-	var del []string
-	if vertexProject != "" {
-		if err := onboard.SetVertexConfig(sd.ConfigPath, vertexProject, vertexLocation); err != nil {
-			resp.Error = "cannot write the Vertex project to " + sd.ConfigPath + ": " + err.Error()
-			return resp, http.StatusInternalServerError
-		}
-		// The env file overrides config.toml: values left there by hand
-		// would hide the ones just written.
-		del = append(del, "VERTEX_PROJECT")
-		if vertexLocation != "" {
-			del = append(del, "VERTEX_LOCATION")
-		}
-	}
-	switch voiceP {
-	case "vertex":
-		set["SHEEPDOG_VOICE_PROVIDER"], set["SHEEPDOG_GEMINI_BACKEND"] = "gemini", "vertex"
-	case "gemini":
-		set["SHEEPDOG_VOICE_PROVIDER"], set["SHEEPDOG_GEMINI_BACKEND"] = "gemini", "aistudio"
-	default:
-		set["SHEEPDOG_VOICE_PROVIDER"] = voiceP
-	}
-	if vc.model != "" {
-		set[vc.modelEnv] = vc.model
-	}
-	if vc.voice != "" {
-		set[vc.voiceEnv] = vc.voice
-	}
-	set["SHEEPDOG_BRAIN_PROVIDER"] = brainProvider
-	if brainModel != "" {
-		set["SHEEPDOG_BRAIN_MODEL"] = brainModel
-	} else if p := saved["SHEEPDOG_BRAIN_PROVIDER"]; p != "" && p != brainProvider {
-		// Back to Gemini from another provider: that provider's model
-		// must not stay behind.
-		del = append(del, "SHEEPDOG_BRAIN_MODEL")
-	}
-	if err := onboard.EditEnvFile(sd.EnvPath, set, del); err != nil {
-		resp.Error = "cannot write " + sd.EnvPath + ": " + err.Error()
+	names, err := onboard.SaveModels(sd.ConfigPath, sd.EnvPath, saved, ch, set)
+	if err != nil {
+		resp.Error = err.Error()
 		return resp, http.StatusInternalServerError
 	}
 	if sd.ClearOverrides != nil {
@@ -935,11 +712,7 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 			s.log.Log(logSource, "web.setup_error", "", map[string]any{"step": "clear_overrides", "error": err.Error()})
 		}
 	}
-	names := make([]string, 0, len(set))
-	for k := range set {
-		names = append(names, k)
-	}
-	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "models", "vars": names, "voice": voiceP, "orchestrator": brainProvider})
+	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "models", "vars": names, "voice": voiceP, "orchestrator": ch.Provider})
 	resp.OK = true
 	resp.Restarting = s.deps.Restart != nil
 	return resp, http.StatusOK
@@ -949,13 +722,6 @@ func (s *Server) saveKeys(ctx context.Context, req SetupKeysRequest) (SetupKeysR
 func withName(c SetupCheck, name string) SetupCheck {
 	c.Name = name
 	return c
-}
-
-func orDefault(v, def string) string {
-	if v = strings.TrimSpace(v); v == "" {
-		return def
-	}
-	return v
 }
 
 // restartSoon asks for the in-place restart once the response is out.

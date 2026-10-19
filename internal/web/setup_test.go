@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -204,6 +205,12 @@ func TestSetupKeysValidateSaveAndNeverEcho(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "web.setup_saved") || !strings.Contains(logged.String(), "GEMINI_API_KEY") {
 		t.Fatalf("the event log does not have the save (so the check below proves nothing): %d bytes", logged.Len())
+	}
+	// The cards, cost lines and summary template come from the daemon
+	// (onboard.Start), the table the terminal setup prints from too.
+	var served struct{ Start onboard.StartInfo }
+	if err := json.Unmarshal([]byte(state), &served); err != nil || !reflect.DeepEqual(served.Start, onboard.Start()) {
+		t.Errorf("state.start = %+v (%v)", served.Start.Cards, err)
 	}
 	if strings.Contains(state, goodKey) || strings.Contains(logged.String(), goodKey) || strings.Contains(logged.String(), bad) {
 		t.Error("a key reached the state or the event log")

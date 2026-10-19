@@ -1,0 +1,68 @@
+{
+  "cards": [
+    {
+      "id": "recommended",
+      "label": "Recommended",
+      "voice": "gemini",
+      "orch": "anthropic",
+      "note": "The strongest orchestrator: understands your agents best.",
+      "need": "Needs an Anthropic API key (paid)."
+    },
+    {
+      "id": "cost",
+      "label": "Cost-effective",
+      "voice": "gemini",
+      "orch": "deepseek",
+      "note": "Cost-effective, and it did well in our tests.",
+      "need": ""
+    },
+    {
+      "id": "free",
+      "label": "Free quick start",
+      "voice": "gemini",
+      "orch": "gemini",
+      "note": "One free key for both. Good for trying; can be slow or busy. Upgrade any time.",
+      "need": ""
+    },
+    {
+      "id": "custom",
+      "label": "Custom",
+      "voice": "",
+      "orch": "",
+      "note": "Pick each part yourself.",
+      "need": ""
+    }
+  ],
+  "voice_providers": {
+    "gemini": "Google AI Studio",
+    "openai": "OpenAI",
+    "vertex": "Google Vertex AI"
+  },
+  "voice_costs": {
+    "gemini": "free with daily limits",
+    "openai": "$0.05/min of open session",
+    "vertex": "billed to your Google Cloud project"
+  },
+  "anthropic_costs": [
+    {
+      "contains": "opus-5-5",
+      "cost": "$4/$20 per million tokens"
+    },
+    {
+      "contains": "sonnet-5-5",
+      "cost": "$2/$10 per million tokens"
+    },
+    {
+      "contains": "haiku-5-5",
+      "cost": "$0.10/$0.50 per million tokens"
+    }
+  ],
+  "pay_per_use": "pay per use",
+  "free_local": "free on this computer",
+  "free_daily": "free with daily limits",
+  "billed": "billed to your Google Cloud project",
+  "template": "You talk to {voice_model} ({voice_provider}). Your agents are handled by {orch_model} ({orch_provider}). Cost: {voice_cost} · {orch_cost}",
+  "voice_model_fallback": "a Live model",
+  "orch_model_fallback": "a model of your choice",
+  "other_fallback": "your server"
+}
