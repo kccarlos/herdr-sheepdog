@@ -4,6 +4,7 @@
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
+import { startCards, cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
@@ -106,11 +107,13 @@ function render() {
   }
   if (renderedBoot !== s.boot) {
     renderedBoot = s.boot;
-    const voice = voiceChoice(s.voice);
+    const init = initialChoice(s, voiceChoice(s.voice), savedPreset(s));
+    const voice = init.voice;
     renderVoiceGrid(s, voice);
     for (const k of Object.keys(chosen)) delete chosen[k];
     for (const k of Object.keys(voiceLists)) delete voiceLists[k];
-    const orch = savedPreset(s);
+    const orch = init.orch;
+    renderStartGrid(init.card);
     renderGrid(s.presets, orch);
     rememberSaved(s, orch);
     renderVertex(s, voice, orch);
@@ -208,6 +211,90 @@ function renderVertex(s, voice, orch) {
   vertexOK = voice === 'vertex' && s.voice.backend === 'vertex' && s.keys.vertex && !s.voice.problem;
 }
 
+// renderStartGrid builds the four starting-point cards: one radio group.
+// A card only sets the voice and orchestrator radios below; Save is what
+// saves. Arrow keys move between the cards (nextCard).
+function renderStartGrid(selected) {
+  const grid = $('start-grid');
+  grid.textContent = '';
+  const inputs = [];
+  startCards.forEach((c, i) => {
+    const label = document.createElement('label');
+    label.className = 'preset';
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = 'start'; input.value = c.id;
+    input.checked = c.id === selected;
+    input.addEventListener('change', () => { if (input.checked) applyCard(c.id); });
+    input.addEventListener('keydown', (e) => {
+      const j = nextCard(e.key, i, startCards.length);
+      if (j < 0) return;
+      e.preventDefault();
+      inputs[j].focus();
+      inputs[j].checked = true;
+      inputs[j].dispatchEvent(new Event('change'));
+    });
+    inputs.push(input);
+    const name = document.createElement('span');
+    name.className = 'p-label'; name.textContent = c.label;
+    const note = document.createElement('span');
+    note.className = 'p-note'; note.textContent = c.note;
+    label.append(input, name, note);
+    if (c.need) {
+      const need = document.createElement('span');
+      need.className = 'p-need'; need.textContent = c.need;
+      label.append(need);
+    }
+    grid.append(label);
+  });
+}
+
+// applyCard sets the voice and orchestrator radios for a card and shows
+// their fields. Custom leaves them as they are.
+function applyCard(id) {
+  const r = cardRadios(id);
+  if (r) {
+    for (const [name, value] of [['voice', r.voice], ['orch', r.orch]]) {
+      const el = document.querySelector('input[name=' + name + '][value="' + value + '"]');
+      if (el) el.checked = true;
+    }
+    const { voice } = choices();
+    if (voice === 'vertex' || $('vertex-result').textContent) checkVertex();
+  }
+  showFields();
+}
+
+// syncCard keeps the starting point honest after a hand change of the
+// radios: the card that matches them, else Custom.
+function syncCard() {
+  const { voice, orch } = choices();
+  const el = document.querySelector('input[name=start][value="' + cardFor(voice, orch) + '"]');
+  if (el && !el.checked) el.checked = true;
+}
+
+// orchModelShown is the model the chosen orchestrator will run, as the
+// page shows it.
+function orchModelShown(p) {
+  if (!p) return '';
+  if (p.id === 'anthropic') return $('anthropic-model').value.trim() || p.default_model || '';
+  if (p.id === 'gemini') return $('gemini-model').value.trim() || p.default_model || '';
+  if (p.id === 'vertex') return $('vertex-model').value.trim();
+  if (p.kind === 'native') return p.default_model || '';
+  return $('compat-model').value.trim();
+}
+
+// renderSummary updates the bar above Save.
+function renderSummary() {
+  if (!state) return;
+  const { voice } = choices();
+  const p = currentPreset();
+  const c = chosen[family(voice)];
+  const shown = !$('voice-pick').classList.contains('hidden') && c;
+  $('summary').textContent = summary({
+    voice, voiceModel: shown ? c.model : pickOf(state, voice).model,
+    preset: p, orchModel: orchModelShown(p), otherName: $('compat-name').value.trim(),
+  });
+}
+
 // renderVoiceGrid builds the three voice cards: native radios in one
 // group (arrow keys move between them), styled like the presets.
 function renderVoiceGrid(s, selected) {
@@ -222,6 +309,7 @@ function renderVoiceGrid(s, selected) {
     input.addEventListener('change', () => {
       // The two Gemini cards share the pick, but Vertex serves fewer models.
       if (c.value === 'vertex' && chosen.gemini) chosen.gemini.model = vertexModel(s.vertex, chosen.gemini.model);
+      syncCard();
       showFields();
       if (c.value === 'vertex' || $('vertex-result').textContent) checkVertex();
     });
@@ -245,7 +333,7 @@ function renderGrid(presets, selected) {
     const input = document.createElement('input');
     input.type = 'radio'; input.name = 'orch'; input.value = p.id;
     input.checked = p.id === selected;
-    input.addEventListener('change', showFields);
+    input.addEventListener('change', () => { syncCard(); showFields(); });
     const name = document.createElement('span');
     name.className = 'p-label'; name.textContent = p.label;
     const note = document.createElement('span');
@@ -299,6 +387,7 @@ function showFields() {
   $('gemini-not-needed').classList.toggle('hidden', f.geminiNeeded);
   refreshVoicePick();
   if (orch !== shownPreset) switchPreset(orch);
+  renderSummary();
 }
 
 // switchPreset shows the fields of the newly selected preset: its model
@@ -402,6 +491,7 @@ async function loadAnthropicModels() {
   if (!$('anthropic-model').value.trim() && r && r.suggested) $('anthropic-model').value = r.suggested;
   fillPick($('anthropic-model-pick'), [{ label: '', ids }], $('anthropic-model').value, 'Choose from this key\'s models');
   $('anthropic-probe').disabled = !$('anthropic-model').value.trim();
+  renderSummary();
 }
 
 async function probeAnthropic() {
@@ -501,6 +591,7 @@ function showTalkLine() {
   const voice = choices().voice;
   const c = chosen[family(voice)];
   if (c) $('voice-line').textContent = talkLine(voice, c.model, c.voice);
+  renderSummary();
 }
 
 // Live check of the Vertex block: the key (or the saved one, for its own
@@ -699,6 +790,7 @@ async function findModels() {
     $('compat-model-pick').value = fill;
     $('probe-tools').disabled = false;
   }
+  renderSummary();
 }
 
 function fillModels(models, toolInfo) {
@@ -726,6 +818,8 @@ async function probeTools() {
 }
 
 function init() {
+  for (const id of ['anthropic-model', 'gemini-model', 'vertex-model', 'compat-model', 'compat-name']) $(id).addEventListener('input', renderSummary);
+  for (const id of ['anthropic-model-pick', 'gemini-model-pick', 'compat-model-pick']) $(id).addEventListener('change', renderSummary);
   $('find-models').addEventListener('click', findModels);
   $('probe-tools').addEventListener('click', probeTools);
   $('compat-model').addEventListener('input', () => {

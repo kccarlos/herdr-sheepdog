@@ -20,6 +20,16 @@ sheepdog needs two models. They never share a role:
 | **Gemini Live on Vertex AI** | `VERTEX_API_KEY` and a project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same model and voice as Gemini Live, for Google Cloud users. |
 | **GPT-Live** | `OPENAI_API_KEY` | **$0.05 per minute of open session** | The session opens only for speech or a push and closes after 45 s idle (`voice.openai.idle_close_s`). The orchestrator uses this key only if you choose to reuse it ([presets](#presets-on-the-setup-page)). |
 
+### Starting points on the setup page
+
+Step 1 opens with four cards that fill in the two parts below; you can
+change anything afterwards, and nothing is saved until you press Save.
+**Recommended** is Gemini Live with the Anthropic orchestrator (needs a paid
+Anthropic key) and is selected on a first run. **Cost-effective** is Gemini
+Live with DeepSeek. **Free quick start** is Gemini Live with Gemini, one free
+key for both. **Custom** leaves your choices as they are. A bar above Save
+says which models you talk to and what they cost.
+
 ### Choosing the voice on the setup page
 
 Step 1 of `sheepdog setup` has two parts: **your voice** and **your

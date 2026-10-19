@@ -93,3 +93,8 @@ label.check input { margin-top: .3rem; }
 .pick-row { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
 .pick-row .field { flex: 1 1 12rem; margin: .2rem 0; }
 .result.muted { color: var(--muted); }
+
+/* Starting points: the same radio cards; the selected one is outlined. */
+.start-grid { grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); }
+.start-grid .p-need { grid-column: 2; font-size: .85em; color: var(--fg); margin-top: .15rem; }
+.summary { margin: .7rem 0 0; padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--code); }
