@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -755,5 +756,79 @@ func TestAnthropicForeignToolCall(t *testing.T) {
 	s := mustJSONString(f.body(0)["messages"])
 	if !strings.Contains(s, `{"id":"toolu_sd_`) || strings.Count(s, "toolu_sd_") != 2 || strings.Contains(s, "bt 1/1") {
 		t.Errorf("messages = %s", s)
+	}
+}
+
+// cachePrefixes are the message-cache prefixes of a request: for each
+// block with cache_control, the role and blocks up to it (cache_control
+// left out), as JSON.
+func cachePrefixes(body map[string]any) []string {
+	var seen []any
+	var out []string
+	for _, mm := range body["messages"].([]any) {
+		m := mm.(map[string]any)
+		for _, bb := range m["content"].([]any) {
+			b := map[string]any{}
+			for k, v := range bb.(map[string]any) {
+				if k != "cache_control" {
+					b[k] = v
+				}
+			}
+			seen = append(seen, []any{m["role"], b})
+			if bb.(map[string]any)["cache_control"] != nil {
+				out = append(out, mustJSONString(seen))
+			}
+		}
+	}
+	return out
+}
+
+// Across turns, a message breakpoint of each new turn sits where an
+// earlier request wrote one, on a prefix that pruning and the dropped
+// thinking left unchanged, so the turn reads it from the cache (not
+// only the tools and system); never more than 4 breakpoints.
+func TestAnthropicCacheBreakpointsStableAcrossTurns(t *testing.T) {
+	f := newFakeAnthropic(t)
+	f.strict = true
+	h, _ := anthropicHarness(t, f, nil)
+	const turns = 7
+	firsts := []int{}
+	for i := range turns {
+		f.add(thinkingStep(toolUse(fmt.Sprintf("toolu_%d", i), ToolRecall, `{"query":"tests"}`)), answer("Still running."))
+		h.brain.Quiesce()
+		firsts = append(firsts, f.count())
+		if _, err := h.ask(fmt.Sprintf("and now, %d?", i), "auth"); err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+	}
+	h.brain.Quiesce()
+	written := map[string]bool{}
+	hits := 0
+	for i := range f.count() {
+		b := f.body(i)
+		if n := strings.Count(mustJSONString(b), `"cache_control"`); n > 4 {
+			t.Errorf("request %d has %d breakpoints, the API allows 4", i, n)
+		}
+		pre := cachePrefixes(b)
+		if slices.Contains(firsts, i) {
+			hit := false
+			for _, p := range pre {
+				hit = hit || written[p]
+			}
+			if hit {
+				hits++
+			} else if i >= firsts[4] {
+				t.Errorf("request %d (a new turn's first) matches no earlier breakpoint", i)
+			}
+		}
+		for _, p := range pre {
+			written[p] = true
+		}
+	}
+	if hits < turns-4 {
+		t.Errorf("cross-turn cache hits = %d, want at least %d", hits, turns-4)
+	}
+	if f.dropped != 0 {
+		t.Errorf("dropped %d thinking blocks", f.dropped)
 	}
 }

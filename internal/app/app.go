@@ -812,7 +812,7 @@ func AnthropicConfig(cfg config.Config, log logging.Logger) brain.AnthropicConfi
 	return brain.AnthropicConfig{
 		APIKey: cfg.Anthropic.APIKey, BaseURL: cfg.Anthropic.BaseURL,
 		Effort: cfg.Anthropic.Effort, EventEffort: cfg.Anthropic.EventEffort,
-		NoFallbacks: !cfg.Anthropic.Fallbacks, Log: log,
+		NoFallbacks: !cfg.Anthropic.Fallbacks, PruneAfterTurns: cfg.Brain.PruneAfterTurns, Log: log,
 	}
 }
 
