@@ -867,7 +867,20 @@ func BrainConfig(cfg config.Config) brain.Config {
 		AnnounceTurnTimeout: time.Duration(cfg.Brain.AnnounceTurnTimeoutS) * time.Second,
 		AnnounceTimeout:     time.Duration(cfg.Brain.AnnounceTimeoutS) * time.Second,
 		DataDir:             cfg.DataDir,
+		KeyVars:             compatKeyVars(cfg),
 	}
+}
+
+// compatKeyVars maps each [[brain.openai_compat]] entry to the variable
+// its key is read from, for the orchestrator's account-problem fix lines.
+func compatKeyVars(cfg config.Config) map[string]string {
+	m := map[string]string{}
+	for _, o := range cfg.Brain.OpenAICompat {
+		if o.APIKeyEnv != "" {
+			m[o.Name] = o.APIKeyEnv
+		}
+	}
+	return m
 }
 
 // BrainMode reports the effective orchestrator mode: BrainOn, BrainFake, or

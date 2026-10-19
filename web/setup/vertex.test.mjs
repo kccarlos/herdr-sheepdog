@@ -1,7 +1,7 @@
 // Unit tests for the setup page's Vertex AI helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { voiceChoice, vertexFields, voiceLine, savedKeyFor, savedNote, validateBody, checkLine } from './vertex.js';
+import { voiceChoice, vertexFields, savedKeyFor, savedNote, validateBody, checkLine } from './vertex.js';
 
 const key = 'AQ.a-key-that-is-long-enough-0000';
 const saved = { keys: { vertex: true }, vertex: { project: 'p-1', default_location: 'us-central1', live_model: 'gemini-3.8-live', voice: 'Puck' } };
@@ -18,11 +18,6 @@ test('which Vertex fields show', () => {
   assert.deepEqual(vertexFields('vertex', 'deepseek'), { block: true, location: true, orchModel: false, geminiNeeded: false });
   assert.deepEqual(vertexFields('openai', 'vertex'), { block: true, location: false, orchModel: true, geminiNeeded: false });
   assert.deepEqual(vertexFields('vertex', 'gemini'), { block: true, location: true, orchModel: false, geminiNeeded: true });
-});
-
-test('the voice line names the model and the voice', () => {
-  assert.equal(voiceLine(saved.vertex), "You'll talk to gemini-3.8-live (Vertex), voice Puck");
-  assert.equal(voiceLine({ live_model: 'm', voice: 'Kore' }), "You'll talk to m (Vertex), voice Kore");
 });
 
 test('the saved key is used only for its own project', () => {
@@ -42,6 +37,8 @@ test('what is checked, and when', () => {
   assert.deepEqual(validateBody({ key: ' ' + key + ' ', project: ' p-2 ', location: '', voice: true }, saved),
     { kind: 'vertex', key, project: 'p-2', voice: true, location: 'us-central1' });
   assert.equal(validateBody({ key, project: 'p-2', location: 'us', voice: true }, saved).location, 'us');
+  assert.equal(validateBody({ key, project: 'p-2', voice: true, model: 'gemini-3.8-live' }, saved).live_model, 'gemini-3.8-live', 'the picked Live model is checked');
+  assert.equal(validateBody({ key, project: 'p-2', model: 'gemini-3.8-live' }, saved).live_model, undefined, 'no Live check for the orchestrator alone');
 });
 
 test('check result lines', () => {

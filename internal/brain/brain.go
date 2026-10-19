@@ -109,6 +109,11 @@ type Config struct {
 	// a used-up quota or balance), shared with the web layer that shows
 	// them; nil gives the orchestrator a set of its own (Accounts).
 	Accounts *AccountAlerts
+	// KeyVars names the variable that holds a provider's key where it is
+	// not ServiceOf's (an OpenAI-compatible entry's api_key_env: the
+	// OpenAI orchestrator reads OPENAI_ORCH_API_KEY unless it reuses the
+	// voice's key), so an account problem's fix line names the right one.
+	KeyVars map[string]string
 }
 
 func (c Config) withDefaults() Config {

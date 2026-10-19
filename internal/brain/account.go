@@ -168,7 +168,20 @@ type AccountAlert struct {
 // vendor: a failover is the daemon's business, a key, a quota or a
 // balance is the user's to fix, and they cannot fix what is not named.
 func NewAccountAlert(role, provider string, p AccountProblem, backup bool) AccountAlert {
+	return newAccountAlert(role, provider, ServiceOf(provider), p, backup)
+}
+
+// serviceOf is provider as ServiceOf describes it, with the key variable
+// the orchestrator's config names for it (Config.KeyVars), if any.
+func (b *Brain) serviceOf(provider string) Service {
 	s := ServiceOf(provider)
+	if v := b.cfg.KeyVars[provider]; v != "" {
+		s.KeyVar = v
+	}
+	return s
+}
+
+func newAccountAlert(role, provider string, s Service, p AccountProblem, backup bool) AccountAlert {
 	ear, _, _ := strings.Cut(s.Name, " (") // "Gemini (AI Studio)" is said "Gemini"
 	what, whatZh := "the orchestrator", "调度模型"
 	if role == RoleVoice {

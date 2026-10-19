@@ -103,7 +103,7 @@ func TestSetupVertexValidate(t *testing.T) {
 	if !strings.Contains(f.get(t, "/api/setup/state"), `"default_location": "us-central1"`) {
 		t.Error("state lacks the default location")
 	}
-	if !strings.Contains(f.get(t, "/setup/vertex.js"), "export function voiceLine") {
+	if !strings.Contains(f.get(t, "/setup/vertex.js"), "export function validateBody") {
 		t.Error("the page's Vertex module is not served")
 	}
 }

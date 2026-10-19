@@ -20,6 +20,39 @@ sheepdog needs two models. They never share a role:
 | **Gemini Live on Vertex AI** | `VERTEX_API_KEY` and a project ([Vertex AI](#vertex-ai)) | Paid per token on the Google Cloud project | The same model and voice as Gemini Live, for Google Cloud users. |
 | **GPT-Live** | `OPENAI_API_KEY` | **$0.05 per minute of open session** | The session opens only for speech or a push and closes after 45 s idle (`voice.openai.idle_close_s`). The orchestrator uses this key only if you choose to reuse it ([presets](#presets-on-the-setup-page)). |
 
+### Choosing the voice on the setup page
+
+Step 1 of `sheepdog setup` has two parts: **your voice** and **your
+orchestrator**. The voice is three cards: **Gemini Live** (Google AI Studio,
+free key, selected by default), **Gemini Live on Vertex AI** and
+**GPT-Live** (OpenAI, $0.05 per minute of open session).
+
+Once the card's key checks out (or a key is already saved; for Vertex AI,
+once the Google Cloud block checks out), the page says which model and voice
+you will hear, for example "You'll talk to gemini-3.8-live, voice Puck.",
+with a picker for each:
+
+| Card | Models offered | Voices offered |
+|---|---|---|
+| Gemini Live | the models your key lists as Live-capable (`bidiGenerateContent` in Google's model list); the configured one if the list fails | Puck (default), Kore, Charon, Aoede |
+| Gemini Live on Vertex AI | the configured model and `gemini-3.8-live`, the one we checked on Vertex (Vertex does not list its models for an API key) | the same as Gemini Live |
+| GPT-Live | the `gpt-live…` models your key lists; `gpt-live-1` if the list fails | marin (default), cedar, alloy, ash, ballad, coral, echo, sage, shimmer, verse, quartz, ripple, vesper, willow, stone, gleam, meridian, bossa, tempo, beacon, delta, cinder |
+
+The two Gemini cards share one model and voice setting. Google has more
+prebuilt voices than the four offered; any of them works in
+`gemini.voice`, and a voice set there by hand is offered on the page too.
+For Vertex AI, the page checks that the location serves the model you pick.
+There is no voice preview: hearing one needs a Live session, which uses
+your quota or is billed.
+
+Saving writes what changed to the env file (`SHEEPDOG_GEMINI_MODEL`,
+`SHEEPDOG_GEMINI_VOICE`, or `SHEEPDOG_VOICE_OPENAI_MODEL`,
+`SHEEPDOG_VOICE_OPENAI_VOICE`, next to `SHEEPDOG_VOICE_PROVIDER` and
+`SHEEPDOG_GEMINI_BACKEND`) and reloads the daemon in place. To change the
+model or the voice later, run `sheepdog setup` again, or set `gemini.model`,
+`gemini.voice`, `voice.openai.model` or `voice.openai.voice`
+([CONFIG.md](../CONFIG.md)).
+
 ## Orchestrator
 
 | Orchestrator | Key | Cost | Measured |
@@ -107,7 +140,7 @@ an option, not a recommendation: the free Gemini key is simpler.
    role, then an **API key bound to that service account**, restricted to
    the Vertex AI API (`aiplatform.googleapis.com`).
 3. In `sheepdog setup`, step 1: choose **Vertex AI** as the orchestrator,
-   **Gemini Live on Vertex AI** as the voice (under Advanced), or both. One "Google
+   **Gemini Live on Vertex AI** as the voice, or both. One "Google
    Cloud (Vertex AI)" block takes the key, the project id and, for the
    voice, the location (`us-central1` by default: `gemini-3.8-live` is
    served there and from the `us` multi-region, not from `global`).
@@ -140,11 +173,12 @@ Check each provider's own terms, especially for free-tier keys.
 
 ## Switch models
 
-- **Setup page:** `sheepdog setup`, step 1 (the voice is under Advanced). Saving reloads the
-  daemon in place.
+- **Setup page:** `sheepdog setup`, step 1: the voice card, its model and
+  its voice, then the orchestrator. Saving reloads the daemon in place.
 - **While it runs:** the `/debug` page header (`sheepdog open debug`) and the
   iPhone app's Settings, Models switch voice and orchestrator at the next
   turn. The choice survives a restart.
-- **Config:** `voice.provider`, `brain.provider` and `brain.model` in
+- **Config:** `voice.provider`, `gemini.model`, `gemini.voice`,
+  `voice.openai.model`, `voice.openai.voice`, `brain.provider` and `brain.model` in
   [CONFIG.md](../CONFIG.md), keys in `~/.config/sheepdog/.env`.
   `sheepdog config show` prints the effective config with keys redacted.

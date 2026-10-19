@@ -20,6 +20,14 @@ const (
 	SampleRate = 24000
 )
 
+// Voices are the output voices the setup page offers, DefaultVoice
+// first: the list in OpenAI's gpt-live-1 docs as read on 2026-09-23
+// (docs/dev/gpt-live-notes.md). The voice is fixed per session.
+var Voices = []string{
+	DefaultVoice, "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse",
+	"quartz", "ripple", "vesper", "willow", "stone", "gleam", "meridian", "bossa", "tempo", "beacon", "delta", "cinder",
+}
+
 // ErrNoAPIKey is returned by New without a key.
 var ErrNoAPIKey = errors.New("gptlive: no OPENAI_API_KEY configured")
 

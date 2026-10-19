@@ -2,7 +2,8 @@
 // only to /api/setup/* (loopback only, no token); keys are posted once
 // and never come back.
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
-import { voiceChoice, vertexFields, voiceLine, savedNote, validateBody, checkLine } from './vertex.js';
+import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
+import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed } from './voice.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus } from './presets.js';
 
 const $ = (id) => document.getElementById(id);
@@ -13,6 +14,10 @@ let vertexOK = false; // the Vertex block's last check passed for the voice
 let shownPreset = null; // the preset whose fields are on screen
 const modelBy = {}; // the model typed or filled per preset: { value, auto }
 let compatKeyValid = false; // the typed compat key checked out
+let geminiValid = false; // the typed Gemini key checked out
+let openaiValid = false; // the typed OpenAI key checked out
+const chosen = {}; // the model and voice picked per family (gemini, openai)
+const voiceLists = {}; // the last model list per card and key
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -85,6 +90,7 @@ function render() {
   // 1. Models
   const ms = $('models-state');
   $('gemini-saved').classList.toggle('hidden', !s.keys.gemini);
+  $('openai-saved').classList.toggle('hidden', !s.keys.openai);
   const note = savedNote(s);
   $('vertex-saved').textContent = note;
   $('vertex-saved').classList.toggle('hidden', !note);
@@ -100,12 +106,13 @@ function render() {
   if (renderedBoot !== s.boot) {
     renderedBoot = s.boot;
     const voice = voiceChoice(s.voice);
-    for (const r of document.querySelectorAll('input[name=voice]')) r.checked = r.value === voice;
+    renderVoiceGrid(s, voice);
+    for (const k of Object.keys(chosen)) delete chosen[k];
     const orch = savedPreset(s);
     renderGrid(s.presets, orch);
     rememberSaved(s, orch);
     renderVertex(s, voice, orch);
-    showAdvancedFields();
+    showFields();
   }
   $('deepseek-saved').classList.toggle('hidden', !s.keys.deepseek);
 
@@ -198,6 +205,30 @@ function renderVertex(s, voice, orch) {
   vertexOK = voice === 'vertex' && s.voice.backend === 'vertex' && s.keys.vertex && !s.voice.problem;
 }
 
+// renderVoiceGrid builds the three voice cards: native radios in one
+// group (arrow keys move between them), styled like the presets.
+function renderVoiceGrid(s, selected) {
+  const grid = $('voice-grid');
+  grid.textContent = '';
+  for (const c of voiceCards(s.voice.openai_price)) {
+    const label = document.createElement('label');
+    label.className = 'preset';
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = 'voice'; input.value = c.value;
+    input.checked = c.value === selected;
+    input.addEventListener('change', () => {
+      showFields();
+      if (c.value === 'vertex' || $('vertex-result').textContent) checkVertex();
+    });
+    const name = document.createElement('span');
+    name.className = 'p-label'; name.textContent = c.label;
+    const note = document.createElement('span');
+    note.className = 'p-note'; note.textContent = c.note;
+    label.append(input, name, note);
+    grid.append(label);
+  }
+}
+
 // renderGrid builds the orchestrator preset radios from the daemon's
 // table: native radios in one group, so arrow keys move between them.
 function renderGrid(presets, selected) {
@@ -209,7 +240,7 @@ function renderGrid(presets, selected) {
     const input = document.createElement('input');
     input.type = 'radio'; input.name = 'orch'; input.value = p.id;
     input.checked = p.id === selected;
-    input.addEventListener('change', showAdvancedFields);
+    input.addEventListener('change', showFields);
     const name = document.createElement('span');
     name.className = 'p-label'; name.textContent = p.label;
     const note = document.createElement('span');
@@ -235,18 +266,22 @@ function rememberSaved(s, orch) {
 
 function choices() {
   const o = document.querySelector('input[name=orch]:checked');
-  return { voice: document.querySelector('input[name=voice]:checked').value, orch: o ? o.value : 'gemini' };
+  const v = document.querySelector('input[name=voice]:checked');
+  return { voice: v ? v.value : 'gemini', orch: o ? o.value : 'gemini' };
 }
 
 function currentPreset() {
   return state ? presetById(state.presets, choices().orch) : null;
 }
 
-function showAdvancedFields() {
+function showFields() {
   const { voice, orch } = choices();
   const f = vertexFields(voice, orch);
   const pn = panel(currentPreset(), $('openai-reuse').checked);
   $('openai-field').classList.toggle('hidden', voice !== 'openai');
+  $('gemini-field').classList.toggle('hidden', !f.geminiNeeded);
+  $('gemini-orch-only').classList.toggle('hidden', voice === 'gemini' || orch !== 'gemini');
+  $('vertex-voice-wait').classList.toggle('hidden', voice !== 'vertex' || vertexOK);
   $('gemini-orch-field').classList.toggle('hidden', pn.field !== 'gemini');
   $('deepseek-field').classList.toggle('hidden', pn.field !== 'deepseek');
   $('compat-field').classList.toggle('hidden', pn.field !== 'compat');
@@ -254,8 +289,7 @@ function showAdvancedFields() {
   $('vertex-block').classList.toggle('hidden', !f.block);
   $('vertex-location-field').classList.toggle('hidden', !f.location);
   $('gemini-not-needed').classList.toggle('hidden', f.geminiNeeded);
-  showVoiceLine();
-  if (voice !== 'gemini') $('advanced').open = true;
+  refreshVoicePick();
   if (orch !== shownPreset) switchPreset(orch);
 }
 
@@ -357,25 +391,85 @@ function fillPick(sel, groups, current, prompt) {
   sel.value = groups.some((g) => g.ids.includes(current)) ? current : '';
 }
 
-function showVoiceLine() {
-  const el = $('vertex-voice-line');
-  const on = vertexOK && choices().voice === 'vertex' && state;
-  el.classList.toggle('hidden', !on);
-  if (on) setResult(el, 'ok', voiceLine(state.vertex));
+// The voice pickers: once the chosen card's key checks out, "You'll
+// talk to …" with the model (from the key's Live models) and the voice.
+let voiceSeq = 0;
+function voiceCtx() {
+  return {
+    vertexOK, geminiValid, openaiValid,
+    geminiSaved: !!(state && state.keys.gemini), geminiTyped: !!$('gemini-key').value.trim(),
+    openaiSaved: !!(state && state.keys.openai), openaiTyped: !!$('openai-key').value.trim(),
+  };
+}
+
+async function refreshVoicePick() {
+  const voice = choices().voice;
+  const box = $('voice-pick');
+  $('vertex-voice-wait').classList.toggle('hidden', voice !== 'vertex' || vertexOK);
+  if (!state || !pickReady(voice, voiceCtx())) { box.classList.add('hidden'); voiceSeq++; return; }
+  const fam = family(voice);
+  const pick = pickOf(state, voice);
+  if (!chosen[fam]) chosen[fam] = { model: pick.model, voice: pick.voice };
+  fillVoiceNames(pick.voices, chosen[fam].voice);
+  box.classList.remove('hidden');
+  showTalkLine();
+  const key = voice === 'gemini' ? $('gemini-key').value.trim() : voice === 'openai' ? $('openai-key').value.trim() : '';
+  const cacheKey = voice + '|' + key;
+  let r = voiceLists[cacheKey];
+  if (!r) {
+    const mine = ++voiceSeq;
+    fillVoiceModels([chosen[fam].model], chosen[fam].model);
+    setResult($('voice-models-status'), 'wait', 'Listing the Live models…');
+    r = await api('voice-models', { provider: voice, key }).catch(() => null);
+    if (mine !== voiceSeq || choices().voice !== voice) return;
+    if (r && !r.error) voiceLists[cacheKey] = r;
+  }
+  fillVoiceModels(modelOptions(r, chosen[fam].model), chosen[fam].model);
+  const st = modelsLine(r);
+  setResult($('voice-models-status'), st.kind, st.text);
+}
+
+function fillVoiceModels(ids, current) {
+  const sel = $('voice-model');
+  sel.textContent = '';
+  for (const id of ids) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = id;
+    sel.appendChild(o);
+  }
+  sel.value = current;
+}
+
+function fillVoiceNames(names, current) {
+  const sel = $('voice-name');
+  sel.textContent = '';
+  for (const n of names) {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  }
+  sel.value = current;
+}
+
+function showTalkLine() {
+  const voice = choices().voice;
+  const c = chosen[family(voice)];
+  if (c) $('voice-line').textContent = talkLine(voice, c.model, c.voice);
 }
 
 // Live check of the Vertex block: the key (or the saved one, for its own
 // project), the project and, for the voice, the location.
 let vertexTimer = null;
 let vertexSeq = 0;
-function checkVertex() {
+function checkVertex(keepPick) {
   clearTimeout(vertexTimer);
   const out = $('vertex-result');
   const voice = choices().voice === 'vertex';
-  const body = validateBody({ key: $('vertex-key').value, project: $('vertex-project').value, location: $('vertex-location').value, voice }, state);
+  const c = chosen.gemini;
+  const body = validateBody({ key: $('vertex-key').value, project: $('vertex-project').value, location: $('vertex-location').value, voice, model: c && c.model }, state);
   const mine = ++vertexSeq;
-  vertexOK = false;
-  showVoiceLine();
+  // A new model is checked with the pickers left in place.
+  if (!keepPick) { vertexOK = false; refreshVoicePick(); }
   if (!body) { setResult(out, '', ''); return; }
   if (body.wait) { setResult(out, 'wait', body.wait); return; }
   setResult(out, 'wait', voice ? 'Checking the key, the project and the location…' : 'Checking the key and the project…');
@@ -385,7 +479,7 @@ function checkVertex() {
     const st = checkLine(r);
     setResult(out, st.kind, st.text);
     vertexOK = voice && r && r.status !== 'fail';
-    showVoiceLine();
+    refreshVoicePick();
   }, 600);
 }
 
@@ -412,9 +506,11 @@ function liveValidate(input, result, kind, extra, onOk) {
 
 async function saveModels() {
   const btn = $('save-models');
-  const voice = document.querySelector('input[name=voice]:checked').value;
-  const orch = choices().orch;
+  const { voice, orch } = choices();
+  const fam = family(voice);
+  const pickBody = chosen[fam] && !$('voice-pick').classList.contains('hidden') ? changed(pickOf(state, voice), chosen[fam].model, chosen[fam].voice) : {};
   const body = {
+    ...pickBody,
     gemini_key: $('gemini-key').value.trim(), voice, openai_key: $('openai-key').value.trim(),
     orchestrator: orchValue(orch), deepseek_key: $('deepseek-key').value.trim(), gemini_model: $('gemini-model').value.trim(),
     compat: { name: $('compat-name').value.trim(), base_url: $('compat-base').value.trim(), model: $('compat-model').value.trim(), key: $('compat-key').value.trim(), reuse_key: $('openai-reuse').checked },
@@ -437,6 +533,7 @@ async function saveModels() {
     return;
   }
   for (const id of ['gemini-key', 'openai-key', 'deepseek-key', 'compat-key', 'vertex-key']) $(id).value = '';
+  geminiValid = false; openaiValid = false;
   $('models-msg').textContent = 'Saved. Restarting sheepdog with your keys…';
   const reloaded = await waitForReload(old, 20000);
   btn.disabled = false;
@@ -609,14 +706,24 @@ function init() {
       setResult($('probe-result'), '', '');
     });
   }
-  liveValidate($('gemini-key'), $('gemini-result'), 'gemini', null, () => { if (choices().orch === 'gemini') loadGeminiModels(); });
-  liveValidate($('openai-key'), $('openai-result'), 'openai');
+  liveValidate($('gemini-key'), $('gemini-result'), 'gemini', null, () => { geminiValid = true; refreshVoicePick(); if (choices().orch === 'gemini') loadGeminiModels(); });
+  liveValidate($('openai-key'), $('openai-result'), 'openai', null, () => { openaiValid = true; refreshVoicePick(); });
+  $('gemini-key').addEventListener('input', () => { geminiValid = false; refreshVoicePick(); });
+  $('openai-key').addEventListener('input', () => { openaiValid = false; refreshVoicePick(); });
+  $('voice-model').addEventListener('change', () => {
+    const voice = choices().voice;
+    chosen[family(voice)].model = $('voice-model').value;
+    showTalkLine();
+    if (voice === 'vertex') checkVertex(true);
+  });
+  $('voice-name').addEventListener('change', () => {
+    chosen[family(choices().voice)].voice = $('voice-name').value;
+    showTalkLine();
+  });
   liveValidate($('deepseek-key'), $('deepseek-result'), 'deepseek');
   liveValidate($('compat-key'), $('compat-result'), 'compat', () => { const b = compatBody(); return { base_url: b.base_url, name: b.name, preset: b.preset }; }, () => { compatKeyValid = true; findModels(); });
   $('compat-key').addEventListener('input', () => { compatKeyValid = false; });
-  for (const r of document.querySelectorAll('input[name=voice]')) r.addEventListener('change', showAdvancedFields);
-  for (const r of document.querySelectorAll('input[name=voice]')) r.addEventListener('change', () => { if (choices().voice === 'vertex' || $('vertex-result').textContent) checkVertex(); });
-  for (const id of ['vertex-key', 'vertex-project', 'vertex-location']) $(id).addEventListener('input', checkVertex);
+  for (const id of ['vertex-key', 'vertex-project', 'vertex-location']) $(id).addEventListener('input', () => checkVertex(false));
   $('save-models').addEventListener('click', saveModels);
   $('run-checks').addEventListener('click', runChecks);
   $('save-service').addEventListener('click', saveService);
