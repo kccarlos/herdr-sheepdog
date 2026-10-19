@@ -16,6 +16,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
@@ -99,6 +100,9 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fprintln(stdout, onboard.Result{Name: "config", Status: onboard.OK, Detail: "loaded " + src}.Line())
 	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath})
+	if r, ok := envLocationCheck(cfg.DataDir, envPath); ok {
+		results = append(results, r)
+	}
 	for _, r := range results {
 		fprintln(stdout, r.Line())
 	}
@@ -106,6 +110,26 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 	return 0
+}
+
+// envLocationCheck warns when the keys come from an env file other than
+// the default (a ./.env in some working directory): a restart from another
+// directory would not find it. It looks at the file this doctor loaded
+// and at the one the last daemon recorded.
+func envLocationCheck(dataDir, loaded string) (onboard.Result, bool) {
+	def := configEnvPath()
+	path := ""
+	if _, err := os.Stat(loaded); err == nil {
+		path, _ = filepath.Abs(loaded)
+	} else if rec := daemon.ReadEnvRecord(dataDir); rec.HadKeys {
+		path = rec.Path
+	}
+	if path == "" || path == def {
+		return onboard.Result{}, false
+	}
+	return onboard.Result{Name: "env file location", Status: onboard.Warn,
+		Detail: "keys come from " + path + ", not the default env file",
+		Fix:    "copy it to " + def + " (chmod 600)"}, true
 }
 
 func printInitUsage(w io.Writer) {

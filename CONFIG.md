@@ -52,7 +52,14 @@ on macOS with `KeepAlive`; a systemd unit
 `Restart=on-failure`): `sheepdog serve --background --env-file
 ~/.config/sheepdog/.env`, plus `--config` when one is given, with the
 installing shell's `PATH`. Without the service, `start` runs the same
-command line as a detached process. `service status` and `service
+command line as a detached process. Keys belong in `~/.config/sheepdog/.env`;
+a daemon that loaded another env file (`--env-file`, or the `./.env` of its
+working directory) records that path (never a value) in
+`<data_dir>/env-file.json`, and `restart`, `start` and the restart after an
+upgrade pass it back as `--env-file <absolute path>` (an `--env-file` you
+give wins). `service install` keeps the default file and warns when the
+recorded one differs, because a login service should not depend on a file in
+a project directory. `service status` and `service
 uninstall` manage the unit; `install --dry-run` prints it without
 changing anything. One daemon runs per `data_dir`: a second `serve` or
 `start` says `sheepdog is already running (pid N, http://…)`.
@@ -463,6 +470,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications: device tokens, relay tokens and each phone's notification content key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
+| `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 

@@ -48,6 +48,15 @@ func lifecycleFlags(fs *flag.FlagSet) (configPath, envFile *string) {
 
 // loadLifecycle loads the env file and config the daemon would use.
 func loadLifecycle(ctx context.Context, name, configPath, envFile string, stdout, stderr io.Writer) (*lifecycle, int, bool) {
+	// start and restart read the env file the last daemon loaded (an
+	// explicit --env-file wins), not whatever ./.env this working
+	// directory offers.
+	if envFile == "" && (name == "start" || name == "restart") {
+		if p := recordedEnvFile(configPath); p != "" {
+			envFile = p
+			fprintf(stdout, "using the env file the last run loaded: %s\n", p)
+		}
+	}
 	if code, ok := loadServeEnvFile(envFile, stderr); !ok {
 		return nil, code, false
 	}
@@ -62,6 +71,24 @@ func loadLifecycle(ctx context.Context, name, configPath, envFile string, stdout
 	}
 	_ = ctx
 	return l, 0, true
+}
+
+// recordedEnvFile is the env file the last daemon recorded
+// (daemon.EnvRecord) when it still exists and differs from the default
+// ("" otherwise: the usual lookup applies).
+func recordedEnvFile(configPath string) string {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return ""
+	}
+	p := daemon.ReadEnvRecord(cfg.DataDir).Path
+	if p == "" || p == configEnvPath() {
+		return ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 // serviceInstalled reports whether the login service's unit file exists.
@@ -134,6 +161,9 @@ func (l *lifecycle) start(ctx context.Context) int {
 		fprintf(l.errw, "sheepdog cannot start: %s\n", strings.TrimSuffix(strings.TrimPrefix(err.Error(), "app: "), "; use --voice=off to run without it"))
 		fprintln(l.errw, "Run `sheepdog setup` to set it up, or `sheepdog doctor` to see what is missing.")
 		return 1
+	}
+	if k := keysStatus(l.cfg.DataDir); k != nil && k.Problem != "" {
+		fprintf(l.errw, "sheepdog start: warning: %s; the daemon will come up in setup mode (copy your keys to %s, chmod 600, or pass --env-file)\n", k.Problem, config.DefaultEnvPath())
 	}
 	stdio, logFile := daemon.StdioFile(l.cfg.DataDir), daemon.LogFile(l.cfg.DataDir)
 	from, logFrom := fileSize(stdio), fileSize(logFile)

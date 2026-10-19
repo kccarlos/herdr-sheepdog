@@ -129,6 +129,13 @@ func implicitEnvFile() string {
 // loaded before config.Load so SHEEPDOG_*/GEMINI_API_KEY* from the file
 // take effect, and are never logged (see config.LoadEnvFile).
 func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
+	code, ok, _ = loadServeEnvFileAt(path, stderr)
+	return code, ok
+}
+
+// loadServeEnvFileAt is loadServeEnvFile that also returns the absolute
+// path of the file it loaded ("" when none existed).
+func loadServeEnvFileAt(path string, stderr io.Writer) (code int, ok bool, loaded string) {
 	explicit := path != ""
 	if !explicit {
 		path = implicitEnvFile()
@@ -139,15 +146,18 @@ func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
 		// is simply absent (a fresh install), not an error.
 		if explicit && path != configEnvPath() {
 			fprintf(stderr, "sheepdog: --env-file %s: %v\n", path, err)
-			return 1, false
+			return 1, false, ""
 		}
-		return 0, true // no default .env: not an error
+		return 0, true, "" // no default .env: not an error
 	}
 	if err := config.LoadEnvFile(path); err != nil {
 		fprintf(stderr, "sheepdog: %v\n", err)
-		return 1, false
+		return 1, false, ""
 	}
-	return 0, true
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return 0, true, path
 }
 
 // runServe implements `sheepdog serve`.
@@ -158,7 +168,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	baseEnv := os.Environ() // before the env file: a reload starts from it
 	startedAt := time.Now().UTC()
-	if code, ok := loadServeEnvFile(o.envFile, stderr); !ok {
+	code, ok, loadedEnv := loadServeEnvFileAt(o.envFile, stderr)
+	if !ok {
 		return code
 	}
 	cfg, err := config.Load(o.configPath)
@@ -274,6 +285,9 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			return 1
 		}
 		cur.Store(a)
+		if run == 0 {
+			recordEnvFile(cfg.DataDir, loadedEnv, !a.SetupNeeded(), stderr)
+		}
 		if serveBuilt != nil {
 			serveBuilt(a)
 		}
@@ -340,7 +354,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 				from[0], to = p[0], p[1]
 			}
 			next, code, resumed := restartForUpdate(updateRestart{
-				cfg: cfg, args: args, baseEnv: baseEnv, from: from[0], to: to,
+				cfg: cfg, args: args, envFile: loadedEnv, baseEnv: baseEnv, from: from[0], to: to,
 				stdout: stdout, stderr: stderr, flush: logw.Flush,
 				stopDemo: func() { sdemo.Stop("the daemon is restarting after an update") },
 				release:  func() { lock.Release() },
@@ -401,6 +415,36 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		return 0
 	}
+}
+
+// recordEnvFile saves which env file this run loaded (daemon.EnvRecord)
+// and says plainly when the previous run had its keys from a file this
+// run did not load. Only paths are written or logged, never values.
+func recordEnvFile(dataDir, loaded string, haveKeys bool, stderr io.Writer) {
+	prev := daemon.ReadEnvRecord(dataDir)
+	if prev.HadKeys && !haveKeys && prev.Path != loaded {
+		fprintf(stderr, "sheepdog: the previous run had its keys from %s, which this run did not load (%s): the daemon is in setup mode. Pass --env-file %s, or copy that file to %s (chmod 600)\n",
+			prev.Path, envFileProblem(prev.Path), prev.Path, config.DefaultEnvPath())
+	}
+	if loaded == "" || (!haveKeys && prev.HadKeys && prev.Path != loaded) {
+		return // keep the record of the file that had the keys
+	}
+	if err := daemon.WriteEnvRecord(dataDir, daemon.EnvRecord{Path: loaded, HadKeys: haveKeys, At: time.Now().UTC()}); err != nil {
+		fprintf(stderr, "sheepdog: could not record the env file: %v\n", err)
+	}
+}
+
+// envFileProblem says why path cannot be loaded.
+func envFileProblem(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "the file is gone"
+		}
+		return "the file is unreadable"
+	}
+	_ = f.Close()
+	return "the file exists"
 }
 
 // setupOptions are the setup page's files and hooks for this serve: the

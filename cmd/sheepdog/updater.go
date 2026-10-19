@@ -88,6 +88,7 @@ func startUpdateWatchers(ctx context.Context, cfg config.Config, tr *update.Trac
 type updateRestart struct {
 	cfg      config.Config
 	args     []string // runServe's arguments (after "serve")
+	envFile  string   // absolute path of the env file this run loaded ("" = none)
 	baseEnv  []string // the process environment before the env file
 	from, to string   // the two `sheepdog version` lines
 	stdout   io.Writer
@@ -134,11 +135,21 @@ func restartForUpdate(r updateRestart) (to string, code int, resumed bool) {
 	r.release()
 	r.flush()
 	restoreEnv(r.baseEnv)
-	argv := append([]string{launch, "serve"}, r.args...)
+	argv := append([]string{launch, "serve"}, argsWithEnvFile(r.args, r.envFile)...)
 	err = execSelf(launch, argv, os.Environ())
 	// Only reached when exec failed.
 	fprintf(r.stderr, "sheepdog: could not start %s (%v); staying on %s\n", launch, err, fromV)
 	return toV, 0, true
+}
+
+// argsWithEnvFile is serve's arguments with --env-file envFile in front,
+// so a re-exec reads the file this run loaded and not whatever ./.env the
+// working directory offers. An --env-file already in args wins.
+func argsWithEnvFile(args []string, envFile string) []string {
+	if envFile == "" || flagValue(args, "env-file") != "" {
+		return args
+	}
+	return append([]string{"--env-file", envFile}, args...)
 }
 
 // noticeCommands are the commands that end with the update notices.
