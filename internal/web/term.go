@@ -191,6 +191,8 @@ type termConn struct {
 	chans  map[int]*termChan
 	reason string // why the connection ended (first one wins)
 	wg     sync.WaitGroup
+	// writing is held while writer runs, so flush never races it.
+	writing sync.WaitGroup
 }
 
 // termOut is one queued outbound message: a frame (ch > 0, binary) or a
@@ -224,7 +226,8 @@ type termChan struct {
 }
 
 func (c *termConn) serve() {
-	go c.writer()
+	c.writing.Add(1)
+	go func() { defer c.writing.Done(); c.writer() }()
 	go c.pinger()
 	c.reader()
 	c.end("client_gone")
@@ -246,6 +249,7 @@ func (c *termConn) serve() {
 		}
 	}
 	c.wg.Wait()
+	c.writing.Wait()
 	c.flush()
 	_ = c.conn.Close(websocket.StatusNormalClosure, reason)
 	c.t.s.log.Log(logSource, "web.term.disconnect", "", map[string]any{"client_id": c.id, "reason": reason})
@@ -681,7 +685,9 @@ func (c *termConn) writer() {
 			if o.binary {
 				typ = websocket.MessageBinary
 			}
-			ctx, cancel := context.WithTimeout(c.ctx, c.t.deps.Timeout)
+			// Not c.ctx: a message already taken off the queue (a last
+			// term-error before the connection ends) must still go out.
+			ctx, cancel := context.WithTimeout(context.Background(), c.t.deps.Timeout)
 			err := c.conn.Write(ctx, typ, o.data)
 			cancel()
 			if err != nil {
