@@ -179,7 +179,7 @@ final class AgentScreenModelTests: XCTestCase {
     }
 
     func testOnlyEscAndCtrlCAskFirst() {
-        XCTAssertEqual(AgentKey.allCases.filter(\.needsConfirmation), [.esc, .ctrlC])
+        XCTAssertEqual(AgentKey.allCases.filter(\.needsConfirmation), [.ctrlC])
         XCTAssertEqual(AgentKey.allCases.map(\.rawValue), ["enter", "esc", "ctrl+c", "1", "2", "3", "up", "down", "tab"])
         XCTAssertTrue(AgentKey.ctrlC.confirmationTitle(agent: "Auth fix").contains("Auth fix"))
     }

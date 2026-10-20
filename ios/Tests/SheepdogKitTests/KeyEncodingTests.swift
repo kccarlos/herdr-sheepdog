@@ -63,6 +63,7 @@ final class KeyEncodingTests: XCTestCase {
         XCTAssertNil(TermKey.shiftTab.allowListed)
         XCTAssertNil(TermKey.function(1).allowListed)
         XCTAssertTrue(TermKey.ctrl("c").needsConfirmation)
+        XCTAssertFalse(TermKey.esc.needsConfirmation)
         XCTAssertFalse(TermKey.ctrl("d").needsConfirmation)
     }
 
