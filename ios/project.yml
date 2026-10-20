@@ -37,7 +37,7 @@ settings:
     # Xcode Cloud gives every build its own (CI_BUILD_NUMBER) and uses it
     # for the uploaded build, so CURRENT_PROJECT_VERSION stays 1 for local
     # builds. docs/dev/xcode-cloud.md.
-    MARKETING_VERSION: "0.1.12"
+    MARKETING_VERSION: "0.1.13"
     CURRENT_PROJECT_VERSION: "1"
     # The paid team. Automatic signing locally; Xcode Cloud
     # signs with its own cloud-managed certificates for this team.
