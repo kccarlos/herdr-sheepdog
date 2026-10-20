@@ -63,6 +63,9 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --config PATH         config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --prompts-dir PATH    prompt override directory (default config prompts.dir)")
+	fprintln(w, "  --screen MODE         the simulated phone screen the show tool puts cards on:")
+	fprintln(w, "                        visible, hidden, or alternate (about half the runs, by")
+	fprintln(w, "                        scenario and repeat); default none")
 }
 
 type evalSimOpts struct {
@@ -76,6 +79,7 @@ type evalSimOpts struct {
 	repeat, parallel                                 int
 	budget                                           float64
 	personas                                         string
+	screen                                           string
 }
 
 func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool) {
@@ -105,11 +109,16 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
 	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
 	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
+	fs.StringVar(&o.screen, "screen", "", "simulated phone screen: visible, hidden or alternate (default none)")
 	fs.StringVar(&o.personas, "personas", "", "simulated-user personas rotated by repeat: rotate, or a list of terse, rambling, zh, impatient, vague (default: each scenario's own)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
 		}
+		return o, 2, false
+	}
+	if !eval.ValidScreenMode(o.screen) {
+		fprintf(stderr, "sheepdog eval sim: --screen %q: want visible, hidden or alternate\n", o.screen)
 		return o, 2, false
 	}
 	if _, err := eval.ParsePersonas(o.personas); err != nil {
@@ -245,6 +254,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions, cfg config.Config) map[string
 		"budget_usd":         fmt.Sprint(o.budget),
 		"scenarios":          o.files + filterNote(o.filter),
 		"personas":           orDefaultStr(o.personas, "each scenario's own"),
+		"screen":             orDefaultStr(o.screen, "none"),
 		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the orchestrator default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
 	if line, err := bench.PromptsArm(o.promptsDir); err == nil && line != "" {
@@ -356,7 +366,7 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 	}
 	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
 	personas, _ := eval.ParsePersonas(o.personas)
-	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events, Personas: personas}
+	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events, Personas: personas, Screen: o.screen}
 	if o.events != "" {
 		opts.EventsDir = filepath.Clean(o.events)
 	}

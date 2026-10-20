@@ -367,6 +367,9 @@ func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult, answ
 	if len(res.Agents) > 0 {
 		tags[voice.TagAgents] = res.Agents
 	}
+	if len(res.Shown) > 0 {
+		tags[voice.TagOnScreen] = res.Shown
+	}
 	s.mu.Lock()
 	s.addAnswerFactsLocked(resp, tags)
 	if rel := s.pendingDeliveryFactsLocked(); len(rel) > 0 {
@@ -431,6 +434,9 @@ const notVerifiedLabel = "these checks by the orchestrator did not finish, so no
 func (s *Session) addAnswerFactsLocked(p map[string]any, tags map[string]any) {
 	if nv := stringList(tags[voice.TagNotVerified]); len(nv) > 0 {
 		p["not_verified"] = notVerifiedLabel + strings.Join(nv, "; ")
+	}
+	if shown := stringList(tags[voice.TagOnScreen]); len(shown) > 0 {
+		p["on_screen"] = voice.OnScreenLine(shown)
 	}
 	var states []string
 	for _, alias := range stringList(tags[voice.TagAgents]) {

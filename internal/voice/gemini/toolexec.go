@@ -255,6 +255,9 @@ func answerLine(call voice.ToolCall, res voice.ToolResult) (string, map[string]a
 	if len(res.Agents) > 0 {
 		tags[voice.TagAgents] = res.Agents
 	}
+	if len(res.Shown) > 0 {
+		tags[voice.TagOnScreen] = res.Shown
+	}
 	return line, tags
 }
 

@@ -495,6 +495,9 @@ type client struct {
 	hs handshake
 	// screen is the client's one agent-window subscription (screen.go).
 	screen *screenSub
+	// visible / voiceScreen: the client's last visibility report
+	// (cards.go); visReported once it sent one.
+	visible, voiceScreen, visReported bool
 	// pendingAttach: another client was attached when this one
 	// connected, so it replaces that one only once its handshake is
 	// accepted. firstStatus is the status it was sent on connect.
@@ -793,6 +796,8 @@ func (c *client) onControl(data []byte) {
 		c.subscribeScreen(m.PaneID, lines)
 	case wsproto.TypeScreenUnsubscribe:
 		c.stopScreen("unsubscribe")
+	case wsproto.TypeVisibility:
+		c.setVisibility(*m.Visible, m.VoiceScreen != nil && *m.VoiceScreen)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")

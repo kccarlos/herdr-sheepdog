@@ -280,6 +280,9 @@ func New(deps Deps) (*Server, error) {
 	}
 	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
 	s.hub = newHub(s)
+	if ch, ok := s.cardHost(); ok {
+		ch.SetCardSink(cardSink{s.hub})
+	}
 	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err

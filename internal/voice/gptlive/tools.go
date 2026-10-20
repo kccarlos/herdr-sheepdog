@@ -147,6 +147,9 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 		if res.Detail != "" {
 			s.appendFor(lc, delegationID, evThinkingAppend, "Plain explanation for follow-ups such as \"what does that mean\" (do not read it out): "+res.Detail)
 		}
+		if len(res.Shown) > 0 {
+			s.appendFor(lc, delegationID, evThinkingAppend, "Note: "+voice.OnScreenLine(res.Shown)+".")
+		}
 		switch {
 		case spoken == "" && res.Pending:
 			// The orchestrator is still working: its reply comes later as a push

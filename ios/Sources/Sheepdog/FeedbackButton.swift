@@ -37,6 +37,7 @@ struct FeedbackButton: View {
                     mark(tag, note, at)
                     markedAt = nil
                 }
+                .coversVoiceScreen("feedback")
             }
         }
     }

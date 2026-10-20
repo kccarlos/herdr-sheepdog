@@ -269,6 +269,35 @@ accessibility text sizes. The voice bar stays in place.
 - **Markdown** (`MarkdownRenderer`). Tasks, questions, the worker's last
   message and orchestrator replies support inline bold, italic, code and links,
   lists, and monospaced fenced code. Headings render as bold body text.
+  GitHub tables parse to a `.table` block: one line per row in the
+  single-`Text` rendering, a real table in a card (below).
+- **Cards** (`Cards.swift`: `ScreenCard`, `CardVisibility`, `CardInbox`;
+  `CardViews.swift`), daemon docs/dev/ws-contract.md "Cards". Only with a
+  daemon whose `bot-ready` lists `cards` (and in the demo).
+  `CardVisibility` sends `visibility {visible, voice_screen}` after every
+  ready handshake (each connection starts not visible on the daemon) and
+  on every change. `visible` is `scenePhase == .active` (inactive and
+  background send false); `voice_screen` is the Conversation pane with
+  nothing pushed on `navigationPath`, Settings closed, no demo cover, and
+  no sheet that reports itself with `.coversVoiceScreen(_:)` (the
+  connection chip's, the feedback flag's). A card's own sheet counts as
+  the voice screen, so the next card replaces it. A `/ws` `card` goes
+  through `CardInbox.receive`: an id seen before (live, from
+  `/api/conversation` or the cache) does nothing, a new one opens as a
+  sheet (medium/large) when the voice screen is in front and is only a
+  row otherwise. Live cards are their own `TimelineRow.card` until the
+  history's `card` item with the same `card_id` replaces them; an item
+  whose card the daemon's store dropped is filled from what the phone
+  got, else shown as a plain row. The `card.shown` SSE event is not
+  folded (metadata only). In the sheet, tables are a `Grid` when its
+  ideal width fits and one small card per row otherwise (`ViewThatFits`,
+  always stacked at the accessibility sizes), so nothing truncates; code
+  and excerpts scroll sideways. An approval card is read-only: its choices
+  are plain chips and "Go to the question" only closes the sheet. "Open
+  window" closes the sheet, then pushes `AgentWindowRoute`. The demo's
+  "Show me the agents" (`DemoDaemon.onCards`) shows one; the debug launch
+  argument `-sheepdogDemoCard` asks it by itself for screenshots
+  (`CardsUITests`, `TEST_RUNNER_SHEEPDOG_CARD_SHOTS=<dir>`).
 
 ## The terminal surface
 

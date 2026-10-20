@@ -103,6 +103,17 @@
   <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
 </main>
 
+<dialog id="card-dialog" class="card-dialog" aria-labelledby="card-title">
+  <form method="dialog" class="card-head">
+    <div>
+      <h2 id="card-title">Card</h2>
+      <p id="card-meta" class="muted small"></p>
+    </div>
+    <button value="close" aria-label="Close the card">Done</button>
+  </form>
+  <div id="card-body" class="card-body"></div>
+</dialog>
+
 <script type="module" src="/voice/app.js"></script>
 <script type="module" src="/static/update-banner.js"></script>
 </body>

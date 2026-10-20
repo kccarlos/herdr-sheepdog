@@ -16,8 +16,21 @@ struct MainView: View {
         FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
     }
 
+    /// What the daemon is told for cards (`visibility`): the app is in
+    /// the foreground, and the voice screen is in front — the conversation
+    /// pane, nothing pushed, no sheet or cover over it. A card's own sheet
+    /// counts as the voice screen, so the next card can replace it.
+    private var screenReport: ScreenReport {
+        let voiceScreen = model.pane == .conversation
+            && model.navigationPath.isEmpty
+            && !model.showSettings
+            && !model.demoActive
+            && model.screenCovers.isEmpty
+        return ScreenReport(visible: scenePhase == .active, voiceScreen: voiceScreen)
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $model.navigationPath) {
             VStack(spacing: 0) {
                 if model.isDemo {
                     DemoHeader()
@@ -246,6 +259,13 @@ struct MainView: View {
                 SettingsView(meter: model.meter)
                     .environmentObject(model)
             }
+            .sheet(item: $model.presentedCard) { card in
+                CardSheet(card: card)
+                    .environmentObject(model)
+            }
+            .onChange(of: screenReport, initial: true) { _, report in
+                model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen)
+            }
             .onAppear {
                 guard !started else { return }
                 started = true
@@ -259,7 +279,15 @@ struct MainView: View {
                 }
             }
         }
+        .environment(\.openCard) { card in model.openCard(card) }
+        .environment(\.reportScreenCover) { name, covering in model.setScreenCover(name, covering) }
     }
+}
+
+/// The screen as `visibility` reports it.
+private struct ScreenReport: Equatable {
+    var visible: Bool
+    var voiceScreen: Bool
 }
 
 /// The first-run coach mark: a bubble pointing down at the mic button.

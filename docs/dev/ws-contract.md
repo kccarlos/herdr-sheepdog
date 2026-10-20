@@ -77,6 +77,7 @@ binary version.
   | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
+  | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
@@ -152,6 +153,7 @@ scheduling each frame at "now".
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed user input, which the one rail accepts like a transcript (docs/dev/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
 | `{"type":"screen-subscribe","pane_id":"…","lines":N?}` | Show me this agent's window; `screen` frames follow. Replaces the client's previous subscription. See *Agent window over /ws*. |
 | `{"type":"screen-unsubscribe"}`      | Stop the window's `screen` frames. |
+| `{"type":"visibility","visible":true\|false,"voice_screen":true\|false}` | Whether the client's screen can be seen now (`visible`: the app in the foreground, the page not hidden) and its voice screen is the one in front (`voice_screen`, taken as false when absent). Requires the `cards` feature. See *Cards*. |
 | `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?,"aec":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters; `aec`, the microphone's echo cancellation as the browser reports it in `track.getSettings().echoCancellation`: `"true"`, `"false"`, or `"unknown"` when the browser does not say — other values are ignored; `/voice` also shows "Use headphones or the app: this browser's echo cancellation is off" when it is `false`, or `unknown` on a mobile browser) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`), `audio_state` and `aec`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation), and with Gemini Live the echo gate's `echo_armed`, `echo_withheld_frames`, `echo_released_frames`, `echo_opens` (docs/dev/research/echo-2026-10-03.md: once this client's echo has shown itself, microphone audio the playing reply explains is held back). |
 
 Unknown `type` values are answered with an `error` message and otherwise
@@ -169,6 +171,8 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 {"type":"screen-subscribe","pane_id":"w1:p2","lines":200}
 {"type":"screen-subscribe","pane_id":"w1:p2"}
 {"type":"screen-unsubscribe"}
+{"type":"visibility","visible":true,"voice_screen":true}
+{"type":"visibility","visible":false,"voice_screen":true}
 {"type":"ping"}
 {"type":"ping","gated_frames":120,"peak":3400,"underruns":1,"drains":4,"buffer_ms":180,"rate":0.97,"stretched_ms":2300,"audio_state":"running","aec":"true"}
 ```
@@ -184,6 +188,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
+| `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible. |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -750,6 +755,8 @@ answer a question by tap. All three need the token under "Auth".
     `answered`, `answer` and `via` (`tap`, `fast_path`, `brain`) once
     answered, `resolution` `open` | `confirmed` | `expired` |
     `cancelled` | `replaced`;
+  - `card` — a card the orchestrator showed (*Cards*): `text` its title,
+    `card_id`, `agent`, and `card`;
   - `notice` — a divider: the daemon started, the voice reconnected (with
     or without its context), the voice session closed, or (`subkind:
     "reset"`, `text: "New conversation"`) a "New conversation" reset.
@@ -902,6 +909,56 @@ frame at once and then whenever the window changes.
   pane id; `reason` is `unsubscribe`, `resubscribe`, `gone`, `closed`
   (replaced, refused or shut down) or `disconnect`. Each read logs
   `herdr.read` as the route's does.
+
+## Cards
+
+Feature `cards`. The orchestrator's `show` tool puts something on the
+user's screen instead of saying it — a list, a table, steps, a diff,
+an agent's window, a screen excerpt, an open approval — and the voice
+says one short sentence ("it's on your screen") with the gist. It is
+display only: a card changes nothing, and an approval card carries no
+way to answer (the user answers through the existing approval card,
+`POST /api/pending/answer`, docs/dev/roles.md "The one rail").
+
+- **`visibility {visible, voice_screen}`** (client → server): the client
+  says whether its screen can be seen. The iOS app sends it on every
+  change of its scene phase and of the screen in front; `/voice` sends
+  it on `visibilitychange` (its page is the voice screen). The daemon
+  shows a card only while the **attached** client's last report was
+  `visible: true` and `voice_screen: true`. A client starts not
+  visible, and a replaced or disconnected client stops counting, so a
+  client that never reports (an older app or page) never gets a card:
+  the tool then answers "not visible" and the orchestrator speaks.
+  Logged as `web.client.visibility {client_id, visible, voice_screen}`
+  on a change.
+- **`card {card}`** (server → client): `card` is `card_id`, `kind`,
+  `at` (RFC 3339) and `title`, plus by kind:
+
+  | `kind` | Fields | Show it as |
+  |---|---|---|
+  | `card` | `markdown` (at most 6 000 bytes; a longer one is cut and ends `…(cut)`) | rendered markdown: headings, lists, tables, code fences |
+  | `agent` | `agent` (alias), `spoken`, `pane_id` | a way into that agent's window (*Agent window*) |
+  | `excerpt` | `agent`, `spoken`, `pane_id`, `text` (the last lines of its screen, verbatim, read by the daemon) | monospace text |
+  | `approval` | `agent`, `spoken`, `pane_id`, `pending_id`, `question`, `command`, `options` (as `pending_action`'s) | the question, read-only, pointing at the approval card that answers it |
+
+  A client shows a new card once by itself (a sheet), keeps it in the
+  conversation as a row that opens it again, and never pops up a card
+  it got from history or replay.
+
+  ```json
+  {"type":"card","card":{"card_id":"cmh2x1","kind":"card","at":"2026-10-20T09:12:03Z","title":"Failing tests","markdown":"| Test | Error |\n|---|---|\n| TestLogin | timeout |"}}
+  {"type":"card","card":{"card_id":"cmh2x2","kind":"approval","at":"2026-10-20T09:13:10Z","title":"Auth fix is asking","agent":"auth","spoken":"Auth fix","pane_id":"w1:p2","pending_id":"p7","question":"to run the migration","command":"make migrate","options":[{"index":1,"label":"Yes","keys":["y"],"default":true},{"index":2,"label":"No","keys":["n"],"default":false}]}}
+  ```
+
+- **History.** The card is stored in `<data_dir>/cards.jsonl` (the
+  newest 500 are kept) and logged as `card.shown {card_id, kind,
+  agent, turn, title_chars, bytes, options}` with the pane id: metadata
+  only. `GET /api/conversation` has a `card` item at that point: `text`
+  is the title, `card_id`, `agent`, and `card` (the card as above;
+  absent, with a text that says so, once the store no longer has it).
+  A show refused because no screen was visible logs `card.refused
+  {kind, turn, reason}` (`not_visible`, or `not_delivered` when the
+  client went away between the check and the send).
 
 ## Phone notifications
 

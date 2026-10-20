@@ -36,8 +36,8 @@ func TestUtteranceTurnIsACEOTurn(t *testing.T) {
 			t.Errorf("request lacks %q:\n%s", want, text)
 		}
 	}
-	if n := len(h.model.Calls()[0].Config.Tools[0].FunctionDeclarations); n != 10 {
-		t.Errorf("utterance turn declared %d tools, want the full surface of 10", n)
+	if n := len(h.model.Calls()[0].Config.Tools[0].FunctionDeclarations); n != 11 {
+		t.Errorf("utterance turn declared %d tools, want the full surface of 11", n)
 	}
 	if p := payload(h.log.ofType("brain.turn")[0]); p["kind"] != "utterance" || p["trigger"] != "ceo" {
 		t.Errorf("brain.turn = %v", p)

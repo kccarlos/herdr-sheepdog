@@ -1,0 +1,16 @@
+[1/3] workday-scale-ten r1: fail (end_call, brain_fallback) ≈ $0.1686, total ≈ $0.169
+[2/3] workday-scale-ten r3: fail (end_call, brain_fallback) ≈ $0.1649, total ≈ $0.334
+[3/3] workday-scale-ten r2: pass (end_call, ) ≈ $0.1630, total ≈ $0.497
+  fail    workday-scale-ten r1  end_call  12 turns   90.0s  brain_fallback         ≈ $0.1686
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  pass    workday-scale-ten r2  end_call  12 turns   97.1s                         ≈ $0.1630
+  fail    workday-scale-ten r3  end_call  12 turns   90.5s  brain_fallback         ≈ $0.1649
+          brain_fallback: yielded: brain: yielded to a CEO turn
+-- 3 runs, spend ≈ $0.4966 (estimate at list prices) --
+reports: /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/cards/workday-scale-ten/report.json, /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/cards/workday-scale-ten/report.md
+== eval sim, repeat 3 ==
+  workday-scale-ten  runs  3  pass  1  fail  2  err  0  not_run  0  rate   33%  brain_fallback ×2
+  TOTAL              runs  3  pass  1  fail  2  err  0  not_run  0  rate   33%  brain_fallback ×2
+-- spend brain    deepseek-flash           calls   112  in   1535786  out    18427  reasoning     6245  ≈ $0.4755 --
+-- spend simuser  deepseek-flash           calls    33  in     68580  out      732  reasoning        0  ≈ $0.0210 --
+-- spend total ≈ $0.4966 (estimate at list prices) --

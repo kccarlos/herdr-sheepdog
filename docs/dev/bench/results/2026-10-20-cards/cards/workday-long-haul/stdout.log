@@ -1,0 +1,14 @@
+[1/3] workday-long-haul r1: pass (end_call, ) ≈ $0.1417, total ≈ $0.142
+[2/3] workday-long-haul r3: pass (end_call, ) ≈ $0.1819, total ≈ $0.324
+[3/3] workday-long-haul r2: pass (end_call, ) ≈ $0.1946, total ≈ $0.518
+  pass    workday-long-haul r1  end_call  15 turns   98.8s                         ≈ $0.1417
+  pass    workday-long-haul r2  end_call  14 turns  135.2s                         ≈ $0.1946
+  pass    workday-long-haul r3  end_call  14 turns  116.3s                         ≈ $0.1819
+-- 3 runs, spend ≈ $0.5182 (estimate at list prices) --
+reports: /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/cards/workday-long-haul/report.json, /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/cards/workday-long-haul/report.md
+== eval sim, repeat 3 ==
+  workday-long-haul  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL              runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   112  in   1590364  out    18340  reasoning     6214  ≈ $0.4918 --
+-- spend simuser  deepseek-flash           calls    41  in     86595  out      696  reasoning        0  ≈ $0.0264 --
+-- spend total ≈ $0.5182 (estimate at list prices) --

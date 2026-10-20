@@ -8,9 +8,9 @@ import Foundation
 ///
 /// Client → server: `client-ready`, `mute`, `silence`, `speaking`,
 /// `playback`, `drain`, `cancel`, `text`, `ping`, `screen-subscribe`,
-/// `screen-unsubscribe`.
+/// `screen-unsubscribe`, `visibility`.
 /// Server → client: `bot-ready`, `flush`, `status`, `transcript`, `error`,
-/// `pong`, `screen`, `screen-error`.
+/// `pong`, `screen`, `screen-error`, `card`.
 public struct WSMessage: Codable, Equatable, Sendable {
     /// Message type discriminator. Mirrors `wsproto.Type*`.
     public enum Kind: String, Codable, Sendable {
@@ -25,6 +25,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case screenUnsubscribe = "screen-unsubscribe"
         case screen
         case screenError = "screen-error"
+        /// Cards (feature `cards`): whether the screen can be seen, and
+        /// something the orchestrator put on it.
+        case visibility, card
     }
 
     /// Who is talking, on `client-ready` (docs/ws-contract.md "Protocol
@@ -143,6 +146,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var lines: Int?
     public var screen: AgentScreen?
     public var ended: Bool?
+    /// `visibility` (feature `cards`): the app is in the foreground, and
+    /// the voice screen is the one in front.
+    public var visible: Bool?
+    public var voiceScreen: Bool?
+    /// `card`: what the orchestrator put on the screen.
+    public var card: ScreenCard?
 
     enum CodingKeys: String, CodingKey {
         case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
@@ -157,6 +166,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case audioState = "audio_state"
         case paneID = "pane_id"
         case lines, screen, ended
+        case visible, card
+        case voiceScreen = "voice_screen"
     }
 
     public init(
@@ -191,7 +202,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
         paneID: String? = nil,
         lines: Int? = nil,
         screen: AgentScreen? = nil,
-        ended: Bool? = nil
+        ended: Bool? = nil,
+        visible: Bool? = nil,
+        voiceScreen: Bool? = nil,
+        card: ScreenCard? = nil
     ) {
         self.type = type
         self.protocol = `protocol`
@@ -225,6 +239,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.lines = lines
         self.screen = screen
         self.ended = ended
+        self.visible = visible
+        self.voiceScreen = voiceScreen
+        self.card = card
     }
 
     // MARK: - Client → server constructors
@@ -294,6 +311,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
     public static let screenUnsubscribe = WSMessage(type: .screenUnsubscribe)
 
+    /// Whether the screen can be seen, and the voice screen is in front
+    /// (send only when `bot-ready` lists `cards`).
+    public static func visibility(visible: Bool, voiceScreen: Bool) -> WSMessage {
+        WSMessage(type: .visibility, visible: visible, voiceScreen: voiceScreen)
+    }
+
     // MARK: - Server → client constructors (tests and fakes)
 
     public static func botReady(protocol p: Int, minProtocol: Int = 1, daemonVersion: String, features: [String] = []) -> WSMessage {
@@ -312,6 +335,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public static func screenError(paneID: String, _ message: String, ended: Bool? = nil) -> WSMessage {
         WSMessage(type: .screenError, message: message, paneID: paneID, ended: ended)
     }
+    public static func card(_ card: ScreenCard) -> WSMessage { WSMessage(type: .card, card: card) }
 
     // MARK: - Wire format
 
@@ -378,6 +402,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case .screenError:
             if (paneID ?? "").isEmpty { throw WSMessageError.missingField("screen-error", "pane_id") }
             if (message ?? "").isEmpty { throw WSMessageError.missingField("screen-error", "message") }
+        case .visibility:
+            if visible == nil { throw WSMessageError.missingField("visibility", "visible") }
+        case .card:
+            if (card?.cardID ?? "").isEmpty { throw WSMessageError.missingField("card", "card") }
         case .cancel, .ping, .flush, .pong, .screenUnsubscribe:
             break
         }
