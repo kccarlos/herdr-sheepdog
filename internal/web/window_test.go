@@ -167,10 +167,24 @@ func TestAgentInputPrompt(t *testing.T) {
 		"submit false": {"text": "x", "submit": false},
 		"both":         {"text": "x", "keys": []string{"enter"}},
 		"neither":      {},
-		"too long":     {"text": strings.Repeat("x", 4001)},
+		"too long":     {"text": strings.Repeat("x", 64<<10+1)},
 	} {
 		if code, body := h.postJSON(windowPath("fake:1", "input"), req, nil); code != http.StatusBadRequest {
 			t.Errorf("%s = %d %s, want 400", name, code, body)
+		}
+	}
+	// A long paste (up to 64 KB) reaches the agent whole; its current task
+	// and the orchestrator's note get the start.
+	long := strings.Repeat("log line\n", 7000)
+	if code, body := h.postJSON(windowPath("fake:1", "input"), map[string]any{"text": long}, nil); code != http.StatusOK {
+		t.Fatalf("long prompt = %d %s", code, body)
+	}
+	if row, _ := h.store.Get("fake:1"); len(row.CurrentTask) > 700 || !strings.Contains(row.CurrentTask, "bytes in all") {
+		t.Errorf("current task after a long prompt = %d bytes", len(row.CurrentTask))
+	}
+	for _, l := range brainLines(h) {
+		if len(l) > 1000 {
+			t.Errorf("orchestrator note of %d bytes", len(l))
 		}
 	}
 	if code, _ := h.postJSON(windowPath("nope:1", "input"), map[string]any{"text": "hi"}, nil); code != http.StatusNotFound {

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -26,8 +27,12 @@ import (
 const (
 	WindowDefaultLines = 120
 	WindowMaxLines     = 500
-	WindowMaxText      = 4000
-	WindowMaxKeys      = 8
+	WindowMaxText      = 64 << 10
+	// WindowNoteText is how much of a window prompt becomes the agent's
+	// current task and the orchestrator's note: a long paste (a log, a
+	// file) reaches the agent whole, the orchestrator its start.
+	WindowNoteText = 600
+	WindowMaxKeys  = 8
 )
 
 // ErrNoSuchAgent is a pane the daemon does not track: the window never
@@ -163,13 +168,14 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	}
 	s.mu.Lock()
 	now := s.cfg.Now()
-	if _, err := s.store.Update(paneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = text, &now }); err != nil {
+	note := clipNote(text)
+	if _, err := s.store.Update(paneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = note, &now }); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
 	}
 	s.invalidateBriefingLocked()
 	s.mu.Unlock()
 	if s.brain != nil {
-		s.brain.Daemon(fmt.Sprintf("the user typed a prompt in %s's window: %q", name, text))
+		s.brain.Daemon(fmt.Sprintf("the user typed a prompt in %s's window: %q", name, note))
 	}
 	return WindowResult{Kind: "prompt", Spoken: "Sent to " + name + "."}, nil
 }
@@ -238,4 +244,18 @@ func (s *Supervisor) windowAnswer(paneID string, keys []string) (string, int, bo
 		}
 	}
 	return "", 0, false
+}
+
+// clipNote cuts a window prompt to WindowNoteText bytes (on a rune
+// boundary) for the current task and the orchestrator's note, saying how
+// long the whole was.
+func clipNote(text string) string {
+	if len(text) <= WindowNoteText {
+		return text
+	}
+	cut := WindowNoteText
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s… (%d bytes in all)", text[:cut], len(text))
 }
