@@ -313,6 +313,8 @@ type Supervisor struct {
 	names namesState
 	// focus is the voice's current-focus line bookkeeping (focus.go).
 	focus focusState
+	// cards is the screen and the card store (cards.go).
+	cards cardState
 
 	// startedAt is when this run's Supervisor was built: openPromises
 	// created before it are from an earlier run (promises.go,
@@ -440,6 +442,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		s.investigator = inv
 	}
 	s.restoreInvestigations()
+	s.loadCards()
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The orchestrator's notices about itself (a provider failing over and

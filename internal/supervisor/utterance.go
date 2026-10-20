@@ -501,6 +501,9 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 		if len(out.res.Agents) > 0 {
 			tags[voice.TagAgents] = out.res.Agents
 		}
+		if len(out.res.Shown) > 0 {
+			tags[voice.TagOnScreen] = out.res.Shown
+		}
 	}
 	s.pushTagged(paneID, line, urgency, tags)
 	if out.ok && !stale {

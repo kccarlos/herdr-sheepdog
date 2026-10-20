@@ -9,6 +9,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
 // GET /api/conversation: the conversation between the user and the
@@ -28,6 +29,9 @@ import (
 //	approval  pending.created of an answer_prompt, with its resolution
 //	          (pending.confirmed / expired / cancelled / replaced)
 //	notice    daemon.start and the voice session's reconnects, as dividers
+//	card      card.shown (the orchestrator's show tool), with the card
+//	          itself from the supervisor's card store (the event carries
+//	          metadata only)
 //
 // A fragment run is closed by the other side speaking, a tool call, a
 // push, a voice turn boundary, an interruption (voice) or a divider.
@@ -58,6 +62,10 @@ type ConversationItem struct {
 	// Resolution is an approval's fate: open, confirmed, expired,
 	// cancelled or replaced.
 	Resolution string `json:"resolution,omitempty"`
+	// CardID and Card are a card item's card (Card is absent when the
+	// store no longer has it; Text then says so).
+	CardID string        `json:"card_id,omitempty"`
+	Card   *wsproto.Card `json:"card,omitempty"`
 }
 
 // ConversationResponse is the body of GET /api/conversation. NextBefore
@@ -90,6 +98,7 @@ func (s *Server) handleConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.attachCards(items)
 	resp := ConversationResponse{Items: items}
 	if next > 0 {
 		resp.NextBefore = &next
@@ -171,7 +180,7 @@ func pageItems(items []ConversationItem, before int64, limit int, moreDays bool)
 
 // conversationTypes are the event types the builder reads.
 var conversationTypes = map[string]bool{
-	"daemon.start": true, "web.utterance": true, "conversation.reset": true,
+	"daemon.start": true, "web.utterance": true, "conversation.reset": true, "card.shown": true,
 	"pending.created": true, "pending.confirmed": true, "pending.expired": true, "pending.cancelled": true, "pending.replaced": true,
 }
 
@@ -232,6 +241,7 @@ type convoPayload struct {
 	Reason    string          `json:"reason"`
 	Resumed   bool            `json:"resumed"`
 	Options   json.RawMessage `json:"options"`
+	CardID    string          `json:"card_id"`
 }
 
 func (b *convoBuilder) add(ev eventlog.Event) {
@@ -310,6 +320,10 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 		}
 		it := b.push(ev, "push", p.Text)
 		it.Urgency, it.Agent = p.Urgency, p.Agent
+	case "card.shown":
+		b.closeAll()
+		it := b.push(ev, "card", cardMissing)
+		it.CardID, it.Agent = p.CardID, p.Agent
 	case "pending.created":
 		if p.Kind != "answer_prompt" {
 			return
@@ -335,6 +349,27 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 		b.resolve(p.ID, "cancelled")
 	case "pending.replaced":
 		b.resolve(p.OldID, "replaced")
+	}
+}
+
+// cardMissing is a card item's text when the store no longer has it.
+const cardMissing = "A card was shown on the screen; it is no longer stored."
+
+// attachCards fills each card item with its card from the supervisor's
+// store: the title becomes the item's text.
+func (s *Server) attachCards(items []ConversationItem) {
+	ch, ok := s.cardHost()
+	if !ok {
+		return
+	}
+	for i := range items {
+		if items[i].Kind != "card" || items[i].CardID == "" {
+			continue
+		}
+		if c, ok := ch.Card(items[i].CardID); ok {
+			w := cardWire(c)
+			items[i].Card, items[i].Text = &w, c.Title
+		}
 	}
 }
 
