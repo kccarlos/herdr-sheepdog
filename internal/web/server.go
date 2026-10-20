@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -215,6 +216,9 @@ type Deps struct {
 	// windows (docs/dev/term-contract.md), and the `term` feature; nil
 	// (herdr mock mode) serves neither.
 	Term *TermDeps
+	// ShellLAN is config web.shell_lan: a plain-LAN client may open the
+	// phone shell (loopback and Tailscale always may).
+	ShellLAN bool
 
 	// DataDir is the daemon's data directory; attachments are kept in its
 	// attachments/ folder. Empty answers the attachments route with 503.
@@ -237,6 +241,11 @@ type Server struct {
 	mux  *http.ServeMux
 	hub  *hub
 	term *termServer
+	// shellLAN is config web.shell_lan, live: the setup page switches it
+	// without a restart (shell.go). kindHook, when set, classifies a
+	// request's peer in place of remoteKind (tests).
+	shellLAN atomic.Bool
+	kindHook func(remote string) string
 	// audio records the voice's output chunks for user.feedback
 	// snapshots (POST /api/feedback).
 	audio *feedback.AudioLog
@@ -309,6 +318,7 @@ func New(deps Deps) (*Server, error) {
 		ch.SetCardSink(cardSink{s.hub})
 	}
 	s.term = newTermServer(s, deps.Term)
+	s.shellLAN.Store(deps.ShellLAN)
 	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err
@@ -339,6 +349,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
 	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
 	s.mux.HandleFunc("GET /term", s.authFunc(s.handleTerm, true))
+	s.mux.HandleFunc("POST /api/shells/{pane_id}/close", s.authFunc(s.handleShellClose, false))
 	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
 	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))

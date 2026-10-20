@@ -200,6 +200,7 @@ func (s *Server) setupRoutes() error {
 		"GET /api/setup/checks":            s.handleSetupChecks,
 		"POST /api/setup/service":          s.handleSetupService,
 		"POST /api/setup/phone":            s.handleSetupPhone,
+		"POST /api/setup/shell-lan":        s.handleSetupShellLAN,
 		"GET /api/setup/qr.svg":            s.handleSetupQR,
 		"POST /api/setup/login":            s.handleSetupLogin,
 		"POST /api/setup/demo":             s.handleSetupDemo,
@@ -323,6 +324,8 @@ type SetupPhone struct {
 	Connected   bool       `json:"connected"`
 	ConnectedAt *time.Time `json:"connected_at,omitempty"`
 	Remote      string     `json:"remote,omitempty"`
+	// ShellLAN is web.shell_lan: a plain-LAN phone may open the shell.
+	ShellLAN bool `json:"shell_lan"`
 }
 
 func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
@@ -487,7 +490,7 @@ func setupVertex(cfg config.Config) SetupVertex {
 func (s *Server) setupPhone() SetupPhone {
 	sd := s.deps.Setup
 	cfg := sd.Config
-	p := SetupPhone{Enabled: !cfg.Web.IsLoopback(), Bind: cfg.Web.Bind, HasToken: cfg.Web.Token != "", Addresses: []pair.Address{}}
+	p := SetupPhone{Enabled: !cfg.Web.IsLoopback(), Bind: cfg.Web.Bind, HasToken: cfg.Web.Token != "", Addresses: []pair.Address{}, ShellLAN: s.shellLAN.Load()}
 	sys, _ := sd.SysAddrs()
 	for _, a := range sys {
 		if ip4 := a.IP.To4(); ip4 != nil && pair.Kind(ip4, a.Iface) == pair.KindTailscale {

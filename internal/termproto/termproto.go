@@ -63,7 +63,9 @@ const (
 	RefusedTooMany    = "refused:too_many"
 	RefusedShellOff   = "refused:shell_off"
 	RefusedNotTracked = "refused:not_tracked"
-	RefusedBad        = "refused:bad_request"
+	// RefusedOutsideProjects: a shell folder outside supervisor.project_roots.
+	RefusedOutsideProjects = "refused:outside_projects"
+	RefusedBad             = "refused:bad_request"
 )
 
 // ClientInfo identifies the client in term-hello (for the log).
@@ -78,8 +80,8 @@ type Limits struct {
 	Channels int `json:"channels"`
 }
 
-// Shell is a target that asks for a new phone shell (phase 5; refused
-// with shell_off until then).
+// Shell is a target that asks for the phone shell in Cwd (empty: the
+// first project root), refused with shell_off where the shell is gated off.
 type Shell struct {
 	Cwd string `json:"cwd,omitempty"`
 }

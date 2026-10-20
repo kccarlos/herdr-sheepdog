@@ -51,6 +51,11 @@ type TermDeps struct {
 	Ping, Timeout time.Duration
 	// QueueBytes is each channel's send queue (default 256 KB).
 	QueueBytes int
+	// Shells opens phone shells (shell.go); nil means no shell is ever
+	// offered. ProjectRoots are the folders a shell may open in (config
+	// supervisor.project_roots), besides a tracked agent's own folder.
+	Shells       ShellHost
+	ProjectRoots []string
 }
 
 // termServer is the state shared by every /term connection.
@@ -65,6 +70,10 @@ type termServer struct {
 	// version cache for termAvailable
 	checked time.Time
 	ok      bool
+	// shells maps each phone shell's pane to its folder (shell.go);
+	// shellMu serialises opening one.
+	shells  map[string]string
+	shellMu sync.Mutex
 }
 
 func newTermServer(s *Server, d *TermDeps) *termServer {
@@ -90,7 +99,7 @@ func newTermServer(s *Server, d *TermDeps) *termServer {
 	if deps.QueueBytes <= 0 {
 		deps.QueueBytes = 256 << 10
 	}
-	return &termServer{s: s, deps: deps}
+	return &termServer{s: s, deps: deps, shells: map[string]string{}}
 }
 
 // available reports whether herdr is new enough for the bridge. The
@@ -149,7 +158,7 @@ func remoteKind(remote string) string {
 	if ip4 := ip.To4(); ip4 != nil {
 		return pair.Kind(ip4, "")
 	}
-	return pair.KindLAN
+	return pair.Kind(ip, "")
 }
 
 // handleTerm upgrades GET /term.
@@ -170,7 +179,7 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	id := t.nextID
 	t.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &termConn{t: t, conn: conn, id: id, kind: remoteKind(r.RemoteAddr), ctx: ctx, cancel: cancel,
+	c := &termConn{t: t, conn: conn, id: id, kind: s.kindOf(r.RemoteAddr), ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
 	t.mu.Lock()
 	if t.conns == nil {
@@ -219,6 +228,7 @@ type termOut struct {
 type termChan struct {
 	ch         int
 	pane       string
+	kind       string // agent or shell
 	mode       string
 	cols, rows int
 	gen        int // bridge generation: an observer reopened on resize or overflow
@@ -318,8 +328,8 @@ func (c *termConn) onMessage(m termproto.Message) {
 			info = map[string]any{"name": m.Client.Name, "version": m.Client.Version, "platform": m.Client.Platform}
 		}
 		c.t.s.log.Log(logSource, "web.term.hello", "", map[string]any{"client_id": c.id, "protocol": *m.Protocol, "client": info})
-		// The plain shell is phase 5; until then it is never offered.
-		c.control(termproto.Ready(false))
+		// Advice only: open checks the gate again on every shell.
+		c.control(termproto.Ready(c.t.shellAllowed(c.kind)))
 	case termproto.TypeOpen:
 		c.open(m)
 	case termproto.TypeResize:
@@ -381,13 +391,31 @@ func (c *termConn) refuse(ch int, pane, reason string) {
 func (c *termConn) open(m termproto.Message) {
 	pane := m.Target.PaneID
 	if m.Target.Shell != nil {
-		c.refuse(m.Ch, "", termproto.RefusedShellOff)
+		if !c.t.shellAllowed(c.kind) {
+			c.refuse(m.Ch, "", termproto.RefusedShellOff)
+			return
+		}
+		// Finding or opening the shell's pane asks herdr: off the reader.
+		go c.openShell(m)
 		return
 	}
-	if _, ok := c.t.s.deps.Store.Get(pane); !ok {
+	kind := "agent"
+	if c.t.isShell(pane) {
+		// A shell opened over Tailscale stays behind the gate by pane id.
+		if !c.t.shellAllowed(c.kind) {
+			c.refuse(m.Ch, pane, termproto.RefusedShellOff)
+			return
+		}
+		kind = "shell"
+	} else if _, ok := c.t.s.deps.Store.Get(pane); !ok {
 		c.refuse(m.Ch, pane, termproto.RefusedNotTracked)
 		return
 	}
+	c.openChan(m, pane, kind)
+}
+
+// openChan opens channel m.Ch on pane (an agent's or a phone shell's).
+func (c *termConn) openChan(m termproto.Message, pane, kind string) {
 	c.mu.Lock()
 	if _, dup := c.chans[m.Ch]; dup {
 		c.mu.Unlock()
@@ -399,7 +427,7 @@ func (c *termConn) open(m termproto.Message) {
 		c.refuse(m.Ch, pane, termproto.RefusedTooMany)
 		return
 	}
-	tc := &termChan{ch: m.Ch, pane: pane, mode: m.Mode, cols: m.Cols, rows: m.Rows, takeover: m.Takeover, start: time.Now(), gen: 1}
+	tc := &termChan{ch: m.Ch, pane: pane, kind: kind, mode: m.Mode, cols: m.Cols, rows: m.Rows, takeover: m.Takeover, start: time.Now(), gen: 1}
 	c.chans[m.Ch] = tc
 	c.mu.Unlock()
 	go c.startBridge(tc, 1, true)
@@ -465,10 +493,10 @@ func (c *termConn) startBridge(tc *termChan, gen int, first bool) {
 	if !closing {
 		if first {
 			c.t.s.log.Log(logSource, "web.term.open", tc.pane, map[string]any{
-				"client_id": c.id, "ch": tc.ch, "pane_id": tc.pane, "mode": tc.mode, "kind": "agent",
+				"client_id": c.id, "ch": tc.ch, "pane_id": tc.pane, "mode": tc.mode, "kind": tc.kind,
 				"cols": tc.cols, "rows": tc.rows, "remote_kind": c.kind, "takeover": tc.takeover,
 			})
-			c.queueLocked(termOut{data: mustJSON(termproto.Opened(tc.ch, tc.pane, tc.mode, tc.cols, tc.rows, "agent"))})
+			c.queueLocked(termOut{data: mustJSON(termproto.Opened(tc.ch, tc.pane, tc.mode, tc.cols, tc.rows, tc.kind))})
 		}
 		tc.opened = true
 		for _, f := range tc.pending {
@@ -636,6 +664,9 @@ func (c *termConn) onBridgeClosed(tc *termChan, gen int, cl herdr.Closed) {
 	c.mu.Unlock()
 	c.t.unreserve()
 	c.finish(tc, reason)
+	if tc.kind == "shell" && reason == termproto.ReasonGone {
+		c.t.forgetShell(tc.pane)
+	}
 	if tc.mode == termproto.ModeControl && reason == termproto.ReasonReleased {
 		c.t.controlFreed(tc.pane)
 	}

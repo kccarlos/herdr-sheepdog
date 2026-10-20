@@ -201,3 +201,15 @@ func TestExplain(t *testing.T) {
 		t.Error("empty")
 	}
 }
+
+func TestKindTailscaleRanges(t *testing.T) {
+	for in, want := range map[string]string{
+		"100.64.0.1": KindTailscale, "100.127.255.254": KindTailscale, "100.128.0.1": KindLAN,
+		"fd7a:115c:a1e0::1": KindTailscale, "fd7a:115c:a1e0:ab12::9": KindTailscale,
+		"fd7a:115c:a1e1::1": KindLAN, "2001:db8::1": KindLAN, "192.168.1.9": KindLAN,
+	} {
+		if got := Kind(net.ParseIP(in), ""); got != want {
+			t.Errorf("Kind(%s) = %s, want %s", in, got, want)
+		}
+	}
+}

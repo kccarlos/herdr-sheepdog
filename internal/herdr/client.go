@@ -253,6 +253,21 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 	return res.Root, err
 }
 
+// CreateTab opens a new, unfocused tab in workspaceID whose shell starts
+// in cwd (`tab.create`) and returns its root pane.
+func (c *Client) CreateTab(ctx context.Context, workspaceID, cwd, label string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"workspace_id": workspaceID, "cwd": cwd, "focus": false, "env": PaneEnv}
+	if label != "" {
+		params["label"] = label
+	}
+	err := c.Call(ctx, "tab.create", params, &res)
+	c.log("herdr.tab_create", res.Root.PaneID, map[string]any{"workspace_id": workspaceID, "cwd": cwd, "label": label, "error": errString(err)})
+	return res.Root, err
+}
+
 // CreateWorktree makes a git worktree on a new branch of cwd's repository
 // and opens an unfocused workspace in it (`worktree.create`), returning
 // the workspace's root pane. herdr picks the checkout path.

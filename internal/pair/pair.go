@@ -41,12 +41,16 @@ type Address struct {
 // ErrLoopback: the daemon listens on loopback only; no phone can reach it.
 var ErrLoopback = errors.New(`the daemon listens on 127.0.0.1 only, so a phone cannot reach it: turn on phone access in step 4 of the setup page (sheepdog setup), or set web.bind (a LAN or Tailscale address, or "0.0.0.0") and a web.token yourself and restart`)
 
-// tailnet is Tailscale's address range (CGNAT 100.64.0.0/10).
-var tailnet = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
+// tailnet is Tailscale's IPv4 range (CGNAT 100.64.0.0/10); tailnet6 is
+// its IPv6 range (fd7a:115c:a1e0::/48).
+var (
+	tailnet  = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
+	tailnet6 = &net.IPNet{IP: net.ParseIP("fd7a:115c:a1e0::"), Mask: net.CIDRMask(48, 128)}
+)
 
-// Kind classifies an address: Tailscale's range or interface, else LAN.
+// Kind classifies an address: Tailscale's ranges or interface, else LAN.
 func Kind(ip net.IP, iface string) string {
-	if tailnet.Contains(ip) || strings.HasPrefix(iface, "tailscale") {
+	if tailnet.Contains(ip) || (ip.To4() == nil && tailnet6.Contains(ip)) || strings.HasPrefix(iface, "tailscale") {
 		return KindTailscale
 	}
 	return KindLAN

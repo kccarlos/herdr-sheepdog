@@ -612,8 +612,10 @@ func (a *App) wire() error {
 				p, err := hc.Ping(ctx)
 				return p.Version, err
 			},
+			Shells: hc, ProjectRoots: cfg.Supervisor.ProjectRoots,
 		}
 	}
+	deps.ShellLAN = cfg.Web.ShellLAN
 	if a.push != nil {
 		deps.Push = a.push
 	}
