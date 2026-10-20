@@ -188,6 +188,28 @@ A refusal logs `brain.rail_blocked` and `supervisor.close_refused
 {reason}`; a close logs `supervisor.close {agent, spoken, kind, cwd,
 state}`.
 
+### The user's own actions
+
+The app's New agent, Rename, Stop and Close (feature `agent-actions`,
+[ws-contract.md](ws-contract.md#agent-actions)) are the user's own taps,
+like a prompt typed in the agent window. They do not pass the words rail
+and spend no words, so a tap never refuses for lack of speech and never
+uses up what the user said for the orchestrator. The rails that are not
+about who asked stay in code (`internal/supervisor` `useractions.go`):
+
+- a new agent's kind is from the allow-list, and its directory resolves
+  inside `supervisor.project_roots` or to an open workspace's own
+  directory; a fresh worktree's branch is a plain branch name; new agents
+  count toward the runaway cap;
+- only tracked agents are renamed, stopped or closed;
+- Close skips the protected-agent rail, because the app asks the user to
+  confirm with the agent's name (what `protected_ok` stands for), but the
+  pane sheepdog itself runs in is always refused.
+
+Each action logs `supervisor.spawn`, `supervisor.close` or
+`supervisor.rename` with `via: "user"` where it applies, plus
+`web.agent_action`, and tells the orchestrator in one transcript line.
+
 ## Personality
 
 The agent is warm, unflappable, proactive, pleased to work with. It

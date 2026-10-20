@@ -219,6 +219,16 @@ func (h *Herdr) CreateWorkspace(ctx context.Context, cwd, label string) (herdr.P
 	return sp.CreateWorkspace(ctx, cwd, label)
 }
 
+// CreateWorktree implements supervisor.WorktreeCreator (the inner
+// client's; mock herdr has none).
+func (h *Herdr) CreateWorktree(ctx context.Context, cwd, branch, label string) (herdr.PaneInfo, error) {
+	wt, ok := h.inner.(supervisor.WorktreeCreator)
+	if !ok {
+		return herdr.PaneInfo{}, fmt.Errorf("herdr: cannot make worktrees here")
+	}
+	return wt.CreateWorktree(ctx, cwd, branch, label)
+}
+
 // SplitPane implements supervisor.Spawner.
 func (h *Herdr) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
 	sp, err := h.spawner()
