@@ -82,12 +82,14 @@ func retryDelay(err error) (time.Duration, bool) {
 	return time.Duration(secs * float64(time.Second)), true
 }
 
-// isSessionGone reports whether the server no longer has the session: a
-// live connection closed with 1008 "Requested entity was not found"
-// (AI Studio, 60 minutes after the session was opened fresh, live log
-// 2026-10-20, 4 of 4 hours), or a resume refused with "session not found
-// or expired". The handle is dead with it: every resume tried after such
-// a close was refused (live log 2026-10-08..16, 8 of 8).
+// isSessionGone reports whether the server dropped the session: a live
+// connection closed with 1008 "Requested entity was not found" (AI
+// Studio: 60 minutes after the fresh connect, 4 of 4 hours on
+// 2026-10-20, and at other times too, 8 to 45 minutes into fresh
+// sessions on 2026-10-08..16), or a resume refused with "session not
+// found or expired". The handle is dead with it: every resume tried
+// after such a close was refused (live log 2026-10-08..16, 8 of 8). The
+// daemon goes by the error, not by the session's age.
 func isSessionGone(err error) bool {
 	if err == nil {
 		return false

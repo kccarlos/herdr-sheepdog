@@ -107,7 +107,9 @@ the canary retries for up to 40 s.
 from the handle the previous resumed connection issued: 8/8, the prompt
 1,096 → 1,146 → 1,203 → 1,248 tokens (never the fall to the system prompt
 seen on Vertex). With `-chain-newfact -chain-n 4`: 11/11, the 8 first facts
-and one told on each resumed connection. So the daemon resumes resumed
+and one told on each resumed connection. With `-chain-n 2 -chain-wait 5m`
+the resumed connection stayed up 316 s and the next resume recalled 8/8.
+So the daemon resumes resumed
 sessions on AI Studio (`chainedResumesKeepContext` in
 `internal/voice/gemini/handle.go`); re-run this after a model or backend
 change, and if it fails, that function must return false again.

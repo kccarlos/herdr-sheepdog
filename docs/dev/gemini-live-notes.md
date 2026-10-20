@@ -468,8 +468,11 @@ replayed. A 1011 after a GoAway no longer drops the handle.
 resume the server closes the connection with `close 1008 (policy
 violation): Requested entity was not found`, 60:00 to 60:04 after the fresh
 connect, and a resume with the handle is refused `BidiGenerateContent
-session not found or expired` (2026-10-08..16, 8 of 8). So the handover at
-the GoAway buys only those 3 minutes. The daemon drops the handle on either
+session not found or expired` (2026-10-08..16, 8 of 8). The same 1008
+also ended fresh, never-resumed sessions 8 to 45 minutes in (2026-10-08..16,
+7 times): it means the server dropped the session, regularly at 60 minutes
+and sometimes earlier. So the handover at a GoAway near the hour buys only
+those 3 minutes. The daemon drops the handle on either
 error (`voice.handle_dropped {reason: session_expired}`) and reconnects
 fresh, refreshes an AI Studio session at a quiet moment after 54 minutes
 (`voice.session_refreshed {reason: max_age}`), and on a GoAway past that

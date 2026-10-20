@@ -202,16 +202,24 @@ resumed_twice}`. The cause was not the generation bookkeeping: the handover
 was the session's first resume (generation 1, correct), and about 2 min 50 s
 later the server closed that resumed connection with 1008 "Requested
 entity was not found", 60:00 to 60:04 after the fresh connect, 4 of 4
-hours. That close is AI Studio ending the session: every resume tried
-after one in the earlier logs was refused "session not found or expired"
-(2026-10-08..16, 8 of 8). The rail only named the drop.
+hours. That close means the server dropped the session: every resume
+tried after one in the earlier logs was refused "session not found or
+expired" (2026-10-08..16, 8 of 8). It also ended fresh sessions 8 to 45
+minutes in on those days, so it is not only the hourly limit, and the
+daemon goes by the error. The rail only named the drop.
 
 The chain arm on AI Studio (`-backend aistudio -text-turns`, results
 `live-resume-context-results/2026-10-20T080844Z-chain.jsonl` and
 `2026-10-20T081118Z-chain.jsonl`) found that **chained resumes keep the
 whole session there**: 8/8 after three resumes, 11/11 with a new fact on
-each of four connections, and the prompt never shrank. The Vertex result
-above was not re-run. So the daemon now (`internal/voice/gemini`):
+each of four connections, and the prompt never shrank. A resumed
+connection is not short-lived either (`2026-10-20T082051Z-chain.jsonl`,
+`-chain-wait 5m`): it stayed up 316 s, longer than the ~170 s the live
+resumes got before the hourly close, and the next resume recalled 8/8, so
+the close follows the session's age, not the resume. The facts went as
+text turns, because AI Studio did not answer the spoken clips; the prompt
+token count, which fell to the system prompt on Vertex, does not depend on
+that. The Vertex result above was not re-run. So the daemon now (`internal/voice/gemini`):
 
 - resumes a resumed session on AI Studio (`chainedResumesKeepContext`);
   the rule stays for Vertex;
