@@ -217,6 +217,12 @@ What is in:
   voice, the roster formatter, stable agent names, reliable spawn
   launch; then a **language preference in Settings** fed into the voice and the orchestrator'
   prompts. Prompt and information changes only, no judgment in code.
+- **Phone terminal (decided 2026-10-20, not built):** a live, resizable
+  agent window, composer, agent actions, attachments, a changes view and a
+  plain shell on the iPhone, over herdr's `terminal session control`
+  bridge, rendered with SwiftTerm. The decision, the evidence and the
+  PR-sized phases are in
+  [`design/phone-terminal.md`](design/phone-terminal.md).
 - **Live orchestrator:** DeepSeek `deepseek-flash`; the DeepSeek balance
   was topped up, so the earlier 402 Insufficient Balance (from 2026-10-03)
   no longer breaks failover.
