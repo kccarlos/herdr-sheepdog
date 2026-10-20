@@ -62,6 +62,8 @@ type Screen struct {
 	Text       string      `json:"text"`
 	Lines      int         `json:"lines"`
 	Truncated  bool        `json:"truncated"`
+	// ANSI marks Text as SGR-coloured lines (ScreenANSI), not plain text.
+	ANSI bool `json:"ansi,omitempty"`
 	// Hash fingerprints State and Text, so a polling client can skip a
 	// frame that did not change.
 	Hash string `json:"hash"`
@@ -93,6 +95,41 @@ func (s *Supervisor) Screen(ctx context.Context, paneID string, lines int) (Scre
 		PaneID: paneID, Alias: row.Alias, Spoken: state.Say(row), Kind: row.Kind,
 		State: row.State, StateSince: row.StateSince,
 		Text: text, Lines: lines, Truncated: read.Truncated,
+		Hash: strconv.FormatUint(h.Sum64(), 16),
+	}, nil
+}
+
+// ANSIReader is a Herdr that can read a pane with its colours kept
+// (herdr.Client, inject.Herdr).
+type ANSIReader interface {
+	ReadANSI(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error)
+}
+
+// ScreenANSI is Screen with colours: the pane's visible screen as
+// SGR-coloured lines at the pane's width (herdr's format ansi), for the
+// app's snapshot window when the live terminal is not available (old
+// herdr). ANSI is set. A Herdr without ANSIReader gives the plain screen.
+func (s *Supervisor) ScreenANSI(ctx context.Context, paneID string) (Screen, error) {
+	r, ok := s.herdr.(ANSIReader)
+	if !ok {
+		return s.Screen(ctx, paneID, 0)
+	}
+	row, ok := s.store.Get(paneID)
+	if !ok {
+		return Screen{}, ErrNoSuchAgent
+	}
+	read, err := r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
+	if err != nil {
+		return Screen{}, err
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(row.State))
+	_, _ = h.Write([]byte{1})
+	_, _ = h.Write([]byte(read.Text))
+	return Screen{
+		PaneID: paneID, Alias: row.Alias, Spoken: state.Say(row), Kind: row.Kind,
+		State: row.State, StateSince: row.StateSince,
+		Text: read.Text, Lines: strings.Count(read.Text, "\n") + 1, Truncated: read.Truncated, ANSI: true,
 		Hash: strconv.FormatUint(h.Sum64(), 16),
 	}, nil
 }

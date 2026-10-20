@@ -53,6 +53,9 @@ type Supervisor interface {
 	// /api/agents/{pane_id}/screen and POST /api/agents/{pane_id}/input
 	// (docs/dev/ws-contract.md "Agent window: screen and input").
 	Screen(ctx context.Context, paneID string, lines int) (supervisor.Screen, error)
+	// ScreenANSI backs the coloured snapshot (?ansi=1, screen-subscribe
+	// ansi): the visible screen with SGR colours, feature screen-ansi.
+	ScreenANSI(ctx context.Context, paneID string) (supervisor.Screen, error)
 	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
 	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
 }

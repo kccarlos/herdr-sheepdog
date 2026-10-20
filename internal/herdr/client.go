@@ -194,6 +194,22 @@ func (c *Client) Read(ctx context.Context, paneID string, source ReadSource, lin
 	return res.Read, err
 }
 
+// ReadANSI is Read with the colours kept (format ansi, strip_ansi off):
+// the lines as SGR-coloured text at the pane's width, for the app's
+// snapshot window when the live terminal is not available.
+func (c *Client) ReadANSI(ctx context.Context, paneID string, source ReadSource, lines int) (ReadResult, error) {
+	params := map[string]any{"pane_id": paneID, "source": string(source), "format": "ansi", "strip_ansi": false}
+	if lines > 0 {
+		params["lines"] = lines
+	}
+	var res struct {
+		Read ReadResult `json:"read"`
+	}
+	err := c.Call(ctx, "pane.read", params, &res)
+	c.log("herdr.read", paneID, map[string]any{"source": string(source), "lines": lines, "ansi": true, "bytes": len(res.Read.Text), "error": errString(err)})
+	return res.Read, err
+}
+
 // Prompt submits text + Enter to the agent in paneID as one submission
 // (`agent.prompt`). The server refuses with ErrAgentBlocked while an
 // approval/question UI is showing; answer those with SendKeys instead.

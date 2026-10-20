@@ -793,7 +793,7 @@ func (c *client) onControl(data []byte) {
 		if m.Lines != nil {
 			lines = *m.Lines
 		}
-		c.subscribeScreen(m.PaneID, lines)
+		c.subscribeScreen(m.PaneID, lines, m.ANSI != nil && *m.ANSI)
 	case wsproto.TypeScreenUnsubscribe:
 		c.stopScreen("unsubscribe")
 	case wsproto.TypeVisibility:
