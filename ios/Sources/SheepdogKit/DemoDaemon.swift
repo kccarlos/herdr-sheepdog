@@ -99,6 +99,15 @@ public final class DemoDaemon: @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in self?.onLines?(lines) }
     }
 
+    /// An agent's scripted screen, for the demo's live window
+    /// (`DemoTermTransport`).
+    public func agentScreen(paneID: String) -> AgentScreen? {
+        lock.lock()
+        defer { lock.unlock() }
+        world.advance(to: clock())
+        return world.screen(paneID: paneID)
+    }
+
     // MARK: - Routes
 
     struct Response {

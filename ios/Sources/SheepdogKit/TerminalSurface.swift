@@ -114,4 +114,125 @@ public protocol TerminalSurface: AnyObject {
     func setFontSize(_ size: CGFloat)
     /// The visible rows, for VoiceOver and the "read the screen" action.
     var accessibilityLines: [String] { get }
+
+    /// The font size in points now (after a pinch).
+    var fontSize: CGFloat { get }
+    /// Called when a pinch settles on a new font size.
+    var onFontSizeChange: ((CGFloat) -> Void)? { get set }
+    /// A one-finger vertical drag, in whole lines: positive when the finger
+    /// moves down (toward older output), negative when it moves up. herdr
+    /// owns the scrollback (`term-scroll`), so the surface never scrolls
+    /// itself.
+    var onScroll: ((_ lines: Int) -> Void)? { get set }
+    /// A tap on a cell, 0-based (`term-mouse` down and up).
+    var onTap: ((_ col: Int, _ row: Int) -> Void)? { get set }
+    /// Colours: background, text, cursor, selection and the 16 ANSI colours.
+    func apply(theme: TerminalTheme)
+}
+
+/// An sRGB colour, 0–255 a channel, renderer-agnostic.
+public struct TerminalRGB: Equatable, Sendable {
+    public var r: UInt8, g: UInt8, b: UInt8
+
+    public init(_ r: UInt8, _ g: UInt8, _ b: UInt8) {
+        self.r = r
+        self.g = g
+        self.b = b
+    }
+
+    /// `#RRGGBB`.
+    public init(hex: String) {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        let v = UInt32(digits, radix: 16) ?? 0
+        self.init(UInt8(v >> 16 & 0xff), UInt8(v >> 8 & 0xff), UInt8(v & 0xff))
+    }
+
+    /// WCAG relative luminance.
+    public var luminance: Double {
+        func channel(_ c: UInt8) -> Double {
+            let s = Double(c) / 255
+            return s <= 0.03928 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+
+    /// WCAG contrast ratio between two colours (1–21).
+    public func contrast(with other: TerminalRGB) -> Double {
+        let a = luminance, b = other.luminance
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+}
+
+/// The terminal's colours in one appearance. The brand's surfaces
+/// (docs/dev/brand.md, assets/brand/colors.json): cream-cousin background
+/// and ink text in light, the cool dark surface and cream text in dark.
+/// The ANSI palette is tuned per appearance so every colour reads at 3:1
+/// or better on its background (`TerminalThemeTests`), since agents draw
+/// prompts and diffs in them.
+public struct TerminalTheme: Equatable, Sendable {
+    public var background: TerminalRGB
+    public var foreground: TerminalRGB
+    public var cursor: TerminalRGB
+    /// Drawn at `selectionAlpha` over the background.
+    public var selection: TerminalRGB
+    public var selectionAlpha: Double
+    /// black, red, green, yellow, blue, magenta, cyan, white, then the
+    /// bright eight.
+    public var ansi: [TerminalRGB]
+
+    public static let light = TerminalTheme(
+        background: TerminalRGB(hex: "#FAF8F3"),
+        foreground: TerminalRGB(hex: "#1F1F22"),
+        cursor: TerminalRGB(hex: "#1F1F22"),
+        selection: TerminalRGB(hex: "#F39C1F"),
+        selectionAlpha: 0.35,
+        ansi: [
+            "#1F1F22", "#B3261E", "#1D6B46", "#8A5700", "#1F5F9E", "#7A3E9D", "#0E6E78", "#6B6E75",
+            "#5C6370", "#C4321F", "#237A52", "#9A6300", "#2C6FB5", "#8A4BB0", "#13808A", "#4A4D54",
+        ].map(TerminalRGB.init(hex:)))
+
+    public static let dark = TerminalTheme(
+        background: TerminalRGB(hex: "#16181C"),
+        foreground: TerminalRGB(hex: "#F5F2EA"),
+        cursor: TerminalRGB(hex: "#F5F2EA"),
+        selection: TerminalRGB(hex: "#F39C1F"),
+        selectionAlpha: 0.4,
+        ansi: [
+            "#5C6370", "#F07A6E", "#5CC792", "#F5B83D", "#6AA8EB", "#C29BF2", "#5FC9D3", "#D9D6CE",
+            "#8E929A", "#FF968A", "#7DDCAA", "#FFD06B", "#8DBEF5", "#D5B6FA", "#84DCE3", "#F5F2EA",
+        ].map(TerminalRGB.init(hex:)))
+}
+
+/// The cell grid a view of a given size holds at a given font size, the
+/// same arithmetic SwiftTerm uses: a cell is as wide as "W" and as tall as
+/// the font's ascent + descent + leading, rounded up; the grid is the whole
+/// cells that fit.
+public struct TerminalGeometry: Equatable, Sendable {
+    public var cellWidth: CGFloat
+    public var cellHeight: CGFloat
+
+    public init(cellWidth: CGFloat, cellHeight: CGFloat) {
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+    }
+
+    /// Whole cells in `size`, never less than 1 × 1.
+    public func grid(for size: CGSize) -> (cols: Int, rows: Int) {
+        guard cellWidth > 0, cellHeight > 0 else { return (1, 1) }
+        return (max(1, Int(size.width / cellWidth)), max(1, Int(size.height / cellHeight)))
+    }
+
+    /// The 0-based cell under a point, clamped to the grid.
+    public func cell(at point: CGPoint, cols: Int, rows: Int) -> (col: Int, row: Int) {
+        guard cellWidth > 0, cellHeight > 0 else { return (0, 0) }
+        let col = min(max(0, Int(point.x / cellWidth)), max(0, cols - 1))
+        let row = min(max(0, Int(point.y / cellHeight)), max(0, rows - 1))
+        return (col, row)
+    }
+
+    /// Whole lines in a vertical drag of `dy` points, rounded toward zero.
+    public func lines(forDrag dy: CGFloat) -> Int {
+        guard cellHeight > 0 else { return 0 }
+        return Int(dy / cellHeight)
+    }
 }
