@@ -151,12 +151,8 @@ The scripts lived in the session scratchpad and were not committed.
 - *Resize lock.* While a controller is attached, herdr puts the terminal in
   `direct_attach_resize_locks`, so the computer's layout cannot resize it
   back. The lock is removed on detach (`remove_client` in
-  `src/server/headless.rs`). So, inferred from the source rather than
-  measured, the computer's UI keeps drawing the pane while it is locked at
-  the phone's size.
-- *Not tested yet.* The claim that a phone needs no `--takeover` against the
-  computer comes from the source. Phase 1's first PR confirms it with a
-  test.
+  `src/server/headless.rs`). Measured in phase 1 (below): the computer's UI
+  draws the phone-sized grid in the top-left of the pane's rect.
 - *Retry needed.* Attach is refused with "has a read in progress; retry"
   while an alt-screen `pane.read` is pending, and the daemon's own reads can
   trigger this. The bridge retries with backoff: 100, 200 and 400 ms.
@@ -577,6 +573,28 @@ scratch `herdr --session` only in an opt-in e2e test.
      `read_screen` (recent-unwrapped) still report correctly.
    - If either one breaks, set a minimum width and have the app zoom out
      below it.
+
+**Phase 1 checks, measured 2026-10-20** (herdr 0.9.5, scratch session, a
+herdr UI client in a 120×40 tmux window, Claude Code 2.1.304):
+
+1. **Phone width and detection.** With the pane held at 93, 58 and 44
+   columns by a control bridge, herdr reported Claude Code `idle →
+   working → blocked` on a Bash approval and `blocked → idle` after Esc at
+   every width. The orchestrator's read (`recent-unwrapped`) is the text at
+   the pane's width, so approval options wrap onto continuation lines.
+   The prompt parser dropped those continuations, which cut option labels.
+   It now joins a continuation that does not start with a capital letter
+   (a description under an AskUserQuestion option still does and is
+   skipped). The 58- and 44-column screens are fixtures in
+   `testdata/herdr/` with parser tests. No minimum width is needed.
+2. **Takeover against the computer.** Not needed: a controller without
+   `--takeover` attached while the computer's herdr UI showed the pane. A
+   second controller without `--takeover` (another phone) was refused
+   with "already has an attached client; retry with --takeover".
+3. **The computer's view while the phone is attached.** The computer's
+   UI keeps its layout (93×39 rect) and draws the 44×30 grid in the
+   rect's top-left corner, with text wrapped at 44 columns and the rest of
+   the rect blank. On release the pane returns to 93×39 and redraws.
 
 ### Phase 2: renderer and live window (app)
 
