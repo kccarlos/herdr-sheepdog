@@ -77,6 +77,15 @@ On the same Wi-Fi this just works. Away from home, see
     window open. You can watch; Take over (it asks first) moves control to
     this phone.
   - ⋯ ▸ Switch agent opens another agent's window in place.
+  - **📎 Attach** (beside the prompt field) sends a photo, a camera shot,
+    a file or a copied image to your computer, up to 20 MB (images, text
+    and PDF). Its path on the computer goes into the prompt, and the agent
+    reads it from there. The file stays on your computer and is deleted
+    after 7 days ([privacy.md](privacy.md)).
+  - **⋯ ▸ Changes** lists the files the agent changed in its folder, with
+    lines added and removed; tap one for its diff. It only shows changes
+    and never edits anything. "No repository" means the agent's folder is
+    not a git repository.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
     refreshes every few seconds (in colour with an up-to-date sheepdog), and

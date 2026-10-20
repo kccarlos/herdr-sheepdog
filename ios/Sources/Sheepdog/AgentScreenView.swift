@@ -44,6 +44,7 @@ private struct AgentWindowView: View {
     @State private var showsMoreKeys = false
     @State private var action: AgentWindowAction?
     @State private var confirmTakeover = false
+    @State private var showChanges = false
     @FocusState private var promptFocused: Bool
 
     init(agent: Agent, onSwitch: @escaping (String) -> Void) {
@@ -96,6 +97,13 @@ private struct AgentWindowView: View {
             window.attach(model: model)
         }
         .onDisappear { window.detach() }
+        .sheet(isPresented: $showChanges) {
+            ChangesView(
+                paneID: agent.paneID, name: name,
+                load: { try await model.agentChanges(paneID: agent.paneID) },
+                loadDiff: { try await model.agentDiff(paneID: agent.paneID, path: $0) }
+            )
+        }
         .onChange(of: colorScheme) { _, _ in window.surface.apply(theme: theme) }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -172,6 +180,12 @@ private struct AgentWindowView: View {
                 Label("Copy screen", systemImage: "doc.on.doc")
             }
             .accessibilityIdentifier("agentScreen.menu.copy")
+            Button {
+                showChanges = true
+            } label: {
+                Label("Changes", systemImage: "plusminus")
+            }
+            .accessibilityIdentifier("agentScreen.menu.changes")
             Button {
                 window.resetFontSize()
             } label: {
@@ -266,7 +280,16 @@ private struct AgentWindowView: View {
                     canStop: live.state == .working,
                     focused: $promptFocused,
                     onSend: sendPrompt,
-                    onStop: { window.stop(actions: model.agentActionsAvailable) }
+                    onStop: { window.stop(actions: model.agentActionsAvailable) },
+                    leading: {
+                        AttachButton(upload: { data, fileName, type in
+                            try await model.uploadAttachment(paneID: agent.paneID, data: data, fileName: fileName, mimeType: type)
+                        }, onAttached: { reply in
+                            prompt = Attachments.inserting(reply.path, into: prompt)
+                        })
+                        .disabled(!window.canOperate)
+                        .padding(.bottom, 2)
+                    }
                 )
             }
             if let error = window.inputError {
