@@ -41,6 +41,7 @@ var audioFS embed.FS
 var (
 	armFlag     = flag.String("arm", "resume", "control | resume | silent | briefing | goaway | compress | fill | long | chain | tool | interrupt | longmic")
 	noResume    = flag.Bool("no-resume", false, "run the arm but do not resume (the within-connection control)")
+	backendFlag = flag.String("backend", "vertex", "vertex (VERTEX_API_KEY, VERTEX_PROJECT) | aistudio (GEMINI_API_KEY)")
 	location    = flag.String("location", "us-central1", "Vertex location")
 	model       = flag.String("model", "gemini-3.8-live", "Live model")
 	transparent = flag.Bool("transparent", false, "SessionResumption.Transparent (the daemon leaves it off)")
@@ -54,6 +55,7 @@ var (
 	chainWait   = flag.Duration("chain-wait", 0, "chain: idle time after the turn before the next resume")
 	chainTurns  = flag.Int("chain-turns", 0, "chain: with -chain-talk, this many extra small-talk turns (about 10 s apart) on each resumed connection before the next resume")
 	chainNew    = flag.Bool("chain-newfact", false, "chain: tell one new fact on every resumed connection and ask about all of them at the end (which connection's content does a resume restore?)")
+	textTurns   = flag.Bool("text-turns", false, "tell the facts and send every probe and small-talk line as client-content text turns (AI Studio does not answer the canary's realtime text, and its VAD ignores the clips' digital silence)")
 	goawayMax   = flag.Duration("goaway-max", 14*time.Minute, "goaway: longest wait for the server's GoAway")
 )
 
@@ -99,6 +101,18 @@ var spokenFacts = []fact{
 	{"wifi", "f6", "What is the Wi-Fi password hint?", [][]string{{"mango"}, {"river"}}},
 	{"library", "f7", "When is the library book due?", [][]string{{"12", "12th", "twelfth", "twelve"}}},
 	{"charger", "f8", "Where is the spare charger?", [][]string{{"green"}, {"backpack"}}},
+}
+
+// factText is what each clip says, for -text-turns.
+var factText = map[string]string{
+	"blue_key":    "Please remember this: the blue key is in drawer number seven.",
+	"cat":         "Remember this too: my sister's cat is called Pickle.",
+	"dana":        "Another one: the meeting with Dana moved to Thursday at three.",
+	"server_code": "Remember: the server room code is 4492.",
+	"bike":        "Also: the red bike has a flat rear tyre.",
+	"wifi":        "And: the Wi-Fi password hint is mango river.",
+	"library":     "Remember: the library book is due on the twelfth.",
+	"charger":     "Last one: the spare charger is in the green backpack.",
 }
 
 type usage struct {
@@ -376,6 +390,13 @@ func (r *runner) connect(handle string) {
 	conn := r.st.conn
 	r.st.mu.Unlock()
 	s, err := r.client.Live.Connect(context.Background(), *model, cfg(handle))
+	// AI Studio allows one connection per session and lags behind a
+	// close: a resume right after it can be refused for a moment.
+	for try := 1; err != nil && try <= 20 && strings.Contains(err.Error(), "already connected"); try++ {
+		logj("refused", map[string]any{"conn": conn, "try": try, "err": err.Error()})
+		time.Sleep(2 * time.Second)
+		s, err = r.client.Live.Connect(context.Background(), *model, cfg(handle))
+	}
 	if err != nil {
 		fatal("connect: " + err.Error())
 	}
@@ -391,7 +412,20 @@ func fatal(msg string) {
 }
 
 func (r *runner) text(s string) {
+	if *textTurns {
+		r.turn(s)
+		return
+	}
 	if err := r.sess.SendRealtimeInput(genai.LiveRealtimeInput{Text: s}); err != nil {
+		logj("send_error", map[string]any{"err": err.Error()})
+	}
+}
+
+// turn sends text as a completed client-content user turn.
+func (r *runner) turn(text string) {
+	tc := true
+	err := r.sess.SendClientContent(genai.LiveClientContentInput{Turns: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: text}}}}, TurnComplete: &tc})
+	if err != nil {
 		logj("send_error", map[string]any{"err": err.Error()})
 	}
 }
@@ -412,7 +446,10 @@ func (r *runner) brief(id, facts string, sched genai.FunctionResponseScheduling)
 
 func (r *runner) tellFacts() {
 	for _, f := range spokenFacts {
-		if err := speak(r.sess, f.clip, true); err != nil {
+		if *textTurns {
+			r.st.drain()
+			r.turn(factText[f.name])
+		} else if err := speak(r.sess, f.clip, true); err != nil {
 			fatal("speak: " + err.Error())
 		}
 		logj("fact_sent", map[string]any{"fact": f.name})
@@ -487,11 +524,33 @@ func (r *runner) probe(fs []fact) (res []probeResult) {
 	return res
 }
 
+// clientConfig builds the client for -backend from the environment.
+func clientConfig() (*genai.ClientConfig, error) {
+	switch *backendFlag {
+	case "aistudio":
+		key := os.Getenv("GEMINI_API_KEY")
+		if key == "" {
+			return nil, errors.New("GEMINI_API_KEY unset")
+		}
+		return &genai.ClientConfig{Backend: genai.BackendGeminiAPI, APIKey: key}, nil
+	case "vertex":
+		key, project := os.Getenv("VERTEX_API_KEY"), os.Getenv("VERTEX_PROJECT")
+		if key == "" || project == "" {
+			return nil, errors.New("VERTEX_API_KEY / VERTEX_PROJECT unset")
+		}
+		return &genai.ClientConfig{
+			Backend: genai.BackendVertexAI, APIKey: key, Project: project, Location: *location,
+			HTTPOptions: genai.HTTPOptions{BaseURL: fmt.Sprintf("https://%s-aiplatform.googleapis.com/", *location), Headers: http.Header{"X-Goog-Api-Key": []string{key}}},
+		}, nil
+	}
+	return nil, fmt.Errorf("unknown -backend %q", *backendFlag)
+}
+
 func main() {
 	flag.Parse()
-	key, project := os.Getenv("VERTEX_API_KEY"), os.Getenv("VERTEX_PROJECT")
-	if key == "" || project == "" {
-		fmt.Fprintln(os.Stderr, "VERTEX_API_KEY / VERTEX_PROJECT unset")
+	cc, err := clientConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 	if *outDir != "" {
@@ -509,15 +568,12 @@ func main() {
 		outFile = f
 		defer func() { _ = f.Close() }()
 	}
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Backend: genai.BackendVertexAI, APIKey: key, Project: project, Location: *location,
-		HTTPOptions: genai.HTTPOptions{BaseURL: fmt.Sprintf("https://%s-aiplatform.googleapis.com/", *location), Headers: http.Header{"X-Goog-Api-Key": []string{key}}},
-	})
+	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
 		fatal("client: " + err.Error())
 	}
 	r := &runner{client: client, st: &state{turnDone: make(chan struct{}, 1)}}
-	logj("start", map[string]any{"date": time.Now().UTC().Format(time.RFC3339), "model": *model, "location": *location, "backend": "vertex", "resume": !*noResume, "transparent": *transparent})
+	logj("start", map[string]any{"date": time.Now().UTC().Format(time.RFC3339), "model": *model, "location": *location, "backend": *backendFlag, "resume": !*noResume, "transparent": *transparent})
 	r.connect("")
 
 	extra := r.runArm()
@@ -572,7 +628,7 @@ func main() {
 		}
 	}
 	sum := map[string]any{
-		"date": time.Now().UTC().Format("2006-01-02"), "model": *model, "backend": "vertex", "location": *location,
+		"date": time.Now().UTC().Format("2006-01-02"), "model": *model, "backend": *backendFlag, "location": *location,
 		"resumed": resumed, "recall": fmt.Sprintf("%d/%d", hit, total), "recall_spoken_facts": fmt.Sprintf("%d/%d", earlyHit, len(spokenFacts)),
 		"prompt_before": before.Prompt, "prompt_before_by_modality": before.PromptBy,
 		"handles": hs, "tool_calls": nCalls, "interrupted": interrupted, "turns": turns, "results": results,

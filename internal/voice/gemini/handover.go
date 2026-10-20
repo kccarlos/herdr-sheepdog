@@ -24,7 +24,9 @@ import (
 // deadline at the latest, the old connection is closed and the session
 // resumes with the same handle; audio in the gap is buffered and
 // replayed. If the deadline 1011 still comes first, the handle is kept
-// (afterGoAwayLocked) and the reconnect resumes with it.
+// (afterGoAwayLocked) and the reconnect resumes with it. AI Studio ends
+// the session itself 60 minutes after it opened, so a GoAway past
+// aistudioMaxAge does not hand over but starts fresh (refresh.go).
 const (
 	// handoverMargin is how long before the GoAway deadline the handover
 	// happens even if the moment is not quiet.

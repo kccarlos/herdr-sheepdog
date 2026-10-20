@@ -236,7 +236,7 @@ What is in:
   an Opus run costs about $20. See
   [`eval/anthropic-opus-2026-10-19.md`](eval/anthropic-opus-2026-10-19.md)
   and [`anthropic-adapter.md`](anthropic-adapter.md).
-- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
+- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8 on Vertex). **On AI Studio chained resumes keep the context** (canary 2026-10-20, `-backend aistudio -text-turns`: 8/8 and 11/11), so the rail now applies to Vertex only.
 - **The hourly Gemini Live error on AI Studio lost the context; fixed, to
   verify live:** every ~58 min the GoAway's make-before-break resume was
   refused with 1008 "session is already connected to an existing client"
@@ -250,6 +250,16 @@ What is in:
   `voice.resume {resumed: true}`, and no `handle_dropped` at the GoAway.
   The other `handle_dropped server_internal_error` lines (no GoAway before
   them, a few a day) are real mid-session 1011s and still start fresh.
+  Live 2026-10-20 the handover resumed every GoAway, but AI Studio ends a
+  session 60 minutes after it opened (1008 "Requested entity was not
+  found", the handle dead), about 3 minutes after that resume, which the
+  log showed as `resumed_twice`. Now an AI Studio session refreshes at a
+  quiet moment after 54 minutes (`voice.session_refreshed {reason:
+  max_age}`), a GoAway past that age goes fresh at once, and the 1008 drops
+  the handle as `session_expired`
+  ([`gemini-live-notes.md`](gemini-live-notes.md#goaway)). Expected live:
+  one fresh, re-seeded session about every 54 minutes, no `resumed_twice`
+  and no 1008 on AI Studio.
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.

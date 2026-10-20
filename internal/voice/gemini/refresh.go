@@ -25,10 +25,11 @@ import (
 // in flight and no question is waiting for the user (the
 // supervisor's open check). Logged voice.session_refreshed {reason,
 // age_s}. These are runaway guards on the session's lifetime, not
-// tuning, so they are constants. Since a GoAway on a resumed connection
-// opens a fresh session anyway (handle.go, "never resume a resumed
-// session"), freshAt moves every second GoAway (~18 min) and the max-age
-// refresh rarely fires; it stays as the guard.
+// tuning, so they are constants. On Vertex a GoAway on a resumed
+// connection opens a fresh session anyway (handle.go, "never resume a
+// resumed session"), so freshAt moves every second GoAway (~18 min) and
+// the max-age refresh rarely fires; it stays as the guard. On AI Studio
+// the max age is shorter (aistudioMaxAge below).
 const (
 	refreshAway   = 30 * time.Minute
 	refreshMaxAge = 2 * time.Hour
@@ -42,6 +43,43 @@ const (
 	// refreshEvery is how often a due refresh looks for a quiet moment.
 	refreshEvery = time.Second
 )
+
+// AI Studio ends a Live session 60 minutes after it was opened fresh,
+// resumed or not: the live connection closes with 1008 "Requested
+// entity was not found" and its handle is dead (isSessionGone; live log
+// 2026-10-20, 60:00 to 60:04 after the fresh connect, 4 of 4 hours,
+// each about 3 minutes after the GoAway handover had resumed it). So on
+// AI Studio the max-age refresh comes before that, at a quiet moment
+// and ahead of the GoAway at about 57 minutes, and a GoAway past it
+// starts a fresh session at once (run loop) instead of resuming into a
+// connection the server cuts minutes later. Vertex sessions resumed
+// past two hours (live log 2026-10-03..04), so Vertex keeps
+// refreshMaxAge.
+const (
+	aistudioSessionLife = 60 * time.Minute
+	aistudioMaxAge      = aistudioSessionLife - 6*time.Minute
+)
+
+// maxAgeLocked is the age past which the session refreshes. Caller
+// holds s.mu.
+func (s *Session) maxAgeLocked() time.Duration {
+	if s.cfg.Backend() == "aistudio" {
+		return aistudioMaxAge
+	}
+	return refreshMaxAge
+}
+
+// pastMaxAge reports the session's age and whether it is past the max
+// age.
+func (s *Session) pastMaxAge() (time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.freshAt.IsZero() {
+		return 0, false
+	}
+	age := s.now().Sub(s.freshAt)
+	return age, age > s.maxAgeLocked()
+}
 
 // Refresh reasons (voice.session_refreshed).
 const (
@@ -137,7 +175,7 @@ func (s *Session) maybeRefresh() {
 		s.mu.Unlock()
 		return
 	}
-	if s.refreshDue == "" && !s.freshAt.IsZero() && now.Sub(s.freshAt) > refreshMaxAge {
+	if s.refreshDue == "" && !s.freshAt.IsZero() && now.Sub(s.freshAt) > s.maxAgeLocked() {
 		s.markRefreshLocked(now, refreshAge)
 	}
 	reason, dueAt, check := s.refreshDue, s.refreshDueAt, s.openCheck

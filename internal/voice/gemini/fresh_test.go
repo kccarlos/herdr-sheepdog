@@ -12,7 +12,15 @@ import (
 // Never resume a resumed session (handle.go): a handle issued by a
 // connection that was itself opened by a resume restores only that
 // connection's own content (docs/dev/research/live-resume-context-2026-10-04.md),
-// so the reconnect after it opens a fresh session and re-seeds it.
+// so the reconnect after it opens a fresh session and re-seeds it. The
+// rule is Vertex's: on AI Studio chained resumes keep the context
+// (chainedResumesKeepContext), so these tests run on a Vertex config.
+
+// onVertex sets a Vertex backend on cfg.
+func onVertex(cfg Config) Config {
+	cfg.Vertex = &Vertex{Project: "p", Location: "us-central1"}
+	return cfg
+}
 
 // waitResumes waits until n EventResumed were emitted and returns the
 // n-th.
@@ -82,7 +90,7 @@ func resumeGenerations(h *harness) []any {
 func TestSecondGoAwayStartsFresh(t *testing.T) {
 	c1, c2, c3, c4 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3"), newFakeConn("c4")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3), ok(c4)}}
-	h := newHarness(t, Config{}, d)
+	h := newHarness(t, onVertex(Config{}), d)
 
 	converse(t, h, c1, "what is codex doing?", "Codex is refactoring the parser.")
 	acceptHandle(t, h, c1, "handle-1")
@@ -139,7 +147,7 @@ func TestSecondGoAwayStartsFresh(t *testing.T) {
 func TestResumedConnectionLostBeforeItsOwnHandleStartsFresh(t *testing.T) {
 	c1, c2, c3, c4 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3"), newFakeConn("c4")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3), ok(c4)}}
-	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d)
+	h := newHarness(t, onVertex(Config{ReconnectBackoff: 5 * time.Millisecond}), d)
 
 	acceptHandle(t, h, c1, "handle-1")
 	c1.serve(goAwayMsg(30 * time.Second))
@@ -172,7 +180,7 @@ func TestResumedConnectionLostBeforeItsOwnHandleStartsFresh(t *testing.T) {
 func TestTwoQuickRecyclesDoNotReuseTheHandle(t *testing.T) {
 	c1, c2, c3 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3)}}
-	h := newHarness(t, Config{}, d)
+	h := newHarness(t, onVertex(Config{}), d)
 
 	converse(t, h, c1, "what is codex doing?", "Codex is refactoring the parser.")
 	acceptHandle(t, h, c1, "handle-1")
@@ -300,7 +308,7 @@ func TestLateHandleFromOldConnectionIsNotKept(t *testing.T) {
 func TestFreshSessionIsGivenRecentBriefings(t *testing.T) {
 	c1, c2, c3, c4 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3"), newFakeConn("c4")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3), ok(c4)}}
-	h := newHarness(t, briefingConfig(), d)
+	h := newHarness(t, onVertex(briefingConfig()), d)
 
 	if err := h.s.PushTagged("bench-codex is refactoring the parser, 2 minutes in.", voice.UrgencySilent, map[string]any{"agent": "bench-codex"}); err != nil {
 		t.Fatal(err)
