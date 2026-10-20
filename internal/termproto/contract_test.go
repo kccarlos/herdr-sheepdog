@@ -58,7 +58,7 @@ func TestContractExamplesRoundTrip(t *testing.T) {
 	if in {
 		t.Fatal("unterminated ```json block")
 	}
-	for _, typ := range []string{TypeHello, TypeOpen, TypeResize, TypeScroll, TypeMouse, TypeClose, TypeReady, TypeOpened, TypeClosed, TypeError} {
+	for _, typ := range []string{TypeHello, TypeOpen, TypeResize, TypeScroll, TypeMouse, TypeClose, TypeReady, TypeOpened, TypeClosed, TypeError, TypeFree} {
 		if !types[typ] {
 			t.Errorf("the contract has no example of %s", typ)
 		}

@@ -205,6 +205,14 @@ final class TermSocketTests: XCTestCase {
         XCTAssertEqual(rig.socket.openChannels, [])
     }
 
+    func testTermFreeReachesItsChannel() throws {
+        let (rig, ch) = try openRig()
+        rig.last!.text(#"{"type":"term-free","ch":\#(ch),"pane_id":"w1:p2"}"#)
+        rig.last!.text(#"{"type":"term-free","ch":999,"pane_id":"w1:p2"}"#)
+        XCTAssertEqual(rig.freed, [ch], "an unknown channel is ignored")
+        XCTAssertEqual(rig.socket.openChannels, [ch], "the channel stays open")
+    }
+
     func testReconnectReopensChannelsWithTheirCurrentSize() async throws {
         let (rig, ch) = try openRig(takeover: true)
         let gone = try XCTUnwrap(rig.socket.open(target: .pane("w1:p9"), mode: .observe, cols: 40, rows: 20))
@@ -318,6 +326,7 @@ private final class Rig {
     var resyncs: [Int] = []
     var opened: [(Int, TermSocket.Opened)] = []
     var closed: [(ch: Int, reason: TermCloseReason, canTakeOver: Bool)] = []
+    var freed: [Int] = []
 
     var last: FakeTermTransport? { transports.last }
 
@@ -339,6 +348,7 @@ private final class Rig {
             case let .resync(ch): self.resyncs.append(ch)
             case let .opened(ch, opened): self.opened.append((ch, opened))
             case let .closed(ch, reason, canTakeOver): self.closed.append((ch, reason, canTakeOver))
+            case let .free(ch): self.freed.append(ch)
             default: break
             }
         }

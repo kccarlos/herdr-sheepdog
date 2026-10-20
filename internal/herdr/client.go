@@ -253,6 +253,22 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 	return res.Root, err
 }
 
+// CreateWorktree makes a git worktree on a new branch of cwd's repository
+// and opens an unfocused workspace in it (`worktree.create`), returning
+// the workspace's root pane. herdr picks the checkout path.
+func (c *Client) CreateWorktree(ctx context.Context, cwd, branch, label string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"cwd": cwd, "branch": branch, "focus": false}
+	if label != "" {
+		params["label"] = label
+	}
+	err := c.Call(ctx, "worktree.create", params, &res)
+	c.log("herdr.worktree_create", res.Root.PaneID, map[string]any{"cwd": cwd, "branch": branch, "error": errString(err)})
+	return res.Root, err
+}
+
 // PaneEnv is set in the shell of every pane the daemon opens for a new
 // agent (workspace.create, pane.split take an env map; neither takes a
 // command, so the agent is still typed at the shell prompt). It keeps

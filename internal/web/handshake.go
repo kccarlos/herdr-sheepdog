@@ -43,6 +43,9 @@ func (s *Server) features() []string {
 	}
 	if s.deps.Supervisor != nil {
 		f = append(f, wsproto.FeatureScreen, wsproto.FeatureScreenANSI)
+		if _, ok := s.deps.Supervisor.(AgentActions); ok {
+			f = append(f, wsproto.FeatureAgentActions)
+		}
 	}
 	if _, ok := s.cardHost(); ok {
 		f = append(f, wsproto.FeatureCards)

@@ -545,3 +545,36 @@ func TestTermRemoteKind(t *testing.T) {
 }
 
 var _ = errors.New
+
+func TestTermObserverToldWhenControlIsFree(t *testing.T) {
+	h, _ := newTermHarness(t, "0.9.5")
+	trackWorking(t, h, "w1:p2", "auth", "$ ")
+	phone := dialTerm(t, h, true)
+	phone.send(openMsg(1, "w1:p2", termproto.ModeControl))
+	phone.expect(termproto.TypeOpened)
+	phone.expectFrame()
+	ipad := dialTerm(t, h, true)
+	ipad.send(openMsg(4, "w1:p2", termproto.ModeObserve))
+	ipad.expect(termproto.TypeOpened)
+	ipad.expectFrame()
+
+	phone.send(termproto.Message{Type: termproto.TypeClose, Ch: 1})
+	phone.expect(termproto.TypeClosed)
+	if m := ipad.expect(termproto.TypeFree); m.Ch != 4 || m.PaneID != "w1:p2" {
+		t.Errorf("term-free = %+v", m)
+	}
+
+	// A controller that leaves with its connection frees the pane too.
+	ipad.send(termproto.Message{Type: termproto.TypeClose, Ch: 4})
+	ipad.expect(termproto.TypeClosed)
+	ipad.send(openMsg(5, "w1:p2", termproto.ModeControl))
+	ipad.expect(termproto.TypeOpened)
+	ipad.expectFrame()
+	phone.send(openMsg(2, "w1:p2", termproto.ModeObserve))
+	phone.expect(termproto.TypeOpened)
+	phone.expectFrame()
+	_ = ipad.conn.Close(websocket.StatusNormalClosure, "bye")
+	if m := phone.expect(termproto.TypeFree); m.Ch != 2 {
+		t.Errorf("term-free after disconnect = %+v", m)
+	}
+}

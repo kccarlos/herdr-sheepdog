@@ -166,7 +166,19 @@ public final class DemoDaemon: @unchecked Sendable {
             DispatchQueue.global().async { [weak self] in self?.publish() }
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
+        case ("GET", "/api/projects"):
+            return json(["kinds": ["claude", "codex"], "worktree": true, "projects": [
+                ["name": "sheepdog-bench", "path": "/Users/you/code/sheepdog-bench", "open": true, "git": true],
+                ["name": "website", "path": "/Users/you/code/website", "open": false, "git": true],
+                ["name": "notes", "path": "/Users/you/code/notes", "open": false, "git": false],
+            ]])
+        case ("POST", "/api/agents"):
+            return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
         default:
+            if path.hasPrefix("/api/agents/"), method == "POST",
+               let last = path.split(separator: "/").last, ["rename", "interrupt", "close"].contains(String(last)) {
+                return json(["ok": true, "spoken": "This is the demo: its agents are scripted, so nothing changed."])
+            }
             if path.hasPrefix("/api/agents/") {
                 let parts = path.dropFirst("/api/agents/".count).split(separator: "/")
                 let pane = parts.first.flatMap { String($0).removingPercentEncoding } ?? ""

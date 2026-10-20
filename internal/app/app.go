@@ -573,6 +573,7 @@ func (a *App) wire() error {
 		VoiceIssue:     a.VoiceIssue,
 		SetupNeeded:    a.SetupNeeded,
 		Restart:        a.RequestRestart,
+		DataDir:        cfg.DataDir,
 	}
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent
