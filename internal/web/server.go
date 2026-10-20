@@ -60,6 +60,16 @@ type Supervisor interface {
 	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
 }
 
+// AgentActions is the optional half of Supervisor behind the user's own
+// agent actions (agents_actions.go, feature agent-actions).
+type AgentActions interface {
+	NewAgentOptions(ctx context.Context) (supervisor.NewAgentOptions, error)
+	UserNewAgent(ctx context.Context, req supervisor.NewAgentRequest) (supervisor.NewAgentResult, error)
+	UserRename(ctx context.Context, paneID, name string) (string, error)
+	UserInterrupt(ctx context.Context, paneID string) (string, error)
+	UserClose(ctx context.Context, paneID string) (string, error)
+}
+
 // EventInjector is the Watcher's optional second input channel (POST
 // /api/herdr/event), beside the herdr socket subscription.
 type EventInjector interface {
@@ -326,6 +336,11 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
 	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
 	s.mux.HandleFunc("POST /api/agents/{pane_id}/input", s.authFunc(s.handleAgentInput, false))
+	s.mux.HandleFunc("GET /api/projects", s.authFunc(s.handleProjects, false))
+	s.mux.HandleFunc("POST /api/agents", s.authFunc(s.handleNewAgent, false))
+	s.mux.HandleFunc("POST /api/agents/{pane_id}/rename", s.authFunc(s.handleAgentRename, false))
+	s.mux.HandleFunc("POST /api/agents/{pane_id}/interrupt", s.authFunc(s.handleAgentInterrupt, false))
+	s.mux.HandleFunc("POST /api/agents/{pane_id}/close", s.authFunc(s.handleAgentClose, false))
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
 	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
 	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))

@@ -79,6 +79,7 @@ binary version.
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: `screen-subscribe {ansi: true}` and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
+  | `agent-actions` | the user's own New agent, Rename, Stop and Close routes (*Agent actions*) | with `screen` |
   | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
@@ -853,6 +854,50 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   as it is: the user may have moved the cursor with `up`/`down`, so the
   recorded default is not necessarily what it selects; the transition
   off `blocked` closes the question. A herdr send that fails is `502`.
+
+## Agent actions
+
+Feature `agent-actions`. Token-authenticated JSON routes for what the
+user does with a tap in the app: start, rename, stop or close an agent.
+The tap is the user's own, so these do not pass the words rail that
+guards the orchestrator's writes ([roles.md](roles.md#the-users-own-actions));
+the rails that are not about who asked stay in the supervisor. Errors are
+`{"error": "…"}` in plain words: `400` a bad name, kind or branch, `403` a
+rail (outside the project roots, the runaway cap, the daemon's own pane),
+`404` an agent the daemon does not track, `502` herdr failed or cannot
+do it here. Every call is logged as `web.agent_action {action, …}` with
+metadata only (a first prompt's length, never its text), and the
+orchestrator gets one transcript line ("the user closed Auth fix from the
+phone").
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /api/projects` | | `{"kinds": ["claude", "codex"], "projects": [{"name", "path", "open", "git"}], "worktree": true}` |
+| `POST /api/agents` | `{"kind", "dir", "worktree"?, "text"?}` | `{"ok": true, "pane_id", "spoken"}` |
+| `POST /api/agents/{pane_id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
+| `POST /api/agents/{pane_id}/interrupt` | | `{"ok": true, "spoken"}` |
+| `POST /api/agents/{pane_id}/close` | | `{"ok": true, "spoken"}` |
+
+- **Projects** are the directories a new agent may start in: every open
+  workspace's directory, then each folder directly inside
+  `supervisor.project_roots`. `open` says a workspace already works there
+  (the new pane is split from it); `git` says a fresh worktree is
+  possible; `worktree` says this herdr can make one.
+- **New agent.** `kind` is `claude` or `codex`; `dir` is a project's name
+  or full path, resolved as for the orchestrator (inside a project root,
+  or an open workspace's own directory). With `worktree` (a branch name:
+  letters, digits and `. _ / -`), herdr's `worktree.create` makes the
+  branch's worktree in that repository and opens a workspace there
+  instead. The CLI is typed into the new shell; `text`, at most 64 KB, is
+  sent once the agent sits idle at its prompt. Counts toward the cap of 3
+  new agents per 10 minutes. `spoken` is "Starting a new Claude in bench."
+- **Rename** takes 1 to 60 characters, as the orchestrator's rename does
+  (herdr gets its own spelling when it allows one).
+- **Interrupt** stops the current turn the way the orchestrator's
+  `interrupt` does: Ctrl-C, then a check, and a second one if the turn
+  still runs; it drops the agent's open question.
+- **Close** ends the agent's pane (`pane.close`). The app confirms it with
+  the agent's name first. The pane sheepdog itself runs in is refused.
 
 ## Agent window over /ws
 
