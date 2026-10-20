@@ -214,39 +214,10 @@ accessibility text sizes. The voice bar stays in place.
   its `detail`, and the worker's last message to a human (four lines until
   tapped). The agent strip above the conversation shows the same running
   agents.
-- **Agent window** (`AgentScreenView`, `AgentScreenModel`, `AgentKey`).
-  "Open window" on a Agents card (a `NavigationLink` to
-  `AgentWindowRoute` on the main `NavigationStack`), or in the sheet behind
-  a strip chip, pushes the agent's live terminal. When the daemon's
-  `bot-ready` lists the `screen` feature, the window streams over `/ws`
-  (`AgentScreenStream`, held once by `SessionViewModel` since the daemon
-  allows one subscription per client): `screen-subscribe` on open and on
-  every new connection, `screen-unsubscribe` on close, and a `screen`
-  frame from the daemon only when the window changed (daemon
-  docs/ws-contract.md "Agent window over /ws"). Until the first frame
-  arrives on a connection — or with an older daemon, a legacy connection
-  or no connection — it polls
-  `GET /api/agents/{pane_id}/screen?lines=200&hash=…` every 1.5 s while on
-  screen; the last `hash` goes back so an unchanged window answers without
-  `text`, and `AgentScreenModel.revision` only moves when the text does.
-  The text is monospaced and scrolls sideways rather than wrapping a TUI's
-  layout; a new frame scrolls to the bottom only when the view is already
-  there (a bottom anchor reports its position through a preference key,
-  since `onScrollGeometryChange` needs iOS 18), and "Latest" jumps back.
-  Pull to refresh reads at once. The header shows the spoken name (the
-  daemon's `spoken`, else the alias), the state and how long. Under it, a
-  key bar (Enter, Esc, Ctrl-C, 1, 2, 3, ↑, ↓, Tab) and a prompt field post
-  to `POST /api/agents/{pane_id}/input` (`{"keys": […]}` /
-  `{"text": …, "submit": true}`); Esc and Ctrl-C ask first, a send is a
-  haptic, and the controls are disabled until a frame has arrived and
-  while reads fail. Errors show inline: a read failure above the key bar,
-  an input refusal (a blocked agent refuses a prompt, `409`) under the
-  field, and a reply such as "Told auth Yes." when keys answered the open
-  question through the daemon's tap path. A plain `404` (no `{"error"}`
-  body) means a daemon without the routes: the window says so and stops
-  polling; a `404 {"error":"no such agent"}` is an untracked pane.
-  `DaemonClient.agentPath` percent-escapes the pane id (`%12` → `%2512`,
-  `/` → `%2F`). The daemon never serves panes it does not track.
+- **Agent window** (`AgentScreenView`). "Open window" on an Agents card
+  (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
+  or in the sheet behind a strip chip, pushes the agent's live terminal;
+  see "The live agent window" below.
 - **Orchestrator replies and held pushes** (`BrainActivity`). `voice.tool_result`
   for `to_supervisor` shows as an "Orchestrator → Sheepdog" card. With
   `--voice=off`, only a detail/options footer appears under the voice's
@@ -301,7 +272,7 @@ accessibility text sizes. The voice bar stays in place.
 
 ## The terminal surface
 
-The live agent window (being built, [phone-terminal.md](../../../docs/dev/design/phone-terminal.md))
+The live agent window ([phone-terminal.md](../../../docs/dev/design/phone-terminal.md))
 draws herdr's terminal stream through two renderer-agnostic protocols in
 `SheepdogKit/TerminalSurface.swift`:
 
@@ -379,6 +350,75 @@ big-endian). Use it only when `bot-ready` lists the `term` feature.
 - `TermSocketTests` run it on a fake `TermTransport`. One test uses the real
   URLSession transport against a local server, and one replays a recorded
   herdr fixture through the socket into a grid.
+
+### The live agent window
+
+```
+AgentScreenView ── AgentWindowView (one per pane; ⋯ ▸ Switch agent swaps it)
+      │                 header (name, state chip, ⋯) · NoticeBar · TerminalHost
+      │                 · PinnedApprovalCard · key bar · composer
+AgentWindowController (@MainActor) ── AgentWindowState (Kit, pure)
+      │            │
+SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
+                   └── TermSocket ── URLSession, or DemoTermTransport in the demo
+```
+
+- **`AgentWindowState`** (SheepdogKit, `AgentWindowTests`) decides
+  everything; the controller feeds it events and runs the commands it
+  returns (`open`, `close`, `startSnapshot`, `stopSnapshot`, `scroll`).
+- **Which path.** `TermAvailability` comes from `bot-ready`'s `term`
+  feature. Without a voice session the window uses the features this daemon
+  listed last time, else tries `/term` anyway (`unknown`). `no` (a daemon
+  without `term`, or one older than the handshake) draws the `screen`
+  snapshot. The window does not know which of the two (old daemon or herdr
+  older than 0.9.2) it is, so its notice names both.
+- **Size.** The channel opens on the surface's first reported grid (after
+  layout), so the pane is resized once; SF Mono 11 pt is 58 columns on a
+  402 pt wide phone. Pinch changes the font when the fingers lift (the view
+  scales as a preview) and the keyboard shrinks the view; both give a new
+  grid and one debounced `term-resize`. The font size is a per-device
+  default (`agentWindow.fontSize`).
+- **Gestures** (`SwiftTermSurface`). SwiftTerm's taps, scroll view and
+  mouse reporting are off; herdr owns scrollback and mouse modes. A
+  one-finger vertical drag becomes `term-scroll` in whole lines (finger
+  down = older = `up`); a tap becomes `term-mouse` down and up on the cell;
+  long-press stays SwiftTerm's selection with Copy. `inputView` is an empty
+  view, so selecting never raises a keyboard (phase 3's typing mode sets
+  `keyboardEnabled`).
+- **"Latest".** herdr never reports its scroll position, so the window
+  counts its own scrolls; Latest and any raw input scroll back down by that
+  count. An observer does not learn when control is released.
+- **`term-closed`.** `refused:busy` and `taken_over` reopen as `observe` with
+  "Another device has control · Take over" (confirmed, then `takeover:
+  true`); `gone` and `refused:not_tracked` end the window; `herdr` and
+  `refused:too_many` fall back to the snapshot with Try again. A dropped
+  connection keeps the last screen ("Reconnecting…"); a window with nothing
+  drawn yet shows the snapshot until the socket comes back.
+- **Snapshot in the same surface.** `SnapshotScreen.bytes` turns the
+  `screen` text into terminal bytes: cursor hidden, autowrap off (wide
+  lines are clipped, not wrapped) and the last rows that fit.
+- **Background.** Going to the background closes every channel and the
+  connection (`TermHub.disconnectIfIdle`), so the computer gets its layout
+  back; the foreground reopens it (as an observer if it was one). The hub
+  keeps the connection for 20 s after the last window closes, so switching
+  agents reuses it; past `term-ready.limits.channels` a window says "Too
+  many live windows".
+- **Input.** The key bar sends raw bytes on a live `control` channel (esc
+  `1b`, tab `09`, ↑ `1b 5b 41`, ↓ `1b 5b 42`, ⌃C `03`, ⏎ `0d`), else posts
+  allow-listed keys as before. The composer always posts
+  `POST /api/agents/{pane}/input`.
+- **Theme.** `TerminalTheme.light` / `.dark` use the brand surfaces and a
+  16-colour palette that reads at 3:1 or better on its background
+  (`AgentWindowTests`); the window reapplies it when the appearance
+  changes.
+- **VoiceOver.** The surface's outer view (`TerminalContainerView`) is one
+  element whose value is the visible text and whose rotor moves by line
+  (`UIAccessibilityReadingContent`); SwiftTerm's own element is hidden.
+- **Demo.** `DemoTermTransport` answers `/term` from `DemoWorld`'s screens:
+  full frames at the window's size, a spinner diff every second, typed
+  input echoed in the prompt box. `-sheepdogDemoTerm busy|gone|herdr`
+  forces the other states; `AgentWindowDemoUITests` covers them without a
+  daemon.
 
 ## Settings ▸ Models
 

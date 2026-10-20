@@ -247,7 +247,22 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
         terminalView.addGestureRecognizer(pinch)
     }
 
-    private var geometry: TerminalGeometry { TerminalRenderer.geometry(fontSize: fontSize) }
+    /// The font's cell size, pulled into the range the grid SwiftTerm
+    /// actually laid out allows (its font metrics differ from UIKit's by a
+    /// fraction of a point), so a tap lands on the cell drawn under it.
+    private var geometry: TerminalGeometry {
+        var g = TerminalRenderer.geometry(fontSize: fontSize)
+        let size = terminalView.bounds.size
+        if cols > 0, size.width > 0 {
+            let lo = size.width / CGFloat(cols + 1), hi = size.width / CGFloat(cols)
+            g.cellWidth = min(max(g.cellWidth, lo + 0.001), hi)
+        }
+        if rows > 0, size.height > 0 {
+            let lo = size.height / CGFloat(rows + 1), hi = size.height / CGFloat(rows)
+            g.cellHeight = min(max(g.cellHeight, lo + 0.001), hi)
+        }
+        return g
+    }
 
     @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
         guard recognizer.state == .ended else { return }

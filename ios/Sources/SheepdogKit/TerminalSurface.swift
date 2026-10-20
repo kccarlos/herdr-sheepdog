@@ -198,7 +198,7 @@ public struct TerminalTheme: Equatable, Sendable {
         selection: TerminalRGB(hex: "#F39C1F"),
         selectionAlpha: 0.4,
         ansi: [
-            "#5C6370", "#F07A6E", "#5CC792", "#F5B83D", "#6AA8EB", "#C29BF2", "#5FC9D3", "#D9D6CE",
+            "#6E747E", "#F07A6E", "#5CC792", "#F5B83D", "#6AA8EB", "#C29BF2", "#5FC9D3", "#D9D6CE",
             "#8E929A", "#FF968A", "#7DDCAA", "#FFD06B", "#8DBEF5", "#D5B6FA", "#84DCE3", "#F5F2EA",
         ].map(TerminalRGB.init(hex:)))
 }

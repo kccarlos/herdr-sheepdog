@@ -255,25 +255,32 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertLessThan(bigger, cols, "pinch out: fewer columns")
     }
 
+    /// The prediction is within a column or row of the grid SwiftTerm lays
+    /// out (its font metrics differ by a fraction of a point), and the
+    /// surface reports that grid, once per change.
     @MainActor
-    func testTheSurfaceReportsTheGridTheGeometryPredicts() {
+    func testTheSurfaceReportsItsGrid() {
         let surface = TerminalRenderer.makeSurface(fontSize: 11)
-        var reported: (Int, Int)?
-        surface.onSizeChange = { reported = ($0, $1) }
+        var reports: [(Int, Int)] = []
+        surface.onSizeChange = { reports.append(($0, $1)) }
         let size = CGSize(width: 390, height: 600)
         surface.view.frame = CGRect(origin: .zero, size: size)
         surface.view.layoutIfNeeded()
         surface.view.subviews.first?.layoutIfNeeded()
         let predicted = TerminalRenderer.geometry(fontSize: 11).grid(for: size)
-        XCTAssertEqual(surface.cols, predicted.cols)
-        XCTAssertEqual(surface.rows, predicted.rows)
-        XCTAssertEqual(reported?.0, predicted.cols)
-        // A new font size is a new grid, reported once.
+        XCTAssertLessThanOrEqual(abs(surface.cols - predicted.cols), 1, "\(surface.cols) vs \(predicted.cols)")
+        XCTAssertLessThanOrEqual(abs(surface.rows - predicted.rows), 1, "\(surface.rows) vs \(predicted.rows)")
+        XCTAssertEqual(reports.last?.0, surface.cols)
+        XCTAssertEqual(reports.last?.1, surface.rows)
+        // A bigger font is a smaller grid, reported.
+        let before = surface.cols
         surface.setFontSize(14)
-        let bigger = TerminalRenderer.geometry(fontSize: 14).grid(for: size)
-        XCTAssertEqual(surface.cols, bigger.cols)
-        XCTAssertEqual(reported?.0, bigger.cols)
-        XCTAssertEqual(reported?.1, bigger.rows)
+        XCTAssertLessThan(surface.cols, before)
+        XCTAssertEqual(reports.last?.0, surface.cols)
+        XCTAssertEqual(reports.last?.1, surface.rows)
+        XCTAssertEqual(surface.fontSize, 14)
+        surface.setFontSize(99)
+        XCTAssertEqual(surface.fontSize, SwiftTermSurface.fontSizeRange.upperBound, "clamped")
     }
 
     // MARK: Snapshot in the terminal
