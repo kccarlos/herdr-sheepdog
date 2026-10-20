@@ -427,7 +427,7 @@ extension DaemonClient {
     /// 2xx decodes; a 404 with the daemon's `{"error"}` is a refusal (no
     /// such agent), a 404 without one is an older daemon (`nil`); 401 is the
     /// token; anything else carries the daemon's words.
-    private func decodeAgentReply<T: Decodable>(_ type: T.Type, data: Data, response: URLResponse, what: String) throws -> T? {
+    func decodeAgentReply<T: Decodable>(_ type: T.Type, data: Data, response: URLResponse, what: String) throws -> T? {
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         switch http.statusCode {

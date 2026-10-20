@@ -176,6 +176,9 @@ public final class DemoDaemon: @unchecked Sendable {
                 if parts.last == "input", method == "POST" {
                     return json(["ok": true, "kind": "prompt", "spoken": "This is the demo: its agents are scripted, so nothing was sent."])
                 }
+                if world.screen(paneID: pane) != nil, parts.count >= 2, parts[1] == "changes" || parts[1] == "attachments" {
+                    return demoPhase4(parts: parts.map(String.init), method: method, body: body)
+                }
                 return json(["error": "no such agent"], status: 404)
             }
             return json(["error": "not in the demo"], status: 404)
@@ -201,11 +204,11 @@ public final class DemoDaemon: @unchecked Sendable {
 
     // MARK: - Encoding
 
-    private func json(_ object: [String: Any], status: Int = 200) -> Response {
+    func json(_ object: [String: Any], status: Int = 200) -> Response {
         Response(status: status, body: (try? JSONSerialization.data(withJSONObject: object)) ?? Data())
     }
 
-    private func encoded<T: Encodable>(_ value: T) -> Response {
+    func encoded<T: Encodable>(_ value: T) -> Response {
         Response(status: 200, body: (try? Self.encoder.encode(value)) ?? Data())
     }
 

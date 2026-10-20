@@ -1474,6 +1474,24 @@ final class SessionViewModel: ObservableObject {
         return try await client.agentInput(paneID: paneID, keys: keys)
     }
 
+    /// `GET /api/agents/{pane}/changes` (the changes view).
+    func agentChanges(paneID: String) async throws -> AgentChanges? {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.agentChanges(paneID: paneID)
+    }
+
+    /// `GET /api/agents/{pane}/changes/{path}`.
+    func agentDiff(paneID: String, path: String) async throws -> FileDiff? {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.agentDiff(paneID: paneID, path: path)
+    }
+
+    /// `POST /api/agents/{pane}/attachments`.
+    func uploadAttachment(paneID: String, data: Data, fileName: String, mimeType: String) async throws -> AttachmentReply {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.uploadAttachment(paneID: paneID, data: data, fileName: fileName, mimeType: mimeType)
+    }
+
     // MARK: - Live agent window (/term)
 
     /// The app's one `/term` connection, shared by every open agent window

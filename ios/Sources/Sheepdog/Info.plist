@@ -41,7 +41,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Sheepdog uses the camera only to scan the pairing code that "sheepdog setup" or "sheepdog pair" shows on your computer. Nothing is recorded.</string>
+	<string>Sheepdog uses the camera to scan the pairing code that "sheepdog setup" or "sheepdog pair" shows on your computer, and to take a photo you attach for an agent, which goes only to your own computer. Nothing is recorded in the background.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sheepdog connects to the sheepdog daemon on your own computer, over your Wi-Fi or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>

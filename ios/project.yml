@@ -151,9 +151,10 @@ targets:
           In the demo, Sheepdog recognises your spoken questions on this
           iPhone only (on-device recognition). Nothing is sent anywhere.
         NSCameraUsageDescription: >-
-          Sheepdog uses the camera only to scan the pairing code that
-          "sheepdog setup" or "sheepdog pair" shows on your computer. Nothing
-          is recorded.
+          Sheepdog uses the camera to scan the pairing code that
+          "sheepdog setup" or "sheepdog pair" shows on your computer, and to
+          take a photo you attach for an agent, which goes only to your own
+          computer. Nothing is recorded in the background.
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
           your Wi-Fi or Tailscale.
