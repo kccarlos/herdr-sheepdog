@@ -382,7 +382,9 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   mouse reporting are off; herdr owns scrollback and mouse modes. A
   one-finger vertical drag becomes `term-scroll` in whole lines (finger
   down = older = `up`); a tap becomes `term-mouse` down and up on the cell;
-  long-press stays SwiftTerm's selection with Copy. `inputView` is an empty
+  long-press stays SwiftTerm's selection with Copy; Paste shows only on a
+  live `control` channel (`GatedTerminalView` withholds the action's
+  target otherwise). `inputView` is an empty
   view, so selecting never raises a keyboard (phase 3's typing mode sets
   `keyboardEnabled`).
 - **"Latest".** herdr never reports its scroll position, so the window
@@ -396,7 +398,10 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   drawn yet shows the snapshot until the socket comes back.
 - **Snapshot in the same surface.** `SnapshotScreen.bytes` turns the
   `screen` text into terminal bytes: cursor hidden, autowrap off (wide
-  lines are clipped, not wrapped) and the last rows that fit.
+  lines are clipped, not wrapped) and the last rows that fit. When the
+  daemon lists `screen-ansi` the subscription asks for `ansi: true`, and the
+  poll always sends `?ansi=1` (older daemons ignore it); a frame with `ansi:
+  true` keeps its SGR colours, each line ending in a reset.
 - **Background.** Going to the background closes every channel and the
   connection (`TermHub.disconnectIfIdle`), so the computer gets its layout
   back; the foreground reopens it (as an observer if it was one). The hub

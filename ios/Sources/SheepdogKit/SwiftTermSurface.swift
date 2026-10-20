@@ -118,7 +118,7 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
         UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
-    private let terminalView: TerminalView
+    private let terminalView: GatedTerminalView
     private var lastSize: (cols: Int, rows: Int) = (0, 0)
     public private(set) var fontSize: CGFloat
     private var pinchStart: CGFloat = SwiftTermSurface.defaultFontSize
@@ -145,6 +145,13 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
         }
     }
 
+    /// Whether the long-press menu offers Paste: only on a window whose
+    /// input goes somewhere (a live `control` channel).
+    public var pasteEnabled: Bool {
+        get { terminalView.pasteEnabled }
+        set { terminalView.pasteEnabled = newValue }
+    }
+
     /// The view to put on screen.
     public var view: UIView { container }
     private let container = TerminalContainerView()
@@ -152,7 +159,7 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
     init(fontSize: CGFloat) {
         let size = min(max(fontSize, Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
         self.fontSize = size
-        terminalView = TerminalView(
+        terminalView = GatedTerminalView(
             frame: .zero,
             font: SwiftTermSurface.font(ofSize: size),
             options: streamOptions(cols: 80, rows: 24))
@@ -402,4 +409,21 @@ extension SwiftTermSurface: TerminalViewDelegate {
     }
     public func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
     public func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+}
+
+/// SwiftTerm's view with Paste gated: its `canPerformAction` always offers
+/// Paste and is not overridable, so the action's target is withheld
+/// instead, which hides the menu item.
+final class GatedTerminalView: TerminalView {
+    var pasteEnabled = false
+
+    override func target(forAction action: Selector, withSender sender: Any?) -> Any? {
+        if action == #selector(paste(_:)), !pasteEnabled { return nil }
+        return super.target(forAction: action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard pasteEnabled else { return }
+        super.paste(sender)
+    }
 }

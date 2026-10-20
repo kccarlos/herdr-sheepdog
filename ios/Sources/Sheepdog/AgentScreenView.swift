@@ -465,7 +465,9 @@ final class AgentWindowController: ObservableObject {
 
     let paneID: String
     let surface: SwiftTermSurface
-    @Published private(set) var state: AgentWindowState
+    @Published private(set) var state: AgentWindowState {
+        didSet { surface.pasteEnabled = state.takesRawInput }
+    }
     @Published private(set) var snapshot: AgentScreenModel
     /// The visible text, for VoiceOver's value.
     @Published private(set) var screenText = ""
@@ -744,7 +746,7 @@ final class AgentWindowController: ObservableObject {
 
     private func drawSnapshot() {
         guard state.phase == .snapshot else { return }
-        surface.feed(SnapshotScreen.bytes(text: snapshot.text, rows: surface.rows))
+        surface.feed(SnapshotScreen.bytes(text: snapshot.text, rows: surface.rows, ansi: snapshot.isANSI))
     }
 
     private func feedMessage(_ message: String) {

@@ -165,4 +165,31 @@ final class AgentScreenStreamTests: XCTestCase {
         XCTAssertTrue(model.apply(frame(text: "$ make test\nok\nPASS", hash: "a1b2").screen!))
         XCTAssertEqual(model.revision, 2)
     }
+
+    // MARK: - Colour (screen-ansi)
+
+    func testSubscribesInColourWhenTheDaemonCan() throws {
+        let colour = ProtocolHandshake.State.ready(protocol: 1, daemonVersion: "0.9.0", features: ["screen", "screen-ansi"])
+        var stream = AgentScreenStream()
+        _ = stream.open(paneID: "w1:p2")
+        let sub = stream.handshake(colour)
+        XCTAssertEqual(sub, .screenSubscribe(paneID: "w1:p2", ansi: true))
+        XCTAssertEqual(try sub?.encodedString(), #"{"ansi":true,"pane_id":"w1:p2","type":"screen-subscribe"}"#)
+    }
+
+    func testANSISnapshotKeepsColours() {
+        let bytes = SnapshotScreen.bytes(text: "\u{1b}[1;32m•\u{1b}[0m ok\nplain", rows: 10, ansi: true)
+        let text = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(text.contains("\u{1b}[1;32m•\u{1b}[0m ok\u{1b}[0m\r\nplain\u{1b}[0m"), text)
+        let plain = String(decoding: SnapshotScreen.bytes(text: "\u{1b}[1;32m•", rows: 10), as: UTF8.self)
+        XCTAssertTrue(plain.hasSuffix("[1;32m•"), "plain text drops ESC as before")
+    }
+
+    func testANSIScreenDecodes() throws {
+        let screen = try DaemonClient.decoder.decode(AgentScreen.self, from: Data(#"{"pane_id":"w1:p2","alias":"auth","state":"working","text":"x","hash":"7","ansi":true}"#.utf8))
+        XCTAssertEqual(screen.ansi, true)
+        var model = AgentScreenModel(paneID: "w1:p2")
+        model.apply(screen)
+        XCTAssertTrue(model.isANSI)
+    }
 }
