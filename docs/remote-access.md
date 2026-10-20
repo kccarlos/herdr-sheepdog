@@ -56,6 +56,27 @@ To rotate the token, press **New token** on the setup page and pair again. To
 turn phone access off, press **Turn phone access off**: the daemon returns to
 loopback.
 
+## The phone shell
+
+The iPhone app can open a plain shell in a project folder ("Open shell
+here" in an agent's ⋯ menu). Where it works depends on how the phone
+reaches the computer:
+
+| Phone reaches the computer over | Shell |
+|---|---|
+| Tailscale | On (Tailscale encrypts the traffic) |
+| Plain Wi-Fi or LAN | Off, unless you turn on **Shell on this network** in step 4 of the setup page |
+
+On plain Wi-Fi, the token and everything typed in the shell travel in clear
+text, so others on the network could read them. Turn the switch on only on a
+network you trust. It takes effect at once (it is `web.shell_lan` in
+[CONFIG.md](../CONFIG.md)).
+
+A tunnel or reverse proxy on the computer itself (one that reaches sheepdog
+on `127.0.0.1`) looks like this computer to sheepdog, so the shell is on
+through it. `tailscale serve` is fine; never put a public tunnel in front of
+sheepdog (see above).
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

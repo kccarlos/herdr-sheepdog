@@ -54,8 +54,8 @@ JSON objects with a `type`, the same convention as `/ws`.
 
 Open a window. `mode` is `control` or `observe`; `takeover` (default
 false) takes control from another device. A `target` of
-`{"shell":{"cwd":"…"}}` asks for a plain shell, which is refused with
-`refused:shell_off` until the shell exists (phase 5).
+`{"shell":{"cwd":"…"}}` asks for the plain shell in that folder (see
+[The plain shell](#the-plain-shell)); `term-opened.kind` is then `shell`.
 
 ```json
 {"type":"term-open","ch":1,"target":{"pane_id":"w1:p2"},"mode":"control","cols":58,"rows":30}
@@ -94,8 +94,8 @@ not ask for the mouse.
 {"type":"term-free","ch":2,"pane_id":"w1:p2"}
 ```
 
-`term-ready.shell` says whether to offer the plain shell at all (always
-false until phase 5). `term-opened` comes before the channel's first frame.
+`term-ready.shell` says whether to offer the plain shell at all on this
+connection (the gate below; the daemon checks it again on every open). `term-opened` comes before the channel's first frame.
 `term-error` is a problem that does not end the channel (`ch` 0 is about the
 connection). `term-free` goes to every `observe` channel on a pane when a
 `control` channel this daemon ran on that pane is released (closed by its
@@ -114,6 +114,7 @@ now, without `takeover`. A controller outside the daemon gives no signal.
 | `refused:too_many` | 4 channels on this connection or 8 on the daemon | Close a window first |
 | `refused:not_tracked` | Not an agent the daemon tracks | Back to the agent list |
 | `refused:shell_off` | No plain shell on this connection | Do not offer it |
+| `refused:outside_projects` | The shell's folder is outside `supervisor.project_roots` and is no tracked agent's folder | Open it from the agent instead |
 
 ## Binary frames
 
@@ -146,6 +147,42 @@ Frames are diffs, so a lost frame corrupts the screen.
 - The daemon pings every 20 s. A client that does not answer within 60 s is
   closed and its bridges released.
 
+## The plain shell
+
+A phone shell is a plain shell in a project folder. The daemon opens it
+as a herdr tab in a workspace labelled `phone shell` (the workspace
+itself the first time), so the user sees it on the computer too.
+
+- **One per folder, reused.** `term-open {target:{shell:{cwd}}}` attaches
+  to the folder's shell when there is one, else opens it. Opens are
+  serialised, so two quick taps make one shell. After a daemon restart the
+  daemon finds its shells again in the `phone shell` workspace.
+- **Folder.** `cwd` is resolved (symlinks, `~`) and must lie inside a
+  `supervisor.project_roots` entry or be a tracked agent's own folder (a
+  worktree herdr put elsewhere). An empty `cwd` is the first project root.
+  Anything else is `refused:outside_projects`.
+- **The gate** is the address the request came from (`RemoteAddr`), not
+  the bind address:
+
+  | Client address | Shell |
+  |---|---|
+  | loopback | on |
+  | Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48) | on |
+  | anything else (plain-LAN HTTP) | off unless `web.shell_lan` ([CONFIG.md](../../CONFIG.md)), set on the setup page |
+
+  It applies to the shell target, to a shell's `pane_id` (a LAN client
+  cannot attach to a shell opened over Tailscale) and to closing one.
+  Off: `refused:shell_off`.
+- **Leaving** the window (`term-close`) only detaches; the shell keeps
+  running. **Closing** it ends the pane:
+
+  `POST /api/shells/{pane_id}/close` → `200 {"ok":true}`; `403` where the
+  shell is gated off; `404` for a pane that is no phone shell.
+
+Phone shells are not agents: a plain shell is not in the agent list and
+the orchestrator is not told about it (an agent the user starts inside one
+is tracked like any other).
+
 ## Event log
 
 Metadata only, never screen content or input:
@@ -159,3 +196,8 @@ Metadata only, never screen content or input:
   channel
 - `web.term.close {ch, pane_id, reason, seconds, frames, bytes_out,
   bytes_in, resyncs}`
+- `web.shell.open {client_id, pane_id, cwd, remote_kind, reused}`,
+  `web.shell.close {pane_id, remote_kind}` and `web.shell.error {client_id,
+  cwd, error}` (herdr could not open the shell)
+- `web.setup_saved {step: "shell_lan", enable}` when the setup page's switch
+  changes

@@ -428,6 +428,23 @@ func TestClientSpawnCalls(t *testing.T) {
 	}
 }
 
+// tab.create (the phone shell's tab) returns the tab's root pane.
+func TestClientCreateTab(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.Handle("tab.create", func(json.RawMessage) (any, error) {
+		return map[string]any{"type": "tab_created", "tab": map[string]any{"tab_id": "w7:t2"}, "root_pane": map[string]any{"pane_id": "w7:p3", "workspace_id": "w7", "cwd": "/p/app"}}, nil
+	})
+	c := herdr.NewClient(srv.Path)
+	pane, err := c.CreateTab(context.Background(), "w7", "/p/app", "app")
+	if err != nil || pane.PaneID != "w7:p3" {
+		t.Fatalf("CreateTab = %+v, %v", pane, err)
+	}
+	reqs := srv.Requests()
+	if got := string(reqs[len(reqs)-1].Params); got != `{"cwd":"/p/app","env":{"DISABLE_AUTO_UPDATE":"true"},"focus":false,"label":"app","workspace_id":"w7"}` {
+		t.Errorf("tab.create params = %s", got)
+	}
+}
+
 // pane.close takes the pane as pane_id (PaneTarget), and herdr's error
 // for a pane that is gone matches ErrPaneNotFound.
 func TestClientClosePane(t *testing.T) {

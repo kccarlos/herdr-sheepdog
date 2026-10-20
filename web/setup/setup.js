@@ -6,6 +6,7 @@ import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from '.
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 import { cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
+import { shellLAN, shellLANSaved } from './phone.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -164,6 +165,10 @@ function render() {
     } else {
       hint.append('To use the app away from home, install Tailscale on this computer and your phone. More: ', doc);
     }
+    const sh = shellLAN(p);
+    $('shell-lan-box').classList.toggle('hidden', !sh.show);
+    $('shell-lan').checked = sh.checked;
+    if (!$('shell-lan').disabled) $('shell-lan-note').textContent = sh.note;
   } else {
     $('phone-state').textContent = '';
   }
@@ -733,6 +738,17 @@ async function saveService() {
   if (!state.service.installed) { $('service-msg').textContent = 'The service did not install: see `sheepdog logs`.'; $('save-service').disabled = false; }
 }
 
+// setShellLAN saves the "Shell on this network" switch (web.shell_lan); it
+// applies at once, with no restart.
+async function setShellLAN(on) {
+  const box = $('shell-lan');
+  box.disabled = true;
+  const r = await api('shell-lan', { enable: on }).catch((e) => ({ error: String(e) }));
+  box.disabled = false;
+  if (r.error) { box.checked = !on; $('shell-lan-note').textContent = shellLANSaved(r); return; }
+  await loadState();
+}
+
 async function setPhone(enable, newToken, msgEl) {
   msgEl.textContent = enable ? 'Turning phone access on…' : 'Saving…';
   const old = state.boot;
@@ -893,6 +909,7 @@ function init() {
   $('save-service').addEventListener('click', saveService);
   $('phone-enable').addEventListener('click', () => setPhone(true, false, $('phone-msg')));
   $('phone-disable').addEventListener('click', () => setPhone(false, false, $('phone-msg2')));
+  $('shell-lan').addEventListener('change', (e) => setShellLAN(e.target.checked));
   $('new-token').addEventListener('click', () => {
     if (confirm('Make a new token? A phone paired with the old one must scan the new code.')) setPhone(true, true, $('phone-msg2'));
   });

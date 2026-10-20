@@ -537,6 +537,7 @@ func TestTermOverflowResyncs(t *testing.T) {
 func TestTermRemoteKind(t *testing.T) {
 	for in, want := range map[string]string{
 		"127.0.0.1:5000": "loopback", "[::1]:80": "loopback", "100.101.102.103:1": "tailscale", "192.168.1.9:1": "lan", "junk": "lan",
+		"[fd7a:115c:a1e0::1]:7777": "tailscale", "[::ffff:100.64.0.9]:1": "tailscale", "[fd7a:115d::1]:1": "lan", "[fe80::1]:1": "lan",
 	} {
 		if got := remoteKind(in); got != want {
 			t.Errorf("remoteKind(%q) = %q, want %q", in, got, want)

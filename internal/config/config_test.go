@@ -661,6 +661,13 @@ func TestWebBindAndToken(t *testing.T) {
 		t.Errorf("env values = %+v", cfg.Web)
 	}
 
+	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL_LAN": "true"})); err != nil || !cfg.Web.ShellLAN {
+		t.Errorf("SHEEPDOG_WEB_SHELL_LAN=true: %v %v", err, cfg.Web.ShellLAN)
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL_LAN": "maybe"})); err == nil {
+		t.Error("SHEEPDOG_WEB_SHELL_LAN=maybe loaded")
+	}
+
 	// An empty SHEEPDOG_WEB_TOKEN does not clear a file token (like
 	// DEEPSEEK_API_KEY).
 	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_TOKEN": ""})); err != nil || cfg.Web.Token != "file-token" {

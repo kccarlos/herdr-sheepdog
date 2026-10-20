@@ -427,6 +427,10 @@ type Web struct {
 	// DevTestdataDir is where /testdata/ reads from when Dev is on
 	// (default testdata/audio relative to the working directory).
 	DevTestdataDir string `toml:"dev_testdata_dir"`
+	// ShellLAN lets a client on the plain LAN (not loopback, not
+	// Tailscale) open the phone shell. Off by default: plain-LAN HTTP
+	// carries every keystroke in clear text. Set from the setup page.
+	ShellLAN bool `toml:"shell_lan"`
 }
 
 // IsLoopback reports whether Bind reaches only this machine (127.0.0.1,
@@ -1017,7 +1021,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
 //	SHEEPDOG_DEEPSEEK_REASONING_EFFORT, ANTHROPIC_API_KEY, SHEEPDOG_ANTHROPIC_BASE_URL,
 //	SHEEPDOG_ANTHROPIC_EFFORT, SHEEPDOG_ANTHROPIC_EVENT_EFFORT, SHEEPDOG_ANTHROPIC_FALLBACKS,
-//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_TOKEN,
+//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_TOKEN, SHEEPDOG_WEB_SHELL_LAN,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
@@ -1149,6 +1153,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	// value (never logged).
 	if v, ok := lookup("SHEEPDOG_WEB_TOKEN"); ok && v != "" {
 		cfg.Web.Token = v
+	}
+	if v, ok := lookup("SHEEPDOG_WEB_SHELL_LAN"); ok && v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_WEB_SHELL_LAN=%q: want true or false", v)
+		}
+		cfg.Web.ShellLAN = b
 	}
 	if err := applyCLIEnv(cfg, lookup); err != nil {
 		return err

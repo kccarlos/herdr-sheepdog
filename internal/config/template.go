@@ -94,6 +94,7 @@ func Template() string {
 # token = ""   # required once bind is not loopback: Authorization: Bearer, ?token= for /ws and /events, or POST /api/login sets a cookie
 # dev = false
 # dev_testdata_dir = ""   # default: testdata/audio relative to the working directory
+# shell_lan = false   # let a plain-LAN client open the phone shell (loopback and Tailscale always can); set on the setup page
 
 [cli]
 # prefer = %[11]q   # "codex" | "claude" | "auto"
