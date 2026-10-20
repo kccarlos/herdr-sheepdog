@@ -59,6 +59,9 @@ public final class TermSocket {
         case error(ch: Int?, message: String)
         /// The channel lost a frame and asked for a repaint.
         case resync(ch: Int)
+        /// An `observe` channel's pane has no controller any more
+        /// (`term-free`): the window may take control without a takeover.
+        case free(ch: Int)
     }
 
     public static let resizeDebounce: TimeInterval = 0.15
@@ -356,6 +359,9 @@ public final class TermSocket {
                              canTakeOver: message.canTakeOver ?? false))
         case .error:
             onEvent?(.error(ch: message.ch, message: message.message ?? "terminal error"))
+        case .free:
+            guard let ch = message.ch, channels[ch] != nil else { return }
+            onEvent?(.free(ch: ch))
         default:
             break
         }

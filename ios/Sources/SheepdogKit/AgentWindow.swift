@@ -245,6 +245,19 @@ public struct AgentWindowState: Equatable, Sendable {
         return [.startSnapshot]
     }
 
+    /// `term-free`: the device that had control let go. An observing
+    /// window takes control (no takeover: if a third device got there
+    /// first, the refusal puts it back to observing).
+    public mutating func controlFreed() -> [Command] {
+        guard phase == .observing, channelOpen, mode == .observe else { return [] }
+        channelOpen = false
+        hasFrame = false
+        scrolledUp = 0
+        notice = nil
+        phase = .connecting
+        return [.close] + openIfReady(mode: .control, takeover: false)
+    }
+
     /// The user confirmed Take over.
     public mutating func takeOver() -> [Command] {
         guard phase != .ended else { return [] }

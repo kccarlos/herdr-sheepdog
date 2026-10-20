@@ -652,6 +652,8 @@ final class AgentWindowController: ObservableObject {
 
     private func run(_ commands: [AgentWindowState.Command]) {
         for command in commands {
+            // A command's channel id is the one open when it was decided:
+            // `.close` then `.open` replaces it in order.
             switch command {
             case let .open(mode, takeover):
                 guard let hub = model?.termHub else { continue }
@@ -688,6 +690,8 @@ final class AgentWindowController: ObservableObject {
         case let .closed(_, reason, canTakeOver):
             channel = nil
             run(mutate { $0.closed(reason, canTakeOver: canTakeOver) })
+        case .free:
+            run(mutate { $0.controlFreed() })
         case .error, .resync:
             break
         }

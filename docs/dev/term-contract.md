@@ -91,12 +91,16 @@ not ask for the mouse.
 {"type":"term-closed","ch":1,"reason":"released"}
 {"type":"term-closed","ch":2,"reason":"refused:busy","can_take_over":true}
 {"type":"term-error","ch":1,"message":"no control channel"}
+{"type":"term-free","ch":2,"pane_id":"w1:p2"}
 ```
 
 `term-ready.shell` says whether to offer the plain shell at all (always
 false until phase 5). `term-opened` comes before the channel's first frame.
 `term-error` is a problem that does not end the channel (`ch` 0 is about the
-connection).
+connection). `term-free` goes to every `observe` channel on a pane when a
+`control` channel this daemon ran on that pane is released (closed by its
+client, or its connection ended): the watching client may open `control`
+now, without `takeover`. A controller outside the daemon gives no signal.
 
 `term-closed.reason` is one of:
 

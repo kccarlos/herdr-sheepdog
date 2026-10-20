@@ -389,7 +389,10 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   `keyboardEnabled`).
 - **"Latest".** herdr never reports its scroll position, so the window
   counts its own scrolls; Latest and any raw input scroll back down by that
-  count. An observer does not learn when control is released.
+  count.
+- **`term-free`.** When the controller this daemon ran lets go, an
+  observing window closes its `observe` channel and opens `control`
+  without a takeover; a refusal (`busy`) puts it back to observing.
 - **`term-closed`.** `refused:busy` and `taken_over` reopen as `observe` with
   "Another device has control · Take over" (confirmed, then `takeover:
   true`); `gone` and `refused:not_tracked` end the window; `herdr` and

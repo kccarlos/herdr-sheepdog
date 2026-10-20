@@ -41,6 +41,9 @@ const (
 	TypeOpened = "term-opened"
 	TypeClosed = "term-closed"
 	TypeError  = "term-error"
+	// TypeFree tells an observe channel that the device controlling its
+	// pane through this daemon let go: the client may open control now.
+	TypeFree = "term-free"
 )
 
 // Modes.
@@ -171,6 +174,10 @@ func (m Message) Validate() error {
 		if !chOK || m.Reason == "" {
 			return errors.New("term-closed needs ch and reason")
 		}
+	case TypeFree:
+		if !chOK || m.PaneID == "" {
+			return errors.New("term-free needs ch and pane_id")
+		}
 	case TypeError:
 		if m.Message == "" {
 			return errors.New("term-error needs message")
@@ -194,6 +201,11 @@ func Parse(data []byte) (Message, error) {
 func Ready(shell bool) Message {
 	p := ProtocolVersion
 	return Message{Type: TypeReady, Protocol: &p, Limits: &Limits{Channels: MaxChannels}, Shell: &shell}
+}
+
+// Free is term-free.
+func Free(ch int, paneID string) Message {
+	return Message{Type: TypeFree, Ch: ch, PaneID: paneID}
 }
 
 // Opened is term-opened.
