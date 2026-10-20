@@ -216,6 +216,12 @@ type Deps struct {
 	// (herdr mock mode) serves neither.
 	Term *TermDeps
 
+	// DataDir is the daemon's data directory; attachments are kept in its
+	// attachments/ folder. Empty answers the attachments route with 503.
+	DataDir string
+	// GitBin is the program the changes view runs (default "git").
+	GitBin string
+
 	// Token, when non-empty, is the bearer token (config web.token) every
 	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
 	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
@@ -307,6 +313,7 @@ func New(deps Deps) (*Server, error) {
 	if err := s.routes(); err != nil {
 		return nil, err
 	}
+	s.pruneAttachments()
 	return s, nil
 }
 
@@ -341,6 +348,9 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/agents/{pane_id}/rename", s.authFunc(s.handleAgentRename, false))
 	s.mux.HandleFunc("POST /api/agents/{pane_id}/interrupt", s.authFunc(s.handleAgentInterrupt, false))
 	s.mux.HandleFunc("POST /api/agents/{pane_id}/close", s.authFunc(s.handleAgentClose, false))
+	s.mux.HandleFunc("POST /api/agents/{pane_id}/attachments", s.authFunc(s.handleAttachment, false))
+	s.mux.HandleFunc("GET /api/agents/{pane_id}/changes", s.authFunc(s.handleChanges, false))
+	s.mux.HandleFunc("GET /api/agents/{pane_id}/changes/{path...}", s.authFunc(s.handleChangeDiff, false))
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
 	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
 	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))
