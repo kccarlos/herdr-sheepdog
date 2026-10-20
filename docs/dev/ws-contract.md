@@ -854,6 +854,72 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   recorded default is not necessarily what it selects; the transition
   off `blocked` closes the question. A herdr send that fails is `502`.
 
+## Attachments
+
+**`POST /api/agents/{pane_id}/attachments`** — a photo or file the user
+attaches in the agent window (docs/dev/design/phone-terminal.md, phase 4).
+The body is `multipart/form-data` with one `file` field, at most 20 MB.
+The daemon sniffs the type from the bytes (the client's header is
+ignored) and takes PNG, JPEG, GIF, WebP, PDF and plain text; anything else
+is `415`. It saves the file as `<data_dir>/attachments/<pane>/<time>-<random>-<name>`
+(mode 0600, folder 0700): the name is the client's base name reduced to
+`A–Z a–z 0–9 . _ -` (no spaces, so the path reads as one word in a prompt),
+at most 64 characters, with the sniffed type's extension. The answer is
+`201`:
+
+```jsonc
+{"path": "/Users/me/.local/share/sheepdog/attachments/w1_p2/20261020-101500-3fa2c1-screenshot.png",
+ "name": "20261020-101500-3fa2c1-screenshot.png", "bytes": 48213, "type": "image/png"}
+```
+
+The app puts `path` into the prompt; Claude Code and Codex read an image
+or file path given in a prompt. Files older than 7 days are removed when
+the daemon starts and on every upload. Errors: `404` for a pane the daemon
+does not track, `413 {"error":"too big (max 20 MB)"}`, `400` for a missing
+or empty file, `503` without a data directory. Each upload is logged as
+`web.attachment {bytes, type, remote_kind}`, never the file's name.
+
+An upload is allowed on every network the token works on, like a prompt:
+the shell gate (`web.shell_lan`, phase 5) does not apply.
+
+## Changes
+
+A read-only look at what the agent changed in its working directory
+(`cwd` in `GET /api/agents`), computed by `git` on the computer. git runs
+with an argument list (no shell), a 5 s timeout per call,
+`--no-optional-locks` and `GIT_OPTIONAL_LOCKS=0` (so it never takes the
+index lock the agent's own git needs), `core.fsmonitor=false`,
+`--no-ext-diff` and `--no-textconv`.
+
+- **`GET /api/agents/{pane_id}/changes`** — the changed files against
+  `HEAD` (staged, unstaged and untracked together):
+
+  ```jsonc
+  {"repo": true, "root": "/Users/me/code/app", "branch": "fix-login",
+   "files": [
+     {"path": "internal/auth/token.go", "status": "modified", "added": 30, "deleted": 5},
+     {"path": "new.txt", "old_path": "old.txt", "status": "renamed", "added": 0, "deleted": 0},
+     {"path": "logo.png", "status": "untracked", "added": 0, "deleted": 0, "binary": true}
+   ],
+   "added": 30, "deleted": 5}
+  ```
+
+  `status` is `modified`, `added`, `deleted`, `renamed`, `typechange`,
+  `untracked` or `conflicted`; `branch` is empty when detached. At most
+  500 files are listed; `truncated: true` says there were more. When there
+  is no repository the answer is still `200`, with `{"repo": false,
+  "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`.
+- **`GET /api/agents/{pane_id}/changes/{path}`** — one file's unified
+  diff: the file's fields plus `"diff": "…"` (empty for a binary file)
+  and `truncated` past 512 KB. `path` is the file's `path` from the list,
+  slashes unescaped. Only a path the status call lists is served, so no
+  other file, inside or outside the repository, can be read; anything else
+  is `404`. An untracked symlink is listed as binary and never followed.
+
+Both are logged as metadata only: `web.changes {repo, files, truncated,
+dur_ms}` and `web.changes.diff {bytes, truncated, status}`, never a path or
+a line of the diff.
+
 ## Agent window over /ws
 
 Feature `screen`. The same window as `GET /api/agents/{pane_id}/screen`,
