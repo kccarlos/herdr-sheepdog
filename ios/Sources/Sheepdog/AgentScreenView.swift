@@ -66,7 +66,7 @@ private struct AgentWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let notice = state.notice {
+            if let notice = state.notice, !(state.phase == .ended && window.screenText.isEmpty) {
                 NoticeBar(notice: notice, fill: noticeFill) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -194,6 +194,18 @@ private struct AgentWindowView: View {
                 .opacity(state.showsSkeleton ? 0 : 1)
             if state.showsSkeleton {
                 TerminalSkeleton(name: name, reduceMotion: reduceMotion)
+            } else if state.phase == .ended, window.screenText.isEmpty {
+                // Closed before anything was drawn: say so in the middle,
+                // not over an empty terminal.
+                ContentUnavailableView {
+                    Label(state.notice?.text ?? "This agent closed.", systemImage: "terminal")
+                } description: {
+                    Text("Its pane closed, or sheepdog no longer tracks it.")
+                } actions: {
+                    Button("Back to agents") { dismiss() }
+                        .accessibilityIdentifier("agentScreen.ended.back")
+                }
+                .background(background)
             }
             if state.showsLatest {
                 Button {
@@ -473,6 +485,8 @@ final class AgentWindowController: ObservableObject {
         let size = saved > 0 ? CGFloat(saved) : SwiftTermSurface.defaultFontSize
         fontSize = size
         surface = TerminalRenderer.makeSurface(fontSize: size)
+        // No cursor until herdr's first frame places one.
+        surface.feed(Array("\u{1b}[?25l".utf8))
         state = AgentWindowState(paneID: paneID)
         snapshot = AgentScreenModel(paneID: paneID)
         surface.onSizeChange = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }

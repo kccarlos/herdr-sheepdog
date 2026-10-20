@@ -92,13 +92,15 @@ final class AgentWindowDemoUITests: XCTestCase {
 
     func testAClosedAgentSaysSo() throws {
         let app = openWindow("claude-migration", term: "gone")
-        let notice = app.descendants(matching: .any)["agentScreen.notice.text"]
-        XCTAssertTrue(notice.waitForExistence(timeout: 10))
-        XCTAssertTrue(notice.label.contains("This agent closed."))
-        XCTAssertTrue(app.buttons["agentScreen.notice.action"].exists, "Back to agents")
+        // Closed before anything was drawn: the empty state, with the way back.
+        let back = app.buttons["agentScreen.ended.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["This agent closed."].exists)
         XCTAssertFalse(app.buttons["agentScreen.key.enter"].isEnabled)
         sleep(1)
         shot("agent-window-gone")
+        back.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["flock.agent.claude-migration"].waitForExistence(timeout: 10), "back to the agents")
     }
 
     func testHerdrDownFallsBackToTheSnapshot() throws {
