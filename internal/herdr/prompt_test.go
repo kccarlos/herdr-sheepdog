@@ -150,6 +150,44 @@ func TestParsePrompt(t *testing.T) {
 			summary: "bench is asking quick safety check: Is this a project you created or one you trust.",
 		},
 		{
+			// The same approval at the phone's width (phone terminal
+			// phase 1 check, Claude Code 2.1.304 in a 58-column pane
+			// held by a control bridge, 2026-10-20): options wrap onto
+			// continuation lines, the parser joins them.
+			fixture:  "claude-bash-prompt-58col.screen.txt",
+			alias:    "Claude",
+			question: "Do you want to proceed?",
+			command:  "date > stamp-58.txt",
+			reason:   "Write current date to stamp file",
+			options: []wantOption{
+				{"Yes", "1"},
+				{"Yes, and always allow access to /private/tmp/sdp1-proj from this project", "2"},
+				{"Yes, and switch to auto mode · auto mode handles these prompts for you", "3"},
+				{"No", "4"},
+			},
+			def: 0, yes: "1", no: "4",
+			summary: "Claude asks to run date.",
+		},
+		{
+			// The same approval at the phone's width (phone terminal
+			// phase 1 check, Claude Code 2.1.304 in a 44-column pane
+			// held by a control bridge, 2026-10-20): options wrap onto
+			// continuation lines, the parser joins them.
+			fixture:  "claude-bash-prompt-44col.screen.txt",
+			alias:    "Claude",
+			question: "Do you want to proceed?",
+			command:  "date > stamp-44.txt",
+			reason:   "Write current date to stamp file",
+			options: []wantOption{
+				{"Yes", "1"},
+				{"Yes, and always allow access to /private/tmp/sdp1-proj from this project", "2"},
+				{"Yes, and switch to auto mode · auto mode handles these prompts for you", "3"},
+				{"No", "4"},
+			},
+			def: 0, yes: "1", no: "4",
+			summary: "Claude asks to run date.",
+		},
+		{
 			// agy's trust dialog: the same unnumbered shape, ">" marker,
 			// "Yes" first.
 			fixture:  "agy-trust-dialog.screen.txt",

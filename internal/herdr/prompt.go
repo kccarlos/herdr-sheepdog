@@ -281,13 +281,17 @@ func findOptions(lines []string) (opts []Option, first, cursor int, ok bool) {
 // parseOptions reads the numbered options starting at lines[0]
 // (numbered 1, 2, 3, …); cursor is the index of the marked option and
 // cursors how many carry a marker. A non-numbered line indented at least
-// as deep as the current option's label is that option's continuation
-// (Claude Code's AskUserQuestion draws a description under each label)
-// and is skipped; any other line — a blank, a rule (AskUserQuestion's
+// as deep as the current option's label is that option's continuation.
+// A continuation that does not start with a capital letter is the label
+// wrapped (a narrow pane: the phone's live window resizes it to 44–58
+// columns) and is joined to it; one that does is a description (Claude
+// Code's AskUserQuestion draws one under each label) and is skipped, with
+// the lines after it. Any other line — a blank, a rule (AskUserQuestion's
 // "Chat about this" sits below one), prose — ends the block.
 func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 	cursor = -1
 	labelCol := 0
+	label, desc := "", false
 	for _, line := range lines {
 		m := reOption.FindStringSubmatchIndex(line)
 		if m != nil && line[m[4]:m[5]] == strconv.Itoa(len(opts)+1) {
@@ -295,7 +299,8 @@ func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 				cursor, cursors = len(opts), cursors+1
 			}
 			labelCol = utf8.RuneCountInString(line[:m[6]])
-			opts = append(opts, option(len(opts)+1, line[m[6]:m[7]]))
+			label, desc = line[m[6]:m[7]], false
+			opts = append(opts, option(len(opts)+1, label))
 			continue
 		}
 		if len(opts) == 0 || strings.TrimSpace(line) == "" || reRule.MatchString(line) || reOption.MatchString(line) {
@@ -304,6 +309,13 @@ func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 		if indent := utf8.RuneCountInString(line) - utf8.RuneCountInString(strings.TrimLeft(line, " \t")); indent < labelCol {
 			break
 		}
+		next := strings.TrimSpace(line)
+		if first, _ := utf8.DecodeRuneInString(next); desc || unicode.IsUpper(first) {
+			desc = true
+			continue
+		}
+		label = strings.TrimSpace(label) + " " + next
+		opts[len(opts)-1] = option(len(opts), label)
 	}
 	return opts, cursor, cursors
 }
@@ -505,7 +517,21 @@ func claudeCommand(lines []string) (command, reason string) {
 		}
 		return strings.Join(out, " ")
 	}
-	return join(lines[r1+1 : r2]), join(lines[header+1 : r1])
+	// Claude Code 2.1.30x adds a "Tip: …" paragraph under the header; it
+	// is advice about auto mode, not the command's reason. Its wrapped
+	// lines run until one starts with a capital letter.
+	desc := lines[header+1 : r1]
+	if len(desc) > 0 && strings.HasPrefix(strings.TrimSpace(desc[0]), "Tip:") {
+		desc = desc[1:]
+		for len(desc) > 0 {
+			first, _ := utf8.DecodeRuneInString(strings.TrimSpace(desc[0]))
+			if unicode.IsUpper(first) {
+				break
+			}
+			desc = desc[1:]
+		}
+	}
+	return join(lines[r1+1 : r2]), join(desc)
 }
 
 // tailLines returns the last n lines of text.
