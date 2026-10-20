@@ -1,6 +1,6 @@
 # Phone terminal: a real agent window on the iPhone
 
-Status: **decided, not built** (phase 0, 2026-10-20). Phases 1–5 below are
+Status: **being built** (phase 0 decided 2026-10-20). Phases 1–5 below are
 the implementation plan.
 
 **Goal.** Anything the user can do at the computer, they can do from the

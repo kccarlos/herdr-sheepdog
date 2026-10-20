@@ -91,6 +91,7 @@ so they have no `SHEEPDOG_*` override.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `herdr.socket` | `SHEEPDOG_HERDR_SOCKET` | `~/.config/herdr/herdr.sock` | Path of the herdr unix domain socket (`--herdr=socket`, the default; ignored under `--herdr=mock`). |
+| `herdr.bin` | `SHEEPDOG_HERDR_BIN` | *(empty)* | The herdr binary the daemon runs for the iPhone app's live agent windows (`herdr terminal session control`, one child process per open window, pointed at `herdr.socket`). Empty finds `herdr` on `PATH`, then `~/.local/bin/herdr`. The live window needs herdr 0.9.2 or newer; with an older herdr the app shows the read-only screen instead. |
 
 ## `[state]`
 
