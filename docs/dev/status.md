@@ -217,11 +217,19 @@ What is in:
   voice, the roster formatter, stable agent names, reliable spawn
   launch; then a **language preference in Settings** fed into the voice and the orchestrator'
   prompts. Prompt and information changes only, no judgment in code.
-- **Orchestrator failover is broken in practice:** DeepSeek returns 402
-  Insufficient Balance (since 2026-10-03), so a Vertex timeout ends in the
-  fallback line. The user is to top it up or pick another fallback. The live
-  orchestrator is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
-  bursts of 20-50 s steps and 504s.
+- **Live orchestrator:** DeepSeek `deepseek-flash`; the DeepSeek balance
+  was topped up, so the earlier 402 Insufficient Balance (from 2026-10-03)
+  no longer breaks failover.
+- **The roster in the orchestrator system text defeats prompt caching
+  (deferred by the CEO, 2026-10-20):** the system text lists the agent
+  aliases, so any agent joining or leaving rewrites the whole cached prompt
+  prefix, for every provider. On Anthropic it also wastes the start-up
+  cache warm-up (#291). Possible fix: move the roster out of the system
+  text into a later message or a tool result. That is a prompt/information
+  change, so it needs eval evidence first: a DeepSeek tier-1 run is cheap,
+  an Opus run costs about $20. See
+  [`eval/anthropic-opus-2026-10-19.md`](eval/anthropic-opus-2026-10-19.md)
+  and [`anthropic-adapter.md`](anthropic-adapter.md).
 - **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
@@ -240,10 +248,10 @@ What is in:
   busy Claude Code pane interrupts the running turn but the queued prompt
   still runs (acceptance run, 2026-10-02 00:34). An idle-then-working
   agent stops cleanly.
-- **`v0.1.0` of the daemon is tagged (2026-10-16) but its darwin binary
-  is not signed yet**: signing moved into the release workflow afterwards,
-  and v0.1.0's own workflow file has no dispatch trigger (see
-  [`signing.md`](signing.md#re-signing-an-existing-release)).
+- **`v0.1.0` of the daemon is not signed**: signing moved into the
+  release workflow afterwards; v0.1.1 onward are signed and notarized, and
+  v0.1.4 is the latest
+  ([`signing.md`](signing.md#re-signing-an-existing-release)).
 - **Not yet checked on a device:** AirPods and route changes, and a
   multi-question (tabbed) AskUserQuestion widget.
 - **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as
