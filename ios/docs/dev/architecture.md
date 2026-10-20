@@ -270,6 +270,57 @@ accessibility text sizes. The voice bar stays in place.
   message and orchestrator replies support inline bold, italic, code and links,
   lists, and monospaced fenced code. Headings render as bold body text.
 
+## The terminal surface
+
+The live agent window (being built, [phone-terminal.md](../../../docs/dev/design/phone-terminal.md))
+draws herdr's terminal stream through two renderer-agnostic protocols in
+`SheepdogKit/TerminalSurface.swift`:
+
+- `TerminalGrid`: a headless emulator (`feed`, `resize`, `cell(col:row:)`,
+  plus `lineText`, `snapshotText` and `column(of:row:)`). Tests and replay
+  use it.
+- `TerminalSurface` (`@MainActor`): the drawn view (`feed`, `cols`/`rows`,
+  `onSizeChange`, `onInput`, `snapshotText()`, `setFontSize(_:)`,
+  `accessibilityLines`). The surface sizes its grid from its bounds and
+  font and reports the size; the caller sends it to the daemon.
+
+`SheepdogKit/SwiftTermSurface.swift` is the only file that imports
+[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (MIT).
+`TerminalRenderer.makeGrid(cols:rows:)` and `makeSurface(fontSize:)` hide
+which renderer is behind them, so a move to libghostty-spm replaces that
+one file. It lives in `SheepdogKit` rather than the app target so the unit
+tests reach the headless grid, and so SwiftTerm, a static library, is
+linked into one binary only.
+
+**The pin.** SwiftTerm is the project's first Swift package, pinned with
+`exactVersion` in `project.yml` (`packages:`). The generated project is not
+committed, so `ios/Package.resolved` (all transitive versions) is, and
+XcodeGen's `postGenCommand` (`scripts/install-package-resolved.sh`) copies
+it into `Sheepdog.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/` on
+every `xcodegen generate`. Xcode Cloud needs that file: it does not resolve
+packages itself. SwiftTerm also runs a build-tool plugin, which Xcode asks
+a person to trust once; `ci_post_clone.sh` trusts package plugins on Xcode
+Cloud, `ios.yml` and local command-line builds pass
+`-skipPackagePluginValidation`, and in Xcode you click Trust & Enable.
+
+To update the pin: check the newest tag with `git ls-remote --tags
+https://github.com/migueldeicaza/SwiftTerm`, change `exactVersion` and
+`TerminalRenderer.name`, run `xcodegen generate` and then
+`scripts/install-package-resolved.sh --update`, run the tests (above all
+`TerminalWidthTests`), and commit `project.yml` with `Package.resolved`.
+
+**Width agreement (R1).** herdr composes the screen with ghostty-vt and
+sends changed cells with an absolute cursor move in front of most cells
+after a non-ASCII one. `TerminalWidthTests` replays recorded frames
+(`Tests/SheepdogKitTests/Terminal/*.jsonl`, with herdr's `pane read
+--source visible` text beside each; `TerminalFixtures.swift` says how they
+were recorded) and checks every row's text, every grapheme herdr placed and
+the column of the text after CJK, VS16 (`☁️`), ZWJ (`👩‍💻`), emoji, flags,
+box drawing, combining marks, ambiguous-width and half-width characters.
+SwiftTerm 1.99.0 agrees on all of them. `TerminalThroughputTests` prints the
+simulator's feed and draw times per frame (R2), which are no substitute for
+a device.
+
 ## Settings ▸ Models
 
 `ModelsView` takes effect at once, like every Settings screen (there is

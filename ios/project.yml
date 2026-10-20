@@ -6,6 +6,22 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: false
   groupSortPosition: top
+  # The generated project is not committed, so neither is the Package.resolved
+  # Xcode keeps inside it; the committed copy next to this file goes in after
+  # every generate (Xcode Cloud, ios.yml and local builds alike).
+  postGenCommand: scripts/install-package-resolved.sh
+
+# Swift packages. Each one is pinned to an exact version, and
+# Package.resolved (next to this file) pins its dependencies too: XcodeGen's
+# postGenCommand above copies it into the generated project, because Xcode
+# Cloud refuses to resolve packages without one. To update a pin, see
+# docs/dev/architecture.md "The terminal surface".
+packages:
+  # The terminal renderer behind TerminalSurface (SheepdogKit), MIT.
+  # docs/dev/design/phone-terminal.md section 2.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.99.0
 
 settings:
   base:
@@ -42,6 +58,11 @@ targets:
     sources:
       - path: Sources/SheepdogKit
       - path: Sources/SheepdogPush
+    dependencies:
+      # Only SwiftTermSurface.swift imports it; the rest of the app talks to
+      # the TerminalSurface protocol.
+      - package: SwiftTerm
+        product: SwiftTerm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.kit

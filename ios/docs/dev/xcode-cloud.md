@@ -56,6 +56,11 @@ The script:
    installs whatever version is current.
 4. `xcodegen generate`, then checks that the shared `Sheepdog` scheme
    exists.
+5. Checks that `Package.resolved` is in the generated project (XcodeGen's
+   `postGenCommand` copies the committed `ios/Package.resolved` there;
+   Xcode Cloud does not resolve Swift packages without it), and trusts
+   package build-tool plugins (SwiftTerm has one), since nobody can click
+   Trust & Enable on Xcode Cloud ([architecture.md](architecture.md#the-terminal-surface)).
 
 It runs once per action (the Test and Archive actions each get a fresh
 machine).

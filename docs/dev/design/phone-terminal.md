@@ -583,7 +583,9 @@ scratch `herdr --session` only in an opt-in e2e test.
 1. **`feat(ios): SwiftTerm surface behind TerminalSurface` (spike gate).**
    - `ios/project.yml`: an exact `packages:` pin.
    - `ios/Sources/SheepdogKit/TerminalSurface.swift` (the protocol).
-   - `ios/Sources/Sheepdog/SwiftTermSurface.swift`.
+   - `ios/Sources/SheepdogKit/SwiftTermSurface.swift` (in `SheepdogKit`, not
+     the app target, so SwiftTerm is linked into one binary and the unit
+     tests reach the headless grid).
    - `ios/Tests/SheepdogKitTests/TerminalWidthTests.swift` covers R1 with
      recorded herdr frames. R2 is run on a device, with the results noted in
      the PR.

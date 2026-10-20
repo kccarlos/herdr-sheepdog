@@ -59,10 +59,13 @@ daemon which one applies.
 ## Tests
 
 ```sh
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation test
 ```
 
-Most UI tests need a fixture daemon and skip themselves when there is none
+`-skipPackagePluginValidation` lets SwiftTerm's build-tool plugin run
+without the "Trust & Enable" prompt Xcode shows the first time; in Xcode
+itself, click Trust & Enable once instead. Most UI tests need a fixture
+daemon and skip themselves when there is none
 ([docs/dev/status.md](docs/dev/status.md#running-the-tests)).
 
 ## Developer docs
