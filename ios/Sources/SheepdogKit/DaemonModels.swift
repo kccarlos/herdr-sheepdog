@@ -162,6 +162,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// The name the user hears (the daemon's spoken name); older
     /// daemons omit it.
     public var spoken: String?
+    /// The pane's working folder on the computer (where "Open shell here"
+    /// opens); older daemons omit it.
+    public var cwd: String?
 
     public var id: String { paneID }
 
@@ -172,7 +175,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic, spoken
+        case alias, kind, name, state, journal, synthetic, spoken, cwd
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -196,7 +199,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         lastResult: Result? = nil,
         journal: [JournalEntry]? = nil,
         synthetic: Bool? = nil,
-        spoken: String? = nil
+        spoken: String? = nil,
+        cwd: String? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -212,6 +216,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.journal = journal
         self.synthetic = synthetic
         self.spoken = spoken
+        self.cwd = cwd
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an

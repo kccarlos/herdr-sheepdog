@@ -14,6 +14,9 @@ public final class TermHub {
     public static let linger: TimeInterval = 20
 
     public let socket: TermSocket
+    /// Every `term-ready` (the app keeps `shell` to know whether to offer
+    /// the phone shell).
+    public var onReady: ((TermSocket.Ready) -> Void)?
     private var handlers: [Int: (TermSocket.Event) -> Void] = [:]
     private var lingerTask: Task<Void, Never>?
     private let linger: TimeInterval
@@ -29,6 +32,12 @@ public final class TermHub {
     }
 
     public var state: TermSocket.State { socket.state }
+    /// `term-ready.shell` of the live connection: whether the daemon offers
+    /// the phone shell to this app. nil while not connected.
+    public var shellOffered: Bool? {
+        if case let .ready(ready) = socket.state { return ready.shell }
+        return nil
+    }
     /// Channels open now, across all windows.
     public var openChannels: [Int] { socket.openChannels }
 
@@ -44,15 +53,31 @@ public final class TermHub {
     /// and the connection's `.state` changes. nil past the channel limit.
     public func open(paneID: String, mode: TermMessage.Mode, cols: Int, rows: Int, takeover: Bool = false,
                      handler: @escaping (TermSocket.Event) -> Void) -> Int? {
+        open(target: .pane(paneID), mode: mode, cols: cols, rows: rows, takeover: takeover, handler: handler)
+    }
+
+    /// Opens a channel on any target: an agent's pane, or the phone shell
+    /// in a folder (`.newShell(cwd:)`, which the daemon reuses per folder).
+    public func open(target: TermMessage.Target, mode: TermMessage.Mode, cols: Int, rows: Int, takeover: Bool = false,
+                     handler: @escaping (TermSocket.Event) -> Void) -> Int? {
         lingerTask?.cancel()
         lingerTask = nil
         if socket.state == .idle { socket.connect() }
-        guard let ch = socket.open(target: .pane(paneID), mode: mode, cols: cols, rows: rows, takeover: takeover) else {
+        guard let ch = socket.open(target: target, mode: mode, cols: cols, rows: rows, takeover: takeover) else {
             scheduleLinger()
             return nil
         }
         handlers[ch] = handler
         return ch
+    }
+
+    /// Connects without a channel, to learn `term-ready` (whether the shell
+    /// is offered) before any window opens; closes after `linger` unless a
+    /// window opens meanwhile.
+    public func warmUp() {
+        guard socket.state == .idle else { return }
+        socket.connect()
+        scheduleLinger()
     }
 
     /// Releases the channel; the pane keeps running.
@@ -96,7 +121,8 @@ public final class TermHub {
 
     private func route(_ event: TermSocket.Event) {
         switch event {
-        case .state:
+        case let .state(state):
+            if case let .ready(ready) = state { onReady?(ready) }
             for handler in handlers.values { handler(event) }
         case let .opened(ch, _), let .closed(ch, _, _), let .resync(ch), let .free(ch):
             handlers[ch]?(event)

@@ -375,7 +375,10 @@ final class SessionViewModel: ObservableObject {
         if !sameDaemon { saveCache(now: true) }
         client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
-        if demo == nil { termHub.update(endpoint: endpoint) }
+        if demo == nil {
+            termHub.update(endpoint: endpoint)
+            shellOffered = nil
+        }
         banner = nil
         hello = nil
         if !sameDaemon {
@@ -1497,6 +1500,28 @@ final class SessionViewModel: ObservableObject {
     /// The app's one `/term` connection, shared by every open agent window
     /// (`TermHub`). The demo's answers from its scripted sessions.
     private(set) lazy var termHub: TermHub = {
+        let hub = makeTermHub()
+        hub.onReady = { [weak self] ready in
+            if self?.shellOffered != ready.shell { self?.shellOffered = ready.shell }
+        }
+        return hub
+    }()
+
+    /// `term-ready.shell` from this daemon: whether it offers the phone
+    /// shell to this phone on this network. nil until `/term` answered.
+    @Published private(set) var shellOffered: Bool?
+
+    /// Whether to show the shell's entry points: the daemon has `/term` and
+    /// has not said the shell is off.
+    var shellEntryShown: Bool { termAvailability == .yes && shellOffered != false }
+
+    /// Learns `term-ready.shell` before any window opens (the Agents tab).
+    func warmUpTerm() {
+        guard termAvailability == .yes, shellOffered == nil else { return }
+        termHub.warmUp()
+    }
+
+    private func makeTermHub() -> TermHub {
         if let demo {
             #if DEBUG
             let behavior = DebugLaunch.demoTerm
@@ -1508,7 +1533,7 @@ final class SessionViewModel: ObservableObject {
             })
         }
         return TermHub(endpoint: settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1"))
-    }()
+    }
 
     /// The features the last `bot-ready` listed, per daemon, so a window
     /// opened while the voice session is not connected still knows about

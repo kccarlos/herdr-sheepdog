@@ -82,6 +82,15 @@ struct SettingsView: View {
                     }
                 }
 
+                if model.shellOffered == false {
+                    Section {
+                        MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this network")
+                            .accessibilityIdentifier("settings.shell")
+                    } footer: {
+                        Text(PhoneShell.offExplanation)
+                    }
+                }
+
                 Section {
                     row("Diagnostics", "stethoscope", .diagnostics, id: "settings.diagnostics")
                     row("About", "info.circle", .about, id: "settings.about")

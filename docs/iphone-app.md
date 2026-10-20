@@ -86,6 +86,20 @@ On the same Wi-Fi this just works. Away from home, see
     lines added and removed; tap one for its diff. It only shows changes
     and never edits anything. "No repository" means the agent's folder is
     not a git repository.
+  - **⋯ ▸ Open shell here** opens a plain shell in the agent's folder,
+    titled "Shell · folder". It has the same terminal and keys, no prompt
+    field, and starts in typing mode. **Shell** beside New agent opens one
+    in your first project folder. Each folder has one shell, which the app
+    reuses. On your computer the shell is a tab in herdr's "phone shell"
+    workspace, so you see it there too. Leaving the window keeps the shell
+    running, and ⋯ ▸ **Close shell** ends it (it asks first).
+    - The shell works over Tailscale. On plain Wi-Fi it is off unless you
+      turn on **Shell on this network** on your computer's setup page,
+      because plain Wi-Fi carries what you type in clear text
+      ([remote-access.md](remote-access.md#the-phone-shell)).
+    - Where it is off, the app shows no shell button, and Settings says
+      why. The shell opens only in your project folders
+      (`supervisor.project_roots`) or an agent's own folder.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
     refreshes every few seconds (in colour with an up-to-date sheepdog), and

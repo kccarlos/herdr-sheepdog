@@ -78,8 +78,10 @@ struct MainView: View {
                     case .flock:
                         FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID,
                                   answer: { model.answer(option: $0) },
-                                  onNewAgent: model.agentActionsAvailable ? { showsNewAgent = true } : nil)
+                                  onNewAgent: model.agentActionsAvailable ? { showsNewAgent = true } : nil,
+                                  onShell: model.shellEntryShown ? { model.navigationPath.append(ShellRoute(cwd: nil)) } : nil)
                             .sheet(isPresented: $showsNewAgent) { NewAgentSheet() }
+                            .onAppear { model.warmUpTerm() }
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -180,6 +182,9 @@ struct MainView: View {
             .animation(.easeInOut(duration: 0.2), value: model.pane)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: ShellRoute.self) { route in
+                ShellWindowView(route: route)
+            }
             .navigationDestination(for: AgentWindowRoute.self) { route in
                 if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
                     AgentScreenView(agent: agent)
