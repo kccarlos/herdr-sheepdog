@@ -139,7 +139,7 @@ The scripts lived in the session scratchpad and were not committed.
 | Release or killed bridge, **with a herdr UI client attached** (120×40 PTY) | The pane goes back to the UI's layout size (93×39) in both cases |
 | Release, **with no UI client** (headless server) | The pane **keeps the phone size** (44×30). The next UI client to attach resizes it to its layout (93×39). |
 | Resize back to the pre-attach size, then release (headless) | Restored (119×40) |
-| Input from the phone, as seen in the computer's herdr UI | It shows up live. The UI keeps drawing the pane while it is locked at the phone's size. |
+| Input from the phone, as seen in the computer's herdr UI | It shows up live |
 | `pane.read --format ansi` (option c) | ~4 ms per call through the CLI. Coloured lines at the **pane's** width. No cursor position and no change events, so it has to be polled. |
 
 **Other details from the herdr source:**
@@ -151,7 +151,12 @@ The scripts lived in the session scratchpad and were not committed.
 - *Resize lock.* While a controller is attached, herdr puts the terminal in
   `direct_attach_resize_locks`, so the computer's layout cannot resize it
   back. The lock is removed on detach (`remove_client` in
-  `src/server/headless.rs`).
+  `src/server/headless.rs`). So, inferred from the source rather than
+  measured, the computer's UI keeps drawing the pane while it is locked at
+  the phone's size.
+- *Not tested yet.* The claim that a phone needs no `--takeover` against the
+  computer comes from the source. Phase 1's first PR confirms it with a
+  test.
 - *Retry needed.* Attach is refused with "has a read in progress; retry"
   while an alt-screen `pane.read` is pending, and the daemon's own reads can
   trigger this. The bridge retries with backoff: 100, 200 and 400 ms.
@@ -210,10 +215,11 @@ own, not a published API, and the JSON bridge exists for "bridge processes"
 So the terminal gets **`GET /term`**: a WebSocket on the same port, with the
 same `authFunc` and token (header, `?token=` or cookie) as `/ws`.
 
-**Discovery.** `bot-ready` lists the feature `term`, with
-`"term":{"herdr":"0.9.5","shell":true|false}` in `/api/hello`. The daemon
-lists `term` only when herdr's `ping` reports 0.9.2 or newer, so the app
-never has to compare versions itself.
+**Discovery.** `bot-ready` (on the authenticated `/ws`) lists the feature
+`term`. The daemon lists it only when herdr's `ping` reports 0.9.2 or newer,
+so the app never has to compare versions itself. The public `/api/hello`
+gets nothing new: herdr's version and whether a shell is reachable are
+visible only after auth (`term-ready.shell`).
 
 ### Channels (several windows per client)
 
@@ -544,7 +550,7 @@ scratch `herdr --session` only in an opt-in e2e test.
    - New `internal/termproto/` (types and a contract test) and
      `internal/web/term.go` with `term_test.go`.
    - Route in `internal/web/server.go`; `term` feature in
-     `internal/web/handshake.go`; `/api/hello` in `internal/web/api.go`.
+     `internal/web/handshake.go`.
    - Channels, limits, per-channel queue and resync, ping, the tracked-agent
      check, and the event-log types above.
    - Docs: a new "Terminal socket" section in
