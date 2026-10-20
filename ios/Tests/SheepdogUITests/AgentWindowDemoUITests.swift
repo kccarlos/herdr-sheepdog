@@ -13,8 +13,10 @@ final class AgentWindowDemoUITests: XCTestCase {
     }
 
     private func shot(_ name: String) {
-        guard let dir = ProcessInfo.processInfo.environment["SHEEPDOG_DEMO_SHOTS"] else { return }
-        try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
+        let environment = ProcessInfo.processInfo.environment
+        guard let dir = environment["SHEEPDOG_DEMO_SHOTS"] else { return }
+        let suffix = environment["SHEEPDOG_DEMO_SHOTS_SUFFIX"].map { "-" + $0 } ?? ""
+        try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + suffix + ".png"))
     }
 
     /// The real main view stays under the demo's cover with the same
@@ -65,6 +67,86 @@ final class AgentWindowDemoUITests: XCTestCase {
         // and Enter clears its prompt line.
         app.buttons["agentScreen.key.enter"].tap()
         XCTAssertTrue(terminal.exists)
+    }
+
+    /// The composer, the more-keys sheet with snippets, and typing mode.
+    func testComposerMoreKeysAndTyping() throws {
+        let app = openWindow("claude-auth")
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+        expectation(for: NSPredicate(format: "value CONTAINS 'scripted session'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.buttons["agentScreen.key.more"].isEnabled)
+        sleep(1)
+        shot("composer")
+
+        let field = app.textFields["agentScreen.field"]
+        field.tap()
+        field.typeText("Run the integration tests and summarise what fails")
+        XCTAssertTrue(app.buttons["agentScreen.send"].isEnabled)
+        shot("composer-active")
+        app.buttons["agentScreen.key.more"].tap()
+
+        let done = app.buttons["moreKeys.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["moreKeys.ctrl"].exists, "live: the modifiers")
+        sleep(1)
+        shot("more-keys")
+        for _ in 0 ..< 4 where !app.staticTexts["moreKeys.snippets.empty"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["moreKeys.snippets.empty"].waitForExistence(timeout: 5))
+        shot("more-keys-snippets")
+        done.tap()
+
+        app.buttons["agentScreen.key.typing"].tap()
+        XCTAssertTrue(app.staticTexts["agentScreen.typingHint"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["agentScreen.key.ctrl"].exists, "⌃C becomes the ⌃ latch")
+        sleep(1)
+        shot("typing")
+        app.buttons["agentScreen.key.typing"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "the composer comes back")
+
+        // The ⋯ menu's actions, each asking first.
+        app.buttons["agentScreen.menu"].tap()
+        XCTAssertTrue(app.buttons["agentScreen.menu.rename"].waitForExistence(timeout: 5))
+        sleep(1)
+        shot("actions-menu")
+        app.buttons["agentScreen.menu.close"].tap()
+        XCTAssertTrue(app.buttons["agentScreen.close.confirm"].waitForExistence(timeout: 5))
+        sleep(1)
+        shot("close-confirm")
+        app.buttons["Cancel"].firstMatch.tap()
+        app.buttons["agentScreen.menu"].tap()
+        app.buttons["agentScreen.menu.rename"].tap()
+        XCTAssertTrue(app.alerts.textFields.firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
+        shot("rename")
+        app.buttons["Cancel"].firstMatch.tap()
+    }
+
+    /// New agent from the Agents tab.
+    func testNewAgentSheet() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launch()
+        let tryDemo = app.buttons["settings.firstRun.tryDemo"]
+        XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
+        tryDemo.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
+        tapVisible(app.buttons, "main.pane.flock")
+        let new = app.buttons.matching(identifier: "flock.newAgent")
+        for _ in 0 ..< 4 where !new.firstMatch.isHittable { app.swipeUp() }
+        tapVisible(app.buttons, "flock.newAgent")
+        XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("new-agent")
+        app.buttons["New worktree"].tap()
+        let branch = app.textFields["newAgent.branch"]
+        XCTAssertTrue(branch.waitForExistence(timeout: 5))
+        branch.tap()
+        branch.typeText("fix-login")
+        XCTAssertTrue(app.buttons["newAgent.start"].isEnabled)
+        shot("new-agent-worktree")
+        app.buttons["newAgent.start"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["newAgent.started"].waitForExistence(timeout: 5))
     }
 
     func testAnotherDeviceInControlShowsTheObserveBanner() throws {
