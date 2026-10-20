@@ -44,6 +44,9 @@ func (s *Server) features() []string {
 	if s.deps.Supervisor != nil {
 		f = append(f, wsproto.FeatureScreen)
 	}
+	if _, ok := s.cardHost(); ok {
+		f = append(f, wsproto.FeatureCards)
+	}
 	if s.term.available() {
 		f = append(f, wsproto.FeatureTerm)
 	}

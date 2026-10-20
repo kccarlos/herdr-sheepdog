@@ -278,5 +278,46 @@
       }
     },
     "type": "function"
+  },
+  {
+    "function": {
+      "description": "Put something on the user's phone screen instead of saying it, when the screen is visible (see Now). Use it only when reading aloud would be long or hard to follow: a list of more than three items, a table, steps, a diff, exact text, or long detail the user asked for. Never for a short answer that fits one or two sentences. kind card: your own title and markdown (tables, lists, code fences; a diff from run_cli as a ```diff fence). kind agent: opens that agent's live window. kind excerpt: the last lines of that agent's screen, exactly as they are. kind approval: shows that agent's open approval prompt (it does not answer it). Display only: it changes nothing. If the screen is not visible the result says so: then say it instead. When it is shown, say one short sentence that it is on the screen plus the gist, and do not read the card aloud.",
+      "name": "show",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "agent, excerpt, approval: the agent's alias",
+            "type": "string"
+          },
+          "kind": {
+            "description": "card, agent, excerpt or approval",
+            "enum": [
+              "card",
+              "agent",
+              "excerpt",
+              "approval"
+            ],
+            "type": "string"
+          },
+          "lines": {
+            "description": "excerpt only: how many lines from the bottom (default 40)",
+            "type": "integer"
+          },
+          "markdown": {
+            "description": "card: the content in markdown, at most about 6000 characters",
+            "type": "string"
+          },
+          "title": {
+            "description": "card: a short title (a few words)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
   }
 ]

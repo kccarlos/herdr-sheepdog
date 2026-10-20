@@ -47,6 +47,16 @@ On the same Wi-Fi this just works. Away from home, see
   option. Tap an answer or say it.
 - **Agents.** Who is working, blocked or done, and a window onto each agent's
   screen.
+- **Cards.** Ask for a list or the details ("show me the failing tests",
+  "show me what auth is asking") while the app is open on the conversation,
+  and the orchestrator puts them on your screen: a card with a table, a
+  list, an agent's screen or a way into its window. It opens once by
+  itself and stays in the conversation, so a tap opens it again. A card
+  only shows things; you still answer approvals on the approval card. With
+  the phone locked, the app in the background, or another screen open
+  (Settings, the Agents pane, an agent window), the voice says it instead.
+  Needs a daemon new enough to send cards; the demo's "Show me the agents"
+  shows one.
 - **Settings, Models.** Switch the voice and the orchestrator
   ([models.md](models.md)). **Settings, Languages** sets the languages you
   speak, most preferred first.

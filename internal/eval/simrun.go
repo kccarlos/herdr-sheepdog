@@ -60,6 +60,9 @@ type SimOptions struct {
 	// Personas are the simulated-user personas to rotate through by
 	// repeat (persona.go); empty keeps each scenario's own.
 	Personas []string
+	// Screen is the simulated phone screen the show tool puts cards on
+	// (simscreen.go): "" (none), visible, hidden or alternate.
+	Screen string
 }
 
 // NamedVerdict is a rubric item's verdict.
@@ -132,6 +135,10 @@ type SimRun struct {
 	// Explain is the explanation scores of a scenario with an explain
 	// block (orchestrator side only: tier 1 has no voice model).
 	Explain *ExplainScore `json:"explain,omitempty"`
+	// Screen is the run's simulated screen (visible, hidden; absent
+	// with none) and Cards what the orchestrator showed on it.
+	Screen string    `json:"screen,omitempty"`
+	Cards  []SimCard `json:"cards,omitempty"`
 }
 
 // RunSim runs one scenario once (repeat is the run's index, for the
@@ -146,7 +153,7 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 	sc = WithPersona(sc, persona)
 	caps := sc.Caps.withDefaults()
 	meter := NewMeter()
-	run := SimRun{Scenario: sc.ID, Repeat: repeat, Persona: persona, HeldOut: sc.Workday != nil && sc.Workday.HeldOut}
+	run := SimRun{Scenario: sc.ID, Repeat: repeat, Persona: persona, HeldOut: sc.Workday != nil && sc.Workday.HeldOut, Screen: ScreenFor(o.Screen, sc.ID, repeat)}
 	finish := func() SimRun {
 		run.DurationMS = time.Since(t0).Milliseconds()
 		run.Usage, run.CostUSD = meter.Lines(), meter.Total()
@@ -182,7 +189,7 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 			scale = 0.02
 		}
 	}
-	w, err := newSimWorld(ctx, sc, simWorldOptions{brainCfg: o.BrainConfig, model: model, fallbacks: o.Fallbacks, fixtureDir: o.FixtureDir, meter: meter, events: sink, timeScale: scale})
+	w, err := newSimWorld(ctx, sc, simWorldOptions{brainCfg: o.BrainConfig, model: model, fallbacks: o.Fallbacks, fixtureDir: o.FixtureDir, meter: meter, events: sink, timeScale: scale, screen: run.Screen})
 	if err != nil {
 		run.EndReason, run.EndDetail = EndError, err.Error()
 		run.Failures = append(run.Failures, Failure{FailError, "world: " + err.Error()})
@@ -321,6 +328,9 @@ loop:
 	run.Facts = facts
 	run.Transcript = convo
 	run.Actions = w.rec.actions()
+	if w.screen != nil {
+		run.Cards = w.screen.shown()
+	}
 	w.mu.Lock()
 	run.Timeline = append([]SimLine(nil), w.timeline...)
 	w.mu.Unlock()
@@ -552,6 +562,8 @@ func renderSim(convo []SimLine) string {
 			b.WriteString(at + "Sheepdog (unprompted): " + l.Text)
 		case "system":
 			b.WriteString(at + "(" + l.Text + ")")
+		case "screen":
+			b.WriteString(at + "(Sheepdog put a card on the CEO's phone screen, seen, not heard: " + l.Text + ")")
 		default:
 			continue
 		}

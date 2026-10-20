@@ -55,6 +55,8 @@ type turn struct {
 	// consulted: the aliases the tools named (Reply.Agents).
 	notVerified []string
 	consulted   []string
+	// shown: the titles of the cards show put on the screen (Reply.Shown).
+	shown []string
 	// prior is the answer an event turn wrote before it learned a line
 	// about its event had gone out meanwhile (recheck): the turn asks
 	// once more with that fact; should the second step fail, prior is
@@ -335,7 +337,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 			b.ingest(t.reply(answer, raw), t.n)
 			reply.Turn, reply.Acted, reply.ActedOn = t.n, len(t.acted) > 0, t.actedOn
-			reply.NotVerified, reply.Agents = t.notVerified, t.consulted
+			reply.NotVerified, reply.Agents, reply.Shown = t.notVerified, t.consulted, t.shown
 			if b.recheck(t, step, reply) {
 				continue
 			}
@@ -416,7 +418,11 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 			m.Raw, m.Content = raw, modelText
 		}
 		b.ingest(m, t.n)
-		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": fc.Args, "turn": t.n})
+		args := fc.Args
+		if fc.Name == ToolShow {
+			args = redactShowArgs(args)
+		}
+		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": args, "turn": t.n})
 	}
 	var promises []Message
 	for i, fc := range calls {
@@ -433,6 +439,9 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		}
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
+		}
+		if out.shown != "" {
+			t.shown = append(t.shown, out.shown)
 		}
 		if out.acted != "" {
 			t.acted = append(t.acted, out.acted)
@@ -523,7 +532,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 		b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: mustJSON(reply)}, t.n)
 		b.logTurn(t, false)
 		reply.Turn, reply.Acted, reply.ActedOn = t.n, true, t.actedOn
-		reply.NotVerified, reply.Agents = t.notVerified, t.consulted
+		reply.NotVerified, reply.Agents, reply.Shown = t.notVerified, t.consulted, t.shown
 		return reply, nil
 	}
 	b.logTurn(t, true)
@@ -699,6 +708,7 @@ func (b *Brain) sections() []PromptSection {
 	var investigations []InvestigationInfo
 	var language string
 	var unanswered []UnansweredInfo
+	var screen string
 	if host != nil {
 		agents, notes, promises, investigations = host.Agents(), host.Notes(), host.Promises(), host.Investigations()
 		if lh, ok := host.(LanguageHost); ok {
@@ -707,10 +717,17 @@ func (b *Brain) sections() []PromptSection {
 		if uh, ok := host.(UnansweredHost); ok {
 			unanswered = uh.Unanswered()
 		}
+		if dh, ok := host.(DisplayHost); ok {
+			screen = screenLine(dh.ScreenVisible())
+		}
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
 	now := b.cfg.Now()
-	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, recordLine(started, compaction, now))...)
+	record := recordLine(started, compaction, now)
+	if screen != "" {
+		record = strings.TrimSpace(record + "\n" + screen)
+	}
+	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
 }
 
 // stateNow renders the state block from the Host as it is now: the loop

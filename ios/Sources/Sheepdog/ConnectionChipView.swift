@@ -55,6 +55,7 @@ struct ConnectionChipView: View {
                 }
             )
             .environmentObject(model)
+            .coversVoiceScreen("connection")
             // A single detent only: swiping on the Form inside a
             // multi-detent sheet is ambiguous between "scroll" and "resize
             // the sheet", and that ambiguity is what triggered a SwiftUI

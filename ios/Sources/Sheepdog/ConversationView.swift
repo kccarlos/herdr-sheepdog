@@ -216,6 +216,8 @@ struct RowView: View {
                 SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), voiceName: voiceName)
             case .approval:
                 ApprovalItemCard(item: item, isPinned: item.pendingID != nil && item.pendingID == activePendingID)
+            case .card:
+                CardRow(card: item.card, text: item.text, at: item.card?.at ?? item.ts)
             case .notice, .unknown:
                 NoticeDivider(title: item.text)
             }
@@ -225,6 +227,8 @@ struct RowView: View {
             BrainReplyCard(reply: reply, compact: compact, voiceName: voiceName)
         case let .held(push):
             HeldPushCard(push: push)
+        case let .card(card):
+            CardRow(card: card, text: card.displayTitle, at: card.at ?? Date())
         }
     }
 }

@@ -41,6 +41,8 @@ type simWorld struct {
 	herd   *simHerdr
 	push   *simPusher
 	rec    *simRecorder
+	// screen is the simulated phone screen (nil: none).
+	screen *simScreen
 
 	runCancel context.CancelFunc
 	runDone   chan struct{}
@@ -101,6 +103,8 @@ type simWorldOptions struct {
 	events func(SimLogEvent)
 	// timeScale multiplies every scripted delay (default 1).
 	timeScale float64
+	// screen is the run's simulated screen: visible, hidden or "" (none).
+	screen string
 }
 
 // SimLogEvent is one logged daemon event of a simulated run.
@@ -179,6 +183,10 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 		return nil, err
 	}
 	w.sup = sup
+	if o.screen != ScreenNone {
+		w.screen = &simScreen{w: w, visible: o.screen == ScreenVisible}
+		sup.SetCardSink(w.screen)
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	w.runCancel, w.runDone = cancel, make(chan struct{})
 	go func() { defer close(w.runDone); sup.Run(runCtx) }()

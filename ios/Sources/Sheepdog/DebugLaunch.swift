@@ -37,6 +37,9 @@ enum DebugLaunch {
     /// message are markdown, for screenshots (the fixture daemon cannot
     /// produce a worker transcript).
     static var demoMarkdown: Bool { arguments.contains("-sheepdogDemoMarkdown") }
+    /// `-sheepdogDemoCard`: the demo asks "Show me the agents" by itself
+    /// once the script has news (about 18 s in), so its card opens for screenshots.
+    static var demoCard: Bool { arguments.contains("-sheepdogDemoCard") }
     /// `-sheepdogDemoLiveActivity speaking|muted|listening`: show the voice
     /// session's Live Activity with two agents waiting, without a session,
     /// for the lock-screen and Dynamic Island screenshots.

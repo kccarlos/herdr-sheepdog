@@ -4,7 +4,8 @@ import Foundation
 /// without letting it take over the layout: inline styles (bold, italic,
 /// `code`, links) through Foundation's `AttributedString(markdown:)`, and a
 /// small block pass on top — paragraphs, bullet and numbered lists, fenced
-/// code as a monospaced block. Headings are bold body text, never large.
+/// code as a monospaced block, GitHub-style tables. Headings are bold body
+/// text, never large.
 ///
 /// Everything comes out as one `AttributedString`, so a SwiftUI `Text`
 /// shows it with its own `lineLimit`, selection and VoiceOver reading.
@@ -17,11 +18,28 @@ public enum MarkdownRenderer {
         public var text: String
     }
 
+    /// A GitHub-style table: a header row, a delimiter row, body rows.
+    /// Every row has as many cells as the header.
+    public struct Table: Equatable, Sendable {
+        public enum Alignment: Equatable, Sendable { case leading, center, trailing }
+
+        public var header: [String]
+        public var alignments: [Alignment]
+        public var rows: [[String]]
+
+        public init(header: [String], alignments: [Alignment]? = nil, rows: [[String]]) {
+            self.header = header
+            self.alignments = alignments ?? Array(repeating: .leading, count: header.count)
+            self.rows = rows
+        }
+    }
+
     public enum Block: Equatable, Sendable {
         case paragraph(String)
         case heading(String)
         case list([ListItem])
         case code(String)
+        case table(Table)
     }
 
     // MARK: - Blocks
@@ -44,7 +62,10 @@ public enum MarkdownRenderer {
         }
 
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-        for line in lines {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            index += 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if var open = code {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
@@ -64,6 +85,26 @@ public enum MarkdownRenderer {
             if trimmed.isEmpty {
                 flushParagraph(); flushList()
                 continue
+            }
+            // A header row followed by a delimiter row starts a table.
+            if trimmed.contains("|"), index < lines.count,
+               let alignments = delimiterRow(lines[index]) {
+                let header = cells(trimmed)
+                if header.count == alignments.count {
+                    flushParagraph(); flushList()
+                    index += 1
+                    var rows: [[String]] = []
+                    while index < lines.count {
+                        let row = lines[index].trimmingCharacters(in: .whitespaces)
+                        guard !row.isEmpty, row.contains("|") else { break }
+                        var c = cells(row)
+                        if c.count < header.count { c += Array(repeating: "", count: header.count - c.count) }
+                        rows.append(Array(c.prefix(header.count)))
+                        index += 1
+                    }
+                    blocks.append(.table(Table(header: header, alignments: alignments, rows: rows)))
+                    continue
+                }
             }
             if let heading = heading(trimmed) {
                 flushParagraph(); flushList()
@@ -86,6 +127,49 @@ public enum MarkdownRenderer {
         if let open = code { blocks.append(.code(open.joined(separator: "\n"))) }
         flushParagraph(); flushList()
         return blocks
+    }
+
+    /// `| a | b |` → ["a", "b"]; `\|` is a pipe inside a cell.
+    static func cells(_ row: String) -> [String] {
+        var line = row.trimmingCharacters(in: .whitespaces)
+        if line.hasPrefix("|") { line.removeFirst() }
+        if line.hasSuffix("|"), !line.hasSuffix("\\|") { line.removeLast() }
+        var out: [String] = []
+        var cell = ""
+        var escaped = false
+        for ch in line {
+            if escaped {
+                if ch != "|" { cell.append("\\") }
+                cell.append(ch)
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "|" {
+                out.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(ch)
+            }
+        }
+        if escaped { cell.append("\\") }
+        out.append(cell.trimmingCharacters(in: .whitespaces))
+        return out
+    }
+
+    /// `|---|:---:|--:|` → the columns' alignments; nil if it is not one.
+    static func delimiterRow(_ line: String) -> [Table.Alignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-"), trimmed.contains("|") || trimmed.allSatisfy({ "-: ".contains($0) }) else { return nil }
+        var out: [Table.Alignment] = []
+        for cell in cells(trimmed) {
+            guard !cell.isEmpty, cell.allSatisfy({ $0 == "-" || $0 == ":" }), cell.contains("-") else { return nil }
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): out.append(.center)
+            case (false, true): out.append(.trailing)
+            default: out.append(.leading)
+            }
+        }
+        return out.isEmpty ? nil : out
     }
 
     static func heading(_ trimmed: String) -> String? {
@@ -166,6 +250,19 @@ public enum MarkdownRenderer {
                 var mono = AttributedString(c)
                 mono.inlinePresentationIntent = .code
                 out += mono
+            case let .table(table):
+                // One Text has no grid: the header in bold, then a line
+                // per row. The card sheet draws the real table.
+                var head = inline(table.header.joined(separator: " · "))
+                for run in head.runs {
+                    let existing = head[run.range].inlinePresentationIntent ?? []
+                    head[run.range].inlinePresentationIntent = existing.union(.stronglyEmphasized)
+                }
+                out += head
+                for row in table.rows {
+                    out += AttributedString("\n")
+                    out += inline(row.joined(separator: " · "))
+                }
             }
         }
         return out

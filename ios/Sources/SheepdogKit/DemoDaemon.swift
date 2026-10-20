@@ -21,6 +21,9 @@ public final class DemoDaemon: @unchecked Sendable {
 
     /// New lines for the voice, on the main queue.
     public var onLines: (([DemoWorld.Line]) -> Void)?
+    /// New cards for the screen, on the main queue (the demo's `/ws`
+    /// `card` messages).
+    public var onCards: (([ScreenCard]) -> Void)?
 
     private let lock = NSLock()
     private var world: DemoWorld
@@ -145,6 +148,12 @@ public final class DemoDaemon: @unchecked Sendable {
             let text = (object["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return json(["error": "empty text"], status: 400) }
             let reply = world.ask(text)
+            let cards = world.takeCards()
+            if !cards.isEmpty {
+                // Before the reply reaches the app, as the daemon's `/ws`
+                // card comes before its history item.
+                DispatchQueue.main.async { [weak self] in self?.onCards?(cards) }
+            }
             DispatchQueue.global().async { [weak self] in self?.publish() }
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])

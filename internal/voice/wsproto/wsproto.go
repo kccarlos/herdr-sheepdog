@@ -73,15 +73,18 @@ const (
 	// FeatureFeedback: POST /api/feedback (the user's "that paused"
 	// marks) and the client's drain messages ("Feedback and drains").
 	FeatureFeedback = "feedback"
+	// FeatureCards: the client's visibility reports and the daemon's
+	// card messages (the orchestrator's show tool; "Cards").
+	FeatureCards = "cards"
 	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
 	// listed only when herdr is new enough for its terminal bridge.
 	FeatureTerm = "term"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
-// playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe.
-// Server→client: bot-ready, flush, status, transcript, error, pong,
-// screen, screen-error.
+// playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe,
+// visibility. Server→client: bot-ready, flush, status, transcript, error,
+// pong, screen, screen-error, card.
 const (
 	TypeClientReady = "client-ready"
 	TypeBotReady    = "bot-ready"
@@ -103,6 +106,9 @@ const (
 	TypeScreenUnsubscribe = "screen-unsubscribe"
 	TypeScreen            = "screen"
 	TypeScreenError       = "screen-error"
+
+	TypeVisibility = "visibility"
+	TypeCard       = "card"
 )
 
 // Voice states carried by a status message.
@@ -158,6 +164,44 @@ type Screen struct {
 	Truncated  bool   `json:"truncated"`
 	Hash       string `json:"hash"`
 }
+
+// Card is a card on a card message: something the orchestrator put on
+// the user's screen ("Cards"). Kind card carries Title and Markdown;
+// agent names the agent whose window it opens (PaneID); excerpt adds
+// Text, the agent's screen lines verbatim; approval adds the open
+// question (PendingID, Question, Command, Options), read-only.
+type Card struct {
+	ID        string       `json:"card_id"`
+	Kind      string       `json:"kind"`
+	At        string       `json:"at"`
+	Title     string       `json:"title"`
+	Markdown  string       `json:"markdown,omitempty"`
+	Agent     string       `json:"agent,omitempty"`
+	Spoken    string       `json:"spoken,omitempty"`
+	PaneID    string       `json:"pane_id,omitempty"`
+	Text      string       `json:"text,omitempty"`
+	PendingID string       `json:"pending_id,omitempty"`
+	Question  string       `json:"question,omitempty"`
+	Command   string       `json:"command,omitempty"`
+	Options   []CardOption `json:"options,omitempty"`
+}
+
+// CardOption is one option of an approval card's question (as
+// /api/state's pending_action lists it).
+type CardOption struct {
+	Index   int      `json:"index"`
+	Label   string   `json:"label"`
+	Keys    []string `json:"keys"`
+	Default bool     `json:"default"`
+}
+
+// Card kinds.
+const (
+	CardKindCard     = "card"
+	CardKindAgent    = "agent"
+	CardKindExcerpt  = "excerpt"
+	CardKindApproval = "approval"
+)
 
 // Message is the union of all control messages. Type selects which of the
 // optional fields are meaningful; unused fields are omitted on the wire.
@@ -251,6 +295,13 @@ type Message struct {
 	Lines  *int    `json:"lines,omitempty"`
 	Screen *Screen `json:"screen,omitempty"`
 	Ended  bool    `json:"ended,omitempty"`
+
+	// visibility (client→server): whether the client's screen is
+	// visible (the app in the foreground, the page not hidden) and its
+	// voice screen is the one in front. card (server→client): Card.
+	Visible     *bool `json:"visible,omitempty"`
+	VoiceScreen *bool `json:"voice_screen,omitempty"`
+	Card        *Card `json:"card,omitempty"`
 }
 
 // ClientReady builds the client→server handshake message, the first text
@@ -367,6 +418,14 @@ func ScreenError(paneID, msg string, ended bool) Message {
 	return Message{Type: TypeScreenError, PaneID: paneID, Message: msg, Ended: ended}
 }
 
+// Visibility builds the client→server visibility report.
+func Visibility(visible, voiceScreen bool) Message {
+	return Message{Type: TypeVisibility, Visible: &visible, VoiceScreen: &voiceScreen}
+}
+
+// CardFrame builds a server→client card message.
+func CardFrame(c Card) Message { return Message{Type: TypeCard, Card: &c} }
+
 // Parse decodes one text frame and validates the fields the type requires.
 func Parse(data []byte) (Message, error) {
 	var m Message
@@ -455,6 +514,14 @@ func (m Message) Validate() error {
 	case TypeScreenError:
 		if m.PaneID == "" || m.Message == "" {
 			return fmt.Errorf("wsproto: screen-error: missing \"pane_id\" or \"message\"")
+		}
+	case TypeVisibility:
+		if m.Visible == nil {
+			return fmt.Errorf("wsproto: visibility: missing \"visible\"")
+		}
+	case TypeCard:
+		if m.Card == nil || m.Card.ID == "" || m.Card.Kind == "" {
+			return fmt.Errorf("wsproto: card: missing \"card\" with \"card_id\" and \"kind\"")
 		}
 	case TypeCancel, TypePing, TypeFlush, TypePong, TypeScreenUnsubscribe:
 	case "":

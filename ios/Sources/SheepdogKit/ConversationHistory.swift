@@ -17,6 +17,9 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         case push
         /// A worker's approval prompt, with how it was resolved.
         case approval
+        /// Something the orchestrator put on the screen (`show`): `text` is
+        /// its title, `card` the card when the daemon still has it.
+        case card
         /// A divider: the daemon started, the voice reconnected or closed.
         case notice
         /// A kind this build does not know; shown as a quiet notice.
@@ -60,11 +63,16 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     /// those rather than a plain `/api/conversation` page — a second key
     /// `fold` dedupes by, alongside the event id every item already has.
     public var resetID: String?
+    /// A `card` item's card id, and the card (absent once the daemon's
+    /// store dropped it).
+    public var cardID: String?
+    public var card: ScreenCard?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution, subkind
+        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution, subkind, card
         case pendingID = "pending_id"
         case resetID = "reset_id"
+        case cardID = "card_id"
     }
 
     public init(
@@ -81,7 +89,9 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         answer: String? = nil,
         resolution: Resolution? = nil,
         subkind: String? = nil,
-        resetID: String? = nil
+        resetID: String? = nil,
+        cardID: String? = nil,
+        card: ScreenCard? = nil
     ) {
         self.id = id
         self.ts = ts
@@ -97,6 +107,8 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         self.resolution = resolution
         self.subkind = subkind
         self.resetID = resetID
+        self.cardID = cardID ?? card?.cardID
+        self.card = card
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,6 +127,9 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         resolution = try c.decodeIfPresent(Resolution.self, forKey: .resolution)
         subkind = try c.decodeIfPresent(String.self, forKey: .subkind)
         resetID = try c.decodeIfPresent(String.self, forKey: .resetID)
+        // One card this build cannot read must not lose the whole page.
+        card = (try? c.decodeIfPresent(ScreenCard.self, forKey: .card)) ?? nil
+        cardID = try c.decodeIfPresent(String.self, forKey: .cardID) ?? card?.cardID
     }
 
     /// A push that interrupts is the one that must stand out.

@@ -139,6 +139,7 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 				"source": {Type: genai.TypeString, Enum: []string{InvestigationSourceCLI, InvestigationSourceWorker}, Description: "cli (default, the repository) or worker (the worker's own memory)"}}, []string{"agent", "question"})},
 		{Name: ToolNote, Description: "Remember something the user decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the user hears it by that name from then on.",
 			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the user's words"), "agent": str("only to rename: the agent's alias"), "name": str("only to rename: the new name, as the user said it")}, nil)},
+		showDeclaration(),
 	}
 	return []*genai.Tool{{FunctionDeclarations: append(read, act...)}}
 }
@@ -173,6 +174,10 @@ func toolTimeout(name string) (limit time.Duration, abandon bool) {
 		return toolTimeoutReadScreen, true
 	case ToolRunCLI:
 		return toolTimeoutRunCLI, true
+	case ToolShow:
+		// Display only: a card that did not reach the screen in time
+		// was not shown, and nothing else happened.
+		return toolTimeoutShow, false
 	case ToolInvestigate:
 		// The start is waited for: a job that did start must be
 		// reported as started.
@@ -253,6 +258,8 @@ type toolOutcome struct {
 	pane string
 	// promise is the record a promise call created.
 	promise *PromiseInfo
+	// shown is the title of the card a show call put on the screen.
+	shown string
 }
 
 // execTool runs one function call against the Host. t is the turn: its
@@ -269,6 +276,8 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		return b.listAgents()
 	case ToolRecall:
 		return b.recall(arg("query"), arg("from"))
+	case ToolShow:
+		return b.show(ctx, t, arg, call.Args)
 	}
 	if IsActionTool(call.Name) {
 		if trigger != TriggerCEO || t.req.Kind.ReadOnly() {
