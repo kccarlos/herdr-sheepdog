@@ -122,6 +122,20 @@ final class AgentWindowDemoUITests: XCTestCase {
         app.buttons["Cancel"].firstMatch.tap()
     }
 
+    /// Paste is offered only where input goes somewhere: the live window,
+    /// not the snapshot.
+    func testPasteOnlyOnALiveWindow() throws {
+        UIPasteboard.general.string = "x"
+        let app = openWindow("claude-migration", term: "herdr")
+        let notice = app.descendants(matching: .any)["agentScreen.notice.text"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 10))
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+        terminal.press(forDuration: 1.2)
+        sleep(1)
+        XCTAssertFalse(app.menuItems["Paste"].exists, "no Paste on the snapshot")
+        shot("paste-snapshot")
+    }
+
     /// New agent from the Agents tab.
     func testNewAgentSheet() throws {
         let app = XCUIApplication()
