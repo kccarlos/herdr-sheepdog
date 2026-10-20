@@ -47,6 +47,9 @@ func (s *Server) features() []string {
 	if _, ok := s.cardHost(); ok {
 		f = append(f, wsproto.FeatureCards)
 	}
+	if s.term.available() {
+		f = append(f, wsproto.FeatureTerm)
+	}
 	return append(f, wsproto.FeatureFeedback)
 }
 

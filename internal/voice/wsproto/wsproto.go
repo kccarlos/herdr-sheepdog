@@ -76,6 +76,9 @@ const (
 	// FeatureCards: the client's visibility reports and the daemon's
 	// card messages (the orchestrator's show tool; "Cards").
 	FeatureCards = "cards"
+	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
+	// listed only when herdr is new enough for its terminal bridge.
+	FeatureTerm = "term"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,

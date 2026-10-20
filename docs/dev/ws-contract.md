@@ -78,6 +78,7 @@ binary version.
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
+  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a

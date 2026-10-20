@@ -198,6 +198,11 @@ type Deps struct {
 	// changing the bind).
 	Restart func(reason string)
 
+	// Term backs GET /term, the terminal socket of the app's live agent
+	// windows (docs/dev/term-contract.md), and the `term` feature; nil
+	// (herdr mock mode) serves neither.
+	Term *TermDeps
+
 	// Token, when non-empty, is the bearer token (config web.token) every
 	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
 	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
@@ -212,6 +217,7 @@ type Server struct {
 	log  logging.Logger
 	mux  *http.ServeMux
 	hub  *hub
+	term *termServer
 	// audio records the voice's output chunks for user.feedback
 	// snapshots (POST /api/feedback).
 	audio *feedback.AudioLog
@@ -283,6 +289,7 @@ func New(deps Deps) (*Server, error) {
 	if ch, ok := s.cardHost(); ok {
 		ch.SetCardSink(cardSink{s.hub})
 	}
+	s.term = newTermServer(s, deps.Term)
 	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err
@@ -311,6 +318,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
 	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
+	s.mux.HandleFunc("GET /term", s.authFunc(s.handleTerm, true))
 	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
 	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
