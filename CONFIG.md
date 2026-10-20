@@ -482,7 +482,7 @@ name of a renamed key sets the new one unless the new name is set too
 ### Fixed values (not configurable)
 
 Tuned from logs and kept as constants: the Gemini voice session refresh
-(30 min away or 2 h of age, `voice.session_refreshed`,
+(30 min away, or 2 h of age, 54 min on AI Studio, `voice.session_refreshed`,
 [`docs/dev/timelines.md`](docs/dev/timelines.md) §1.4); the orchestrator's per-tool
 timeouts (2 s in-memory reads, 4 s `read_screen`, 5 s starting an
 investigation, 8 s `run_cli`; `brain.tool_timeout`); provider failover

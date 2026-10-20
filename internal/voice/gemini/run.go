@@ -201,6 +201,14 @@ func (s *Session) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.goAway:
+			if age, ok := s.pastMaxAge(); ok {
+				// The session ends soon anyway (AI Studio: 60 minutes
+				// after it opened, refresh.go): start a fresh one now
+				// rather than resume into a connection the server cuts
+				// minutes later.
+				s.refresh(ctx, refreshRequest{reason: refreshAge, age: age})
+				continue
+			}
 			s.proactiveReconnect(ctx, "goaway")
 			continue
 		case r := <-s.refreshReq:
@@ -264,6 +272,10 @@ func (s *Session) run(ctx context.Context) {
 			if len(s.cfg.APIKeys) > 1 {
 				s.rotateKey(readErr.Error())
 			}
+		} else if isSessionGone(readErr) && s.hasHandle() {
+			// The server ended the session (AI Studio's 60-minute
+			// limit, refresh.go): its handle is dead, so go fresh at once.
+			s.dropHandle(reasonSessionExpired)
 		} else if isServerInternalError(readErr) && s.hasHandle() && !afterGoAway {
 			// (After a GoAway the 1011 "Deadline expired" is the
 			// connection's announced end, and the handle outlives it:
@@ -313,6 +325,8 @@ func (s *Session) reconnect(ctx context.Context, backoff *time.Duration) bool {
 		if s.hasHandle() && !isRateLimited(err) && !errors.Is(err, ErrAllKeysExhausted) {
 			if isAlreadyConnected(err) && refused < maxRefusedResumes {
 				refused++
+			} else if isSessionGone(err) {
+				resumeFailures = s.cfg.ResumeAttempts // no use retrying
 			} else {
 				resumeFailures++
 			}
