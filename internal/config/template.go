@@ -27,6 +27,7 @@ func Template() string {
 
 [herdr]
 # socket = %[5]q
+# bin = ""   # the herdr binary for the phone's terminal; empty finds it on PATH or in ~/.local/bin
 
 [state]
 # path = %[6]q

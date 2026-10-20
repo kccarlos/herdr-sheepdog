@@ -607,6 +607,10 @@ type APNs struct {
 type Herdr struct {
 	// Socket is the path of the herdr unix socket.
 	Socket string `toml:"socket"`
+	// Bin is the herdr binary the phone's terminal windows run
+	// (`herdr terminal session`); empty finds `herdr` on PATH, then
+	// ~/.local/bin/herdr.
+	Bin string `toml:"bin"`
 }
 
 // State configures the persisted state table.
@@ -1007,7 +1011,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 // applyEnv overrides cfg from SHEEPDOG_* variables. Recognised names:
 //
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
-//	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
+//	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_HERDR_BIN, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
 //	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
@@ -1096,6 +1100,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_HERDR_SOCKET"); ok {
 		cfg.Herdr.Socket = v
+	}
+	if v, ok := lookup("SHEEPDOG_HERDR_BIN"); ok {
+		cfg.Herdr.Bin = v
 	}
 	if v, ok := lookup("SHEEPDOG_STATE_PATH"); ok {
 		cfg.State.Path = v
@@ -1440,8 +1447,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s anthropic.api_key=%s anthropic.base_url=%s anthropic.effort=%s anthropic.event_effort=%s anthropic.fallbacks=%t web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, setOrUnset(c.Anthropic.APIKey), c.Anthropic.BaseURL, c.Anthropic.Effort, c.Anthropic.EventEffort, c.Anthropic.Fallbacks, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s herdr.bin=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s anthropic.api_key=%s anthropic.base_url=%s anthropic.effort=%s anthropic.event_effort=%s anthropic.fallbacks=%t web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
+		c.DataDir, c.Herdr.Socket, c.Herdr.Bin, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, setOrUnset(c.Anthropic.APIKey), c.Anthropic.BaseURL, c.Anthropic.Effort, c.Anthropic.EventEffort, c.Anthropic.Fallbacks, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
 }
 
 // compatString renders the [[brain.openai_compat]] entries for String,
