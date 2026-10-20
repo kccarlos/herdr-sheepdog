@@ -46,7 +46,10 @@ On the same Wi-Fi this just works. Away from home, see
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
 - **Agents.** Who is working, blocked or done, and a window onto each agent's
-  screen (below).
+  screen (below). **New agent** at the bottom of the list starts Claude Code
+  or Codex in one of your projects (the folders in `supervisor.project_roots`
+  and the workspaces herdr has open), in the project folder or in a fresh
+  git worktree on a new branch, with an optional first prompt.
 - **Agent window.** "Open window" on an agent shows its live terminal,
   sized to the phone, in the agent's own colours. While the window is open
   the agent's pane on your computer takes the phone's size; it goes back
@@ -56,16 +59,28 @@ On the same Wi-Fi this just works. Away from home, see
     the bottom. A **tap** clicks, for programs that use the mouse.
     **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
   - The keys under the terminal send esc, tab, the arrows, control-C and
-    return straight to the agent. The field below sends a prompt, the same
-    as saying it. When the agent asks for approval, the approval card is
-    there too.
+    return straight to the agent (esc and control-C ask first). **⌨︎** types
+    straight into the terminal with the phone's keyboard, dictation and
+    input methods included; control-C becomes **⌃**, which holds Control for
+    the next key. **···** has the rest: Ctrl and Alt for the next key,
+    shift-tab, the arrows, Home, End, Page up and down, y, n, the digits,
+    F1–F12, and your **snippets** (saved text: a tap puts it in the field,
+    or types it in typing mode; swipe to delete).
+  - The field below sends a prompt, the same as saying it (up to 64 KB, so
+    a pasted log arrives whole). With the field empty while the agent
+    works, its button is **Stop**, which ends the current turn. When the
+    agent asks for approval, the approval card is there too.
+  - ⋯ ▸ **Rename**, **Stop current turn** and **Close agent** (it asks,
+    naming the agent; the session ends and its pane closes on your
+    computer). These, and New agent, need an up-to-date sheepdog.
   - **Another device has control** means another phone or iPad has this
     window open. You can watch; Take over (it asks first) moves control to
     this phone.
   - ⋯ ▸ Switch agent opens another agent's window in place.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
-    refreshes every few seconds, and it says so. "herdr is not running"
+    refreshes every few seconds (in colour with an up-to-date sheepdog), and
+    it says so. "herdr is not running"
     means sheepdog cannot reach herdr: start herdr on your computer, then
     tap Try again.
 - **Cards.** Ask for a list or the details ("show me the failing tests",

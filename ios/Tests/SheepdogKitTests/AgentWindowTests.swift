@@ -374,4 +374,21 @@ final class AgentWindowTests: XCTestCase {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
     }
+
+    func testObserverTakesControlWhenItIsFreed() {
+        var w = AgentWindowState(paneID: "w1:p2")
+        _ = w.start(.yes)
+        _ = w.sizeChanged(cols: 58, rows: 30)
+        XCTAssertEqual(w.closed(.refused("busy"), canTakeOver: true), [.open(mode: .observe, takeover: false)])
+        w.opened(mode: .observe)
+        _ = w.frame()
+        XCTAssertEqual(w.phase, .observing)
+        XCTAssertEqual(w.controlFreed(), [.close, .open(mode: .control, takeover: false)])
+        XCTAssertEqual(w.phase, .connecting)
+        XCTAssertNil(w.notice)
+        XCTAssertEqual(w.controlFreed(), [], "only an observer reacts")
+        // A third device got there first: back to watching.
+        XCTAssertEqual(w.closed(.refused("busy"), canTakeOver: true), [.open(mode: .observe, takeover: false)])
+        XCTAssertEqual(w.notice, .otherDevice)
+    }
 }

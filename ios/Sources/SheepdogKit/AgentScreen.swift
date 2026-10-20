@@ -16,14 +16,16 @@ public struct AgentScreen: Codable, Equatable, Sendable {
     public var truncated: Bool?
     public var hash: String
     public var unchanged: Bool?
+    /// `text` is SGR-coloured lines (`screen-ansi`), not plain text.
+    public var ansi: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case alias, spoken, kind, state, text, lines, truncated, hash, unchanged
+        case alias, spoken, kind, state, text, lines, truncated, hash, unchanged, ansi
         case paneID = "pane_id"
         case stateSince = "state_since"
     }
 
-    public init(paneID: String, alias: String, spoken: String? = nil, kind: String? = nil, state: Agent.State, stateSince: Date? = nil, text: String? = nil, lines: Int? = nil, truncated: Bool? = nil, hash: String, unchanged: Bool? = nil) {
+    public init(paneID: String, alias: String, spoken: String? = nil, kind: String? = nil, state: Agent.State, stateSince: Date? = nil, text: String? = nil, lines: Int? = nil, truncated: Bool? = nil, hash: String, unchanged: Bool? = nil, ansi: Bool? = nil) {
         self.paneID = paneID
         self.alias = alias
         self.spoken = spoken
@@ -35,6 +37,7 @@ public struct AgentScreen: Codable, Equatable, Sendable {
         self.truncated = truncated
         self.hash = hash
         self.unchanged = unchanged
+        self.ansi = ansi
     }
 
     /// The name the user hears, falling back to the alias.
@@ -216,11 +219,17 @@ public struct AgentScreenModel: Equatable, Sendable {
         }
     }
 
+    /// The daemon's prompt limit (`WindowMaxText`, 64 KB).
+    public static let maxPromptBytes = 64 << 10
+
     /// The prompt field's text is worth sending.
     public static func canSend(_ text: String) -> Bool {
         let t = text.trimmed
-        return !t.isEmpty && t.utf8.count <= 4000
+        return !t.isEmpty && t.utf8.count <= maxPromptBytes
     }
+
+    /// Whether the drawn text is SGR-coloured (`screen-ansi`).
+    public var isANSI: Bool { screen?.ansi == true }
 
     /// Whether a scroll view whose bottom anchor sits at `anchorMaxY`, in a
     /// viewport `viewportHeight` tall, counts as "at the bottom" (a few
@@ -267,6 +276,8 @@ public struct AgentScreenPush: Equatable, Sendable {
 public struct AgentScreenStream: Equatable, Sendable {
     /// The `bot-ready` feature that says the daemon streams windows.
     public static let feature = "screen"
+    /// The feature that says it can stream them in colour.
+    public static let ansiFeature = "screen-ansi"
 
     /// The window on screen, if any.
     public private(set) var paneID: String?
@@ -274,6 +285,8 @@ public struct AgentScreenStream: Equatable, Sendable {
     public private(set) var lines = AgentScreenModel.lines
     /// The connection is up and its daemon listed `screen`.
     public private(set) var available = false
+    /// Its daemon also listed `screen-ansi`: subscribe in colour.
+    public private(set) var ansi = false
     /// The pane subscribed on this connection, and whether a frame for it
     /// arrived since.
     public private(set) var subscribed: String?
@@ -312,8 +325,10 @@ public struct AgentScreenStream: Equatable, Sendable {
         let nowAvailable: Bool
         if case let .ready(_, _, features) = state {
             nowAvailable = features.contains(AgentScreenStream.feature)
+            ansi = features.contains(AgentScreenStream.ansiFeature)
         } else {
             nowAvailable = false
+            ansi = false
         }
         if !nowAvailable || !available {
             // A new connection (or none): nothing is subscribed on it yet.
@@ -358,7 +373,7 @@ public struct AgentScreenStream: Equatable, Sendable {
         guard available, let paneID, subscribed != paneID else { return nil }
         subscribed = paneID
         confirmed = false
-        return .screenSubscribe(paneID: paneID, lines: lines)
+        return .screenSubscribe(paneID: paneID, lines: ansi ? nil : lines, ansi: ansi ? true : nil)
     }
 }
 
@@ -373,11 +388,14 @@ extension DaemonClient {
         return "/api/agents/\(escaped)/\(suffix)"
     }
 
-    /// `GET /api/agents/{pane_id}/screen?lines=&hash=` — the agent's current
-    /// window. `nil` when the daemon predates the route (a plain 404); a
-    /// pane the daemon does not track is `.rejected(404, "no such agent")`.
-    public func agentScreen(paneID: String, lines: Int = AgentScreenModel.lines, hash: String? = nil) async throws -> AgentScreen? {
+    /// `GET /api/agents/{pane_id}/screen?lines=&hash=&ansi=1` — the agent's
+    /// current window, in colour when the daemon can (`ansi: true` in the
+    /// reply; an older daemon ignores `ansi=1`). `nil` when the daemon
+    /// predates the route (a plain 404); a pane the daemon does not track
+    /// is `.rejected(404, "no such agent")`.
+    public func agentScreen(paneID: String, lines: Int = AgentScreenModel.lines, hash: String? = nil, ansi: Bool = true) async throws -> AgentScreen? {
         var query = [URLQueryItem(name: "lines", value: String(lines))]
+        if ansi { query.append(URLQueryItem(name: "ansi", value: "1")) }
         if let hash, !hash.isEmpty { query.append(URLQueryItem(name: "hash", value: hash)) }
         let request = try request(encodedPath: DaemonClient.agentPath(paneID: paneID, suffix: "screen"), query: query)
         let (data, response) = try await perform(request)

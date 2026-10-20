@@ -19,6 +19,8 @@ struct FlockView: View {
     /// A notification tap: scroll to this agent's card, then forget it.
     @Binding var focusedPaneID: String?
     let answer: (Int) -> Void
+    /// New agent, when the daemon has agent actions.
+    var onNewAgent: (() -> Void)?
 
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
@@ -40,6 +42,16 @@ struct FlockView: View {
                     }
                     ForEach(flock.running) { agent in
                         card(agent)
+                    }
+                    if let onNewAgent {
+                        Button(action: onNewAgent) {
+                            Label("New agent", systemImage: "plus")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flock.newAgent")
                     }
                     if Self.showsNotRunning, !flock.notRunning.isEmpty {
                         notRunningRow

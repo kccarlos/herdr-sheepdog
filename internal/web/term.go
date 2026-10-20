@@ -61,6 +61,7 @@ type termServer struct {
 	mu      sync.Mutex
 	bridges int // open or opening, across connections
 	nextID  int
+	conns   map[*termConn]struct{}
 	// version cache for termAvailable
 	checked time.Time
 	ok      bool
@@ -171,6 +172,17 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &termConn{t: t, conn: conn, id: id, kind: remoteKind(r.RemoteAddr), ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
+	t.mu.Lock()
+	if t.conns == nil {
+		t.conns = map[*termConn]struct{}{}
+	}
+	t.conns[c] = struct{}{}
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		delete(t.conns, c)
+		t.mu.Unlock()
+	}()
 	s.log.Log(logSource, "web.term.connect", "", map[string]any{"client_id": id, "remote_kind": c.kind})
 	c.serve()
 }
@@ -624,6 +636,31 @@ func (c *termConn) onBridgeClosed(tc *termChan, gen int, cl herdr.Closed) {
 	c.mu.Unlock()
 	c.t.unreserve()
 	c.finish(tc, reason)
+	if tc.mode == termproto.ModeControl && reason == termproto.ReasonReleased {
+		c.t.controlFreed(tc.pane)
+	}
+}
+
+// controlFreed tells every observe channel on pane, on any connection,
+// that the controller this daemon ran let go (term-free), so a watching
+// phone can take control without a takeover. A controller outside the
+// daemon (another herdr client) gives no such signal.
+func (t *termServer) controlFreed(pane string) {
+	t.mu.Lock()
+	conns := make([]*termConn, 0, len(t.conns))
+	for c := range t.conns {
+		conns = append(conns, c)
+	}
+	t.mu.Unlock()
+	for _, c := range conns {
+		c.mu.Lock()
+		for _, oc := range c.chans {
+			if oc.pane == pane && oc.mode == termproto.ModeObserve && !oc.closing && oc.opened {
+				c.queueLocked(termOut{data: mustJSON(termproto.Free(oc.ch, pane))})
+			}
+		}
+		c.mu.Unlock()
+	}
 }
 
 // finish tells the client a channel ended and logs its totals.

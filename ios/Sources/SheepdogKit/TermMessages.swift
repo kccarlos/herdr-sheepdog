@@ -23,6 +23,8 @@ public struct TermMessage: Codable, Equatable, Sendable {
         case opened = "term-opened"
         case closed = "term-closed"
         case error = "term-error"
+        /// The controller of an observed pane let go (`term-free`).
+        case free = "term-free"
     }
 
     /// `control` sends input and sizes the pane; `observe` only watches, at

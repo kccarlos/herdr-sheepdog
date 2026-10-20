@@ -9,6 +9,7 @@ struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var started = false
     @State private var confirmNewConversation = false
+    @State private var showsNewAgent = false
     @State private var typing = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -75,9 +76,10 @@ struct MainView: View {
                     case .flock where paneState != .content:
                         FlockUnavailableView(state: paneState)
                     case .flock:
-                        FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID) { index in
-                            model.answer(option: index)
-                        }
+                        FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID,
+                                  answer: { model.answer(option: $0) },
+                                  onNewAgent: model.agentActionsAvailable ? { showsNewAgent = true } : nil)
+                            .sheet(isPresented: $showsNewAgent) { NewAgentSheet() }
                     }
                 }
                 .frame(maxHeight: .infinity)

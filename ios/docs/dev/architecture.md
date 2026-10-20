@@ -353,6 +353,17 @@ big-endian). Use it only when `bot-ready` lists the `term` feature.
 
 ### The live agent window
 
+The controls (phase 3) are their own files: `KeyBar.swift` (the bar,
+`KeyCap` and `MoreKeysSheet`), `TerminalComposer.swift` (the field, Send ↔
+Stop, a `leading` slot for attachments, and the controller's key, typing
+and Stop methods) and `AgentActionsMenu.swift` (⋯ ▸ Rename, Stop, Close and
+their dialogs). `KeyEncoding` (Kit) holds every key's bytes, the one-shot
+`KeyModifiers` and `SnippetStore`; on the snapshot path only keys with an
+`allowListed` name work. Typing mode is SwiftTerm's own `UITextInput`
+(marked text for IMEs, dictation), switched by `SwiftTermSurface.setTyping`.
+`AgentAction` (Kit) is the client of the daemon's agent actions;
+`NewAgentSheet` is presented from the Agents list.
+
 ```
 AgentScreenView ── AgentWindowView (one per pane; ⋯ ▸ Switch agent swaps it)
       │                 header (name, state chip, ⋯) · NoticeBar · TerminalHost
@@ -382,12 +393,17 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   mouse reporting are off; herdr owns scrollback and mouse modes. A
   one-finger vertical drag becomes `term-scroll` in whole lines (finger
   down = older = `up`); a tap becomes `term-mouse` down and up on the cell;
-  long-press stays SwiftTerm's selection with Copy. `inputView` is an empty
+  long-press stays SwiftTerm's selection with Copy; Paste shows only on a
+  live `control` channel (`GatedTerminalView` withholds the action's
+  target otherwise). `inputView` is an empty
   view, so selecting never raises a keyboard (phase 3's typing mode sets
   `keyboardEnabled`).
 - **"Latest".** herdr never reports its scroll position, so the window
   counts its own scrolls; Latest and any raw input scroll back down by that
-  count. An observer does not learn when control is released.
+  count.
+- **`term-free`.** When the controller this daemon ran lets go, an
+  observing window closes its `observe` channel and opens `control`
+  without a takeover; a refusal (`busy`) puts it back to observing.
 - **`term-closed`.** `refused:busy` and `taken_over` reopen as `observe` with
   "Another device has control · Take over" (confirmed, then `takeover:
   true`); `gone` and `refused:not_tracked` end the window; `herdr` and
@@ -396,7 +412,10 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   drawn yet shows the snapshot until the socket comes back.
 - **Snapshot in the same surface.** `SnapshotScreen.bytes` turns the
   `screen` text into terminal bytes: cursor hidden, autowrap off (wide
-  lines are clipped, not wrapped) and the last rows that fit.
+  lines are clipped, not wrapped) and the last rows that fit. When the
+  daemon lists `screen-ansi` the subscription asks for `ansi: true`, and the
+  poll always sends `?ansi=1` (older daemons ignore it); a frame with `ansi:
+  true` keeps its SGR colours, each line ending in a reset.
 - **Background.** Going to the background closes every channel and the
   connection (`TermHub.disconnectIfIdle`), so the computer gets its layout
   back; the foreground reopens it (as an observer if it was one). The hub

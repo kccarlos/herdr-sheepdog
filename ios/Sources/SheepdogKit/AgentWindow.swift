@@ -245,6 +245,19 @@ public struct AgentWindowState: Equatable, Sendable {
         return [.startSnapshot]
     }
 
+    /// `term-free`: the device that had control let go. An observing
+    /// window takes control (no takeover: if a third device got there
+    /// first, the refusal puts it back to observing).
+    public mutating func controlFreed() -> [Command] {
+        guard phase == .observing, channelOpen, mode == .observe else { return [] }
+        channelOpen = false
+        hasFrame = false
+        scrolledUp = 0
+        notice = nil
+        phase = .connecting
+        return [.close] + openIfReady(mode: .control, takeover: false)
+    }
+
     /// The user confirmed Take over.
     public mutating func takeOver() -> [Command] {
         guard phase != .ended else { return [] }
@@ -410,12 +423,17 @@ public enum SnapshotScreen {
     /// the terminal surface: cursor hidden, clear, home, autowrap off so a wider line is
     /// clipped rather than wrapped, and the last `rows` lines with `\r\n`
     /// between them (a bare `\n` is only a line feed in a terminal).
-    public static func bytes(text: String, rows: Int) -> [UInt8] {
+    ///
+    /// With `ansi` (a `screen-ansi` frame) ESC stays, so SGR colours draw;
+    /// each line ends with an SGR reset, so a colour never bleeds into the
+    /// next line's margin.
+    public static func bytes(text: String, rows: Int, ansi: Bool = false) -> [UInt8] {
         var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         while lines.last?.isEmpty == true { lines.removeLast() }
         if rows > 0, lines.count > rows { lines = Array(lines.suffix(rows)) }
         let body = lines.map { line in
-            String(line.unicodeScalars.filter { $0.value >= 0x20 || $0 == "\t" }.map(Character.init))
+            let kept = String(line.unicodeScalars.filter { $0.value >= 0x20 || $0 == "\t" || (ansi && $0 == "\u{1b}") }.map(Character.init))
+            return ansi ? kept + "\u{1b}[0m" : kept
         }.joined(separator: "\r\n")
         return Array("\u{1b}[?25l\u{1b}[?7l\u{1b}[0m\u{1b}[2J\u{1b}[H".utf8) + Array(body.utf8)
     }

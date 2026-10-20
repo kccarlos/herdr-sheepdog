@@ -98,7 +98,7 @@ public final class TermHub {
         switch event {
         case .state:
             for handler in handlers.values { handler(event) }
-        case let .opened(ch, _), let .closed(ch, _, _), let .resync(ch):
+        case let .opened(ch, _), let .closed(ch, _, _), let .resync(ch), let .free(ch):
             handlers[ch]?(event)
             if case .closed = event {
                 handlers.removeValue(forKey: ch)

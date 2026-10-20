@@ -40,7 +40,9 @@ private struct AgentWindowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var prompt = ""
-    @State private var confirmKey: AgentKey?
+    @State private var confirmKey: TermKey?
+    @State private var showsMoreKeys = false
+    @State private var action: AgentWindowAction?
     @State private var confirmTakeover = false
     @FocusState private var promptFocused: Bool
 
@@ -104,14 +106,28 @@ private struct AgentWindowView: View {
         }
         .onChange(of: model.handshake) { _, _ in window.availabilityChanged() }
         .confirmationDialog(
-            confirmKey.map { $0.confirmationTitle(agent: name) } ?? "",
+            confirmKey.map { $0.allowListed?.confirmationTitle(agent: name) ?? "Send \($0.accessibilityLabel) to \(name)?" } ?? "",
             isPresented: Binding(get: { confirmKey != nil }, set: { if !$0 { confirmKey = nil } }),
             titleVisibility: .visible,
             presenting: confirmKey
         ) { key in
-            Button("Send \(key.label)", role: .destructive) { window.send(key: key) }
+            Button("Send \(key.allowListed?.label ?? key.label)", role: .destructive) { window.send(termKey: key) }
                 .accessibilityIdentifier("agentScreen.confirm")
             Button("Cancel", role: .cancel) {}
+        }
+        .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { dismiss() })
+        .sheet(isPresented: $showsMoreKeys) {
+            MoreKeysSheet(window: window) { snippet in
+                if window.typing {
+                    window.sendText(snippet)
+                } else {
+                    prompt = prompt.isEmpty ? snippet : prompt + " " + snippet
+                    promptFocused = true
+                }
+            }
+        }
+        .onChange(of: window.state.takesRawInput) { _, live in
+            if !live { window.setTyping(false) }
         }
         .confirmationDialog(
             "Take control of \(name) from the other device? It can only watch until it takes control back.",
@@ -163,6 +179,9 @@ private struct AgentWindowView: View {
             }
             .disabled(window.fontSize == SwiftTermSurface.defaultFontSize)
             .accessibilityIdentifier("agentScreen.menu.textSize")
+            if model.agentActionsAvailable {
+                AgentActionItems(working: live.state == .working) { action = $0 }
+            }
             let others = model.flock.running.filter { $0.paneID != agent.paneID }
             if !others.isEmpty {
                 Menu {
@@ -232,31 +251,23 @@ private struct AgentWindowView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            keyBar
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(state.phase == .observing ? "Take over to type" : "Ask \(name)…", text: $prompt, axis: .vertical)
-                    .lineLimit(1 ... 4)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.send)
-                    .focused($promptFocused)
-                    .onSubmit(sendPrompt)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .disabled(!window.canOperate && !window.sending)
-                    .accessibilityIdentifier("agentScreen.field")
-                Button(action: sendPrompt) {
-                    if window.sending {
-                        ProgressView().frame(width: 32, height: 32)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 30))
-                            .foregroundStyle(canSendPrompt ? Color.accentColor : Color(.tertiaryLabel))
-                    }
-                }
-                .disabled(!canSendPrompt)
-                .accessibilityLabel("Send prompt")
-                .accessibilityIdentifier("agentScreen.send")
+            KeyBar(window: window, confirm: { confirmKey = $0 }, onMore: { showsMoreKeys = true })
+            if window.typing {
+                Label("Typing goes straight to \(name).", systemImage: "keyboard")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("agentScreen.typingHint")
+            } else {
+                TerminalComposer(
+                    text: $prompt,
+                    placeholder: state.phase == .observing ? "Take over to type" : "Ask \(name)…",
+                    enabled: window.canOperate,
+                    sending: window.sending,
+                    canStop: live.state == .working,
+                    focused: $promptFocused,
+                    onSend: sendPrompt,
+                    onStop: { window.stop(actions: model.agentActionsAvailable) }
+                )
             }
             if let error = window.inputError {
                 Text(error)
@@ -278,33 +289,6 @@ private struct AgentWindowView: View {
         .padding(.bottom, 6)
         .background(Color(.systemBackground).opacity(0.001))
         .overlay(alignment: .top) { Divider() }
-    }
-
-    private var keyBar: some View {
-        HStack(spacing: 6) {
-            ForEach(AgentKey.bar) { key in
-                Button {
-                    if key.needsConfirmation {
-                        confirmKey = key
-                    } else {
-                        window.send(key: key)
-                    }
-                } label: {
-                    Text(key.barLabel)
-                        .font(.system(.subheadline, design: .monospaced).weight(.medium))
-                        .foregroundStyle(key == .ctrlC ? Color(.systemRed) : Color(.label))
-                        .frame(maxWidth: .infinity, minHeight: 36)
-                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!window.canOperate)
-                .opacity(window.canOperate ? 1 : 0.4)
-                .accessibilityLabel(key.accessibilityLabel)
-                .accessibilityIdentifier("agentScreen.key.\(key.rawValue)")
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("agentScreen.keyBar")
     }
 
     private var canSendPrompt: Bool { window.canOperate && AgentScreenModel.canSend(prompt) }
@@ -465,16 +449,22 @@ final class AgentWindowController: ObservableObject {
 
     let paneID: String
     let surface: SwiftTermSurface
-    @Published private(set) var state: AgentWindowState
+    @Published private(set) var state: AgentWindowState {
+        didSet { surface.pasteEnabled = state.takesRawInput }
+    }
     @Published private(set) var snapshot: AgentScreenModel
     /// The visible text, for VoiceOver's value.
     @Published private(set) var screenText = ""
     @Published private(set) var fontSize: CGFloat
-    @Published private(set) var sending = false
-    @Published private(set) var inputError: String?
-    @Published private(set) var lastReply: String?
+    @Published var sending = false
+    @Published var inputError: String?
+    @Published var lastReply: String?
+    /// The key bar's one-shot Ctrl and Alt.
+    @Published var modifiers = KeyModifiers()
+    /// Typing mode: the system keyboard types into the pane.
+    @Published var typing = false
 
-    private weak var model: SessionViewModel?
+    weak var model: SessionViewModel?
     private var channel: Int?
     private var snapshotTask: Task<Void, Never>?
     private var pushes: AnyCancellable?
@@ -492,7 +482,7 @@ final class AgentWindowController: ObservableObject {
         surface.onSizeChange = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
         surface.onScroll = { [weak self] lines in self?.dragged(lines: lines) }
         surface.onTap = { [weak self] col, row in self?.tapped(col: col, row: row) }
-        surface.onInput = { [weak self] bytes in self?.sendRaw(bytes) }
+        surface.onInput = { [weak self] bytes in self?.typed(bytes) }
         surface.onFontSizeChange = { [weak self] size in self?.fontChanged(size) }
         surface.onContentChange = { [weak self] in self?.contentChanged() }
     }
@@ -584,7 +574,7 @@ final class AgentWindowController: ObservableObject {
         }
     }
 
-    private func sendRaw(_ bytes: [UInt8]) {
+    func sendRaw(_ bytes: [UInt8]) {
         guard state.takesRawInput, let channel, let hub = model?.termHub else { return }
         run(mutate { $0.willSendInput() })
         hub.send(input: bytes, ch: channel)
@@ -650,6 +640,8 @@ final class AgentWindowController: ObservableObject {
 
     private func run(_ commands: [AgentWindowState.Command]) {
         for command in commands {
+            // A command's channel id is the one open when it was decided:
+            // `.close` then `.open` replaces it in order.
             switch command {
             case let .open(mode, takeover):
                 guard let hub = model?.termHub else { continue }
@@ -686,6 +678,8 @@ final class AgentWindowController: ObservableObject {
         case let .closed(_, reason, canTakeOver):
             channel = nil
             run(mutate { $0.closed(reason, canTakeOver: canTakeOver) })
+        case .free:
+            run(mutate { $0.controlFreed() })
         case .error, .resync:
             break
         }
@@ -744,7 +738,7 @@ final class AgentWindowController: ObservableObject {
 
     private func drawSnapshot() {
         guard state.phase == .snapshot else { return }
-        surface.feed(SnapshotScreen.bytes(text: snapshot.text, rows: surface.rows))
+        surface.feed(SnapshotScreen.bytes(text: snapshot.text, rows: surface.rows, ansi: snapshot.isANSI))
     }
 
     private func feedMessage(_ message: String) {
