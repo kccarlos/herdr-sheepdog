@@ -21,6 +21,9 @@ struct FlockView: View {
     let answer: (Int) -> Void
     /// New agent, when the daemon has agent actions.
     var onNewAgent: (() -> Void)?
+    /// A plain shell in the first project folder, when the daemon offers
+    /// the phone shell on this network.
+    var onShell: (() -> Void)?
 
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
@@ -43,15 +46,11 @@ struct FlockView: View {
                     ForEach(flock.running) { agent in
                         card(agent)
                     }
-                    if let onNewAgent {
-                        Button(action: onNewAgent) {
-                            Label("New agent", systemImage: "plus")
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    if onNewAgent != nil || onShell != nil {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) { quietButtons }
+                            VStack(spacing: 10) { quietButtons }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("flock.newAgent")
                     }
                     if Self.showsNotRunning, !flock.notRunning.isEmpty {
                         notRunningRow
@@ -69,6 +68,30 @@ struct FlockView: View {
             .onChange(of: focusedPaneID) { _, _ in scrollToFocus(proxy) }
         }
         .accessibilityIdentifier("flock.list")
+    }
+
+    /// New agent and Shell: quiet, side by side (stacked at large text).
+    @ViewBuilder private var quietButtons: some View {
+        if let onNewAgent {
+            quietButton("New agent", symbol: "plus", action: onNewAgent)
+                .accessibilityIdentifier("flock.newAgent")
+        }
+        if let onShell {
+            quietButton("Shell", symbol: "apple.terminal", action: onShell)
+                .accessibilityHint("Opens a plain shell in your first project folder")
+                .accessibilityIdentifier("flock.shell")
+        }
+    }
+
+    private func quietButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func card(_ agent: Agent) -> some View {

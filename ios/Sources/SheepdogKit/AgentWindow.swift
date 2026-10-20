@@ -68,6 +68,12 @@ public struct AgentWindowState: Equatable, Sendable {
         case tooMany
         /// The live connection dropped; trying again (the last screen stays).
         case reconnecting
+        /// A phone shell: the daemon does not offer it on this network.
+        case shellOff
+        /// A phone shell: the folder is outside the project folders.
+        case shellFolder
+        /// A phone shell's pane closed.
+        case shellClosed
 
         public var text: String {
             switch self {
@@ -78,6 +84,9 @@ public struct AgentWindowState: Equatable, Sendable {
             case .snapshotOnly: return "Snapshot only. The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog on your computer."
             case .tooMany: return "Too many live windows are open. Close one, then try again."
             case .reconnecting: return "Reconnecting…"
+            case .shellOff: return "The shell is off on this network."
+            case .shellFolder: return "This folder is outside your project folders."
+            case .shellClosed: return "This shell closed."
             }
         }
 
@@ -88,6 +97,7 @@ public struct AgentWindowState: Equatable, Sendable {
             case .gone, .notTracked: return "Back to agents"
             case .herdrDown, .tooMany: return "Try again"
             case .snapshotOnly, .reconnecting: return nil
+            case .shellOff, .shellFolder, .shellClosed: return "Back"
             }
         }
     }
@@ -104,6 +114,8 @@ public struct AgentWindowState: Equatable, Sendable {
     }
 
     public let paneID: String
+    /// A phone shell's window (no snapshot path: a shell is no agent).
+    public let isShell: Bool
     public private(set) var availability: TermAvailability = .unknown
     public private(set) var phase: Phase = .connecting
     public private(set) var notice: Notice?
@@ -123,8 +135,9 @@ public struct AgentWindowState: Equatable, Sendable {
     /// The snapshot path is drawing.
     public private(set) var snapshotRunning = false
 
-    public init(paneID: String) {
+    public init(paneID: String, isShell: Bool = false) {
         self.paneID = paneID
+        self.isShell = isShell
     }
 
     // MARK: - Derived
@@ -214,7 +227,11 @@ public struct AgentWindowState: Equatable, Sendable {
             phase = .observing
             return openIfReady(mode: .observe, takeover: false)
         case .gone:
-            return end(.gone)
+            return end(isShell ? .shellClosed : .gone)
+        case .refused("shell_off"):
+            return end(.shellOff)
+        case .refused("outside_projects"):
+            return end(.shellFolder)
         case .refused("not_tracked"):
             return end(.notTracked)
         case .herdr:
@@ -232,7 +249,8 @@ public struct AgentWindowState: Equatable, Sendable {
     public mutating func connectionLost() -> [Command] {
         guard channelOpen, phase != .ended else { return [] }
         hasFrame = false
-        if phase == .live || phase == .observing {
+        if phase == .live || phase == .observing || isShell {
+            // A shell has no snapshot: wait for the socket to reopen it.
             if notice == nil { notice = .reconnecting }
             return []
         }
@@ -306,6 +324,9 @@ public struct AgentWindowState: Equatable, Sendable {
         switch phase {
         case .ended:
             return []
+        case .snapshot where isShell:
+            phase = .connecting
+            return openIfReady(mode: .control, takeover: false)
         case .snapshot where availability == .no || notice == .tooMany:
             snapshotRunning = true
             return [.startSnapshot]
@@ -367,7 +388,7 @@ public struct AgentWindowState: Equatable, Sendable {
     private mutating func fallBack(_ notice: Notice) -> [Command] {
         self.notice = notice
         phase = .snapshot
-        guard foreground, !snapshotRunning else { return [] }
+        guard foreground, !snapshotRunning, !isShell else { return [] }
         snapshotRunning = true
         return [.startSnapshot]
     }

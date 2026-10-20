@@ -175,6 +175,9 @@ public final class DemoDaemon: @unchecked Sendable {
         case ("POST", "/api/agents"):
             return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
         default:
+            if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {
+                return json(["ok": true])
+            }
             if path.hasPrefix("/api/agents/"), method == "POST",
                let last = path.split(separator: "/").last, ["rename", "interrupt", "close"].contains(String(last)) {
                 return json(["ok": true, "spoken": "This is the demo: its agents are scripted, so nothing changed."])

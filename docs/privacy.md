@@ -119,6 +119,12 @@ tracking code is in it.
 | Local network | To reach the daemon on your Wi-Fi or Tailscale. | On the first connection |
 | Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token** and receives the key that encrypts the alerts' content; the daemon keeps both in `push_devices.json`. | After the first connection to a daemon (never in the demo) |
 
+The live agent window and the phone shell send your keystrokes to the daemon
+and show the pane's screen. The daemon passes them through without storing
+them: its event log records only that a window or shell opened and closed
+(which pane, which folder, how long, how many bytes), never what was typed or
+shown.
+
 What the app stores on the phone: the daemon's address, your settings and a
 cache of the conversation. The daemon token is in the iOS keychain, not synced
 to iCloud. The demo runs entirely on the phone, with no network and a throwaway

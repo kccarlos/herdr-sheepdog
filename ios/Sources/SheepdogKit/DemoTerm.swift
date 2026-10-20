@@ -19,6 +19,8 @@ public final class DemoTermTransport: TermTransport {
         case gone
         /// herdr is not running.
         case herdr
+        /// The daemon offers no phone shell (`term-ready.shell` false).
+        case noShell
     }
 
     public var onEvent: ((TermTransportEvent) -> Void)?
@@ -36,6 +38,10 @@ public final class DemoTermTransport: TermTransport {
         var seq: UInt32 = 0
         var typed = ""
         var lastBody: [String] = []
+        /// A phone shell's folder; nil for an agent's window.
+        var shellCwd: String?
+        /// A shell's earlier lines (commands and the demo's answer).
+        var history: [String] = []
     }
 
     /// `screen` reads an agent's scripted screen (`DemoDaemon.agentScreen`).
@@ -57,9 +63,14 @@ public final class DemoTermTransport: TermTransport {
         guard !closed, let message = try? TermMessage.decode(Data(text.utf8)) else { return }
         switch message.type {
         case .hello:
-            reply(#"{"type":"term-ready","protocol":1,"limits":{"channels":4},"shell":false}"#)
+            reply(#"{"type":"term-ready","protocol":1,"limits":{"channels":4},"shell":\#(behavior != .noShell)}"#)
         case .open:
-            guard let ch = message.ch, let pane = message.target?.paneID else { return }
+            guard let ch = message.ch else { return }
+            if let shell = message.target?.shell {
+                openShell(ch, cwd: shell.cwd ?? "~/Documents", message: message)
+                return
+            }
+            guard let pane = message.target?.paneID else { return }
             let mode = message.mode ?? .control
             switch behavior {
             case .gone:
@@ -98,6 +109,10 @@ public final class DemoTermTransport: TermTransport {
         guard let (ch, bytes) = TermInput.decode(data), var c = channels[ch], c.mode == .control else { return }
         for byte in bytes {
             switch byte {
+            case 0x0d where c.shellCwd != nil:
+                c.history += [Self.shellPrompt(c.shellCwd!) + c.typed]
+                if !c.typed.isEmpty { c.history += ["demo: nothing runs here; on your computer this is a real shell."] }
+                c.typed = ""
             case 0x0d: c.typed = ""
             case 0x7f, 0x08: if !c.typed.isEmpty { c.typed.removeLast() }
             case 0x03, 0x1b: c.typed = ""
@@ -117,6 +132,34 @@ public final class DemoTermTransport: TermTransport {
         channels.removeAll()
     }
 
+    // MARK: - The phone shell
+
+    private var shells = 0
+
+    private func openShell(_ ch: Int, cwd: String, message: TermMessage) {
+        guard behavior != .noShell else {
+            reply(#"{"type":"term-closed","ch":\#(ch),"reason":"refused:shell_off"}"#)
+            return
+        }
+        shells += 1
+        let pane = "demo-shell-\(shells)"
+        var c = Channel(paneID: pane, cols: message.cols ?? 58, rows: message.rows ?? 30, mode: .control)
+        c.shellCwd = cwd
+        c.history = ["Last login on the phone: demo shell in \(cwd)"]
+        channels[ch] = c
+        reply(#"{"type":"term-opened","ch":\#(ch),"pane_id":"\#(pane)","mode":"control","cols":\#(c.cols),"rows":\#(c.rows),"kind":"shell"}"#)
+        sendFull(ch)
+    }
+
+    static func shellPrompt(_ cwd: String) -> String {
+        "\u{1b}[36m" + ((cwd as NSString).lastPathComponent) + "\u{1b}[0m % "
+    }
+
+    private func shellLines(_ c: Channel) -> [String] {
+        let lines = c.history + [Self.shellPrompt(c.shellCwd ?? "~") + c.typed]
+        return Array(lines.suffix(max(1, c.rows)))
+    }
+
     // MARK: - Frames
 
     private func reply(_ json: String) {
@@ -125,8 +168,15 @@ public final class DemoTermTransport: TermTransport {
     }
 
     private func sendFull(_ ch: Int) {
-        guard var c = channels[ch], let agent = screen(c.paneID) else { return }
-        let body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: Self.tickNow)
+        guard var c = channels[ch] else { return }
+        let body: [String]
+        if c.shellCwd != nil {
+            body = shellLines(c)
+        } else if let agent = screen(c.paneID) {
+            body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: Self.tickNow)
+        } else {
+            return
+        }
         c.lastBody = body
         c.seq &+= 1
         channels[ch] = c
@@ -134,7 +184,14 @@ public final class DemoTermTransport: TermTransport {
         for (i, line) in body.enumerated() {
             bytes += Array("\u{1b}[\(i + 1);1H".utf8) + Array(line.utf8)
         }
-        bytes += Array("\u{1b}[0m\u{1b}[?2026l".utf8)
+        if c.shellCwd != nil {
+            // The cursor after the prompt, like a real shell.
+            let last = body.count
+            let column = (body.last.map { $0.replacingOccurrences(of: "\u{1b}[36m", with: "").replacingOccurrences(of: "\u{1b}[0m", with: "").count } ?? 0) + 1
+            bytes += Array("\u{1b}[0m\u{1b}[\(last);\(column)H\u{1b}[?25h\u{1b}[?2026l".utf8)
+        } else {
+            bytes += Array("\u{1b}[0m\u{1b}[?2026l".utf8)
+        }
         emit(TermFrame(ch: ch, seq: c.seq, cols: c.cols, rows: c.rows, full: true, bytes: bytes))
     }
 
@@ -144,7 +201,7 @@ public final class DemoTermTransport: TermTransport {
     /// when the script moved on.
     private func tick() {
         for ch in channels.keys.sorted() {
-            guard var c = channels[ch], let agent = screen(c.paneID) else { continue }
+            guard var c = channels[ch], c.shellCwd == nil, let agent = screen(c.paneID) else { continue }
             let body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: Self.tickNow)
             let changed = body.indices.filter { $0 >= c.lastBody.count || body[$0] != c.lastBody[$0] }
             guard !changed.isEmpty else { continue }

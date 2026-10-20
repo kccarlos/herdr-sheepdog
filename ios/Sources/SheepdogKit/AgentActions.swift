@@ -113,6 +113,14 @@ extension DaemonClient {
         try await postAction(encodedPath: DaemonClient.agentPath(paneID: paneID, suffix: "close"), body: [:])
     }
 
+    /// `POST /api/shells/{pane_id}/close`: end a phone shell (the user
+    /// confirmed). Leaving the window only detaches.
+    public func closeShell(paneID: String) async throws -> AgentActionReply {
+        let agentPath = DaemonClient.agentPath(paneID: paneID, suffix: "close")
+        let path = "/api/shells/" + agentPath.dropFirst("/api/agents/".count)
+        return try await postAction(encodedPath: path, body: [:])
+    }
+
     private func postAction(encodedPath: String, body: [String: Any]) async throws -> AgentActionReply {
         let data = try JSONSerialization.data(withJSONObject: body)
         let request = try request(encodedPath: encodedPath, method: "POST", body: data)

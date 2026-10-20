@@ -186,6 +186,14 @@ private struct AgentWindowView: View {
                 Label("Changes", systemImage: "plusminus")
             }
             .accessibilityIdentifier("agentScreen.menu.changes")
+            if model.shellEntryShown, let cwd = live.cwd, !cwd.isEmpty {
+                Button {
+                    model.navigationPath.append(ShellRoute(cwd: cwd))
+                } label: {
+                    Label("Open shell here", systemImage: "apple.terminal")
+                }
+                .accessibilityIdentifier("agentScreen.menu.shell")
+            }
             Button {
                 window.resetFontSize()
             } label: {
@@ -330,6 +338,7 @@ private struct AgentWindowView: View {
         case .gone, .notTracked: dismiss()
         case .herdrDown, .tooMany: window.retry()
         case .snapshotOnly, .reconnecting: break
+        case .shellOff, .shellFolder, .shellClosed: dismiss()
         }
     }
 }
@@ -355,7 +364,7 @@ private struct StateChip: View {
 }
 
 /// The one slim line under the header.
-private struct NoticeBar: View {
+struct NoticeBar: View {
     let notice: AgentWindowState.Notice
     let fill: Color
     let action: () -> Void
@@ -368,6 +377,9 @@ private struct NoticeBar: View {
         case .snapshotOnly: return "camera.viewfinder"
         case .tooMany: return "square.stack.3d.up"
         case .reconnecting: return "arrow.triangle.2.circlepath"
+        case .shellOff: return "lock"
+        case .shellFolder: return "folder.badge.questionmark"
+        case .shellClosed: return "xmark.circle"
         }
     }
 
@@ -407,9 +419,10 @@ private struct NoticeBar: View {
 }
 
 /// "Connecting…": a few placeholder rows where the terminal will be.
-private struct TerminalSkeleton: View {
+struct TerminalSkeleton: View {
     let name: String
     let reduceMotion: Bool
+    var message: String?
     @State private var dim = false
 
     var body: some View {
@@ -421,7 +434,7 @@ private struct TerminalSkeleton: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .scaleEffect(x: width, y: 1, anchor: .leading)
             }
-            Text("Connecting to \(name)…")
+            Text(message ?? "Connecting to \(name)…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)
@@ -434,13 +447,13 @@ private struct TerminalSkeleton: View {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Connecting to \(name)")
+        .accessibilityLabel(message ?? "Connecting to \(name)")
         .accessibilityIdentifier("agentScreen.connecting")
     }
 }
 
 /// The renderer's view in SwiftUI.
-private struct TerminalHost: UIViewRepresentable {
+struct TerminalHost: UIViewRepresentable {
     let surface: SwiftTermSurface
     let accessibilityText: String
 
@@ -471,6 +484,11 @@ final class AgentWindowController: ObservableObject {
     static let fontSizeKey = "agentWindow.fontSize"
 
     let paneID: String
+    /// A phone shell's window: opens `.newShell(cwd:)`, not an agent's pane.
+    let isShell: Bool
+    let shellCwd: String?
+    /// The shell's pane, once the daemon opened it (for Close shell).
+    @Published private(set) var shellPane: String?
     let surface: SwiftTermSurface
     @Published private(set) var state: AgentWindowState {
         didSet { surface.pasteEnabled = state.takesRawInput }
@@ -492,15 +510,17 @@ final class AgentWindowController: ObservableObject {
     private var snapshotTask: Task<Void, Never>?
     private var pushes: AnyCancellable?
 
-    init(paneID: String) {
+    init(paneID: String, shell: Bool = false, shellCwd: String? = nil) {
         self.paneID = paneID
+        self.isShell = shell
+        self.shellCwd = shellCwd
         let saved = UserDefaults.standard.double(forKey: Self.fontSizeKey)
         let size = saved > 0 ? CGFloat(saved) : SwiftTermSurface.defaultFontSize
         fontSize = size
         surface = TerminalRenderer.makeSurface(fontSize: size)
         // No cursor until herdr's first frame places one.
         surface.feed(Array("\u{1b}[?25l".utf8))
-        state = AgentWindowState(paneID: paneID)
+        state = AgentWindowState(paneID: paneID, isShell: shell)
         snapshot = AgentScreenModel(paneID: paneID)
         surface.onSizeChange = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
         surface.onScroll = { [weak self] lines in self?.dragged(lines: lines) }
@@ -668,7 +688,8 @@ final class AgentWindowController: ObservableObject {
             switch command {
             case let .open(mode, takeover):
                 guard let hub = model?.termHub else { continue }
-                let ch = hub.open(paneID: paneID, mode: mode, cols: state.cols, rows: state.rows, takeover: takeover) { [weak self] event in
+                let target: TermMessage.Target = isShell ? .newShell(cwd: shellCwd) : .pane(paneID)
+                let ch = hub.open(target: target, mode: mode, cols: state.cols, rows: state.rows, takeover: takeover) { [weak self] event in
                     self?.handle(event)
                 }
                 if let ch {
@@ -694,6 +715,7 @@ final class AgentWindowController: ObservableObject {
         case let .state(socketState):
             if socketState == .reconnecting { run(mutate { $0.connectionLost() }) }
         case let .opened(_, opened):
+            if isShell { shellPane = opened.paneID }
             _ = mutate { $0.opened(mode: opened.mode); return [] }
         case let .frame(frame):
             surface.feed(frame.bytes)
