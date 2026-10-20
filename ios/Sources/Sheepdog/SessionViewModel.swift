@@ -1497,6 +1497,22 @@ final class SessionViewModel: ObservableObject {
     /// `term`.
     private var rememberedFeatures: [String: [String]] = [:]
 
+    /// Whether the daemon has the user's own agent actions (New agent,
+    /// Rename, Stop, Close).
+    var agentActionsAvailable: Bool {
+        if demo != nil { return true }
+        let key = settings.endpoint.map(ConversationCache.key(for:)) ?? ""
+        if case let .ready(_, _, features) = handshake { return features.contains(AgentAction.feature) }
+        return rememberedFeatures[key]?.contains(AgentAction.feature) ?? false
+    }
+
+    /// Runs `body` against the daemon (the agent actions). Throws when no
+    /// daemon is configured.
+    func daemon<T>(_ body: (DaemonClient) async throws -> T) async throws -> T {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await body(client)
+    }
+
     /// Whether the agent window can go live (`/term`).
     var termAvailability: TermAvailability {
         if demo != nil { return .yes }

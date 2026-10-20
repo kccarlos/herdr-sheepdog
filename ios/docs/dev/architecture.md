@@ -353,6 +353,17 @@ big-endian). Use it only when `bot-ready` lists the `term` feature.
 
 ### The live agent window
 
+The controls (phase 3) are their own files: `KeyBar.swift` (the bar,
+`KeyCap` and `MoreKeysSheet`), `TerminalComposer.swift` (the field, Send ↔
+Stop, a `leading` slot for attachments, and the controller's key, typing
+and Stop methods) and `AgentActionsMenu.swift` (⋯ ▸ Rename, Stop, Close and
+their dialogs). `KeyEncoding` (Kit) holds every key's bytes, the one-shot
+`KeyModifiers` and `SnippetStore`; on the snapshot path only keys with an
+`allowListed` name work. Typing mode is SwiftTerm's own `UITextInput`
+(marked text for IMEs, dictation), switched by `SwiftTermSurface.setTyping`.
+`AgentAction` (Kit) is the client of the daemon's agent actions;
+`NewAgentSheet` is presented from the Agents list.
+
 ```
 AgentScreenView ── AgentWindowView (one per pane; ⋯ ▸ Switch agent swaps it)
       │                 header (name, state chip, ⋯) · NoticeBar · TerminalHost

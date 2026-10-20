@@ -152,6 +152,17 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
         set { terminalView.pasteEnabled = newValue }
     }
 
+    /// Typing mode on or off: the system keyboard (with IME and dictation,
+    /// which SwiftTerm commits as text) comes up, or goes away.
+    public func setTyping(_ on: Bool) {
+        keyboardEnabled = on
+        if on {
+            terminalView.becomeFirstResponder()
+        } else {
+            terminalView.resignFirstResponder()
+        }
+    }
+
     /// The view to put on screen.
     public var view: UIView { container }
     private let container = TerminalContainerView()
