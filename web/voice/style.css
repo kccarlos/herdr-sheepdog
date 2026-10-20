@@ -72,6 +72,25 @@ input[type=file] { max-width: 100%; }
 .transcript .line.partial .text { opacity: .7; }
 .transcript .text { overflow-wrap: anywhere; }
 
+/* Cards (the orchestrator's show tool): a dialog with the card, and a row in the transcript that opens it again. */
+.transcript .card-open { background: none; border: none; padding: 0; color: var(--primary-text); text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+.card-dialog { width: min(40rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); padding: 0; }
+.card-dialog::backdrop { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.card-head { display: flex; align-items: flex-start; gap: 1rem; padding: .8rem 1rem .4rem; position: sticky; top: 0; background: var(--card); }
+.card-head > div { flex: 1; min-width: 0; }
+.card-head h2 { font-size: 1.1rem; margin: 0; overflow-wrap: anywhere; }
+.card-head p { margin: .1rem 0 0; }
+.card-body { padding: 0 1rem 1rem; overflow-wrap: anywhere; }
+.card-body h3, .card-body h4, .card-body h5, .card-body h6 { font-size: 1rem; margin: .8rem 0 .3rem; }
+.card-body ul, .card-body ol { padding-left: 1.3rem; margin: .4rem 0; }
+.card-body blockquote { margin: .4rem 0; padding-left: .7rem; border-left: 3px solid var(--line); color: var(--muted); }
+.card-body pre.code { background: var(--code); border-radius: 4px; padding: .5rem .6rem; overflow-x: auto; font-size: .85em; line-height: 1.35; }
+.card-body pre.code code { background: none; padding: 0; white-space: pre; }
+.card-body .table-wrap { overflow-x: auto; margin: .5rem 0; }
+.card-body table { border-collapse: collapse; font-size: .92em; min-width: 100%; }
+.card-body th { text-align: left; background: var(--code); font-weight: 600; }
+.card-body th, .card-body td { padding: .3rem .55rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: normal; }
+
 .stats dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: 0; font-size: .9em; }
 .stats dt { color: var(--muted); }
 .stats dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }

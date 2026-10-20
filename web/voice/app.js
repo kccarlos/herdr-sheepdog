@@ -6,6 +6,7 @@
 
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
+import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -338,6 +339,7 @@ function openWS() {
     // (docs/dev/ws-contract.md "Protocol version and handshake"); nothing
     // waits for bot-ready — an older daemon never sends one.
     state.handshake = new Handshake();
+    state.cardsOn = false;
     send(clientReady());
     clearTimeout(state.handshakeTimer);
     state.handshakeTimer = setTimeout(() => {
@@ -457,6 +459,11 @@ function onControl(m) {
       return;
     }
     if (r.consumed) {
+      if (state.handshake.state === 'ready' && cardsEnabled(state.handshake.features)) {
+        // Each connection starts "not visible" on the daemon: say so now.
+        state.cardsOn = true;
+        send(visibilityMessage(document.hidden));
+      }
       render();
       return;
     }
@@ -478,6 +485,15 @@ function onControl(m) {
       break;
     case 'transcript':
       addTranscript(m.dir, m.text, !!m.final);
+      break;
+    case 'card':
+      if (m.card && !state.transcript.some((t) => t.card && t.card.card_id === m.card.card_id)) {
+        closeTranscript('in');
+        closeTranscript('out');
+        state.transcript.push({ dir: 'card', text: cardLabel(m.card), final: true, card: m.card });
+        while (state.transcript.length > TRANSCRIPT_LINES) state.transcript.shift();
+        openCard(m.card);
+      }
       break;
     case 'error':
       if (m.problem) showAccountProblem(m);
@@ -730,6 +746,21 @@ function renderTranscript() {
     return;
   }
   for (const t of state.transcript) {
+    if (t.card) {
+      const line = document.createElement('div');
+      line.className = 'line card-row';
+      const dir = document.createElement('span');
+      dir.className = 'dir';
+      dir.textContent = 'card';
+      const open = document.createElement('button');
+      open.className = 'card-open';
+      open.textContent = t.text;
+      open.setAttribute('aria-label', `Open card: ${t.text}`);
+      open.addEventListener('click', () => openCard(t.card));
+      line.append(dir, open);
+      box.appendChild(line);
+      continue;
+    }
     const line = document.createElement('div');
     line.className = `line ${t.dir}${t.final ? '' : ' partial'}`;
     const dir = document.createElement('span');
@@ -743,6 +774,25 @@ function renderTranscript() {
   }
   box.scrollTop = box.scrollHeight;
 }
+
+// ---------------------------------------------------------------- cards
+
+function openCard(card) {
+  const dlg = $('card-dialog');
+  $('card-title').textContent = card.title || 'Card';
+  const who = card.spoken || card.agent || '';
+  $('card-meta').textContent = who;
+  $('card-body').innerHTML = cardBodyHTML(card); // cards.js escapes everything
+  if (typeof dlg.showModal === 'function') {
+    if (!dlg.open) dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (state.cardsOn) send(visibilityMessage(document.hidden));
+});
 
 // ---------------------------------------------------------------- auth
 
@@ -870,6 +920,7 @@ async function init() {
 
   document.addEventListener('keydown', (e) => {
     const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
+    if ($('card-dialog').open) return; // Esc closes the card, not the voice
     if (e.key === 'Escape') {
       if (!$('btn-stop').disabled) stop();
       return;

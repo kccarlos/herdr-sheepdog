@@ -93,6 +93,16 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var agentScreenPush: AgentScreenPush?
     /// The agent window over `/ws`: one subscription for the app.
     private var screenStream = AgentScreenStream()
+    /// Cards (feature `cards`): the card open as a sheet, the main
+    /// screen's navigation (a card's "Open window" pushes onto it), the
+    /// `visibility` reports and the cards this phone got.
+    @Published var presentedCard: ScreenCard?
+    @Published var navigationPath = NavigationPath()
+    private var cardVisibility = CardVisibility()
+    private var cardInbox = CardInbox()
+    /// Sheets over the voice screen that this model cannot see itself
+    /// (the connection chip's, the feedback flag's), by name.
+    @Published private(set) var screenCovers: Set<String> = []
     /// The orchestrator's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
@@ -371,6 +381,7 @@ final class SessionViewModel: ObservableObject {
             // Another daemon, another conversation.
             reducer.clear()
             activity.clear()
+            cardInbox.clear()
             health.clear()
             brainModels = nil
             daemonSettings = nil
@@ -681,15 +692,18 @@ final class SessionViewModel: ObservableObject {
             audio.enqueue(data)
         case let .closed(reason, retrying):
             screenStream.socketClosed()
+            cardVisibility.socketClosed()
             send(.socketClosed(reason: reason, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
         case let .failed(error, retrying):
             screenStream.socketClosed()
+            cardVisibility.socketClosed()
             send(.socketFailed(error, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
         case let .handshake(state):
             send(.handshakeChanged(state))
             if let message = screenStream.handshake(state) { socket.send(message) }
+            if let message = cardVisibility.handshake(state) { socket.send(message) }
         }
     }
 
@@ -742,8 +756,10 @@ final class SessionViewModel: ObservableObject {
             if let event = screenStream.receive(message), let pane = screenStream.paneID {
                 agentScreenPush = AgentScreenPush(seq: (agentScreenPush?.seq ?? 0) + 1, paneID: pane, event: event)
             }
+        case .card:
+            if let card = message.card { receiveCard(card) }
         case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
-             .screenSubscribe, .screenUnsubscribe:
+             .screenSubscribe, .screenUnsubscribe, .visibility:
             break
         }
     }
@@ -1182,7 +1198,16 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Conversation history
 
     private func conversationChanged(save: Bool = true) {
-        rows = ConversationTimeline.rows(history: history.items, live: reducer.bubbles, activity: activity)
+        cardInbox.absorb(history.items)
+        // A card item whose card the daemon's store dropped still opens
+        // what this phone got live.
+        let items = history.items.map { item -> ConversationItem in
+            guard item.kind == .card, item.card == nil, let card = cardInbox.card(for: item) else { return item }
+            var filled = item
+            filled.card = card
+            return filled
+        }
+        rows = ConversationTimeline.rows(history: items, live: reducer.bubbles, activity: activity, cards: cardInbox.live)
         canLoadOlder = history.canLoadOlder
         if save { saveCache(now: false) }
     }
@@ -1259,6 +1284,7 @@ final class SessionViewModel: ObservableObject {
         history.clear()
         reducer.clear()
         activity.clear()
+        cardInbox.clear()
         conversationChanged(save: false)
     }
 
@@ -1545,6 +1571,61 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Cards
+
+    /// The app is in the foreground.
+    private var screenVisible = false
+    /// The voice screen is the one in front (or a card sheet over it).
+    private var voiceScreenInFront = false
+
+    /// The main screen says what is in front: sent to the daemon as
+    /// `visibility` when it changed and the daemon takes it.
+    func setScreen(visible: Bool, voiceScreen: Bool) {
+        screenVisible = visible
+        voiceScreenInFront = voiceScreen
+        if demo == nil, let message = cardVisibility.update(visible: visible, voiceScreen: voiceScreen) {
+            socket.send(message)
+        }
+    }
+
+    /// A sheet the model cannot see opened or closed over the voice screen.
+    func setScreenCover(_ name: String, _ covering: Bool) {
+        if covering { screenCovers.insert(name) } else { screenCovers.remove(name) }
+    }
+
+    /// A card from the daemon (or the demo): once, as a sheet when the
+    /// voice screen is in front (replacing a card already open), else
+    /// only as a row in the conversation.
+    func receiveCard(_ card: ScreenCard) {
+        let arrival = cardInbox.receive(card, canPresent: screenVisible && voiceScreenInFront)
+        guard arrival != .duplicate else { return }
+        conversationChanged()
+        if arrival == .open {
+            presentedCard = cardInbox.card(id: card.cardID) ?? card
+            Haptics.tap()
+            AccessibilityNotification.Announcement("On your screen: \(card.displayTitle)").post()
+        }
+        // The card's own history item replaces the live row.
+        scheduleHistorySync()
+    }
+
+    /// A card row was tapped.
+    func openCard(_ card: ScreenCard) {
+        presentedCard = card
+    }
+
+    /// A card's "Open window": close the sheet, then push the agent's
+    /// window (a push made under a sheet that is closing is lost).
+    func openAgentWindow(paneID: String) {
+        let wasOpen = presentedCard != nil
+        presentedCard = nil
+        pane = .conversation
+        Task { @MainActor in
+            if wasOpen { try? await Task.sleep(for: .milliseconds(400)) }
+            navigationPath.append(AgentWindowRoute(paneID: paneID))
+        }
+    }
+
     // MARK: - Feedback marks
 
     /// The daemon takes feedback marks: `bot-ready` listed `feedback`.
@@ -1751,6 +1832,17 @@ final class SessionViewModel: ObservableObject {
 
     private func startDemo() {
         guard let demo else { return }
+        demo.onCards = { [weak self] cards in
+            for card in cards { self?.receiveCard(card) }
+        }
+        #if DEBUG
+        if DebugLaunch.demoCard {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(18))
+                self?.askDemo("Show me the agents")
+            }
+        }
+        #endif
         guard !demoSilent else {
             demo.start()
             Task {

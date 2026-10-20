@@ -252,7 +252,7 @@ func (s *Supervisor) loadCards() {
 		}
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var cards []Card
 	n := 0
 	sc := bufio.NewScanner(f)
