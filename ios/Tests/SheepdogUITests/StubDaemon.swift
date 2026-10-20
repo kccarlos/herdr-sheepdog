@@ -12,6 +12,11 @@ final class StubDaemon {
         case wrongToken
         /// Every path answers 200 with an HTML page (a router, a web server).
         case notSheepdog
+        /// A daemon that accepts the token: `/api/hello` and `/api/state`
+        /// (no agents) answer, with `update` as `/api/state`'s update
+        /// object when given (nil: a daemon too old to report one);
+        /// everything else is 404.
+        case daemon(update: String?)
     }
 
     private let listener: NWListener
@@ -63,11 +68,21 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"name":"sheepdog","version":"0.0.0-stub","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}"#)
             }
             return http(401, "application/json", #"{"error":"unauthorized"}"#)
+        case .daemon(let update):
+            if path.hasPrefix("/api/hello") {
+                return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}"#)
+            }
+            if path.hasPrefix("/api/state") {
+                let voice = #""voice":{"mode":"gemini","status":"connected","muted":false,"stalled":false,"client_connected":false}"#
+                let tail = update.map { #","update":"# + $0 } ?? ""
+                return http(200, "application/json", #"{"agents":[],"# + voice + #","version":"v0.1.4""# + tail + "}")
+            }
+            return http(404, "application/json", #"{"error":"not found"}"#)
         }
     }
 
     private func http(_ status: Int, _ type: String, _ body: String) -> Data {
-        let reason = status == 200 ? "OK" : "Unauthorized"
+        let reason = [200: "OK", 401: "Unauthorized", 404: "Not Found"][status] ?? "Error"
         let bytes = Data(body.utf8)
         let head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(type)\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
         return Data(head.utf8) + bytes

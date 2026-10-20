@@ -44,6 +44,11 @@ struct SettingsView: View {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
                 } else {
+                    if let notice = model.update?.notice {
+                        Section {
+                            UpdateNoticeRow(notice: notice)
+                        }
+                    }
                     Section {
                         NavigationLink(value: SettingsPage.daemon) {
                             MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
@@ -106,6 +111,8 @@ struct SettingsView: View {
             }
             .onAppear(perform: load)
             .task {
+                // The update line reads /api/state: make it current.
+                if !model.isDemo { await model.refreshState(quiet: true) }
                 await model.loadVoiceProviders()
                 await model.loadDaemonSettings()
             }
@@ -203,6 +210,37 @@ struct EchoCancellationRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("about.echo")
+    }
+}
+
+/// Settings' update line: what the daemon reports about a newer release
+/// (`UpdateInfo.notice`), with the command to run on the computer in
+/// monospace. Wraps at every text size; VoiceOver reads it as one sentence.
+struct UpdateNoticeRow: View {
+    let notice: UpdateNotice
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notice.text)
+                if let command = notice.command {
+                    Text(command)
+                        .font(.callout.monospaced())
+                        .textSelection(.enabled)
+                }
+                if let after = notice.after {
+                    Text(after)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(.tint)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(notice.spoken)
+        .accessibilityIdentifier("settings.update")
     }
 }
 

@@ -560,6 +560,14 @@ flipped; the daemon address and token are written, and the app repointed,
 when you leave the Daemon screen or tap Done. The first run opens on the
 Daemon screen and cannot be closed until an address is in.
 
+Above the menu, `UpdateNoticeRow` shows `/api/state`'s `update` object
+(daemon docs/dev/update.md) as one line when it reports a newer release
+or an installed one not running yet; `UpdateInfo.notice` (SheepdogKit,
+`UpdateNoticeTests`) picks the words from `available`, `how`,
+`restart_pending` and `auto_restart`. Settings refreshes `/api/state` when
+it opens. A daemon without the field shows nothing
+(`UpdateNoticeUITests`, against `StubDaemon`).
+
 The Daemon screen can also scan the pairing code `sheepdog pair` prints
 (`PairingScanner.swift`: an `AVCaptureSession` with a QR metadata output,
 behind the camera permission). `PairingLink` (SheepdogKit, tested) reads

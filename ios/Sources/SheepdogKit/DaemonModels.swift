@@ -507,16 +507,20 @@ public struct DaemonState: Codable, Equatable, Sendable {
     /// daemon's own start if there has not been one. Absent on a daemon
     /// that predates "New conversation".
     public var conversationStartedAt: Date?
+    /// The daemon's update notice; nil on a daemon too old to report one
+    /// or with `update.check` off.
+    public var update: UpdateInfo?
 
     enum CodingKeys: String, CodingKey {
-        case agents, voice, herdr, version, brain
+        case agents, voice, herdr, version, brain, update
         case pendingAction = "pending_action"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil) {
+        self.update = update
         self.agents = agents
         self.pendingAction = pendingAction
         self.voice = voice
@@ -532,6 +536,93 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public func pendingQuestion(for paneID: String) -> String? {
         guard let p = pendingAction, p.paneID == paneID else { return nil }
         return p.question ?? p.spokenSummary
+    }
+}
+
+/// `/api/state`'s `update` (daemon docs/dev/update.md): whether a newer
+/// daemon release exists and whether one is installed but not running yet.
+/// Display only. The Go side omits the false and empty fields.
+public struct UpdateInfo: Codable, Equatable, Sendable {
+    public var current: String?
+    public var latest: String?
+    public var available: Bool
+    /// The upgrade command for the way the daemon was installed.
+    public var how: String?
+    /// The program on disk is newer than the one running.
+    public var restartPending: Bool
+    public var restartTo: String?
+    /// The daemon restarts itself into an installed update when idle.
+    public var autoRestart: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case current, latest, available, how
+        case restartPending = "restart_pending"
+        case restartTo = "restart_to"
+        case autoRestart = "auto_restart"
+    }
+
+    public init(current: String? = nil, latest: String? = nil, available: Bool = false, how: String? = nil, restartPending: Bool = false, restartTo: String? = nil, autoRestart: Bool = false) {
+        self.current = current
+        self.latest = latest
+        self.available = available
+        self.how = how
+        self.restartPending = restartPending
+        self.restartTo = restartTo
+        self.autoRestart = autoRestart
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        current = try c.decodeIfPresent(String.self, forKey: .current)
+        latest = try c.decodeIfPresent(String.self, forKey: .latest)
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        how = try c.decodeIfPresent(String.self, forKey: .how)
+        restartPending = try c.decodeIfPresent(Bool.self, forKey: .restartPending) ?? false
+        restartTo = try c.decodeIfPresent(String.self, forKey: .restartTo)
+        autoRestart = try c.decodeIfPresent(Bool.self, forKey: .autoRestart) ?? false
+    }
+
+    /// The one line Settings shows, or nil when there is nothing to say.
+    /// It says what the daemon will actually do: it never installs an
+    /// update itself, it only restarts into one that was installed
+    /// (`update.auto_restart`), and only while no one is using it.
+    public var notice: UpdateNotice? {
+        func trimmed(_ s: String?) -> String? {
+            guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+            return t
+        }
+        if restartPending {
+            let to = trimmed(restartTo).map { "sheepdog \($0)" } ?? "A new sheepdog"
+            if autoRestart {
+                return UpdateNotice(text: "\(to) is installed and restarts itself when no one is using it.", command: nil)
+            }
+            return UpdateNotice(text: "\(to) is installed. To finish, run this on your computer:", command: "sheepdog restart")
+        }
+        guard available, let latest = trimmed(latest) else { return nil }
+        let after = autoRestart ? "It then restarts itself when idle." : nil
+        if let how = trimmed(how) {
+            return UpdateNotice(text: "sheepdog \(latest) is available. To update, run this on your computer:", command: how, after: after)
+        }
+        return UpdateNotice(text: "sheepdog \(latest) is available. Update it on your computer.", command: nil, after: after)
+    }
+}
+
+/// What Settings shows for an update: a sentence, an optional command in
+/// monospace under it, and an optional sentence after the command.
+public struct UpdateNotice: Equatable, Sendable {
+    public var text: String
+    public var command: String?
+    public var after: String?
+
+    public init(text: String, command: String?, after: String? = nil) {
+        self.text = text
+        self.command = command
+        self.after = after
+    }
+
+    /// The whole notice as one sentence run, for VoiceOver.
+    public var spoken: String {
+        [text, command, after].compactMap { $0 }.joined(separator: " ")
     }
 }
 
