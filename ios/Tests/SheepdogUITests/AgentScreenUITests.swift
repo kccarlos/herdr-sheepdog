@@ -55,9 +55,9 @@ final class AgentScreenUITests: XCTestCase {
         XCTAssertTrue(open.waitForExistence(timeout: 15), "the card's Open window button")
         open.tap()
 
-        let text = app.descendants(matching: .any)["agentScreen.text"]
+        let text = app.descendants(matching: .any)["agentScreen.terminal"]
         XCTAssertTrue(text.waitForExistence(timeout: 10))
-        let arrived = NSPredicate(format: "label CONTAINS 'make test'")
+        let arrived = NSPredicate(format: "value CONTAINS 'make test'")
         expectation(for: arrived, evaluatedWith: text)
         waitForExpectations(timeout: 10)
         sleep(1)
@@ -66,7 +66,7 @@ final class AgentScreenUITests: XCTestCase {
         // New output on the daemon reaches the open window (pushed over
         // /ws by a daemon with the `screen` feature, else the next poll).
         status("POST", "/api/inject/screen", ["pane_id": pane, "screen": Self.screen + "\n• Ran go vet ./...\n"])
-        let updated = NSPredicate(format: "label CONTAINS 'Ran go vet'")
+        let updated = NSPredicate(format: "value CONTAINS 'Ran go vet'")
         expectation(for: updated, evaluatedWith: text)
         waitForExpectations(timeout: 10)
 
@@ -96,10 +96,10 @@ final class AgentScreenUITests: XCTestCase {
         field.tap()
         field.typeText("run the integration tests too")
         app.buttons["agentScreen.send"].tap()
-        let echoed = NSPredicate(format: "label CONTAINS 'run the integration tests too'")
+        let echoed = NSPredicate(format: "value CONTAINS 'run the integration tests too'")
         expectation(for: echoed, evaluatedWith: text)
         waitForExpectations(timeout: 10)
-        if app.keyboards.firstMatch.exists { app.descendants(matching: .any)["agentScreen.text"].tap() }
+        if app.keyboards.firstMatch.exists { app.descendants(matching: .any)["agentScreen.terminal"].tap() }
         sleep(1)
         shot(app, "agent-screen-sent")
     }
@@ -128,15 +128,15 @@ final class AgentScreenUITests: XCTestCase {
         let open = app.buttons["flock.agent.auth.window"]
         XCTAssertTrue(open.waitForExistence(timeout: 15))
         open.tap()
-        let text = app.descendants(matching: .any)["agentScreen.text"]
-        expectation(for: NSPredicate(format: "label CONTAINS 'make test'"), evaluatedWith: text)
+        let text = app.descendants(matching: .any)["agentScreen.terminal"]
+        expectation(for: NSPredicate(format: "value CONTAINS 'make test'"), evaluatedWith: text)
         waitForExpectations(timeout: 10)
         guard waitForEvent("web.screen.subscribe", timeout: 5) else {
             throw XCTSkip("the daemon on \(host) does not stream agent windows")
         }
 
         status("POST", "/api/inject/screen", ["pane_id": pane, "screen": Self.screen + "\n• Ran go vet ./...\n"])
-        expectation(for: NSPredicate(format: "label CONTAINS 'Ran go vet'"), evaluatedWith: text)
+        expectation(for: NSPredicate(format: "value CONTAINS 'Ran go vet'"), evaluatedWith: text)
         waitForExpectations(timeout: 5)
 
         app.navigationBars.buttons.element(boundBy: 0).tap()

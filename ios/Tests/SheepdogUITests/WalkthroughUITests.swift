@@ -116,7 +116,7 @@ final class WalkthroughUITests: XCTestCase {
             XCTFail("tapping a chip should open the agent window")
         }
         XCTAssertTrue(app.descendants(matching: .any)["agentScreen.state"].waitForExistence(timeout: 5), "the window should show the state")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 5), "the window should show the open question")
+        XCTAssertTrue(app.descendants(matching: .any)["approval.card"].waitForExistence(timeout: 5), "the window should show the open question (the approval card)")
         shot(app, "05-agent-window")
         tapWhenReady(app.navigationBars["auth"].buttons.firstMatch, "Back")
 

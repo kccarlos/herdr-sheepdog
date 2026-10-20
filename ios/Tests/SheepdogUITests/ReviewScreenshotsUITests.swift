@@ -74,9 +74,9 @@ final class ReviewScreenshotsUITests: XCTestCase {
         clearBanner(app)
         shot(app, "conversation-strip")
 
-        // The strip opens the agent window; its header has the question.
+        // The strip opens the agent window; its approval card is under the terminal.
         tapWhenReady(app.buttons["agent.chip.auth"], "the auth chip")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["approval.card"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "agent-window")
         tapWhenReady(app.navigationBars.buttons.firstMatch, "Back")
