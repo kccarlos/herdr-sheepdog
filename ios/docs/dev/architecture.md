@@ -321,6 +321,36 @@ SwiftTerm 1.99.0 agrees on all of them. `TerminalThroughputTests` prints the
 simulator's feed and draw times per frame (R2), which are no substitute for
 a device.
 
+### The terminal socket
+
+`TermSocket` (`SheepdogKit`) is the client side of the daemon's `/term`
+WebSocket ([phone-terminal.md](../../../docs/dev/design/phone-terminal.md)
+section 4). `TermMessages.swift` holds its JSON messages (`TermMessage`,
+which mirrors the daemon's `internal/termproto`), `TermCloseReason`, and the
+binary frames (`TermFrame` for output, `TermInput` for input, both
+big-endian). Use it only when `bot-ready` lists the `term` feature.
+
+- Same address and token as `/ws` (`Authorization: Bearer` on the upgrade),
+  path `/term`. `term-hello` goes first, and the connection is ready on
+  `term-ready`. Channels opened before that wait for it.
+- `open(target:mode:cols:rows:takeover:)` returns a channel id, or nil past
+  `term-ready.limits.channels`. Frames come out of `onEvent` as
+  `.frame(TermFrame)`, in order.
+- **Resync.** On a `seq` gap, or a diff before any full frame, the channel
+  drops diffs and sends `term-resize` at its current size (herdr answers
+  with a full frame). It asks again if no full frame arrives within a
+  second.
+- `resize(ch:cols:rows:)` is debounced by 150 ms. The same size is sent
+  too, because it asks for a repaint.
+- Input goes as binary frames of at most 64 KB; a long paste is split.
+- A dropped connection reconnects with backoff (1 s, doubling to 10 s) and
+  reopens every channel the daemon had not closed, at its latest size and
+  without takeover. A WebSocket ping goes every 20 s, and a ping still
+  unanswered at the next tick drops the connection.
+- `TermSocketTests` run it on a fake `TermTransport`. One test uses the real
+  URLSession transport against a local server, and one replays a recorded
+  herdr fixture through the socket into a grid.
+
 ## Settings ▸ Models
 
 `ModelsView` takes effect at once, like every Settings screen (there is
