@@ -1,0 +1,13 @@
+cjk ab x宽字符|
+vs16  y|
+zwj 👩‍💻|
+emoji z 🚀|
+flag 🇯🇵|
+mix a中b☁️c- d|
+box ┌──┬──┐│ok│└─┘|
+comb é ñ|
+amb ±§αβ→…|
+kana ｶﾀｶﾅ カタカナ 한글|
+TRUE BG BOLD|
+
+$

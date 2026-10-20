@@ -96,6 +96,8 @@ jobs:
             -configuration Debug \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -only-testing:SheepdogKitTests \
+            -disableAutomaticPackageResolution \
+            -skipPackagePluginValidation \
             -resultBundlePath "$RUNNER_TEMP/SheepdogKitTests.xcresult" \
             > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
           grep -E '^Test Suite|^Test Case .*(failed|error)|error:|^\*\* |Executed [0-9]+ test' "$RUNNER_TEMP/xcodebuild.log" | tail -n 300 || true

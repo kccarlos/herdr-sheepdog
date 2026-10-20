@@ -18,7 +18,7 @@ daemon and runs only when asked:
 ```sh
 TEST_RUNNER_SHEEPDOG_LAUNCH_SHOTS=/tmp/shots TEST_RUNNER_SHEEPDOG_LAUNCH_PREFIX=light \
   xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  test -only-testing:SheepdogUITests/LaunchReviewScreenshotsUITests
+  -skipPackagePluginValidation test -only-testing:SheepdogUITests/LaunchReviewScreenshotsUITests
 ```
 
 Set the simulator's appearance and text size first (`xcrun simctl ui <udid>

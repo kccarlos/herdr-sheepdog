@@ -108,7 +108,7 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ```sh
 xcodegen generate
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' build test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation build test
 ```
 
 The unit suite (`SheepdogKitTests`) has 437 tests. `LiveDaemonTests` and
@@ -129,7 +129,7 @@ SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-token SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-
 
 cd ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
-xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' test
+xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation test
 ```
 
 - `HistoryApprovalUITests` expects a restart divider, so restart the 7799

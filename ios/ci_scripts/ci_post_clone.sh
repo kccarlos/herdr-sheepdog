@@ -55,3 +55,17 @@ if [ ! -f Sheepdog.xcodeproj/xcshareddata/xcschemes/Sheepdog.xcscheme ]; then
     echo "error: xcodegen did not write the shared Sheepdog scheme" >&2
     exit 1
 fi
+
+# Swift packages. Xcode Cloud does not resolve packages itself: it needs the
+# Package.resolved that project.yml's postGenCommand copied into the project
+# during `xcodegen generate` (scripts/install-package-resolved.sh).
+resolved=Sheepdog.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+if [ ! -f "$resolved" ]; then
+    echo "error: $resolved is missing; xcodegen's postGenCommand did not run" >&2
+    exit 1
+fi
+# SwiftTerm runs a build-tool plugin (SwiftTermBuildInfoPlugin) that Xcode
+# asks a person to trust ("Trust & Enable") before the first build. Nobody
+# can click that on Xcode Cloud, so trust package plugins for this machine
+# (the setting's name is misspelled on Apple's side; keep it as is).
+defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES

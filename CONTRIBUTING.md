@@ -47,7 +47,7 @@ You need a Mac with Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGe
 ```sh
 cd ios
 xcodegen generate
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation test
 ```
 
 To build onto a device under your own Apple team, see [ios/README.md](ios/README.md#build-it-yourself). The UI tests that need a daemon skip themselves without one; to run them, start the fixture daemons described in [ios/docs/dev/status.md](ios/docs/dev/status.md#running-the-tests). Read [ios/docs/dev/architecture.md](ios/docs/dev/architecture.md) before you change the app.
