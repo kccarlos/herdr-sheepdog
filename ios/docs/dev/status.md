@@ -165,7 +165,7 @@ cannot produce.
 | ![](../screenshots/review-light-models.png) | ![](../screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
 | ![](../screenshots/review-light-models-notifications.png) | ![](../screenshots/review-dark-models-notifications.png) | Notifications: this phone, and the daemon's `GET /api/push/status`. |
 | ![](../screenshots/review-light-agent-screen.png) | ![](../screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
-| ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
+| ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C asks before it is sent (Esc no longer does, so Esc Esc works). |
 | ![](../screenshots/review-light-agent-screen-sent.png) | ![](../screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
 
 The Live Activity, drawn in the DEBUG gallery (`-sheepdogLiveActivityGallery`):

@@ -94,9 +94,10 @@ public enum AgentKey: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    /// Esc and Ctrl-C interrupt or dismiss what the agent is doing, so the
-    /// window asks before sending them.
-    public var needsConfirmation: Bool { self == .esc || self == .ctrlC }
+    /// Ctrl-C can end the agent's process, so the window asks before
+    /// sending it. Esc goes at once: Claude Code's Esc Esc (rewind) needs
+    /// two quick presses.
+    public var needsConfirmation: Bool { self == .ctrlC }
 
     /// The confirmation dialog's question.
     public func confirmationTitle(agent: String) -> String {
