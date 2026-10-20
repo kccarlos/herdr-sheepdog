@@ -603,6 +603,16 @@ func (a *App) wire() error {
 	if a.wref != nil {
 		deps.Watcher = a.wref
 	}
+	if a.hc != nil {
+		hc := a.hc
+		deps.Term = &web.TermDeps{
+			Bin: cfg.Herdr.Bin, Socket: cfg.Herdr.Socket,
+			Version: func(ctx context.Context) (string, error) {
+				p, err := hc.Ping(ctx)
+				return p.Version, err
+			},
+		}
+	}
 	if a.push != nil {
 		deps.Push = a.push
 	}

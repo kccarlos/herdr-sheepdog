@@ -77,6 +77,7 @@ binary version.
   | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
+  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a

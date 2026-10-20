@@ -73,6 +73,9 @@ const (
 	// FeatureFeedback: POST /api/feedback (the user's "that paused"
 	// marks) and the client's drain messages ("Feedback and drains").
 	FeatureFeedback = "feedback"
+	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
+	// listed only when herdr is new enough for its terminal bridge.
+	FeatureTerm = "term"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
