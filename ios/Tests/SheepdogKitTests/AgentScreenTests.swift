@@ -17,7 +17,7 @@ final class AgentScreenClientTests: XCTestCase {
         XCTAssertEqual(screen?.text, "$ make test\nok")
         XCTAssertEqual(screen?.hash, "9f2c0e1a44b7d310")
         let request = try XCTUnwrap(StubProtocol.seen.first)
-        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:7799/api/agents/w1:p2/screen?lines=200")
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:7799/api/agents/w1:p2/screen?lines=200&ansi=1")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
     }
 
@@ -26,7 +26,7 @@ final class AgentScreenClientTests: XCTestCase {
         let screen = try await StubProtocol.client().agentScreen(paneID: "w1:p2", lines: 50, hash: "abc")
         XCTAssertEqual(screen?.unchanged, true)
         XCTAssertNil(screen?.text)
-        XCTAssertEqual(StubProtocol.seen.first?.url?.query, "lines=50&hash=abc")
+        XCTAssertEqual(StubProtocol.seen.first?.url?.query, "lines=50&ansi=1&hash=abc")
     }
 
     func testPaneIDsArePathEscaped() throws {
@@ -187,7 +187,10 @@ final class AgentScreenModelTests: XCTestCase {
     func testCanSendWantsSomeTextWithinTheLimit() {
         XCTAssertFalse(AgentScreenModel.canSend("   "))
         XCTAssertTrue(AgentScreenModel.canSend("run the tests"))
-        XCTAssertFalse(AgentScreenModel.canSend(String(repeating: "x", count: 4001)))
+        XCTAssertTrue(AgentScreenModel.canSend(String(repeating: "x", count: 4001)), "the daemon takes 64 KB now")
+        XCTAssertTrue(AgentScreenModel.canSend(String(repeating: "x", count: 64 << 10)))
+        XCTAssertFalse(AgentScreenModel.canSend(String(repeating: "x", count: (64 << 10) + 1)))
+        XCTAssertFalse(AgentScreenModel.canSend(String(repeating: "界", count: 22_000)), "bytes, not characters")
     }
 
     func testAtBottomHasSlack() {

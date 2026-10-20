@@ -65,7 +65,8 @@ On the same Wi-Fi this just works. Away from home, see
   - ⋯ ▸ Switch agent opens another agent's window in place.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
-    refreshes every few seconds, and it says so. "herdr is not running"
+    refreshes every few seconds (in colour with an up-to-date sheepdog), and
+    it says so. "herdr is not running"
     means sheepdog cannot reach herdr: start herdr on your computer, then
     tap Try again.
 - **Cards.** Ask for a list or the details ("show me the failing tests",

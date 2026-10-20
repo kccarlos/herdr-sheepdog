@@ -144,6 +144,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// (`pane_id`; `ended` when the subscription is over).
     public var paneID: String?
     public var lines: Int?
+    /// `screen-subscribe` (feature `screen-ansi`): coloured frames.
+    public var ansi: Bool?
     public var screen: AgentScreen?
     public var ended: Bool?
     /// `visibility` (feature `cards`): the app is in the foreground, and
@@ -165,7 +167,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case stretchedMs = "stretched_ms"
         case audioState = "audio_state"
         case paneID = "pane_id"
-        case lines, screen, ended
+        case lines, ansi, screen, ended
         case visible, card
         case voiceScreen = "voice_screen"
     }
@@ -201,6 +203,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         message: String? = nil,
         paneID: String? = nil,
         lines: Int? = nil,
+        ansi: Bool? = nil,
         screen: AgentScreen? = nil,
         ended: Bool? = nil,
         visible: Bool? = nil,
@@ -237,6 +240,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.message = message
         self.paneID = paneID
         self.lines = lines
+        self.ansi = ansi
         self.screen = screen
         self.ended = ended
         self.visible = visible
@@ -306,8 +310,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
 
     /// Show me this agent's window (`screen` frames follow).
-    public static func screenSubscribe(paneID: String, lines: Int? = nil) -> WSMessage {
-        WSMessage(type: .screenSubscribe, paneID: paneID, lines: lines)
+    public static func screenSubscribe(paneID: String, lines: Int? = nil, ansi: Bool? = nil) -> WSMessage {
+        WSMessage(type: .screenSubscribe, paneID: paneID, lines: lines, ansi: ansi)
     }
     public static let screenUnsubscribe = WSMessage(type: .screenUnsubscribe)
 
