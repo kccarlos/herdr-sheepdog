@@ -78,6 +78,7 @@ binary version.
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
+  | `screen-ansi` | coloured window frames: `screen-subscribe {ansi: true}` and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
   | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
@@ -864,6 +865,19 @@ frame at once and then whenever the window changes.
   client**: a second subscribe replaces the first (to switch agents, or
   to get a fresh frame at once). Only agents the daemon tracks, as on
   the route.
+- **`screen-subscribe {pane_id, ansi: true}`** (feature `screen-ansi`)
+  asks for the coloured window instead: herdr's visible screen with its
+  SGR colours kept (`pane.read` format `ansi`), one line per row at the
+  pane's own width, and `lines` ignored. Its frames carry `ansi: true`.
+  `GET /api/agents/{pane_id}/screen?ansi=1` is the same read. The app
+  uses it when the live terminal (`term`, [term-contract.md](term-contract.md))
+  is not available, drawing it in the same terminal renderer.
+
+  ```json
+  {"type":"screen-subscribe","pane_id":"w1:p2","ansi":true}
+  {"type":"screen","screen":{"pane_id":"w1:p2","alias":"auth","spoken":"Auth fix","kind":"codex","state":"working","text":"\u001b[1;32m•\u001b[0m Running go test ./...","lines":1,"truncated":false,"hash":"77d1a90c3e2b4f05","ansi":true}}
+  ```
+
 - **`screen-unsubscribe`** ends it. Closing the window sends it; the
   connection ending (closed, replaced, refused, daemon shutdown) ends
   it too, and a reconnecting client subscribes again: nothing carries

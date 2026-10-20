@@ -79,6 +79,9 @@ const (
 	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
 	// listed only when herdr is new enough for its terminal bridge.
 	FeatureTerm = "term"
+	// FeatureScreenANSI: screen-subscribe {ansi:true} and ?ansi=1 on the
+	// screen route give the visible screen with SGR colours.
+	FeatureScreenANSI = "screen-ansi"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
@@ -163,6 +166,8 @@ type Screen struct {
 	Lines      int    `json:"lines"`
 	Truncated  bool   `json:"truncated"`
 	Hash       string `json:"hash"`
+	// ANSI marks Text as SGR-coloured lines (feature screen-ansi).
+	ANSI bool `json:"ansi,omitempty"`
 }
 
 // Card is a card on a card message: something the orchestrator put on
@@ -299,7 +304,9 @@ type Message struct {
 	// visibility (client→server): whether the client's screen is
 	// visible (the app in the foreground, the page not hidden) and its
 	// voice screen is the one in front. card (server→client): Card.
-	Visible     *bool `json:"visible,omitempty"`
+	Visible *bool `json:"visible,omitempty"`
+	// ANSI (screen-subscribe) asks for coloured frames (feature screen-ansi).
+	ANSI        *bool `json:"ansi,omitempty"`
 	VoiceScreen *bool `json:"voice_screen,omitempty"`
 	Card        *Card `json:"card,omitempty"`
 }

@@ -112,6 +112,20 @@ func (h *Herdr) Read(ctx context.Context, paneID string, source herdr.ReadSource
 	return herdr.ReadResult{PaneID: paneID, Source: source, Text: text, Truncated: len(text) < len(p.screen)}, nil
 }
 
+// ReadANSI implements supervisor.ANSIReader: a synthetic pane's screen
+// has no colours, so it is Read; a real one goes to the inner client
+// when it can keep them.
+func (h *Herdr) ReadANSI(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+	if _, ok := h.get(paneID); !ok && h.inner != nil {
+		if r, ok := h.inner.(interface {
+			ReadANSI(context.Context, string, herdr.ReadSource, int) (herdr.ReadResult, error)
+		}); ok {
+			return r.ReadANSI(ctx, paneID, source, lines)
+		}
+	}
+	return h.Read(ctx, paneID, source, lines)
+}
+
 // Prompt implements supervisor.Herdr: for a synthetic pane it records the
 // send and appends the text to the screen so a later Read shows it.
 func (h *Herdr) Prompt(ctx context.Context, paneID, text string) (herdr.AgentInfo, error) {

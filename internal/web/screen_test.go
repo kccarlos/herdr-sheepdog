@@ -234,3 +234,36 @@ func TestWSScreenNotInheritedByReplacement(t *testing.T) {
 	injectScreen(t, h, "changed")
 	b.expectNoScreen(150 * time.Millisecond)
 }
+
+// Feature screen-ansi: ?ansi=1 and screen-subscribe {ansi:true} keep the
+// colours (the app's snapshot window when the live terminal is not
+// available); the plain route still strips them.
+func TestScreenANSI(t *testing.T) {
+	h := newHarness(t, harnessOpts{screenInterval: 50 * time.Millisecond, screenMinGap: 10 * time.Millisecond})
+	trackWorking(t, h, "fake:1", "auth", "line one\n\x1b[1;32mgreen\x1b[0m line two")
+	var rest ScreenResponse
+	if code := h.getJSON(windowPath("fake:1", "screen")+"?ansi=1", &rest); code != http.StatusOK {
+		t.Fatalf("ansi screen = %d", code)
+	}
+	if !rest.ANSI || !strings.Contains(rest.Text, "\x1b[1;32mgreen\x1b[0m line two") || rest.Lines != 2 {
+		t.Fatalf("ansi screen = %+v", rest)
+	}
+	var plain ScreenResponse
+	h.getJSON(windowPath("fake:1", "screen"), &plain)
+	if plain.ANSI || strings.Contains(plain.Text, "\x1b") || plain.Hash == rest.Hash {
+		t.Fatalf("plain screen = %+v", plain)
+	}
+
+	c, features := readyClient(t, h)
+	if !slices.Contains(features, wsproto.FeatureScreenANSI) {
+		t.Fatalf("features %v lack %s", features, wsproto.FeatureScreenANSI)
+	}
+	on := true
+	m := wsproto.ScreenSubscribe("fake:1", 0)
+	m.ANSI = &on
+	c.send(m)
+	got := c.expect(wsproto.TypeScreen).Screen
+	if !got.ANSI || got.Text != rest.Text || got.Hash != rest.Hash {
+		t.Fatalf("ws ansi frame = %+v", got)
+	}
+}
