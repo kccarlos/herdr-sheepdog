@@ -375,6 +375,7 @@ final class SessionViewModel: ObservableObject {
         if !sameDaemon { saveCache(now: true) }
         client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
+        if demo == nil { termHub.update(endpoint: endpoint) }
         banner = nil
         hello = nil
         if !sameDaemon {
@@ -1471,6 +1472,37 @@ final class SessionViewModel: ObservableObject {
     func agentInput(paneID: String, keys: [AgentKey]) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
         return try await client.agentInput(paneID: paneID, keys: keys)
+    }
+
+    // MARK: - Live agent window (/term)
+
+    /// The app's one `/term` connection, shared by every open agent window
+    /// (`TermHub`). The demo's answers from its scripted sessions.
+    private(set) lazy var termHub: TermHub = {
+        if let demo {
+            #if DEBUG
+            let behavior = DebugLaunch.demoTerm
+            #else
+            let behavior = DemoTermTransport.Behavior.normal
+            #endif
+            return TermHub(endpoint: DemoDaemon.endpoint, makeTransport: { _ in
+                DemoTermTransport(behavior: behavior) { [weak demo] pane in demo?.agentScreen(paneID: pane) }
+            })
+        }
+        return TermHub(endpoint: settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1"))
+    }()
+
+    /// The features the last `bot-ready` listed, per daemon, so a window
+    /// opened while the voice session is not connected still knows about
+    /// `term`.
+    private var rememberedFeatures: [String: [String]] = [:]
+
+    /// Whether the agent window can go live (`/term`).
+    var termAvailability: TermAvailability {
+        if demo != nil { return .yes }
+        let key = settings.endpoint.map(ConversationCache.key(for:)) ?? ""
+        if case let .ready(_, _, features) = handshake { rememberedFeatures[key] = features }
+        return TermAvailability.from(handshake: handshake, remembered: rememberedFeatures[key])
     }
 
     // MARK: - New conversation

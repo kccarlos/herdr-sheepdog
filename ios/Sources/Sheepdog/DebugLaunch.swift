@@ -47,6 +47,13 @@ enum DebugLaunch {
         guard let i = arguments.firstIndex(of: "-sheepdogDemoLiveActivity"), i + 1 < arguments.count else { return nil }
         return SessionState(rawValue: arguments[i + 1])
     }
+    /// `-sheepdogDemoTerm busy|gone|herdr`: the demo's live window answers
+    /// every open that way, for screenshots and UI tests of the observe
+    /// banner and the error states.
+    static var demoTerm: DemoTermTransport.Behavior {
+        guard let i = arguments.firstIndex(of: "-sheepdogDemoTerm"), i + 1 < arguments.count else { return .normal }
+        return DemoTermTransport.Behavior(rawValue: arguments[i + 1]) ?? .normal
+    }
     /// The agent `-sheepdogDemoMarkdown` adds.
     static let markdownAgent = Agent(
         paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),

@@ -46,7 +46,28 @@ On the same Wi-Fi this just works. Away from home, see
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
 - **Agents.** Who is working, blocked or done, and a window onto each agent's
-  screen.
+  screen (below).
+- **Agent window.** "Open window" on an agent shows its live terminal,
+  sized to the phone, in the agent's own colours. While the window is open
+  the agent's pane on your computer takes the phone's size; it goes back
+  when you leave the window or the app goes to the background.
+  - **Pinch** to change the text size (⋯ ▸ Reset text size undoes it).
+    **Drag** to scroll back through the output, and **Latest** returns to
+    the bottom. A **tap** clicks, for programs that use the mouse.
+    **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
+  - The keys under the terminal send esc, tab, the arrows, control-C and
+    return straight to the agent. The field below sends a prompt, the same
+    as saying it. When the agent asks for approval, the approval card is
+    there too.
+  - **Another device has control** means another phone or iPad has this
+    window open. You can watch; Take over (it asks first) moves control to
+    this phone.
+  - ⋯ ▸ Switch agent opens another agent's window in place.
+  - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
+    on your computer. Otherwise the window is a snapshot of the screen that
+    refreshes every few seconds, and it says so. "herdr is not running"
+    means sheepdog cannot reach herdr: start herdr on your computer, then
+    tap Try again.
 - **Cards.** Ask for a list or the details ("show me the failing tests",
   "show me what auth is asking") while the app is open on the conversation,
   and the orchestrator puts them on your screen: a card with a table, a
