@@ -828,8 +828,9 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   himself. Exactly one of:
   - `{"text": "…", "submit": true}` — a prompt, sent as one submission
     (`agent.prompt`, text + Enter; `submit` defaults to true, `false` is
-    `400`). Text is trimmed, non-empty, at most 4 000 bytes. The agent's
-    `current_task` becomes the text. An agent waiting at an approval or
+    `400`). Text is trimmed, non-empty, at most 64 KB (a pasted log or
+    file reaches the agent whole). The agent's `current_task`, and the
+    orchestrator's note below, get its first 600 bytes. An agent waiting at an approval or
     question prompt refuses a prompt: `409` with the reason.
   - `{"keys": ["enter"]}` — up to 8 keys from the allow-list `enter`,
     `esc`, `ctrl+c`, `1`…`9`, `up`, `down`, `tab` (anything else is
