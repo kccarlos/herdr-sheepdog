@@ -75,6 +75,7 @@ func (s *Session) refreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			s.maybeHandover()
 			s.maybeRefresh()
 		}
 	}

@@ -52,9 +52,16 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		if ctx.Err() != nil {
 			return nil, false, ctx.Err()
 		}
-		s.log.Log(logSource, "voice.connect_error", "", map[string]any{
+		ev, p := "voice.connect_error", map[string]any{
 			"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "backend": s.cfg.Backend(), "error": err.Error(),
-		})
+		}
+		if isAlreadyConnected(err) {
+			// Expected on AI Studio while the old connection is still
+			// open (handover.go), not a failure: the caller hands over.
+			ev = "voice.handover"
+			p["step"], p["message"] = "refused", handoverMessage
+		}
+		s.log.Log(logSource, ev, "", p)
 		if !isRotatable(err) {
 			return nil, false, err
 		}
@@ -119,6 +126,7 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 		s.handle, s.handleGen = "", 0
 	}
 	s.freshWhy = ""
+	s.handoverDue, s.handoverWhy = time.Time{}, ""
 	resumeGen := s.resumeGen
 	s.status = voice.StatusConnected
 	pending := s.pending
@@ -188,6 +196,7 @@ func (s *Session) run(ctx context.Context) {
 	backoff := s.cfg.ReconnectBackoff
 	for {
 		var readErr error
+		afterGoAway := false
 		select {
 		case <-ctx.Done():
 			return
@@ -213,9 +222,15 @@ func (s *Session) run(ctx context.Context) {
 			s.log.Log(logSource, "voice.recycle", "", map[string]any{"reason": reason, "handle": handle})
 			s.proactiveReconnect(ctx, "recycle")
 			continue
+		case <-s.handoverReq:
+			if !s.handover(ctx, &backoff) {
+				return
+			}
+			continue
 		case r := <-s.readerExit:
 			s.mu.Lock()
 			stale := r.gen != s.connGen
+			afterGoAway = s.afterGoAwayLocked(r.gen)
 			s.mu.Unlock()
 			if stale {
 				continue
@@ -232,7 +247,11 @@ func (s *Session) run(ctx context.Context) {
 		if old != nil {
 			_ = old.Close()
 		}
-		s.log.Log(logSource, "voice.disconnected", "", map[string]any{"error": errString(readErr)})
+		dp := map[string]any{"error": errString(readErr)}
+		if afterGoAway {
+			dp["after_goaway"] = true
+		}
+		s.log.Log(logSource, "voice.disconnected", "", dp)
 		s.emit(voice.EventStatus{Status: voice.StatusReconnecting, Reason: "connection lost"})
 		if isRateLimited(readErr) {
 			// A 429 mid-session: cool down, then move to the next key.
@@ -245,7 +264,10 @@ func (s *Session) run(ctx context.Context) {
 			if len(s.cfg.APIKeys) > 1 {
 				s.rotateKey(readErr.Error())
 			}
-		} else if isServerInternalError(readErr) && s.hasHandle() {
+		} else if isServerInternalError(readErr) && s.hasHandle() && !afterGoAway {
+			// (After a GoAway the 1011 "Deadline expired" is the
+			// connection's announced end, and the handle outlives it:
+			// handover.go.)
 			// The server itself closed on an internal error (1011): a
 			// resumption handle across one is usually dead too, and paying
 			// for a resume attempt that will just fail with the same 1011
@@ -256,42 +278,59 @@ func (s *Session) run(ctx context.Context) {
 			s.dropHandle("server_internal_error")
 		}
 
-		resumeFailures := 0
-		for {
-			conn, resumed, err := s.connect(ctx)
-			if err == nil {
-				backoff = s.cfg.ReconnectBackoff
-				s.install(conn, resumed, true)
-				break
-			}
-			if ctx.Err() != nil {
-				return
-			}
+		if !s.reconnect(ctx, &backoff) {
+			return
+		}
+	}
+}
+
+// reconnect dials until a connection is installed, dropping a handle
+// the server keeps rejecting. It returns false when ctx ends.
+func (s *Session) reconnect(ctx context.Context, backoff *time.Duration) bool {
+	resumeFailures, refused := 0, 0
+	for {
+		conn, resumed, err := s.connect(ctx)
+		if err == nil {
+			*backoff = s.cfg.ReconnectBackoff
+			s.install(conn, resumed, true)
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		if !isAlreadyConnected(err) {
 			s.emit(voice.EventError{Err: err})
-			// A resumption handle the server keeps rejecting is dead (seen
-			// live: every attempt failed at setup with "Internal error
-			// encountered", ~30 s each, forever). Drop it after a couple of
-			// tries and reconnect fresh: install re-seeds it with the
-			// recent conversation (reseed.go) and the supervisor
-			// re-pushes the briefing on EventResumed{ContextLost:true}.
-			if s.hasHandle() && !isRateLimited(err) && !errors.Is(err, ErrAllKeysExhausted) {
-				resumeFailures++
-				if resumeFailures >= s.cfg.ResumeAttempts {
-					s.dropHandle(err.Error())
-					resumeFailures = 0
-				}
-			}
-			wait := backoff
-			if errors.Is(err, ErrAllKeysExhausted) || isRateLimited(err) {
-				wait = s.rateLimitWait(err)
+		}
+		// A resumption handle the server keeps rejecting is dead (seen
+		// live: every attempt failed at setup with "Internal error
+		// encountered", ~30 s each, forever). Drop it after a couple of
+		// tries and reconnect fresh: install re-seeds it with the
+		// recent conversation (reseed.go) and the supervisor
+		// re-pushes the briefing on EventResumed{ContextLost:true}.
+		// A refusal because the old connection still counts as open
+		// (handover.go) is the server lagging behind the close, not a
+		// dead handle: a few of those are retried first.
+		if s.hasHandle() && !isRateLimited(err) && !errors.Is(err, ErrAllKeysExhausted) {
+			if isAlreadyConnected(err) && refused < maxRefusedResumes {
+				refused++
 			} else {
-				backoff = min(backoff*2, 30*time.Second)
+				resumeFailures++
 			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(wait):
+			if resumeFailures >= s.cfg.ResumeAttempts {
+				s.dropHandle(err.Error())
+				resumeFailures, refused = 0, 0
 			}
+		}
+		wait := *backoff
+		if errors.Is(err, ErrAllKeysExhausted) || isRateLimited(err) {
+			wait = s.rateLimitWait(err)
+		} else {
+			*backoff = min(*backoff*2, 30*time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(wait):
 		}
 	}
 }
@@ -318,6 +357,12 @@ func (s *Session) rateLimitWait(err error) time.Duration {
 func (s *Session) proactiveReconnect(ctx context.Context, why string) bool {
 	conn, resumed, err := s.connect(ctx)
 	if err != nil {
+		if isAlreadyConnected(err) {
+			// One connection per session (AI Studio): close the old
+			// one first, at a quiet moment (handover.go).
+			s.scheduleHandover(why)
+			return false
+		}
 		s.emit(voice.EventError{Err: fmt.Errorf("%s reconnect: %w", why, err)})
 		return false
 	}

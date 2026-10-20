@@ -147,13 +147,21 @@ type Session struct {
 	turnDoneAt time.Time
 	// brief is the briefing ledger (briefing.go).
 	brief briefLedger
+	// goAwayGen is the connection that last received a GoAway, and
+	// goAwayDeadline when the server ends it; handoverDue, when set, is
+	// the latest moment for a break-before-make handover (handover.go).
+	goAwayGen      int
+	goAwayDeadline time.Time
+	handoverDue    time.Time
+	handoverWhy    string
 
-	readerExit chan readerResult
-	refreshReq chan refreshRequest
-	goAway     chan struct{}
-	recycle    chan string
-	kick       chan struct{}
-	dropReq    chan struct{}
+	readerExit  chan readerResult
+	refreshReq  chan refreshRequest
+	goAway      chan struct{}
+	handoverReq chan struct{}
+	recycle     chan string
+	kick        chan struct{}
+	dropReq     chan struct{}
 }
 
 type readerResult struct {
@@ -200,6 +208,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		refreshReq:  make(chan refreshRequest, 1),
 		owedReplies: map[string]time.Time{},
 		goAway:      make(chan struct{}, 1),
+		handoverReq: make(chan struct{}, 1),
 		recycle:     make(chan string, 1),
 		kick:        make(chan struct{}, 1),
 		dropReq:     make(chan struct{}, 1),
