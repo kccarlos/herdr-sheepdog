@@ -426,15 +426,41 @@ Barge-in sequence observed (client content sent while the model was counting):
   bypasses the daemon, still fails (re-run 2026-10-04: 0/8); run it after a
   model or backend change to see whether the platform changed.
 
-### GoAway (not observed — the smoke test did not run for the ~10 min limit)
+### GoAway
 
 Type: `LiveServerGoAway{TimeLeft time.Duration}`; wire `{"goAway":{"timeLeft":"10s"}}`
-(protobuf Duration string; the SDK's `UnmarshalJSON` converts it). Flow:
-on `GoAway`, mark the session draining, finish the current turn if possible,
-open the new connection with the saved handle, swap the sender, close the old
-one. The connection limit is enforced per connection; the resumable *session*
+(protobuf Duration string; the SDK's `UnmarshalJSON` converts it). The
+connection limit is enforced per connection; the resumable *session*
 outlives it. `Receive()` returning a close error without a preceding `GoAway`
 is the "unexpected drop" case — reconnect the same way.
+
+**Observed on AI Studio (`gemini-3.8-live`, live daemon log 2026-10-12..20):**
+the GoAway comes about 58 minutes after a connection opens, with
+`timeLeft` 50 s; Vertex sent one about every 9 minutes. At the deadline the
+server closes with `1011 (internal server error): Deadline expired before
+operation could complete`. **AI Studio allows one connection per session:**
+a resume dialled while the old connection is still open is refused with
+`close 1008 (policy violation): BidiGenerateContent session is already
+connected to an existing client`. A scratch repro (2026-10-20, idle, no
+audio) confirmed it: the overlapping resume was refused, the same handle
+resumed in 537 ms right after closing the old connection, and a fresh
+(handle-less) dial next to an open connection was accepted. Vertex accepted
+the overlapping resume.
+
+Until 2026-10-20 this cost the context of every AI Studio session once an
+hour: the make-before-break resume was refused (`ERROR voice.connect_error`),
+the old connection ran to the deadline, and its 1011 dropped the handle
+(`voice.handle_dropped {reason: server_internal_error}`), so the next
+connection started fresh from the recap. Not one GoAway resumed on AI Studio
+in those nine days. The daemon now hands over (`internal/voice/gemini/handover.go`):
+it still tries make-before-break first; on that refusal it logs
+`voice.handover {step: refused}` (no error), closes the old connection at the
+next quiet moment (5 s before the deadline at the latest), and resumes with
+the same handle; audio in the gap of about half a second is buffered and
+replayed. A 1011 after a GoAway no longer drops the handle. The second
+GoAway, on the resumed connection, still opens a fresh session by design
+("never resume a resumed session" above), so on AI Studio a session starts
+fresh about every two hours instead of every hour.
 
 ### Context window compression (accepted, effect not observable in a short run)
 

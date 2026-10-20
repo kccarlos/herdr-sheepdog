@@ -231,6 +231,19 @@ What is in:
   [`eval/anthropic-opus-2026-10-19.md`](eval/anthropic-opus-2026-10-19.md)
   and [`anthropic-adapter.md`](anthropic-adapter.md).
 - **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
+- **The hourly Gemini Live error on AI Studio lost the context; fixed, to
+  verify live:** every ~58 min the GoAway's make-before-break resume was
+  refused with 1008 "session is already connected to an existing client"
+  (`ERROR voice.connect_error`), the old connection ended at the deadline
+  with a 1011, and the 1011 rule dropped the handle, so every hour the voice
+  started fresh from the recap (no GoAway resumed on AI Studio, 2026-10-12..20).
+  The daemon now closes the old connection at a quiet moment and resumes
+  with the same handle (`voice.handover`; details in
+  [`gemini-live-notes.md`](gemini-live-notes.md#goaway)). To verify once the
+  live daemon runs it: `voice.handover {step: closing}` followed by
+  `voice.resume {resumed: true}`, and no `handle_dropped` at the GoAway.
+  The other `handle_dropped server_internal_error` lines (no GoAway before
+  them, a few a day) are real mid-session 1011s and still start fresh.
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.

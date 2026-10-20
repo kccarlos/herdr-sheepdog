@@ -263,7 +263,7 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 			text = "Voice session closed: " + p.Reason + "."
 		}
 		b.push(ev, "notice", text)
-	case "voice.connect", "voice.connect_error", "voice.recycle", "voice.stalled", "voice.disconnected", "voice.goaway":
+	case "voice.connect", "voice.connect_error", "voice.recycle", "voice.stalled", "voice.disconnected", "voice.goaway", "voice.handover":
 		b.closeAll() // dividers in /debug; not items here
 	case "voice.transcript.in":
 		b.dog = nil
