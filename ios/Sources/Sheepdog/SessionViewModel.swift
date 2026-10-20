@@ -154,6 +154,9 @@ final class SessionViewModel: ObservableObject {
         didSet { audio.setProvider(resolvedVoiceProvider) }
     }
     @Published private(set) var stateVoiceModel: String?
+    /// `/api/state`'s update notice (Settings shows one line for it); nil
+    /// on a daemon too old to report one.
+    @Published private(set) var update: UpdateInfo?
     @Published var showSettings = false
     /// A `sheepdog://pair` link that arrived from outside the app (the
     /// Camera app scanned `sheepdog pair`'s code), waiting for the user to
@@ -371,6 +374,7 @@ final class SessionViewModel: ObservableObject {
             health.clear()
             brainModels = nil
             daemonSettings = nil
+            update = nil
             approvalFlow.reset()
             loadCache()
             conversationChanged(save: false)
@@ -1172,6 +1176,7 @@ final class SessionViewModel: ObservableObject {
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
         stateVoiceModel = state.voiceModel
+        if update != state.update { update = state.update }
     }
 
     // MARK: - Conversation history
