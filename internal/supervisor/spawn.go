@@ -117,13 +117,23 @@ type spawnStart struct {
 	Kind string
 	// Model is the model flag, by voice only ("" for the CLI's default).
 	Model string
-	// Dir is a project's name or full path.
+	// Dir is a project's name or full path. The agent's pane is split
+	// from a workspace already there, unless NewSpace.
 	Dir string
+	// Space, instead of Dir, is the herdr workspace to start in (a pane
+	// split from one of its panes, in that pane's folder).
+	Space string
+	// NewSpace opens a new workspace in Dir even when one works there.
+	NewSpace bool
 	// Worktree, when set, is the branch of a fresh git worktree the
 	// agent starts in instead of the project folder.
 	Worktree string
 	// Text is the first instruction, sent once the agent is ready.
 	Text string
+	// Name is the agent's name, given once the launch is done in place
+	// of the placeholder ("" clears it: the agent keeps its computed
+	// spoken name).
+	Name string
 	// Via is who asked: "orchestrator" or "user" (a tap).
 	Via string
 	// Authorise, when set, runs under s.mu just before the rate cap is
@@ -140,6 +150,8 @@ type started struct {
 	// Where is what the user hears for the place ("bench", "a new
 	// worktree fix-login of bench").
 	Where string
+	// Name is spawnStart.Name: the herdr name the placeholder becomes.
+	Name string
 }
 
 // startAgent is the one start path: it resolves the directory, takes a
@@ -167,9 +179,27 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 	if err != nil {
 		return refuse("snapshot failed", fmt.Errorf("could not list herdr's workspaces: %w", err))
 	}
-	dir, reason, err := resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
-	if err != nil {
-		return refuse(reason, err)
+	var dir spawnDir
+	var reason string
+	if req.Space != "" {
+		// An open workspace: its own folder, which the directory rail
+		// allows as it is.
+		if dir, err = spaceDir(snap, req.Space); err != nil {
+			return refuse("no such space", err)
+		}
+	} else {
+		dir, reason, err = resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
+		if err != nil {
+			return refuse(reason, err)
+		}
+		if req.NewSpace {
+			dir.Pane = ""
+		}
+	}
+	if req.Worktree != "" {
+		if why, err := worktreeRefusal(ctx, dir, req.Worktree); err != nil {
+			return refuse(why, err)
+		}
 	}
 	// What authorised the start and the slot are taken before anything
 	// opens, under one lock: two calls racing cannot both spend the
@@ -218,25 +248,108 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 	s.waitShell(ctx, sp, pane.PaneID)
 	if err := sp.StartAgent(ctx, pane.PaneID, launchName(), req.Kind, spawnArgs(req.Kind, req.Model), spawnStartWait); err != nil {
 		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": req.Via, "error": err.Error()})
-		return started{}, &StartError{PaneID: pane.PaneID, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
+		return started{}, &StartError{PaneID: pane.PaneID, Reason: ReasonStartFailed, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
 	}
 	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
 	if req.Model != "" {
 		fields["model"] = req.Model
 	}
 	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, fields)
-	return started{PaneID: pane.PaneID, Dir: dir, Where: where}, nil
+	return started{PaneID: pane.PaneID, Dir: dir, Where: where, Name: req.Name}, nil
+}
+
+// spaceDir is the start place in workspace id: its first pane (split
+// from) and that pane's folder, named after the workspace.
+func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
+	label := snap.WorkspaceLabel(id)
+	var first herdr.PaneInfo
+	for _, p := range snap.Panes {
+		if p.WorkspaceID == id && (first.PaneID == "" || paneLess(p.PaneID, first.PaneID)) {
+			first = p
+		}
+	}
+	if first.PaneID == "" {
+		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
+	}
+	path := realDir(first.Cwd)
+	for _, w := range snap.Workspaces {
+		if w.WorkspaceID == id && w.Worktree != nil && w.Worktree.CheckoutPath != "" {
+			if p := realDir(w.Worktree.CheckoutPath); p != "" {
+				path = p
+			}
+		}
+	}
+	if path == "" {
+		return spawnDir{}, fmt.Errorf("the space %s has no folder", label)
+	}
+	if label == "" {
+		label = filepath.Base(path)
+	}
+	return spawnDir{Name: label, Path: path, Pane: first.PaneID}, nil
 }
 
 // StartError is a start that failed once its pane was open: the pane is
 // left at its shell prompt, so the user can open it and see why.
 type StartError struct {
 	PaneID string
+	// Reason is ReasonTimeout when herdr never reported the agent
+	// ready, else ReasonStartFailed.
+	Reason string
 	Err    error
 }
 
 func (e *StartError) Error() string { return e.Err.Error() }
 func (e *StartError) Unwrap() error { return e.Err }
+
+// The codes of a refused or failed start, for the app's own screens
+// (POST /api/agents "reason").
+const (
+	ReasonNotInstalled = "not_installed"
+	ReasonNotGit       = "not_git"
+	ReasonBranchExists = "branch_exists"
+	ReasonTimeout      = "timeout"
+	ReasonStartFailed  = "start_failed"
+)
+
+// ReasonError is a refused start with its code.
+type ReasonError struct {
+	Reason string
+	Err    error
+}
+
+func (e *ReasonError) Error() string { return e.Err.Error() }
+func (e *ReasonError) Unwrap() error { return e.Err }
+
+// worktreeRefusal says why dir cannot have a fresh worktree of branch
+// (with its reason code), or nil when it can.
+func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
+	g, isGit := gitInfo(dir.Path)
+	if !isGit {
+		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
+	}
+	if branchCheckedOut(ctx, g.root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	}
+	return "", nil
+}
+
+// branchCheckedOut reports whether branch (already checked by
+// validBranch) is checked out in one of the repository's worktrees, the
+// main checkout included: git cannot check it out a second time. An
+// existing branch checked out nowhere is fine, herdr's worktree.create
+// opens it.
+func branchCheckedOut(ctx context.Context, root, branch string) bool {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "branch refs/heads/"+branch {
+			return true
+		}
+	}
+	return false
+}
 
 // launchName is a fresh placeholder herdr name (state.LaunchNamePrefix).
 func launchName() string {
@@ -607,7 +720,8 @@ func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 // to the user as a daemon fact. Then, on both paths, it waits for the
 // watcher to put the agent in the roster and for it to sit idle at its
 // prompt (its trust question answered by the user through the normal
-// pending path), clears the placeholder herdr name, and sends the first
+// pending path), replaces the placeholder herdr name (with the user's
+// name for it, or nothing), and sends the first
 // instruction, when there is one, through the instruction send path
 // (sendInstruction's menu guard included).
 func (s *Supervisor) followStart(st started, kind, text string, waitLaunch bool) {
@@ -635,7 +749,7 @@ func (s *Supervisor) followStart(st started, kind, text string, waitLaunch bool)
 				// herdr refuses while the launch is pending; the next
 				// look tries again.
 				renames++
-				if r, can := s.herdr.(Renamer); !can || r.Rename(ctx, paneID, "") == nil {
+				if r, can := s.herdr.(Renamer); !can || r.Rename(ctx, paneID, st.Name) == nil {
 					named = false
 				}
 			}

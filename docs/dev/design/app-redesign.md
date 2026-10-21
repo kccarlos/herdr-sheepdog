@@ -683,45 +683,36 @@ old route or shape.
 3. **The chosen answer** (information). `last_block` records which option
    was chosen and how (voice or tap), for "Last question (answered)".
 4. **Title** (information). `Agent` carries `title`; the app decodes it.
-5. **Spaces and kinds** (plumbing and information). `GET /api/spaces`
-   replaces `GET /api/projects`, which is removed. It returns:
-   - `spaces`: herdr workspaces, each with id, name, path, git, branch,
-     whether it is a worktree, and the panes of its agents and shells;
-   - `folders`: project roots that have no space yet;
-   - `kinds: [{kind, name}]`: herdr's supported kinds that are on the PATH
-     the panes get. agy must appear when installed. This list is for the
-     app; the orchestrator's `brain.SpawnKinds` changes only with an eval.
-6. **Start** (plumbing and a rail). `POST /api/agents` takes
-   `{space | dir, kind, worktree?: {branch}, text?, name?}`.
-   - The daemon starts the agent with herdr's `agent.start`, which waits
-     until it is ready, then sends the text.
-   - It returns `{pane_id, spoken}`, so the app can open the window; on a
-     failure, the pane id (if any) and the reason, such as
-     `branch_exists`, `not_git`, `not_installed`, `timeout`.
-   - `UserNewAgent` and the orchestrator's `spawn()` share one start
-     helper that keeps the approval rule in code (code-health plan).
-7. **Space actions** (plumbing; close is a rail).
-   - `POST /api/spaces` takes `{dir, name?, worktree?: {branch}}`.
-   - `POST /api/spaces/{id}/rename` takes `{name}`.
-   - `POST /api/spaces/{id}/close` is refused while any agent in the space
-     is working or blocked.
-8. **Worktrees and wrap-up** (plumbing; run follows the shell switch).
-   - `GET /api/spaces/{id}/worktrees`, `POST /api/worktrees/open`,
-     `POST /api/worktrees/remove` (refuses a dirty checkout without
-     `force`).
-   - Saved wrap-up commands per space, stored on the daemon:
-     `GET`/`PUT /api/spaces/{id}/commands`.
-   - `POST /api/spaces/{id}/run` takes `{command}`. It makes a new pane,
-     calls `pane run` and returns the pane id. Run is shell-equivalent, so
-     it is refused when the computer's shell switch is off.
-9. **Push** (plumbing).
+5. **Spaces, kinds, start, space actions, worktrees and wrap-up**
+   (built 2026-10-21). The routes and their shapes are in
+   [ws-contract.md](../ws-contract.md#spaces) ("Spaces" and "Agent
+   actions"); that is the one place for them. In short:
+   - `GET /api/spaces` (replacing `GET /api/projects`): the spaces with
+     their agents, shells and saved commands, the free folders, and
+     `kinds: [{kind, name}]` (agy appears when installed). The
+     orchestrator's `brain.SpawnKinds` changes only with an eval.
+   - `POST /api/agents` takes `{kind, space}` or `{kind, dir, worktree?:
+     {branch}}`, plus `text?` and `name?`; one start helper with the
+     orchestrator's `spawn()`, through herdr's `agent.start`. It answers
+     once the agent is ready; a failure carries `reason` (`not_installed`,
+     `not_git`, `branch_exists`, `timeout`, `start_failed`) and the pane
+     id when one opened.
+   - `POST /api/spaces` takes `{dir, name?, worktree?: {branch}}`: a
+     space with no agent yet.
+   - Space rename and close (close refused while an agent there works or
+     waits, `409`); worktree list, open and remove (a dirty checkout needs
+     `force`), under `/api/spaces/{id}/…`.
+   - Wrap-up commands are saved per space on the daemon, one route each
+     to add, edit, delete and run a saved command; run opens a tab with
+     herdr's `pane run` and sits behind the shell switch.
+6. **Push** (plumbing).
    - Push payloads carry the computer id.
    - The Notification Service Extension adds the computer's name only when
      several computers are paired.
    - Each daemon registers with the relay on its own.
-10. **Live Activity:** app-only. The content state gains `computer` and up
+7. **Live Activity:** app-only. The content state gains `computer` and up
     to three `rows`.
-11. **⌃C:** app-only (5.8).
+8. **⌃C:** app-only (5.8).
 
 ## 10. App changes
 
