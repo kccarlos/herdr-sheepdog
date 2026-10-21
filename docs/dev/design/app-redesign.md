@@ -692,12 +692,13 @@ old route or shape.
      `kinds: [{kind, name}]` (agy appears when installed). The
      orchestrator's `brain.SpawnKinds` changes only with an eval.
    - `POST /api/agents` takes `{kind, space}` or `{kind, dir, worktree?:
-     {branch}}`, plus `text?`; one start helper with the orchestrator's
-     `spawn()`, through herdr's `agent.start`. It answers once the agent
-     is ready; a failure carries `reason` (`not_installed`, `not_git`,
-     `branch_exists`, `timeout`, `start_failed`) and the pane id when one
-     opened. A new space without an agent and a `name` for the new agent
-     are not built.
+     {branch}}`, plus `text?` and `name?`; one start helper with the
+     orchestrator's `spawn()`, through herdr's `agent.start`. It answers
+     once the agent is ready; a failure carries `reason` (`not_installed`,
+     `not_git`, `branch_exists`, `timeout`, `start_failed`) and the pane
+     id when one opened.
+   - `POST /api/spaces` takes `{dir, name?, worktree?: {branch}}`: a
+     space with no agent yet.
    - Space rename and close (close refused while an agent there works or
      waits, `409`); worktree list, open and remove (a dirty checkout needs
      `force`), under `/api/spaces/{id}/…`.

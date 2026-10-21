@@ -66,6 +66,7 @@ type Supervisor interface {
 type AgentActions interface {
 	UserNewAgent(ctx context.Context, req supervisor.NewAgentRequest) (supervisor.NewAgentResult, error)
 	Spaces(ctx context.Context) (supervisor.SpacesView, error)
+	NewSpace(ctx context.Context, dir, name, branch string) (string, string, error)
 	RenameSpace(ctx context.Context, id, name string) (string, error)
 	CloseSpace(ctx context.Context, id string) (string, error)
 	SpaceWorktrees(ctx context.Context, id string) (herdr.WorktreeList, error)
@@ -364,6 +365,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
 	s.mux.HandleFunc("POST /api/agents/{pane_id}/input", s.authFunc(s.handleAgentInput, false))
 	s.mux.HandleFunc("GET /api/spaces", s.authFunc(s.handleSpaces, false))
+	s.mux.HandleFunc("POST /api/spaces", s.authFunc(s.handleNewSpace, false))
 	s.mux.HandleFunc("POST /api/spaces/{id}/rename", s.authFunc(s.handleSpaceRename, false))
 	s.mux.HandleFunc("POST /api/spaces/{id}/close", s.authFunc(s.handleSpaceClose, false))
 	s.mux.HandleFunc("GET /api/spaces/{id}/worktrees", s.authFunc(s.handleSpaceWorktrees, false))

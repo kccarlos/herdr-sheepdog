@@ -130,6 +130,10 @@ type spawnStart struct {
 	Worktree string
 	// Text is the first instruction, sent once the agent is ready.
 	Text string
+	// Name is the agent's name, given once the launch is done in place
+	// of the placeholder ("" clears it: the agent keeps its computed
+	// spoken name).
+	Name string
 	// Via is who asked: "orchestrator" or "user" (a tap).
 	Via string
 	// Authorise, when set, runs under s.mu just before the rate cap is
@@ -146,6 +150,8 @@ type started struct {
 	// Where is what the user hears for the place ("bench", "a new
 	// worktree fix-login of bench").
 	Where string
+	// Name is spawnStart.Name: the herdr name the placeholder becomes.
+	Name string
 }
 
 // startAgent is the one start path: it resolves the directory, takes a
@@ -191,12 +197,8 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 		}
 	}
 	if req.Worktree != "" {
-		g, isGit := gitInfo(dir.Path)
-		if !isGit {
-			return refuse("not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)})
-		}
-		if branchExists(ctx, g.root, req.Worktree) {
-			return refuse("branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s already exists in %s; open its worktree instead", ErrUserAction, req.Worktree, g.repo)})
+		if why, err := worktreeRefusal(ctx, dir, req.Worktree); err != nil {
+			return refuse(why, err)
 		}
 	}
 	// What authorised the start and the slot are taken before anything
@@ -253,7 +255,7 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 		fields["model"] = req.Model
 	}
 	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, fields)
-	return started{PaneID: pane.PaneID, Dir: dir, Where: where}, nil
+	return started{PaneID: pane.PaneID, Dir: dir, Where: where, Name: req.Name}, nil
 }
 
 // spaceDir is the start place in workspace id: its first pane (split
@@ -318,10 +320,35 @@ type ReasonError struct {
 func (e *ReasonError) Error() string { return e.Err.Error() }
 func (e *ReasonError) Unwrap() error { return e.Err }
 
-// branchExists reports whether the repository at root has a local
-// branch named branch (already checked by validBranch).
-func branchExists(ctx context.Context, root, branch string) bool {
-	return exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+// worktreeRefusal says why dir cannot have a fresh worktree of branch
+// (with its reason code), or nil when it can.
+func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
+	g, isGit := gitInfo(dir.Path)
+	if !isGit {
+		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
+	}
+	if branchCheckedOut(ctx, g.root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	}
+	return "", nil
+}
+
+// branchCheckedOut reports whether branch (already checked by
+// validBranch) is checked out in one of the repository's worktrees, the
+// main checkout included: git cannot check it out a second time. An
+// existing branch checked out nowhere is fine, herdr's worktree.create
+// opens it.
+func branchCheckedOut(ctx context.Context, root, branch string) bool {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "branch refs/heads/"+branch {
+			return true
+		}
+	}
+	return false
 }
 
 // launchName is a fresh placeholder herdr name (state.LaunchNamePrefix).
@@ -693,7 +720,8 @@ func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 // to the user as a daemon fact. Then, on both paths, it waits for the
 // watcher to put the agent in the roster and for it to sit idle at its
 // prompt (its trust question answered by the user through the normal
-// pending path), clears the placeholder herdr name, and sends the first
+// pending path), replaces the placeholder herdr name (with the user's
+// name for it, or nothing), and sends the first
 // instruction, when there is one, through the instruction send path
 // (sendInstruction's menu guard included).
 func (s *Supervisor) followStart(st started, kind, text string, waitLaunch bool) {
@@ -721,7 +749,7 @@ func (s *Supervisor) followStart(st started, kind, text string, waitLaunch bool)
 				// herdr refuses while the launch is pending; the next
 				// look tries again.
 				renames++
-				if r, can := s.herdr.(Renamer); !can || r.Rename(ctx, paneID, "") == nil {
+				if r, can := s.herdr.(Renamer); !can || r.Rename(ctx, paneID, st.Name) == nil {
 					named = false
 				}
 			}

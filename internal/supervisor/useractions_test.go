@@ -86,7 +86,7 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 		reason string
 	}{
 		"not git":       {NewAgentRequest{Kind: "codex", Dir: "app", Worktree: "fix-app"}, ReasonNotGit},
-		"branch exists": {NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "main"}, ReasonBranchExists},
+		"checked out":   {NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "main"}, ReasonBranchExists},
 		"not installed": {NewAgentRequest{Kind: "gemini", Dir: "bench"}, ReasonNotInstalled},
 	} {
 		_, err := w.sup.UserNewAgent(context.Background(), c.req)
@@ -97,6 +97,18 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 	}
 	if len(w.params("worktree.create")) != 1 {
 		t.Error("a refused worktree reached herdr")
+	}
+	// An existing branch checked out nowhere opens (herdr checks it out).
+	if out, err := exec.Command("git", "-C", w.bench, "branch", "spare").CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v: %s", err, out)
+	}
+	_, err = w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "spare"})
+	var spareErr *ReasonError
+	if errors.As(err, &spareErr) {
+		t.Errorf("spare branch refused: %v", err)
+	}
+	if len(w.params("worktree.create")) != 2 {
+		t.Error("the spare branch did not reach herdr")
 	}
 }
 
@@ -110,6 +122,25 @@ func gitRepo(t *testing.T, dir string) {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
+	}
+}
+
+// The user's name for a new agent replaces the placeholder once the
+// launch is done.
+func TestUserNewAgentTakesTheUsersName(t *testing.T) {
+	w := newSpawnWorld(t)
+	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "claude", Dir: "bench", Name: "  Login   fix "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.detect(res.PaneID, "", herdr.StateIdle)
+	waitFor(t, func() bool { return len(w.params("agent.rename")) == 1 }, "agent.rename")
+	if r := w.params("agent.rename")[0]; r["target"] != "w20:p1" || r["name"] != "Login fix" {
+		t.Errorf("agent.rename = %v", r)
+	}
+	long := NewAgentRequest{Kind: "claude", Dir: "bench", Name: strings.Repeat("x", 61)}
+	if _, err := w.sup.UserNewAgent(context.Background(), long); !errors.Is(err, ErrUserAction) {
+		t.Errorf("a 61-character name: %v", err)
 	}
 }
 

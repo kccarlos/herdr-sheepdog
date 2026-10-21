@@ -42,6 +42,17 @@ func actionStatus(err error) int {
 	}
 }
 
+// actionErrorBody is {"error"}, plus "reason" when the app has its own
+// screen for it (supervisor.ReasonError).
+func actionErrorBody(err error) map[string]string {
+	body := map[string]string{"error": err.Error()}
+	var re *supervisor.ReasonError
+	if errors.As(err, &re) {
+		body["reason"] = re.Reason
+	}
+	return body
+}
+
 // newAgentRequest is the body of POST /api/agents: an open space, or
 // the folder of a new space (with an optional fresh worktree).
 type newAgentRequest struct {
@@ -52,6 +63,7 @@ type newAgentRequest struct {
 		Branch string `json:"branch"`
 	} `json:"worktree"`
 	Text string `json:"text"`
+	Name string `json:"name"`
 }
 
 // handleNewAgent is POST /api/agents: it answers once the agent is ready.
@@ -65,7 +77,7 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Dir: strings.TrimSpace(req.Dir), Text: strings.TrimSpace(req.Text)}
+	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Dir: strings.TrimSpace(req.Dir), Text: strings.TrimSpace(req.Text), Name: req.Name}
 	if req.Worktree != nil {
 		in.Worktree = strings.TrimSpace(req.Worktree.Branch)
 		if in.Worktree == "" {
@@ -92,12 +104,7 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Log(logSource, "web.agent_action", "", fields)
-		body := map[string]string{"error": err.Error()}
-		var re *supervisor.ReasonError
-		if errors.As(err, &re) {
-			body["reason"] = re.Reason
-		}
-		writeJSON(w, actionStatus(err), body)
+		writeJSON(w, actionStatus(err), actionErrorBody(err))
 		return
 	}
 	s.log.Log(logSource, "web.agent_action", res.PaneID, fields)

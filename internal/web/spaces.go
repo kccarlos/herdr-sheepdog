@@ -69,6 +69,45 @@ func (s *Server) handleSpaceRename(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleNewSpace is POST /api/spaces {"dir", "name"?, "worktree"?:
+// {"branch"}}: a space with no agent yet.
+func (s *Server) handleNewSpace(w http.ResponseWriter, r *http.Request) {
+	a, ok := s.agentActions(w)
+	if !ok {
+		return
+	}
+	var req struct {
+		Dir      string `json:"dir"`
+		Name     string `json:"name"`
+		Worktree *struct {
+			Branch string `json:"branch"`
+		} `json:"worktree"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	branch := ""
+	if req.Worktree != nil {
+		if branch = strings.TrimSpace(req.Worktree.Branch); branch == "" {
+			writeError(w, http.StatusBadRequest, "a new worktree needs a branch")
+			return
+		}
+	}
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	space, pane, err := a.NewSpace(ctx, strings.TrimSpace(req.Dir), req.Name, branch)
+	fields := map[string]any{"action": "new", "space": space, "worktree": branch != ""}
+	if err != nil {
+		fields["error"] = err.Error()
+		s.log.Log(logSource, "web.space_action", "", fields)
+		writeJSON(w, actionStatus(err), actionErrorBody(err))
+		return
+	}
+	s.log.Log(logSource, "web.space_action", pane, fields)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "space": space, "pane_id": pane})
+}
+
 // handleSpaceClose is POST /api/spaces/{id}/close (the app confirmed it).
 func (s *Server) handleSpaceClose(w http.ResponseWriter, r *http.Request) {
 	s.spaceAction(w, r, "close", func(ctx context.Context, a AgentActions, id string) (map[string]any, error) {

@@ -87,6 +87,9 @@ type NewAgentRequest struct {
 	Worktree string
 	// Text is the optional first prompt, sent once the agent is ready.
 	Text string
+	// Name is the optional name the user gave the agent (1 to 60
+	// characters, as for a rename).
+	Name string
 }
 
 // NewAgentResult is the started agent's pane and the line to show.
@@ -109,6 +112,10 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 	if _, ok := s.herdr.(Spawner); !ok {
 		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
 	}
+	req.Name = strings.Join(strings.Fields(req.Name), " ")
+	if len(req.Name) > 60 {
+		return refuse("bad name", fmt.Errorf("%w: a name is at most 60 characters", ErrUserAction))
+	}
 	if len(req.Text) > WindowMaxText {
 		return refuse("text too long", fmt.Errorf("%w: the first prompt is at most %d bytes", ErrUserAction, WindowMaxText))
 	}
@@ -127,7 +134,7 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 	if !slices.Contains(kinds, req.Kind) {
 		return refuse("bad kind", &ReasonError{Reason: ReasonNotInstalled, Err: fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", "))})
 	}
-	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Space == "", Worktree: req.Worktree, Text: req.Text, Via: "user"})
+	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Space == "", Worktree: req.Worktree, Text: req.Text, Name: req.Name, Via: "user"})
 	if err != nil {
 		return NewAgentResult{}, err
 	}

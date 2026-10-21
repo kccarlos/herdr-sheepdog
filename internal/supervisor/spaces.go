@@ -296,6 +296,73 @@ func busyIn(sp Space) string {
 	return ""
 }
 
+// NewSpace opens a space with no agent in it (POST /api/spaces): a new
+// herdr workspace in dir (a project's name or full path, resolved as
+// for a new agent), or, with branch, in a fresh worktree of its
+// repository. name is the space's name (default: the folder's, or the
+// branch). It returns the space and its first pane, a shell.
+func (s *Supervisor) NewSpace(ctx context.Context, dir, name, branch string) (spaceID, paneID string, err error) {
+	sp, ok := s.herdr.(Spawner)
+	if !ok {
+		return "", "", errors.New("spaces are not available here")
+	}
+	refuse := func(reason string, err error) (string, string, error) {
+		s.log.Log(logSource, "supervisor.space_refused", "", map[string]any{"reason": reason, "dir": filepath.Base(dir), "worktree": branch != ""})
+		return "", "", err
+	}
+	name = strings.Join(strings.Fields(name), " ")
+	switch {
+	case strings.TrimSpace(dir) == "":
+		return refuse("no dir", fmt.Errorf("%w: give the new space's folder", ErrUserAction))
+	case utf8.RuneCountInString(name) > 60:
+		return refuse("bad name", fmt.Errorf("%w: a name is at most 60 characters", ErrUserAction))
+	case branch != "" && !validBranch(branch):
+		return refuse("bad branch", fmt.Errorf("%w: %q is not a branch name (letters, digits and . _ / -)", ErrUserAction, branch))
+	}
+	snap, err := sp.Snapshot(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("could not list herdr's workspaces: %w", err)
+	}
+	d, reason, err := resolveSpawnDir(dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
+	if err != nil {
+		return refuse(reason, err)
+	}
+	label := name
+	if label == "" {
+		label = d.Name
+		if branch != "" {
+			label = branch
+		}
+	}
+	var pane herdr.PaneInfo
+	if branch != "" {
+		wt, ok := s.herdr.(WorktreeCreator)
+		if !ok {
+			return refuse("no worktrees", errors.New("this herdr cannot make worktrees"))
+		}
+		if why, err := worktreeRefusal(ctx, d, branch); err != nil {
+			return refuse(why, err)
+		}
+		pane, err = wt.CreateWorktree(ctx, d.Path, branch, label)
+	} else {
+		pane, err = sp.CreateWorkspace(ctx, d.Path, label)
+	}
+	if err == nil && pane.PaneID == "" {
+		err = errors.New("herdr returned no pane")
+	}
+	if err != nil {
+		s.log.Log(logSource, "supervisor.space_error", "", map[string]any{"action": "new", "dir": d.Name, "worktree": branch != "", "error": err.Error()})
+		return "", "", fmt.Errorf("could not open a space in %s: %w", d.Name, err)
+	}
+	s.log.Log(logSource, "supervisor.space_new", pane.PaneID, map[string]any{"space": pane.WorkspaceID, "dir": d.Name, "worktree": branch != ""})
+	where := d.Name
+	if branch != "" {
+		where = "a new worktree " + branch + " of " + d.Name
+	}
+	s.tellBrain(fmt.Sprintf("the user opened a new space %s in %s from the phone", label, where))
+	return pane.WorkspaceID, pane.PaneID, nil
+}
+
 // RenameSpace sets a space's name (herdr's workspace label).
 func (s *Supervisor) RenameSpace(ctx context.Context, id, name string) (string, error) {
 	name = strings.Join(strings.Fields(name), " ")

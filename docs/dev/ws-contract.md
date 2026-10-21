@@ -872,7 +872,7 @@ phone").
 
 | Route | Body | Answer |
 |---|---|---|
-| `POST /api/agents` | `{"kind", "space"}` or `{"kind", "dir", "worktree"?: {"branch"}}`, plus `"text"?` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
+| `POST /api/agents` | `{"kind", "space"}` or `{"kind", "dir", "worktree"?: {"branch"}}`, plus `"text"?`, `"name"?` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
 | `POST /api/agents/{pane_id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/interrupt` | | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/close` | | `{"ok": true, "spoken"}` |
@@ -890,15 +890,18 @@ phone").
   about a minute): `spoken` is "Claude is ready in bench.", or, with
   `blocked: true`, the agent started at a question (its first-run trust
   question), which is now an open question. `text`, at most 64 KB, is
-  sent once the agent sits idle at its prompt. Counts toward the cap of
+  sent once the agent sits idle at its prompt. `name` (at most 60
+  characters) becomes the agent's herdr name once the launch is done, as
+  a rename would. Counts toward the cap of
   3 new agents per 10 minutes. A start that fails once its pane is open
   is `502` `{"error", "pane_id", "reason"}`: the pane is left at its
   shell prompt, so the app can offer to open it.
 - **Reasons.** An error the app has its own screen for carries
   `reason`: `not_installed` (`400`, the kind is not installed here),
   `not_git` (`400`, a worktree for a folder outside git),
-  `branch_exists` (`400`, the branch is already there: open its worktree
-  instead), `timeout` (`502`, herdr never saw the agent running) and
+  `branch_exists` (`400`, the branch is already checked out in a
+  worktree of the repository: open that worktree instead; an existing
+  branch checked out nowhere is fine), `timeout` (`502`, herdr never saw the agent running) and
   `start_failed` (`502`, herdr refused `agent.start`).
 - **Rename** takes 1 to 60 characters, as the orchestrator's rename does
   (herdr gets its own spelling when it allows one).
@@ -921,6 +924,7 @@ and told to the orchestrator in one line.
 | Route | Body | Answer |
 |---|---|---|
 | `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": [{"kind", "name"}], "worktrees": true}` |
+| `POST /api/spaces` | `{"dir", "name"?, "worktree"?: {"branch"}}` | `{"ok": true, "space", "pane_id"}` |
 | `POST /api/spaces/{id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/spaces/{id}/close` | | `{"ok": true, "spoken"}` |
 | `GET /api/spaces/{id}/worktrees` | | `{"repo", "repo_root", "worktrees": [{"path", "branch", "label", "is_linked_worktree", "is_detached", "is_prunable", "is_bare", "open_workspace_id"}]}` |
@@ -953,6 +957,12 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
   "Antigravity"). They are the kinds a tap may start; the orchestrator
   still starts only Claude and Codex. `worktrees` says this herdr can make
   a fresh worktree (a space's `git` says whether its folder can have one).
+- **New space** opens a space with no agent yet: a herdr workspace in
+  `dir` (resolved as for a new agent), or a fresh worktree of its
+  repository with `worktree`, named `name` (at most 60 characters;
+  default the folder's name, or the branch). It answers with the space
+  and its first pane, a shell. Errors and `reason` codes are those of a
+  new agent.
 - **Close** ends the space and every pane in it (`workspace.close`). It is
   refused (`409`) while one of its agents is working or waiting for an
   answer, and for the space sheepdog itself runs in (`403`). The app

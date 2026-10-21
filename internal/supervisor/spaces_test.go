@@ -95,6 +95,34 @@ func TestUserNewAgentInASpaceOrANewOne(t *testing.T) {
 	}
 }
 
+// A space with no agent: a workspace in the folder, or a fresh worktree;
+// a worktree outside git is refused with its reason.
+func TestNewSpace(t *testing.T) {
+	w := newSpawnWorld(t)
+	space, pane, err := w.sup.NewSpace(context.Background(), "bench", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if space == "" || pane == "" {
+		t.Errorf("space %q pane %q", space, pane)
+	}
+	created := w.params("workspace.create")
+	if len(created) != 1 || created[0]["cwd"] != w.bench || created[0]["label"] != "bench" {
+		t.Fatalf("workspace.create = %v", created)
+	}
+	if len(w.startParams()) != 0 {
+		t.Error("an agent was started")
+	}
+	if _, _, err := w.sup.NewSpace(context.Background(), "app", "", "fix-app"); err == nil {
+		t.Error("a worktree outside git opened")
+	} else if re := (*ReasonError)(nil); !errors.As(err, &re) || re.Reason != ReasonNotGit {
+		t.Errorf("err = %v", err)
+	}
+	if _, _, err := w.sup.NewSpace(context.Background(), "/etc", "", ""); err == nil {
+		t.Error("a space opened outside the project roots")
+	}
+}
+
 func TestRenameAndCloseSpace(t *testing.T) {
 	w := spacesWorld(t)
 	if _, err := w.sup.RenameSpace(context.Background(), "w3", " "); !errors.Is(err, ErrUserAction) {
