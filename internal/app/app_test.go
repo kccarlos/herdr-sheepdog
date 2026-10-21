@@ -181,7 +181,7 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 		t.Fatalf("inject = %d", resp.StatusCode)
 	}
 	body, _ = json.Marshal(map[string]any{"text": "yes"})
-	resp, err = http.Post(url+"/api/inject/utterance", "application/json", bytes.NewReader(body))
+	resp, err = http.Post(url+"/api/utterance", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

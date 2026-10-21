@@ -226,7 +226,7 @@ accessibility text sizes. The voice bar stays in place.
   these are backfilled from `GET /api/events?type=…`.
 - **Typed input.** The keyboard button in the voice bar (or ⋯ ▸ Type
   instead) opens `TypeBar`. Sending goes through
-  `POST /api/inject/utterance`, and the words and the answer arrive in the
+  `POST /api/utterance`, and the words and the answer arrive in the
   conversation the usual way.
 - **Health** (`HealthView`, `DaemonHealth`), pushed from the connection
   chip's popover and from Settings ▸ Diagnostics; its error count is the
@@ -775,7 +775,7 @@ voice speaks; questions get answers.
 - **`DemoDaemon` + `DemoURLProtocol` (SheepdogKit, tested):** the world
   behind the daemon's own routes and JSON (`/api/hello`, `/api/state`,
   `/api/conversation`, `/api/events`, `/events` held open as SSE,
-  `/api/pending/answer`, `/api/inject/utterance`,
+  `/api/pending/answer`, `/api/utterance`,
   `/api/agents/{pane}/screen` and `/input`). `DaemonClient` reaches it on
   a `URLSession` whose protocol class answers everything for the host
   `demo.sheepdog.invalid`, so no request leaves the app. The agent list,

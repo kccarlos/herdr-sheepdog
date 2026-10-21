@@ -608,6 +608,27 @@ plain HTTP.
 public key hash; a client never trusts this field, only the pin in the
 pairing code.
 
+### Loopback-only routes
+
+These answer only this computer (`127.0.0.0/8`, `::1`) and refuse any
+other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
+{path, remote}`), whatever it presents:
+
+- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`;
+- debug and internal: the `/debug` page, `/api/inject/*` (blocked,
+  pane, done, state, screen, remove), `POST /api/herdr/event` (the herdr
+  hooks), `POST /api/prompts/reload`, `GET /api/voice/system_prompt`,
+  `GET /api/brain/{transcript,context,system_prompt}`,
+  `GET /api/context/*`, `/testdata/*`;
+- the setup page, `/setup` and `/api/setup/*`, which also wants a change
+  from its own origin as JSON (*Auth*).
+
+The model picker (`GET /api/brain/models`, `PUT /api/brain/model`) and
+the composer stay open to the app. Typed text goes to
+`POST /api/utterance {"text":"…"}` (it was `/api/inject/utterance`).
+`internal/web/routes_test.go` walks the route table: every route has
+exactly one of public, device, loopback or setup.
+
 ## Pairing
 
 `sheepdog pair` prints, and `/debug` (State → Pair a phone; `GET

@@ -352,97 +352,177 @@ func New(deps Deps) (*Server, error) {
 	return s, nil
 }
 
+// access is who may use a route (docs/dev/design/security.md "Loopback-only
+// routes"). Every route is registered through routeTable with one, so a
+// new route without a rule cannot exist.
+type access int
+
+const (
+	// accessPublic: anyone who reaches the port (the pages and
+	// /api/hello).
+	accessPublic access = iota
+	// accessDevice: a paired device, or this computer itself.
+	accessDevice
+	// accessUpgrade: accessDevice for /ws, /events and /term, which
+	// also take ?token= (a browser cannot set a header there).
+	accessUpgrade
+	// accessLoopback: this computer only (debug and internal routes).
+	accessLoopback
+	// accessSetup: this computer only, and a change only from this
+	// origin as JSON (the setup page, setup.go localOnly).
+	accessSetup
+)
+
+// route is one entry of the route table.
+type route struct {
+	pattern string
+	access  access
+	h       http.HandlerFunc
+}
+
 func (s *Server) routes() error {
-	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/voice", http.StatusFound)
-	})
-	for _, name := range []string{"voice", "debug", "static"} {
-		if err := s.static(name); err != nil {
-			return err
-		}
-	}
-	// GET /api/hello and POST /api/login stay public (docs/dev/ws-contract.md
-	// "Auth"): a client has to reach them to learn it found a sheepdog
-	// daemon and to trade a token for the cookie in the first place.
-	// Everything else that reads or acts on daemon state goes through
-	// s.authFunc. /ws and /events also accept ?token=: a browser cannot
-	// set a header on a WebSocket or EventSource request.
-	s.mux.HandleFunc("GET /api/hello", s.handleHello)
-	s.mux.HandleFunc("GET /api/pair", s.authFunc(s.handlePair, false))
-	s.mux.HandleFunc("GET /api/pair/qr.svg", s.authFunc(s.handlePairQR, false))
-	s.mux.HandleFunc("POST /api/login", s.handleLogin)
-	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
-	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
-	s.mux.HandleFunc("GET /term", s.authFunc(s.handleTerm, true))
-	s.mux.HandleFunc("POST /api/shells/{pane_id}/close", s.authFunc(s.handleShellClose, false))
-	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
-	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
-	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/input", s.authFunc(s.handleAgentInput, false))
-	s.mux.HandleFunc("GET /api/spaces", s.authFunc(s.handleSpaces, false))
-	s.mux.HandleFunc("POST /api/spaces", s.authFunc(s.handleNewSpace, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/rename", s.authFunc(s.handleSpaceRename, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/close", s.authFunc(s.handleSpaceClose, false))
-	s.mux.HandleFunc("GET /api/spaces/{id}/worktrees", s.authFunc(s.handleSpaceWorktrees, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/worktrees/open", s.authFunc(s.handleWorktreeOpen, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/worktree/remove", s.authFunc(s.handleWorktreeRemove, false))
-	s.mux.HandleFunc("GET /api/spaces/{id}/commands", s.authFunc(s.handleSpaceCommands, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/commands", s.authFunc(s.handleSaveCommand, false))
-	s.mux.HandleFunc("PUT /api/spaces/{id}/commands/{cid}", s.authFunc(s.handleSaveCommand, false))
-	s.mux.HandleFunc("DELETE /api/spaces/{id}/commands/{cid}", s.authFunc(s.handleDeleteCommand, false))
-	s.mux.HandleFunc("POST /api/spaces/{id}/commands/{cid}/run", s.authFunc(s.handleRunCommand, false))
-	s.mux.HandleFunc("POST /api/agents", s.authFunc(s.handleNewAgent, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/rename", s.authFunc(s.handleAgentRename, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/interrupt", s.authFunc(s.handleAgentInterrupt, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/close", s.authFunc(s.handleAgentClose, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/attachments", s.authFunc(s.handleAttachment, false))
-	s.mux.HandleFunc("GET /api/agents/{pane_id}/changes", s.authFunc(s.handleChanges, false))
-	s.mux.HandleFunc("GET /api/agents/{pane_id}/changes/{path...}", s.authFunc(s.handleChangeDiff, false))
-	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
-	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
-	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))
-	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
-	s.mux.HandleFunc("GET /api/voice/providers", s.authFunc(s.handleVoiceProviders, false))
-	s.mux.HandleFunc("PUT /api/voice/provider", s.authFunc(s.handleSetVoiceProvider, false))
-	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
-	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
-	s.mux.HandleFunc("POST /api/pending/cancel", s.authFunc(s.handleCancel, false))
-	s.mux.HandleFunc("POST /api/pending/answer", s.authFunc(s.handlePendingAnswer, false))
-	s.mux.HandleFunc("POST /api/inject/blocked", s.authFunc(s.handleInjectBlocked, false))
-	s.mux.HandleFunc("POST /api/inject/pane", s.authFunc(s.handleInjectPane, false))
-	s.mux.HandleFunc("POST /api/inject/done", s.authFunc(s.handleInjectDone, false))
-	s.mux.HandleFunc("POST /api/inject/state", s.authFunc(s.handleInjectState, false))
-	s.mux.HandleFunc("POST /api/inject/screen", s.authFunc(s.handleInjectScreen, false))
-	s.mux.HandleFunc("POST /api/inject/remove", s.authFunc(s.handleInjectRemove, false))
-	s.mux.HandleFunc("POST /api/inject/utterance", s.authFunc(s.handleUtterance, false))
-	s.mux.HandleFunc("POST /api/herdr/event", s.authFunc(s.handleHerdrEvent, false))
-	s.mux.HandleFunc("POST /api/prompts/reload", s.authFunc(s.handleReloadPrompts, false))
-	s.mux.HandleFunc("GET /api/brain/transcript", s.authFunc(s.handleBrainTranscript, false))
-	s.mux.HandleFunc("GET /api/brain/context", s.authFunc(s.handleBrainContext, false))
-	s.mux.HandleFunc("GET /api/brain/system_prompt", s.authFunc(s.handleBrainSystemPrompt, false))
-	s.mux.HandleFunc("GET /api/brain/models", s.authFunc(s.handleBrainModels, false))
-	s.mux.HandleFunc("PUT /api/brain/model", s.authFunc(s.handleSetBrainModel, false))
-	s.mux.HandleFunc("GET /api/context/brain", s.authFunc(s.handleContextBrain, false))
-	s.mux.HandleFunc("GET /api/context/voice", s.authFunc(s.handleContextVoice, false))
-	s.mux.HandleFunc("GET /api/context/timeline", s.authFunc(s.handleContextTimeline, false))
-	s.mux.HandleFunc("POST /api/push/register", s.authFunc(s.handlePushRegister, false))
-	s.mux.HandleFunc("DELETE /api/push/register", s.authFunc(s.handlePushUnregister, false))
-	s.mux.HandleFunc("GET /api/push/status", s.authFunc(s.handlePushStatus, false))
-	s.mux.HandleFunc("POST /api/feedback", s.authFunc(s.handleFeedback, false))
-	if err := s.setupRoutes(); err != nil {
+	table, err := s.routeTable()
+	if err != nil {
 		return err
 	}
-	if s.deps.DevTestdataDir != "" {
-		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
-			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
-		})
-		if s.deps.DevBrainDir != "" {
-			s.mux.HandleFunc("GET /testdata/brain/{name}", func(w http.ResponseWriter, r *http.Request) {
-				s.serveFixture(w, r, s.deps.DevBrainDir, ".jsonl", "application/x-ndjson")
-			})
-		}
+	for _, rt := range table {
+		s.mux.HandleFunc(rt.pattern, s.wrap(rt.access, rt.h))
 	}
 	return nil
+}
+
+// wrap puts the access check for a in front of h.
+func (s *Server) wrap(a access, h http.HandlerFunc) http.HandlerFunc {
+	switch a {
+	case accessDevice:
+		return s.authFunc(h, false)
+	case accessUpgrade:
+		return s.authFunc(h, true)
+	case accessLoopback:
+		return s.loopbackOnly(h)
+	case accessSetup:
+		return s.localOnly(h)
+	}
+	return h
+}
+
+// loopbackOnly refuses any caller but this computer with 403
+// {"error":"loopback_only"} (the guard has already checked the Host).
+func (s *Server) loopbackOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.kindOf(r.RemoteAddr) != "loopback" {
+			s.log.Log(logSource, "web.loopback_only", "", map[string]any{"path": r.URL.Path, "remote": r.RemoteAddr})
+			writeError(w, http.StatusForbidden, "loopback_only")
+			return
+		}
+		h(w, r)
+	}
+}
+
+// routeTable is every route the daemon serves, with who may use it.
+func (s *Server) routeTable() ([]route, error) {
+	t := []route{
+		{"GET /{$}", accessPublic, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/voice", http.StatusFound)
+		}},
+	}
+	for _, p := range []struct {
+		name string
+		a    access
+	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}} {
+		pages, err := s.staticRoutes(p.name, p.a)
+		if err != nil {
+			return nil, err
+		}
+		t = append(t, pages...)
+	}
+	t = append(t,
+		// Public: a client has to reach /api/hello to learn it found a
+		// sheepdog daemon before it can authenticate at all.
+		route{"GET /api/hello", accessPublic, s.handleHello},
+		route{"POST /api/login", accessPublic, s.handleLogin},
+
+		// A paired device: the app and the voice page. /ws, /events and
+		// /term authenticate before the upgrade like any other request.
+		route{"GET /events", accessUpgrade, s.handleEvents},
+		route{"GET /ws", accessUpgrade, s.hub.handle},
+		route{"GET /term", accessUpgrade, s.handleTerm},
+		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
+		route{"GET /api/state", accessDevice, s.handleState},
+		route{"GET /api/agents", accessDevice, s.handleAgents},
+		route{"GET /api/agents/{pane_id}/screen", accessDevice, s.handleAgentScreen},
+		route{"POST /api/agents/{pane_id}/input", accessDevice, s.handleAgentInput},
+		route{"GET /api/spaces", accessDevice, s.handleSpaces},
+		route{"POST /api/spaces", accessDevice, s.handleNewSpace},
+		route{"POST /api/spaces/{id}/rename", accessDevice, s.handleSpaceRename},
+		route{"POST /api/spaces/{id}/close", accessDevice, s.handleSpaceClose},
+		route{"GET /api/spaces/{id}/worktrees", accessDevice, s.handleSpaceWorktrees},
+		route{"POST /api/spaces/{id}/worktrees/open", accessDevice, s.handleWorktreeOpen},
+		route{"POST /api/spaces/{id}/worktree/remove", accessDevice, s.handleWorktreeRemove},
+		route{"GET /api/spaces/{id}/commands", accessDevice, s.handleSpaceCommands},
+		route{"POST /api/spaces/{id}/commands", accessDevice, s.handleSaveCommand},
+		route{"PUT /api/spaces/{id}/commands/{cid}", accessDevice, s.handleSaveCommand},
+		route{"DELETE /api/spaces/{id}/commands/{cid}", accessDevice, s.handleDeleteCommand},
+		route{"POST /api/spaces/{id}/commands/{cid}/run", accessDevice, s.handleRunCommand},
+		route{"POST /api/agents", accessDevice, s.handleNewAgent},
+		route{"POST /api/agents/{pane_id}/rename", accessDevice, s.handleAgentRename},
+		route{"POST /api/agents/{pane_id}/interrupt", accessDevice, s.handleAgentInterrupt},
+		route{"POST /api/agents/{pane_id}/close", accessDevice, s.handleAgentClose},
+		route{"POST /api/agents/{pane_id}/attachments", accessDevice, s.handleAttachment},
+		route{"GET /api/agents/{pane_id}/changes", accessDevice, s.handleChanges},
+		route{"GET /api/agents/{pane_id}/changes/{path...}", accessDevice, s.handleChangeDiff},
+		route{"GET /api/events", accessDevice, s.handleEventsTail},
+		route{"GET /api/conversation", accessDevice, s.handleConversation},
+		route{"POST /api/conversation/reset", accessDevice, s.handleConversationReset},
+		route{"POST /api/utterance", accessDevice, s.handleUtterance},
+		route{"GET /api/voice/providers", accessDevice, s.handleVoiceProviders},
+		route{"PUT /api/voice/provider", accessDevice, s.handleSetVoiceProvider},
+		route{"GET /api/brain/models", accessDevice, s.handleBrainModels},
+		route{"PUT /api/brain/model", accessDevice, s.handleSetBrainModel},
+		route{"GET /api/settings", accessDevice, s.handleGetSettings},
+		route{"PUT /api/settings", accessDevice, s.handlePutSettings},
+		route{"POST /api/pending/cancel", accessDevice, s.handleCancel},
+		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
+		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
+		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
+		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
+		route{"POST /api/feedback", accessDevice, s.handleFeedback},
+
+		// This computer only: pairing, debug and internal routes.
+		route{"GET /api/pair", accessLoopback, s.handlePair},
+		route{"GET /api/pair/qr.svg", accessLoopback, s.handlePairQR},
+		route{"POST /api/inject/blocked", accessLoopback, s.handleInjectBlocked},
+		route{"POST /api/inject/pane", accessLoopback, s.handleInjectPane},
+		route{"POST /api/inject/done", accessLoopback, s.handleInjectDone},
+		route{"POST /api/inject/state", accessLoopback, s.handleInjectState},
+		route{"POST /api/inject/screen", accessLoopback, s.handleInjectScreen},
+		route{"POST /api/inject/remove", accessLoopback, s.handleInjectRemove},
+		route{"POST /api/herdr/event", accessLoopback, s.handleHerdrEvent},
+		route{"POST /api/prompts/reload", accessLoopback, s.handleReloadPrompts},
+		route{"GET /api/voice/system_prompt", accessLoopback, s.handleSystemPrompt},
+		route{"GET /api/brain/transcript", accessLoopback, s.handleBrainTranscript},
+		route{"GET /api/brain/context", accessLoopback, s.handleBrainContext},
+		route{"GET /api/brain/system_prompt", accessLoopback, s.handleBrainSystemPrompt},
+		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
+		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
+		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+	)
+	setup, err := s.setupRoutes()
+	if err != nil {
+		return nil, err
+	}
+	t = append(t, setup...)
+	if s.deps.DevTestdataDir != "" {
+		t = append(t, route{"GET /testdata/{name}", accessLoopback, func(w http.ResponseWriter, r *http.Request) {
+			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
+		}})
+		if s.deps.DevBrainDir != "" {
+			t = append(t, route{"GET /testdata/brain/{name}", accessLoopback, func(w http.ResponseWriter, r *http.Request) {
+				s.serveFixture(w, r, s.deps.DevBrainDir, ".jsonl", "application/x-ndjson")
+			}})
+		}
+	}
+	return t, nil
 }
 
 // serveFixture serves one fixture by base name from dir (dev mode only).
@@ -459,28 +539,25 @@ func (s *Server) serveFixture(w http.ResponseWriter, r *http.Request, dir, ext, 
 	http.ServeFile(w, r, filepath.Join(dir, name))
 }
 
-// static serves /<name> (index.html) and /<name>/* from the embedded FS.
-func (s *Server) static(name string) error {
-	return s.staticWrapped(name, func(h http.HandlerFunc) http.HandlerFunc { return h })
-}
-
-// staticWrapped is static with every request going through wrap.
-func (s *Server) staticWrapped(name string, wrap func(http.HandlerFunc) http.HandlerFunc) error {
+// staticRoutes serves /<name> (index.html) and /<name>/* from the
+// embedded FS, with access a.
+func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 	sub, err := fs.Sub(static.FS, name)
 	if err != nil {
-		return fmt.Errorf("web: embedded %s: %w", name, err)
+		return nil, fmt.Errorf("web: embedded %s: %w", name, err)
 	}
 	files := http.FileServerFS(sub)
 	serve := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}
-	s.mux.HandleFunc("GET /"+name, wrap(func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "/"
-		serve(w, r)
-	}))
-	s.mux.Handle("GET /"+name+"/", wrap(http.StripPrefix("/"+name, http.HandlerFunc(serve)).ServeHTTP))
-	return nil
+	return []route{
+		{"GET /" + name, a, func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = "/"
+			serve(w, r)
+		}},
+		{"GET /" + name + "/", a, http.StripPrefix("/"+name, http.HandlerFunc(serve)).ServeHTTP},
+	}, nil
 }
 
 // OnVoiceEvent forwards a voice session event to the connected browser

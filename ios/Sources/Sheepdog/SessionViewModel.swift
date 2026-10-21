@@ -111,7 +111,7 @@ final class SessionViewModel: ObservableObject {
     /// it), optimistic (shown) until then.
     @Published private(set) var conversationResetSupported = true
     @Published var banner: Banner?
-    /// Typed input (`POST /api/inject/utterance`): in flight, and the
+    /// Typed input (`POST /api/utterance`): in flight, and the
     /// daemon's refusal if it had one.
     @Published private(set) var sendingTyped = false
     @Published var typedError: String?
@@ -1411,7 +1411,7 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Typed input
 
     /// The text field under the conversation: says `text` as if spoken,
-    /// through `POST /api/inject/utterance`, which records it as typed
+    /// through `POST /api/utterance`, which records it as typed
     /// user input (the rail takes it like a transcript). The
     /// conversation shows it from `/events` (or the next history sync when
     /// not connected). Returns true when the daemon took it.

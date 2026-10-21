@@ -66,7 +66,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         post("/api/inject/state", ["pane_id": "p-busy", "state": "working"])
         post("/api/inject/blocked", ["pane_id": "p-idle", "alias": "web", "kind": "claude", "screen": "Idle"])
         post("/api/inject/state", ["pane_id": "p-idle", "state": "idle"])
-        post("/api/inject/utterance", ["text": "how is auth doing"])
+        post("/api/utterance", ["text": "how is auth doing"])
         post("/api/inject/blocked", ["pane_id": "p-auth", "alias": "auth", "kind": "codex", "screen": Self.longApproval])
         selectPane(app, "conversation")
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15))
@@ -148,7 +148,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(mic, "Unmute")
 
         // A worker asks, with a long command and long options.
-        post("/api/inject/utterance", ["text": "how is auth doing"])
+        post("/api/utterance", ["text": "how is auth doing"])
         post("/api/inject/blocked", ["pane_id": "p-auth", "alias": "auth", "kind": "codex", "screen": Self.longApproval])
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15))
         sleep(3)
