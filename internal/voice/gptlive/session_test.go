@@ -264,6 +264,8 @@ func TestLoudAudioOpensOnlyForAttachedClient(t *testing.T) {
 	if len(raw) < 900 {
 		t.Fatalf("replayed chunk %d bytes, want ~960 (640 samples × 1.5 × 2)", len(raw))
 	}
+	// voice.session_open is logged after the replay, once Live is set.
+	waitFor(t, "session_open logged", func() bool { return len(l.find("voice.session_open")) > 0 })
 	if got := l.find("voice.session_open"); len(got) != 1 || got[0]["reason"] != "audio" {
 		t.Fatalf("session_open %v", got)
 	}
