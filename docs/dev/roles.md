@@ -208,6 +208,12 @@ about who asked stay in code (`internal/supervisor` `useractions.go`):
   workspace's own directory; a fresh worktree's branch is a plain branch
   name; new agents count toward the runaway cap;
 - only tracked agents are renamed, stopped or closed;
+- a space (a herdr workspace, `spaces.go`) is closed only while none of
+  its agents is working or blocked, and never the one sheepdog runs in;
+  only a linked worktree is removed, not while an agent there is busy,
+  and not with uncommitted changes unless the user forces it; running a
+  saved wrap-up command is shell-equivalent and sits behind the phone
+  shell's gate;
 - Close skips the protected-agent rail, because the app asks the user to
   confirm with the agent's name (what `protected_ok` stands for), but the
   pane sheepdog itself runs in is always refused.

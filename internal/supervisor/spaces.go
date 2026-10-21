@@ -246,14 +246,14 @@ func gitInfo(dir string) (gitCheckout, bool) {
 }
 
 // space finds workspace id in a fresh snapshot.
-func (s *Supervisor) space(ctx context.Context, id string) (herdr.Snapshot, Space, error) {
+func (s *Supervisor) space(ctx context.Context, id string) (Space, error) {
 	sp, ok := s.herdr.(Spawner)
 	if !ok {
-		return herdr.Snapshot{}, Space{}, errors.New("spaces are not available here")
+		return Space{}, errors.New("spaces are not available here")
 	}
 	snap, err := sp.Snapshot(ctx)
 	if err != nil {
-		return herdr.Snapshot{}, Space{}, fmt.Errorf("could not list herdr's workspaces: %w", err)
+		return Space{}, fmt.Errorf("could not list herdr's workspaces: %w", err)
 	}
 	rows := map[string]state.Agent{}
 	for _, a := range s.store.List() {
@@ -261,10 +261,10 @@ func (s *Supervisor) space(ctx context.Context, id string) (herdr.Snapshot, Spac
 	}
 	for _, w := range snap.Workspaces {
 		if w.WorkspaceID == id {
-			return snap, spaceOf(snap, w, rows), nil
+			return spaceOf(snap, w, rows), nil
 		}
 	}
-	return snap, Space{}, ErrNoSuchSpace
+	return Space{}, ErrNoSuchSpace
 }
 
 func (s *Supervisor) spaceHost() (SpaceHost, error) {
@@ -295,7 +295,7 @@ func (s *Supervisor) RenameSpace(ctx context.Context, id, name string) (string, 
 	if err != nil {
 		return "", err
 	}
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -314,7 +314,7 @@ func (s *Supervisor) CloseSpace(ctx context.Context, id string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -366,7 +366,7 @@ func (s *Supervisor) SpaceWorktrees(ctx context.Context, id string) (herdr.Workt
 	if err != nil {
 		return herdr.WorktreeList{}, err
 	}
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return herdr.WorktreeList{}, err
 	}
@@ -426,7 +426,7 @@ func (s *Supervisor) RemoveWorktree(ctx context.Context, id string, force bool) 
 	if err != nil {
 		return "", err
 	}
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -567,7 +567,7 @@ func checkWrapUp(name, command string) (string, string, error) {
 
 // SpaceCommands lists space id's saved commands.
 func (s *Supervisor) SpaceCommands(ctx context.Context, id string) ([]WrapUp, error) {
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +580,7 @@ func (s *Supervisor) SaveCommand(ctx context.Context, id, cmdID, name, command s
 	if err != nil {
 		return WrapUp{}, err
 	}
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return WrapUp{}, err
 	}
@@ -629,7 +629,7 @@ func wrapUpIndex(list []WrapUp, id string) int {
 
 // DeleteCommand removes one of space id's commands.
 func (s *Supervisor) DeleteCommand(ctx context.Context, id, cmdID string) error {
-	_, sp, err := s.space(ctx, id)
+	sp, err := s.space(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -666,7 +666,7 @@ func (s *Supervisor) RunCommand(ctx context.Context, id, cmdID string) (string, 
 	if !ok {
 		return "", errors.New("spaces are not available here")
 	}
-	_, space, err := s.space(ctx, id)
+	space, err := s.space(ctx, id)
 	if err != nil {
 		return "", err
 	}

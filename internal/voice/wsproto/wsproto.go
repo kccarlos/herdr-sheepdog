@@ -82,8 +82,8 @@ const (
 	// FeatureScreenANSI: screen-subscribe {ansi:true} and ?ansi=1 on the
 	// screen route give the visible screen with SGR colours.
 	FeatureScreenANSI = "screen-ansi"
-	// FeatureAgentActions: the user's own agent actions — GET
-	// /api/projects, POST /api/agents (new agent) and POST
+	// FeatureAgentActions: the user's own agent and space actions — GET
+	// /api/spaces and the /api/spaces/{id}/… routes, POST /api/agents (new agent) and POST
 	// /api/agents/{pane_id}/rename|interrupt|close.
 	FeatureAgentActions = "agent-actions"
 )

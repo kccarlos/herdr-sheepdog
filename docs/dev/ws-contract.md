@@ -872,33 +872,28 @@ phone").
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /api/projects` | | `{"kinds": ["claude", "codex", "agy"], "projects": [{"name", "path", "open", "git"}], "worktree": true}` |
-| `POST /api/agents` | `{"kind", "dir", "worktree"?, "text"?}` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
+| `POST /api/agents` | `{"kind", "space"}` or `{"kind", "new_space": {"dir", "worktree"?: {"branch"}}}`, plus `"text"?` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
 | `POST /api/agents/{pane_id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/interrupt` | | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/close` | | `{"ok": true, "spoken"}` |
 
-- **Projects** are the directories a new agent may start in: every open
-  workspace's directory, then each folder directly inside
-  `supervisor.project_roots`. `open` says a workspace already works there
-  (the new pane is split from it); `git` says a fresh worktree is
-  possible; `worktree` says this herdr can make one.
-- **Kinds** are the agent kinds herdr supports (its agent manifests)
-  whose executable is on the daemon's PATH, in herdr's order.
-- **New agent.** `kind` is one of `kinds`; `dir` is a project's name
-  or full path, resolved as for the orchestrator (inside a project root,
-  or an open workspace's own directory). With `worktree` (a branch name:
-  letters, digits and `. _ / -`), herdr's `worktree.create` makes the
-  branch's worktree in that repository and opens a workspace there
-  instead. herdr's `agent.start` starts the agent in the new shell, and
-  the answer comes once herdr reports it ready (up to about a minute):
-  `spoken` is "Claude is ready in bench.", or, with `blocked: true`, the
-  agent started at a question (its first-run trust question), which is
-  now an open question. `text`, at most 64 KB, is sent once the agent
-  sits idle at its prompt. Counts toward the cap of 3 new agents per
-  10 minutes. A start that fails once its pane is open is `502`
-  `{"error", "pane_id"}`: the pane is left at its shell prompt, so the
-  app can offer to open it.
+- **New agent.** `kind` is one of the `kinds` of `GET /api/spaces`
+  ([Spaces](#spaces)). With `space` (a space's `id`) the agent joins that
+  space: its pane is split from the space's first pane, in the space's
+  folder. With `new_space` a new space opens in `dir`, a folder's name or
+  full path resolved as for the orchestrator (inside a project root, or
+  an open space's own folder), even when a space already works there.
+  With `worktree` (a branch name: letters, digits and `. _ / -`), herdr's
+  `worktree.create` makes the branch's worktree in that repository and
+  the new space opens there. herdr's `agent.start` starts the agent in
+  the new shell, and the answer comes once herdr reports it ready (up to
+  about a minute): `spoken` is "Claude is ready in bench.", or, with
+  `blocked: true`, the agent started at a question (its first-run trust
+  question), which is now an open question. `text`, at most 64 KB, is
+  sent once the agent sits idle at its prompt. Counts toward the cap of
+  3 new agents per 10 minutes. A start that fails once its pane is open
+  is `502` `{"error", "pane_id"}`: the pane is left at its shell prompt,
+  so the app can offer to open it.
 - **Rename** takes 1 to 60 characters, as the orchestrator's rename does
   (herdr gets its own spelling when it allows one).
 - **Interrupt** stops the current turn the way the orchestrator's
@@ -907,6 +902,71 @@ phone").
 - **Close** ends the agent's pane (`pane.close`). The app confirms it with
   the agent's name first. The pane sheepdog itself runs in is refused.
 
+## Spaces
+
+Feature `agent-actions`, same errors and logging as [Agent actions](#agent-actions)
+(`404` also for a space or command that does not exist, `409` for a
+close or removal refused while an agent there is busy, or a dirty
+worktree). A **space** is a herdr workspace: a folder with its agents and
+shells. Each action is logged as `web.space_action {action, space}` and
+`supervisor.space_*` / `supervisor.worktree_*` / `supervisor.wrapup_*`,
+and told to the orchestrator in one line.
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": ["claude", "codex", "agy"], "worktrees": true}` |
+| `POST /api/spaces/{id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
+| `POST /api/spaces/{id}/close` | | `{"ok": true, "spoken"}` |
+| `GET /api/spaces/{id}/worktrees` | | `{"repo", "repo_root", "worktrees": [{"path", "branch", "label", "is_linked_worktree", "is_detached", "is_prunable", "is_bare", "open_workspace_id"}]}` |
+| `POST /api/spaces/{id}/worktrees/open` | `{"path"}` or `{"branch"}` | `{"ok": true, "pane_id"}` |
+| `POST /api/spaces/{id}/worktree/remove` | `{"force"?}` | `{"ok": true, "spoken"}` |
+| `GET /api/spaces/{id}/commands` | | `{"commands": [{"id", "name", "command"}]}` |
+| `POST /api/spaces/{id}/commands` | `{"name", "command"}` | `{"ok": true, "command": {"id", "name", "command"}}` |
+| `PUT /api/spaces/{id}/commands/{cid}` | `{"name", "command"}` | `{"ok": true, "command"}` |
+| `DELETE /api/spaces/{id}/commands/{cid}` | | `{"ok": true}` |
+| `POST /api/spaces/{id}/commands/{cid}/run` | | `{"ok": true, "pane_id"}` |
+
+A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
+"worktree", "agents": [{"pane_id", "alias", "name", "kind", "state",
+"title"?}], "shells": ["<pane_id>"], "commands": [{"id", "name",
+"command"}]}`:
+
+- `id` is herdr's workspace id and `name` its label. `path` is its
+  folder: the checkout of a worktree space, else the folder of its first
+  pane. `git` says the folder is in a git repository; `repo` is the
+  repository's folder name and `branch` its checked-out branch (a short
+  commit when detached), read from `.git` without running git.
+  `worktree` marks a linked worktree, not the repository's main checkout.
+- `agents` are the space's tracked agents with their spoken `name`;
+  `shells` are its panes with no agent.
+- **Folders** are the folders directly inside `supervisor.project_roots`
+  that no space works in yet: where a `new_space` can open.
+- **Kinds** are the agent kinds herdr supports (its agent manifests,
+  `server.agent_manifests`) whose executable is on the daemon's PATH, in
+  herdr's order. They are the kinds a tap may start; the orchestrator
+  still starts only Claude and Codex. `worktrees` says this herdr can make
+  a fresh worktree (a space's `git` says whether its folder can have one).
+- **Close** ends the space and every pane in it (`workspace.close`). It is
+  refused (`409`) while one of its agents is working or waiting for an
+  answer, and for the space sheepdog itself runs in (`403`). The app
+  confirms first.
+- **Worktrees** are the checkouts of the space's repository
+  (`worktree.list`; `400` when the space is not in a git repository).
+  **Open** opens a space for one of them (`worktree.open`, unfocused) and
+  returns its root pane. **Remove** removes the linked worktree the space
+  works in and closes the space (`worktree.remove`). It is refused for a
+  repository's main checkout (`400`), while an agent there is busy
+  (`409`), and for a checkout with uncommitted changes (`409`, from `git
+  status --porcelain`) unless `force` is set. The app confirms first.
+- **Wrap-up commands** are saved per space folder in
+  `<data_dir>/wrapups.json` (mode 0600), at most 20 per space: a `name` of
+  1 to 40 characters and a one-line `command` of at most 1000 bytes. GET
+  `/api/spaces` carries them too. **Run** opens a new tab in the space,
+  in its folder, waits for the shell and types the command with Enter
+  (herdr's `pane run`), then answers with the tab's pane, which the app
+  opens as a shell window. Running a command is shell-equivalent, so it
+  sits behind the [phone shell's](term-contract.md#the-plain-shell) gate
+  (`403` where the shell is off).
 ## Attachments
 
 **`POST /api/agents/{pane_id}/attachments`** — a photo or file the user
