@@ -51,11 +51,18 @@ jobs:
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
       BUNDLE_ID: com.github.kccarlos.herdr-sheepdog-ios
-      DERIVED: ${{ runner.temp }}/DerivedData
-      SPM: ${{ runner.temp }}/spm
-      RESULTS: ${{ runner.temp }}/results
     steps:
       - uses: actions/checkout@v7
+
+      # Build outputs live in the runner's temp directory (the runner
+      # context is not available in a job's env).
+      - name: Set the paths
+        run: |
+          {
+            echo "DERIVED=$RUNNER_TEMP/DerivedData"
+            echo "SPM=$RUNNER_TEMP/spm"
+            echo "RESULTS=$RUNNER_TEMP/results"
+          } >> "$GITHUB_ENV"
 
       - name: Select Xcode 27.1
         run: |
