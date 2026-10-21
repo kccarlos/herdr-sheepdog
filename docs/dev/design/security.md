@@ -1,14 +1,15 @@
 # Security: pairing keys, encryption and device access
 
-Status: **proposal for review** (2026-10-20). Nothing here is built yet.
-Section 16 lists the phases; section 17 lists the open questions.
+Status: **decided** (2026-10-21). Nothing here is built yet. Section 15
+lists the phases; section 16 records how each open question was closed.
 
 **Goal.** Make the phone and browser connection to the daemon safe on any
 network, with **no extra steps for the user**. Pairing stays one QR scan.
 Everything below rides on that scan.
 
 **Today** ([remote-access.md](../../remote-access.md),
-[ws-contract.md](../ws-contract.md#auth)):
+[ws-contract.md](../ws-contract.md#auth)), all of which this design
+replaces:
 
 - One shared secret, `web.token`. Every phone and browser holds the same
   one. It travels as a header, as `?token=` on `/ws`, `/events` and `/term`,
@@ -21,23 +22,32 @@ Everything below rides on that scan.
 - The app has an ATS exception (`NSAllowsArbitraryLoads`) so it can speak
   plain HTTP.
 
+**No compatibility.** The new design fully replaces the old one. There is
+no shared token, no migration path, no "Allow old apps" switch and no code
+for old apps or old daemons. An app or daemon from before this design
+simply stops talking to the other side; the user updates both and scans
+the QR once more.
+
 **Decisions**
 
 | Question | Decision |
 |---|---|
-| Encryption | TLS on every address except loopback. The daemon makes its own self-signed certificate. The pairing QR carries its fingerprint (an SPKI pin). The app pins it by fingerprint, never by hostname or IP. Loopback stays plain HTTP. |
-| Browser certificate | If the user's Tailscale has HTTPS certificates turned on, the daemon also serves the real `*.ts.net` certificate, chosen by SNI. Otherwise browsers see the self-signed one and show a one-time warning. |
-| One port | The daemon keeps one port. It reads the first byte of each connection: `0x16` is a TLS handshake, anything else is plain HTTP. Plain HTTP from a non-loopback address is allowed only for old apps during the migration. |
-| Device identity | Each phone and browser makes its own **P-256 keypair** at pairing. On iPhone the key lives in the Secure Enclave. In a browser it is a non-extractable WebCrypto key. The daemon records each device's public key. |
+| Encryption | TLS on every address except loopback. The daemon makes its own self-signed certificate. The pairing QR carries its fingerprint (an SPKI pin). The app pins it by fingerprint, never by hostname or IP. Loopback stays plain HTTP for the local `/setup`, `/voice` and `/debug` pages. |
+| Certificate lifetime | 1 year. Rotated automatically 7 days before it expires; paired devices learn the next pin in advance (section 4.4). |
+| Browser certificate | The self-signed one by default; browsers show a one-time warning. The real Tailscale `*.ts.net` certificate is a setup-page switch, **off** by default, because it puts the machine name in public logs (section 3.3). |
+| One port | The daemon keeps one port. It reads the first byte of each connection: `0x16` is a TLS handshake, anything else is plain HTTP. Plain HTTP is served only to loopback. |
+| Device identity | Each phone and browser makes its own **P-256 keypair** at pairing. On iPhone the key lives in the Secure Enclave. In a browser it is a non-extractable WebCrypto key. The daemon records each device's public key. There is no shared token. |
 | Proof of possession | A **signed challenge** that returns a short session ticket, not mutual TLS. Section 5 explains why. |
-| Migration | A new app talking to a new daemon enrolls its key on its own, using the old token once. Old apps keep working until "Allow old apps" turns off. |
-| Devices list | On the setup page: name, kind, last seen, capabilities, revoke, and "Disconnect all". Devices unused for 90 days expire. |
-| Browsers elsewhere | The browser shows a QR code, a 6-digit code and "Waiting for approval". A paired phone approves it, by scanning or through an in-app prompt. The setup page can approve it too. |
-| Tailscale identity | When a request comes from a tailnet address, the daemon asks the Tailscale LocalAPI who sent it. It allows only devices of the same Tailscale user. It skips this check silently when Tailscale is not installed. |
-| Capabilities | Four tiers per device: **view**, **approve**, **control**, **shell and files**. Shell and file access becomes per device, not per network. |
-| Face ID | Optional, not yet decided. Two variants are in section 9. |
-| Limits | Voice: one client, with take-back. Terminal: 4 channels per device, 8 per daemon. About 32 connections in total. Rate limits on challenges and approval requests. |
-| Router forwarding | Required scenario. Pins and device keys never depend on the source address, so a router that forwards or NATs the traffic works. |
+| Pairing QR | **One-time, expires in 10 minutes.** Generated only on the computer: the loopback setup page or `sheepdog pair`. The routes that make a QR are loopback-only. |
+| New device alert | When a device pairs, a **push goes to every other paired device**: "New device paired: Pixel · Chrome. Not you? Open the computer's setup page to revoke." |
+| Browsers and Android | They scan the **same QR** with the camera. It opens `/voice` in the browser, which enrolls a WebCrypto key. There is no "phone approves browser" flow. |
+| Devices list | On the setup page: name, kind, last seen and revoke, plus two separate buttons, **Disconnect all devices** and **Reset pairing** (which also replaces the certificate and keys). |
+| Shell | **On by default.** One switch per computer, on the setup page. It applies to every device paired with that computer. There are no per-device tiers and no per-network rule. |
+| Loopback-only routes | Pairing, device management, setup, debug and internal routes (hooks, injection, prompt reload, brain and context inspection). The composer's `/api/inject/utterance` is renamed to `/api/utterance` and stays open to paired devices. |
+| Removing a computer in the app | Also revokes this phone's key on that computer, best effort (`DELETE /api/devices/self`). |
+| Limits | Voice: one client, with take-back. Terminals: 4 per device, 8 per daemon. About 32 connections in total; loopback is not counted. |
+| Router forwarding | Required scenario. Pins and device keys never depend on the source address. Subnet routing needs nothing; a port forward needs `web.advertise` or "Add address" in the app (section 13). |
+| Not done | No Tailscale identity check. No Face ID or other biometrics for risky actions. |
 | Future relay | Out of scope. The device keys and the pin are designed to work unchanged through a future outbound relay. |
 
 ---
@@ -52,17 +62,19 @@ Everything below rides on that scan.
    keystroke on the plain LAN.
 2. **A leaked secret.** A photo of the pairing QR, a screenshot sent to
    the wrong chat, a token copied into a log. Today the token in that
-   photo works forever.
+   photo works forever. With this design the QR works once, for 10
+   minutes, and every other device hears about its use.
 3. **A lost or stolen phone.** The user must be able to cut off one device
    without re-pairing the others.
 4. **Other devices on the tailnet.** Nodes shared in from another
    tailnet, other users of a family or team tailnet, a compromised
-   smart-home box with a tailnet address.
+   smart-home box with a tailnet address. They can reach the port, but
+   without a paired device key they get nothing beyond `/api/hello`.
 5. **Malicious web pages in the user's own browser.** Cross-site request
    forgery, cross-site WebSocket hijacking, and DNS rebinding against
    `127.0.0.1:7777`.
-6. **Floods and guessing.** Someone on the LAN who opens many sockets,
-   spams approval requests, or guesses codes.
+6. **Floods and guessing.** Someone on the LAN who opens many sockets or
+   guesses pairing codes.
 7. **The push relay operator.** Already handled: notifications are
    end-to-end encrypted ([push.md](../push.md#end-to-end-encryption)).
    Nothing here changes that.
@@ -74,15 +86,21 @@ Everything below rides on that scan.
   The agents themselves run as the user too.
 - **Someone using the computer's unlocked session.** They can open the
   setup page and pair their own phone. The setup page is loopback-only,
-  so this needs the computer itself.
+  so this needs the computer itself, and the other devices get the
+  new-device push.
 - **A compromised, unlocked phone.** The key cannot be copied off the
   phone, but code on the phone can use it. Revoking the device stops it.
+  There is no Face ID gate, by decision.
 - **Breaks in TLS, WireGuard, the Secure Enclave or the browser.**
 - **Traffic analysis.** Packet sizes and timing still show when the user
   talks or types.
-- **A user who clicks through the browser warning on a hostile network on
-  the very first visit, then approves by prompt rather than by scan.**
-  Section 4.2 explains this case and why scanning closes it.
+- **A browser's first visit on a hostile network.** A browser cannot pin,
+  so someone in the middle on that first visit can show a fake page that
+  reads the QR's one-time code and enrolls itself first. Three things
+  limit this: the code works once (the real browser then fails and says
+  so), it expires in 10 minutes, and every other device gets the
+  new-device push. The `*.ts.net` certificate (section 3.3) closes it for
+  users who turn it on. The app is not affected: it pins from the QR.
 
 ---
 
@@ -90,12 +108,13 @@ Everything below rides on that scan.
 
 | Layer | What it is | What it stops | What it does not stop |
 |---|---|---|---|
-| Reach | `web.bind`, loopback default, LAN or Tailscale | Strangers on the internet (no port forwarding to the internet, ever) | Anyone on the same LAN or tailnet |
+| Reach | `web.bind`, loopback default, LAN or Tailscale | Strangers on the internet (no port forwarding to the internet, ever) | Anyone on the same LAN or tailnet reaching the port |
 | TLS with a pin | Self-signed certificate, fingerprint pinned from the QR | Sniffing and man-in-the-middle on the LAN, a fake daemon | Who the client is |
-| Device key | P-256 key per device, signed challenge, short session ticket | A stolen QR photo, a leaked token, a copied cookie (short-lived), one lost device among many | A thief using an unlocked phone |
-| Tailscale identity | LocalAPI `whois` on tailnet source addresses | Other users' devices and shared-in nodes on the tailnet | Traffic that reaches the daemon from the LAN |
-| Capability tiers | view, approve, control, shell and files per device | A browser that only watches being able to type or open a shell | Misuse within a granted tier |
-| Face ID (optional) | A second key that needs a face, for risky actions | Someone holding the unlocked phone opening a shell | Everyday actions |
+| One-time QR | Enroll code that works once, for 10 minutes, made only on the computer | A stolen QR photo used later | A thief who scans it within the 10 minutes (the push reveals it) |
+| Device key | P-256 key per device, signed challenge, short session ticket | A leaked QR after use, a copied cookie (short-lived), one lost device among many, other tailnet nodes | A thief using an unlocked phone |
+| New-device push | A push to every other device when one pairs | Pairing that goes unnoticed | A user who ignores it |
+| Shell switch | One switch per computer on the setup page | A shell on a computer where the user does not want one | Misuse by a paired device while it is on |
+| Loopback-only routes | Pairing, setup, debug and hook routes refuse non-loopback callers | A paired device or a LAN stranger injecting fake herdr events or reading prompts | Malware on the computer |
 | Host and Origin checks | Allowed `Host` names, same-origin `Origin` on upgrades and writes | DNS rebinding, cross-site WebSocket hijacking, CSRF | — |
 | Limits | Connection caps, handshake timeouts, rate limits | Floods, code guessing | A large distributed attack |
 | Audit | Device id on events, metadata only | Not knowing which device did what | — |
@@ -108,54 +127,55 @@ Everything below rides on that scan.
 ### 3.1 The daemon's identity
 
 - At first start the daemon makes:
-  - a **daemon id**: 16 random bytes, base64url;
+  - a **daemon id**: 16 random bytes, base64url. It is also the computer
+    id the app keys everything by;
   - an **ECDSA P-256 key** and a **self-signed certificate** for it,
-    signed with SHA-256, valid for 10 years. It has no meaningful names:
+    signed with SHA-256, **valid for 1 year**. It has no meaningful names:
     nobody checks them.
 - They live in `<data_dir>/tls/` (directory mode 0700, files 0600):
-  `daemon_id`, `key.pem`, `cert.pem`.
+  `daemon_id`, `key.pem`, `cert.pem`, and during a rotation `next_key.pem`
+  and `next_cert.pem`.
 - The **pin** is `base64url(SHA-256(SubjectPublicKeyInfo))` of that key.
-  It changes only when the key changes. Re-issuing the certificate with
-  the same key (for example when it nears expiry) keeps the pin.
-- Losing the data directory means a new daemon id and a new pin. Every
-  device then has to scan again (section 4.3).
+  Each yearly rotation makes a new key, so a new pin (section 4.4).
+- Losing the data directory means a new daemon id, key and pin.
+  Pressing **Reset pairing** replaces the key and pin but keeps the daemon
+  id, so the app still knows which computer it is. Either way every
+  device has to scan again (section 4.3).
 
 ### 3.2 One port, two protocols
 
 - The listener peeks at the first byte of each new connection.
   - `0x16` (TLS handshake): serve TLS 1.2 or newer, ECDHE only.
   - Anything else: plain HTTP.
-- **Loopback** (`127.0.0.0/8`, `::1`): plain HTTP, exactly as today. The
-  local `/setup`, `/voice` and `/debug` pages do not change. TLS on
-  loopback also works, but nothing needs it.
-- **Non-loopback plain HTTP** is served only while "Allow old apps" is on
-  (section 7), and only to requests that carry the legacy token. Anything
-  else gets:
+- **Loopback** (`127.0.0.0/8`, `::1`): plain HTTP. The local `/setup`,
+  `/voice` and `/debug` pages, the herdr hooks and the CLI keep working
+  with no TLS. TLS on loopback also works, but nothing needs it.
+- **Non-loopback plain HTTP** is never served:
   - a page route (`GET /`, `/voice`, `/debug`): `308` to the same path on
     `https://` at the same host and port;
   - an API route or an upgrade: `426 {"error":"tls_required"}`.
-- A device session (section 5) is never accepted over non-loopback plain
-  HTTP, even while old apps are allowed.
-- The port number stays the same, so stored `host:port` addresses keep
-  working.
+- The port number stays the same.
 
 ### 3.3 Which certificate a client gets
 
 - **No SNI, or an IP address** (what the app sends): the self-signed
   certificate.
-- **SNI equal to the machine's `*.ts.net` name**, when Tailscale HTTPS is
-  on: the real certificate, fetched from the Tailscale LocalAPI (the same
-  call `tailscale cert` uses). The daemon checks once a day and renews it
-  when Tailscale does.
+- **SNI equal to the machine's `*.ts.net` name**, only when the setup
+  page's **"Use a Tailscale certificate for browsers"** switch is on: the
+  real certificate, fetched from the Tailscale LocalAPI (the same call
+  `tailscale cert` uses). The daemon checks once a day and renews it when
+  Tailscale does.
+- The switch is **off by default**. Its copy says: "Browsers on other
+  computers open sheepdog with no warning. Tailscale's certificates are
+  public: this computer's name and your tailnet's name get logged in
+  public certificate logs." The switch is hidden when Tailscale or its
+  HTTPS feature is not available.
 - The app **never pins the `*.ts.net` certificate**: it rotates about
   every 90 days and its key can change. The app always connects by IP
   and pins the self-signed key.
-- Browsers use the `*.ts.net` name when the setup page offers one, so
-  they show no warning. Otherwise they use the IP address and accept the
-  self-signed certificate once.
-- Tailscale's HTTPS certificates are public: their names go into
-  Certificate Transparency logs, so the machine name and tailnet name
-  become public. That is an open question (17.3).
+- With the switch on, the QR's browser link uses the `*.ts.net` name, so
+  browsers show no warning. Otherwise browsers use the IP address and
+  accept the self-signed certificate once.
 
 ### 3.4 The app checks the pin
 
@@ -166,167 +186,178 @@ Everything below rides on that scan.
   3. accepts if it equals the stored pin (or the stored next pin,
      section 4.4), and refuses otherwise.
 - The hostname and IP are not checked. That is what makes router
-  forwarding work (section 14).
+  forwarding work (section 13).
 - The same delegate serves `URLSessionWebSocketTask`, so `/ws` and
   `/term` are pinned too.
 - The pin is checked during the TLS handshake, before any request. A
   wrong pin sends nothing: no hello, no ticket, no audio.
-- The app's own code refuses `http://` to a non-loopback address once it
-  holds a pin. ATS is a second wall, not the only one.
-- The ATS exception is removed only in a late phase (section 16, phase 10),
-  because a new app must still reach an old daemon until then.
+- The app refuses `http://` to any non-loopback address. The ATS
+  exception (`NSAllowsArbitraryLoads`) is removed in the same release
+  that adds pinning; nothing needs plain HTTP any more.
 
 ---
 
 ## 4. Pairing flows
 
-### 4.1 Phone (new pairing)
+### 4.1 The QR
 
-The QR keeps today's form and gains three parameters:
+The setup page (loopback only) and `sheepdog pair` show it. Each showing
+makes a fresh enroll code; showing a new one invalidates the previous one.
 
 ```
-sheepdog://pair?u=http://100.101.102.103:7777&u=http://192.168.1.20:7777&d=<daemon id>&k=<pin>&e=<enroll code>&t=<token>
+https://100.101.102.103:7777/voice#pair=1&d=<daemon id>&n=<computer name>&k=<pin>&e=<enroll code>&u=100.101.102.103:7777&u=192.168.1.20:7777
 ```
 
-- `u` stays `http://host:port`. Today's `PairingLink` drops any `u` that
-  is not plain HTTP. If the QR listed `https://` URLs, an old app would
-  find no address. A new app sees `k` and speaks TLS to the same
-  `host:port`.
-- `d`: the daemon id. `k`: the pin.
-- `e`: a one-time **enroll code**, 16 random bytes. It works once and
-  expires 10 minutes after the QR is shown. The setup page and
-  `sheepdog pair` show a fresh one each time.
-- `t`: the legacy token, only while "Allow old apps" is on, so an old app
-  can still pair. Once that switch is off, `t` is left out, and an old
-  QR photo is useless after 10 minutes.
+- It is an `https://` link to `/voice`, so a phone camera or an Android
+  phone opens it in the browser (section 4.2). The app's scanner reads
+  the same link and never opens the browser (section 4.1.1).
+- Everything after `#` is a fragment: browsers do not send it to the
+  server, so it never lands in an access log or a proxy.
+- The host is the first address: the Tailscale address when there is
+  one, else the LAN address, or the `*.ts.net` name when that switch is
+  on. `web.advertise` addresses are listed in `u` after the daemon's own.
+- `d`: the daemon id. `n`: the computer's name from the daemon config.
+  `k`: the pin.
+- `e`: the one-time **enroll code**, 16 random bytes. It works once and
+  expires 10 minutes after the QR is shown. The setup page shows the
+  countdown and a "New code" button; `sheepdog pair` prints the expiry
+  time.
 
-Step by step:
+#### 4.1.1 Phone or iPad
 
-1. The user scans the QR (in the app, or with the Camera app and a
-   confirmation, as today).
+1. The user scans the QR in the app (the first-run screen or Settings ▸
+   Connection ▸ Scan a new code). If the iPhone Camera app opens it in
+   Safari instead, the `/voice` page does **not** enroll yet: it offers
+   "Open in the Sheepdog app" (a `sheepdog://pair` link with the same
+   fragment) first, and "Use in this browser" second (section 4.1.2).
 2. The app tries the addresses, Tailscale first, with TLS pinned to `k`.
    It keeps the first that answers `GET /api/hello`. A pin mismatch on
    one address counts as "did not answer" for that address.
 3. The app creates a key in the Secure Enclave, tagged with the daemon
    id (section 6).
 4. The app calls `POST /api/devices/enroll` with the enroll code, its
-   public key, its name (the system gives "iPhone"; the user can rename it later)
-   and its kind (`ios`, `ipados`).
-5. The daemon checks the code, records the device with the default tiers
-   (section 8), and answers `{device_id, caps, daemon_id}`.
+   public key, its name (the system gives "iPhone"; the user can rename
+   it on the setup page) and its kind (`ios`, `ipados`).
+5. The daemon checks the code, burns it, records the device and answers
+   `{device_id, daemon_id, name}`.
 6. The app signs a challenge and gets its first session ticket
    (section 5).
-7. The app saves the daemon's entry: daemon id, addresses, pin, device
-   id, key tag. It saves no token.
+7. The app saves the computer's entry: daemon id, name, addresses, pin,
+   device id, key tag, paired date.
+8. The daemon sends the new-device push to every other device
+   (section 4.5).
 
 The user sees what they see today: scan, a moment, connected.
 
-### 4.2 Browser on another computer
+#### 4.1.2 Browser or Android phone
 
-The browser is on a laptop that is not the computer sheepdog runs on.
+1. The user points the camera at the QR, or opens the link on a laptop.
+   The browser opens `https://<address>:7777/voice#pair=…` and warns once
+   about the certificate, unless the `*.ts.net` switch is on.
+2. The page reads the fragment, then removes it from the address bar
+   (`history.replaceState`) so it does not stay in history.
+3. On an iPhone or iPad (from the user agent), it stops here and shows
+   two buttons: **Open in the Sheepdog app** and **Use in this browser**.
+   The code is burnt only by whichever enrolls, so handing it to the app
+   works. A self-hosted IP address cannot use Universal Links, so the app
+   cannot take the link before Safari does. Other platforms go straight
+   on.
+4. It creates a non-extractable P-256 key with WebCrypto and stores it in
+   IndexedDB (section 6).
+5. It calls `POST /api/devices/enroll` with the enroll code, the public
+   key, the kind (`browser`) and a name from the user agent, such as
+   "Mac · Safari" or "Android · Chrome". The user can rename it on the
+   setup page.
+6. It signs a challenge and receives its session cookie (section 5), then
+   shows the voice page.
+7. The daemon sends the new-device push to every other device.
 
-1. The user opens `https://<address>:7777/voice`. With Tailscale HTTPS
-   on, the setup page shows a `*.ts.net` link instead, with no warning.
-   Otherwise the browser warns once about the certificate.
-2. The page finds no session. It creates a non-extractable P-256 key with
-   WebCrypto and stores it in IndexedDB (section 6).
-3. It calls `POST /api/pair-requests` with the public key, a kind
-   (`browser`), and a name. The name starts as "Mac · Safari", from the
-   user agent; the user can change it in a text field. A browser cannot
-   tell "MacBook Air" from "Mac" (open question 17.7).
-4. The daemon answers `{request_id, secret, code, expires_in: 300}`.
-   `code` is 6 random digits. `secret` lets only this browser read the
-   outcome.
-5. The page shows:
-   - a QR code: `sheepdog://approve?d=<daemon id>&r=<request id>&f=<SHA-256 of the browser's public key>`;
-   - the 6-digit code, large;
-   - "Waiting for approval from your phone or this computer's setup page".
-6. Approval, by any one of:
-   - **Scanning.** The phone scans the browser's QR. The app shows the
-     approval sheet. It checks that `f` matches the key the daemon
-     received for that request.
-   - **In-app prompt.** Every connected device with the control tier gets
-     a `pair-request` message on `/ws`. A phone that is not connected
-     gets a notification that opens the app; its Allow button needs the
-     phone unlocked. The sheet says: "New browser (Mac · Safari) wants
-     to connect, code 482913. Allow?" It has an "Also allow shell and
-     files" switch, off by default.
-   - **The setup page** on the computer lists the pending request with
-     the same text and Allow and Deny.
-7. The approver calls `POST /api/pair-requests/{id}/approve` with the
-   tiers. A phone can grant only tiers it holds itself.
-8. The page has been waiting on `GET /api/pair-requests/{id}?secret=…`
-   (long poll). It gets `{device_id, caps}`, signs a challenge, and
-   receives its session cookie.
+There is no 6-digit code, no request waiting for approval and no phone
+approving a browser.
 
-**Why scanning is stronger than the prompt.** With a self-signed
-certificate the browser has no pin. If an attacker sits in the middle on
-the very first visit, they can make their own request and show the
-browser the attacker's code. The user would then approve the attacker.
-Comparing 6 digits does not stop this, because the attacker relays the
-code. Scanning does stop it: the browser's QR carries the full hash of
-the browser's own key, computed in the browser, and the phone compares it
-with the key the daemon received. With the `*.ts.net` certificate, or on
-a network the user trusts, the prompt is as good as the scan. The sheet
-for a request that came in over a plain LAN with a self-signed
-certificate says "Scanning the code on that screen is safer."
+If the code was already used or has expired, the page says: "This code
+was already used or has expired. Open the setup page on your computer and
+scan the new code." The app says the same (see the table in 4.3).
 
-**Limits:**
+### 4.2 Pairing a second computer
 
-- At most 3 pending requests per daemon, and one new request per source
-  address every 10 seconds, 20 per hour daemon-wide.
-- A request expires after 5 minutes.
-- Three denials from one source address block it for 15 minutes.
+The app keeps one entry per daemon id. Scanning another computer's QR
+adds a computer; it does not replace the first. Scanning a QR whose
+daemon id the app already has replaces that entry's pin and addresses and
+re-enrolls with the new code (section 4.3).
 
-### 4.3 Re-pair after a lost certificate
+### 4.3 When the app must scan again
 
-The pin no longer matches. This happens when sheepdog was reinstalled,
-its data directory was reset, or the computer was replaced. It also
-happens if someone is intercepting the connection; the app cannot tell
-the two apart, so it treats them the same.
+The pin no longer matches, or the daemon no longer knows the device. A
+pin mismatch happens when sheepdog was reinstalled, **Reset pairing** was
+pressed, its data directory was lost, or the computer was replaced. It
+also happens if someone is intercepting the connection; the app cannot
+tell the two apart, so it treats them the same.
 
 1. The TLS handshake fails the pin check. The app sends nothing.
 2. If every address fails the same way, the app stops retrying and
    shows:
    > **Scan the pairing code again.** This computer's security key
-   > changed. That happens when sheepdog is reinstalled or its settings
-   > are reset. If you did not do that, someone may be intercepting the
+   > changed. That happens when sheepdog is reinstalled or pairing is
+   > reset. If you did not do that, someone may be intercepting the
    > connection: do not continue on this network.
 3. There is no "trust anyway" button.
-4. The user scans a fresh QR. If the daemon id is new, the app deletes
-   the old entry and its key, and pairs as a new device. If the daemon id
-   is the same (only the TLS key was reset), the app replaces the pin and
-   the enroll code re-binds its existing device record to its key.
+4. The user scans a fresh QR. If the daemon id is new, the app replaces
+   the old entry and deletes its key. If the daemon id is the same, the
+   app replaces the pin and enrolls its existing key again with the new
+   code.
 
 The app shows a reason for every "scan again" case:
 
 | Cause | Daemon says | App says |
 |---|---|---|
 | Pin mismatch | (nothing, TLS fails) | "This computer's security key changed…" (above) |
-| Device revoked on the computer | `401 {"reason":"device_revoked"}` | "This phone was removed on your computer. Scan the pairing code again to reconnect." |
-| Unused for 90 days | `401 {"reason":"device_expired"}` | "This phone was not used for 90 days, so your computer forgot it. Scan the pairing code again." |
+| Device revoked, or Disconnect all devices | `401 {"reason":"device_revoked"}` | "This phone was removed on your computer. Scan the pairing code again to reconnect." |
 | Unknown device (data reset, same daemon id) | `401 {"reason":"unknown_device"}` | "Your computer no longer knows this phone. Scan the pairing code again." |
-| Old apps turned off, app still on the token | `401 {"reason":"token_retired"}` | "Scan the pairing code again to finish the security update." |
+| Code used or expired | `410 {"reason":"code_used"}` / `{"reason":"code_expired"}` | "This code was already used or has expired. Show a new code on your computer and scan it." |
 | Phone restored from a backup | (no key in the Secure Enclave) | "This is a new phone to your computer. Scan the pairing code again." |
+| Rotation missed (section 4.4) | (nothing, TLS fails) | "This computer renewed its security certificate while this phone was away. Scan the pairing code again." |
 
 ### 4.4 Certificate rotation
 
-The user, or a future release, replaces the TLS key while the data
-directory survives.
+The certificate lasts 1 year and rotates on its own.
 
-1. The daemon makes the new key and keeps serving the old one.
-2. It announces `next_pin` to every authenticated client for 7 days: in
-   the session answer and in `bot-ready` (section 11).
+1. **30 days before the switch** (37 days before expiry), the daemon makes
+   the next key and certificate and keeps serving the current one.
+2. From then on it announces `next_pin` to every authenticated client: in
+   the session answer and in `bot-ready` (section 10).
 3. Each app that connects in that window stores it next to the current
-   pin.
-4. After 7 days the daemon serves the new key. Apps that stored it accept
-   it and drop the old pin.
-5. An app that did not connect in the window sees a pin mismatch and
-   shows the "scan again" message, with the reason "This computer
-   changed its security certificate while this phone was away."
+   pin. Browsers do not pin, so they need nothing.
+4. **7 days before expiry**, the daemon switches to the new key. Apps
+   that stored `next_pin` accept it and drop the old pin.
+5. An app that did not connect in those 30 days sees a pin mismatch.
+   Because it knows the old certificate's expiry date, it shows the
+   "renewed while this phone was away" reason instead of the
+   interception warning.
 
-Rotation is rare: the certificate lasts 10 years, and the key changes only
-when the user asks (open question 17.9).
+The 30-day lead time is this design's choice, not part of the decision
+(which sets only the switch 7 days before expiry and that devices learn
+the pin in advance); it is easy to change.
+
+**Reset pairing** is the manual version: a new key at once, with no
+window, so every device scans again.
+
+### 4.5 The new-device push
+
+- Sent by the daemon after every successful enroll, to every **other**
+  paired device that has push registered, through the existing
+  end-to-end encrypted relay ([push.md](../push.md)).
+- Text: "New device paired: Pixel · Chrome." The daemon cannot know how
+  many computers the phone has, so it never names itself; the app's
+  notification service extension adds "with Home Mac" only when a second
+  computer is paired. Tapping it
+  opens a sheet: "Not you? Open the computer's setup page to revoke it."
+  It names the device and the time; it has no revoke button of its own,
+  because revoking is done on the computer.
+- Devices without push (browsers, Android, an app without the app team's
+  APNs key) get a `device-paired` message on `/ws` the next time they
+  connect, shown as a banner with the same text.
+- Logged as `web.device.enroll`; the push itself as `push.sent` as today.
 
 ---
 
@@ -350,16 +381,15 @@ when the user asks (open question 17.9).
    session
    ```
 
-   A browser does not know the pin, so it signs an empty line there; the
-   daemon checks it the same way.
+   A browser does not know the pin for sure, so it signs an empty line
+   there; the daemon checks it the same way.
 3. `POST /api/auth/session {device_id, nonce, time, signature, client}`.
    The daemon checks:
    - the nonce is unused and fresh;
    - the time is within 5 minutes;
-   - the device exists and is not revoked or expired;
-   - the signature is valid for the device's public key;
-   - the Tailscale identity, when it applies (section 8.3).
-4. It answers `{ticket, expires_in: 43200, caps, device: {id, name}}`.
+   - the device exists and is not revoked;
+   - the signature is valid for the device's public key.
+4. It answers `{ticket, expires_in: 43200, device: {id, name}, next_pin?}`.
    For a browser it also sets the `sheepdog_session` cookie (`HttpOnly`,
    `Secure`, `SameSite=Strict`, `Path=/`).
 5. The ticket is 32 random bytes. The daemon keeps it in memory only,
@@ -374,6 +404,10 @@ when the user asks (open question 17.9).
 Revoking a device drops its tickets **and closes its open `/ws`, `/term`
 and `/events` connections** within a second.
 
+**Loopback** needs no ticket. A request from `127.0.0.1` or `::1` with an
+allowed `Host` (section 10.6) is the computer itself: the local pages,
+the herdr hooks and the CLI.
+
 ### 5.2 WebSocket and SSE upgrades
 
 - `/ws`, `/term` and `/events` authenticate **before the upgrade**, like
@@ -384,8 +418,8 @@ and `/events` connections** within a second.
   `URLSessionWebSocketTask` allows that.
 - A browser cannot set headers on a WebSocket or `EventSource`. It sends
   the cookie, which a same-origin upgrade carries.
-- `?token=` is kept only for legacy token clients. New clients never put
-  a secret in a URL, so none ends up in history, logs or a proxy.
+- `?token=` goes away. No secret is ever put in a URL query, so none ends
+  up in history, logs or a proxy.
 - Every upgrade and every state-changing request checks `Origin`. It must
   be absent (the app) or the daemon's own origin. This stops cross-site
   WebSocket hijacking even if a cookie were sent.
@@ -398,7 +432,7 @@ and `/events` connections** within a second.
   - On iOS, a client identity from a Secure Enclave key needs a
     certificate in the Keychain and a custom identity. That is possible
     but fragile.
-  - A future relay may end TLS at the edge (section 18). An application
+  - A future relay may end TLS at the edge (section 17). An application
     signature survives that; a client certificate does not.
   - Loopback is plain HTTP, so it would need its own path anyway.
 - **Signing every request.** No ticket to steal, but every REST call and
@@ -421,338 +455,230 @@ everywhere.
 
 | Platform | Device key | Other data | Notes |
 |---|---|---|---|
-| iPhone, iPad | Secure Enclave P-256 (`kSecAttrTokenIDSecureEnclave`), `.privateKeyUsage`, accessible after first unlock, this device only. One key per daemon, tagged `sheepdog.device.<daemon id>`. | Daemon id, addresses, pin, next pin, device id in the Keychain (this device only). The ticket in memory only. | "After first unlock" lets a notification's Approve work while the phone is locked. The key is not in backups and not in iCloud Keychain; a restored or new phone pairs again. |
-| iOS Simulator | Software P-256 key in the Keychain, same attributes | Same | No Secure Enclave. The enroll call says `hardware: false`, and the devices list shows it. |
-| Browser | WebCrypto ECDSA P-256, `extractable: false`, `["sign"]`, stored as a `CryptoKey` in IndexedDB, keyed by daemon id | Device id in IndexedDB; ticket in the `HttpOnly` cookie | Per origin: `https://192.168.1.20:7777`, `https://100.x:7777` and `https://mac.tailnet.ts.net:7777` are three devices. Private windows keep nothing. Clearing site data, or Safari's tracking prevention after long disuse, removes the key; the browser asks for approval again. |
-| Daemon | Not applicable | `<data_dir>/tls/` (TLS key, certificate, daemon id), `<data_dir>/devices.json` (0600: id, name, kind, public key, caps, created, last seen, last network kind, how it enrolled, hardware flag). `web.token` stays in `~/.config/sheepdog/.env`. | The push device list gets a `device_id` link, so revoking a device also drops its push registration and content key. |
+| iPhone, iPad | Secure Enclave P-256 (`kSecAttrTokenIDSecureEnclave`), `.privateKeyUsage`, accessible after first unlock, this device only. One key per daemon, tagged `sheepdog.device.<daemon id>`. | Daemon id, name, addresses, pin, next pin, certificate expiry, device id, paired date in the Keychain (this device only). The ticket in memory only. | "After first unlock" lets a notification's Approve work while the phone is locked. The key is not in backups and not in iCloud Keychain; a restored or new phone pairs again. |
+| iOS Simulator | Software P-256 key in the Keychain, same attributes | Same | No Secure Enclave. The enroll call says `hardware: false`. |
+| Browser | WebCrypto ECDSA P-256, `extractable: false`, `["sign"]`, stored as a `CryptoKey` in IndexedDB, keyed by daemon id | Device id in IndexedDB; ticket in the `HttpOnly` cookie | Per origin: `https://192.168.1.20:7777`, `https://100.x:7777` and `https://mac.tailnet.ts.net:7777` are three devices. Private windows keep nothing. Clearing site data, or Safari's tracking prevention after long disuse, removes the key; the browser scans a new QR. |
+| Daemon | Not applicable | `<data_dir>/tls/` (TLS key, certificate, next key during rotation, daemon id), `<data_dir>/devices.json` (0600: id, name, kind, public key, created, last seen, last network kind, hardware flag). | The push device list gets a `device_id` link, so revoking a device also drops its push registration and content key. `web.token` is removed from the config. |
 
 Push content keys are already per phone and stay as they are
 ([push.md](../push.md#end-to-end-encryption)).
 
 ---
 
-## 7. Migration and compatibility
+## 7. Devices and the shell switch
 
-### 7.1 Who talks to whom
-
-| App | Daemon | What happens |
-|---|---|---|
-| Old app | Old daemon | Unchanged. |
-| Old app | New daemon | Plain HTTP and the token, as today, while "Allow old apps" is on. Its shell stays gated by network, exactly as today (`web.shell_lan`). After the switch is off: `401 {"reason":"token_retired"}`, and the old app says "Token refused". |
-| New app | Old daemon | `/api/hello` has no `security` block. The app uses plain HTTP and the token, as today. After phase 10 the app says "Update sheepdog on your computer" instead. |
-| New app | New daemon, new pairing | Section 4.1. |
-| New app | New daemon, old pairing (token, no pin) | Automatic migration, below. |
-
-### 7.2 Automatic migration with no re-scan
-
-The app has a token and an address but no pin, because its QR had no
-`k`. It must not trust the first certificate it sees.
-
-1. The app calls `GET /api/hello` over plain HTTP, as today. It sees the
-   `security` block.
-2. It calls `GET /api/tls/pin-proof?nonce=<16 random bytes>` over plain
-   HTTP. The daemon answers
-   `{daemon_id, pin, mac}`, where `mac = HMAC-SHA256(token, "sheepdog-pin-v1" || nonce || daemon_id || pin)`.
-   The token itself is not sent.
-3. The app checks the MAC with its token. Someone in the middle without
-   the token cannot forge it.
-4. The app connects over TLS, pinned, and calls
-   `POST /api/devices/enroll` with `Authorization: Bearer <token>`,
-   inside TLS. This is the token's one and last use by this app.
-5. The daemon records the device with `enrolled_via: "token"` and the
-   tiers in 7.3.
-6. The app deletes the token from its Keychain and keeps the pin, the
-   daemon id and the device id.
-
-The leftover risk: on a plain LAN, someone who already sniffed the token
-earlier could forge the MAC. That person could already do everything
-today, so migration is never worse than the present. Over Tailscale the
-first step is already encrypted.
-
-### 7.3 Tiers for migrated devices
-
-| Device enrolled with the token over | Tiers |
-|---|---|
-| Tailscale | All four (it had the shell before) |
-| The LAN, with `web.shell_lan` on | All four |
-| The LAN, with `web.shell_lan` off | view, approve, control. Shell and files can be granted on the setup page. |
-
-### 7.4 When the shared token stops working
-
-The token bypasses every tier and every device record, so it must end.
-
-- **"Allow old apps"** (a new config key, `web.legacy_token`, documented
-  in [CONFIG.md](../../../CONFIG.md) when it is built). When it is on, the
-  token works from non-loopback addresses as today.
-- It turns off on its own **30 days after the last request that used the
-  token from a non-loopback address.** The setup page can turn it off
-  sooner. It shows "Old connection (shared token): last used 2 days ago
-  from 192.168.1.31".
-- On a fresh install with no old devices it starts off.
-- The token keeps working **on loopback**, for the local pages, the
-  herdr hooks and the CLI. Loopback is the computer itself.
-- `web.shell_lan` then has no remaining purpose. It is kept only for old
-  apps on plain HTTP and removed with the token.
-
-### 7.5 Version and feature negotiation
-
-- `GET /api/hello` gains a `security` block (section 11.1). Its presence
-  is how a new app knows the daemon has TLS and device keys.
-- `/ws` stays protocol 1. The new parts are **features** in `bot-ready`,
-  as the contract asks: `devices`, `pair-requests`, `caps`, and `step-up`
-  if Face ID is chosen.
-- `/term` stays protocol 1. New refusal reasons are added; an old client
-  treats an unknown reason as a refusal, which is correct.
-- The daemon's own pages (`/voice`, `/debug`) ship with the daemon, so
-  they need no negotiation.
-
----
-
-## 8. Devices, capabilities and identity
-
-### 8.1 The devices list
+### 7.1 The devices list
 
 On the setup page (loopback only), a "Devices" section:
 
-- Each row: name (editable), kind (iPhone, iPad, browser · Safari on
-  Mac, "old connection"), tiers, added, last seen and over what (Tailscale,
-  Wi-Fi, this computer), and a hardware-key badge.
-- **Revoke** on each row. It drops the device's tickets, closes its
-  connections and removes its push registration.
-- **Disconnect all.** Revokes every device and turns off old apps. Every
-  phone and browser must scan again. (Whether it also replaces the TLS key
-  and the token is open question 17.10.)
-- Pending browser requests, with Allow and Deny.
-- Devices with no authenticated request for **90 days** are removed.
-  "Last seen" counts any authenticated request, including an Approve from
-  a notification.
+- Each row: **name** (editable), **kind** (iPhone, iPad, Android ·
+  Chrome, Mac · Safari), **last seen** (with the network: Tailscale,
+  Wi-Fi, this computer) and **Revoke**. Revoke drops the device's
+  tickets, closes its connections and removes its push registration.
+- **Disconnect all devices.** Revokes every device. The certificate,
+  pin and daemon id stay, so the next QR scan is an ordinary pairing.
+  Confirm: "Every phone and browser will need to scan the code again."
+- **Reset pairing.** Revokes every device **and** replaces the TLS key,
+  certificate and pin; the daemon id stays. Use it after a suspected compromise.
+  Confirm: "Every phone and browser will need to scan the code again,
+  and each will show a security warning until it does."
+- An empty list says: "No devices yet. Scan the code above with the
+  Sheepdog app or your phone's camera."
 
-A device can also see itself and unpair itself from the app
-(`DELETE /api/devices/self`).
+A device can also unpair itself (`DELETE /api/devices/self`). The app
+calls it, best effort, when the user removes a computer in Settings ▸
+Connection ▸ Remove: if the computer is offline the app removes its entry
+anyway, and the stale record stays on the computer until it is revoked
+there.
 
-### 8.2 Capability tiers
+There is no automatic expiry of unused devices.
 
-Each tier includes the ones above it.
+### 7.2 The shell switch
 
-| Tier | Allows | Routes |
-|---|---|---|
-| **view** | Read state, agents, screens, history, events, cards, changes and diffs; receive notifications | `GET /api/state`, `/api/agents`, `/api/agents/{id}/screen`, `/api/agents/{id}/changes…`, `/api/conversation`, `/api/events`, `GET /events`; `/term` channels in `observe` mode; `/ws` without voice (cards, screens) |
-| **approve** | Answer or cancel a pending approval | `POST /api/pending/answer`, `/api/pending/cancel`; notification actions |
-| **control** | Talk to the voice, type, send keys, new, rename, stop and close an agent, change settings and models, approve new browsers | `/ws` with audio; `POST /api/agents/{id}/input`, `/api/agents` (new), `…/rename`, `…/interrupt`, `…/close`; `PUT /api/settings`, `/api/voice/provider`, `/api/brain/model`; `/term` in `control` mode; `POST /api/pair-requests/{id}/approve` |
-| **shell and files** | Open and close the plain shell, attach files | `/term` shell target, `POST /api/shells/{id}/close`, `POST /api/agents/{id}/attachments` |
+- **"Shell from your phone"** on the setup page, **on by default**, one
+  per computer (config `web.shell`, documented in
+  [CONFIG.md](../../../CONFIG.md) when it is built).
+- It applies to every paired device of that computer, on every network.
+  The old "on this network" wording and `web.shell_lan` go away.
+- When it is off, `/term`'s shell target answers `refused:shell_off`, and
+  the app hides "Open shell here" and the shell window for that computer.
+  Agent windows (`/term` on an agent pane) stay available.
+- Attachments follow the same switch, since they write files on the
+  computer.
 
-- Voice needs **control**, because the user can ask the orchestrator to
-  type or start agents. The rails still decide what the orchestrator may
-  do; the tier decides who may talk to it.
-- A missing tier answers `403 {"error":"forbidden","need":"control"}`.
-  On `/term` it is `refused:not_allowed`.
-- Routes for the computer itself stay loopback-only: `/setup`,
-  `/api/setup/*`, and now `/api/pair`, `/api/pair/qr.svg` (the QR holds an
-  enroll code) and the device management routes. Proposed: the debug and
-  hook routes (`/api/inject/*`, `/api/herdr/event`, `/api/prompts/reload`,
-  `/api/brain/*`, `/api/context/*`) become loopback-only too (open
-  question 17.6).
+### 7.3 Loopback-only routes
 
-**Defaults, chosen so everyday use needs nothing extra:**
+These refuse any non-loopback caller with `403 {"error":"loopback_only"}`:
 
-| Device | Default tiers | Why |
-|---|---|---|
-| Phone or iPad paired by QR | All four | Scanning needs the computer's screen, so it is the user. Today the shell is on over Tailscale; this keeps it on everywhere now that the LAN is encrypted. |
-| Browser approved by a phone or the setup page | view, approve, control | Watching and talking from a laptop is the everyday use. "Also allow shell and files" is one switch on the approval sheet. |
-| Migrated phone | Section 7.3 | Keeps what it had. |
+- setup: `/setup`, `/api/setup/*`;
+- pairing: `/api/pair`, `/api/pair/qr.svg` (the QR holds an enroll
+  code);
+- device management: `GET /api/devices`, `PATCH /api/devices/{id}`,
+  `DELETE /api/devices/{id}`, `POST /api/devices/disconnect-all`,
+  `POST /api/devices/reset-pairing`;
+- debug and internal: `/api/inject/*` (blocked, pane, done, state, screen,
+  remove), `/api/herdr/event` (the herdr hooks), `/api/prompts/reload`,
+  `/api/brain/*`, `/api/context/*`, `/testdata/*`;
+- the `/debug` page itself.
 
-### 8.3 Tailscale identity check
+`/debug` from another computer loses those panels; that is intended.
 
-- At start, the daemon looks for the Tailscale LocalAPI (the
-  `tailscaled` socket on Linux, the app's local port and token file on
-  macOS). Not found: the check is off, silently, and is re-checked every
-  few minutes.
-- For a request whose **source address is a tailnet address**
-  (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), the daemon calls `whois` on
-  the source `ip:port`, cached for 5 minutes per address.
-- Allowed only when the peer's user is the same user as the daemon's own
-  node. Refused: a node of another user, a node shared in from another
-  tailnet, and a tagged node with no user.
-- Refused requests get `403 {"error":"forbidden","reason":"tailscale_user"}`
-  and a `web.tailscale.denied` event.
-- If `whois` errors while Tailscale is installed, the request is refused
-  (fail closed) and logged. If Tailscale is not installed, nothing is
-  checked.
-- A request from a **LAN address** is never checked, even if it came over
-  Tailscale through a router. That is the router-forwarding case
-  (section 14); the device key protects it.
-- Whether to allow other users of the same tailnet is open question 17.4.
+**The composer route is renamed.** The voice page and the app type to
+the orchestrator through `POST /api/inject/utterance` today. It becomes
+`POST /api/utterance`, open to paired devices, so the loopback sweep does
+not break typing. The old path is removed, not aliased.
+
+Every other route is open to any paired device.
 
 ---
 
-## 9. Face ID (optional, not decided)
-
-Face ID would be asked only before **opening a shell, attaching files or
-closing an agent**. Never on connect, never for voice, never for an
-approval.
-
-The main device key must **not** need Face ID, or every connection would
-ask for a face.
-
-| | A: in the app only | B: enforced by the daemon |
-|---|---|---|
-| How | The app shows `LAContext` before the action. | A second Secure Enclave key per daemon with a biometry access control (`.biometryCurrentSet`, passcode fallback). For those actions the daemon asks for a fresh signature from it (`step-up`, valid 5 minutes). |
-| What it stops | A casual person with the unlocked phone, if they use our app | The same, and also any code that holds the main key without the user's face. The rule lives in code on the daemon, like the other rails. |
-| Cost | Small, app only | One more key, one more route, a new `refused:verify` reason |
-| Trade-off | Not a real rail; the daemon cannot tell it happened | One glance before risky actions. Closing an agent by voice with the phone in a pocket would still go through the orchestrator, which is not gated by it. |
-
-Recommendation: **off by default; when the user turns it on (per device,
-in the app's Settings), use B.** It breaks "no extra steps" only for the
-user who chose it.
-
----
-
-## 10. Connection limits
+## 8. Connection limits
 
 | What | Limit | Today |
 |---|---|---|
 | Voice on `/ws` | One client. A new one replaces the old one. The replaced client sees "Voice moved to Mac · Safari" and a **Take back** button, which simply reconnects. | One client, replaced |
 | `/term` channels | 4 per **device** (was per connection), 8 per daemon | 4 per connection, 8 per daemon |
-| `/events` streams | 4 per device | No limit |
 | All connections | About 32 open connections from non-loopback addresses. Loopback is not counted, so the setup page always opens. | No limit |
 | Unauthenticated connections | 8 per source address; TLS handshake and request headers within 10 seconds | No limit |
 | Challenges | 30 a minute per source address. After 10 bad signatures in a minute, that address waits 5 minutes. | — |
-| Approval requests | Section 4.2 | — |
 | Enroll codes | 5 wrong codes in a minute from one address: it waits 5 minutes | — |
 
 ---
 
-## 11. Wire changes
+## 9. Logging and audit
 
-These are sketches for review. The real contract goes into
-[ws-contract.md](../ws-contract.md) and [term-contract.md](../term-contract.md)
-when each phase is built, with their contract tests.
-
-### 11.1 `GET /api/hello`
-
-Still public. It gains:
-
-```
-"security": {
-  "tls": true,
-  "pin": "<base64url SHA-256 of the SPKI>",
-  "daemon_id": "<base64url>",
-  "auth": ["device", "token"],
-  "tailscale_https": "mac.tailnet.ts.net"
-}
-```
-
-- `auth` lists `token` only while old apps are allowed.
-- The old `auth` field stays `"token"` while old apps are allowed, so old
-  apps behave as today; it becomes `"device"` after that.
-- The pin is a public key hash, safe to publish. The migration does not
-  trust this field; it uses the pin proof (7.2).
-
-### 11.2 New routes
-
-| Route | Auth | Purpose |
-|---|---|---|
-| `GET /api/auth/challenge` | public, rate-limited | A nonce |
-| `POST /api/auth/session` | signature | A ticket (and a cookie for browsers) |
-| `GET /api/tls/pin-proof?nonce=` | public | The pin, with a MAC keyed by the token (migration) |
-| `POST /api/devices/enroll` | enroll code, or the legacy token inside TLS | Record a device's public key |
-| `GET /api/devices/self`, `DELETE /api/devices/self` | ticket | See or unpair this device |
-| `GET /api/devices`, `PATCH /api/devices/{id}`, `DELETE /api/devices/{id}`, `POST /api/devices/disconnect-all` | loopback only | The setup page's list |
-| `POST /api/pair-requests` | public, rate-limited | A browser asks to join |
-| `GET /api/pair-requests/{id}?secret=` | the request's secret | Long poll for the outcome |
-| `POST /api/pair-requests/{id}/approve`, `…/deny` | control tier, or loopback | Approve or deny |
-| `POST /api/auth/step-up` | step-up key signature | Only with Face ID variant B |
-
-### 11.3 `/ws`
-
-- Auth before the upgrade (5.2). Origin checked.
-- `bot-ready` adds `device: {id, name, caps}`, `next_pin` during a
-  rotation, and the features in 7.5.
-- New server messages, sent only to clients whose `bot-ready` listed the
-  feature:
-  - `pair-request {request_id, name, kind, code, expires_in, network}` to
-    control-tier clients, and `pair-request-done {request_id, outcome}`;
-  - `status` with reason `replaced` gains `by` (the new device's name),
-    for the Take back button.
-- New close codes: **4003** device revoked or expired (with the reason
-  text), **4004** session expired (sign again and reconnect).
-
-### 11.4 `/term`
-
-- Auth as `/ws`. `term-hello` is unchanged.
-- The shell gate moves from the source address to the device's tiers.
-  Old clients on plain HTTP keep the address gate.
-- Channel limits per device (section 10).
-- New refusals: `refused:not_allowed` (missing tier), `refused:verify`
-  (Face ID variant B).
-- Close codes 4003 and 4004 as on `/ws`.
-
-### 11.5 `/events`
-
-- Header or cookie. `?token=` only for old clients.
-- Revocation closes the stream.
-
-### 11.6 REST routes
-
-- Every route names its tier (8.2). Missing ticket: `401` with a
-  `reason`. Missing tier: `403` with `need`.
-- Every `401` body gains `reason` (`session_expired`, `device_revoked`,
-  `device_expired`, `unknown_device`, `token_retired`), so the app can say
-  why.
-- On loopback, every route checks that `Host` is `127.0.0.1`, `::1` or
-  `localhost` (today only `/setup` does). This stops DNS rebinding.
-
----
-
-## 12. Logging and audit
-
-Metadata only. Never a key, a signature, a ticket, a token, an enroll
-code or a 6-digit code.
+Metadata only. Never a key, a signature, a ticket or an enroll code.
 
 - New events:
-  - `web.device.enroll {device_id, kind, name, via, hardware, remote_kind}`
-    (`via`: `qr`, `token`, `browser_approval`, with `approved_by` for the
-    last);
+  - `web.device.enroll {device_id, kind, name, hardware, remote_kind}`;
   - `web.device.session {device_id, remote_kind}` (each new ticket);
   - `web.device.auth_failed {reason, remote, device_id?}`;
-  - `web.device.revoke {device_id, by}`, `web.device.expire {device_id, last_seen}`,
-    `web.device.disconnect_all {count}`;
-  - `web.pair_request.create|approve|deny|expire {request_id, kind, name, remote_kind, by?}`;
-  - `web.tls.created {pin}`, `web.tls.rotate {old_pin, new_pin, phase}`,
-    `web.tls.tsnet {name, expires}`, `web.tls.pin_proof {remote_kind}`;
-  - `web.tailscale.denied {remote, reason}`;
-  - `web.legacy_token.used {remote_kind}` (at most once an hour) and
-    `web.legacy_token.off {why}`;
+  - `web.device.revoke {device_id, by}` (`by`: `setup`, `self`),
+    `web.device.disconnect_all {count}`, `web.device.reset_pairing {count}`;
+  - `web.pair.code {expires}` (a new QR shown), `web.pair.code_refused {reason, remote}`;
+  - `web.tls.created {pin, expires}`, `web.tls.rotate {old_pin, new_pin, phase}`,
+    `web.tls.tsnet {name, expires}`;
+  - `web.loopback_only {path, remote}`;
   - `web.limit {what, remote}` when a cap or rate limit refuses
     something.
 - Existing events gain `device_id`: `web.client.connect`, `web.client.hello`,
   `web.term.connect`, `web.term.open`, `web.shell.open`, `web.shell.close`,
-  the agent action events, and the pending answer events. For an old app
-  it is `"legacy"`; for loopback it is `"local"`.
+  the agent action events, and the pending answer events. For loopback it
+  is `"local"`.
 - `remote_kind` keeps its values (`loopback`, `tailscale`, `lan`), so the
   log shows when a device came through a router.
 
 ---
 
-## 13. Several computers
+## 10. Wire changes
 
-The app will manage several daemons, one per computer. Everything here is
-**per daemon, keyed by daemon id**, never by address:
+These are sketches for review. The real contract goes into
+[ws-contract.md](../ws-contract.md) and [term-contract.md](../term-contract.md)
+when each phase is built, with their contract tests. Nothing keeps the old
+shapes.
+
+### 10.1 `GET /api/hello`
+
+Still public. `auth` becomes `"device"`, and it gains:
+
+```
+"computer": {"id": "<daemon id>", "name": "Home Mac"},
+"security": {
+  "pin": "<base64url SHA-256 of the SPKI>",
+  "cert_expires": "2027-10-21T00:00:00Z",
+  "tailscale_https": "mac.tailnet.ts.net"
+}
+```
+
+- `computer.name` comes from the daemon config; the app may rename it
+  locally.
+- `tailscale_https` appears only while that switch is on.
+- The pin is a public key hash, safe to publish. The app never trusts this
+  field; it trusts the QR's `k`.
+
+### 10.2 New and changed routes
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /api/auth/challenge` | public, rate-limited | A nonce |
+| `POST /api/auth/session` | signature | A ticket (and a cookie for browsers) |
+| `POST /api/devices/enroll` | one-time enroll code | Record a device's public key |
+| `GET /api/devices/self`, `DELETE /api/devices/self` | ticket | See or unpair this device |
+| `GET /api/devices`, `PATCH /api/devices/{id}`, `DELETE /api/devices/{id}`, `POST /api/devices/disconnect-all`, `POST /api/devices/reset-pairing` | loopback only | The setup page's list |
+| `GET /api/pair`, `GET /api/pair/qr.svg` | loopback only | A fresh one-time QR |
+| `POST /api/utterance` | ticket | Typed text to the orchestrator (was `/api/inject/utterance`) |
+| `POST /api/login` | — | Removed with the token |
+
+### 10.3 `/ws`
+
+- Auth before the upgrade (5.2). Origin checked.
+- `bot-ready` adds `device: {id, name}`, `computer: {id, name}`,
+  `shell: true|false`, and `next_pin` during a rotation.
+- New server messages:
+  - `device-paired {device_id, name, kind, at}` to every other connected
+    device;
+  - `status` with reason `replaced` gains `by` (the new device's name),
+    for the Take back button.
+- New close codes: **4003** device revoked (with the reason text),
+  **4004** session expired (sign again and reconnect).
+
+### 10.4 `/term`
+
+- Auth as `/ws`. `term-hello` is unchanged.
+- The shell gate moves from the source address to the computer's shell
+  switch: `refused:shell_off`.
+- Channel limits per device (section 8).
+- Close codes 4003 and 4004 as on `/ws`.
+
+### 10.5 `/events`
+
+- Header or cookie. `?token=` is removed.
+- Revocation closes the stream.
+
+### 10.6 REST routes
+
+- Missing or bad ticket: `401` with a `reason` (`session_expired`,
+  `device_revoked`, `unknown_device`), so the app can say why.
+- Loopback-only routes from elsewhere: `403 {"error":"loopback_only"}`.
+- On loopback, every route checks that `Host` is `127.0.0.1`, `::1` or
+  `localhost` (today only `/setup` does). This stops DNS rebinding.
+
+---
+
+## 11. Several computers
+
+Option A of the app redesign: each computer runs its own
+daemon. Everything here is **per daemon, keyed by daemon id**, never by
+address:
 
 - one device key per daemon (`sheepdog.device.<daemon id>`), so revoking
   one computer's access does not touch another, and two computers cannot
   link the phone by its key;
 - one pin, next pin, device id and address list per daemon;
-- the push content key is already per daemon.
+- the push content key is already per daemon;
+- the new-device push goes to the devices of the computer that was
+  paired, not to other computers.
 
 The daemon id also tells "a second computer at the same IP" apart from
-"the same computer, reinstalled". Scanning a second computer's QR adds it;
-it does not replace the first (the app's screens for this are a separate
-design).
+"the same computer, reinstalled".
 
 ---
 
-## 14. Router forwarding (required scenario)
+## 12. Removing a computer
+
+Settings ▸ Connection ▸ Remove in the app:
+
+1. The app calls `DELETE /api/devices/self` on that computer, with a
+   short timeout. Success or not, it goes on.
+2. It deletes the Keychain entry and the Secure Enclave key for that
+   daemon id, and unregisters push for it.
+3. If the call failed, the computer's devices list still shows the phone
+   until it is revoked there; the key is gone from the phone, so the
+   record is useless.
+
+---
+
+## 13. Router forwarding (required scenario)
 
 **The case.** A work computer cannot install Tailscale. The user's router
 runs Tailscale. Either:
@@ -772,27 +698,24 @@ runs Tailscale. Either:
 - The pin is checked by fingerprint, not by name or IP, so any path to
   the daemon works.
 - The device key is checked by signature, not by source address.
-- The Tailscale check runs only for tailnet source addresses and only
-  when the daemon has Tailscale. In (a) and (b) the source is a LAN
-  address. In (c) the daemon has no Tailscale. So it never wrongly
-  refuses.
-- Shell and files follow the device's tiers, not the network, so they
-  work through the router.
+- Nothing depends on the network kind: there is no Tailscale identity
+  check and the shell switch is per computer.
 
-**The one gap: the address.** In (a) the QR's LAN address already works
-away from home. In (b) the QR does not list the router's `100.101.1.1`,
-because the daemon cannot know it. Two options (open question 17.5):
+**The address.** Subnet routing ((a), (c)) needs nothing: the QR's LAN
+address already works away from home. A port forward (b) needs the
+router's address, which the daemon cannot know. Both ways are offered:
 
-- a config key `web.advertise` (for example `["100.101.1.1:7777"]`), set
-  once on the setup page under "Other addresses", that the QR then lists;
-- or "Add address" in the app's Settings for that daemon. The pin and the
-  key carry over, so no re-pairing.
+- the config key `web.advertise` (for example `["100.101.1.1:7777"]`),
+  also set on the setup page under "Other addresses", which the QR then
+  lists (documented in [CONFIG.md](../../../CONFIG.md) when it is built);
+- "Add address" in the app's Settings ▸ Connection for that computer. The
+  pin and the key carry over, so no re-pairing.
 
 ---
 
-## 15. Test plan
+## 14. Test plan
 
-### 15.1 Phase 0 spikes (facts this doc cannot settle from here)
+### 14.1 Phase 0 spikes (facts this doc cannot settle from here)
 
 1. **ATS and a self-signed pin.** Does `URLSession` with ATS on accept a
    self-signed P-256 certificate when our delegate accepts the trust? Does
@@ -800,53 +723,55 @@ because the daemon cannot know it. Two options (open question 17.5):
    over Wi-Fi and over Tailscale.
 2. **Browser secure context.** Is a page on a self-signed certificate the
    user accepted a secure context, so `crypto.subtle` works? Check Safari,
-   Chrome and Firefox. Does a non-extractable `CryptoKey` survive in
-   IndexedDB across restarts in each?
-3. **Tailscale LocalAPI on macOS.** Can the daemon reach the LocalAPI of
-   the App Store Tailscale app, the standalone app and the open-source
-   `tailscaled`? Can it fetch the `*.ts.net` certificate?
-4. **Secure Enclave and notification actions.** Can the app sign with a
+   Chrome (desktop and Android) and Firefox. Does a non-extractable
+   `CryptoKey` survive in IndexedDB across restarts in each?
+3. **Camera to browser.** Does the iPhone Camera app and Android's camera
+   open an `https://<ip>:7777/voice#…` link, and does the fragment
+   survive the certificate warning in Safari and Chrome?
+4. **Tailscale certificate on macOS.** Can the daemon fetch the
+   `*.ts.net` certificate from the App Store Tailscale app, the
+   standalone app and the open-source `tailscaled`? Only needed for the
+   optional switch.
+5. **Secure Enclave and notification actions.** Can the app sign with an
    "after first unlock" key in the background when a notification's
    Approve is tapped on a locked phone?
 
-### 15.2 Go tests (no real network, no live daemon)
+### 14.2 Go tests (no real network, no live daemon)
 
 - Peeking listener: TLS and plain on one port; plain from non-loopback
-  refused when old apps are off; `308` for pages, `426` for the API.
+  refused; `308` for pages, `426` for the API.
+- Enroll codes: a code works once; a second use is `code_used`; after 10
+  minutes (fake clock) it is `code_expired`; a new QR invalidates the
+  old code; `/api/pair` refused from non-loopback.
 - Challenge and session: a good signature; a reused nonce; an old time; a
-  signature by another key; a revoked device; an expired device; the
-  ticket after a restart.
-- Revocation closes live `/ws`, `/term` and `/events` connections within
-  a second.
-- Tiers: every route in 8.2 refused one tier below and allowed at its
-  tier. A table test walks the route list, so a new route without a tier
-  fails.
-- Migration: the pin proof's MAC verifies with the token and fails
-  without it; enroll with the token over TLS; the token refused over
-  plain HTTP for enroll.
-- "Allow old apps": turns off 30 days after the last use (fake clock);
-  the QR drops `t` once it is off.
-- Pair requests: rate limits, 3 pending, expiry, three denials, a
-  control-tier phone cannot grant shell and files it does not hold.
-- Tailscale: a fake LocalAPI: same user allowed, other user refused,
-  tagged node refused, shared-in node refused, LocalAPI error refused,
-  no LocalAPI skipped, LAN source never checked.
+  signature by another key; a revoked device; the ticket after a restart.
+- Revocation, Disconnect all devices and Reset pairing close live `/ws`,
+  `/term` and `/events` connections within a second; Reset pairing
+  changes the pin and keeps the daemon id.
+- New-device push: enrolling device B sends one push to device A and
+  none to B; a connected browser gets `device-paired`.
+- Loopback-only: a table test walks every route; each loopback-only route
+  refuses a non-loopback caller, every other route refuses an
+  unauthenticated one, so a new route without a rule fails.
+  `/api/utterance` works for a paired device; `/api/inject/utterance` is
+  gone.
+- Shell switch: off refuses the shell target with `refused:shell_off` and
+  refuses attachments; agent panes still open.
 - Limits: the 33rd non-loopback connection refused while loopback still
-  works; the fifth `/term` channel of one device refused; slow handshakes
-  dropped after 10 seconds.
+  works; the fifth `/term` channel of one device refused; the ninth of the
+  daemon refused; slow handshakes dropped after 10 seconds; voice
+  take-back carries `by`.
 - Host and Origin: a rebinding `Host` on loopback refused; a cross-site
   `Origin` on `/ws` refused.
-- Logs: no event carries a ticket, token, code or signature (a test greps
-  the test log for the secrets it used).
+- Logs: no event carries a ticket, code or signature (a test greps the
+  test log for the secrets it used).
 
-### 15.3 Router forwarding
+### 14.3 Router forwarding
 
 - **Go test.** A TCP forwarder in the test sits between the client and
   the daemon. A test hook makes the daemon classify the forwarder's
   address as `lan`. The client connects to the forwarder's address with
-  the pin, enrolls, opens `/ws` and `/term`, and opens a shell with the
-  shell tier. The test also runs with the Tailscale check on and a fake
-  LocalAPI, and checks that it is not called for the LAN source.
+  the pin, enrolls, opens `/ws` and `/term`, and opens a shell.
 - **iOS unit test.** The pin delegate accepts a certificate whose names
   match neither the host nor the IP, and refuses one with another key.
 - **Manual check, once per release that touches this.** A router with
@@ -859,79 +784,79 @@ because the daemon cannot know it. Two options (open question 17.5):
      address.
   5. Revoke the phone on the setup page: the app shows the revoked
      message within a second.
-  6. The log shows `remote_kind: lan` and the device id, and no
-     `web.tailscale.denied`.
+  6. The log shows `remote_kind: lan` and the device id.
 
-### 15.4 Certificate rotation
+### 14.4 Certificate rotation
 
-- Go test with a fake clock: start a rotation; a client that connects in
-  the 7-day window gets `next_pin`; after the switch it connects with the
-  new key; a client that did not connect fails the pin check.
-- Go test: re-issuing the certificate with the same key keeps the pin.
+- Go test with a fake clock: at expiry − 37 days the next key appears and
+  `next_pin` is announced; at expiry − 7 days the daemon serves the new
+  key; a client that stored `next_pin` connects; one that did not fails
+  the pin check.
 - iOS test with `StubDaemon`: a pin mismatch on every address shows the
-  "scan again" message with the right reason, and sends no request.
-- iOS test: scanning a QR with the same daemon id and a new pin re-binds
-  the device; with a new daemon id it replaces the entry and deletes the
-  old key.
+  "scan again" message with the right reason (interception warning, or
+  "renewed while away" after the old expiry date), and sends no request.
+- iOS test: scanning a QR with the same daemon id and a new pin re-enrolls
+  the existing key; with a new daemon id it replaces the entry and
+  deletes the old key.
+- The fixture-daemon UI tests (GitHub Actions) reach their daemon on
+  loopback over plain HTTP, which stays allowed after phase 4: the app's
+  plain-HTTP refusal and ATS both exempt loopback.
+- iOS test: Remove calls `DELETE /api/devices/self` and deletes the key
+  even when the stub refuses the call.
 
-### 15.5 Compatibility
+### 14.5 Browser pairing
 
-- Today's app (0.1.14) against the new daemon, old apps allowed: pairs
-  from the new QR, works over plain HTTP, its shell follows `web.shell_lan`.
-- The new app against today's daemon: works over plain HTTP until
-  phase 10.
-- The new app with an old pairing against the new daemon: migrates with
-  no user action; afterwards the Keychain holds no token, and the stub
-  daemon never saw the token over plain HTTP.
+- Web test (`make test-web`): the `/voice` page reads the fragment,
+  clears it from the address bar, enrolls with a fake daemon and shows
+  the used-or-expired message for a `410`.
+- Web test: with an iPhone user agent the page shows the two buttons and
+  sends no enroll until "Use in this browser" is tapped; "Open in the
+  Sheepdog app" links to `sheepdog://pair` with the same fragment.
 
 ---
 
-## 16. Phases (each bullet is one PR)
+## 15. Phases (each bullet is one PR)
 
-1. **`feat(web): TLS identity on the same port`.** Daemon id, key and
-   certificate in `<data_dir>/tls/`; the peeking listener; the `security`
-   block in `/api/hello`; the `Host` check on loopback. Plain HTTP still
-   accepted everywhere. Files: `internal/web/server.go`, new
-   `internal/web/tlsid.go`, `internal/web/auth.go`.
-2. **`feat(web): device keys and signed sessions`.** `devices.json`,
-   enroll by code or token, challenge and session, tickets, revocation
-   that closes connections, `device_id` on events. The QR gains `d`, `k`
-   and `e`. Every device gets all tiers for now. Files: new
-   `internal/web/devices.go`, `internal/pair`, `internal/web/pair.go`,
-   [ws-contract.md](../ws-contract.md).
-3. **`feat(ios): pinned TLS and a Secure Enclave device key`.** The pin
-   delegate, the key, `PairingLink` reads `d`, `k` and `e`, the
-   per-daemon Keychain entry, the migration in 7.2, the "scan again"
-   messages. Plain HTTP stays for old daemons. Files:
+Each phase lands whole; there is no transition release. Old apps and old
+daemons stop working at phase 3, which is fine with one tester.
+
+1. **`feat(web): TLS identity on the same port`.** Daemon id, 1-year key
+   and certificate in `<data_dir>/tls/`; the peeking listener with plain
+   HTTP only on loopback; `computer` and `security` in `/api/hello`; the
+   `Host` check on loopback. Files: `internal/web/server.go`, new
+   `internal/web/tlsid.go`.
+2. **`feat(web): loopback-only routes and /api/utterance`.** The route
+   sweep in 7.3 and its table test; the composer route renamed in the
+   daemon, `/voice` and the app together. Files: `internal/web/server.go`,
+   `web/voice/`, `ios/Sources/SheepdogKit/DaemonClient.swift`.
+3. **`feat(web): device keys, one-time QR and signed sessions`.**
+   `devices.json`, the one-time enroll code, challenge and session,
+   tickets, revocation that closes connections, `device_id` on events,
+   the new QR. `web.token`, `/api/login`, `?token=` and `web.shell_lan`
+   are deleted in the same PR. Files: new `internal/web/devices.go`,
+   `internal/pair`, `internal/web/pair.go`, `internal/web/auth.go`,
+   [ws-contract.md](../ws-contract.md), [CONFIG.md](../../../CONFIG.md).
+4. **`feat(ios): pinned TLS and a Secure Enclave device key`.** The pin
+   delegate, the key, `PairingLink` reads the new QR, the per-computer
+   Keychain entry, the "scan again" messages, Remove revokes, the ATS
+   exception removed, the token field removed. Files:
    `ios/Sources/SheepdogKit/DaemonClient.swift`, `PairingLink.swift`, new
-   `DeviceKey.swift`.
-4. **`feat(web): devices list on the setup page`.** The list, rename,
-   revoke, "Disconnect all", 90-day expiry, "Allow old apps" and its
-   automatic off. Files: `internal/web/setup.go`, `web/setup/`,
-   [CONFIG.md](../../../CONFIG.md) (`web.legacy_token`).
-5. **`feat(web): capability tiers`.** Tier per route, `403` with `need`,
-   per-device shell, the migration mapping in 7.3; the app shows "Not
-   allowed on this device" states (a small `feat(ios)` PR beside it).
-6. **`feat(web): connection limits and rate limits`.** The caps in
-   section 10, the handshake timeout, voice take-back with `by`.
-7. **`feat(web): browser pairing`.** Pair requests, WebCrypto keys in
-   `/voice` and `/debug`, the approval on the setup page. Files:
-   `internal/web/pairreq.go`, `web/voice/`, `web/debug/`.
-8. **`feat(ios): approve a new browser`.** The `pair-request` sheet,
-   scanning the browser's QR, the notification with an unlock-required
-   Allow.
-9. **`feat(web): Tailscale identity and ts.net certificate`.** LocalAPI
-   discovery, `whois` with a cache, the SNI choice, daily renewal, the
-   setup page's `*.ts.net` link.
-10. **`feat(ios): drop the ATS exception`.** Only once the daemon release
-    with phase 2 has been out long enough (open question 17.2). The app
-    then needs that daemon version and says "Update sheepdog on your
-    computer" to older ones. File: `ios/project.yml`.
-11. **`chore(web): retire the shared token off loopback`.** After the
-    transition: `t` leaves the QR for good, `web.shell_lan` goes, and
-    `?token=` is loopback-only.
-12. *(Only if chosen)* **`feat: Face ID step-up for shell, files and close`**
-    (variant B in section 9).
+   `DeviceKey.swift`, `ios/project.yml`.
+5. **`feat(web): browser and Android pairing`.** WebCrypto keys in
+   `/voice` from the QR fragment, the used-or-expired page, "Open in the
+   Sheepdog app". Files: `web/voice/`.
+6. **`feat(web): devices list, shell switch and new-device push`.** The
+   list, rename, revoke, Disconnect all devices, Reset pairing, the
+   `web.shell` switch, the push and `device-paired`. Files:
+   `internal/web/setup.go`, `web/setup/`, `internal/web/push.go`; the
+   app's new-device sheet in a small `feat(ios)` PR beside it.
+7. **`feat(web): connection limits and rate limits`.** The caps in
+   section 8, the handshake timeout, voice take-back with `by`.
+8. **`feat(web): certificate rotation`.** The 30-day `next_pin` window,
+   the switch 7 days before expiry; the app stores `next_pin`.
+9. **`feat(web): port-forward addresses and the ts.net switch`.**
+   `web.advertise` and "Other addresses" on the setup page, "Add address"
+   in the app, and the off-by-default Tailscale certificate switch.
 
 User docs ([remote-access.md](../../remote-access.md),
 [iphone-app.md](../../iphone-app.md), [privacy.md](../../privacy.md)) change
@@ -939,39 +864,37 @@ in the phase that changes the behaviour, not before.
 
 ---
 
-## 17. Open questions
+## 16. Closed questions
 
-1. **Face ID.** Offer it at all? If yes, variant A (app only) or B
-   (daemon-enforced, recommended)? Off by default?
-2. **How long old apps keep working.** Is 30 days after the last token
-   use right? When may the app drop the ATS exception and stop talking to
-   daemons without TLS?
-3. **Public `*.ts.net` certificates.** They put the machine name and
-   tailnet name into public Certificate Transparency logs. Use them
-   automatically when Tailscale HTTPS is on (as agreed), or ask once on
-   the setup page?
-4. **Other users on the same tailnet.** Same user only (as agreed), or an
-   allowlist for a family or team tailnet? What about tagged devices?
-5. **Router port forward.** For case (b), a `web.advertise` setting on the
-   setup page, "Add address" in the app, or both? Either is one extra step
-   for that setup.
-6. **Debug and hook routes.** Make `/api/inject/*`, `/api/herdr/event`,
-   `/api/prompts/reload`, `/api/brain/*` and `/api/context/*`
-   loopback-only? `/debug` from another computer would then lose those
-   panels.
-7. **Browser names.** A browser cannot tell "MacBook Air" from "Mac". Is
-   "Mac · Safari" with an optional name field enough?
-8. **Default tiers for browsers.** view, approve and control, with shell
-   and files as a switch on the approval? Or approve-only by default?
-9. **Certificate lifetime.** 10 years with a key change only on request,
-   or a yearly automatic rotation through the 7-day `next_pin` window?
-10. **"Disconnect all".** Should it also replace the TLS key and
-    `web.token`, as a full reset after a suspected compromise? That makes
-    every device scan again even if it has the newest app.
+Every question the proposal left open is now decided (2026-10-21):
+
+1. **Face ID.** Not done, in either variant.
+2. **How long old apps keep working.** Not at all: there is no
+   compatibility, no migration and no shared token. The ATS exception goes
+   in phase 4.
+3. **Public `*.ts.net` certificates.** A setup-page switch, off by
+   default, whose copy says the machine name gets logged publicly.
+4. **Other users on the same tailnet.** No Tailscale identity check. A
+   tailnet node needs a paired device key like anyone else.
+5. **Router port forward.** Both: `web.advertise` (and "Other addresses"
+   on the setup page) and "Add address" in the app. Subnet routing needs
+   nothing.
+6. **Debug and hook routes.** Loopback-only. The composer route is renamed
+   to `/api/utterance` and stays open to paired devices.
+7. **Browser names.** "Mac · Safari" or "Android · Chrome" from the user
+   agent, renamed on the setup page if wanted. No name field at pairing.
+8. **Default tiers for browsers.** There are no tiers. Every paired device
+   has the same access; the shell is one switch per computer, on by
+   default.
+9. **Certificate lifetime.** 1 year, rotated automatically 7 days before
+   expiry, with `next_pin` announced 30 days ahead.
+10. **"Disconnect all".** Two separate buttons: **Disconnect all devices**
+    (revokes devices, keeps the certificate) and **Reset pairing** (also
+    replaces the certificate and keys, keeping the daemon id).
 
 ---
 
-## 18. Room for a future relay
+## 17. Room for a future relay
 
 Out of scope now. A computer that cannot run Tailscale at all, with no
 router to help, could open an outbound connection to a relay (for example
@@ -986,8 +909,8 @@ What carries over unchanged:
   ciphertext, as the push relay already does.
 - **The device keys.** The signed challenge is bound to the daemon id and
   pin, not to a TLS session or an address, so it works through any path.
-- **Tiers, revocation and the audit log** live in the daemon, so they do
-  not change.
+- **Revocation and the audit log** live in the daemon, so they do not
+  change.
 
 What would be new: browsers cannot run TLS inside a WebSocket themselves,
 so a browser through the relay would need an end-to-end layer of its own
