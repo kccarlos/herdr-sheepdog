@@ -108,7 +108,11 @@ temp data dirs), then runs the unit tests (`SheepdogKitTests`) and the UI
 tests (`SheepdogUITests`) against them; `HistoryApprovalUITests` runs after
 a fresh daemon restart, and `ReconnectUITests` with
 `ios/scripts/fixture-daemon-restarter.sh` running. Only the opt-in
-recording and screenshot tests skip. It builds for the simulator only and
+recording and screenshot tests skip. A failing test is retried up to
+three times (`-retry-tests-on-failure`): on the hosted Mac a tap now and
+then lands during an animation and is lost, a different test each run, so
+the job fails only when a test never passes; look for repeated
+`Test Case … failed` lines in a green run's log to find flaky tests. It builds for the simulator only and
 uses no secrets; it is not a required check (see below). Archives, signing
 and TestFlight stay on Xcode Cloud, which runs no tests, and no signing
 certificate or App Store Connect key for the app goes into GitHub. The other exception

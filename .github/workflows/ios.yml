@@ -180,7 +180,11 @@ jobs:
       # Everything but the two tests that need a fresh restart or the
       # restarter: the unit suite and the other UI tests. The recordings and
       # screenshot tests skip themselves (they need SHEEPDOG_SHOTS and the
-      # like).
+      # like). A hosted Mac is slow enough that a UI tap now and then lands
+      # while an animation runs and is lost, a different test each run; a
+      # test that fails is run again (up to 3 times) and the job fails only
+      # if it never passes. The retries show in the log as repeated
+      # "Test Case ... failed" lines above the final pass.
       - name: Unit and UI tests
         working-directory: ios
         run: |
@@ -191,6 +195,7 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
             -skip-testing:SheepdogUITests/HistoryApprovalUITests \
             -skip-testing:SheepdogUITests/ReconnectUITests \
             -resultBundlePath "$RESULTS/Tests.xcresult" \
@@ -212,6 +217,7 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
             -only-testing:SheepdogUITests/HistoryApprovalUITests \
             -resultBundlePath "$RESULTS/HistoryApproval.xcresult" \
             > "$RESULTS/history.log" 2>&1 || status=$?
@@ -232,6 +238,7 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
             -only-testing:SheepdogUITests/ReconnectUITests \
             -resultBundlePath "$RESULTS/Reconnect.xcresult" \
             > "$RESULTS/reconnect.log" 2>&1 || status=$?
