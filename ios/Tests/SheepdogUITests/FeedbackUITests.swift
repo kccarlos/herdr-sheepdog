@@ -37,9 +37,11 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertTrue(app.buttons["feedback.tag.misheard"].exists, "the other tags are offered too")
         paused.tap()
 
-        let notice = app.descendants(matching: .any)["feedback.notice"]
+        // The notice is brief: match its label in the same query, since
+        // reading it after the wait can find it already gone on a slow Mac.
+        let notice = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == 'feedback.notice' AND label CONTAINS 'Noted'")).firstMatch
         XCTAssertTrue(notice.waitForExistence(timeout: 10), "\"Noted\" after the mark")
-        XCTAssertTrue(notice.label.contains("Noted"), "got \(notice.label)")
         XCTAssertTrue(waitFor { self.feedbackCount() == before + 1 }, "the daemon logged one user.feedback")
         XCTAssertTrue(orb.exists, "the voice session is still there")
     }

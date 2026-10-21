@@ -5,8 +5,7 @@ import XCTest
 ///
 /// Needs the fixture daemon on 127.0.0.1:7799 (`--voice=off`, empty
 /// config), and runs against its real `POST /api/conversation/reset`: the
-/// divider comes from the daemon's own `conversation.reset` notice. Not in
-/// CI.
+/// divider comes from the daemon's own `conversation.reset` notice.
 final class NewConversationUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
 
@@ -29,7 +28,7 @@ final class NewConversationUITests: XCTestCase {
         app.launch()
         // Each bubble is one accessibility element, read as a sentence
         // ("You said, what's going on"), not a plain-text label.
-        guard let said = bubble(app, "bubble.shepherd") else {
+        guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on") }) else {
             return XCTFail("the scrollback should load from GET /api/conversation at launch")
         }
         XCTAssertTrue(said.label.hasSuffix("what's going on"), "got \(said.label)")
@@ -62,12 +61,16 @@ final class NewConversationUITests: XCTestCase {
         element.tap()
     }
 
-    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15) -> XCUIElement? {
+    /// The first bubble with this identifier whose label passes `label`.
+    /// The fixture daemon is shared by the whole suite, so earlier tests'
+    /// bubbles may already be in the history; look for this test's own.
+    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15, label: (String) -> Bool = { _ in true }) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             for query in [app.otherElements, app.staticTexts, app.buttons] {
-                let first = query.matching(identifier: identifier).firstMatch
-                if first.exists { return first }
+                for element in query.matching(identifier: identifier).allElementsBoundByIndex where element.exists && label(element.label) {
+                    return element
+                }
             }
             usleep(250_000)
         } while Date() < deadline

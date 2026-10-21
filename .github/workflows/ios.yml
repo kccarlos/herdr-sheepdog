@@ -1,21 +1,34 @@
 name: iOS
 
-# Unit tests for the iPhone app (ios/) on a GitHub-hosted Mac. Xcode Cloud
-# still archives and uploads the TestFlight builds (ios/docs/dev/xcode-cloud.md);
-# this workflow builds for the simulator only, so it needs no signing
-# certificate, no App Store Connect key and no secret of any kind.
+# The iPhone app's (ios/) whole test suite on a GitHub-hosted Mac: the unit
+# tests (SheepdogKitTests) and the UI tests (SheepdogUITests), the UI tests
+# against fixture daemons built from this checkout. It builds for the
+# simulator only, so it needs no signing certificate, no App Store Connect
+# key and no secret of any kind (scripts/workflow-policy.sh checks that).
+# Xcode Cloud only archives and uploads TestFlight builds on ios-v* tags; it
+# runs no tests (ios/docs/dev/xcode-cloud.md).
 #
-# Not a required check: the required jobs live in ci.yml.
+# Not a required check yet: it runs only when ios/ or the daemon's API
+# changes, and a required check that never starts blocks the merge
+# (docs/dev/development.md, CI/CD).
 
 on:
   pull_request:
     paths:
       - 'ios/**'
+      - 'cmd/**'
+      - 'internal/web/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/ios.yml'
   push:
     branches: [main]
     paths:
       - 'ios/**'
+      - 'cmd/**'
+      - 'internal/web/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
 
@@ -27,25 +40,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-tests:
-    # The xcode-27 image (macOS with Xcode 27.x, a preview image as of
-    # 2026-10) has the Xcode the app is developed with; macos-26 stops at 26.x.
+  tests:
+    # The xcode-27 image (macOS with Xcode 27.x) has the Xcode the app is
+    # developed with; macos-26 stops at Xcode 26.x. Its simulators run iOS
+    # 27.0, above the app's iOS 26 deployment target.
     # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
     runs-on: xcode-27
-    timeout-minutes: 40
-    defaults:
-      run:
-        working-directory: ios
+    timeout-minutes: 60
     env:
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+      BUNDLE_ID: com.github.kccarlos.herdr-sheepdog-ios
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select Xcode 27.0
+      # Build outputs live in the runner's temp directory (the runner
+      # context is not available in a job's env).
+      - name: Set the paths
         run: |
-          sudo xcode-select -s /Applications/Xcode_27.0.app
+          {
+            echo "DERIVED=$RUNNER_TEMP/DerivedData"
+            echo "SPM=$RUNNER_TEMP/spm"
+            echo "RESULTS=$RUNNER_TEMP/results"
+          } >> "$GITHUB_ENV"
+
+      - name: Select Xcode 27.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
+
+      # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
+      # checkout's daemon, so an API change that breaks the app fails here.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the daemon
+        run: make build
 
       # The same pinned XcodeGen as ci_scripts/ci_post_clone.sh (Xcode Cloud).
       - name: Install XcodeGen
@@ -58,11 +90,18 @@ jobs:
           echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
 
       - name: Generate the project
+        working-directory: ios
         run: |
           xcodegen --version
           xcodegen generate --spec project.yml
 
-      - name: Pick a simulator
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spm
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
+
+      - name: Pick a simulator and start booting it
         id: sim
         run: |
           # The newest available iPhone simulator on the image.
@@ -83,26 +122,132 @@ jobs:
           print(best[2], best[3], file=sys.stderr)
           ')
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # Boots while the app builds (a few minutes on a cold runner).
+          xcrun simctl boot "$udid" || true
 
-      # The unit suite only. The UI tests (SheepdogUITests) need the fixture
-      # daemons on 127.0.0.1:7799 and skip themselves without them, so on a
-      # hosted runner they would only add a UI-runner build and app launches.
-      - name: Unit tests (SheepdogKitTests)
+      - name: Build for testing
+        id: build
+        working-directory: ios
         run: |
+          mkdir -p "$RESULTS"
           status=0
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project Sheepdog.xcodeproj \
             -scheme Sheepdog \
             -configuration Debug \
             -destination "id=${{ steps.sim.outputs.udid }}" \
-            -only-testing:SheepdogKitTests \
+            -derivedDataPath "$DERIVED" \
+            -clonedSourcePackagesDirPath "$SPM" \
             -disableAutomaticPackageResolution \
             -skipPackagePluginValidation \
-            -resultBundlePath "$RUNNER_TEMP/SheepdogKitTests.xcresult" \
-            > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
-          grep -E '^Test Suite|^Test Case .*(failed|error)|error:|^\*\* |Executed [0-9]+ test' "$RUNNER_TEMP/xcodebuild.log" | tail -n 300 || true
-          if [ "$status" -ne 0 ]; then tail -n 80 "$RUNNER_TEMP/xcodebuild.log"; fi
+            > "$RESULTS/build.log" 2>&1 || status=$?
+          grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
+          if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
           exit "$status"
+
+      - name: Wait for the simulator
+        run: |
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          # The app asks for the microphone when the session starts.
+          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
+
+      # Two free ports for the main (--voice=off) and the token daemon, and
+      # a control directory for scripts/fixture-daemon-restarter.sh. The
+      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift).
+      - name: Start the fixture daemons
+        id: fixture
+        run: |
+          read -r port token_port < <(python3 -c '
+          import socket
+          socks = [socket.socket() for _ in range(2)]
+          for s in socks: s.bind(("127.0.0.1", 0))
+          print(*[s.getsockname()[1] for s in socks])
+          ')
+          {
+            echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
+            echo "SHEEPDOG_FIXTURE_PORT=$port"
+            echo "SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port"
+            echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
+            echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port"
+            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
+          } >> "$GITHUB_ENV"
+          SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
+            SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
+            ios/scripts/fixture-daemons.sh start
+
+      # Everything but the two tests that need a fresh restart or the
+      # restarter: the unit suite and the other UI tests. The recordings and
+      # screenshot tests skip themselves (they need SHEEPDOG_SHOTS and the
+      # like). A hosted Mac is slow enough that a UI tap now and then lands
+      # while an animation runs and is lost, a different test each run; a
+      # test that fails is run again (up to 3 times) and the job fails only
+      # if it never passes. The retries show in the log as repeated
+      # "Test Case ... failed" lines above the final pass.
+      - name: Unit and UI tests
+        working-directory: ios
+        run: |
+          status=0
+          xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            -skip-testing:SheepdogUITests/HistoryApprovalUITests \
+            -skip-testing:SheepdogUITests/ReconnectUITests \
+            -resultBundlePath "$RESULTS/Tests.xcresult" \
+            > "$RESULTS/tests.log" 2>&1 || status=$?
+          sh scripts/ci-test-summary.sh "$RESULTS/tests.log" "$status"
+
+      # Expects a restart divider in the history, so the main daemon restarts
+      # just before it (the other UI tests add conversation after the seeded
+      # restart).
+      - name: UI test - history and approval
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        working-directory: ios
+        run: |
+          ./scripts/fixture-daemons.sh restart
+          status=0
+          xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            -only-testing:SheepdogUITests/HistoryApprovalUITests \
+            -resultBundlePath "$RESULTS/HistoryApproval.xcresult" \
+            > "$RESULTS/history.log" 2>&1 || status=$?
+          sh scripts/ci-test-summary.sh "$RESULTS/history.log" "$status"
+
+      # The restarter kills and restarts the main daemon when the test asks.
+      - name: UI test - reconnect after a daemon restart
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        working-directory: ios
+        run: |
+          mkdir -p "$SHEEPDOG_CONTROL_DIR"
+          ./scripts/fixture-daemon-restarter.sh > "$RUNNER_TEMP/restarter.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/restarter.pid"
+          status=0
+          TEST_RUNNER_SHEEPDOG_CONTROL_DIR="$SHEEPDOG_CONTROL_DIR" xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            -only-testing:SheepdogUITests/ReconnectUITests \
+            -resultBundlePath "$RESULTS/Reconnect.xcresult" \
+            > "$RESULTS/reconnect.log" 2>&1 || status=$?
+          kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
+          sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
+
+      - name: Stop the fixture daemons
+        if: always()
+        run: ios/scripts/fixture-daemons.sh stop || true
 
       - name: Upload the test results
         if: failure()
@@ -110,6 +255,7 @@ jobs:
         with:
           name: ios-test-results
           path: |
-            ${{ runner.temp }}/SheepdogKitTests.xcresult
-            ${{ runner.temp }}/xcodebuild.log
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/fixture/**/*.log
+            ${{ runner.temp }}/restarter.log
           retention-days: 7

@@ -41,10 +41,16 @@ final class ReadmeRecordingUITests: XCTestCase {
     private func tapVisible(_ query: XCUIElementQuery, _ id: String) {
         let matches = query.matching(identifier: id)
         XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 10), id)
-        for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
-            matches.element(boundBy: i).tap()
-            return
-        }
+        // It can exist a moment before it is hittable (a sheet or the
+        // demo's cover still animating, slower on a CI Mac): keep looking.
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+                matches.element(boundBy: i).tap()
+                return
+            }
+            usleep(200_000)
+        } while Date() < deadline
         XCTFail("no visible \(id)")
     }
 

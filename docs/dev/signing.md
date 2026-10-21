@@ -6,7 +6,8 @@ it with a browser can run it without Gatekeeper blocking it. The Linux
 build is not affected.
 
 This is for the daemon's own macOS binary only. The **iOS companion app**
-([`ios/`](../../ios/README.md)) is signed and shipped separately, by Xcode Cloud, not
+([`ios/`](../../ios/README.md)) is signed and shipped separately, by Xcode Cloud (which only archives
+TestFlight builds; the app's tests run in `ios.yml` on GitHub Actions), not
 by anything in this document — see
 [`ios/docs/dev/xcode-cloud.md`](../../ios/docs/dev/xcode-cloud.md). As of 2026-09-28 this Mac's login keychain already
 holds both certificates for team `GV776BZVA8`: the **Developer ID

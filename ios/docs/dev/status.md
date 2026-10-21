@@ -33,8 +33,8 @@ Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `ios-v0.1.4` (`b90c38d`
 workflow, the first signed archive with the widget extension; it exported with
 no signing change. It adds the UI polish (#36) and the Live Activity widget,
 App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
-No GitHub Actions run anything here (Xcode Cloud
-only, see [`xcode-cloud.md`](xcode-cloud.md)).
+Xcode Cloud only archives TestFlight builds on `ios-v*` tags ([`xcode-cloud.md`](xcode-cloud.md));
+the tests run on GitHub Actions (`.github/workflows/ios.yml`, below).
 The App Store Connect record is **"Sheepdog for herdr"**. For setup,
 workflows and troubleshooting, see [`xcode-cloud.md`](xcode-cloud.md).
 
@@ -112,12 +112,30 @@ xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 The unit suite (`SheepdogKitTests`) has 437 tests. `LiveDaemonTests` and
-every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
-so Xcode Cloud stays green without a daemon.
+the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
-To run the UI tests for real, start two fixture daemons from the daemon
-repository root (`..` from `ios/`). Neither needs a model key: `--brain=fake` is a scripted local
-model, and `--voice=off` means there is no live session.
+**In CI** (`.github/workflows/ios.yml`, a GitHub-hosted Mac) the job builds
+the daemon, starts both fixture daemons on free ports with
+`scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
+the main daemon, so the history has a restart divider), and passes the
+ports as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT` and
+`TEST_RUNNER_SHEEPDOG_FIXTURE_TOKEN_PORT`. It runs the unit suite and the UI
+tests, then `HistoryApprovalUITests` after `scripts/fixture-daemons.sh
+restart`, then `ReconnectUITests` with `scripts/fixture-daemon-restarter.sh`
+running. Only the opt-in recording and screenshot tests skip there.
+
+To run the UI tests for real on your Mac, start the two fixture daemons
+from the daemon repository root (`..` from `ios/`). Neither needs a model
+key: `--brain=fake` is a scripted local model, and `--voice=off` means there
+is no live session. The script does it (`SHEEPDOG_FIXTURE_PORT`,
+`SHEEPDOG_FIXTURE_TOKEN_PORT` and `SHEEPDOG_FIXTURE_DATA` move it off 7799,
+7798 and `/tmp/sd-bugs`; `stop` stops them):
+
+```sh
+make build && SHEEPDOG_DAEMON_REPO=$PWD ios/scripts/fixture-daemons.sh start
+```
+
+or by hand:
 
 ```sh
 cd ..   # the repository root; build bin/sheepdog first with make build
