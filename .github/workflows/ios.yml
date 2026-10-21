@@ -101,7 +101,7 @@ jobs:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
-      - name: Pick and boot a simulator
+      - name: Pick a simulator and start booting it
         id: sim
         run: |
           # The newest available iPhone simulator on the image.
@@ -122,10 +122,8 @@ jobs:
           print(best[2], best[3], file=sys.stderr)
           ')
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # Boots while the app builds (a few minutes on a cold runner).
           xcrun simctl boot "$udid" || true
-          xcrun simctl bootstatus "$udid" -b
-          # The app asks for the microphone when the session starts.
-          xcrun simctl privacy "$udid" grant microphone "$BUNDLE_ID"
 
       - name: Build for testing
         id: build
@@ -146,6 +144,12 @@ jobs:
           grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
           if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
           exit "$status"
+
+      - name: Wait for the simulator
+        run: |
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          # The app asks for the microphone when the session starts.
+          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
 
       # Two free ports for the main (--voice=off) and the token daemon, and
       # a control directory for scripts/fixture-daemon-restarter.sh. The
