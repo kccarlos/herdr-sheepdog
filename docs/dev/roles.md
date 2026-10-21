@@ -350,7 +350,8 @@ authorises that answer, the worker is at a prompt the daemon has
 recorded, and every key is from that prompt's option set. "A user
 utterance" means one the daemon itself recorded — the voice's input
 transcription, typed text, or a tap on the question — that arrived after
-the prompt appeared and within `supervisor.authorise_window_s`, and whose
+the prompt appeared (when it was first seen, per pane) and within
+`supervisor.authorise_window_s`, and whose
 own words (never the voice model's `to_supervisor` argument) answer it:
 never empty, and a "no" never approves. A `to_supervisor` call with no
 such input since the previous call and the last push is the voice
@@ -365,6 +366,14 @@ retries those words once (`supervisor.relay {retry_of}`, 2026-10-08
 the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
 the orchestrator's call.
+
+The voice is on one question at a time (the pending action), but every
+blocked agent's read prompt stays open for a tap (`state.Table.Questions`,
+`GET /api/state` `questions`). A tap on a question the voice moved past
+passes the same rail with that question's own prompt and option set,
+after a fresh read of the agent's screen: a prompt that changed refuses
+the tap, so keys never reach a question they were not chosen for. It
+leaves the voice on its own question.
 
 The app's agent window (docs/dev/ws-contract.md "Agent window: screen and
 input") is outside the rail on purpose: there the user types or presses

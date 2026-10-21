@@ -91,6 +91,31 @@ final class DaemonModelTests: XCTestCase {
         XCTAssertEqual(state.herdr, "mock")
     }
 
+    func testDecodesEveryOpenQuestionTheChosenAnswerTitleAndComputer() throws {
+        let json = """
+        {"agents":[{"pane_id":"w1:p1","alias":"auth","kind":"codex","state":"blocked","title":"Fix the login test",
+        "last_block":{"question":"run the migration?","answered":false}},
+        {"pane_id":"w2:p1","alias":"docs","kind":"claude","state":"blocked"},
+        {"pane_id":"w3:p1","alias":"web","kind":"claude","state":"idle","last_block":{"question":"push?","answered":true,"answer":"Yes","via":"tap"}}],
+        "pending_action":{"id":"p2","pane_id":"w2:p1","kind":"answer_prompt","spoken_summary":"docs is asking","question":"whether to edit README"},
+        "questions":[{"id":"p1","pane_id":"w1:p1","kind":"answer_prompt","spoken_summary":"auth is asking","question":"whether to run the migration","options":[{"index":1,"label":"Yes","keys":["y"],"default":true}]},
+        {"id":"p2","pane_id":"w2:p1","kind":"answer_prompt","spoken_summary":"docs is asking","question":"whether to edit README"}],
+        "voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.pendingQuestion(for: "w1:p1"), "whether to run the migration")
+        XCTAssertEqual(state.pendingQuestion(for: "w2:p1"), "whether to edit README")
+        XCTAssertEqual(state.question(for: "w1:p1")?.id, "p1")
+        XCTAssertNil(state.question(for: "w3:p1"))
+        XCTAssertEqual(state.agents[0].title, "Fix the login test")
+        XCTAssertEqual(state.agents[2].lastBlock?.answer, "Yes")
+        XCTAssertEqual(state.agents[2].lastBlock?.via, "tap")
+
+        let hello = #"{"name":"sheepdog","version":"1.0.0","auth":"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"AAAAAAAAAAAAAAAAAAAAAA","name":"Studio Mac"}}"#
+        let h = try DaemonClient.decoder.decode(Hello.self, from: Data(hello.utf8))
+        XCTAssertEqual(h.computer, Hello.Computer(id: "AAAAAAAAAAAAAAAAAAAAAA", name: "Studio Mac"))
+    }
+
     func testDecodesConversationStartedAtWhenTheDaemonReportsIt() throws {
         let json = #"{"agents":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false},"conversation_started_at":"2026-09-23T01:40:29.425157Z"}"#
         let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))

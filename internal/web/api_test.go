@@ -119,6 +119,9 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	if len(st.Agents) != 1 || st.PendingAction == nil || st.PendingAction.Kind != state.PendingAnswerPrompt || st.PendingAction.PaneID != "fake:1" {
 		t.Fatalf("state = %+v", st)
 	}
+	if len(st.Questions) != 1 || st.Questions[0].ID != st.PendingAction.ID || len(st.Questions[0].Options) == 0 {
+		t.Fatalf("questions = %+v", st.Questions)
+	}
 	if st.Voice.Mode != "off" || st.Voice.Status != "closed" || st.Herdr != "mock" || st.Version != "test" {
 		t.Fatalf("state meta = %+v", st.Voice)
 	}
@@ -151,8 +154,8 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 			}
 		}
 	}
-	if h.getJSON("/api/state", &st); st.PendingAction != nil {
-		t.Fatalf("pending not cleared: %+v", st.PendingAction)
+	if h.getJSON("/api/state", &st); st.PendingAction != nil || len(st.Questions) != 0 {
+		t.Fatalf("pending not cleared: %+v %+v", st.PendingAction, st.Questions)
 	}
 
 	// Anything else is relayed verbatim: the router classifies nothing,

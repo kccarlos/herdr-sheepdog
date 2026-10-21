@@ -57,6 +57,7 @@ type Config struct {
 	Log        Log        `toml:"log"`
 	Events     Events     `toml:"events"`
 	Update     Update     `toml:"update"`
+	Computer   Computer   `toml:"computer"`
 
 	// deprecations are the notes about deprecated keys Load read
 	// (Deprecations, deprecated.go).
@@ -540,6 +541,13 @@ type Update struct {
 	AutoRestart bool `toml:"auto_restart"`
 }
 
+// Computer names this computer for the apps (GET /api/hello).
+type Computer struct {
+	// Name is what the app calls this computer; empty means the
+	// system's computer name (macOS ComputerName, else the host name).
+	Name string `toml:"name"`
+}
+
 // LogLevels are the valid log.level values.
 var LogLevels = []string{"debug", "info", "warn", "error"}
 
@@ -1016,6 +1024,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_HERDR_BIN, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
+//	SHEEPDOG_COMPUTER_NAME,
 //	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
@@ -1101,6 +1110,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_UPDATE_AUTO_RESTART=%q: want true or false", v)
 		}
 		cfg.Update.AutoRestart = b
+	}
+	if v, ok := lookup("SHEEPDOG_COMPUTER_NAME"); ok {
+		cfg.Computer.Name = v
 	}
 	if v, ok := lookup("SHEEPDOG_HERDR_SOCKET"); ok {
 		cfg.Herdr.Socket = v

@@ -381,6 +381,12 @@ func TestYesWithinTheFastWindowAuthorises(t *testing.T) {
 	if h.log.count("brain.rail_blocked") != 0 || h.log.count("supervisor.fast_path_skipped") != 0 {
 		t.Errorf("rail_blocked=%d fast_path_skipped=%d", h.log.count("brain.rail_blocked"), h.log.count("supervisor.fast_path_skipped"))
 	}
+	if row, _ := h.store.Get("w5:p1"); row.LastBlock == nil || row.LastBlock.Via != "voice" || row.LastBlock.Answer == "" {
+		t.Errorf("last_block = %+v", row.LastBlock)
+	}
+	if len(h.store.Questions()) != 0 {
+		t.Error("the answered question is still listed")
+	}
 }
 
 // The regression of 2026-09-23 06:30: send_keys revived auth's prompt
@@ -440,5 +446,76 @@ func TestNegativeInput(t *testing.T) {
 		if got := negativeInput(text); got != want {
 			t.Errorf("negativeInput(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+// Two agents asking at once: both questions are open for the app, the
+// voice stays on the newer one, and a tap on the older one answers it
+// (after a fresh read of its screen) without moving the voice. The
+// chosen answer is recorded on last_block.
+func TestTapAnswersAQuestionTheVoiceMovedPast(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	older, _ := h.pending()
+	h.clock.Advance(time.Second)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.block("w6:p1", "claude-bash-prompt.screen.txt")
+	newer, _ := h.pending()
+	if newer.PaneID != "w6:p1" {
+		t.Fatalf("voice is on %+v", newer)
+	}
+	qs := h.store.Questions()
+	if len(qs) != 2 || qs[0].ID != older.ID || qs[1].ID != newer.ID {
+		t.Fatalf("questions = %+v", qs)
+	}
+	h.clock.Advance(time.Second)
+	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.sendKeysRequests(); len(got) != 1 || got[0][0] != "w5:p1" {
+		t.Errorf("keys = %v", got)
+	}
+	if cur, has := h.pending(); !has || cur.ID != newer.ID {
+		t.Errorf("the voice moved: %+v", cur)
+	}
+	if qs := h.store.Questions(); len(qs) != 1 || qs[0].ID != newer.ID {
+		t.Errorf("questions after the tap = %+v", qs)
+	}
+	row, _ := h.store.Get("w5:p1")
+	if row.LastBlock == nil || !row.LastBlock.Answered || row.LastBlock.Answer != older.Options[0].Label || row.LastBlock.Via != "tap" {
+		t.Errorf("last_block = %+v", row.LastBlock)
+	}
+}
+
+// A question the voice moved past whose screen changed is not answered:
+// the keys would go into a question the tap was not about.
+func TestTapOnAStaleQuestionIsRefused(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	older, _ := h.pending()
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.block("w6:p1", "claude-bash-prompt.screen.txt")
+	h.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
+	h.clock.Advance(time.Second)
+	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1); !errors.Is(err, ErrPendingGone) {
+		t.Errorf("err = %v, want ErrPendingGone", err)
+	}
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("keys sent: %v", got)
+	}
+	if _, has := h.store.Question(older.ID); has {
+		t.Error("the stale question is still listed")
+	}
+}
+
+// A question leaves the list when its pane leaves blocked.
+func TestAQuestionLeavesWithItsBlock(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.block("w6:p1", "claude-bash-prompt.screen.txt")
+	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
+	if qs := h.store.Questions(); len(qs) != 1 || qs[0].PaneID != "w6:p1" {
+		t.Errorf("questions = %+v", qs)
 	}
 }

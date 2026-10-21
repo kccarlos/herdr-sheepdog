@@ -638,11 +638,15 @@ loopback default) every endpoint below is open. With it set:
   A WebSocket upgrade or an SSE stream refused this way never reaches
   the contract below it — the client sees an ordinary HTTP 401, not a
   `status`/`error` frame.
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"}}`
   so a client can confirm it found a sheepdog daemon, whether it needs a
   token, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
-  `/ws`.
+  `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
+  random bytes base64url, made once): the app keys a computer's
+  settings, cache and pushes by it. `computer.name` is
+  [`computer.name`](../../CONFIG.md), else the system's computer name;
+  the app may rename it locally.
 
 ## Voice provider
 
@@ -787,9 +791,18 @@ answer a question by tap. All three need the token under "Auth".
   short line ("Fresh start. What's next?").
 - **Approve by tap.** `GET /api/state`'s `pending_action` (and the
   `pending.created` event) carries `agent`, `summary`, `question`,
-  `command` and `options: [{index, label, keys, default}]`.
+  `command` and `options: [{index, label, keys, default}]`. It is the
+  question the voice is on. `questions` lists **every** open question
+  in the same shape, oldest first: one per blocked agent whose prompt
+  was read, `pending_action`'s among them, so each blocked agent gets
+  its answer buttons. A question leaves the list when it is answered,
+  its agent leaves blocked or closes, or its prompt is gone from the
+  screen (checked on every reconcile tick; a different prompt replaces
+  it quietly).
   `POST /api/pending/answer {"id": "<pending id>", "option": <index>}`
-  answers it: the tap is recorded as a user input and passes the same
+  answers any of them; for one the voice is not on, the daemon reads the
+  agent's screen first and refuses (`409`) when the prompt changed, and
+  the voice stays on its own question. The answer: the tap is recorded as a user input and passes the same
   rail as a spoken answer (docs/dev/roles.md "The one rail"), the option's
   keys go to the worker, and the answer is `{"ok": true, "spoken":
   "Told auth Yes."}`; the voice is told silently ("The user tapped
@@ -797,6 +810,12 @@ answer a question by tap. All three need the token under "Auth".
   replaced, or expired and gone from the screen) is `409
   {"error":"that question is no longer open"}`; an option the question
   does not have is `400`.
+- **The chosen answer.** An agent's `last_block` is `{question, seen_at,
+  answered, answer?, via?}`: when sheepdog sent the answer, `answer` is
+  the option's label and `via` is `voice` or `tap`; both are absent when
+  the agent left the question some other way (answered at the computer,
+  cancelled). Each agent also carries `title`, its own session title
+  (Claude Code's, Codex's thread name) when it has one.
 
 ## Agent window: screen and input
 

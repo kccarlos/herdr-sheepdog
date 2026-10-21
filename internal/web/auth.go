@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
@@ -83,6 +84,10 @@ type HelloResponse struct {
 	// version; the two ship and move separately.
 	Protocol    int `json:"protocol"`
 	MinProtocol int `json:"min_protocol"`
+	// Computer is this computer's id (the daemon id) and name
+	// (computer.name, else the system's): the app keys everything by
+	// the id. Omitted when the daemon has no id (a test server).
+	Computer *identity.Computer `json:"computer,omitempty"`
 }
 
 // HelloAudio is the /ws audio contract (docs/dev/ws-contract.md): what a
@@ -103,7 +108,17 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 		Audio:         HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
 		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
+		Computer: s.computer(),
 	})
+}
+
+// computer is Deps.Computer, nil without an id.
+func (s *Server) computer() *identity.Computer {
+	if s.deps.Computer.ID == "" {
+		return nil
+	}
+	c := s.deps.Computer
+	return &c
 }
 
 // LoginRequest is the body of POST /api/login: the token typed once into

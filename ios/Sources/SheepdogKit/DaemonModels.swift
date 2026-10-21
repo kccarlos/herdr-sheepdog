@@ -38,9 +38,22 @@ public struct Hello: Codable, Equatable, Sendable {
     /// Absent on daemons from before the handshake: protocol 1.
     public var `protocol`: Int?
     public var minProtocol: Int?
+    /// This computer: its id (the daemon id the app keys everything by)
+    /// and its name (the daemon's `computer.name`).
+    public var computer: Computer?
+
+    public struct Computer: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case name, version, auth, ws, audio, `protocol`
+        case name, version, auth, ws, audio, `protocol`, computer
         case minProtocol = "min_protocol"
         case voiceName = "voice_name"
         case voiceProvider = "voice_provider"
@@ -76,16 +89,22 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         public var seenAt: Date?
         /// The question was answered (by tap, voice or the orchestrator).
         public var answered: Bool?
+        /// The option sheepdog sent, and how it came (`voice` or `tap`);
+        /// absent when the agent left the question some other way.
+        public var answer: String?
+        public var via: String?
 
         enum CodingKeys: String, CodingKey {
-            case question, answered
+            case question, answered, answer, via
             case seenAt = "seen_at"
         }
 
-        public init(question: String? = nil, seenAt: Date? = nil, answered: Bool? = nil) {
+        public init(question: String? = nil, seenAt: Date? = nil, answered: Bool? = nil, answer: String? = nil, via: String? = nil) {
             self.question = question
             self.seenAt = seenAt
             self.answered = answered
+            self.answer = answer
+            self.via = via
         }
     }
 
@@ -165,6 +184,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// The pane's working folder on the computer (where "Open shell here"
     /// opens); older daemons omit it.
     public var cwd: String?
+    /// The agent's own session title (Claude Code's, Codex's thread
+    /// name), when it has one.
+    public var title: String?
 
     public var id: String { paneID }
 
@@ -175,7 +197,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic, spoken, cwd
+        case alias, kind, name, state, journal, synthetic, spoken, cwd, title
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -200,7 +222,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         journal: [JournalEntry]? = nil,
         synthetic: Bool? = nil,
         spoken: String? = nil,
-        cwd: String? = nil
+        cwd: String? = nil,
+        title: String? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -217,6 +240,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.synthetic = synthetic
         self.spoken = spoken
         self.cwd = cwd
+        self.title = title
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an
@@ -498,7 +522,11 @@ public struct DaemonState: Codable, Equatable, Sendable {
     }
 
     public var agents: [Agent]
+    /// The question the voice is on.
     public var pendingAction: PendingAction?
+    /// Every open question, oldest first: one per blocked agent whose
+    /// prompt was read, `pendingAction` among them.
+    public var questions: [PendingAction]?
     public var voice: VoiceInfo
     public var herdr: String?
     public var version: String?
@@ -517,17 +545,18 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var update: UpdateInfo?
 
     enum CodingKeys: String, CodingKey {
-        case agents, voice, herdr, version, brain, update
+        case agents, voice, herdr, version, brain, update, questions
         case pendingAction = "pending_action"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil) {
         self.update = update
         self.agents = agents
         self.pendingAction = pendingAction
+        self.questions = questions
         self.voice = voice
         self.herdr = herdr
         self.version = version
@@ -537,9 +566,17 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.conversationStartedAt = conversationStartedAt
     }
 
-    /// The question waiting on a given pane, if the pending action is one.
-    public func pendingQuestion(for paneID: String) -> String? {
+    /// The open question of a pane: from `questions`, else the pending
+    /// action when it is that pane's.
+    public func question(for paneID: String) -> PendingAction? {
+        if let q = questions?.first(where: { $0.paneID == paneID }) { return q }
         guard let p = pendingAction, p.paneID == paneID else { return nil }
+        return p
+    }
+
+    /// The question waiting on a given pane, in words.
+    public func pendingQuestion(for paneID: String) -> String? {
+        guard let p = question(for: paneID) else { return nil }
         return p.question ?? p.spokenSummary
     }
 }

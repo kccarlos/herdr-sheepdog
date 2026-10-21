@@ -35,7 +35,7 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 	case a.pending != "":
 		n.Kind = push.KindApproval
 		n.PendingID = a.pending
-		if p, ok := s.store.Pending(); ok && p.ID == a.pending {
+		if p, _, ok := s.questionByID(a.pending); ok {
 			for i, o := range p.Options {
 				if o.Meta {
 					continue

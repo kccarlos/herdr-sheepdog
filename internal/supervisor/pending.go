@@ -95,6 +95,13 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 	if err := s.store.SetPending(p); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	if p.Kind == state.PendingAnswerPrompt {
+		// Every open question is listed for the app, the one the
+		// voice is on and those it moved past alike.
+		if err := s.store.SetQuestion(p); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+		}
+	}
 	s.invalidateBriefingLocked()
 	created := map[string]any{
 		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question,
@@ -116,8 +123,34 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	if p.Kind == state.PendingAnswerPrompt {
+		s.dropQuestionLocked(p)
+	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
+}
+
+// dropQuestionLocked removes p from the open questions when it is
+// still its pane's question. Caller holds s.mu.
+func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
+	if q, ok := s.store.Question(p.ID); !ok || q.PaneID != p.PaneID {
+		return
+	}
+	if err := s.store.DropQuestion(p.PaneID); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+}
+
+// questionByID finds an open answer_prompt by id: the one the voice is
+// on, or one it moved past. slot says it is the former.
+func (s *Supervisor) questionByID(id string) (p state.PendingAction, slot, ok bool) {
+	if cur, has := s.store.Pending(); has && cur.ID == id && cur.Kind == state.PendingAnswerPrompt {
+		return cur, true, true
+	}
+	if q, has := s.store.Question(id); has {
+		return q, false, true
+	}
+	return state.PendingAction{}, false, false
 }
 
 // dropPendingFor cancels the pending action of paneID when it has one of
