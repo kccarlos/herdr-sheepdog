@@ -48,7 +48,7 @@ func TestAgentActions(t *testing.T) {
 	}
 	// Mock herdr cannot start agents: a plain refusal, not a crash.
 	secret := "a prompt that must not be logged"
-	if code, body := h.postJSON("/api/agents", map[string]any{"kind": "claude", "new_space": map[string]any{"dir": "bench"}, "text": secret}, nil); code < 400 || !strings.Contains(body, "cannot start agents") {
+	if code, body := h.postJSON("/api/agents", map[string]any{"kind": "claude", "dir": "bench", "text": secret}, nil); code < 400 || !strings.Contains(body, "cannot start agents") {
 		t.Errorf("new agent on mock herdr = %d %s", code, body)
 	}
 	if code, _ := h.postJSON("/api/agents", map[string]any{"kind": "claude"}, nil); code != http.StatusBadRequest {

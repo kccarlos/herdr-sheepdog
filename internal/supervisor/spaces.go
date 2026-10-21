@@ -93,12 +93,20 @@ type Folder struct {
 	Git  bool   `json:"git"`
 }
 
+// Kind is an agent kind a tap may start: herdr's kind and its name
+// ("agy", "Antigravity").
+type Kind struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
 // SpacesView is GET /api/spaces.
 type SpacesView struct {
 	Spaces  []Space  `json:"spaces"`
 	Folders []Folder `json:"folders"`
-	// Kinds are the agent kinds a new agent may be (InstalledKinds).
-	Kinds []string `json:"kinds"`
+	// Kinds are the agent kinds a new agent may be (InstalledKinds),
+	// each with the name the user hears for it.
+	Kinds []Kind `json:"kinds"`
 	// Worktrees is true when this herdr can make a fresh worktree for a
 	// new agent (a space's Git says whether its folder can have one).
 	Worktrees bool `json:"worktrees"`
@@ -119,7 +127,10 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 		return SpacesView{}, err
 	}
 	_, wt := s.herdr.(WorktreeCreator)
-	out := SpacesView{Spaces: []Space{}, Folders: []Folder{}, Kinds: kinds, Worktrees: wt}
+	out := SpacesView{Spaces: []Space{}, Folders: []Folder{}, Kinds: []Kind{}, Worktrees: wt}
+	for _, k := range kinds {
+		out.Kinds = append(out.Kinds, Kind{Kind: k, Name: state.KindWord(k)})
+	}
 	cmds := s.loadWrapUps()
 	rows := map[string]state.Agent{}
 	for _, a := range s.store.List() {

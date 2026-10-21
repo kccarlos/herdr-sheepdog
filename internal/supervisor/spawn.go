@@ -190,6 +190,15 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 			dir.Pane = ""
 		}
 	}
+	if req.Worktree != "" {
+		g, isGit := gitInfo(dir.Path)
+		if !isGit {
+			return refuse("not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)})
+		}
+		if branchExists(ctx, g.root, req.Worktree) {
+			return refuse("branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s already exists in %s; open its worktree instead", ErrUserAction, req.Worktree, g.repo)})
+		}
+	}
 	// What authorised the start and the slot are taken before anything
 	// opens, under one lock: two calls racing cannot both spend the
 	// same words or the last slot.
@@ -237,7 +246,7 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 	s.waitShell(ctx, sp, pane.PaneID)
 	if err := sp.StartAgent(ctx, pane.PaneID, launchName(), req.Kind, spawnArgs(req.Kind, req.Model), spawnStartWait); err != nil {
 		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": req.Via, "error": err.Error()})
-		return started{}, &StartError{PaneID: pane.PaneID, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
+		return started{}, &StartError{PaneID: pane.PaneID, Reason: ReasonStartFailed, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
 	}
 	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
 	if req.Model != "" {
@@ -281,11 +290,39 @@ func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 // left at its shell prompt, so the user can open it and see why.
 type StartError struct {
 	PaneID string
+	// Reason is ReasonTimeout when herdr never reported the agent
+	// ready, else ReasonStartFailed.
+	Reason string
 	Err    error
 }
 
 func (e *StartError) Error() string { return e.Err.Error() }
 func (e *StartError) Unwrap() error { return e.Err }
+
+// The codes of a refused or failed start, for the app's own screens
+// (POST /api/agents "reason").
+const (
+	ReasonNotInstalled = "not_installed"
+	ReasonNotGit       = "not_git"
+	ReasonBranchExists = "branch_exists"
+	ReasonTimeout      = "timeout"
+	ReasonStartFailed  = "start_failed"
+)
+
+// ReasonError is a refused start with its code.
+type ReasonError struct {
+	Reason string
+	Err    error
+}
+
+func (e *ReasonError) Error() string { return e.Err.Error() }
+func (e *ReasonError) Unwrap() error { return e.Err }
+
+// branchExists reports whether the repository at root has a local
+// branch named branch (already checked by validBranch).
+func branchExists(ctx context.Context, root, branch string) bool {
+	return exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+}
 
 // launchName is a fresh placeholder herdr name (state.LaunchNamePrefix).
 func launchName() string {

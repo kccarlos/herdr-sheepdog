@@ -42,17 +42,15 @@ func actionStatus(err error) int {
 	}
 }
 
-// newAgentRequest is the body of POST /api/agents: an open space, or a
-// new space's folder (with an optional fresh worktree).
+// newAgentRequest is the body of POST /api/agents: an open space, or
+// the folder of a new space (with an optional fresh worktree).
 type newAgentRequest struct {
 	Kind     string `json:"kind"`
 	Space    string `json:"space"`
-	NewSpace *struct {
-		Dir      string `json:"dir"`
-		Worktree *struct {
-			Branch string `json:"branch"`
-		} `json:"worktree"`
-	} `json:"new_space"`
+	Dir      string `json:"dir"`
+	Worktree *struct {
+		Branch string `json:"branch"`
+	} `json:"worktree"`
 	Text string `json:"text"`
 }
 
@@ -67,19 +65,16 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Text: strings.TrimSpace(req.Text)}
-	if req.NewSpace != nil {
-		in.Dir = strings.TrimSpace(req.NewSpace.Dir)
-		if req.NewSpace.Worktree != nil {
-			in.Worktree = strings.TrimSpace(req.NewSpace.Worktree.Branch)
-			if in.Worktree == "" {
-				writeError(w, http.StatusBadRequest, "a new worktree needs a branch")
-				return
-			}
+	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Dir: strings.TrimSpace(req.Dir), Text: strings.TrimSpace(req.Text)}
+	if req.Worktree != nil {
+		in.Worktree = strings.TrimSpace(req.Worktree.Branch)
+		if in.Worktree == "" {
+			writeError(w, http.StatusBadRequest, "a new worktree needs a branch")
+			return
 		}
 	}
 	if (in.Space == "") == (in.Dir == "") {
-		writeError(w, http.StatusBadRequest, "give space, or new_space with its dir")
+		writeError(w, http.StatusBadRequest, "give a space, or the dir of a new space")
 		return
 	}
 	ctx, cancel := s.toolCtx()
@@ -93,11 +88,16 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 			// The pane is left at its shell prompt: the app offers
 			// "Open the pane".
 			s.log.Log(logSource, "web.agent_action", se.PaneID, fields)
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "pane_id": se.PaneID})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "pane_id": se.PaneID, "reason": se.Reason})
 			return
 		}
 		s.log.Log(logSource, "web.agent_action", "", fields)
-		writeError(w, actionStatus(err), err.Error())
+		body := map[string]string{"error": err.Error()}
+		var re *supervisor.ReasonError
+		if errors.As(err, &re) {
+			body["reason"] = re.Reason
+		}
+		writeJSON(w, actionStatus(err), body)
 		return
 	}
 	s.log.Log(logSource, "web.agent_action", res.PaneID, fields)

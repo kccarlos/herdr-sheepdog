@@ -57,7 +57,7 @@ func TestSpacesListsSpacesFoldersAndKinds(t *testing.T) {
 	if len(v.Folders) != 1 || v.Folders[0].Name != "app" || v.Folders[0].Git {
 		t.Errorf("folders = %+v", v.Folders)
 	}
-	if strings.Join(v.Kinds, " ") != "claude codex agy" || !v.Worktrees {
+	if kindList(v.Kinds) != "claude:Claude codex:Codex agy:Antigravity" || !v.Worktrees {
 		t.Errorf("kinds = %v, worktrees = %v", v.Kinds, v.Worktrees)
 	}
 }
@@ -226,4 +226,13 @@ func TestWrapUpCommands(t *testing.T) {
 	if list, _ := w.sup.SpaceCommands(ctx, "w3"); len(list) != 0 {
 		t.Errorf("after delete = %+v", list)
 	}
+}
+
+// kindList is kinds as "kind:Name" words.
+func kindList(kinds []Kind) string {
+	var out []string
+	for _, k := range kinds {
+		out = append(out, k.Kind+":"+k.Name)
+	}
+	return strings.Join(out, " ")
 }

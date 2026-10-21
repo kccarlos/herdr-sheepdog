@@ -41,6 +41,12 @@ public struct SpacesView: Codable, Equatable, Sendable {
         public var git: Bool
     }
 
+    /// A kind a new agent may be, with the name the user hears.
+    public struct Kind: Codable, Equatable, Sendable {
+        public var kind: String
+        public var name: String
+    }
+
     /// A saved wrap-up command of a space.
     public struct WrapUp: Codable, Equatable, Sendable, Identifiable {
         public var id: String
@@ -50,7 +56,7 @@ public struct SpacesView: Codable, Equatable, Sendable {
 
     public var spaces: [Space]
     public var folders: [Folder]
-    public var kinds: [String]
+    public var kinds: [Kind]
     /// herdr can make a fresh worktree for a new agent.
     public var worktrees: Bool
 }
@@ -79,37 +85,32 @@ public struct NewAgentOptions: Codable, Equatable, Sendable {
     }
 
     public var kinds: [String]
+    /// The daemon's name for each kind ("agy": "Antigravity").
+    public var kindNames: [String: String]
     public var projects: [Project]
     /// herdr can make worktrees.
     public var worktree: Bool
 
-    public init(kinds: [String], projects: [Project], worktree: Bool) {
+    public init(kinds: [String], projects: [Project], worktree: Bool, kindNames: [String: String] = [:]) {
         self.kinds = kinds
+        self.kindNames = kindNames
         self.projects = projects
         self.worktree = worktree
     }
 
     /// The open spaces first, then the free project folders.
     public init(spaces view: SpacesView) {
-        self.kinds = view.kinds
+        self.kinds = view.kinds.map(\.kind)
+        self.kindNames = Dictionary(view.kinds.map { ($0.kind, $0.name) }, uniquingKeysWith: { a, _ in a })
         self.worktree = view.worktrees
         self.projects = view.spaces.filter { !$0.path.isEmpty }.map {
             Project(name: $0.name, path: $0.path, open: true, git: $0.git, space: $0.id)
         } + view.folders.map { Project(name: $0.name, path: $0.path, git: $0.git) }
     }
 
-    /// The name the sheet shows for a kind.
-    public static func kindName(_ kind: String) -> String {
-        switch kind {
-        case "claude": return "Claude Code"
-        case "codex": return "Codex"
-        case "agy": return "Antigravity"
-        case "gemini": return "Gemini"
-        case "opencode": return "OpenCode"
-        case "copilot": return "Copilot"
-        case "cursor": return "Cursor"
-        default: return kind
-        }
+    /// The name the sheet shows for a kind: the daemon's.
+    public func kindName(_ kind: String) -> String {
+        kindNames[kind] ?? kind
     }
 }
 
@@ -170,11 +171,12 @@ extension DaemonClient {
     public func newAgent(kind: String, project: NewAgentOptions.Project, worktree: String? = nil, text: String? = nil) async throws -> AgentActionReply {
         var body: [String: Any] = ["kind": kind]
         if let worktree, !worktree.isEmpty {
-            body["new_space"] = ["dir": project.path, "worktree": ["branch": worktree]]
+            body["dir"] = project.path
+            body["worktree"] = ["branch": worktree]
         } else if let space = project.space {
             body["space"] = space
         } else {
-            body["new_space"] = ["dir": project.path]
+            body["dir"] = project.path
         }
         if let text, !text.isEmpty { body["text"] = text }
         return try await postAction(encodedPath: "/api/agents", body: body)

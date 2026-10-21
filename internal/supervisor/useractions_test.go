@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -56,11 +57,12 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 		w.srv.SetScreen(pane.PaneID, "❯ ")
 		return map[string]any{"type": "worktree_created", "root_pane": pane}, nil
 	})
+	gitRepo(t, w.bench)
 	opts, err := w.sup.Spaces(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Worktrees || strings.Join(opts.Kinds, " ") != "claude codex agy" || len(opts.Folders) != 2 {
+	if !opts.Worktrees || kindList(opts.Kinds) != "claude:Claude codex:Codex agy:Antigravity" || len(opts.Folders) != 2 {
 		t.Fatalf("options = %+v", opts)
 	}
 	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "fix-login", Text: "fix the login test"})
@@ -76,6 +78,38 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 	}
 	if len(w.params("workspace.create")) != 0 {
 		t.Error("a workspace was opened in the project folder too")
+	}
+
+	// The app shows its own screens for these.
+	for name, c := range map[string]struct {
+		req    NewAgentRequest
+		reason string
+	}{
+		"not git":       {NewAgentRequest{Kind: "codex", Dir: "app", Worktree: "fix-app"}, ReasonNotGit},
+		"branch exists": {NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "main"}, ReasonBranchExists},
+		"not installed": {NewAgentRequest{Kind: "gemini", Dir: "bench"}, ReasonNotInstalled},
+	} {
+		_, err := w.sup.UserNewAgent(context.Background(), c.req)
+		var re *ReasonError
+		if !errors.As(err, &re) || re.Reason != c.reason || !errors.Is(err, ErrUserAction) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if len(w.params("worktree.create")) != 1 {
+		t.Error("a refused worktree reached herdr")
+	}
+}
+
+// gitRepo makes dir a git repository whose branch main has one commit.
+func gitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "start"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
 	}
 }
 

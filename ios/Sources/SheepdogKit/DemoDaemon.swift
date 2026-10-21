@@ -167,7 +167,7 @@ public final class DemoDaemon: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
         case ("GET", "/api/spaces"):
-            return json(["kinds": ["claude", "codex", "agy"], "worktrees": true, "spaces": [
+            return json(["kinds": [["kind": "claude", "name": "Claude"], ["kind": "codex", "name": "Codex"], ["kind": "agy", "name": "Antigravity"]], "worktrees": true, "spaces": [
                 ["id": "w1", "name": "sheepdog-bench", "path": "/Users/you/code/sheepdog-bench", "git": true,
                  "repo": "sheepdog-bench", "branch": "main", "worktree": false,
                  "agents": [] as [Any], "shells": [] as [Any], "commands": [] as [Any]],

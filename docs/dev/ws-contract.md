@@ -872,7 +872,7 @@ phone").
 
 | Route | Body | Answer |
 |---|---|---|
-| `POST /api/agents` | `{"kind", "space"}` or `{"kind", "new_space": {"dir", "worktree"?: {"branch"}}}`, plus `"text"?` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
+| `POST /api/agents` | `{"kind", "space"}` or `{"kind", "dir", "worktree"?: {"branch"}}`, plus `"text"?` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
 | `POST /api/agents/{pane_id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/interrupt` | | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/close` | | `{"ok": true, "spoken"}` |
@@ -880,9 +880,9 @@ phone").
 - **New agent.** `kind` is one of the `kinds` of `GET /api/spaces`
   ([Spaces](#spaces)). With `space` (a space's `id`) the agent joins that
   space: its pane is split from the space's first pane, in the space's
-  folder. With `new_space` a new space opens in `dir`, a folder's name or
-  full path resolved as for the orchestrator (inside a project root, or
-  an open space's own folder), even when a space already works there.
+  folder. With `dir` a new space opens there: a folder's name or full
+  path resolved as for the orchestrator (inside a project root, or an
+  open space's own folder), even when a space already works there.
   With `worktree` (a branch name: letters, digits and `. _ / -`), herdr's
   `worktree.create` makes the branch's worktree in that repository and
   the new space opens there. herdr's `agent.start` starts the agent in
@@ -892,8 +892,14 @@ phone").
   question), which is now an open question. `text`, at most 64 KB, is
   sent once the agent sits idle at its prompt. Counts toward the cap of
   3 new agents per 10 minutes. A start that fails once its pane is open
-  is `502` `{"error", "pane_id"}`: the pane is left at its shell prompt,
-  so the app can offer to open it.
+  is `502` `{"error", "pane_id", "reason"}`: the pane is left at its
+  shell prompt, so the app can offer to open it.
+- **Reasons.** An error the app has its own screen for carries
+  `reason`: `not_installed` (`400`, the kind is not installed here),
+  `not_git` (`400`, a worktree for a folder outside git),
+  `branch_exists` (`400`, the branch is already there: open its worktree
+  instead), `timeout` (`502`, herdr never saw the agent running) and
+  `start_failed` (`502`, herdr refused `agent.start`).
 - **Rename** takes 1 to 60 characters, as the orchestrator's rename does
   (herdr gets its own spelling when it allows one).
 - **Interrupt** stops the current turn the way the orchestrator's
@@ -914,7 +920,7 @@ and told to the orchestrator in one line.
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": ["claude", "codex", "agy"], "worktrees": true}` |
+| `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": [{"kind", "name"}], "worktrees": true}` |
 | `POST /api/spaces/{id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/spaces/{id}/close` | | `{"ok": true, "spoken"}` |
 | `GET /api/spaces/{id}/worktrees` | | `{"repo", "repo_root", "worktrees": [{"path", "branch", "label", "is_linked_worktree", "is_detached", "is_prunable", "is_bare", "open_workspace_id"}]}` |
@@ -940,10 +946,11 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
 - `agents` are the space's tracked agents with their spoken `name`;
   `shells` are its panes with no agent.
 - **Folders** are the folders directly inside `supervisor.project_roots`
-  that no space works in yet: where a `new_space` can open.
+  that no space works in yet: where a new space can open.
 - **Kinds** are the agent kinds herdr supports (its agent manifests,
   `server.agent_manifests`) whose executable is on the daemon's PATH, in
-  herdr's order. They are the kinds a tap may start; the orchestrator
+  herdr's order, each with the `name` the user hears ("agy",
+  "Antigravity"). They are the kinds a tap may start; the orchestrator
   still starts only Claude and Codex. `worktrees` says this herdr can make
   a fresh worktree (a space's `git` says whether its folder can have one).
 - **Close** ends the space and every pane in it (`workspace.close`). It is

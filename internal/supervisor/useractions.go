@@ -125,7 +125,7 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 		return refuse("kinds failed", err)
 	}
 	if !slices.Contains(kinds, req.Kind) {
-		return refuse("bad kind", fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", ")))
+		return refuse("bad kind", &ReasonError{Reason: ReasonNotInstalled, Err: fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", "))})
 	}
 	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Space == "", Worktree: req.Worktree, Text: req.Text, Via: "user"})
 	if err != nil {
@@ -138,7 +138,7 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 		if line := lastLine(out.Tail); line != "" {
 			msg += "; its pane shows: " + line
 		}
-		return NewAgentResult{}, &StartError{PaneID: st.PaneID, Err: errors.New(msg)}
+		return NewAgentResult{}, &StartError{PaneID: st.PaneID, Reason: ReasonTimeout, Err: errors.New(msg)}
 	}
 	if s.track() {
 		go func() {

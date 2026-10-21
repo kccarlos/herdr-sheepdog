@@ -27,10 +27,10 @@ func TestSpacesRoutes(t *testing.T) {
 	if code, _ := h.postJSON("/api/spaces/w1/rename", map[string]any{"name": "x"}, nil); code < 400 {
 		t.Errorf("rename on mock herdr = %d", code)
 	}
-	if code, _ := h.postJSON("/api/agents", map[string]any{"kind": "claude", "space": "w1", "new_space": map[string]any{"dir": "bench"}}, nil); code != http.StatusBadRequest {
-		t.Errorf("space and new_space = %d, want 400", code)
+	if code, _ := h.postJSON("/api/agents", map[string]any{"kind": "claude", "space": "w1", "dir": "bench"}, nil); code != http.StatusBadRequest {
+		t.Errorf("space and dir = %d, want 400", code)
 	}
-	if code, _ := h.postJSON("/api/agents", map[string]any{"kind": "claude", "new_space": map[string]any{"dir": "bench", "worktree": map[string]any{}}}, nil); code != http.StatusBadRequest {
+	if code, _ := h.postJSON("/api/agents", map[string]any{"kind": "claude", "dir": "bench", "worktree": map[string]any{}}, nil); code != http.StatusBadRequest {
 		t.Errorf("worktree without a branch = %d, want 400", code)
 	}
 }

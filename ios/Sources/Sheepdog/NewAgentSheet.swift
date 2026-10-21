@@ -94,7 +94,7 @@ struct NewAgentSheet: View {
         Form {
             Section {
                 Picker("Agent", selection: $kind) {
-                    ForEach(options.kinds, id: \.self) { Text(NewAgentOptions.kindName($0)).tag($0) }
+                    ForEach(options.kinds, id: \.self) { Text(options.kindName($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("newAgent.kind")
