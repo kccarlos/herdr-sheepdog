@@ -171,6 +171,7 @@ jobs:
             echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
             echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
             echo "TEST_RUNNER_SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port"
+            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
           } >> "$GITHUB_ENV"
           SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
             SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
