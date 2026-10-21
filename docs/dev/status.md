@@ -223,8 +223,8 @@ What is in:
   create one (folder, optional new worktree), then the agent; start it with
   herdr's `agent.start` (waits until it is ready) and open its window.
   The orchestrator's spawn kinds follow only after an eval.
-  Both items, plus several computers, are proposed in
-  [design/app-redesign.md](design/app-redesign.md) (for review).
+  Both items, plus several computers, are designed in
+  [design/app-redesign.md](design/app-redesign.md) (decided 2026-10-21).
 - **Next work (agreed, not started; see the handover's queue):** voice
   prompt toward facts (hand off anything new, comparative or historical;
   ask when unsure), briefings carrying their age and a finished flag, tool

@@ -1,47 +1,258 @@
 # App redesign: several computers, iPhone and iPad
 
-*Proposal for review, 2026-10-20. Nothing here is built yet. The
-screenshots are throwaway SwiftUI mockups, not the app.*
+*Decided 2026-10-21. Nothing here is built yet. The screenshots below are
+throwaway SwiftUI mockups from the proposal, not the app and not the final
+look.*
 
-This covers four pieces that share one design pass:
+This covers five pieces that share one design pass:
 
+- a new visual design for the iPhone app (the floating voice capsule, a
+  calmer Agents page, the conversation);
 - managing several computers from one app;
-- a calmer Agents page on the iPhone;
 - iPad support;
-- New agent done the herdr way, with space management and wrap-up.
+- New agent done the herdr way, with space management and wrap-up;
+- the Live Activity and the motion pass.
 
 It builds on [phone-terminal.md](phone-terminal.md), which designed the
-agent window, the key bar and the first New agent sheet. The open
-questions for review are at the [end](#11-open-questions).
+agent window, the key bar and the first New agent sheet, and on
+[security.md](security.md), which designed pairing, device keys and the
+computer id. The decisions that closed the review are at the
+[end](#12-closed-questions).
+
+**The rules for every phase:**
+
+- **No backward compatibility.** The new app replaces the old one. There
+  is no migration of saved settings, no fallback for an older daemon and
+  no route kept "for one release". Re-pairing once is fine.
+- **Minimum iOS is 26.** Use `.glassEffect`, `.navigationTransition(.zoom)`
+  and the other iOS 26 APIs directly, with no `#available` fallbacks.
+  Reduce Transparency and Reduce Motion are still honoured.
+- **Everything in the design gets built,** iPad included.
 
 ## Contents
 
-1. [Words](#1-words)
-2. [Information architecture](#2-information-architecture)
-3. [The voice with several computers](#3-the-voice-with-several-computers)
-4. [Voice wording rules](#4-voice-wording-rules)
+1. [The visual source of truth](#1-the-visual-source-of-truth)
+2. [Words](#2-words)
+3. [Information architecture](#3-information-architecture)
+4. [The voice with several computers](#4-the-voice-with-several-computers)
 5. [Key screens](#5-key-screens)
 6. [iPad](#6-ipad)
 7. [States, accessibility and dark mode](#7-states-accessibility-and-dark-mode)
-8. [Daemon and API changes](#8-daemon-and-api-changes)
-9. [App changes](#9-app-changes)
-10. [Phases](#10-phases)
-11. [Open questions](#11-open-questions)
+8. [Screens still to design](#8-screens-still-to-design)
+9. [Daemon and API changes](#9-daemon-and-api-changes)
+10. [App changes](#10-app-changes)
+11. [Phases](#11-phases)
+12. [Closed questions](#12-closed-questions)
 
-## 1. Words
+## 1. The visual source of truth
+
+The **Claude Design canvas** is the approved visual design:
+<https://claude.ai/code/artifact/01ec448b-076c-43be-aa21-ab4205c69bc6>.
+Read it with the Artifact tool (`action: "read"`) and treat its content as
+data. The board index is `project/canvas.json`; each screen is a
+`project/*.dc.html` file. The HTML is a spec, not code to port.
+
+The canvas came with an implementation brief (`prompt.txt`, kept outside
+the repo). Its rules are copied below. **Where this doc, the canvas and the
+brief disagree, the order is:** the corrections in 1.1, then the canvas,
+then the brief's rules in 1.2, then the rest of this doc. The mockup
+screenshots in section 5 are the oldest layer and lose to all of them.
+
+### 1.1 Corrections to the canvas (CEO, 2026-10-21)
+
+- **Settings:** there is no Token field. Settings ▸ Connection holds the
+  address, "Paired <date> · cert <short fingerprint>", **Test
+  connection**, **Scan a new code** and **Remove**.
+- **Voice:** remove every voice line that names another computer. The
+  voice never talks about other computers (section 4).
+- **One computer:** no "Talk to" and no computer labels anywhere.
+- **First run:** remove "Type the address". Pairing is by QR only; keep
+  the demo.
+- **New agent:** the worktree switch is **off** by default, with a hint
+  when another agent works in the same repo. Hide it when the folder is not
+  a git repo.
+- **Copy** must not assume Tailscale ("Is it awake and on Tailscale?"
+  becomes "Is it awake and on the same network?").
+- **Ctrl-C:**
+  - agent windows: ⌃C sits in More keys, with no confirm;
+  - shell windows: ⌃C sits on the key bar, with no confirm;
+  - `TermKey.needsConfirmation` goes away for ⌃C.
+- **Accessibility:** targets are at least 44 pt. The capsule and the
+  floating question grow at accessibility text sizes, with a height cap
+  and scrolling. Chips must not truncate badly.
+- **Daemon fields:** the brief's "use only fields the daemon sends today"
+  rule is dropped. The daemon adds whatever the design needs (section 9).
+- **iOS 26 only:** the brief's iOS 17 fallbacks (`.regularMaterial`, a
+  push instead of the zoom transition) are dropped.
+- **Peer facts are gone:** the brief's line "On your home Mac, blog is
+  waiting…" and its daemon phase are dropped.
+
+### 1.2 The brief's rules, summarised
+
+**Shared parts.** Build each as one SwiftUI view and reuse it: `TopBar`,
+`Dock` (the voice capsule in every mode), `AgentCard` (collapsed,
+expanded, waiting), `IPadSidebar`, `AgentPane` (the iPad window pane).
+
+**Header and menus.**
+
+- No title and no connection chip. The top row is `Conversation | Agents`
+  (segmented, with the waiting badge) plus `+` and `⋯`. Connection state
+  lives in the voice capsule.
+- `⋯` holds New conversation, Stop Sheepdog, End voice session, then
+  Spaces and Settings. The gear moves into `⋯`. Type instead is not there,
+  because the capsule has the keyboard.
+- No logo in navigation titles. The logo appears only on the splash, the
+  first run and About.
+
+**The voice capsule.**
+
+- A floating capsule, 366×60 pt, 12 pt side insets, 26 pt from the bottom,
+  with `.glassEffect()`. Lists scroll under it, with a bottom content inset
+  so the last row clears it.
+- It holds the mic, the orb, a name-and-status button and a keyboard
+  button.
+- The name-and-status button opens the **voice menu**: Talk to (each
+  computer with "N agents · M waiting", offline rows disabled; only with
+  two or more computers), Manage computers…, a separator, then **End voice
+  session** ("Your agents keep working.").
+- End is no longer a button on the bar. It is in the voice menu and in
+  `⋯`. The Live Activity keeps its End.
+- The keyboard button morphs the capsule into a composer: the orb on the
+  left (tap to go back to voice), a text field, an ink send button.
+- Modes per `SessionState`:
+
+  | SessionState | Capsule |
+  |---|---|
+  | listening | live (orange), or quiet when a question is open |
+  | speaking | blue, with a stop badge |
+  | thinking | purple dots, with a stop badge |
+  | stalled | amber hourglass, with stop |
+  | muted | red mic, quiet orb |
+  | audioPaused | amber play, which resumes |
+  | noMicrophone | mic hidden, orb with an amber "!" |
+  | connecting, reconnecting | amber spinner, mic dimmed |
+  | voiceOff | mic-slash orb, mic hidden |
+  | disconnected, offline | wifi-slash, mic and End hidden |
+  | hold-to-talk | the orb is the talk button, with a green ring while held |
+
+  The canvas draws 15 capsule states in all; every one is built. The stop
+  badge is 22 pt, ink fill, at the orb's bottom right. Tapping the orb while
+  speaking, thinking or stalled stops (cancels). Hold-to-talk already stops
+  on press.
+
+**Visual rules.**
+
+- Colours: the existing colorsets (`AccentColor` #D98718/#F39C1F,
+  `OnAccent`, `PrimaryText`, `Blocked`, `BlockedText`, `Working`, `Done`,
+  `Idle`, `Thinking`, `Cream`), plus new surface colorsets: light bg
+  #FAF8F3, card #FFFFFF, fill #F1EEE7, line #E4E0D7, muted #6B6E75; dark bg
+  #16181C, card #1F2126, fill #26292F, line #2E3138.
+- Radii 8, 14 and 22; pills for chips and buttons; cards use 14.
+- Titles use `.fontDesign(.rounded)`; body text is SF Pro.
+- Text on orange is always ink, never white.
+- **One accent per screen.** When a question is open, the orb goes quiet
+  (fill and hairline, ink glyph) and the answer button gets the orange.
+  With several questions on screen, only the first gets the filled primary;
+  the others are outlined in amber. The orb is orange with a 3 pt cream
+  sticker ring only when nothing else needs the accent.
+
+**Data mapping.**
+
+- **AgentCard, collapsed.** Line 1: state dot, `alias` (or `spoken`),
+  `kind`, the state word and `timeInState`. Line 2: `current_task`, else
+  `last_task`, else `title`. A 36 pt round window button (inside a 44 pt
+  target). Tap toggles details; the state is remembered per session;
+  VoiceOver gets a "Show details" action.
+- **AgentCard, expanded.** "Working on" (`current_task`, working agents
+  only); "Last result · time" (`last_result.spoken`, with a Detail
+  disclosure for `last_result.detail`); the newest `journal` entry ("X
+  wrote when {event} · time" plus `last_assistant`, `files_touched` as name
+  chips, `tools` as "Edit ×6 · Bash ×4"); "Last question (answered)" from
+  `last_block`, with the chosen answer; the space (`workspace_label`) and
+  branch. With no journal yet, say so plainly. On iPad, up to 3 earlier
+  journal entries as an "Earlier" list.
+- **Questions never fold.** Show `PendingAction.summary`, the `command` in
+  a mono block (3 lines, tap to expand), and `options[].label` verbatim.
+  `default` is the filled primary; labels starting with "No" are red text,
+  outlined; long labels take the full row.
+- **Conversation rows** keep today's timeline types: day header,
+  `UpdatesGroup` ("N updates", latest line, chevron), user and dog bubbles,
+  `BrainReplyCard` ("Orchestrator → Sheepdog", options, Detail),
+  `ScreenCard` rows (icon, title, "Card · agent", chevron → a sheet), and
+  settled approvals ("You approved — Yes · by voice/tap").
+- **The open question floats** above the capsule (bottom 96 pt) and content
+  scrolls under it. With several computers, a question from another
+  computer is prefixed "Home Mac · blog" and has the footnote "Answers by
+  tap go to Home Mac." with a **Talk to Home Mac** button.
+- **The agent strip** on Conversation is single-line chips (32 pt high,
+  44 pt targets). A blocked agent on another computer shows its computer
+  name in the chip.
+
+**Mascot and splash.**
+
+- The four poses in `Assets.xcassets`: `MascotListening`, `MascotAlert`,
+  `MascotSleeping`, `MascotCelebrating`. Transparent, with the cream sticker
+  outline baked in; the same art serves light and dark. Drop the 20 pt clip
+  in `MascotCard`.
+- Sleeping: first run, offline, no agents. Listening: the empty
+  conversation ("Just talk" and two example chips) and the mic permission
+  primer. Alert: the notification permission primer. Celebrating: the
+  "Paired with Work Mac" screen only.
+- Splash: `LaunchBackground` (#1B1D22), the colour logo and the lowercase
+  wordmark "sheepdog" in rounded type.
+
+**iPad** (section 6 has the layout).
+
+- `NavigationSplitView` on regular width; compact width falls back to the
+  iPhone layout. Sidebar 390 pt.
+- New agent, Spaces and Settings open as 560 pt form sheets. Start is ⌘↩,
+  and a new agent opens beside the current pane.
+- Shortcuts: ⌘N, ⌘1…9, ⌘⇧M, ⌘K.
+
+**Settings** (as corrected in 1.1).
+
+- **Computers:** each with a status dot and "Talking here · address",
+  "Connected" or "Offline since…", plus Add a computer. With one computer
+  this is a single row.
+- **Per computer:** Name (defaults to the daemon's name; renaming is local
+  only); Connection (1.1); On this computer: Models, Languages,
+  Notifications and the Shell status; Remove.
+- **This phone:** Voice (microphone mode, Hold to talk, Keep listening with
+  the screen locked) and Notifications.
+- **Help:** Diagnostics (including Health) and About. Try the demo at the
+  bottom.
+
+**Motion.** One easing, `cubic-bezier(.2,.8,.2,1)`, 200 ms. Reduce Motion
+replaces movement with fades.
+
+1. Question lifecycle: it rises out of the capsule with a light haptic;
+   the tapped option shows progress inside the button; on answer, the card
+   collapses into the settled conversation row (`matchedGeometryEffect`).
+2. The capsule morphs into the composer and back.
+3. Opening a window from a card uses `.navigationTransition(.zoom)`.
+4. Orb: colour crossfade, SF Symbol replace, a 1→1.04 / 2 s breathe only
+   while listening, a waveform following output while speaking.
+5. Durations and counts use `.contentTransition(.numericText())`. Done is
+   one check flash, no loops.
+6. Switching computer pushes the capsule label, crossfades the
+   conversation and inserts a "Talking to X" divider.
+7. iPad: hover effects; a drop target appears when an agent is dragged to
+   the split.
+
+## 2. Words
 
 These add to [the glossary](../glossary.md).
 
 | Word | Meaning |
 |---|---|
-| **Computer** | One paired sheepdog daemon and the herdr it drives. Paired by its own QR code (`sheepdog pair`). It has a name the user can change, such as "Work Mac". |
+| **Computer** | One paired sheepdog daemon and the herdr it drives. Paired by its own QR code (`sheepdog pair`). Its id is the daemon id ([security.md](security.md)); its name comes from the daemon's config and the user can rename it in the app. |
 | **Current computer** | The computer the voice is talking to right now. There is exactly one while a voice session runs. |
 | **Space** | A herdr workspace: a folder (often a git checkout) with its panes. The app says "space" because herdr's own UI does. |
 | **Agent** | A coding agent in a pane (claude, codex, agy, gemini, …). |
 | **Window** | The live terminal of one agent or shell pane, as built in phone-terminal.md. |
 | **Shell** | A plain terminal pane, without an agent. |
 
-## 2. Information architecture
+## 3. Information architecture
 
 ### The tree
 
@@ -61,103 +272,78 @@ side.
 
 ### The one rule for one computer
 
-**With one computer paired, the app looks exactly as it does today.** The
-computer level appears only when a second computer is paired.
+**With one computer paired, the UI looks exactly as simple as today.** No
+computer names and no "Talk to". The computer level appears only when a
+second computer is paired.
 
 | Element | One computer | Several computers |
 |---|---|---|
-| Title | "Sheepdog" (the voice's name) | The current computer, with a chevron: "Work Mac ⌄" opens *Talk to* |
+| Voice menu | Manage computers… and End voice session | Adds Talk to, with every computer |
 | Agents page | One list | One section per computer, the current one first |
 | Agent window title | Agent name | Agent name, plus "Work Mac · webapp" underneath |
-| Pinned question | As today | Labelled "Home Mac · blog" when it is not on the current computer |
-| Voice | Never names a computer | Names computers by the rules in [section 4](#4-voice-wording-rules) |
+| Floating question | As today | Labelled "Home Mac · blog" when it is not on the current computer, with "Answers by tap go to Home Mac." and **Talk to Home Mac** |
+| Voice | Never names a computer | Never names a computer (section 4) |
 | Notifications and Live Activity | As today | The computer is added only to rows from another computer |
-| Settings | Daemon settings, as today | A Computers list; each computer has its own settings page |
-
-The mockup in [5.1](#51-agents-one-computer) is the one-computer case. It
-has no computer label anywhere.
+| Settings | One computer row | A Computers list; each computer has its own settings page |
 
 ### Navigation on the iPhone
 
-The structure stays the same: one screen with **Conversation | Agents**,
-the voice bar at the bottom, and windows pushed on top.
+One screen with **Conversation | Agents**, the floating voice capsule at
+the bottom, and windows pushed on top.
 
-- **Header:** connection chip on the left. On the right are `+` and `⋯`.
+- **Header:** the segmented `Conversation | Agents` with the waiting
+  badge, and `+` and `⋯` on the right (1.2).
   - `+` creates: New agent, New shell.
-  - `⋯` manages: New conversation, Stop, Type instead, Spaces, Settings.
-  - The gear moves into `⋯`, so the header stays at two buttons.
   - Settings stays one tap away for first-time users: the first-run screen
     and every error state link to it directly.
-- **Conversation:** the agent strip on top, the conversation, the pinned
-  question above the voice bar. With several computers, the strip and the
-  pinned question can show another computer's blocked agent, labelled with
-  its computer.
+- **Conversation:** the agent strip on top, the conversation, the floating
+  question above the capsule.
 - **Agents:** compact cards (see [5.1](#51-agents-one-computer)), grouped
   by computer when there are several.
-- **Windows** are pushed from a card's window icon, a strip chip, a
+- **Windows** are pushed from a card's window button, a strip chip, a
   notification, a Live Activity row or a finished New agent. The window
   carries its own computer, so opening a window on Home Mac does not change
   the current computer.
 - **Spaces** (from `⋯`) is a list. A space's page holds its agents,
-  worktrees and wrap-up actions.
+  worktrees and wrap-up commands.
 
 ### Where voice, conversation and cards live
 
-- **Voice bar:**
-  - iPhone: at the bottom of the main screen, as today. Agent windows hide
+- **Voice capsule:**
+  - iPhone: floating at the bottom of the main screen. Agent windows hide
     it; the voice keeps running.
   - iPad: at the foot of the sidebar. See [section 6](#6-ipad).
 - **Conversation:** one per computer, because the history lives in that
-  daemon.
-  - Switching the current computer shows that computer's conversation,
-    with a "Talking to Home Mac" divider.
-  - The old conversation stays cached per computer, as today (the cache is
-    already per daemon).
-- **Cards:** these are the daemon's rich cards (CardViews). They belong to
-  the computer that sent them and appear in its conversation. A card from
-  another computer only bumps the badge; it does not take over the screen.
-- **Approvals:** a question is answered on the computer that owns the pane.
-  - The tap goes to that computer's `/api/pending/answer`.
-  - The voice can answer by voice only on the current computer, because
-    the rail lives in that daemon.
+  daemon. Switching the current computer shows that computer's
+  conversation, with a "Talking to Home Mac" divider.
+- **Cards:** the daemon's rich cards belong to the computer that sent them
+  and appear in its conversation. A card from another computer only bumps
+  the badge; it does not take over the screen.
+- **Questions:** every blocked agent gets its own answer buttons (the
+  daemon sends a list, section 9). A question is answered on the computer
+  that owns the pane, through that computer's `/api/pending/answer`.
+  - When questions from several computers are open, the current
+    computer's come first, then the rest by age.
+  - The voice answers by voice only on the current computer, because the
+    rail lives in that daemon.
 
-## 3. The voice with several computers
+## 4. The voice with several computers
 
-### Constraints
+**Option A, one current computer.** Each computer runs its own daemon,
+with its own voice and orchestrator. The app opens `/ws` to the current
+computer only, and `/events` to all of them. The other computers' agents
+and questions appear as cards, badges and pushes; a tap switches.
 
-- iOS gives the app one microphone and one audio session. Only one voice
-  can listen at a time.
-- Each daemon has its own voice model, keys, cost, prompt and chattiness.
-- The approval rail ("answered only on the user's own fresh words") runs in
-  the daemon that owns the pane. It must stay there.
-- The voice keeps two tools (`to_supervisor`, `stop`). Adding tools to the
-  realtime model has measured badly.
-- Daemons may not reach each other: the phone may reach both over
-  Tailscale while the computers sit on different networks.
-
-### Options
-
-| | A. One current computer | B. All voices at once | C. A home computer federates | D. One current computer, plus facts from the others (recommended) |
-|---|---|---|---|---|
-| How | The app opens `/ws` to the current computer only, and `/events` to all of them. The user picks the current one. | `/ws` to every daemon at once. The microphone fans out. | One daemon is "home". Its orchestrator reaches the other daemons over a daemon-to-daemon API. | As A. In addition, the app passes each other computer's blocked and finished events to the current daemon as labelled facts. |
-| What the voice knows about other computers | Nothing | Everything, several times | Everything | What is waiting or finished there, one line each |
-| Answering a question on another computer | Tap, or switch first | Ambiguous: two voices answer | Home relays the user's words. B's rail would have to trust A. | Tap, or switch first. The voice says so. |
-| Cost | 1 voice | N voices | 1 voice | 1 voice |
-| Daemon changes | None (identity only) | Heavy | Heavy: peer auth, routing, rail across machines | Small: one endpoint that takes a fact, plus prompt lines (with an eval) |
-| Failure mode | You miss another computer's event by ear | Chaos | Home offline means no voice at all | The current computer offline means switching (the app offers it) |
-| Fits "keep the voice link simple" | Yes | No | No | Yes (no new voice tools) |
-
-**Recommendation: D, built as A first.**
-
-- Phase 1 is A: a current computer, with the other computers' state shown
-  as cards, badges and pushes.
-- Phase 2 adds D's facts after an eval: "On your home Mac, blog is waiting
-  for you."
-- The facts are *information*, not judgement in code. The current daemon
-  gets the fact with its source; the orchestrator decides whether and how
-  to say it.
-- A fact carries no pending id the current daemon can act on, so the rail
-  cannot be crossed by design.
+- **The voice never talks about other computers.** No facts from other
+  computers reach the current daemon, the voice prompt does not change,
+  and there are no wording rules for computer names. With one or many
+  computers, the voice never names a computer, not even after a switch.
+- The app UI carries every computer label: the capsule's name, section
+  headers, the floating question's "Answers by tap go to Home Mac." and
+  its **Talk to Home Mac** button.
+- iOS gives the app one microphone and one audio session, so only one
+  voice listens at a time. The voice keeps its two tools (`to_supervisor`,
+  `stop`).
 
 **How the current computer is chosen:**
 
@@ -165,57 +351,22 @@ the voice bar at the bottom, and windows pushed on top.
   paired first.
 - The app never switches on its own. If the voice moved to wherever
   something happened, the user would not know who is listening.
-- Ways to switch:
-  - the title menu (*Talk to*);
-  - the iPad sidebar;
-  - a Live Activity or notification row from another computer, which
-    offers "Talk to Home Mac" but does not switch on its own;
-  - an App Intent, "Talk to Home Mac", for Siri and Shortcuts.
+- Ways to switch: Talk to in the voice menu; the iPad sidebar; ⌘K; the
+  floating question's **Talk to Home Mac**; a Live Activity or
+  notification row from another computer, which offers "Talk to Home Mac"
+  but does not switch on its own; an App Intent, "Talk to Home Mac", for
+  Siri and Shortcuts.
+- There is no switching by voice.
 - Switching ends the old voice session cleanly and connects the new one.
-  The voice's first line names the computer (section 4).
-- Switching by voice ("switch to my home Mac") would need a signal from the
-  daemon to the app. It is an open question, not part of this plan.
-
-## 4. Voice wording rules
-
-These rules are prompt text the daemon adds **only when the app reports
-other computers**. With one computer, the prompt is unchanged. Each rule
-needs an eval case before it ships.
-
-1. **One computer: never name it.**
-2. **Say which computer you are on, once.** The first spoken line after
-   connecting or switching names it in a few words. After that, the title
-   bar carries it.
-3. **An agent on another computer always comes with its computer, first:**
-   "On your home Mac, blog is waiting for you." Do not put the computer
-   last ("blog, on the home Mac, …").
-4. **Agents on the current computer get no computer name**, unless the same
-   reply also mentions another computer. Then name both, for contrast.
-5. **Group by computer and name each computer once per group.** Never
-   repeat the computer for every agent.
-6. **Use the user's name for the computer**, with "your" in front when it
-   reads naturally ("your work Mac", "your Studio mini").
-7. **Same agent name on two computers:** always name the computer for both.
-8. **A question on another computer:** say where it is and how to answer:
-   tap it, or switch.
-9. **An offline computer:** say it once, with when it was last seen. Do not
-   repeat it on every status reply.
-
-| Situation | English | 中文 |
-|---|---|---|
-| After switching | "On your work Mac now." | "现在在工作电脑上。" |
-| Another computer's question | "On your home Mac, blog is waiting for you. It wants to publish the draft to staging. Tap it, or switch to your home Mac to answer by voice." | "家里那台 Mac 上，blog 在等你：它想把草稿发到预发环境。点一下卡片就能回答，或者切到家里那台用语音回答。" |
-| Both computers in one reply | "On your work Mac, auth-fix is done. On your home Mac, blog needs you." | "工作电脑上，auth-fix 做完了；家里那台上，blog 在等你。" |
-| Only the current computer | "auth-fix wants to run the tests. payments is still working." | "auth-fix 想跑测试，payments 还在做。" |
-| Same name on two computers | "The docs agent on your work Mac is done. The one on your home Mac is still writing." | "工作电脑上的 docs 做完了，家里那台上的 docs 还在写。" |
-| Offline | "Your Studio mini isn't answering. I last saw it at 9:12." | "Studio mini 连不上，最后一次看到是九点十二分。" |
-| Too verbose (don't) | "On your work Mac, auth-fix on your work Mac is done, and payments on your work Mac…" | "工作电脑上的 auth-fix 在工作电脑上做完了，工作电脑上的 payments……" |
 
 ## 5. Key screens
 
-Each pair is light | dark. The phone is an iPhone 17 Pro; the iPad is a
-13-inch iPad Pro. Full-size originals were saved with the overnight
-screenshots as `redesign-*.png`.
+These mockups were made for the proposal. **The canvas (section 1)
+supersedes them** wherever they differ: they still show a title, a
+connection chip and a fixed voice bar, which the canvas replaced with the
+segmented header and the floating capsule. They are kept for the
+behaviour they illustrate. Each pair is light | dark; the phone is an
+iPhone 17 Pro and the iPad a 13-inch iPad Pro.
 
 ### 5.1 Agents, one computer
 
@@ -223,23 +374,15 @@ screenshots as `redesign-*.png`.
 |---|---|
 | ![Agents page, one computer, light](app-redesign/agents-one-light.jpg) | ![Agents page, one computer, dark](app-redesign/agents-one-dark.jpg) |
 
-- **Compact card:**
-  - Line one: state dot, name, kind, and "Working · 12 min" on the right.
-  - Line two: the task in one line, with a small chevron.
-  - The window is a round icon button on the right.
-- **Details fold away.**
-  - Tapping the card shows the last result, what the agent wrote, the files
-    and tools, and the space and branch (`migrate` is shown open).
-  - VoiceOver gets a "Show details" action, and the state of each card is
-    remembered for the session.
+- **Compact card** as in 1.2's data mapping, with the window as a round
+  button on the right.
+- **Details fold away.** Tapping the card shows the last result, what the
+  agent wrote, the files and tools, and the space and branch.
 - **A question never folds.** A blocked card always shows the question and
   its answer buttons, with the first answer filled amber and ink text.
   That is the one accent on the screen.
-- **Calmer chrome.**
-  - The orb is quiet while listening, as in today's app.
-  - There are no orange "Open window" buttons any more (today's page has
-    three).
-  - New agent and Shell left the list for `+`.
+- **Calmer chrome.** No orange "Open window" buttons. New agent and Shell
+  left the list for `+`.
 - **Not running (N)** stays folded at the bottom, as today.
 
 ### 5.2 Agents, several computers
@@ -248,13 +391,13 @@ screenshots as `redesign-*.png`.
 |---|---|
 | ![Agents page, several computers, light](app-redesign/agents-several-light.jpg) | ![Agents page, several computers, dark](app-redesign/agents-several-dark.jpg) |
 
-- There is one section per computer. The current computer comes first,
-  marked "You're talking here".
+- One section per computer. The current computer comes first, marked
+  "You're talking here".
 - Inside a section, blocked agents come first, as today.
 - The Agents badge counts waiting agents on every computer.
 - An offline computer shows one dashed row: "Can't reach Studio mini. Last
-  seen 9:12. Is it awake and on Tailscale?" with **Retry**. Its last-known
-  agents are not shown as if they were live.
+  seen 9:12. Is it awake and on the same network?" with **Retry**. Its
+  last-known agents are not shown as if they were live.
 
 ### 5.3 Conversation, several computers
 
@@ -264,29 +407,28 @@ screenshots as `redesign-*.png`.
 
 - A divider marks whom you are talking to.
 - The strip shows the current computer's agents, plus any blocked agent
-  elsewhere, with its computer as the subtitle.
-- The pinned question from Home Mac is labelled "Home Mac · blog". Its
-  buttons answer through Home Mac's daemon.
-- The last bubble shows rule 3 at work. It comes from phase 2's relayed
-  fact.
+  elsewhere, with its computer in the chip.
+- The floating question from Home Mac is labelled "Home Mac · blog". Its
+  buttons answer through Home Mac's daemon, and the footnote says "Answers
+  by tap go to Home Mac." with **Talk to Home Mac**.
+- The mockup's last bubble, where the voice names Home Mac, is withdrawn:
+  the voice never does that.
 
-### 5.4 Talk to (the computer switcher) and pairing another computer
+### 5.4 Talk to and pairing another computer
 
 | Light | Dark |
 |---|---|
 | ![Talk to sheet, light](app-redesign/computers-light.jpg) | ![Talk to sheet, dark](app-redesign/computers-dark.jpg) |
 
-- The sheet opens from the title.
-- Each row shows the computer, a status dot, and "4 agents · 1 waiting" or
-  "Offline since 9:12".
-- The check marks the current computer.
-- **Add a computer** scans another `sheepdog pair` code.
-  - The daemon's stable id tells a new computer apart from a re-pair of an
-    old one (for example, after an address change). A re-pair updates the
-    computer instead of adding a second one.
-- **Edit** renames, reorders and removes computers.
-- Each computer keeps its own settings page: address, token, voice and the
-  rest of today's Daemon settings.
+- Talk to is in the voice menu (the capsule's name button), only with two
+  or more computers. The mockup's sheet from the title is replaced by that
+  menu.
+- Each row shows the computer, a status dot, and "4 agents · 1 waiting";
+  offline rows are disabled with "Offline since 9:12".
+- **Manage computers…** opens Settings ▸ Computers: rename, reorder,
+  remove, and **Add a computer**, which scans another `sheepdog pair` code.
+- The daemon id tells a new computer apart from a re-pair of an old one.
+  A re-pair updates the computer instead of adding a second one.
 
 ### 5.5 `+` in the header
 
@@ -298,8 +440,8 @@ screenshots as `redesign-*.png`.
 - With several computers, both items act on the current computer. A
   "Computer" picker row appears at the top of the New agent sheet; with one
   computer there is no such row.
-- If the daemon has no agent actions, or the shell is off on this network,
-  that item is shown disabled, with a one-line reason.
+- If the computer's shell switch is off ([security.md](security.md)), New
+  shell is disabled with "Shell is off on this computer".
 
 ### 5.6 New agent, the herdr way
 
@@ -312,35 +454,27 @@ screenshots as `redesign-*.png`.
    - Then **New space**: the folders under `supervisor.project_roots` that
      have no space yet, and "Choose another folder…" (a folder browser
      limited to the project roots).
-   - Picking a folder makes a space there. The worktree choice comes in
-     step 2, so step 1 stays a plain list.
 2. **Which agent.**
    - A grid of the kinds herdr supports that are *installed on that
-     computer*, such as Claude, Codex, agy, Gemini and OpenCode.
+     computer* (on PATH), such as Claude, Codex, agy, Gemini and OpenCode.
+     agy must appear when it is installed.
    - The last kind used in this space is preselected.
    - **New worktree** is off by default. A light hint appears when an agent
-     already runs in the same repo: "auth-fix and payments already work in
-     webapp. A worktree keeps their changes apart."
-   - Turning it on shows a branch field. The suggested branch is drawn from
-     the first prompt, and the user can edit it.
+     already works in the same repo: "auth-fix and payments already work in
+     webapp. A worktree keeps their changes apart." The switch is hidden
+     when the folder is not a git repo.
+   - Turning it on shows a branch field, suggested from the first prompt
+     and editable.
    - The first prompt is optional.
 3. **Start.**
-   - The daemon makes a pane in the space and runs herdr's `agent.start`,
-     which waits until the agent is ready. Then it sends the first prompt.
+   - The daemon starts the agent through herdr's `agent.start`, which waits
+     until the agent is ready, then sends the first prompt.
    - The sheet shows "Starting Claude in webapp…".
    - When the agent is ready, the sheet closes and **the agent's window
      opens**.
-   - If start fails (not installed, timed out), the sheet stays with the
-     reason and "Open the pane". The pane is left at its shell prompt, so
-     the user can see what happened.
+   - If start fails, the sheet stays with the reason and **Open the pane**.
 
-Empty and error states:
-
-- **No spaces and no project roots:** "Open a workspace in herdr, or list
-  your code folders in `supervisor.project_roots`."
-- **No supported kind installed:** "No agent found on Work Mac. Install
-  Claude Code or Codex there, then try again."
-- **Load failed:** the reason and **Try again**, as today.
+The starting and failure states are designed in section 8.
 
 ### 5.7 Spaces and wrap-up
 
@@ -353,22 +487,20 @@ Empty and error states:
   - `+` makes a space without starting an agent.
   - With several computers, the list has one section per computer.
 - **A space's page** holds:
-  - its agents, each with a window icon;
+  - its agents, each with a window button;
   - **Worktrees**, from `herdr worktree list`. Each row's `⋯` offers Open
     (as its own space) and Remove;
-  - **Wrap up**: saved commands such as "Run tests · `npm test`", and "Run
-    a command…". A command runs in a new pane through `pane run`, and its
-    window opens;
+  - **Wrap up**: saved commands such as "Run tests · `npm test`", stored
+    on the daemon per space, and "Run a command…". A command runs in a new
+    pane through `pane run`, and its window opens;
   - **Rename** and **Close space**.
 - **Close space** asks first, names what will end ("auth-fix and payments
-  will stop"), and is refused while an agent is blocked on a question.
+  will stop"), and is refused while any agent in the space is working or
+  blocked.
 - **Remove worktree** asks first and refuses a dirty checkout unless the
   user confirms a second time.
 - Dark variants: [spaces](app-redesign/spaces-dark.jpg),
   [a space](app-redesign/space-detail-dark.jpg).
-
-This pass designs only the entry points. The worktree, run and close flows
-get their own design when their phase starts.
 
 ### 5.8 Agent window and Ctrl-C
 
@@ -376,16 +508,15 @@ get their own design when their phase starts.
 |---|---|
 | ![Agent window without Ctrl-C on the bar, light](app-redesign/agent-window-light.jpg) | ![More keys with Ctrl-C at the top, dark](app-redesign/more-keys-dark.jpg) |
 
-- **Agent windows:** the key bar is `esc ⇥ ↑ ↓ ⏎ ⌨︎ ···`.
-  - ⌃C moves to the top of **More keys**, under "Interrupt", and is sent
-    at once, without asking.
-  - Esc already interrupts Claude and Codex, and it sends at once since
-    #317.
-- **Shell windows:** the bar keeps ⌃C, `esc ⇥ ↑ ↓ ⌃C ⏎ ⌨︎ ···`, also
-  without asking. In a shell, ⌃C is the everyday key.
-- `TermKey.needsConfirmation` goes away for ⌃C in both kinds of window.
-  The rail against a stray tap is that the key is in a sheet in agent
-  windows. No daemon change is needed.
+- **Agent windows:** the key bar is `esc ⇥ ↑ ↓ ⏎ ⌨︎ ···`. ⌃C sits at the
+  top of **More keys**, under "Interrupt", and is sent at once, with no
+  confirm. Esc already interrupts Claude and Codex.
+- **Shell windows:** the bar keeps ⌃C, `esc ⇥ ↑ ↓ ⌃C ⏎ ⌨︎ ···`, with no
+  confirm. In a shell, ⌃C is the everyday key.
+- `TermKey.needsConfirmation` goes away for ⌃C in both kinds of window. No
+  daemon change is needed.
+- The window's `⋯` menu (section 8) holds Changes, Rename, Open shell here
+  and, on iPad, Open in New Window.
 - With several computers, the title carries "Work Mac · webapp".
 
 ### 5.9 First run and offline
@@ -397,14 +528,14 @@ get their own design when their phase starts.
 - **First run:**
   - The sleeping mascot, "Pair your computer", and one accent button:
     **Scan pairing code**.
-  - The demo and typing the address are quiet links.
+  - **Try the demo** is a quiet link. There is no "Type the address":
+    pairing is by QR only.
   - "You can add more computers later" is the only mention of several
     computers.
 - **Offline with one computer:**
-  - The chip says Offline.
+  - The capsule shows wifi-slash and "Offline".
   - The page explains what to check, with **Try again** and **How to fix
-    this**.
-  - The voice bar keeps its place and shows "Offline".
+    this**, in copy that does not assume Tailscale.
 - Light and dark variants: [first run, light](app-redesign/welcome-light.jpg),
   [offline, dark](app-redesign/offline-dark.jpg).
 
@@ -414,24 +545,18 @@ get their own design when their phase starts.
 |---|---|
 | ![Live Activity on the lock screen, light](app-redesign/live-activity-light.jpg) | ![Live Activity on the lock screen, dark](app-redesign/live-activity-dark.jpg) |
 
-**Content:**
+The lock screen comes first.
 
-- The voice's phase, with the current computer under it when there are
-  several. With one computer, the voice's name goes there, as today.
-- Mute and End, as today.
-- Up to three waiting agents, each with its question in one line. A row
-  from another computer adds that computer's name.
-
-**Entry points:**
-
-- **Tapping a row** opens that agent's window, through the existing
-  `sheepdog://` link, with the computer id added.
-- **Tapping elsewhere** opens the main screen.
+- **Content:** the voice's phase, with the current computer under it when
+  there are several (the voice's name with one); Mute and End; up to three
+  waiting agents, each with its question in one line. A row from another
+  computer adds that computer's name.
+- **Tapping a row** opens that agent's window, through the `sheepdog://`
+  link, with the computer id. **Tapping elsewhere** opens the main screen.
 - **When it runs:** it starts with the voice session, as today. It is
   updated locally from every computer's `/events` while the app runs.
-
-The Dynamic Island keeps the system's default layout: the orb and the
-waiting count. No special work goes into it.
+- The Dynamic Island keeps the system default layout: the orb and the
+  waiting count.
 
 ## 6. iPad
 
@@ -441,37 +566,35 @@ waiting count. No special work goes into it.
 
 **Layout:** a `NavigationSplitView`.
 
-- **Sidebar:**
-  - **Conversation** on top.
+- **Sidebar (390 pt):**
+  - **Conversation** and **All agents** (with a waiting count) on top.
   - Then each computer, with its spaces as small captions and its agents
-    under them. Blocked agents show a hand; the others show the time in
-    their state.
+    under them. Blocked agents show a hand and "waiting"; the others show
+    the time in their state.
   - An offline computer shows one row with **Retry**.
   - With one computer, the computer row disappears and spaces sit at the
     top level.
-  - `+` and `⋯` sit in the sidebar's toolbar.
-- **Detail:** the selected agent's window, with its open question pinned
-  above the key bar, or the Conversation.
-  ([Conversation, light](app-redesign/ipad-conversation-light.jpg),
-  [dark](app-redesign/ipad-conversation-dark.jpg).)
-- **Side by side:** the window toolbar's split button puts a second agent
-  next to the first (like two herdr panes), and each pane has its own key
-  bar.
-  - The app also supports iPadOS multiple windows (scenes). "Open in New
-    Window" on an agent, or dragging it from the sidebar, gives it its own
-    window, for Split View or Stage Manager.
-  - The in-app split is for two agents on one task. Separate windows are
-    for everything else.
-- **Voice bar:**
-  - It sits at the foot of the sidebar. It is always in reach of the left
-    thumb, and it never covers a terminal.
-  - When the sidebar is hidden, or a window has no sidebar (a second scene,
-    or the in-app split), a small orb in the toolbar shows the voice state
-    and mutes on tap.
-  - Only one scene owns the audio session; the others show the orb.
-- **Keyboard:** a hardware keyboard types straight into the focused
-  window. Shortcuts: ⌘N new agent, ⌘1…9 jump to agents, ⌘⇧M mute, ⌘K
-  Talk to.
+  - The voice capsule sits at the foot.
+- **Detail** is one of:
+  - an agent pane: the terminal, the question pinned above the key bar,
+    the key bar `esc ⇥ ↑ ↓ ⏎ ⌨ ···`, and a composer;
+  - the Conversation, in a 720 pt centred column with a composer
+    ([light](app-redesign/ipad-conversation-light.jpg),
+    [dark](app-redesign/ipad-conversation-dark.jpg));
+  - **All agents:** a two-column AgentCard grid with the filters All,
+    Waiting and Working, and Expand all.
+- **In-app split:** two panes side by side, each with its own question,
+  keys and composer. The focused pane gets a 3 pt ink top line. The divider
+  drags. At most 2 panes in landscape; stacked vertically in portrait.
+- **Multiple scenes:** "Open in New Window" and dragging from the sidebar
+  give an agent its own window, for Split View or Stage Manager. Only one
+  scene owns the audio session; the others show a mini capsule in the
+  toolbar.
+- **Portrait with the sidebar hidden:** a mini capsule in the toolbar (orb
+  and "Work Mac ⌄ / Listening"; with one computer, the voice's name).
+- **Keyboard:** a hardware keyboard types straight into the focused pane.
+  Shortcuts: ⌘N new agent, ⌘1…9 jump to agents, ⌘⇧M mute, ⌘K Talk to
+  (only with several computers). Start in New agent is ⌘↩.
 - **Compact width** (Slide Over, a narrow split): falls back to the iPhone
   layout.
 
@@ -482,180 +605,208 @@ Dark variants: [main](app-redesign/ipad-main-dark.jpg),
 
 | Screen | Empty | Error | Offline computer | Blocked agent | One vs several |
 |---|---|---|---|---|---|
-| Agents | "No agent is running right now" with the celebrating mascot, as today; `+` is the next step | Banner with the reason and Retry | 5.2 row; with one computer, 5.9 | Question and answers always visible | 5.1 vs 5.2 |
-| Conversation | Today's empty conversation | Today's banners | Voice bar says "Offline"; Talk to offers another computer | Pinned card, labelled with its computer when it is another one | Title is "Sheepdog" vs "Work Mac ⌄" |
-| Talk to | Never empty: it opens only with two or more computers | A failed switch keeps the old computer and says why | Offline rows are disabled, with their last-seen time | Each row shows "1 waiting" | Not shown with one computer |
-| New agent | 5.6 empty states | Reason and Try again | Not offered for an offline computer | Hint about agents in the same repo | Computer row only with several |
-| Spaces | "No spaces yet. Start an agent and herdr makes one." | Reason and Try again | Section shows Offline | Close is refused while an agent is blocked | One section per computer |
-| Window | "This agent has ended" (AgentGoneView) | Today's reconnect states | Read-only snapshot with "Offline" | The terminal and the pinned question | Subtitle only with several |
+| Agents | "No agent is running right now" with the sleeping mascot; `+` is the next step | Banner with the reason and Retry | 5.2 row; with one computer, 5.9 | Question and answers always visible | 5.1 vs 5.2 |
+| Conversation | "Just talk" with the listening mascot and two example chips | Error banners (section 8) | Capsule says "Offline"; Talk to offers another computer | Floating card, labelled with its computer when it is another one | No labels vs labels and Talk to |
+| Voice menu ▸ Talk to | Not shown with one computer | A failed switch keeps the old computer and says why | Offline rows are disabled, with their last-seen time | Each row shows "1 waiting" | Only with several |
+| New agent | Section 8 | Section 8 | Section 8 | Hint about agents in the same repo | Computer row only with several |
+| Spaces | "No spaces yet. Start an agent and herdr makes one." | Reason and Try again | Section shows Offline | Close is refused while an agent works or is blocked | One section per computer |
+| Window | "This agent has ended" (AgentGoneView) | Reconnect states | Read-only snapshot with "Offline" | The terminal and the pinned question | Subtitle only with several |
 | iPad sidebar | "Pair your computer" | Per-computer row | One row with Retry | Hand icon | No computer level with one |
+| All agents (iPad) | Same as Agents | Same as Agents | Offline computers listed with Retry | Waiting filter | Sections only with several |
 
-Rules for every new screen, the same as today:
+Rules for every new screen:
 
-- VoiceOver labels name the computer only when there are several
-  computers.
-- At the accessibility text sizes, card lines stack instead of truncating
-  (as AgentCard does today), and `+` and `⋯` keep 44 pt targets.
-- Every screen is checked in dark mode.
-- One accent per screen: the answer button, the Start button or the scan
-  button, never two of them.
+- VoiceOver labels name the computer only when there are several.
+- Targets are at least 44 pt.
+- At the accessibility text sizes, card lines stack instead of truncating;
+  option labels never truncate; chips wrap or shorten cleanly rather than
+  cutting a word in half.
+- The capsule and the floating question grow with the text size, up to a
+  height cap, then scroll.
+- Every screen is checked in dark mode, at XXXL and AX sizes, and with
+  VoiceOver.
+- One accent per screen (1.2).
+- Reduce Transparency swaps glass for a solid surface; Reduce Motion swaps
+  movement for fades.
 
-## 8. Daemon and API changes
+## 8. Screens still to design
 
-These are listed, not built. Each change is labelled as a **rail**,
-**information** or **plumbing**, following the harness rule. No
-judgement-in-code is added.
+The canvas does not cover these. Design each in the canvas's style,
+simple, clean and elegant, add it to the canvas, and save light and dark
+screenshots before the phase that builds it.
+
+1. **The shell window.** Its key bar with ⌃C, the `⋯` menu, the "Shell is
+   off on this computer" state.
+2. **New agent progress and failure states:**
+   - starting ("Starting Claude in webapp…");
+   - failed, with the reason and **Open the pane**;
+   - no kinds installed ("No agent found on Work Mac. Install Claude Code
+     or Codex there, then try again.");
+   - offline computer;
+   - not a git repo (the worktree switch hidden, with a one-line reason);
+   - branch exists (the branch field's inline error and a suggestion).
+3. **Pairing:**
+   - the scanner;
+   - the camera permission primer and the denied state (with Open
+     Settings);
+   - an expired or already used QR;
+   - "Please scan again" for a pin mismatch or a revoked phone, with each
+     reason from [security.md](security.md).
+4. **The new-device push** and the sheet it opens ("Not you? Open the
+   computer's setup page to revoke.").
+5. **The agent window's `⋯` menu:** Changes, Rename, Open shell here, and
+   on iPad Open in New Window.
+6. **The update notice and the error banners** (daemon unreachable, daemon
+   too old for this app, voice provider error, a failed answer).
+7. **The sheet a ScreenCard opens.**
+8. **The Close space and Remove worktree confirmations,** including the
+   refusal while an agent works or is blocked, and the dirty-checkout
+   second confirm.
+
+## 9. Daemon and API changes
+
+Each change is labelled as a **rail**, **information** or **plumbing**,
+following the harness rule. No judgement-in-code is added. Nothing keeps an
+old route or shape.
 
 1. **Computer identity** (information).
-   - `GET /api/hello` and the pairing link gain
-     `computer: {id, name}`.
-   - The id is a random UUID the daemon writes once in its data dir.
+   - `GET /api/hello` and the pairing QR carry `computer: {id, name}`. The
+     id is the daemon id from [security.md](security.md).
    - The name comes from a new config key, `[computer] name`, which goes in
      CONFIG.md. It defaults to the Mac's user-visible computer name. The
-     user can rename the computer in the app, and the app keeps its own
-     name for it.
-2. **Spaces** (plumbing). `GET /api/spaces` replaces `GET /api/projects`;
-   the old route is kept for one release. It returns:
+     app can rename the computer locally.
+2. **Several pending questions** (information, and the rail stays).
+   - The daemon sends every open question as a list, so every blocked
+     agent gets its answer buttons. `POST /api/pending/answer` names the
+     question it answers.
+   - The approval rule is unchanged and stays in code.
+3. **The chosen answer** (information). `last_block` records which option
+   was chosen and how (voice or tap), for "Last question (answered)".
+4. **Title** (information). `Agent` carries `title`; the app decodes it.
+5. **Spaces and kinds** (plumbing and information). `GET /api/spaces`
+   replaces `GET /api/projects`, which is removed. It returns:
    - `spaces`: herdr workspaces, each with id, name, path, git, branch,
      whether it is a worktree, and the panes of its agents and shells;
-   - `folders`: project roots that have no space yet.
-3. **Kinds** (information). These go in the same response:
-   - `kinds: [{kind, name, installed}]`. The list is herdr's supported
-     kinds (`herdr agent start --kind`) that are installed, checked with
-     `exec.LookPath` on the PATH the panes get.
-   - **This list is for the app only.** The orchestrator's
-     `brain.SpawnKinds` stays claude and codex until an eval adds more
-     (status.md already says so).
-   - `UserNewAgent`'s kind check moves to the installed list, which is the
-     rail for taps.
-4. **Start** (plumbing and a rail). `POST /api/agents` takes
-   `{space | dir, kind, worktree?, text?, name?}`.
-   - The daemon makes a pane at a shell prompt in that space, calls
-     `agent.start --kind --pane --timeout`, waits for ready, then sends the
-     text.
-   - It returns `{pane_id, spoken}`, so the app can open the window.
-   - On a timeout, it returns the pane id and the reason.
-   - The rate cap and the directory rail stay as they are.
-   - This also lets `UserNewAgent` and `spawn()` share one start path (an
-     open follow-up from phase 3).
-5. **Space actions** (plumbing; close is a rail).
+   - `folders`: project roots that have no space yet;
+   - `kinds: [{kind, name}]`: herdr's supported kinds that are on the PATH
+     the panes get. agy must appear when installed. This list is for the
+     app; the orchestrator's `brain.SpawnKinds` changes only with an eval.
+6. **Start** (plumbing and a rail). `POST /api/agents` takes
+   `{space | dir, kind, worktree?: {branch}, text?, name?}`.
+   - The daemon starts the agent with herdr's `agent.start`, which waits
+     until it is ready, then sends the text.
+   - It returns `{pane_id, spoken}`, so the app can open the window; on a
+     failure, the pane id (if any) and the reason, such as
+     `branch_exists`, `not_git`, `not_installed`, `timeout`.
+   - `UserNewAgent` and the orchestrator's `spawn()` share one start
+     helper that keeps the approval rule in code (code-health plan).
+7. **Space actions** (plumbing; close is a rail).
    - `POST /api/spaces` takes `{dir, name?, worktree?: {branch}}`.
    - `POST /api/spaces/{id}/rename` takes `{name}`.
-   - `POST /api/spaces/{id}/close` is refused while a pane in the space has
-     an open pending question.
-6. **Wrap-up** (plumbing; run is gated like the shell).
-   - `GET /api/spaces/{id}/worktrees`.
-   - `POST /api/worktrees/open` and `POST /api/worktrees/remove`. Remove
-     refuses a dirty checkout without `force`.
-   - `POST /api/spaces/{id}/run` takes `{command}`. It makes a new pane and
-     calls `pane run`, then returns the pane id.
-   - Run is shell-equivalent, so it sits behind the same gate as the phone
-     shell (`web.shell_lan`).
-7. **Facts from other computers** (information; phase 2 of section 3).
-   - `POST /api/peer/event` takes `{computer, agent, state, question?,
-     result?}`, sent by the app.
-   - The daemon turns it into a labelled briefing line for the voice
-     ("Home Mac: blog is blocked and asks …"), held and spoken by the usual
-     delivery rules.
-   - It is never actionable: there is no pending id, and the approval rail
-     ignores it.
-8. **Other computers in the handshake** (information).
-   - `client-ready` gains `peers: [names]`.
-   - With no peers, the prompt is unchanged. With peers, the section 4
-     lines are added.
-   - This is a prompt change, so it needs `make eval` and new cases.
+   - `POST /api/spaces/{id}/close` is refused while any agent in the space
+     is working or blocked.
+8. **Worktrees and wrap-up** (plumbing; run follows the shell switch).
+   - `GET /api/spaces/{id}/worktrees`, `POST /api/worktrees/open`,
+     `POST /api/worktrees/remove` (refuses a dirty checkout without
+     `force`).
+   - Saved wrap-up commands per space, stored on the daemon:
+     `GET`/`PUT /api/spaces/{id}/commands`.
+   - `POST /api/spaces/{id}/run` takes `{command}`. It makes a new pane,
+     calls `pane run` and returns the pane id. Run is shell-equivalent, so
+     it is refused when the computer's shell switch is off.
 9. **Push** (plumbing).
-   - Push payloads gain the computer id.
+   - Push payloads carry the computer id.
    - The Notification Service Extension adds the computer's name only when
      several computers are paired.
    - Each daemon registers with the relay on its own.
 10. **Live Activity:** app-only. The content state gains `computer` and up
-    to three `rows`. The attributes type name stays the same.
+    to three `rows`.
 11. **⌃C:** app-only (5.8).
 
-## 9. App changes
+## 10. App changes
 
-- **`SettingsStore` becomes `ComputerStore`.**
-  - It holds a list of computers: `{id, name, address}`, with each token
-    kept in the keychain under that id.
-  - The single daemon saved today migrates into computer 1, with no change
-    the user can see.
+- **`SettingsStore` becomes `ComputerStore`.** It holds a list of
+  computers, `{id, name, addresses, pin, device key tag, paired date}`
+  ([security.md](security.md)). There is no migration: the old saved
+  daemon and token are dropped, and the user pairs again.
 - **`SessionViewModel` splits in two:**
   - a `ComputerSession` per computer: DaemonClient, `/events`, Agents
     state, approvals, conversation cache and health;
   - one `VoiceSession` bound to the current computer.
-- **Cache:** `ConversationCache` keys move from `host_port` to the computer
-  id, so an address change keeps the history.
-- **One-computer snapshot tests:** they fail if any computer label appears
-  when only one computer is paired.
-- **iPad:**
-  - a `NavigationSplitView` root on regular width; the iPhone root stays
-    for compact width;
-  - `UIApplicationSupportsMultipleScenes`, with one audio owner.
+- **Cache:** `ConversationCache` is keyed by the computer id. The old
+  `host_port` cache is deleted, not converted.
+- **One-computer snapshot tests:** they fail if any computer label or Talk
+  to appears when only one computer is paired.
+- **Deployment target** iOS 26 in `ios/project.yml`; `#available` checks
+  and fallbacks are removed.
+- **iPad:** a `NavigationSplitView` root on regular width, the iPhone root
+  for compact width, and `UIApplicationSupportsMultipleScenes` with one
+  audio owner.
 
-## 10. Phases
+## 11. Phases
 
 Each phase is one PR, or two where the daemon and the app split. Every
-phase ships with screenshots, VoiceOver and Dynamic Type checks, and the
-tests listed in AGENTS.md.
+phase ships with light and dark screenshots, XXXL and VoiceOver checks, and
+the tests in AGENTS.md (iOS tests run on GitHub Actions). Screens from
+section 8 are designed before the phase that builds them.
 
-1. **`feat(ios)`: Agents polish.**
-   - Compact cards, the window icon, the always-visible question, `+` in
-     the header, the gear into `⋯`, and ⌃C moved (5.8).
-   - No daemon change.
-2. **`feat(web)`: spaces and kinds.** `GET /api/spaces` with installed
-   kinds, and `POST /api/agents` through `agent.start`, returning the pane
-   id.
-3. **`feat(ios)`: New agent, the herdr way.** The two steps, the worktree
-   hint, and opening the window.
-4. **`feat(ios)`: iPad.**
-   - Sidebar (spaces → agents for one computer), detail, the voice bar in
-     the sidebar, the in-app split and multiple scenes.
-   - This uses today's `workspace_label`, so it needs no daemon change.
-5. **`feat(web)` + `feat(ios)`: space management.** Create, rename and
-   close, and the Spaces screen.
-6. **`feat(web)`: computer identity.** The id and name in `/api/hello` and
-   the pairing link, and `[computer] name` in CONFIG.md.
-7. **`feat(ios)`: several computers.**
-   - `ComputerStore` and its migration, per-computer sessions, Talk to,
-     sections on the Agents page, the sidebar's computer level, pairing
-     another computer, and push labels.
-   - Includes the one-computer snapshot tests.
-8. **`feat(ios)`: Live Activity content.** Computer and waiting rows, and
-   tapping a row to open its window.
-9. **`feat(web)` + `feat(ios)`: facts from other computers.** The peer
-   endpoint, `peers` in `client-ready`, and the section 4 prompt lines.
-   Needs eval evidence.
-10. **`feat(web)` + `feat(ios)`: wrap-up.** Worktrees list, open and
-    remove, and run a command (gated like the shell).
+1. **`feat(ios)`: iOS 26, tokens and brand.** Raise the deployment target,
+   drop the fallbacks, add the surface colorsets, the mascot poses and the
+   splash.
+2. **`feat(ios)`: header, capsule and menus.** The segmented top bar, the
+   floating capsule in all 15 states, the voice menu, `⋯`, the composer
+   morph.
+3. **`feat(ios)`: AgentCard and the Agents page.** The data mapping,
+   `title` decode, the question card with verbatim options, ⌃C moved
+   (5.8), the window `⋯` menu.
+4. **`feat(ios)`: conversation.** Conversation rows, the floating question,
+   the empty conversation, the permission primers, the ScreenCard sheet,
+   the error banners and update notice.
+5. **`feat(web)`: daemon fields.** Several pending questions as a list, the
+   chosen answer in `last_block`, `title`, and `computer` in `/api/hello`
+   and the QR (with the security work); the app shows every question.
+6. **`feat(web)`: spaces, kinds and start.** `GET /api/spaces` with
+   installed kinds, `POST /api/agents` through `agent.start`, the shared
+   start helper.
+7. **`feat(ios)`: New agent, the herdr way.** The two steps, the worktree
+   switch and hint, the progress and failure states, opening the window.
+8. **`feat(ios)`: Settings.** The new structure, Connection without a
+   token, the pairing screens (scanner, primer, denied, expired, scan
+   again) and the new-device sheet.
+9. **`feat(ios)`: iPad.** The sidebar, detail, All agents, the in-app
+   split, multiple scenes, the mini capsule and the shortcuts.
+10. **`feat(web)` + `feat(ios)`: spaces and wrap-up.** Create, rename and
+    close, worktrees list, open and remove, saved commands and run, the
+    Spaces screens and their confirmations.
+11. **`feat(ios)`: several computers.** `ComputerStore`, per-computer
+    sessions, Talk to, sections on the Agents page, the sidebar's computer
+    level, pairing another computer, push labels, question ordering, and
+    the one-computer snapshot tests.
+12. **`feat(ios)`: Live Activity.** Lock screen first: the computer and
+    waiting rows, tapping a row to open its window; the system default
+    Dynamic Island.
+13. **`feat(ios)`: motion pass.** The seven motions in 1.2, with Reduce
+    Motion fades.
 
-Phases 1 to 4 are worth doing even if several computers waits.
+## 12. Closed questions
 
-## 11. Open questions
+The proposal's open questions were decided on 2026-10-21:
 
-1. **Switching by voice.** Should "switch to my home Mac" work? It needs a
-   signal from the daemon to the app, as a parameter on an existing event,
-   not a new voice tool, and an eval. The alternative is to switch only by
-   tap and Siri.
-2. **Facts from other computers (option D).** Should the current voice
-   speak about other computers at all? The other choice is to leave them as
-   cards, badges and pushes only.
-3. **Naming computers.** Should the name come from the daemon's
-   `[computer] name`, so every app and the voice agree, or from the app at
-   pairing? The proposal is the daemon's name, which the app can rename.
-4. **The gear in `⋯`.** Is moving Settings into `⋯` acceptable, so the
-   header holds only `+` and `⋯`? The other choice is three header buttons.
-5. **Kinds to offer.** Should New agent show only installed kinds (the
-   proposal), or also list the rest of herdr's 24 kinds behind "Show all",
-   greyed out with "not installed"?
-6. **Saved commands for wrap-up.** Should they live in the app for each
-   space (recent commands), or in the daemon's config, so the voice can use
-   them too?
-7. **Closing a space.** Is a confirmation that names the agents enough, or
-   should closing be refused while any agent is working, not only while one
-   is blocked?
-8. **iPad split.** Should we build both the in-app split and multiple
-   scenes, or start with multiple scenes only (cheaper, standard)?
-9. **Live Activity without voice.** Should there also be an activity while
-   the voice is off, one per computer, like Heeler? Without the push relay,
-   it cannot update while the app is suspended.
+1. **Switching by voice.** No. The voice never talks about other
+   computers; switching is by tap, ⌘K, a notification or Live Activity
+   row, and Siri.
+2. **Facts from other computers (option D).** Dropped. Option A only: other
+   computers appear as cards, badges and pushes.
+3. **Naming computers.** The daemon's `[computer] name`; the app may rename
+   locally.
+4. **The gear in `⋯`.** Yes, as in the canvas. The header holds `+` and
+   `⋯`.
+5. **Kinds to offer.** Only installed kinds (herdr's supported kinds on
+   PATH); agy must appear.
+6. **Saved commands for wrap-up.** Stored on the daemon, per space.
+7. **Closing a space.** Refused while any agent is working or blocked;
+   otherwise confirm first, naming what will end.
+8. **iPad split.** Both the in-app split and multiple scenes are built.
+9. **Live Activity without voice.** Not in this plan: the activity runs
+   with the voice session, lock screen first. An activity that updates
+   while the app is suspended needs the push relay, which is deferred.
