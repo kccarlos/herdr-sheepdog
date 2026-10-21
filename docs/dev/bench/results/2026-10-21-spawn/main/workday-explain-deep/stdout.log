@@ -1,0 +1,14 @@
+[1/3] workday-explain-deep r1: pass (end_call, ) ≈ $0.1179, total ≈ $0.118
+[2/3] workday-explain-deep r3: pass (end_call, ) ≈ $0.1318, total ≈ $0.250
+[3/3] workday-explain-deep r2: pass (end_call, ) ≈ $0.1196, total ≈ $0.369
+  pass    workday-explain-deep r1  end_call  13 turns   97.1s                         ≈ $0.1179
+  pass    workday-explain-deep r2  end_call  12 turns  115.7s                         ≈ $0.1196
+  pass    workday-explain-deep r3  end_call  13 turns  104.8s                         ≈ $0.1318
+-- 3 runs, spend ≈ $0.3694 (estimate at list prices) --
+reports: /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a828dcb9b89e08095/docs/dev/bench/results/2026-10-21-spawn/main/workday-explain-deep/report.json, /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a828dcb9b89e08095/docs/dev/bench/results/2026-10-21-spawn/main/workday-explain-deep/report.md
+== eval sim, repeat 3 ==
+  workday-explain-deep  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                 runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    83  in   1087961  out    20046  reasoning     8107  ≈ $0.3433 --
+-- spend simuser  deepseek-flash           calls    36  in     84878  out     1073  reasoning        0  ≈ $0.0261 --
+-- spend total ≈ $0.3694 (estimate at list prices) --
