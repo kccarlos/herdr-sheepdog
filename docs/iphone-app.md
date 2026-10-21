@@ -5,7 +5,7 @@
 **Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for
-notifications, if you set up push). It needs iOS 17 or newer.
+notifications, if you set up push). It needs iOS 26 or newer.
 
 ## Install
 

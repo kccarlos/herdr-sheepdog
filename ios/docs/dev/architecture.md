@@ -199,6 +199,35 @@ this separately for each daemon. The app adds no optimistic divider: the
 daemon logs the reset before it answers, so the divider arrives as an
 ordinary notice item, deduplicated by event id and `reset_id`.
 
+## Visual tokens
+
+The redesign ([docs/dev/design/app-redesign.md](../../../docs/dev/design/app-redesign.md))
+draws from one palette, `Theme` (`Sources/Sheepdog/Theme.swift`), backed by
+colorsets with a light and a dark value each, taken from
+`assets/brand/colors.json`:
+
+- **Surfaces:** `Surface` (the screen), `Card`, `Fill` (code, wells),
+  `Line` (hairlines), `Muted` (secondary words), `Track` and `Selected`
+  (the segmented control), `Ink` (primary words, cream in dark).
+- **Accent and states:** `AccentColor`, `AccentSoft` (a waiting card's
+  question), `OnAccent` (text on orange is always ink), the agent-state
+  colours and their soft tints (`WorkingSoft`, `ThinkingSoft`,
+  `DoneSoft`), `Danger` for "No" options and the muted mic.
+- **Shape and motion:** radii 8, 14 (cards) and 22; one easing,
+  `Theme.ease` (cubic-bezier(.2,.8,.2,1), 200 ms), which turns into a
+  short fade under Reduce Motion.
+- **Mascot:** `MascotSleeping` (first run, offline, no agents),
+  `MascotListening` (empty conversation, microphone primer),
+  `MascotAlert` (notification primer), `MascotCelebrating` (paired). The
+  same transparent art serves both appearances.
+- **Splash:** the launch screen shows `LaunchLogo` (168 pt) on
+  `LaunchBackground`; `SplashView` keeps the logo in place, adds the
+  wordmark and fades out after 0.6 s.
+
+The app needs iOS 26: it uses Liquid Glass (`.glassEffect`) and the zoom
+navigation transition directly, and swaps glass for a solid surface under
+Reduce Transparency.
+
 ## Main screen panes
 
 `PaneSwitcher` switches the middle of the screen between Conversation,
