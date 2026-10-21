@@ -730,14 +730,14 @@ func TestAppURLsNonLoopbackBind(t *testing.T) {
 		t.Fatal("non-loopback URLs() is empty")
 	}
 	for _, u := range urls {
-		if !strings.HasPrefix(u, "http://") {
-			t.Errorf("url %q does not start with http://", u)
+		if !strings.HasPrefix(u, "https://") {
+			t.Errorf("url %q does not start with https://", u)
 		}
 	}
 }
 
 // TestLanURLsShape proves lanURLs never returns a loopback address and
-// always sorted, well-formed "http://<ip>:<port>" strings — the
+// always sorted, well-formed "https://<ip>:<port>" strings — the
 // enumeration itself is environment-dependent (a sandbox may have no
 // non-loopback interface at all), so this only checks shape.
 func TestLanURLsShape(t *testing.T) {
@@ -746,7 +746,7 @@ func TestLanURLsShape(t *testing.T) {
 		t.Errorf("lanURLs not sorted: %v", urls)
 	}
 	for _, u := range urls {
-		if !strings.HasPrefix(u, "http://") || !strings.HasSuffix(u, ":1234") || strings.Contains(u, "127.0.0.1") {
+		if !strings.HasPrefix(u, "https://") || !strings.HasSuffix(u, ":1234") || strings.Contains(u, "127.0.0.1") {
 			t.Errorf("lanURLs entry %q malformed or loopback", u)
 		}
 	}

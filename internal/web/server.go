@@ -239,6 +239,11 @@ type Deps struct {
 	// GitBin is the program the changes view runs (default "git").
 	GitBin string
 
+	// TLS is the daemon's key and self-signed certificate (tlsid.go),
+	// served on the same port as plain HTTP; nil makes a fresh one in
+	// memory (tests).
+	TLS *TLSIdentity
+
 	// Token, when non-empty, is the bearer token (config web.token) every
 	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
 	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
@@ -324,6 +329,13 @@ func New(deps Deps) (*Server, error) {
 	}
 	if deps.Accounts == nil {
 		deps.Accounts = brain.NewAccountAlerts()
+	}
+	if deps.TLS == nil {
+		id, err := LoadTLSIdentity("", deps.Now)
+		if err != nil {
+			return nil, err
+		}
+		deps.TLS = id
 	}
 	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
 	s.hub = newHub(s)
@@ -530,9 +542,10 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	if ln == nil {
 		return errors.New("web: Serve before Listen")
 	}
-	srv := &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
+	sl := newSniffListener(ln, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
+	go func() { errc <- srv.Serve(sl) }()
 	select {
 	case err := <-errc:
 		return err
@@ -548,6 +561,9 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	}
 	return nil
 }
+
+// handler is the routed mux behind the guard (sniff.go).
+func (s *Server) handler() http.Handler { return s.guard(s.mux) }
 
 // writeJSON encodes v with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -5,4 +5,4 @@ import (
 )
 
 // Handler returns the routed handler (for httptest).
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.handler() }
