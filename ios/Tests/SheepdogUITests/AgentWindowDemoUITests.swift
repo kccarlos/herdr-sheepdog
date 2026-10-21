@@ -158,9 +158,14 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10))
         sleep(1)
         shot("new-agent")
-        app.buttons["New worktree"].tap()
+        // A tap on the segment while the sheet still settles can be lost on
+        // a slow Mac; choosing the same segment again is harmless.
         let branch = app.textFields["newAgent.branch"]
-        XCTAssertTrue(branch.waitForExistence(timeout: 5))
+        for _ in 0 ..< 3 where !branch.exists {
+            app.buttons["New worktree"].tap()
+            if branch.waitForExistence(timeout: 5) { break }
+        }
+        XCTAssertTrue(branch.exists, "New worktree shows the branch field")
         branch.tap()
         branch.typeText("fix-login")
         XCTAssertTrue(app.buttons["newAgent.start"].isEnabled)

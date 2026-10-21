@@ -9,11 +9,26 @@ final class PairingLinkUITests: XCTestCase {
 
     /// Opens the link the way another app does; iOS asks "Open in
     /// Sheepdog?" first.
+    /// Opens the pairing link and taps the system's "Open" prompt if it
+    /// comes. On a slow Mac the prompt can come late, or a link opened while
+    /// the app is still starting can be dropped, so wait for either the
+    /// prompt or the app's alert and open the link once more if neither
+    /// came.
     private func openLink(in app: XCUIApplication) {
-        app.open(link)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let open = springboard.buttons["Open"]
-        if open.waitForExistence(timeout: 5) { open.tap() }
+        for _ in 0 ..< 2 {
+            app.open(link)
+            let deadline = Date().addingTimeInterval(10)
+            repeat {
+                if open.exists {
+                    open.tap()
+                    return
+                }
+                if app.alerts.firstMatch.exists { return }
+                usleep(250_000)
+            } while Date() < deadline
+        }
     }
 
     override func setUpWithError() throws {
