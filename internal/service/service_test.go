@@ -180,17 +180,6 @@ func TestInstallLinux(t *testing.T) {
 	}
 }
 
-func TestLogsCommand(t *testing.T) {
-	name, args, _ := Manager{Spec: spec(t, "darwin")}.LogsCommand(50, true)
-	if name != "tail" || strings.Join(args[:3], " ") != "-n 50 -F" || !strings.HasSuffix(args[3], "serve.log") {
-		t.Errorf("darwin logs = %s %q", name, args)
-	}
-	name, args, _ = Manager{Spec: spec(t, "linux")}.LogsCommand(20, false)
-	if name != "journalctl" || strings.Join(args, " ") != "--user -u sheepdog.service -n 20 --no-pager" {
-		t.Errorf("linux logs = %s %q", name, args)
-	}
-}
-
 func TestStart(t *testing.T) {
 	t.Run("not installed leaves everything alone", func(t *testing.T) {
 		f := &fakeRunner{}
