@@ -16,8 +16,8 @@ concurrency:
 # Jobs run on self-hosted runners on Cloud Run worker pools (infra/ci-runners).
 # Switch back to GitHub-hosted: gh variable set CI_RUNNER --body ubuntu-latest
 #
-# ios/ is the iPhone app (Xcode Cloud archives it; ios.yml runs its unit
-# tests on a hosted Mac). The required jobs
+# ios/ is the iPhone app (ios.yml runs its unit and UI tests on a hosted
+# Mac; Xcode Cloud only archives TestFlight builds). The required jobs
 # below must report a result on every PR, so they always start, and their
 # steps run only when something outside ios/ changed (changes.outputs.code).
 # Do not use workflow-level paths-ignore: it leaves required checks pending.
@@ -37,7 +37,7 @@ jobs:
               - '**'
               - '!ios/**'
       - if: steps.filter.outputs.code != 'true'
-        run: echo "::notice::Only ios/ changed; the Go, web and eval jobs pass without running their heavy steps (ios.yml and Xcode Cloud test the app)."
+        run: echo "::notice::Only ios/ changed; the Go, web and eval jobs pass without running their heavy steps (ios.yml tests the app)."
 
   test:
     needs: changes
@@ -100,7 +100,7 @@ jobs:
 
   policy:
     # Where macOS runners, Xcode and secrets may appear (scripts/workflow-policy.sh):
-    # ios.yml (simulator unit tests, no secrets at all), and release.yml's
+    # ios.yml (simulator unit and UI tests, no secrets at all), and release.yml's
     # jobs that declare `environment: release` (signing; maintainer approval).
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:

@@ -1,0 +1,13 @@
+exit 0 spawn workday-interruptions
+-- spend total ≈ $0.2502 (estimate at list prices) --
+exit 0 spawn workday-explain-deep
+-- spend total ≈ $0.4205 (estimate at list prices) --
+exit 0 spawn workday-morning-standup
+-- spend total ≈ $0.3407 (estimate at list prices) --
+exit 0 spawn workday-long-haul
+-- spend total ≈ $0.5181 (estimate at list prices) --
+exit 0 spawn workday-scale-ten
+-- spend total ≈ $0.4959 (estimate at list prices) --
+exit 0 spawn workday-zh-evening
+-- spend total ≈ $0.3631 (estimate at list prices) --
+DONE spawn

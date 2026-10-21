@@ -276,12 +276,12 @@ targets:
 
 schemes:
   # Shared (XcodeGen writes schemes to xcshareddata), which Xcode Cloud
-  # needs: its workflows build, test and archive this scheme.
+  # needs: its TestFlight workflow archives this scheme.
   #
-  # Test runs the unit suite and the UI tests. Every UI test skips itself
-  # when no fixture daemon answers on 127.0.0.1:7799 (always the case on
-  # Xcode Cloud), so they cost a few seconds there and run for real on a
-  # Mac with the fixture daemons up (docs/dev/status.md).
+  # Test runs the unit suite and the UI tests. The UI tests that need a
+  # fixture daemon skip themselves when none answers on 127.0.0.1:7799;
+  # .github/workflows/ios.yml starts the fixture daemons and runs them all
+  # (docs/dev/status.md). Xcode Cloud only archives this scheme.
   Sheepdog:
     build:
       targets:

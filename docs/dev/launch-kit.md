@@ -1,57 +1,15 @@
 # Launch kit
 
-Storyboard for the hero video, plus draft launch posts. The owner records the
-video on a real phone; nothing here is recorded yet. Every claim in the lines
-and captions must match what the real app does on the day of recording; the
-checks are in "Before you record".
+Draft launch posts and the README stills. The launch video's script,
+storyboard and recording checklist are in [launch-video.md](launch-video.md).
 
-## Hero video (45–60 s, vertical 9:16)
-
-**Message:** talk to your Herdr agents, from anywhere: hear who's stuck,
-approve with a word, ask what broke, right from your phone.
-**Look:** handheld phone footage, real lock screen, no screen mockups. Show
-the screen only while it matters; keep the desk and the street in frame.
-**Sound:** earbud-mic audio for the user's lines, the app's voice from the
-phone speaker or a clip-on recorder. No music under speech; a quiet bed
-between scenes.
-
-| # | Time | Shot | On-screen caption | Line (exact) |
-|---|---|---|---|---|
-| 1 | 0–5 s | Desk, laptop with herdr: three panes (Claude Code, Codex, agy) working. User puts in earbuds, stands up. | Three agents. Zero babysitting. | — |
-| 2 | 5–12 s | User walks out of the door; hold on the closing door, then outdoors. | Walk away from your desk. | — |
-| 3 | 12–22 s | Phone in hand, lock screen: a sheepdog notification, "api needs your approval". Thumb stays off the phone. The app's voice speaks over the earbuds. | An agent needs you. You hear it first. | **Sheepdog:** "Codex in api needs your approval to run the migration." |
-| 4 | 22–30 s | Close-up of the earbud (or the lock screen with the Live Activity), the user speaks. | Approve by voice. | **You:** "What will the migration touch?" **Sheepdog:** "An index on orders, no data changes." **You:** "Approve." **Sheepdog:** "Approved." |
-| 5 | 30–42 s | Walking, wider shot; the user raises a hand to the earbud. | Ask what is going on. | **You:** "What's going on?" **Sheepdog:** "Codex is migrating, Claude Code is writing tests, agy is idle. I'll tell you when Codex is done." |
-| 6 | 42–52 s | Back at the desk: laptop shows the migration done and tests passing. Earbud voice over the cut. | Come back to finished work. | **Sheepdog:** "Codex finished the migration; auth's tests pass." |
-| 7 | 52–60 s | End card on the phone: the logo and the install line. | herdr plugin install kccarlos/herdr-sheepdog | — |
-
-Notes:
-
-- The lines in shot 3–6 are the spoken script; the real model will phrase
-  things its own way. Record real takes, and if the wording drifts, keep the
-  take and fix the caption to match (never dub).
-- Shot 3 needs push configured (`[push.apns]`, [push.md](push.md)) on the
-  daemon the app talks to, with the phone locked.
-- Shot 6 can be shot first and re-used: stage a short real task in each pane
-  so the finish lands while you are out.
-
-### Before you record (check on the day)
-
-- The earbud remote, the Live Activity and the lock-screen notification work
-  on your device ([status.md](status.md) lists them as not yet checked on a
-  device); drop a shot rather than fake one.
-- `sheepdog doctor` is clean and chattiness is `chatty` (the default).
-- The migration approval is a real approval prompt from a real agent.
-- Use staging projects only, no real secrets on screen. Blur the token if the
-  pairing screen shows.
-
-### Stills for the README
+## README media
 
 `assets/readme/hero.gif` is a 12 s loop of its own: the iOS app's offline
 demo on the left, the conversation as chat bubbles on the right
 (`scripts/readme-media/bubbles/`, lines in its `lines.tsv`).
-Record `status.gif` (ask "what's going on", shot 5), `phone.gif` (approve
-from the phone, shot 4) and `install.gif` (the three install steps in
+Record `status.gif` (ask "what's going on", shot 5 of the launch video),
+`phone.gif` (approve from the phone, shot 4) and `install.gif` (the three install steps in
 herdr, once the plugin ships). Keep each GIF under ~5 MB.
 
 ## Launch post for X (draft, under 280 characters)

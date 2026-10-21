@@ -8,7 +8,7 @@ import XCTest
 /// `scripts/fixture-daemon-restarter.sh` running on the Mac: the test asks
 /// for a restart by creating `/tmp/sd-bugs/control/restart`, and the script
 /// kills the daemon and starts it again 3 s later. Skipped without either.
-/// Not in CI.
+/// ios.yml runs it with the restarter in its own step.
 final class ReconnectUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
     private let control = URL(fileURLWithPath: Fixture.controlDir)
@@ -25,7 +25,10 @@ final class ReconnectUITests: XCTestCase {
 
     func testADaemonRestartReconnectsByItselfWithNoBanner() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice"]
+        // The one-time Voice Isolation tip is a banner too, and it comes the
+        // second time the voice listens, which is the reconnect: mark it as
+        // shown (an argument-domain default outlives the reset).
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-hint.micmode.shown", "YES"]
         app.launch()
 
         let status = app.staticTexts["controls.statusLine"]
