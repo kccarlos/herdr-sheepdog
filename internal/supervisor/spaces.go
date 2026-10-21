@@ -688,4 +688,3 @@ func (s *Supervisor) RunCommand(ctx context.Context, id, cmdID string) (string, 
 	s.tellBrain(fmt.Sprintf("the user ran %q (%s) in the space %s from the phone", w.Name, w.Command, space.Name))
 	return pane.PaneID, nil
 }
-
