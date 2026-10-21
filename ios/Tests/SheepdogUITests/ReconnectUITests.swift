@@ -8,7 +8,7 @@ import XCTest
 /// `scripts/fixture-daemon-restarter.sh` running on the Mac: the test asks
 /// for a restart by creating `/tmp/sd-bugs/control/restart`, and the script
 /// kills the daemon and starts it again 3 s later. Skipped without either.
-/// Not in CI.
+/// ios.yml runs it with the restarter in its own step.
 final class ReconnectUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
     private let control = URL(fileURLWithPath: Fixture.controlDir)

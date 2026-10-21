@@ -98,13 +98,20 @@ GitHub Actions runs Linux jobs, on self-hosted runners in Cloud Run
 worker pools ([infra/ci-runners](../../infra/ci-runners/README.md); repo variable
 `CI_RUNNER=ubuntu-latest` switches back to GitHub-hosted): vet, test, lint, web
 tests, the offline eval, the policy guard and the cross-compile on every PR, and the
-Ubuntu release on `v*` tags. The one exception is `ios.yml`: since the
-repository went public (2026-10-15) it runs the app's unit tests
-(`SheepdogKitTests`) on a GitHub-hosted Mac (the `xcode-27` image, Xcode
-27.0) for PRs and pushes to `main` that touch `ios/`. It builds for the
-simulator only and uses no secrets; it is not a required check. Archives,
-signing and TestFlight stay on Xcode Cloud, and no signing certificate or
-App Store Connect key for the app goes into GitHub. The other exception
+Ubuntu release on `v*` tags. The one exception is `ios.yml`, which runs the iPhone app's whole test
+suite on a GitHub-hosted Mac (free for a public repository; the `xcode-27`
+image, Xcode 27.1 picked with `xcode-select`) for PRs and pushes to `main`
+that touch `ios/`, `cmd/`, `internal/web/` or `go.mod`. It builds the
+daemon with Go in the same job and starts two fixture daemons on free ports
+(`ios/scripts/fixture-daemons.sh`, `--brain=fake --herdr=mock --voice=off`,
+temp data dirs), then runs the unit tests (`SheepdogKitTests`) and the UI
+tests (`SheepdogUITests`) against them; `HistoryApprovalUITests` runs after
+a fresh daemon restart, and `ReconnectUITests` with
+`ios/scripts/fixture-daemon-restarter.sh` running. Only the opt-in
+recording and screenshot tests skip. It builds for the simulator only and
+uses no secrets; it is not a required check (see below). Archives, signing
+and TestFlight stay on Xcode Cloud, which runs no tests, and no signing
+certificate or App Store Connect key for the app goes into GitHub. The other exception
 is `release.yml`'s `sign-macos` job, which signs and notarizes the daemon's
 darwin binary on a GitHub-hosted Mac in the `release` environment
 (maintainer approval, `v*` tags only), followed by the `homebrew` job that
@@ -115,8 +122,15 @@ appears anywhere else, including a `release.yml` job without
 `environment: release`, if `release.yml` reads a secret other than
 `GITHUB_TOKEN` outside such a job, or if `ios.yml` reads any secret.
 
-The iPhone app lives in [`ios/`](../../ios/README.md) and is archived by
-Xcode Cloud ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`
+`ios.yml` is not a required check because of its `paths:` filter: on a PR
+that touches none of those paths it never starts, and a required check that
+never starts blocks the merge. Making it required means giving it the same
+`changes` gate as `ci.yml` first (the job always starts and skips its steps
+when nothing relevant changed), then adding the `tests` check of the `iOS`
+workflow to the branch protection of `main`.
+
+The iPhone app lives in [`ios/`](../../ios/README.md); Xcode Cloud only
+archives its TestFlight builds ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`
 job in `ci.yml` (dorny/paths-filter) tells the other jobs whether anything
 outside `ios/` changed. On an ios-only PR every required check still starts
 and passes, but skips its heavy steps; only the policy guard and the docs

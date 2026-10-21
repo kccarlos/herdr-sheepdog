@@ -36,7 +36,7 @@ Never commit a key, a token, a `.env` file or a log that has not been through `s
 - **Docs travel with the code.** A user-visible change updates the matching page in [docs/](docs/README.md); a new config key needs its entry in [CONFIG.md](CONFIG.md) (`go test` fails otherwise). Every relative link and every `sheepdog …` command in the user docs is checked by `go test ./internal/docscheck`.
 - **Conventional Commits** for every commit and PR title: `feat(scope): …`, `fix(scope): …`, `docs: …`, `test:`, `refactor:`, `ci:`, `build:`, `perf:`, `chore:`. The changelog is generated from them.
 - **Pull requests** target `main`, use the template, and merge by squash once CI is green. Describe what a user sees, with the exact output when it changed.
-- **CI** runs vet, race tests, lint, web tests, the offline eval and cross-builds on Linux only. A PR that changes only `ios/` skips those steps; the iPhone app builds on Xcode Cloud (see below).
+- **CI** runs vet, race tests, lint, web tests, the offline eval and cross-builds on Linux only. A PR that changes only `ios/` skips those steps; the iPhone app's tests run in `ios.yml` on a GitHub-hosted Mac (see below).
 
 ## The iPhone app (ios/)
 
@@ -50,11 +50,11 @@ xcodegen generate
 xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation test
 ```
 
-To build onto a device under your own Apple team, see [ios/README.md](ios/README.md#build-it-yourself). The UI tests that need a daemon skip themselves without one; to run them, start the fixture daemons described in [ios/docs/dev/status.md](ios/docs/dev/status.md#running-the-tests). Read [ios/docs/dev/architecture.md](ios/docs/dev/architecture.md) before you change the app.
+To build onto a device under your own Apple team, see [ios/README.md](ios/README.md#build-it-yourself). The UI tests that need a daemon skip themselves without one; to run them, start the fixture daemons with `ios/scripts/fixture-daemons.sh` as described in [ios/docs/dev/status.md](ios/docs/dev/status.md#running-the-tests). Read [ios/docs/dev/architecture.md](ios/docs/dev/architecture.md) before you change the app.
 
 - Logic goes in `ios/Sources/SheepdogKit` with a unit test. A flow the user sees gets an XCUITest, and it should run without a daemon when it can (see `ios/Tests/SheepdogUITests/StubDaemon.swift`).
 - **Design the unhappy paths.** A new screen needs its empty state and its error states with a plain fix, and it must work in dark mode, at the largest Dynamic Type size and on a small iPhone.
-- **iOS CI.** Every PR that touches `ios/` runs the app's tests on Xcode Cloud ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)) and the unit tests on a GitHub-hosted Mac (`.github/workflows/ios.yml`, no secrets). The only other macOS job is `release.yml`'s signing job, in the approval-gated `release` environment ([docs/dev/signing.md](docs/dev/signing.md)); do not add macOS jobs anywhere else, the `policy` check fails if one does.
+- **iOS CI.** Every PR that touches `ios/` or the daemon's API runs the app's unit and UI tests on a GitHub-hosted Mac (`.github/workflows/ios.yml`, no secrets), the UI tests against fixture daemons built from the same checkout. The only other macOS job is `release.yml`'s signing job, in the approval-gated `release` environment ([docs/dev/signing.md](docs/dev/signing.md)); do not add macOS jobs anywhere else, the `policy` check fails if one does. Xcode Cloud runs no tests: it only archives TestFlight builds on `ios-v*` tags ([ios/docs/dev/xcode-cloud.md](ios/docs/dev/xcode-cloud.md)).
 - App releases are `ios-v*` tags (`ios-v` + `MARKETING_VERSION`); plain `v*` tags are daemon releases: the tag builds the release, and after the maintainer approves the `release` environment, Actions signs and notarizes the macOS binary and publishes the Homebrew formula ([docs/dev/signing.md](docs/dev/signing.md)).
 
 ## License

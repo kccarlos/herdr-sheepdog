@@ -6,14 +6,15 @@
 #
 # Rules:
 #   1. A macOS runner, an Xcode image or xcodebuild may appear only in
-#      - ios.yml (the app's simulator unit tests), or
+#      - ios.yml (the app's simulator unit and UI tests, secret-free), or
 #      - release.yml, inside a job that declares `environment: release`
 #        (the sign-macos job; that environment needs the maintainer's
 #        approval and only deploys v* tags).
 #      Anywhere else, including release.yml's other jobs and its top level,
 #      it fails.
 #   2. ios.yml reads no secret at all (not even GITHUB_TOKEN) and asks for
-#      no id-token: archives, signing and TestFlight stay on Xcode Cloud.
+#      no id-token: archives, signing and TestFlight builds come from
+#      Xcode Cloud, never from GitHub Actions.
 #   3. In release.yml a secret other than GITHUB_TOKEN may be read only
 #      inside a job that declares `environment: release`.
 #
@@ -67,7 +68,7 @@ for f in "${files[@]}"; do
         bad = 1
       }
       if (base == "ios.yml" && $0 ~ /secrets\.|GITHUB_TOKEN|id-token/) {
-        printf "::error file=%s,line=%d::ios.yml must not use secrets: signing and TestFlight stay on Xcode Cloud\n", file, FNR
+        printf "::error file=%s,line=%d::ios.yml must not use secrets: signing and TestFlight builds come from Xcode Cloud\n", file, FNR
         printf "%s:%d: %s\n", file, FNR, $0
         bad = 1
       }
