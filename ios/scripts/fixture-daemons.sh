@@ -74,8 +74,9 @@ start_token() {
 stop_main() {
   local pid
   if [ -f "$DATA/main.pid" ]; then kill "$(cat "$DATA/main.pid")" 2>/dev/null || true; rm -f "$DATA/main.pid"; fi
-  pid=$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
-  [ -n "$pid" ] && kill $pid 2>/dev/null || true
+  # Only a fixture daemon (ours or the restarter's), never another program.
+  pid=$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)
+  if [ -n "$pid" ] && ps -o command= -p "$pid" | grep -q "sheepdog serve .*--brain=fake .*--port $PORT"; then kill "$pid" 2>/dev/null || true; fi
   wait_down "$PORT"
 }
 
