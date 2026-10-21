@@ -403,23 +403,3 @@ func launchdState(out string) string {
 	}
 	return strings.Join(parts, ", ")
 }
-
-// LogsCommand is the command that shows the last n lines of the
-// daemon's output, following it when follow is set.
-func (m Manager) LogsCommand(n int, follow bool) (string, []string, error) {
-	if err := m.Spec.check(); err != nil {
-		return "", nil, err
-	}
-	if m.Spec.OS == "darwin" {
-		args := []string{"-n", fmt.Sprint(n)}
-		if follow {
-			args = append(args, "-F")
-		}
-		return "tail", append(args, m.Spec.LogPath()), nil
-	}
-	args := []string{"--user", "-u", Unit, "-n", fmt.Sprint(n), "--no-pager"}
-	if follow {
-		args = append(args, "-f")
-	}
-	return "journalctl", args, nil
-}

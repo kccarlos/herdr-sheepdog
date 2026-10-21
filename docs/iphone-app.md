@@ -59,7 +59,7 @@ On the same Wi-Fi this just works. Away from home, see
     the bottom. A **tap** clicks, for programs that use the mouse.
     **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
   - The keys under the terminal send esc, tab, the arrows, control-C and
-    return straight to the agent (esc and control-C ask first). **⌨︎** types
+    return straight to the agent (only control-C asks first). **⌨︎** types
     straight into the terminal with the phone's keyboard, dictation and
     input methods included; control-C becomes **⌃**, which holds Control for
     the next key. **···** has the rest: Ctrl and Alt for the next key,
