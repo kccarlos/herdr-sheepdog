@@ -103,8 +103,9 @@ final class DaemonModelTests: XCTestCase {
         "voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}
         """
         let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
-        XCTAssertEqual(state.pendingQuestion(for: "w1:p1"), "whether to run the migration")
+        XCTAssertNil(state.pendingQuestion(for: "w1:p1"))
         XCTAssertEqual(state.pendingQuestion(for: "w2:p1"), "whether to edit README")
+        XCTAssertEqual(state.question(for: "w2:p1")?.id, "p2")
         XCTAssertEqual(state.question(for: "w1:p1")?.id, "p1")
         XCTAssertNil(state.question(for: "w3:p1"))
         XCTAssertEqual(state.agents[0].title, "Fix the login test")

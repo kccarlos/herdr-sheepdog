@@ -508,6 +508,41 @@ func TestTapOnAStaleQuestionIsRefused(t *testing.T) {
 	}
 }
 
+// The reconciler checks a question the voice moved past: a different
+// prompt replaces it quietly, a prompt gone from the screen ends it, and
+// the voice stays on its own question either way.
+func TestReconcileChecksQuestionsTheVoiceMovedPast(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	older, _ := h.pending()
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.block("w6:p1", "claude-bash-prompt.screen.txt")
+	newer, _ := h.pending()
+	pushes := len(h.pusher.all())
+
+	h.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
+	h.sup.reconcileReprompts(context.Background())
+	qs := h.store.Questions()
+	if len(qs) != 2 || qs[0].PaneID != "w5:p1" || qs[0].ID == older.ID || qs[0].Question == older.Question {
+		t.Fatalf("questions after a new prompt = %+v", qs)
+	}
+	if cur, _ := h.pending(); cur.ID != newer.ID {
+		t.Errorf("the voice moved to %+v", cur)
+	}
+	if len(h.pusher.all()) != pushes {
+		t.Errorf("a quiet replacement pushed: %+v", h.pusher.all()[pushes:])
+	}
+
+	h.srv.SetScreen("w5:p1", "$ ")
+	h.sup.reconcileReprompts(context.Background())
+	if qs := h.store.Questions(); len(qs) != 1 || qs[0].ID != newer.ID {
+		t.Errorf("questions after the prompt went = %+v", qs)
+	}
+	if cur, _ := h.pending(); cur.ID != newer.ID {
+		t.Errorf("the voice moved to %+v", cur)
+	}
+}
+
 // A question leaves the list when its pane leaves blocked.
 func TestAQuestionLeavesWithItsBlock(t *testing.T) {
 	h := newHarness(t)

@@ -574,9 +574,10 @@ public struct DaemonState: Codable, Equatable, Sendable {
         return p
     }
 
-    /// The question waiting on a given pane, in words.
+    /// The question waiting on a given pane, if the pending action (the
+    /// question the voice is on) is that pane's.
     public func pendingQuestion(for paneID: String) -> String? {
-        guard let p = question(for: paneID) else { return nil }
+        guard let p = pendingAction, p.paneID == paneID else { return nil }
         return p.question ?? p.spokenSummary
     }
 }
