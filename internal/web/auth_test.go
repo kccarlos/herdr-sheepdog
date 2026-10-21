@@ -132,6 +132,9 @@ func TestAPIHelloPublic(t *testing.T) {
 			if resp.Audio.InHz != 16000 || resp.Audio.OutHz != 24000 || resp.Audio.Format == "" {
 				t.Errorf("hello.audio = %+v", resp.Audio)
 			}
+			if resp.Computer == nil || resp.Computer.ID != "AAAAAAAAAAAAAAAAAAAAAA" || resp.Computer.Name != "Test Mac" {
+				t.Errorf("hello.computer = %+v", resp.Computer)
+			}
 		})
 	}
 }

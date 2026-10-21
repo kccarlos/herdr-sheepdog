@@ -20,6 +20,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/observe"
@@ -546,6 +547,12 @@ func (a *App) wire() error {
 	}
 
 	injector := inject.NewInjector(store, a.herdr, sup, a.log, nil)
+	computer := identity.Computer{Name: identity.Name(cfg.Computer.Name)}
+	if id, err := identity.DaemonID(cfg.DataDir); err != nil {
+		a.log.Log("daemon", "daemon.identity_error", "", map[string]any{"error": err.Error()})
+	} else {
+		computer.ID = id
+	}
 	deps := web.Deps{
 		Log:        a.elog,
 		Logger:     a.log,
@@ -562,6 +569,7 @@ func (a *App) wire() error {
 		Aliases:        gcfg.Aliases,
 		Names:          sup.SpokenNames,
 		VoiceName:      cfg.Voice.Name,
+		Computer:       computer,
 		ReloadPrompts:  a.ReloadPrompts,
 		Brain:          a.brain,
 		BrainOffReason: a.brainOff,

@@ -20,6 +20,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/feedback"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -90,6 +91,8 @@ type EventInjector interface {
 // Deps are the components the server exposes. Log and Store are
 // required; the rest may be nil (the matching endpoints then answer 503).
 type Deps struct {
+	// Computer is this computer's id and name for GET /api/hello.
+	Computer identity.Computer
 	// Log is the event log the SSE endpoint tails.
 	Log *eventlog.Log
 	// Logger is where this package writes its own events (default Log;

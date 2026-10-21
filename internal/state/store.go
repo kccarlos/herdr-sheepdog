@@ -127,6 +127,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 			return a.clone(), false, nil
 		}
 		delete(s.table.Agents, t.PaneID)
+		delete(s.table.Questions, t.PaneID)
 		if s.table.PendingAction != nil && s.table.PendingAction.PaneID == t.PaneID {
 			s.table.PendingAction = nil
 		}
@@ -173,9 +174,13 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		a.State, a.StateSince, changed = t.To, at, true
 		if t.To == herdr.StateBlocked {
 			a.LastBlock = &Block{SeenAt: at}
-		} else if a.LastBlock != nil && !a.LastBlock.Answered && t.From == herdr.StateBlocked {
-			// Left the prompt by any route (answered, cancelled, exited).
-			a.LastBlock.Answered = true
+		} else {
+			// Off blocked: no question of this pane is open any more.
+			delete(s.table.Questions, t.PaneID)
+			if a.LastBlock != nil && !a.LastBlock.Answered && t.From == herdr.StateBlocked {
+				// Left the prompt by any route (answered, cancelled, exited).
+				a.LastBlock.Answered = true
+			}
 		}
 	}
 	if !changed {
@@ -393,6 +398,62 @@ func (s *Store) ClearPending() error {
 	}
 	s.table.PendingAction = nil
 	return s.persist()
+}
+
+// SetQuestion records p, an answer_prompt, as its pane's open question
+// (replacing an older one of the pane) and persists.
+func (s *Store) SetQuestion(p PendingAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.table.Agents[p.PaneID]; !ok {
+		return nil
+	}
+	if s.table.Questions == nil {
+		s.table.Questions = map[string]*PendingAction{}
+	}
+	p = p.clone()
+	s.table.Questions[p.PaneID] = &p
+	return s.persist()
+}
+
+// DropQuestion removes paneID's open question, if any, and persists.
+func (s *Store) DropQuestion(paneID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.table.Questions[paneID]; !ok {
+		return nil
+	}
+	delete(s.table.Questions, paneID)
+	return s.persist()
+}
+
+// Question finds an open question by its id.
+func (s *Store) Question(id string) (PendingAction, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, q := range s.table.Questions {
+		if q.ID == id {
+			return q.clone(), true
+		}
+	}
+	return PendingAction{}, false
+}
+
+// Questions lists the open questions, oldest first.
+func (s *Store) Questions() []PendingAction {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]PendingAction, 0, len(s.table.Questions))
+	for _, q := range s.table.Questions {
+		out = append(out, q.clone())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].PaneID < out[j].PaneID
+	})
+	return out
 }
 
 // UpdateSession mutates the session bookkeeping under the lock and

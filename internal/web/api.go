@@ -21,11 +21,15 @@ import (
 
 // StateResponse is the body of GET /api/state.
 type StateResponse struct {
-	Agents        []state.Agent     `json:"agents"`
-	PendingAction *PendingView      `json:"pending_action"`
-	Session       state.Session     `json:"session"`
-	Voice         VoiceInfo         `json:"voice"`
-	Settings      *SettingsResponse `json:"settings,omitempty"`
+	Agents        []state.Agent `json:"agents"`
+	PendingAction *PendingView  `json:"pending_action"`
+	// Questions are every open question, oldest first: one per blocked
+	// agent whose prompt was read, the voice's pending_action among
+	// them. Each has its options for POST /api/pending/answer.
+	Questions []PendingView     `json:"questions"`
+	Session   state.Session     `json:"session"`
+	Voice     VoiceInfo         `json:"voice"`
+	Settings  *SettingsResponse `json:"settings,omitempty"`
 	// Brain is the orchestrator's provider and current model; omitted
 	// when the orchestrator is off.
 	Brain   *BrainInfo `json:"brain,omitempty"`
@@ -127,6 +131,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:                agents,
 		PendingAction:         s.pendingView(snap.PendingAction),
+		Questions:             s.questionViews(),
 		Session:               snap.Session,
 		Voice:                 s.voiceInfo(hs),
 		Settings:              s.settings(),
@@ -185,6 +190,15 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 		v.Agent = row.Alias
 	}
 	return v
+}
+
+// questionViews lists the open questions for /api/state.
+func (s *Server) questionViews() []PendingView {
+	out := []PendingView{}
+	for _, q := range s.deps.Store.Questions() {
+		out = append(out, *s.pendingView(&q))
+	}
+	return out
 }
 
 // pendingAnswerRequest is the body of POST /api/pending/answer.

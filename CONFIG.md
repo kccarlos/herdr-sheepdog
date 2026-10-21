@@ -530,6 +530,12 @@ before a line is written.
 | `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, and the setup and voice pages. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
 | `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one, but only while it is idle: no voice client connected, no orchestrator turn running, no approval waiting, no demo running on the setup page. It checks every minute and never interrupts a live session. `false` leaves the restart to you (`sheepdog restart`); the pages and `sheepdog status` still say "update installed, restart to finish". |
 
+## `[computer]`
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `computer.name` | `SHEEPDOG_COMPUTER_NAME` | the system's computer name | What the apps call this computer (`GET /api/hello` `computer.name`). Empty uses macOS's computer name (System Settings ▸ General ▸ Sharing), else the host name. The app may rename it on the phone. The app tells computers apart by the daemon id in `<data_dir>/tls/daemon_id`, made once at first start. |
+
 ## What sheepdog stores
 
 Everything is under two directories (and `data_dir` moves the second).
@@ -549,6 +555,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
+| `~/.local/share/sheepdog/tls/daemon_id` | This computer's id for the apps (16 random bytes; directory 0700, file 0600). No personal data. | Until you delete it; a new one means the apps see a new computer. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 

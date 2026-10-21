@@ -357,13 +357,24 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, false
 	}
-	if err := s.store.ClearPending(); err != nil {
-		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	// The voice's slot is cleared only when it held this question: a
+	// tap on a question the voice moved past leaves the voice on its own.
+	if cur, has := s.store.Pending(); has && cur.ID == p.ID {
+		if err := s.store.ClearPending(); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+		}
 	}
+	s.dropQuestionLocked(p)
 	now := s.cfg.Now()
+	answerVia := "voice"
+	if via == "tap" {
+		answerVia = "tap"
+	}
 	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
 		if a.LastBlock != nil {
 			a.LastBlock.Answered = true
+			a.LastBlock.Answer = label
+			a.LastBlock.Via = answerVia
 		}
 		a.LastInteraction = &now
 	}); err != nil {
