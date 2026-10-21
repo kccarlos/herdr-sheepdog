@@ -39,10 +39,14 @@ func TestVoiceContextCapture(t *testing.T) {
 	cfg.Handler = func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
 		return voice.ToolResult{Spoken: "Auth is waiting for approval.", Scheduling: voice.UrgencyIdle}, nil
 	}
-	s, d, _ := startSession(t, cfg)
+	s, d, l := startSession(t, cfg)
 	s.ClientAttached(true)
 	_ = s.SendAudio(tone(3000, 640))
 	waitFor(t, "open", s.Live)
+	// Live is set before the triggering audio is replayed (and recorded);
+	// voice.session_open is logged after the replay. A transcript before
+	// it would have no audio item to attach to.
+	waitFor(t, "audio replayed", func() bool { return len(l.find("voice.session_open")) > 0 })
 	c := d.last()
 	c.server(map[string]any{"type": evInputTranscript, "delta": " What's going on?"})
 	c.server(map[string]any{"type": evDelegationCreated, "delegation": map[string]any{"id": "item_1", "target": "client"}})

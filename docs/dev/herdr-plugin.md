@@ -2,7 +2,7 @@
 
 The repository root is a [herdr plugin](https://herdr.dev/docs/plugins/)
 (`herdr-plugin.toml`, id `kccarlos.sheepdog`). It adds four actions to
-herdr and downloads the `sheepdog` binary for you. It needs herdr 0.9.5 or
+herdr and downloads the `sheepdog` binary for you. It needs herdr 0.9.4 or
 newer (macOS or Linux).
 
 ```sh
