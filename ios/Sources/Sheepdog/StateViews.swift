@@ -84,9 +84,14 @@ struct FlockUnavailableView: View {
     }
 }
 
-/// A brand mascot pose from the asset catalog, on the illustration's own
-/// cream background in a rounded card. Decorative: VoiceOver skips it. Only
-/// the two Agents-pane empty states use one.
+/// A brand mascot pose from the asset catalog: transparent, with the cream
+/// sticker outline baked in, the same art in light and dark. Decorative:
+/// VoiceOver skips it.
+///
+/// - sleeping: first run, offline, no agents;
+/// - listening: the empty conversation, the microphone primer;
+/// - alert: the notification primer;
+/// - celebrating: the "Paired" screen only.
 struct MascotCard: View {
     let name: String
     var width: CGFloat = 160
@@ -96,8 +101,31 @@ struct MascotCard: View {
             .resizable()
             .scaledToFit()
             .frame(maxWidth: width)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .accessibilityHidden(true)
+    }
+}
+
+/// The splash: the launch screen's logo on `LaunchBackground`, with the
+/// lowercase wordmark under it. The launch screen (Info.plist) shows the
+/// same logo at the same size and place, so the hand-off does not jump;
+/// the wordmark fades in, then the whole splash fades out.
+struct SplashView: View {
+    var body: some View {
+        ZStack {
+            Color("LaunchBackground").ignoresSafeArea()
+            Image(decorative: "LaunchLogo")
+                .overlay(alignment: .bottom) {
+                    Text("sheepdog")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .tracking(-0.4)
+                        .foregroundStyle(Theme.cream)
+                        .fixedSize()
+                        .offset(y: 58)
+                }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Sheepdog")
+        .accessibilityIdentifier("splash")
     }
 }
 
