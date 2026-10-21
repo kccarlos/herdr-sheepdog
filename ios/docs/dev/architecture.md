@@ -7,7 +7,7 @@ microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
 │  MainView ── PaneSwitcher ── AgentStrip ── ConversationView / FlockView /      │
-│              PinnedApprovalCard ── TypeBar ── VoiceBarView       │
+│              PinnedApprovalCard ── VoiceCapsule ── CapsuleComposer             │
 │  SettingsView ── ModelsView                  PushCoordinator (APNs)            │
 │        │                                                                      │
 │  SessionViewModel (@MainActor): adapts SessionCore, runs its effects          │
@@ -112,7 +112,7 @@ any ──bot-ready below our minimum──────────────�
 - A mismatch closes the socket like `replaced`, without reconnecting
   (`VoiceSocket` reports `.closed(reason: "protocol", retrying: false)`).
   The core raises `SessionBanner.protocolMismatch` with the words to show
-  ("Update the app" / "Update the daemon"), and the connection chip reads
+  ("Update the app" / "Update the daemon"), and the connection reads
   **Update needed** (red) until the next Connect.
 - Health and the chip's sheet show a **Protocol** row: the handshake's
   result, or `/api/hello`'s `protocol`/`min_protocol` before a socket
@@ -187,7 +187,7 @@ without the question dismisses it. `/api/state`'s `pending_action` is the
 source of truth (refreshed every 5 s and on every `pending.*` event), and
 the event is the fast path. The POST to `/api/pending/answer` sends the
 option's 1-based `index`. On the Agents pane the card sits on its agent's
-card instead of above the voice bar.
+card instead of above the voice capsule.
 
 ## New conversation
 
@@ -233,7 +233,7 @@ Reduce Transparency.
 `PaneSwitcher` switches the middle of the screen between Conversation,
 Agents. It is built from buttons, so Agents can carry an amber
 badge with the number of blocked agents, and it turns into a menu at the
-accessibility text sizes. The voice bar stays in place.
+accessibility text sizes. The voice capsule stays in place.
 
 - **Agents** (`Flock`, `FlockView`). Only running agents are listed (idle,
   working, blocked, done): blocked first, then working, then idle and
@@ -253,13 +253,11 @@ accessibility text sizes. The voice bar stays in place.
   bubble. `voice.push_held` shows as a "Waiting for a listener" card, which
   goes away on release and is struck through on drop. After a relaunch,
   these are backfilled from `GET /api/events?type=…`.
-- **Typed input.** The keyboard button in the voice bar (or ⋯ ▸ Type
-  instead) opens `TypeBar`. Sending goes through
-  `POST /api/inject/utterance`, and the words and the answer arrive in the
+- **Typed input.** The capsule's keyboard turns it into the composer
+  (see "The voice capsule"); the words and the answer arrive in the
   conversation the usual way.
-- **Health** (`HealthView`, `DaemonHealth`), pushed from the connection
-  chip's popover and from Settings ▸ Diagnostics; its error count is the
-  red badge on the chip. It shows the daemon's
+- **Health** (`HealthView`, `DaemonHealth`), pushed from the voice menu's
+  connection sheet and from Settings ▸ Diagnostics. It shows the daemon's
   connection, address, version and uptime (from the newest `daemon.start`),
   plus the voice and orchestrator read-only with "Change in Settings ›", which
   opens Settings ▸ Models. It also shows GPT-Live's billed time, chattiness
@@ -280,7 +278,7 @@ accessibility text sizes. The voice bar stays in place.
   background send false); `voice_screen` is the Conversation pane with
   nothing pushed on `navigationPath`, Settings closed, no demo cover, and
   no sheet that reports itself with `.coversVoiceScreen(_:)` (the
-  connection chip's, the feedback flag's). A card's own sheet counts as
+  connection sheet's, the feedback flag's). A card's own sheet counts as
   the voice screen, so the next card replaces it. A `/ws` `card` goes
   through `CardInbox.receive`: an id seen before (live, from
   `/api/conversation` or the cache) does nothing, a new one opens as a
@@ -663,28 +661,49 @@ unit's input mute and iOS's app-wide input mute, and downmixes a
 multi-channel input. When the microphone is denied or will not start, the
 orb says "No microphone" (`SessionState.noMicrophone`).
 
-## The voice bar
+## The voice capsule
 
-`VoiceBarView` is one full-width row containing the mic (mute) button, the
-orb, the status line, Type and End (✕). Each control has a fixed slot, and
-the bar's height depends only on the text size. `VoiceBarModel` decides
-what the orb's tap does (Connect when disconnected, Stop while the voice is
-thinking or speaking, otherwise nothing) and what the bar says: "Tap the
-orb to connect", "Listening — just talk", "Muted — tap to unmute", "Hold
-the orb to talk". While the mic is live, the mic button shows the input
-level as a ring. When muted, it shows a red slashed mic. With voice off or
-no microphone, the mic button is hidden. A first-run coach mark explains
-that the mic is only for muting. The first time Mute is used, the status
-line explains it. **Hold to talk** (Settings ▸ Microphone) turns the orb
-into a push-to-talk button and hides Mute.
+`VoiceCapsule` (`VoiceBar.swift`) floats over the bottom of the main
+screen, 12 pt from the sides, in Liquid Glass (a solid card under Reduce
+Transparency); the content scrolls under it (`safeAreaInset`). It holds
+four fixed 44 pt slots: the mic (mute) button, the orb, the name and status
+(the voice menu) and the keyboard. It grows with the text size up to a cap,
+and the status wraps to two lines at the accessibility sizes.
 
-The **connection chip** (`ConnectionChip`) reflects only the daemon
-connection (the `/ws` socket, the `/events` stream and the token), never
-the voice state. It shows green "Connected", amber "Connecting…" (the first attempt) or
-"Reconnecting…" (after a drop; a spinner replaces the dot), red
-"Offline" or "Token refused", or grey "Not connected". Tapping it opens the
-address, a timed round trip, the daemon's version, the voice provider and
-model, the orchestrator, and Reconnect / Open Settings.
+- **Its look** is one of 13 `CapsuleMode`s (SheepdogKit, table-tested), from
+  the session state, the talk mode, holding, and whether a question is
+  open: live (orange orb with the cream ring), quiet (a question has the
+  accent), speaking, thinking and stalled (with the stop badge), muted (the
+  red mic), paused, no microphone, reconnecting, offline, voice off, hold
+  and holding. `-sheepdogCapsuleGallery` shows them all on one screen.
+- **What the orb does** is `VoiceBarModel`: Connect when disconnected,
+  Stop while the voice is thinking or speaking, Resume after an audio
+  interruption, otherwise nothing. Its words too: "Tap the orb to connect",
+  "Listening — just talk", "Muted — tap to unmute", "Hold the orb to talk".
+- **The voice menu** (tap the name): the connection, Manage computers… and
+  End voice session ("Your agents keep working."), or Start voice session.
+  With several computers it will add Talk to.
+- **The composer.** The keyboard morphs the capsule into `CapsuleComposer`:
+  the quiet orb (back to voice), the field and the ink send button.
+  Sending goes through `POST /api/inject/utterance`.
+- A first-run coach mark explains that the mic is only for muting; the
+  first time Mute is used, the status line explains it. **Hold to talk**
+  (Settings ▸ Microphone) turns the orb into a push-to-talk button and
+  hides Mute.
+
+The **connection** (`ConnectionChip`) reflects only the daemon connection
+(the `/ws` socket, the `/events` stream and the token), never the voice
+state: "Connected", "Connecting…", "Reconnecting…", "Offline", "Token
+refused" or "Not connected". It is the first row of the voice menu, which
+opens `ConnectionDetailView`: the address, a timed round trip, the daemon's
+version, the voice provider and model, the orchestrator, Health, and
+Reconnect / Open Settings.
+
+**The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
+(`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
+and one pill with `+` (New agent, New shell) and `⋯` (New conversation,
+Stop, End voice session, Settings). There is no title and no connection
+chip.
 
 A new question with options plays a distinct haptic pattern and a short
 chime through the audio session (`Haptics`).
@@ -828,7 +847,7 @@ voice speaks; questions get answers.
 ## Empty and error states
 
 `FlockPaneState` (SheepdogKit, tested) decides what an empty Agents pane
-says from the connection chip: connecting, reconnecting, no agents, not
+says from the connection: connecting, reconnecting, no agents, not
 connected, daemon unreachable, token refused, update needed. `StateViews`
 shows each as a `ContentUnavailableView` with one action. Agents already on
 screen are never hidden by a connection problem. The orb's halo and the hold

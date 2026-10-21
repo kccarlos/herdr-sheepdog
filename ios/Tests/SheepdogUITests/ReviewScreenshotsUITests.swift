@@ -82,7 +82,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(app.navigationBars.buttons.firstMatch, "Back")
 
         // The chip's popover, with Health in it.
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         XCTAssertTrue(app.buttons["chip.address"].exists || app.descendants(matching: .any)["chip.address"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "chip-popover")
@@ -96,7 +96,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(app.navigationBars["Health"].buttons.firstMatch, "Back")
         tapWhenReady(app.buttons["Done"], "Done")
 
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "settings-menu")
@@ -177,7 +177,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         sleep(5)
 
         // Health: models read-only, grouped problems (connection chip > Health).
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         tapWhenReady(app.buttons["chip.health"], "Health")
         XCTAssertTrue(app.descendants(matching: .any)["health.version"].waitForExistence(timeout: 10))
         sleep(1)

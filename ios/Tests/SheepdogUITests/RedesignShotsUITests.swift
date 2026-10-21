@@ -29,7 +29,53 @@ final class RedesignShotsUITests: XCTestCase {
         shot("splash")
     }
 
+    func testCapsuleModes() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot("capsule-modes")
+        app.swipeUp()
+        sleep(1)
+        shot("capsule-modes-2")
+    }
+
+    func testTopBarCapsuleAndMenus() throws {
+        let app = launchDemo()
+        sleep(3)
+        shot("conversation")
+        app.buttons["main.pane.flock"].firstMatch.tap()
+        sleep(2)
+        shot("agents")
+        app.buttons["voice.menu"].firstMatch.tap()
+        sleep(1)
+        shot("voice-menu")
+        dismissMenu(app)
+        app.buttons["toolbar.more"].firstMatch.tap()
+        sleep(1)
+        shot("more-menu")
+        dismissMenu(app)
+        app.buttons["toolbar.new"].firstMatch.tap()
+        sleep(1)
+        shot("plus-menu")
+        dismissMenu(app)
+        app.buttons["main.pane.conversation"].firstMatch.tap()
+        app.buttons["controls.type"].firstMatch.tap()
+        let field = app.textFields["type.field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("and remind me when search is done")
+        sleep(1)
+        shot("composer")
+    }
+
     // MARK: - Helpers
+
+    /// Closes an open menu by tapping the top of the screen.
+    func dismissMenu(_ app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        sleep(2)
+    }
 
     /// The demo, opened at launch, silent (no speech, no permission alerts).
     func launchDemo(_ extra: [String] = []) -> XCUIApplication {

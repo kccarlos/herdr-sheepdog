@@ -64,7 +64,7 @@ final class WalkthroughUITests: XCTestCase {
         // The voice bar before Connect: Mute and End hidden, the orb is a
         // Connect button, and the top-left chip reads the daemon connection
         // itself (grey "Not connected"), never the voice state.
-        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Not connected")
+        XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Not connected")
         shot(app, "15-voicebar-not-connected")
 
         // 4. Connect. The daemon runs without a voice session and says so
@@ -76,7 +76,7 @@ final class WalkthroughUITests: XCTestCase {
 
         // The chip's own sheet: address, round trip, daemon/voice info,
         // Reconnect and Open Settings.
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
         XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
@@ -144,8 +144,8 @@ final class WalkthroughUITests: XCTestCase {
 
         // 8. Point it at a port with nothing behind it: a plain sentence,
         //    not a raw error.
-        tapWhenReady(app.buttons["controls.end"], "Disconnect")
-        tapWhenReady(app.buttons["toolbar.settings"], "the settings button")
+        tapMenuItem(app, menu: "voice.menu", item: "controls.end")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Daemon")
         let field = app.textFields["settings.address"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
@@ -159,7 +159,7 @@ final class WalkthroughUITests: XCTestCase {
         shot(app, "07-error-banner")
         // The failed attempt reads as red "Offline" on the chip — not the
         // grey "Not connected" of a session that was never opened.
-        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Offline")
+        XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Offline")
         shot(app, "18-voicebar-offline")
     }
 

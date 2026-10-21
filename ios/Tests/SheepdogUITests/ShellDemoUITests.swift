@@ -84,14 +84,7 @@ final class ShellDemoUITests: XCTestCase {
 
     func testTheAgentsTabOffersAShell() throws {
         let app = launch()
-        let shell = app.buttons.matching(identifier: "flock.shell")
-        XCTAssertTrue(shell.firstMatch.waitForExistence(timeout: 10))
-        for _ in 0 ..< 4 where !shell.allElementsBoundByIndex.contains(where: { $0.isHittable }) {
-            app.swipeUp()
-        }
-        sleep(1)
-        shot("agents-shell-button")
-        tapVisible(app.buttons, "flock.shell")
+        tapMenuItem(app, menu: "toolbar.new", item: "new.shell")
         let header = app.descendants(matching: .any).matching(identifier: "shell.header").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         XCTAssertTrue(header.label.contains("Shell"), header.label)
@@ -115,12 +108,7 @@ final class ShellDemoUITests: XCTestCase {
             break
         }
         sleep(1)
-        let settings = app.buttons.matching(NSPredicate(format: "label == 'Settings'"))
-        XCTAssertTrue(settings.firstMatch.waitForExistence(timeout: 10))
-        for i in 0 ..< settings.count where settings.element(boundBy: i).isHittable {
-            settings.element(boundBy: i).tap()
-            break
-        }
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         let row = app.descendants(matching: .any).matching(identifier: "settings.shell").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'setup page'")).firstMatch.exists)
