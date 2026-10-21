@@ -221,7 +221,9 @@ What is in:
   the app's kinds are herdr's supported kinds that are installed (agy
   included). Still to come: spaces (pick or create one, optional new
   worktree) and the app's sheet. The orchestrator's spawn kinds stay
-  Claude and Codex until an eval adds more.
+  Claude and Codex until an eval adds more. Both items, plus several
+  computers, are designed in [design/app-redesign.md](design/app-redesign.md)
+  (decided 2026-10-21).
 - **Next work (agreed, not started; see the handover's queue):** voice
   prompt toward facts (hand off anything new, comparative or historical;
   ask when unsure), briefings carrying their age and a finished flag, tool

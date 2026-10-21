@@ -24,10 +24,16 @@ final class AgentWindowDemoUITests: XCTestCase {
     private func tapVisible(_ query: XCUIElementQuery, _ id: String) {
         let matches = query.matching(identifier: id)
         XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 10), id)
-        for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
-            matches.element(boundBy: i).tap()
-            return
-        }
+        // It can exist a moment before it is hittable (a sheet or the
+        // demo's cover still animating, slower on a CI Mac): keep looking.
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+                matches.element(boundBy: i).tap()
+                return
+            }
+            usleep(200_000)
+        } while Date() < deadline
         XCTFail("no visible \(id)")
     }
 
@@ -41,7 +47,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         tapVisible(app.buttons, "flock.agent.\(alias).window")
         return app
     }
@@ -145,22 +151,41 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         let new = app.buttons.matching(identifier: "flock.newAgent")
         for _ in 0 ..< 4 where !new.firstMatch.isHittable { app.swipeUp() }
-        tapVisible(app.buttons, "flock.newAgent")
-        XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10))
+        // The sheet comes from the tap; a tap lost while the list still
+        // scrolls is retried once the list is still.
+        let start = app.buttons["newAgent.start"]
+        for _ in 0 ..< 3 where !start.exists {
+            tapVisible(app.buttons, "flock.newAgent")
+            if start.waitForExistence(timeout: 10) { break }
+        }
+        XCTAssertTrue(start.exists, "New agent opens its sheet")
         sleep(1)
         shot("new-agent")
-        app.buttons["New worktree"].tap()
+        // A tap on the segment while the sheet still settles can be lost on
+        // a slow Mac; choosing the same segment again is harmless.
         let branch = app.textFields["newAgent.branch"]
-        XCTAssertTrue(branch.waitForExistence(timeout: 5))
+        for _ in 0 ..< 3 where !branch.exists {
+            app.buttons["New worktree"].tap()
+            if branch.waitForExistence(timeout: 5) { break }
+        }
+        XCTAssertTrue(branch.exists, "New worktree shows the branch field")
         branch.tap()
         branch.typeText("fix-login")
         XCTAssertTrue(app.buttons["newAgent.start"].isEnabled)
         shot("new-agent-worktree")
         app.buttons["newAgent.start"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["newAgent.started"].waitForExistence(timeout: 5))
+        // "Started" shows for 1.4 s, then the sheet closes by itself, which
+        // it does only after a successful start. The tap's own wait for the
+        // app to idle can outlast the label on a slow Mac, so either counts.
+        let started = app.descendants(matching: .any)["newAgent.started"]
+        let startButton = app.buttons["newAgent.start"]
+        let startedOrClosed = NSPredicate { _, _ in started.exists || !startButton.exists }
+        wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
+        XCTAssertEqual(app.state, .runningForeground, "the app is still up")
+        XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
     }
 
     func testAnotherDeviceInControlShowsTheObserveBanner() throws {
