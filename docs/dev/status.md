@@ -216,13 +216,12 @@ What is in:
   moved to a `+` in the header, and one layout pass that also fits iPad
   (sidebar and detail, windows side by side). Do it as one design pass, with
   screenshots for review first.
-- **New agent like herdr (CEO, 2026-10-21):** the sheet offers only Claude
-  and Codex because `brain.SpawnKinds` is hard-coded, so an installed `agy`
-  never shows. Proposed: list the kinds herdr supports (`herdr agent start
-  --kind`) that are installed on the computer; pick an existing space or
-  create one (folder, optional new worktree), then the agent; start it with
-  herdr's `agent.start` (waits until it is ready) and open its window.
-  The orchestrator's spawn kinds follow only after an eval.
+- **New agent like herdr (CEO, 2026-10-21):** the daemon side has started.
+  Voice and tap share one start path through herdr's `agent.start`, and
+  the app's kinds are herdr's supported kinds that are installed (agy
+  included). Still to come: spaces (pick or create one, optional new
+  worktree) and the app's sheet. The orchestrator's spawn kinds stay
+  Claude and Codex until an eval adds more.
 - **Next work (agreed, not started; see the handover's queue):** voice
   prompt toward facts (hand off anything new, comparative or historical;
   ask when unsure), briefings carrying their age and a finished flag, tool

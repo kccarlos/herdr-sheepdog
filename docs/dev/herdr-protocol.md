@@ -308,8 +308,8 @@ against the fake herdr (`herdrtest.EmitEventsLost`).
 The shell is ready for typing when its process group is the foreground group
 and it is listed among `foreground_processes` (`ProcessInfo.ShellForeground`,
 the predicate herdr's own `agent start` uses). Spawn waits for this plus first
-output, then settles 200 ms, before typing the agent command; after 5 s it
-types anyway and logs `supervisor.spawn_shell_timeout`. Checked live in a
+output, then settles 200 ms, before calling `agent.start`; after 5 s it
+starts anyway and logs `supervisor.spawn_shell_timeout`. Checked live in a
 named session: a fresh pane reports the shell in the foreground; while `sleep`
 runs it does not.
 
@@ -516,6 +516,25 @@ once right after the approval was answered but before the screen changed. Use
 `until:["working"]` or a status-specific wait when you need an edge.
 `agent.start` requires an existing shell pane at its prompt; `kind` values:
 `pi|claude|codex|gemini|cursor|devin|agy|cline|omp|mastracode|opencode|copilot|kimi|kiro|droid|amp|grok|hermes|kilo|qodercli|qwen|maki|muse`.
+
+Checked against herdr 0.9.5 in a named session (2026-10-21), and what
+sheepdog's start path (`internal/supervisor` `startAgent`) relies on:
+
+- The socket method answers **at once** with the agent `launch_pending:
+  true` and `agent_status: unknown`; the `herdr agent start` CLI is what
+  waits. `agent.get` then shows `launch_pending` until the agent's first
+  ready state. Claude at its folder-trust dialog is `blocked` with
+  `launch_pending: true` (the CLI exits with `agent_not_ready … blocked
+  during startup`); Codex was `idle`, not pending, about 4 s after the call.
+- A kind that never shows up (not installed) is dropped after
+  `timeout_ms`: `agent.get` then answers `agent_not_found`.
+- `name` is required and must match `^[a-z][a-z0-9_-]{0,31}$`
+  (`invalid_agent_name` otherwise). `agent.rename` with `name: null`
+  clears it, but only once the launch is no longer pending
+  (`agent_launch_pending` before).
+- `server.agent_manifests` (no params) lists the supported kinds as
+  `manifests[].agent`. It had 22 entries on 0.9.5, without `omp` and
+  `mastracode` from the CLI's list.
 
 Trust dialogs: Codex 0.154 shows a directory-trust dialog on first launch in a
 folder (herdr classifies it `idle`), Claude Code 2.1.275 shows a folder-trust

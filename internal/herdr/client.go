@@ -285,11 +285,60 @@ func (c *Client) CreateWorktree(ctx context.Context, cwd, branch, label string) 
 }
 
 // PaneEnv is set in the shell of every pane the daemon opens for a new
-// agent (workspace.create, pane.split take an env map; neither takes a
-// command, so the agent is still typed at the shell prompt). It keeps
+// agent (workspace.create, pane.split take an env map; agent.start then
+// types the agent's executable at the shell prompt). It keeps
 // oh-my-zsh from asking to update at shell start: on 2026-10-04 that
 // prompt ate the "c" of "claude" on a voice spawn.
 var PaneEnv = map[string]string{"DISABLE_AUTO_UPDATE": "true"}
+
+// StartAgent starts a supported agent kind at the shell prompt of paneID
+// (`agent.start`). herdr answers at once with the launch pending, types
+// the kind's canonical executable plus args, and drops the launch when
+// the agent is not detected within timeout; GetAgent's LaunchPending and
+// status tell how it went. name must be a herdr agent name (lowercase,
+// digits, - and _, 1-32 characters).
+func (c *Client) StartAgent(ctx context.Context, paneID, name, kind string, args []string, timeout time.Duration) error {
+	params := map[string]any{"name": name, "kind": kind, "pane_id": paneID}
+	if len(args) > 0 {
+		params["args"] = args
+	}
+	if timeout > 0 {
+		params["timeout_ms"] = timeout.Milliseconds()
+	}
+	err := c.Call(ctx, "agent.start", params, nil)
+	c.log("herdr.agent_start", paneID, map[string]any{"kind": kind, "name": name, "args": args, "error": errString(err)})
+	return err
+}
+
+// GetAgent returns one agent by name or pane id (`agent.get`);
+// ErrAgentNotFound when there is none (a launch herdr dropped).
+func (c *Client) GetAgent(ctx context.Context, target string) (AgentInfo, error) {
+	var res struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	err := c.Call(ctx, "agent.get", map[string]any{"target": target}, &res)
+	return res.Agent, err
+}
+
+// AgentKinds lists the agent kinds herdr supports (`server.agent_manifests`):
+// the kinds `agent.start` accepts, each its canonical executable.
+func (c *Client) AgentKinds(ctx context.Context) ([]string, error) {
+	var res struct {
+		Manifests []struct {
+			Agent string `json:"agent"`
+		} `json:"manifests"`
+	}
+	if err := c.Call(ctx, "server.agent_manifests", map[string]any{}, &res); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(res.Manifests))
+	for _, m := range res.Manifests {
+		if m.Agent != "" {
+			out = append(out, m.Agent)
+		}
+	}
+	return out, nil
+}
 
 // SplitPane splits paneID to the right, unfocused, with a new shell in
 // cwd (`pane.split`), and returns the new pane. The pane to split goes

@@ -20,11 +20,11 @@ func TestUserNewAgentIsTheUsersTap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.PaneID != "w20:p1" || res.Spoken != "Starting a new Claude in bench." {
+	if res.PaneID != "w20:p1" || res.Spoken != "Claude is ready in bench." || res.Blocked {
 		t.Errorf("result = %+v", res)
 	}
-	if inputs := w.params("pane.send_input"); len(inputs) != 1 || inputs[0]["text"] != "claude" {
-		t.Fatalf("pane.send_input = %v", inputs)
+	if starts := w.startParams(); len(starts) != 1 || starts[0]["kind"] != "claude" || starts[0]["pane_id"] != "w20:p1" {
+		t.Fatalf("agent.start = %v", starts)
 	}
 	ev := w.log.ofType("supervisor.spawn")
 	if len(ev) != 1 || ev[0].Payload.(map[string]any)["via"] != "user" {
@@ -34,6 +34,7 @@ func TestUserNewAgentIsTheUsersTap(t *testing.T) {
 	for name, req := range map[string]NewAgentRequest{
 		"outside roots": {Kind: "claude", Dir: "/etc"},
 		"unknown kind":  {Kind: "bash", Dir: "bench"},
+		"not installed": {Kind: "gemini", Dir: "bench"},
 		"bad branch":    {Kind: "codex", Dir: "bench", Worktree: "../main"},
 		"lock branch":   {Kind: "codex", Dir: "bench", Worktree: "fix.lock"},
 	} {
@@ -59,7 +60,7 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Worktree || len(opts.Kinds) != 2 || len(opts.Projects) != 2 {
+	if !opts.Worktree || strings.Join(opts.Kinds, " ") != "claude codex agy" || len(opts.Projects) != 2 {
 		t.Fatalf("options = %+v", opts)
 	}
 	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "fix-login", Text: "fix the login test"})
@@ -75,6 +76,50 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 	}
 	if len(w.params("workspace.create")) != 0 {
 		t.Error("a workspace was opened in the project folder too")
+	}
+}
+
+// Any installed kind herdr supports starts by tap, agy included; the
+// orchestrator's kinds stay brain.SpawnKinds.
+func TestUserNewAgentStartsAgy(t *testing.T) {
+	w := newSpawnWorld(t)
+	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "agy", Dir: "app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Spoken != "Antigravity is ready in app." {
+		t.Errorf("result = %+v", res)
+	}
+	if starts := w.startParams(); len(starts) != 1 || starts[0]["kind"] != "agy" {
+		t.Fatalf("agent.start = %v", starts)
+	}
+	w.hear("open an antigravity in bench")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "agy"}); err == nil {
+		t.Error("the orchestrator started agy")
+	}
+}
+
+// A tap start that herdr detects at its trust question has started; one
+// that never shows up fails with its pane, left at the shell prompt.
+func TestUserNewAgentBlockedAndFailed(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.startAs = herdr.StateBlocked
+	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "claude", Dir: "bench"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Blocked || res.Spoken != "Claude started in bench and asks a question first." {
+		t.Errorf("result = %+v", res)
+	}
+
+	w.noStart = true
+	_, err = w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "app"})
+	var se *StartError
+	if !errors.As(err, &se) || se.PaneID != "w20:p2" || !strings.Contains(err.Error(), "Codex did not start in app: herdr did not see it running") {
+		t.Fatalf("err = %v", err)
+	}
+	if w.log.count("supervisor.spawn_not_ready") != 1 {
+		t.Error("no supervisor.spawn_not_ready")
 	}
 }
 
