@@ -4,6 +4,15 @@ The plan for re-recording sheepdog's launch video, for the owner's review. Nothi
 recorded yet. It replaces the storyboard that was in [launch-kit.md](launch-kit.md), which still
 holds the launch posts.
 
+> **Decision (2026-10-21): we make it ourselves, synthetic, as the old one was, after the
+> product work.** The redesign, the security work and the several-computers support land first,
+> so the video shows the app as it will ship. Then we follow this storyboard with simulator
+> recordings and the offline demo wherever possible, TTS voices as in the old pipeline
+> ([scripts/readme-media/launch/](../../scripts/readme-media/launch/README.md)), and the new brand
+> and logo. Shots that need a real phone (the lock screen, the Live Activity) are recorded on a
+> device or drawn as before. The "film well" product changes in section 5 are done if there is
+> time. The filming notes below stay as the reference for anything recorded live.
+
 Every caption has to match what the real app does on the day of recording. Check each shot
 against the app, not against this page, and drop a shot rather than fake it.
 
@@ -172,7 +181,7 @@ A three-beat montage, about 2 s each, with one caption each.
 
 - **10a.** ⋯ ▸ **Open shell here**: "Shell · shop" runs `git log --oneline -3`.
   - **Caption:** "A real shell when you need one." / 「需要时，还有一个真正的 shell。」
-  - **Source:** a real daemon over Tailscale, or with **Shell on this network** turned on; on plain Wi-Fi the shell is off. The demo's shell prints "demo: nothing runs here", so don't use it on camera.
+  - **Source:** a real daemon (the shell is on by default once the security work lands). The demo's shell prints "demo: nothing runs here", so don't use it on camera.
 - **10b.** Settings, the top line: "sheepdog vX.Y.Z is available. To update, run this on your computer: `brew upgrade sheepdog`".
   - **Caption:** "It tells you when there's an update." / 「有新版本，它会告诉你。」
   - **Source:** this line shows only when the daemon knows of a newer release. Either film it through `UpdateNoticeUITests`' stub daemon in the simulator, or film just after a release with an older daemon. A demo flag is in [Product changes](#product-changes-that-would-help-filming).
@@ -311,7 +320,7 @@ for some final shots.
 | 7. Changes and diff | yes, but the path reads `/Users/demo/code/app` | or real |
 | 8. Attach and send a prompt | no (it says "This is the demo") | yes |
 | 9. New agent | no (it says "no agent was started") | yes |
-| 10a. Shell | no (it says "demo: nothing runs here") | yes, over Tailscale or with Shell on this network |
+| 10a. Shell | no (it says "demo: nothing runs here") | yes |
 | 10b. Update notice | no | an older daemon, or the stub daemon in `UpdateNoticeUITests` |
 | 11, 12 | | real herdr, real setup |
 
@@ -360,13 +369,13 @@ link in the README.
 
 - The `demo` macOS user, the `shop` repository with its commits, and the herdr session with the four agents and their tasks (above).
 - The keys (Gemini or OpenAI, and DeepSeek) in the demo user's `.env`, and a clean `sheepdog doctor`.
-- Tailscale on the Mac and the phone, for the shell. Or turn on **Shell on this network** for the shoot and off afterwards.
+- The shell switch on the setup page left on (it is on by default).
 - On the device: a push test, the Filming Focus, the wallpaper and home screen, dark mode, the text size and the current TestFlight build.
 - The staged "login error" screenshot for shot 8 (a fake page, made in any image editor).
 - The graphics: the title lockup and the end card, from `assets/brand/`.
 - A music track and its licence.
 - A dry run of every phone shot in the offline demo, to time the cut before filming the real ones.
-- After the shoot: **New token** on the setup page, and turn Shell on this network off.
+- After the shoot: revoke the demo devices on the setup page (or **Reset pairing**).
 
 ### Product changes that would help filming
 
