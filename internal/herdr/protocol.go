@@ -156,6 +156,41 @@ type WorkspaceInfo struct {
 	Focused     bool   `json:"focused"`
 	PaneCount   int    `json:"pane_count"`
 	Status      State  `json:"agent_status"`
+	// Worktree is set when the workspace is a git checkout herdr knows
+	// (null otherwise).
+	Worktree *WorkspaceWorktree `json:"worktree,omitempty"`
+}
+
+// WorkspaceWorktree is herdr's WorkspaceWorktreeInfo.
+type WorkspaceWorktree struct {
+	RepoName     string `json:"repo_name"`
+	RepoRoot     string `json:"repo_root"`
+	CheckoutPath string `json:"checkout_path"`
+	// Linked is true for a linked worktree (not the repository's main
+	// checkout).
+	Linked bool `json:"is_linked_worktree"`
+}
+
+// Worktree is herdr's WorktreeInfo: one checkout of a repository.
+type Worktree struct {
+	Path     string `json:"path"`
+	Branch   string `json:"branch,omitempty"`
+	Label    string `json:"label"`
+	Linked   bool   `json:"is_linked_worktree"`
+	Detached bool   `json:"is_detached"`
+	Prunable bool   `json:"is_prunable"`
+	Bare     bool   `json:"is_bare"`
+	// OpenWorkspace is the workspace open in it ("" when none).
+	OpenWorkspace string `json:"open_workspace_id,omitempty"`
+}
+
+// WorktreeList is the `worktree.list` result.
+type WorktreeList struct {
+	Source struct {
+		RepoName string `json:"repo_name"`
+		RepoRoot string `json:"repo_root"`
+	} `json:"source"`
+	Worktrees []Worktree `json:"worktrees"`
 }
 
 // Snapshot is the `session.snapshot` result (== `herdr api snapshot`).

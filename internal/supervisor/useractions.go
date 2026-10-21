@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -54,25 +52,6 @@ func validBranch(b string) bool {
 		!strings.HasSuffix(b, "/") && !strings.HasSuffix(b, ".lock") && !strings.HasSuffix(b, ".")
 }
 
-// Project is one directory a new agent may start in (GET /api/projects).
-type Project struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-	// Open is true when a herdr workspace already works there.
-	Open bool `json:"open"`
-	// Git is true when it is a git checkout, so a fresh worktree is
-	// possible.
-	Git bool `json:"git"`
-}
-
-// NewAgentOptions is what the app's New agent sheet offers.
-type NewAgentOptions struct {
-	Kinds    []string  `json:"kinds"`
-	Projects []Project `json:"projects"`
-	// Worktree is true when herdr can make worktrees here.
-	Worktree bool `json:"worktree"`
-}
-
 // InstalledKinds are the agent kinds a tap may start: the kinds herdr
 // supports (its agent manifests) whose executable is on the daemon's
 // PATH, in herdr's order. It is information for the app and the rail
@@ -95,39 +74,22 @@ func (s *Supervisor) InstalledKinds(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// NewAgentOptions lists the kinds and directories for a new agent.
-func (s *Supervisor) NewAgentOptions(ctx context.Context) (NewAgentOptions, error) {
-	sp, ok := s.herdr.(Spawner)
-	if !ok {
-		return NewAgentOptions{}, errors.New("starting a new agent is not available here")
-	}
-	snap, err := sp.Snapshot(ctx)
-	if err != nil {
-		return NewAgentOptions{}, fmt.Errorf("could not list herdr's workspaces: %w", err)
-	}
-	kinds, err := s.InstalledKinds(ctx)
-	if err != nil {
-		return NewAgentOptions{}, err
-	}
-	_, wt := s.herdr.(WorktreeCreator)
-	out := NewAgentOptions{Kinds: kinds, Projects: []Project{}, Worktree: wt}
-	for _, d := range s.spawnDirs(snap) {
-		_, gerr := os.Stat(filepath.Join(d.Path, ".git"))
-		out.Projects = append(out.Projects, Project{Name: d.Name, Path: d.Path, Open: d.Pane != "", Git: gerr == nil})
-	}
-	return out, nil
-}
-
 // NewAgentRequest is the user's New agent.
 type NewAgentRequest struct {
 	Kind string
-	// Dir is a project's name or full path, as for the orchestrator.
-	Dir string
-	// Worktree, when set, is the branch of a fresh git worktree the agent
-	// starts in instead of the project folder.
+	// Space is the open space (herdr workspace id) to start in; or, with
+	// Space empty, Dir is the folder of a new space: a project's name or
+	// full path, as for the orchestrator.
+	Space string
+	Dir   string
+	// Worktree, with Dir, is the branch of a fresh git worktree the new
+	// space opens in instead of the project folder.
 	Worktree string
 	// Text is the optional first prompt, sent once the agent is ready.
 	Text string
+	// Name is the optional name the user gave the agent (1 to 60
+	// characters, as for a rename).
+	Name string
 }
 
 // NewAgentResult is the started agent's pane and the line to show.
@@ -150,10 +112,19 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 	if _, ok := s.herdr.(Spawner); !ok {
 		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
 	}
+	req.Name = strings.Join(strings.Fields(req.Name), " ")
+	if len(req.Name) > 60 {
+		return refuse("bad name", fmt.Errorf("%w: a name is at most 60 characters", ErrUserAction))
+	}
 	if len(req.Text) > WindowMaxText {
 		return refuse("text too long", fmt.Errorf("%w: the first prompt is at most %d bytes", ErrUserAction, WindowMaxText))
 	}
-	if req.Worktree != "" && !validBranch(req.Worktree) {
+	switch {
+	case (req.Space == "") == (strings.TrimSpace(req.Dir) == ""):
+		return refuse("no place", fmt.Errorf("%w: give a space or a new space's folder", ErrUserAction))
+	case req.Worktree != "" && req.Space != "":
+		return refuse("worktree in space", fmt.Errorf("%w: a fresh worktree opens a new space; give its folder, not a space", ErrUserAction))
+	case req.Worktree != "" && !validBranch(req.Worktree):
 		return refuse("bad branch", fmt.Errorf("%w: %q is not a branch name (letters, digits and . _ / -)", ErrUserAction, req.Worktree))
 	}
 	kinds, err := s.InstalledKinds(ctx)
@@ -161,9 +132,9 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 		return refuse("kinds failed", err)
 	}
 	if !slices.Contains(kinds, req.Kind) {
-		return refuse("bad kind", fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", ")))
+		return refuse("bad kind", &ReasonError{Reason: ReasonNotInstalled, Err: fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", "))})
 	}
-	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Dir: req.Dir, Worktree: req.Worktree, Text: req.Text, Via: "user"})
+	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Space == "", Worktree: req.Worktree, Text: req.Text, Name: req.Name, Via: "user"})
 	if err != nil {
 		return NewAgentResult{}, err
 	}
@@ -174,7 +145,7 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 		if line := lastLine(out.Tail); line != "" {
 			msg += "; its pane shows: " + line
 		}
-		return NewAgentResult{}, &StartError{PaneID: st.PaneID, Err: errors.New(msg)}
+		return NewAgentResult{}, &StartError{PaneID: st.PaneID, Reason: ReasonTimeout, Err: errors.New(msg)}
 	}
 	if s.track() {
 		go func() {

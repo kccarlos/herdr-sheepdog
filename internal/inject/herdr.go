@@ -330,3 +330,78 @@ func tailLines(s string, n int) string {
 	}
 	return s
 }
+
+var _ supervisor.SpaceHost = (*Herdr)(nil)
+
+// spaceHost is the inner client's workspace half, or an error (mock
+// herdr has none).
+func (h *Herdr) spaceHost() (supervisor.SpaceHost, error) {
+	sh, ok := h.inner.(supervisor.SpaceHost)
+	if !ok {
+		return nil, fmt.Errorf("herdr: cannot manage spaces here")
+	}
+	return sh, nil
+}
+
+// RenameWorkspace implements supervisor.SpaceHost.
+func (h *Herdr) RenameWorkspace(ctx context.Context, workspaceID, label string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.RenameWorkspace(ctx, workspaceID, label)
+}
+
+// CloseWorkspace implements supervisor.SpaceHost.
+func (h *Herdr) CloseWorkspace(ctx context.Context, workspaceID string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.CloseWorkspace(ctx, workspaceID)
+}
+
+// ListWorktrees implements supervisor.SpaceHost.
+func (h *Herdr) ListWorktrees(ctx context.Context, workspaceID string) (herdr.WorktreeList, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.WorktreeList{}, err
+	}
+	return sh.ListWorktrees(ctx, workspaceID)
+}
+
+// OpenWorktree implements supervisor.SpaceHost.
+func (h *Herdr) OpenWorktree(ctx context.Context, workspaceID, path, branch string) (herdr.PaneInfo, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sh.OpenWorktree(ctx, workspaceID, path, branch)
+}
+
+// RemoveWorktree implements supervisor.SpaceHost.
+func (h *Herdr) RemoveWorktree(ctx context.Context, workspaceID string, force bool) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.RemoveWorktree(ctx, workspaceID, force)
+}
+
+// CreateTab implements supervisor.SpaceHost.
+func (h *Herdr) CreateTab(ctx context.Context, workspaceID, cwd, label string) (herdr.PaneInfo, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sh.CreateTab(ctx, workspaceID, cwd, label)
+}
+
+// SendInput implements supervisor.SpaceHost.
+func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.SendInput(ctx, paneID, text, keys...)
+}

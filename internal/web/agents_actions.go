@@ -31,6 +31,10 @@ func actionStatus(err error) int {
 	switch {
 	case errors.Is(err, supervisor.ErrUserAction):
 		return http.StatusBadRequest
+	case errors.Is(err, supervisor.ErrNoSuchSpace), errors.Is(err, supervisor.ErrNoSuchCommand):
+		return http.StatusNotFound
+	case errors.Is(err, supervisor.ErrSpaceBusy), errors.Is(err, supervisor.ErrDirtyWorktree):
+		return http.StatusConflict
 	case errors.Is(err, brain.ErrNotPermitted):
 		return http.StatusForbidden
 	default:
@@ -38,29 +42,31 @@ func actionStatus(err error) int {
 	}
 }
 
-// handleProjects is GET /api/projects: the New agent sheet's kinds and
-// directories.
-func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	a, ok := s.agentActions(w)
-	if !ok {
-		return
+// actionErrorBody is {"error"}, plus "reason" when the app has its own
+// screen for it (supervisor.ReasonError).
+func actionErrorBody(err error) map[string]string {
+	body := map[string]string{"error": err.Error()}
+	var re *supervisor.ReasonError
+	if errors.As(err, &re) {
+		body["reason"] = re.Reason
 	}
-	opts, err := a.NewAgentOptions(r.Context())
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, opts)
+	return body
 }
 
+// newAgentRequest is the body of POST /api/agents: an open space, or
+// the folder of a new space (with an optional fresh worktree).
 type newAgentRequest struct {
 	Kind     string `json:"kind"`
+	Space    string `json:"space"`
 	Dir      string `json:"dir"`
-	Worktree string `json:"worktree"`
-	Text     string `json:"text"`
+	Worktree *struct {
+		Branch string `json:"branch"`
+	} `json:"worktree"`
+	Text string `json:"text"`
+	Name string `json:"name"`
 }
 
-// handleNewAgent is POST /api/agents.
+// handleNewAgent is POST /api/agents: it answers once the agent is ready.
 func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 	a, ok := s.agentActions(w)
 	if !ok {
@@ -71,15 +77,22 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Dir) == "" {
-		writeError(w, http.StatusBadRequest, "dir is required")
+	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Dir: strings.TrimSpace(req.Dir), Text: strings.TrimSpace(req.Text), Name: req.Name}
+	if req.Worktree != nil {
+		in.Worktree = strings.TrimSpace(req.Worktree.Branch)
+		if in.Worktree == "" {
+			writeError(w, http.StatusBadRequest, "a new worktree needs a branch")
+			return
+		}
+	}
+	if (in.Space == "") == (in.Dir == "") {
+		writeError(w, http.StatusBadRequest, "give a space, or the dir of a new space")
 		return
 	}
-	req.Text = strings.TrimSpace(req.Text)
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	res, err := a.UserNewAgent(ctx, supervisor.NewAgentRequest{Kind: req.Kind, Dir: req.Dir, Worktree: strings.TrimSpace(req.Worktree), Text: req.Text})
-	fields := map[string]any{"action": "new", "kind": req.Kind, "dir": filepath.Base(req.Dir), "worktree": req.Worktree != "", "text_len": len(req.Text)}
+	res, err := a.UserNewAgent(ctx, in)
+	fields := map[string]any{"action": "new", "kind": req.Kind, "space": in.Space, "dir": filepath.Base(in.Dir), "worktree": in.Worktree != "", "text_len": len(in.Text)}
 	if err != nil {
 		fields["error"] = err.Error()
 		var se *supervisor.StartError
@@ -87,11 +100,11 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 			// The pane is left at its shell prompt: the app offers
 			// "Open the pane".
 			s.log.Log(logSource, "web.agent_action", se.PaneID, fields)
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "pane_id": se.PaneID})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "pane_id": se.PaneID, "reason": se.Reason})
 			return
 		}
 		s.log.Log(logSource, "web.agent_action", "", fields)
-		writeError(w, actionStatus(err), err.Error())
+		writeJSON(w, actionStatus(err), actionErrorBody(err))
 		return
 	}
 	s.log.Log(logSource, "web.agent_action", res.PaneID, fields)

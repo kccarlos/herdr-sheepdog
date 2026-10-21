@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -56,11 +57,12 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 		w.srv.SetScreen(pane.PaneID, "❯ ")
 		return map[string]any{"type": "worktree_created", "root_pane": pane}, nil
 	})
-	opts, err := w.sup.NewAgentOptions(context.Background())
+	gitRepo(t, w.bench)
+	opts, err := w.sup.Spaces(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Worktree || strings.Join(opts.Kinds, " ") != "claude codex agy" || len(opts.Projects) != 2 {
+	if !opts.Worktrees || kindList(opts.Kinds) != "claude:Claude codex:Codex agy:Antigravity" || len(opts.Folders) != 2 {
 		t.Fatalf("options = %+v", opts)
 	}
 	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "fix-login", Text: "fix the login test"})
@@ -76,6 +78,69 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 	}
 	if len(w.params("workspace.create")) != 0 {
 		t.Error("a workspace was opened in the project folder too")
+	}
+
+	// The app shows its own screens for these.
+	for name, c := range map[string]struct {
+		req    NewAgentRequest
+		reason string
+	}{
+		"not git":       {NewAgentRequest{Kind: "codex", Dir: "app", Worktree: "fix-app"}, ReasonNotGit},
+		"checked out":   {NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "main"}, ReasonBranchExists},
+		"not installed": {NewAgentRequest{Kind: "gemini", Dir: "bench"}, ReasonNotInstalled},
+	} {
+		_, err := w.sup.UserNewAgent(context.Background(), c.req)
+		var re *ReasonError
+		if !errors.As(err, &re) || re.Reason != c.reason || !errors.Is(err, ErrUserAction) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if len(w.params("worktree.create")) != 1 {
+		t.Error("a refused worktree reached herdr")
+	}
+	// An existing branch checked out nowhere opens (herdr checks it out).
+	if out, err := exec.Command("git", "-C", w.bench, "branch", "spare").CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v: %s", err, out)
+	}
+	_, err = w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "spare"})
+	var spareErr *ReasonError
+	if errors.As(err, &spareErr) {
+		t.Errorf("spare branch refused: %v", err)
+	}
+	if len(w.params("worktree.create")) != 2 {
+		t.Error("the spare branch did not reach herdr")
+	}
+}
+
+// gitRepo makes dir a git repository whose branch main has one commit.
+func gitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "start"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+}
+
+// The user's name for a new agent replaces the placeholder once the
+// launch is done.
+func TestUserNewAgentTakesTheUsersName(t *testing.T) {
+	w := newSpawnWorld(t)
+	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "claude", Dir: "bench", Name: "  Login   fix "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.detect(res.PaneID, "", herdr.StateIdle)
+	waitFor(t, func() bool { return len(w.params("agent.rename")) == 1 }, "agent.rename")
+	if r := w.params("agent.rename")[0]; r["target"] != "w20:p1" || r["name"] != "Login fix" {
+		t.Errorf("agent.rename = %v", r)
+	}
+	long := NewAgentRequest{Kind: "claude", Dir: "bench", Name: strings.Repeat("x", 61)}
+	if _, err := w.sup.UserNewAgent(context.Background(), long); !errors.Is(err, ErrUserAction) {
+		t.Errorf("a 61-character name: %v", err)
 	}
 }
 

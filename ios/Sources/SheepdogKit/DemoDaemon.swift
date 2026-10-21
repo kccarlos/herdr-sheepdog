@@ -166,11 +166,14 @@ public final class DemoDaemon: @unchecked Sendable {
             DispatchQueue.global().async { [weak self] in self?.publish() }
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
-        case ("GET", "/api/projects"):
-            return json(["kinds": ["claude", "codex"], "worktree": true, "projects": [
-                ["name": "sheepdog-bench", "path": "/Users/you/code/sheepdog-bench", "open": true, "git": true],
-                ["name": "website", "path": "/Users/you/code/website", "open": false, "git": true],
-                ["name": "notes", "path": "/Users/you/code/notes", "open": false, "git": false],
+        case ("GET", "/api/spaces"):
+            return json(["kinds": [["kind": "claude", "name": "Claude"], ["kind": "codex", "name": "Codex"], ["kind": "agy", "name": "Antigravity"]], "worktrees": true, "spaces": [
+                ["id": "w1", "name": "sheepdog-bench", "path": "/Users/you/code/sheepdog-bench", "git": true,
+                 "repo": "sheepdog-bench", "branch": "main", "worktree": false,
+                 "agents": [] as [Any], "shells": [] as [Any], "commands": [] as [Any]],
+            ], "folders": [
+                ["name": "website", "path": "/Users/you/code/website", "git": true],
+                ["name": "notes", "path": "/Users/you/code/notes", "git": false],
             ]])
         case ("POST", "/api/agents"):
             return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])

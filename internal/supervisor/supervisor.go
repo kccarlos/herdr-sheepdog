@@ -401,6 +401,11 @@ type Supervisor struct {
 	// rate cap).
 	spawns []time.Time
 
+	// wrapMu guards the spaces' wrap-up commands file (spaces.go);
+	// wrapMem holds them without a data dir (tests).
+	wrapMu  sync.Mutex
+	wrapMem map[string][]WrapUp
+
 	// conversationStartedAt is when the current conversation began: the
 	// last reset, or startedAt (reset.go, GET /api/state).
 	conversationStartedAt time.Time

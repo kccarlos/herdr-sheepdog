@@ -284,6 +284,56 @@ func (c *Client) CreateWorktree(ctx context.Context, cwd, branch, label string) 
 	return res.Root, err
 }
 
+// RenameWorkspace sets a workspace's label (`workspace.rename`).
+func (c *Client) RenameWorkspace(ctx context.Context, workspaceID, label string) error {
+	err := c.Call(ctx, "workspace.rename", map[string]any{"workspace_id": workspaceID, "label": label}, nil)
+	c.log("herdr.workspace_rename", "", map[string]any{"workspace_id": workspaceID, "label": label, "error": errString(err)})
+	return err
+}
+
+// CloseWorkspace closes a workspace and every pane in it
+// (`workspace.close`).
+func (c *Client) CloseWorkspace(ctx context.Context, workspaceID string) error {
+	err := c.Call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil)
+	c.log("herdr.workspace_close", "", map[string]any{"workspace_id": workspaceID, "error": errString(err)})
+	return err
+}
+
+// ListWorktrees lists the checkouts of the repository a workspace works
+// in (`worktree.list`).
+func (c *Client) ListWorktrees(ctx context.Context, workspaceID string) (WorktreeList, error) {
+	var res WorktreeList
+	err := c.Call(ctx, "worktree.list", map[string]any{"workspace_id": workspaceID}, &res)
+	return res, err
+}
+
+// OpenWorktree opens an unfocused workspace in an existing checkout of
+// the workspace's repository (`worktree.open`), by path or branch, and
+// returns its root pane (the open one when it is already open).
+func (c *Client) OpenWorktree(ctx context.Context, workspaceID, path, branch string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"workspace_id": workspaceID, "focus": false}
+	if path != "" {
+		params["path"] = path
+	}
+	if branch != "" {
+		params["branch"] = branch
+	}
+	err := c.Call(ctx, "worktree.open", params, &res)
+	c.log("herdr.worktree_open", res.Root.PaneID, map[string]any{"workspace_id": workspaceID, "path": path, "branch": branch, "error": errString(err)})
+	return res.Root, err
+}
+
+// RemoveWorktree removes the checkout a worktree workspace works in and
+// closes it (`worktree.remove`); force removes a checkout with changes.
+func (c *Client) RemoveWorktree(ctx context.Context, workspaceID string, force bool) error {
+	err := c.Call(ctx, "worktree.remove", map[string]any{"workspace_id": workspaceID, "force": force}, nil)
+	c.log("herdr.worktree_remove", "", map[string]any{"workspace_id": workspaceID, "force": force, "error": errString(err)})
+	return err
+}
+
 // PaneEnv is set in the shell of every pane the daemon opens for a new
 // agent (workspace.create, pane.split take an env map; agent.start then
 // types the agent's executable at the shell prompt). It keeps

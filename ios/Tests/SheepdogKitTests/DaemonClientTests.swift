@@ -117,6 +117,25 @@ final class DaemonModelTests: XCTestCase {
         XCTAssertEqual(h.computer, Hello.Computer(id: "AAAAAAAAAAAAAAAAAAAAAA", name: "Studio Mac"))
     }
 
+    func testDecodesSpacesIntoTheNewAgentChoices() throws {
+        let json = """
+        {"spaces":[{"id":"w3","name":"bench","path":"/code/bench","git":true,"repo":"bench","branch":"main","worktree":false,
+        "agents":[{"pane_id":"w3:p1","alias":"bench-claude","name":"Claude","kind":"claude","state":"idle"}],
+        "shells":["w3:p2"],"commands":[{"id":"a1b2c3d4","name":"Run tests","command":"go test ./..."}]}],
+        "folders":[{"name":"app","path":"/code/app","git":false}],"kinds":[{"kind":"claude","name":"Claude"},{"kind":"codex","name":"Codex"},{"kind":"agy","name":"Antigravity"}],"worktrees":true}
+        """
+        let view = try DaemonClient.decoder.decode(SpacesView.self, from: Data(json.utf8))
+        XCTAssertEqual(view.spaces[0].agents[0].paneID, "w3:p1")
+        XCTAssertEqual(view.spaces[0].commands[0].command, "go test ./...")
+        let options = NewAgentOptions(spaces: view)
+        XCTAssertEqual(options.kinds, ["claude", "codex", "agy"])
+        XCTAssertEqual(options.projects.map(\.name), ["bench", "app"])
+        XCTAssertEqual(options.projects[0].space, "w3")
+        XCTAssertNil(options.projects[1].space)
+        XCTAssertTrue(options.worktree)
+        XCTAssertEqual(options.kindName("agy"), "Antigravity")
+    }
+
     func testDecodesConversationStartedAtWhenTheDaemonReportsIt() throws {
         let json = #"{"agents":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false},"conversation_started_at":"2026-09-23T01:40:29.425157Z"}"#
         let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
