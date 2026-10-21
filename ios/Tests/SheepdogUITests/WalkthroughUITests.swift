@@ -95,13 +95,13 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(chip.waitForExistence(timeout: 15), "the chip should arrive over the event stream")
 
 
-        try inject("/api/inject/utterance", ["text": "what's going on"])
+        try inject("/api/inject/utterance", ["text": "what's going on right now"])
         // Each bubble is one accessibility element, read as a sentence.
-        guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on") }) else {
+        guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on right now") }) else {
             shot(app, "debug-before-utterance")
             return XCTFail("the user's words belong in the conversation")
         }
-        XCTAssertTrue(said.label.hasSuffix("what's going on"), "got \(said.label)")
+        XCTAssertTrue(said.label.hasSuffix("what's going on right now"), "got \(said.label)")
         guard let answered = bubble(app, "bubble.sheepdog", label: { $0.contains("auth") }) else {
             return XCTFail("and so does the daemon's answer")
         }

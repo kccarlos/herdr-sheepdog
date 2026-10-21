@@ -173,6 +173,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         let startButton = app.buttons["newAgent.start"]
         let startedOrClosed = NSPredicate { _, _ in started.exists || !startButton.exists }
         wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
+        XCTAssertEqual(app.state, .runningForeground, "the app is still up")
         XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
     }
 
