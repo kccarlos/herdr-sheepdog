@@ -166,7 +166,14 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(app.buttons["newAgent.start"].isEnabled)
         shot("new-agent-worktree")
         app.buttons["newAgent.start"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["newAgent.started"].waitForExistence(timeout: 5))
+        // "Started" shows for 1.4 s, then the sheet closes by itself, which
+        // it does only after a successful start. The tap's own wait for the
+        // app to idle can outlast the label on a slow Mac, so either counts.
+        let started = app.descendants(matching: .any)["newAgent.started"]
+        let startButton = app.buttons["newAgent.start"]
+        let startedOrClosed = NSPredicate { _, _ in started.exists || !startButton.exists }
+        wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
+        XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
     }
 
     func testAnotherDeviceInControlShowsTheObserveBanner() throws {
