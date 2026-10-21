@@ -185,6 +185,7 @@ jobs:
             -scheme Sheepdog \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
             -skip-testing:SheepdogUITests/HistoryApprovalUITests \
             -skip-testing:SheepdogUITests/ReconnectUITests \
             -resultBundlePath "$RESULTS/Tests.xcresult" \
@@ -205,6 +206,7 @@ jobs:
             -scheme Sheepdog \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
             -only-testing:SheepdogUITests/HistoryApprovalUITests \
             -resultBundlePath "$RESULTS/HistoryApproval.xcresult" \
             > "$RESULTS/history.log" 2>&1 || status=$?
@@ -224,6 +226,7 @@ jobs:
             -scheme Sheepdog \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
             -only-testing:SheepdogUITests/ReconnectUITests \
             -resultBundlePath "$RESULTS/Reconnect.xcresult" \
             > "$RESULTS/reconnect.log" 2>&1 || status=$?

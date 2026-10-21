@@ -97,12 +97,12 @@ final class WalkthroughUITests: XCTestCase {
 
         try inject("/api/inject/utterance", ["text": "what's going on"])
         // Each bubble is one accessibility element, read as a sentence.
-        guard let said = bubble(app, "bubble.shepherd") else {
+        guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on") }) else {
             shot(app, "debug-before-utterance")
             return XCTFail("the user's words belong in the conversation")
         }
         XCTAssertTrue(said.label.hasSuffix("what's going on"), "got \(said.label)")
-        guard let answered = bubble(app, "bubble.sheepdog") else {
+        guard let answered = bubble(app, "bubble.sheepdog", label: { $0.contains("auth") }) else {
             return XCTFail("and so does the daemon's answer")
         }
         XCTAssertTrue(answered.label.contains("auth"), "got \(answered.label)")
@@ -251,12 +251,16 @@ final class WalkthroughUITests: XCTestCase {
     /// legitimately match more than one bubble (e.g. the orchestrator's own
     /// "dropping the earlier question" notice alongside the one this step
     /// is looking for), and either reads fine for what the caller checks.
-    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15) -> XCUIElement? {
+    /// The first bubble with this identifier whose label passes `label`.
+    /// The fixture daemon is shared by the whole suite, so earlier tests'
+    /// bubbles may already be in the history; look for this test's own.
+    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15, label: (String) -> Bool = { _ in true }) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             for query in [app.otherElements, app.staticTexts, app.buttons] {
-                let first = query.matching(identifier: identifier).firstMatch
-                if first.exists { return first }
+                for element in query.matching(identifier: identifier).allElementsBoundByIndex where element.exists && label(element.label) {
+                    return element
+                }
             }
             usleep(250_000)
         } while Date() < deadline
