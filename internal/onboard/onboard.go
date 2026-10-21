@@ -525,8 +525,3 @@ func CheckSecretFile(name, path string) Result {
 	}
 	return Result{Name: name, Status: OK, Detail: path + " is private (0600)"}
 }
-
-// IsLoopbackURL reports whether a base URL points at this machine.
-func IsLoopbackURL(base string) bool {
-	return config.OpenAICompat{BaseURL: base}.KeyOptional()
-}
