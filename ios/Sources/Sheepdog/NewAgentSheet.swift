@@ -32,7 +32,7 @@ struct NewAgentSheet: View {
     }
 
     private var project: NewAgentOptions.Project? {
-        options?.projects.first { $0.path == projectPath }
+        options?.projects.first { $0.id == projectPath }
     }
 
     private var worktreePossible: Bool { (options?.worktree ?? false) && (project?.git ?? false) }
@@ -100,7 +100,7 @@ struct NewAgentSheet: View {
                 .accessibilityIdentifier("newAgent.kind")
                 Picker("Project", selection: $projectPath) {
                     ForEach(options.projects) { p in
-                        Text(p.name).tag(p.path)
+                        Text(p.name).tag(p.id)
                     }
                 }
                 .accessibilityIdentifier("newAgent.project")
@@ -159,7 +159,7 @@ struct NewAgentSheet: View {
         do {
             let options = try await model.daemon { try await $0.newAgentOptions() }
             if !options.kinds.contains(kind), let first = options.kinds.first { kind = first }
-            if projectPath.isEmpty { projectPath = options.projects.first?.path ?? "" }
+            if projectPath.isEmpty { projectPath = options.projects.first?.id ?? "" }
             load = .loaded(options)
         } catch {
             load = .failed((error as? DaemonError)?.message ?? error.localizedDescription)
@@ -174,7 +174,7 @@ struct NewAgentSheet: View {
         Task {
             do {
                 let reply = try await model.daemon {
-                    try await $0.newAgent(kind: kind, dir: project.path, worktree: inWorktree ? branch : nil, text: text)
+                    try await $0.newAgent(kind: kind, project: project, worktree: inWorktree ? branch : nil, text: text)
                 }
                 starting = false
                 started = reply.spoken ?? "Starting."

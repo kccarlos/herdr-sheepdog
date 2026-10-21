@@ -31,6 +31,10 @@ func actionStatus(err error) int {
 	switch {
 	case errors.Is(err, supervisor.ErrUserAction):
 		return http.StatusBadRequest
+	case errors.Is(err, supervisor.ErrNoSuchSpace), errors.Is(err, supervisor.ErrNoSuchCommand):
+		return http.StatusNotFound
+	case errors.Is(err, supervisor.ErrSpaceBusy), errors.Is(err, supervisor.ErrDirtyWorktree):
+		return http.StatusConflict
 	case errors.Is(err, brain.ErrNotPermitted):
 		return http.StatusForbidden
 	default:
@@ -38,29 +42,21 @@ func actionStatus(err error) int {
 	}
 }
 
-// handleProjects is GET /api/projects: the New agent sheet's kinds and
-// directories.
-func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	a, ok := s.agentActions(w)
-	if !ok {
-		return
-	}
-	opts, err := a.NewAgentOptions(r.Context())
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, opts)
-}
-
+// newAgentRequest is the body of POST /api/agents: an open space, or a
+// new space's folder (with an optional fresh worktree).
 type newAgentRequest struct {
 	Kind     string `json:"kind"`
-	Dir      string `json:"dir"`
-	Worktree string `json:"worktree"`
-	Text     string `json:"text"`
+	Space    string `json:"space"`
+	NewSpace *struct {
+		Dir      string `json:"dir"`
+		Worktree *struct {
+			Branch string `json:"branch"`
+		} `json:"worktree"`
+	} `json:"new_space"`
+	Text string `json:"text"`
 }
 
-// handleNewAgent is POST /api/agents.
+// handleNewAgent is POST /api/agents: it answers once the agent is ready.
 func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 	a, ok := s.agentActions(w)
 	if !ok {
@@ -71,15 +67,25 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Dir) == "" {
-		writeError(w, http.StatusBadRequest, "dir is required")
+	in := supervisor.NewAgentRequest{Kind: req.Kind, Space: strings.TrimSpace(req.Space), Text: strings.TrimSpace(req.Text)}
+	if req.NewSpace != nil {
+		in.Dir = strings.TrimSpace(req.NewSpace.Dir)
+		if req.NewSpace.Worktree != nil {
+			in.Worktree = strings.TrimSpace(req.NewSpace.Worktree.Branch)
+			if in.Worktree == "" {
+				writeError(w, http.StatusBadRequest, "a new worktree needs a branch")
+				return
+			}
+		}
+	}
+	if (in.Space == "") == (in.Dir == "") {
+		writeError(w, http.StatusBadRequest, "give space, or new_space with its dir")
 		return
 	}
-	req.Text = strings.TrimSpace(req.Text)
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	res, err := a.UserNewAgent(ctx, supervisor.NewAgentRequest{Kind: req.Kind, Dir: req.Dir, Worktree: strings.TrimSpace(req.Worktree), Text: req.Text})
-	fields := map[string]any{"action": "new", "kind": req.Kind, "dir": filepath.Base(req.Dir), "worktree": req.Worktree != "", "text_len": len(req.Text)}
+	res, err := a.UserNewAgent(ctx, in)
+	fields := map[string]any{"action": "new", "kind": req.Kind, "space": in.Space, "dir": filepath.Base(in.Dir), "worktree": in.Worktree != "", "text_len": len(in.Text)}
 	if err != nil {
 		fields["error"] = err.Error()
 		var se *supervisor.StartError

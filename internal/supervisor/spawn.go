@@ -117,8 +117,14 @@ type spawnStart struct {
 	Kind string
 	// Model is the model flag, by voice only ("" for the CLI's default).
 	Model string
-	// Dir is a project's name or full path.
+	// Dir is a project's name or full path. The agent's pane is split
+	// from a workspace already there, unless NewSpace.
 	Dir string
+	// Space, instead of Dir, is the herdr workspace to start in (a pane
+	// split from one of its panes, in that pane's folder).
+	Space string
+	// NewSpace opens a new workspace in Dir even when one works there.
+	NewSpace bool
 	// Worktree, when set, is the branch of a fresh git worktree the
 	// agent starts in instead of the project folder.
 	Worktree string
@@ -167,9 +173,22 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 	if err != nil {
 		return refuse("snapshot failed", fmt.Errorf("could not list herdr's workspaces: %w", err))
 	}
-	dir, reason, err := resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
-	if err != nil {
-		return refuse(reason, err)
+	var dir spawnDir
+	var reason string
+	if req.Space != "" {
+		// An open workspace: its own folder, which the directory rail
+		// allows as it is.
+		if dir, err = spaceDir(snap, req.Space); err != nil {
+			return refuse("no such space", err)
+		}
+	} else {
+		dir, reason, err = resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
+		if err != nil {
+			return refuse(reason, err)
+		}
+		if req.NewSpace {
+			dir.Pane = ""
+		}
 	}
 	// What authorised the start and the slot are taken before anything
 	// opens, under one lock: two calls racing cannot both spend the
@@ -226,6 +245,36 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 	}
 	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, fields)
 	return started{PaneID: pane.PaneID, Dir: dir, Where: where}, nil
+}
+
+// spaceDir is the start place in workspace id: its first pane (split
+// from) and that pane's folder, named after the workspace.
+func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
+	label := snap.WorkspaceLabel(id)
+	var first herdr.PaneInfo
+	for _, p := range snap.Panes {
+		if p.WorkspaceID == id && (first.PaneID == "" || paneLess(p.PaneID, first.PaneID)) {
+			first = p
+		}
+	}
+	if first.PaneID == "" {
+		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
+	}
+	path := realDir(first.Cwd)
+	for _, w := range snap.Workspaces {
+		if w.WorkspaceID == id && w.Worktree != nil && w.Worktree.CheckoutPath != "" {
+			if p := realDir(w.Worktree.CheckoutPath); p != "" {
+				path = p
+			}
+		}
+	}
+	if path == "" {
+		return spawnDir{}, fmt.Errorf("the space %s has no folder", label)
+	}
+	if label == "" {
+		label = filepath.Base(path)
+	}
+	return spawnDir{Name: label, Path: path, Pane: first.PaneID}, nil
 }
 
 // StartError is a start that failed once its pane was open: the pane is

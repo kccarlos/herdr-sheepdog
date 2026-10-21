@@ -4,7 +4,58 @@ import Foundation
 // "Agent actions", feature `agent-actions`): New agent, Rename, Stop and
 // Close from the app.
 
-/// `GET /api/projects`: what the New agent sheet offers.
+/// `GET /api/spaces`: herdr's workspaces with their agents, the project
+/// folders that have no space yet, and the kinds a new agent may be.
+public struct SpacesView: Codable, Equatable, Sendable {
+    public struct Space: Codable, Equatable, Sendable, Identifiable {
+        public var id: String
+        public var name: String
+        public var path: String
+        public var git: Bool
+        public var repo: String?
+        public var branch: String?
+        /// A linked git worktree (not the repository's main checkout).
+        public var worktree: Bool
+        public var agents: [SpaceAgent]
+        public var shells: [String]
+        public var commands: [WrapUp]
+    }
+
+    public struct SpaceAgent: Codable, Equatable, Sendable {
+        public var paneID: String
+        public var alias: String
+        public var name: String
+        public var kind: String
+        public var state: String
+        public var title: String?
+
+        enum CodingKeys: String, CodingKey {
+            case paneID = "pane_id"
+            case alias, name, kind, state, title
+        }
+    }
+
+    public struct Folder: Codable, Equatable, Sendable {
+        public var name: String
+        public var path: String
+        public var git: Bool
+    }
+
+    /// A saved wrap-up command of a space.
+    public struct WrapUp: Codable, Equatable, Sendable, Identifiable {
+        public var id: String
+        public var name: String
+        public var command: String
+    }
+
+    public var spaces: [Space]
+    public var folders: [Folder]
+    public var kinds: [String]
+    /// herdr can make a fresh worktree for a new agent.
+    public var worktrees: Bool
+}
+
+/// What the New agent sheet offers, built from `GET /api/spaces`.
 public struct NewAgentOptions: Codable, Equatable, Sendable {
     public struct Project: Codable, Equatable, Sendable, Identifiable, Hashable {
         public var name: String
@@ -13,13 +64,17 @@ public struct NewAgentOptions: Codable, Equatable, Sendable {
         public var open: Bool
         /// A git checkout: a fresh worktree is possible.
         public var git: Bool
-        public var id: String { path }
+        /// The open space (herdr workspace id) the agent joins; nil for a
+        /// folder that has no space yet.
+        public var space: String?
+        public var id: String { space ?? path }
 
-        public init(name: String, path: String, open: Bool = false, git: Bool = false) {
+        public init(name: String, path: String, open: Bool = false, git: Bool = false, space: String? = nil) {
             self.name = name
             self.path = path
             self.open = open
             self.git = git
+            self.space = space
         }
     }
 
@@ -34,11 +89,25 @@ public struct NewAgentOptions: Codable, Equatable, Sendable {
         self.worktree = worktree
     }
 
+    /// The open spaces first, then the free project folders.
+    public init(spaces view: SpacesView) {
+        self.kinds = view.kinds
+        self.worktree = view.worktrees
+        self.projects = view.spaces.filter { !$0.path.isEmpty }.map {
+            Project(name: $0.name, path: $0.path, open: true, git: $0.git, space: $0.id)
+        } + view.folders.map { Project(name: $0.name, path: $0.path, git: $0.git) }
+    }
+
     /// The name the sheet shows for a kind.
     public static func kindName(_ kind: String) -> String {
         switch kind {
         case "claude": return "Claude Code"
         case "codex": return "Codex"
+        case "agy": return "Antigravity"
+        case "gemini": return "Gemini"
+        case "opencode": return "OpenCode"
+        case "copilot": return "Copilot"
+        case "cursor": return "Cursor"
         default: return kind
         }
     }
@@ -83,17 +152,30 @@ public enum AgentAction {
 }
 
 extension DaemonClient {
-    /// `GET /api/projects`.
-    public func newAgentOptions() async throws -> NewAgentOptions {
-        let request = try request(encodedPath: "/api/projects")
+    /// `GET /api/spaces`.
+    public func spaces() async throws -> SpacesView {
+        let request = try request(encodedPath: "/api/spaces")
         let (data, response) = try await perform(request)
-        return try decodeAction(NewAgentOptions.self, data: data, response: response)
+        return try decodeAction(SpacesView.self, data: data, response: response)
     }
 
-    /// `POST /api/agents`.
-    public func newAgent(kind: String, dir: String, worktree: String? = nil, text: String? = nil) async throws -> AgentActionReply {
-        var body: [String: Any] = ["kind": kind, "dir": dir]
-        if let worktree, !worktree.isEmpty { body["worktree"] = worktree }
+    /// The New agent sheet's choices (`GET /api/spaces`).
+    public func newAgentOptions() async throws -> NewAgentOptions {
+        NewAgentOptions(spaces: try await spaces())
+    }
+
+    /// `POST /api/agents`: in the project's open space, or in a new space
+    /// in its folder (a fresh worktree always opens a new space). It
+    /// answers once the agent is ready.
+    public func newAgent(kind: String, project: NewAgentOptions.Project, worktree: String? = nil, text: String? = nil) async throws -> AgentActionReply {
+        var body: [String: Any] = ["kind": kind]
+        if let worktree, !worktree.isEmpty {
+            body["new_space"] = ["dir": project.path, "worktree": ["branch": worktree]]
+        } else if let space = project.space {
+            body["space"] = space
+        } else {
+            body["new_space"] = ["dir": project.path]
+        }
         if let text, !text.isEmpty { body["text"] = text }
         return try await postAction(encodedPath: "/api/agents", body: body)
     }

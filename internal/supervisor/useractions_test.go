@@ -56,11 +56,11 @@ func TestUserNewAgentInAFreshWorktree(t *testing.T) {
 		w.srv.SetScreen(pane.PaneID, "❯ ")
 		return map[string]any{"type": "worktree_created", "root_pane": pane}, nil
 	})
-	opts, err := w.sup.NewAgentOptions(context.Background())
+	opts, err := w.sup.Spaces(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Worktree || strings.Join(opts.Kinds, " ") != "claude codex agy" || len(opts.Projects) != 2 {
+	if !opts.Worktrees || strings.Join(opts.Kinds, " ") != "claude codex agy" || len(opts.Folders) != 2 {
 		t.Fatalf("options = %+v", opts)
 	}
 	res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "fix-login", Text: "fix the login test"})
