@@ -115,19 +115,22 @@ subdirectory of a `supervisor.project_roots` directory, hidden ones
 left out), and the orchestrator asks. A name matches a candidate's base name,
 case and punctuation aside.
 
-The daemon (`internal/supervisor` `spawn.go`) then opens a new herdr
-workspace in the directory, or splits a pane from an existing
-workspace there, waits for the pane's shell, and types the CLI's
-command line (`claude --model haiku`, `codex -m …`). It does not use
-herdr's `agent.start`, which requires a name: a name the daemon chose
-would win over the spoken name as if the user had given it. herdr
-detects the agent like one started by hand, so it reaches the roster
-with a spoken name, and its first-run folder-trust question is an
-ordinary pending question the user answers by voice. The first
-instruction is held until the new agent sits idle at its prompt and
-then goes through the instruction send path (its menu guard included);
-it is dropped (`supervisor.spawn_instruction_dropped`) if the agent
-never gets there within ten minutes.
+The daemon (`internal/supervisor` `spawn.go`, `startAgent`, the one
+start path for voice and tap) then opens a new herdr workspace in the
+directory, or splits a pane from an existing workspace there, waits for
+the pane's shell, and starts the agent with herdr's `agent.start`
+(`--kind claude`, the model as `--model haiku` or `-m …`). herdr types
+the kind's own executable and reports when it detected the agent.
+`agent.start` needs a name; the daemon gives a placeholder
+(`sdnew-…`, `state.LaunchNamePrefix`) that the store never takes for
+the user's name, so the agent reaches the roster with its computed
+spoken name, and the daemon clears the placeholder once the launch is
+done. The first-run folder-trust question is an ordinary pending
+question the user answers by voice. The first instruction is held
+until the new agent sits idle at its prompt and then goes through the
+instruction send path (its menu guard included); it is dropped
+(`supervisor.spawn_instruction_dropped`) if the agent never gets there
+within ten minutes.
 
 Rails (authorisation and runaways, not judgement):
 - the user's own recent words must be behind it: the newest
@@ -141,27 +144,29 @@ Rails (authorisation and runaways, not judgement):
 - the directory must resolve, symlinks followed, inside a project root
   or be an existing workspace's directory (a project root itself, `..`
   and links out of a root are refused);
-- at most three new agents per ten minutes;
+- the orchestrator starts only `brain.SpawnKinds` (Claude and Codex)
+  until an eval adds more;
+- at most three new agents per ten minutes, voice and taps together;
 - only a model name (letters, digits, `.`, `_`, `:`, `-`) reaches the
-  shell.
+  agent's arguments.
 
-herdr's `pane.split` and `workspace.create` take an environment but no
-command, so the agent is typed at the new shell's prompt; the pane gets
-`DISABLE_AUTO_UPDATE=true` so oh-my-zsh cannot ask to update and eat
-the first keystrokes (it ate the "c" of "claude" on 2026-10-04).
+`agent.start` types into the new shell, so the pane gets
+`DISABLE_AUTO_UPDATE=true` (herdr's `pane.split` and `workspace.create`
+take an environment) and oh-my-zsh cannot ask to update and eat the
+first keystrokes (it ate the "c" of "claude" on 2026-10-04).
 
 A rail refusal is a `brain.rail_blocked` and `supervisor.spawn_refused
-{reason}`; a start logs `supervisor.spawn {dir, kind, model, pane}`,
-then `supervisor.spawn_ready` when herdr reports the agent and
-`supervisor.spawn_instruction` when the first instruction went. An
-agent herdr has not recognised after 20 s logs
-`supervisor.spawn_not_ready {still_waiting}`; the orchestrator gets a
-transcript line saying so, with the pane's last lines (often the
-first-run question, or a shell that never ran the command), and the user
-a daemon fact with the same lines through the voice (and, should herdr
-see it later, a second fact that it is running now); the watch goes on to the ten-minute bound or until
-the pane closes, and the orchestrator is told whether the held instruction
-went or was dropped.
+{reason}`; a start logs `supervisor.spawn {dir, kind, model, pane, via}`,
+then `supervisor.spawn_ready` when the agent reaches the roster and
+`supervisor.spawn_instruction` when the first instruction went. The
+orchestrator's tool answers as soon as herdr has the launch. If herdr
+drops it (the agent was not detected within 60 s, or the pane closed),
+that logs `supervisor.spawn_not_ready {error}`; the orchestrator gets a
+transcript line saying so, with the pane's last lines (often a shell
+that never ran the command), and the user a daemon fact with the same
+lines through the voice. Otherwise the watch goes on to the ten-minute
+bound or until the pane closes, and the orchestrator is told when the
+held instruction was dropped.
 
 ### Closing an agent
 
@@ -197,10 +202,11 @@ and spend no words, so a tap never refuses for lack of speech and never
 uses up what the user said for the orchestrator. The rails that are not
 about who asked stay in code (`internal/supervisor` `useractions.go`):
 
-- a new agent's kind is from the allow-list, and its directory resolves
-  inside `supervisor.project_roots` or to an open workspace's own
-  directory; a fresh worktree's branch is a plain branch name; new agents
-  count toward the runaway cap;
+- a new agent's kind is one herdr supports (its agent manifests) whose
+  executable is on the daemon's PATH (`InstalledKinds`), and its
+  directory resolves inside `supervisor.project_roots` or to an open
+  workspace's own directory; a fresh worktree's branch is a plain branch
+  name; new agents count toward the runaway cap;
 - only tracked agents are renamed, stopped or closed;
 - Close skips the protected-agent rail, because the app asks the user to
   confirm with the agent's name (what `protected_ok` stands for), but the

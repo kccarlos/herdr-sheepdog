@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -238,13 +239,31 @@ func (h *Herdr) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneIn
 	return sp.SplitPane(ctx, paneID, cwd)
 }
 
-// SendInput implements supervisor.Spawner.
-func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+// StartAgent implements supervisor.Spawner.
+func (h *Herdr) StartAgent(ctx context.Context, paneID, name, kind string, args []string, timeout time.Duration) error {
 	sp, err := h.spawner()
 	if err != nil {
 		return err
 	}
-	return sp.SendInput(ctx, paneID, text, keys...)
+	return sp.StartAgent(ctx, paneID, name, kind, args, timeout)
+}
+
+// GetAgent implements supervisor.Spawner.
+func (h *Herdr) GetAgent(ctx context.Context, target string) (herdr.AgentInfo, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.AgentInfo{}, err
+	}
+	return sp.GetAgent(ctx, target)
+}
+
+// AgentKinds implements supervisor.Spawner.
+func (h *Herdr) AgentKinds(ctx context.Context) ([]string, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return nil, err
+	}
+	return sp.AgentKinds(ctx)
 }
 
 // ProcessInfo implements supervisor.Spawner.

@@ -101,6 +101,10 @@ type AgentInfo struct {
 	Revision      uint64 `json:"revision"`
 	// StateChangeSeq increases on every state change; absent from PaneInfo.
 	StateChangeSeq uint64 `json:"state_change_seq,omitempty"`
+	// LaunchPending is true while an `agent.start` launch has not reached
+	// its first ready state (an agent at its first-run trust question is
+	// still pending). herdr refuses a rename until it is false.
+	LaunchPending bool `json:"launch_pending,omitempty"`
 	// Session is the agent's own session as its integration hook reported
 	// it (pane.report_agent_session); nil when none was reported.
 	Session *AgentSession `json:"agent_session,omitempty"`

@@ -53,7 +53,7 @@ func running(a Agent) bool {
 // name (herdr agent rename, or a voice rename through the orchestrator), else
 // an alias pinned in the config or through the API.
 func CEOName(a Agent) string {
-	if n := strings.TrimSpace(a.Name); n != "" {
+	if n := strings.TrimSpace(a.Name); n != "" && !IsLaunchName(n) {
 		return n
 	}
 	if !a.AliasAuto && a.Alias != "" {
@@ -61,6 +61,16 @@ func CEOName(a Agent) string {
 	}
 	return ""
 }
+
+// LaunchNamePrefix starts the herdr name the daemon gives an agent it
+// starts (herdr's agent.start needs one). It is a placeholder, cleared
+// once the launch is done, and never the user's name: the store ignores
+// it, so the agent gets its computed spoken name like any other.
+const LaunchNamePrefix = "sdnew-"
+
+// IsLaunchName reports whether a herdr agent name is the daemon's
+// placeholder (LaunchNamePrefix).
+func IsLaunchName(name string) bool { return strings.HasPrefix(name, LaunchNamePrefix) }
 
 // kindWords are the spoken forms of the herdr kind labels; any other
 // kind is capitalised.

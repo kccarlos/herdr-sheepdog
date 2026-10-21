@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -21,9 +22,10 @@ import (
 // does not apply and no words are spent. The rails that are not about
 // who asked stay:
 //
-//   - a new agent's kind is one of brain.SpawnKinds and its directory
-//     resolves inside supervisor.project_roots or to an open workspace's
-//     own directory (resolveSpawnDir), and the runaway cap counts it;
+//   - a new agent's kind is one herdr supports and is installed here
+//     (InstalledKinds), its directory resolves inside
+//     supervisor.project_roots or to an open workspace's own directory
+//     (resolveSpawnDir), and the runaway cap counts it (startAgent);
 //   - a fresh worktree's branch is a plain git branch name, made by
 //     herdr in that directory's repository;
 //   - only tracked agents are renamed, stopped or closed, and the pane
@@ -71,6 +73,28 @@ type NewAgentOptions struct {
 	Worktree bool `json:"worktree"`
 }
 
+// InstalledKinds are the agent kinds a tap may start: the kinds herdr
+// supports (its agent manifests) whose executable is on the daemon's
+// PATH, in herdr's order. It is information for the app and the rail
+// for a tap; the orchestrator's kinds stay brain.SpawnKinds.
+func (s *Supervisor) InstalledKinds(ctx context.Context) ([]string, error) {
+	sp, ok := s.herdr.(Spawner)
+	if !ok {
+		return nil, errors.New("starting a new agent is not available here")
+	}
+	kinds, err := sp.AgentKinds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not list herdr's agent kinds: %w", err)
+	}
+	out := []string{}
+	for _, k := range kinds {
+		if _, err := lookPath(k); err == nil {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
 // NewAgentOptions lists the kinds and directories for a new agent.
 func (s *Supervisor) NewAgentOptions(ctx context.Context) (NewAgentOptions, error) {
 	sp, ok := s.herdr.(Spawner)
@@ -81,8 +105,12 @@ func (s *Supervisor) NewAgentOptions(ctx context.Context) (NewAgentOptions, erro
 	if err != nil {
 		return NewAgentOptions{}, fmt.Errorf("could not list herdr's workspaces: %w", err)
 	}
+	kinds, err := s.InstalledKinds(ctx)
+	if err != nil {
+		return NewAgentOptions{}, err
+	}
 	_, wt := s.herdr.(WorktreeCreator)
-	out := NewAgentOptions{Kinds: brain.SpawnKinds, Projects: []Project{}, Worktree: wt}
+	out := NewAgentOptions{Kinds: kinds, Projects: []Project{}, Worktree: wt}
 	for _, d := range s.spawnDirs(snap) {
 		_, gerr := os.Stat(filepath.Join(d.Path, ".git"))
 		out.Projects = append(out.Projects, Project{Name: d.Name, Path: d.Path, Open: d.Pane != "", Git: gerr == nil})
@@ -106,89 +134,67 @@ type NewAgentRequest struct {
 type NewAgentResult struct {
 	PaneID string
 	Spoken string
+	// Blocked is true when the agent started at a question (its
+	// first-run trust question), which is now pending.
+	Blocked bool
 }
 
-// UserNewAgent starts an agent the user asked for with a tap.
+// UserNewAgent starts an agent the user asked for with a tap and
+// returns once it is ready (or started at a question). A start that
+// failed after its pane opened is a *StartError with the pane.
 func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (NewAgentResult, error) {
 	refuse := func(reason string, err error) (NewAgentResult, error) {
 		s.log.Log(logSource, "supervisor.spawn_refused", "", map[string]any{"reason": reason, "dir": req.Dir, "kind": req.Kind, "via": "user"})
 		return NewAgentResult{}, err
 	}
-	sp, ok := s.herdr.(Spawner)
-	if !ok {
+	if _, ok := s.herdr.(Spawner); !ok {
 		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
-	}
-	if req.Kind != brain.SpawnClaude && req.Kind != brain.SpawnCodex {
-		return refuse("bad kind", fmt.Errorf("%w: kind %q: want %s", ErrUserAction, req.Kind, strings.Join(brain.SpawnKinds, " or ")))
 	}
 	if len(req.Text) > WindowMaxText {
 		return refuse("text too long", fmt.Errorf("%w: the first prompt is at most %d bytes", ErrUserAction, WindowMaxText))
 	}
-	var wt WorktreeCreator
-	if req.Worktree != "" {
-		if !validBranch(req.Worktree) {
-			return refuse("bad branch", fmt.Errorf("%w: %q is not a branch name (letters, digits and . _ / -)", ErrUserAction, req.Worktree))
-		}
-		if wt, ok = s.herdr.(WorktreeCreator); !ok {
-			return refuse("no worktrees", errors.New("this herdr cannot make worktrees"))
-		}
+	if req.Worktree != "" && !validBranch(req.Worktree) {
+		return refuse("bad branch", fmt.Errorf("%w: %q is not a branch name (letters, digits and . _ / -)", ErrUserAction, req.Worktree))
 	}
-	snap, err := sp.Snapshot(ctx)
+	kinds, err := s.InstalledKinds(ctx)
 	if err != nil {
-		return refuse("snapshot failed", fmt.Errorf("could not list herdr's workspaces: %w", err))
+		return refuse("kinds failed", err)
 	}
-	dir, reason, err := resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
+	if !slices.Contains(kinds, req.Kind) {
+		return refuse("bad kind", fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", ")))
+	}
+	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Dir: req.Dir, Worktree: req.Worktree, Text: req.Text, Via: "user"})
 	if err != nil {
-		return refuse(reason, err)
+		return NewAgentResult{}, err
 	}
-	s.mu.Lock()
-	reason = s.spawnRateLocked()
-	if reason == "" {
-		s.spawns = append(s.spawns, s.cfg.Now())
-	}
-	s.mu.Unlock()
-	if reason != "" {
-		return refuse("rate", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason))
-	}
-	var pane herdr.PaneInfo
-	switch {
-	case wt != nil:
-		// worktree.create takes no env, so PaneEnv does not reach this
-		// shell; waitShell is the guard against a slow rc file.
-		pane, err = wt.CreateWorktree(ctx, dir.Path, req.Worktree, req.Worktree)
-	case dir.Pane != "":
-		pane, err = sp.SplitPane(ctx, dir.Pane, dir.Path)
-	default:
-		pane, err = sp.CreateWorkspace(ctx, dir.Path, dir.Name)
-	}
-	if err != nil || pane.PaneID == "" {
-		if err == nil {
-			err = errors.New("herdr returned no pane")
+	out := s.waitStarted(ctx, st.PaneID)
+	if out.Err != nil {
+		s.log.Log(logSource, "supervisor.spawn_not_ready", st.PaneID, map[string]any{"kind": req.Kind, "error": out.Err.Error(), "first_instruction": req.Text != "", "via": "user"})
+		msg := state.KindWord(req.Kind) + " did not start in " + st.Where + ": " + out.Err.Error()
+		if line := lastLine(out.Tail); line != "" {
+			msg += "; its pane shows: " + line
 		}
-		s.log.Log(logSource, "supervisor.spawn_error", "", map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "pane", "worktree": req.Worktree != "", "via": "user", "error": err.Error()})
-		if req.Worktree != "" {
-			return NewAgentResult{}, fmt.Errorf("could not make a worktree %s in %s: %w", req.Worktree, dir.Name, err)
-		}
-		return NewAgentResult{}, fmt.Errorf("could not open a pane in %s: %w", dir.Name, err)
+		return NewAgentResult{}, &StartError{PaneID: st.PaneID, Err: errors.New(msg)}
 	}
-	s.waitShell(ctx, sp, pane.PaneID)
-	if err := sp.SendInput(ctx, pane.PaneID, spawnCommand(req.Kind, ""), "enter"); err != nil {
-		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": "user", "error": err.Error()})
-		return NewAgentResult{}, fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), dir.Name, err)
-	}
-	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": "user"})
 	if s.track() {
 		go func() {
 			defer s.replies.Done()
-			s.followSpawn(pane.PaneID, req.Kind, req.Text, dir.Name)
+			s.followStart(st, req.Kind, req.Text, false)
 		}()
 	}
-	where := dir.Name
-	if req.Worktree != "" {
-		where = "a new worktree " + req.Worktree + " of " + dir.Name
+	kw := state.KindWord(req.Kind)
+	s.tellBrain(fmt.Sprintf("the user started a new %s in %s from the phone", kw, st.Where))
+	res := NewAgentResult{PaneID: st.PaneID, Blocked: out.Blocked, Spoken: kw + " is ready in " + st.Where + "."}
+	if out.Blocked {
+		res.Spoken = kw + " started in " + st.Where + " and asks a question first."
 	}
-	s.tellBrain(fmt.Sprintf("the user started a new %s in %s from the phone", state.KindWord(req.Kind), where))
-	return NewAgentResult{PaneID: pane.PaneID, Spoken: "Starting a new " + state.KindWord(req.Kind) + " in " + where + "."}, nil
+	return res, nil
+}
+
+// lastLine is the last non-empty line of text.
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // UserRename renames a tracked agent as the user typed it.

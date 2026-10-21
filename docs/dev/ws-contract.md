@@ -872,8 +872,8 @@ phone").
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /api/projects` | | `{"kinds": ["claude", "codex"], "projects": [{"name", "path", "open", "git"}], "worktree": true}` |
-| `POST /api/agents` | `{"kind", "dir", "worktree"?, "text"?}` | `{"ok": true, "pane_id", "spoken"}` |
+| `GET /api/projects` | | `{"kinds": ["claude", "codex", "agy"], "projects": [{"name", "path", "open", "git"}], "worktree": true}` |
+| `POST /api/agents` | `{"kind", "dir", "worktree"?, "text"?}` | `{"ok": true, "pane_id", "spoken", "blocked"}` once the agent is ready |
 | `POST /api/agents/{pane_id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/interrupt` | | `{"ok": true, "spoken"}` |
 | `POST /api/agents/{pane_id}/close` | | `{"ok": true, "spoken"}` |
@@ -883,14 +883,22 @@ phone").
   `supervisor.project_roots`. `open` says a workspace already works there
   (the new pane is split from it); `git` says a fresh worktree is
   possible; `worktree` says this herdr can make one.
-- **New agent.** `kind` is `claude` or `codex`; `dir` is a project's name
+- **Kinds** are the agent kinds herdr supports (its agent manifests)
+  whose executable is on the daemon's PATH, in herdr's order.
+- **New agent.** `kind` is one of `kinds`; `dir` is a project's name
   or full path, resolved as for the orchestrator (inside a project root,
   or an open workspace's own directory). With `worktree` (a branch name:
   letters, digits and `. _ / -`), herdr's `worktree.create` makes the
   branch's worktree in that repository and opens a workspace there
-  instead. The CLI is typed into the new shell; `text`, at most 64 KB, is
-  sent once the agent sits idle at its prompt. Counts toward the cap of 3
-  new agents per 10 minutes. `spoken` is "Starting a new Claude in bench."
+  instead. herdr's `agent.start` starts the agent in the new shell, and
+  the answer comes once herdr reports it ready (up to about a minute):
+  `spoken` is "Claude is ready in bench.", or, with `blocked: true`, the
+  agent started at a question (its first-run trust question), which is
+  now an open question. `text`, at most 64 KB, is sent once the agent
+  sits idle at its prompt. Counts toward the cap of 3 new agents per
+  10 minutes. A start that fails once its pane is open is `502`
+  `{"error", "pane_id"}`: the pane is left at its shell prompt, so the
+  app can offer to open it.
 - **Rename** takes 1 to 60 characters, as the orchestrator's rename does
   (herdr gets its own spelling when it allows one).
 - **Interrupt** stops the current turn the way the orchestrator's

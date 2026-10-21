@@ -82,12 +82,20 @@ func (s *Server) handleNewAgent(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]any{"action": "new", "kind": req.Kind, "dir": filepath.Base(req.Dir), "worktree": req.Worktree != "", "text_len": len(req.Text)}
 	if err != nil {
 		fields["error"] = err.Error()
+		var se *supervisor.StartError
+		if errors.As(err, &se) {
+			// The pane is left at its shell prompt: the app offers
+			// "Open the pane".
+			s.log.Log(logSource, "web.agent_action", se.PaneID, fields)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "pane_id": se.PaneID})
+			return
+		}
 		s.log.Log(logSource, "web.agent_action", "", fields)
 		writeError(w, actionStatus(err), err.Error())
 		return
 	}
 	s.log.Log(logSource, "web.agent_action", res.PaneID, fields)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pane_id": res.PaneID, "spoken": res.Spoken})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pane_id": res.PaneID, "spoken": res.Spoken, "blocked": res.Blocked})
 }
 
 // handleAgentRename is POST /api/agents/{pane_id}/rename {"name"}.

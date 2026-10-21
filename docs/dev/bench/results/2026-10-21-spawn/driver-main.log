@@ -1,0 +1,13 @@
+exit 0 main workday-interruptions
+-- spend total ≈ $0.2633 (estimate at list prices) --
+exit 0 main workday-explain-deep
+-- spend total ≈ $0.3694 (estimate at list prices) --
+exit 0 main workday-morning-standup
+-- spend total ≈ $0.3530 (estimate at list prices) --
+exit 0 main workday-long-haul
+-- spend total ≈ $0.4793 (estimate at list prices) --
+exit 0 main workday-scale-ten
+-- spend total ≈ $0.4438 (estimate at list prices) --
+exit 0 main workday-zh-evening
+-- spend total ≈ $0.3032 (estimate at list prices) --
+DONE main

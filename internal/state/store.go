@@ -150,7 +150,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if t.WorkspaceLabel != "" && a.WorkspaceLabel != t.WorkspaceLabel {
 		a.WorkspaceLabel, identity = t.WorkspaceLabel, true
 	}
-	if t.Name != "" && a.Name != t.Name && !herdrSpelling(a.Name, t.Name) {
+	if t.Name != "" && !IsLaunchName(t.Name) && a.Name != t.Name && !herdrSpelling(a.Name, t.Name) {
 		a.Name, identity = t.Name, true
 	}
 	if sess := t.Session; sess != nil && sess.Value != "" && (a.SessionValue != sess.Value || a.SessionKind != sess.Kind || a.SessionSource != sess.Source) {
