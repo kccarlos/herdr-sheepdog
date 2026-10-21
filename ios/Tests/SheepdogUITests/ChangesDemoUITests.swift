@@ -38,7 +38,7 @@ final class ChangesDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         tapVisible(app.buttons, "flock.agent.claude-auth.window")
         XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
         return app

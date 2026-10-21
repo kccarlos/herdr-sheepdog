@@ -47,7 +47,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         tapVisible(app.buttons, "flock.agent.\(alias).window")
         return app
     }
@@ -151,7 +151,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         let new = app.buttons.matching(identifier: "flock.newAgent")
         for _ in 0 ..< 4 where !new.firstMatch.isHittable { app.swipeUp() }
         tapVisible(app.buttons, "flock.newAgent")

@@ -72,7 +72,7 @@ final class DemoUITests: XCTestCase {
         dismissPermissionAlerts()
 
         // The scripted agents, in the real Agents pane.
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         for alias in ["claude-auth", "codex-payments", "claude-migration", "codex-docs"] {
             XCTAssertTrue(app.descendants(matching: .any)["flock.agent.\(alias)"].waitForExistence(timeout: 10), alias)
         }
