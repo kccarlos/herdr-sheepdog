@@ -41,7 +41,7 @@ func waitScreenEnd(t *testing.T, h *harness, n int) map[string]any {
 // bot-ready features too.
 func readyClient(t *testing.T, h *harness) (*wsClient, []string) {
 	t.Helper()
-	c := dialWS(t, h)
+	c := dialWSRaw(t, h)
 	c.expect(wsproto.TypeStatus)
 	c.send(wsproto.ClientReady(1, iosClient))
 	return c, c.expect(wsproto.TypeBotReady).Features

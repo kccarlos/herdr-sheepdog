@@ -155,9 +155,8 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced, "pending": busy})
 
-	// The contract: a status message before any binary frame — sent at
-	// once, before the handshake, so a legacy client is served exactly
-	// as before. A pending client is told it starts unmuted (it will, on
+	// The contract: a status message before any binary frame, sent at
+	// once, before the handshake. A pending client is told it starts unmuted (it will, on
 	// attach) rather than the attached client's mute.
 	st := h.statusMsg()
 	if busy {
@@ -707,7 +706,7 @@ func (c *client) readLoop(ctx context.Context) string {
 
 // onAudio forwards a microphone frame to the session.
 func (c *client) onAudio(data []byte) {
-	if !c.legacyIfUnresolved("first_frame") {
+	if !c.readyOrRefuse("first_frame") {
 		return
 	}
 	h := c.h
@@ -733,7 +732,7 @@ func (c *client) onControl(data []byte) {
 		c.onClientReady(m)
 		return
 	}
-	if !c.legacyIfUnresolved("first_frame") {
+	if !c.readyOrRefuse("first_frame") {
 		return
 	}
 	if err != nil {

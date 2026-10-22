@@ -19,9 +19,27 @@ type wsClient struct {
 	t    *testing.T
 	conn *websocket.Conn
 	ctx  context.Context
+	// skipBotReady: dialWS sent client-ready, so read drops the one
+	// bot-ready that answers it.
+	skipBotReady bool
 }
 
+// testClient is who dialWS says it is on client-ready.
+var testClient = wsproto.ClientInfo{Name: "sheepdog-test", Version: "test", Platform: "go"}
+
+// dialWS dials /ws and sends client-ready as the first frame, as every
+// client does; read hides the bot-ready answer, so a test sees the frames
+// that follow the handshake. Handshake tests use dialWSRaw.
 func dialWS(t *testing.T, h *harness) *wsClient {
+	t.Helper()
+	c := dialWSRaw(t, h)
+	c.send(wsproto.ClientReady(wsproto.ProtocolVersion, testClient))
+	c.skipBotReady = true
+	return c
+}
+
+// dialWSRaw dials /ws and sends nothing.
+func dialWSRaw(t *testing.T, h *harness) *wsClient {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -75,6 +93,10 @@ func (c *wsClient) read(d time.Duration) (wsproto.Message, []byte, error) {
 	m, err := wsproto.Parse(data)
 	if err != nil {
 		c.t.Fatalf("bad control frame %s: %v", data, err)
+	}
+	if c.skipBotReady && m.Type == wsproto.TypeBotReady {
+		c.skipBotReady = false
+		return c.read(d)
 	}
 	return m, nil, nil
 }
