@@ -23,13 +23,10 @@ const (
 // Protocol versions of the /ws contract (docs/dev/ws-contract.md "Protocol
 // version and handshake"). ProtocolVersion is what this build speaks;
 // MinProtocolVersion is the oldest client protocol the daemon still
-// serves. A client that never sends client-ready is protocol 1.
+// serves. A client that never sends client-ready is refused.
 const (
 	ProtocolVersion    = 1
 	MinProtocolVersion = 1
-	// LegacyProtocol is the protocol assumed for a client that sends no
-	// client-ready (the contract as it stood before the handshake).
-	LegacyProtocol = 1
 )
 
 // CloseProtocolUnsupported is the WebSocket close code the daemon uses

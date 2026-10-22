@@ -194,7 +194,7 @@ type Deps struct {
 	// ToolTimeout bounds one tool call or injected chain (default 90 s).
 	ToolTimeout time.Duration
 	// HandshakeTimeout is how long /ws waits for a client-ready before
-	// it treats the client as a legacy protocol-1 client (default 2 s;
+	// it refuses the client (default 10 s;
 	// docs/dev/ws-contract.md "Protocol version and handshake").
 	HandshakeTimeout time.Duration
 	// MinProtocol is the oldest /ws client protocol served (default
@@ -307,7 +307,7 @@ func New(deps Deps) (*Server, error) {
 		deps.ToolTimeout = 90 * time.Second
 	}
 	if deps.HandshakeTimeout <= 0 {
-		deps.HandshakeTimeout = 2 * time.Second
+		deps.HandshakeTimeout = 10 * time.Second
 	}
 	if deps.MinProtocol <= 0 {
 		deps.MinProtocol = wsproto.MinProtocolVersion
