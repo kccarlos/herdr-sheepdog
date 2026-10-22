@@ -21,7 +21,7 @@ scenarios (docs/dev/iteration-2.md, "Rules for every change").
 
 ## 1. Timelines (bottom-up)
 
-### 1.1 Worker pane — `internal/herdr`, dispatched by `internal/app/app.go`
+### 1.1 Worker pane — `internal/herdr`, dispatched by `internal/app/run.go`
 
 | State / step | Advanced by | Logged as |
 |---|---|---|
@@ -30,7 +30,7 @@ scenarios (docs/dev/iteration-2.md, "Rules for every change").
 | `blocked` debounce | `blocked` must persist `Debounce` 3 s (`debounce_ms`); any other state cancels it; others emit at once | `herdr.debounce_cancelled` |
 | synthetic `blocked → blocked` | post-answer poll every 1 s for `reprompt_poll_s`, and the reconciler every 30 s + at startup (`supervisor/reprompt.go`) | `supervisor.reprompt`, `supervisor.reprompt_poll` |
 | `agent_session` | carried on the Transition from the snapshot; the transcript since the last read is read at each block/finish (`internal/workerlog`) | `worker.session_missing` |
-| dispatch | one goroutine per Transition, **serialised per pane** (`app.go` `paneLocks`); `HandleTransition` blocks for the pane read and the whole announce turn | — |
+| dispatch | one goroutine per Transition, **serialised per pane** (`internal/app/run.go` `paneLocks`); `HandleTransition` blocks for the pane read and the whole announce turn | — |
 
 ### 1.2 Supervisor — `internal/supervisor`
 
@@ -138,7 +138,7 @@ Status: **ok** (handled), **partial**, **gap**. The incidents come first. C23 an
 | C15 | voice provider switch × queued pushes | the old session's recent conversation (its filtered recap) is handed to the new one first — Gemini sends it at once as silent context, GPT-Live opens its next billed session with it (`Switcher.carryRecap`, `voice.recap_carried`, Gemini `voice.reseeded {provider_switch}`); then the old session's queued pushes (and GPT-Live's held standby context) are carried over to the new session (`Switcher.carryPushes`, `voice.push_carried`); one the new session refuses is `voice.push_dropped {provider_switch}`; `EventInterrupted` flushes the client; a tool handler in flight is cancelled, so its reply goes the late path [V `TestProviderSwitchCarriesQueuedPushes`] | ok (fixed #72) |
 | C16 | New conversation × everything | `abandonUtterance`; `brain.Reset` waits for the lock (user priority); the voice `Reset`; relay counters bumped so old inputs cannot authorise. Pending prompts, promises and investigations are kept, and a delivery lands in the fresh conversation by design [V `TestResetDropsADetachedUtteranceReply`, `TestResetPreventsPreResetInputFromAuthorising`] | ok |
 | C17 | orchestrator model switch × running turn | the turn keeps its snapshot; the next one rebuilds the other model's calls without `Raw` [V `TestSetModelMidTurnKeepsSnapshot`] | ok |
-| C18 | a worker event × the same pane's announce | the pane lock (`app.go`) is held for the whole announce turn (≤ 6/15 s + grace), so a block on that pane waits behind its own finish's turn. The orchestrator's per-agent coalesce is never reached for one pane's events (`TestAnnounceCoalesces` calls `HandleTransition` concurrently and bypasses the lock) [I] | gap |
+| C18 | a worker event × the same pane's announce | the pane lock (`internal/app/run.go`) is held for the whole announce turn (≤ 6/15 s + grace), so a block on that pane waits behind its own finish's turn. The orchestrator's per-agent coalesce is never reached for one pane's events (`TestAnnounceCoalesces` calls `HandleTransition` concurrently and bypasses the lock) [I] | gap |
 | C19 | block × another pane's open question | the single slot is replaced ("Dropping the earlier question from X"). An instruction to B also replaces A's open `answer_prompt`; A's bare "yes" then goes to the orchestrator (`send_keys` revives it); the reconciler skips A (`LastBlock` unanswered). `pending.replaced` never appears in the log [I] | gap |
 | C20 | prompt answered × its announce turn | `pendingStillOpen` fails → `brain.push_stale`, nothing said; a promise that event kept is already marked kept, so its line is lost — now logged `voice.push_dropped {stale_block, keeps_promise_ids}` (#72) [V `TestKeptPromiseOnAStaleBlockIsLoggedDropped`] | ok (logged, #72) |
 | C21 | new prompt while blocked | the poll or the reconciler raises a synthetic transition; `claimPrompt` stops a double raise [V `TestPollAndReconcileNeverDoubleRaiseTheSamePrompt`]; `raiseReprompt` calls `HandleTransition` outside the pane lock [I] | ok |
@@ -173,7 +173,7 @@ Status: **ok** (handled), **partial**, **gap**. The incidents come first. C23 an
 5. **Atomic re-check at send time** — `AnswerPrompt` under `s.mu` (the rail); `pendingStillOpen`; `hasListener`; `execTool`'s `Speaking()`; `deliverLate`'s `acceptedSeq`; `relayUnanswered`'s `gen`.
 6. **TTL with an event** — `pending.expired` (instructions only), `promise.expired`, `supervisor.push_loop_dropped` (30 s per event), `voice.push_dropped`, `brain.fallback timeout`, reset-confirm 20 s, `investigate_max_s`.
 
-**Collisions handled by none of these:** C1 is fixed by render-time normalisation (`modelOrder`), not arbitration. C5 is a text-and-timing heuristic. C18 is a seventh, implicit mechanism: the per-pane mutex in `app.go`. The Gemini `sendOn` generation check re-checks and then *drops* instead of holding. C3 is a lifecycle join. C15 was plain discard; it is a carry-over since #72.
+**Collisions handled by none of these:** C1 is fixed by render-time normalisation (`modelOrder`), not arbitration. C5 is a text-and-timing heuristic. C18 is a seventh, implicit mechanism: the per-pane mutex in `internal/app/run.go`. The Gemini `sendOn` generation check re-checks and then *drops* instead of holding. C3 is a lifecycle join. C15 was plain discard; it is a carry-over since #72.
 
 ## 5. Invariants
 
@@ -203,7 +203,7 @@ proposed.
 
 | Rank | Gap | Seen? | Scenario it needs | One-line direction |
 |---|---|---|---|---|
-| 4 | Per-pane serialisation (C18): a block waits behind its own pane's finish turn (≤ 15 s + grace) | no | supervisor scenario through `app.go`'s pane lock: finish, then block within the turn budget | do not hold the pane lock across the announce wait |
+| 4 | Per-pane serialisation (C18): a block waits behind its own pane's finish turn (≤ 15 s + grace) | no | supervisor scenario through `internal/app/run.go`'s pane lock: finish, then block within the turn budget | do not hold the pane lock across the announce wait |
 | 5 | Single daemon-wide pending slot (C19): an instruction or a second block displaces an open question; the bare-"yes" fast path is lost for it | no (`pending.replaced` 0) | eval case: A asks, the orchestrator instructs B, the user says "yes" | keep one slot per pane |
 | 8 | Stop leaves queued pushes (C11) | no (not in the 2026-10-03 bench runs either) | audio-e2e: stop while an announce is queued | none until seen |
 
