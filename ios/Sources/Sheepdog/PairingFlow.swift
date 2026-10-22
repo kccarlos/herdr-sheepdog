@@ -69,7 +69,8 @@ struct PairingFlowView: View {
             }
             .animation(Theme.ease(reduceMotion: reduceMotion), value: stage.id)
             .toolbar {
-                if !isPaired {
+                // The message screens carry their own "Not now".
+                if stage == .scanning || stage == .noCamera {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { dismiss() }
                             .tint(stage == .scanning ? .white : Theme.primaryText)
@@ -83,7 +84,6 @@ struct PairingFlowView: View {
         .accessibilityIdentifier("pairing.\(stage.id)")
     }
 
-    private var isPaired: Bool { if case .paired = stage { return true } else { return false } }
     private var isWorking: Bool { if case .working = stage { return true } else { return false } }
 
     // MARK: - Scanner
@@ -190,7 +190,8 @@ struct PairingFlowView: View {
 
     private var message: some View {
         let copy = copy
-        return ScrollView {
+        return GeometryReader { geo in
+          ScrollView {
             VStack(spacing: 14) {
                 Group {
                     switch copy.art {
@@ -222,10 +223,12 @@ struct PairingFlowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 28)
+            .padding(.bottom, 24)
             .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: geo.size.height * 0.8)
+          }
+          .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 4) {
                 Button { primary() } label: {

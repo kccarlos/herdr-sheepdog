@@ -451,6 +451,30 @@ everywhere.
 
 ---
 
+### 5.4 Intended exception: the model picker
+
+`GET /api/brain/models` and `PUT /api/brain/model` stay open to paired
+devices (with a ticket), not loopback-only like the other `/api/brain/*`
+debug routes, because the app's Settings ▸ Models screen uses them. They
+change which model the orchestrator uses, nothing else; a device that can
+already steer agents gains nothing from them. The route table test pins
+this.
+
+### 5.5 The app side (phase 4)
+
+The app keeps one record per paired computer in the keychain (daemon id,
+name, addresses, pin, next pin, device id, paired date) and the key in
+the Secure Enclave (`DeviceKey`, a software key on the Simulator). One
+process-wide `DeviceCredentials` holds the pins every `URLSession` checks
+(`PinnedTrustDelegate`: HTTP, `/events`, `/ws`, `/term`, push, intents)
+and the ticket; sign-in is single-flight, refreshed 30 minutes before
+expiry and once more on `401 no_session`/`session_expired`. `401
+device_revoked`/`unknown_device` and a key that matches no pin open
+"Please scan again". The only ATS setting left is
+`NSAllowsLocalNetworking`, for plain HTTP to loopback (the fixture
+daemons). `PairingE2ETests` and `PairingLinkUITests.testPairingWalkthrough`
+run the whole path against the pair fixture daemon.
+
 ## 6. Key storage
 
 | Platform | Device key | Other data | Notes |
