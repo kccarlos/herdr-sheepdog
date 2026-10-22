@@ -1,0 +1,6 @@
+{
+  "type": "status",
+  "voice": "closed",
+  "muted": false,
+  "reason": "protocol_too_old"
+}

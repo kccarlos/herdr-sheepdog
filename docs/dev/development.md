@@ -92,6 +92,14 @@ make changelog     # regenerate CHANGELOG.md
 make release-sign TAG=v0.1.0   # local fallback: sign and notarize a release's darwin binary (signing.md)
 ```
 
+**Protocol goldens.** `testdata/protocol/` holds what the daemon puts on
+the wire: every `/ws` and `/term` message, `/api/hello` and `/api/state`.
+`internal/web/protocol_golden_test.go` writes the files and fails when
+they are stale. The app's `ProtocolGoldenTests` decode the same files, so
+a wire change the app cannot read fails the iOS job. After a deliberate
+wire change, run `PROTOCOL_GOLDEN_UPDATE=1 go test ./internal/web -run
+TestProtocolGoldens` and commit the files with it.
+
 ### CI/CD
 
 GitHub Actions runs Linux jobs, on self-hosted runners in Cloud Run

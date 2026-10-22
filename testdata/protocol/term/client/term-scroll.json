@@ -1,0 +1,8 @@
+{
+  "type": "term-scroll",
+  "ch": 1,
+  "dir": "down",
+  "lines": 3,
+  "col": 12,
+  "row": 5
+}
