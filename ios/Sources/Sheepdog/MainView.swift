@@ -592,12 +592,8 @@ struct BannerView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .fill(Theme.card)
-        )
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .fill(tint.opacity(0.10))
-                .padding(-0.5)
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
