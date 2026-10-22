@@ -269,6 +269,10 @@ type Server struct {
 	auth    *authState
 	enroll  enrollCodes
 	live    liveConns
+	// limits rate-limits sign-in and pairing per source address; conns
+	// caps open non-loopback connections (limits.go).
+	limits *rateLimiter
+	conns  *capListener
 	// audio records the voice's output chunks for user.feedback
 	// snapshots (POST /api/feedback).
 	audio *feedback.AudioLog
@@ -342,7 +346,7 @@ func New(deps Deps) (*Server, error) {
 		}
 		deps.TLS = id
 	}
-	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
+	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog(), limits: newRateLimiter()}
 	s.hub = newHub(s)
 	if ch, ok := s.cardHost(); ok {
 		ch.SetCardSink(cardSink{s.hub})
@@ -636,7 +640,13 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 		return errors.New("web: Serve before Listen")
 	}
 	srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
-	sl := newSniffListener(ln, s.deps.TLS.TLSConfig(), sniffTimeout)
+	capped := &capListener{Listener: ln, max: maxRemoteConns, onRefuse: func(remote string) {
+		s.log.Log(logSource, "web.conn.refused", "", map[string]any{"remote": remote, "reason": "too_many_connections"})
+	}}
+	s.mu.Lock()
+	s.conns = capped
+	s.mu.Unlock()
+	sl := newSniffListener(capped, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(sl) }()
 	select {
