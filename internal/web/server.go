@@ -77,6 +77,7 @@ type AgentActions interface {
 	SaveCommand(ctx context.Context, id, cmdID, name, command string) (supervisor.WrapUp, error)
 	DeleteCommand(ctx context.Context, id, cmdID string) error
 	RunCommand(ctx context.Context, id, cmdID string) (string, error)
+	RunLine(ctx context.Context, id, name, command string) (string, error)
 	UserRename(ctx context.Context, paneID, name string) (string, error)
 	UserInterrupt(ctx context.Context, paneID string) (string, error)
 	UserClose(ctx context.Context, paneID string) (string, error)
@@ -479,6 +480,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"PUT /api/spaces/{id}/commands/{cid}", accessDevice, s.handleSaveCommand},
 		route{"DELETE /api/spaces/{id}/commands/{cid}", accessDevice, s.handleDeleteCommand},
 		route{"POST /api/spaces/{id}/commands/{cid}/run", accessDevice, s.handleRunCommand},
+		route{"POST /api/spaces/{id}/run", accessDevice, s.handleRunLine},
 		route{"POST /api/agents", accessDevice, s.handleNewAgent},
 		route{"POST /api/agents/{pane_id}/rename", accessDevice, s.handleAgentRename},
 		route{"POST /api/agents/{pane_id}/interrupt", accessDevice, s.handleAgentInterrupt},

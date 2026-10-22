@@ -135,6 +135,19 @@ extension DaemonClient {
         _ = try await postSpace(DaemonClient.spacePath(id, "commands"), ["name": name, "command": command])
     }
 
+    /// `PUT /api/spaces/{id}/commands/{cid}`: change a saved command.
+    public func updateCommand(space id: String, command cid: String, name: String, command: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["name": name, "command": command])
+        let request = try request(encodedPath: DaemonClient.spacePath(id, "commands/" + (cid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? cid)), method: "PUT", body: body)
+        let (data, response) = try await perform(request)
+        try checkSpace(data: data, response: response)
+    }
+
+    /// `POST /api/spaces/{id}/run`: a one-off line in a new tab, not saved.
+    public func runLine(space id: String, command: String) async throws -> AgentActionReply {
+        try await postSpace(DaemonClient.spacePath(id, "run"), ["command": command])
+    }
+
     /// `DELETE /api/spaces/{id}/commands/{cid}`.
     public func deleteCommand(space id: String, command cid: String) async throws {
         let request = try request(encodedPath: DaemonClient.spacePath(id, "commands/" + (cid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? cid)), method: "DELETE")

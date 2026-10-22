@@ -20,9 +20,15 @@ func TestSpacesRoutes(t *testing.T) {
 	if code, body := h.postJSON("/api/spaces/w1/commands/abc/run", map[string]any{}, nil); code != http.StatusForbidden || !strings.Contains(body, "like the shell") {
 		t.Errorf("run with the shell off = %d %s", code, body)
 	}
+	if code, body := h.postJSON("/api/spaces/w1/run", map[string]any{"command": "make"}, nil); code != http.StatusForbidden || !strings.Contains(body, "like the shell") {
+		t.Errorf("run a line with the shell off = %d %s", code, body)
+	}
 	h.srv.shellOn.Store(true)
 	if code, _ := h.postJSON("/api/spaces/w1/commands/abc/run", map[string]any{}, nil); code == http.StatusForbidden {
 		t.Error("run refused on loopback")
+	}
+	if code, _ := h.postJSON("/api/spaces/w1/run", map[string]any{"command": "make"}, nil); code == http.StatusForbidden {
+		t.Error("run a line refused on loopback")
 	}
 	if code, _ := h.postJSON("/api/spaces/w1/rename", map[string]any{"name": "x"}, nil); code < 400 {
 		t.Errorf("rename on mock herdr = %d", code)

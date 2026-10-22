@@ -214,6 +214,33 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10), "Open the pane opens its window")
     }
 
+    /// Choose another folder…: a path typed in goes on to Which agent,
+    /// with no worktree switch and no claim about git.
+    func testNewAgentInAnotherFolder() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        let choose = app.buttons["newAgent.chooseFolder"]
+        for _ in 0 ..< 3 where !choose.exists {
+            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
+            if choose.waitForExistence(timeout: 10) { break }
+        }
+        for _ in 0 ..< 4 where !choose.isHittable { app.swipeUp() }
+        choose.tap()
+        let field = app.textFields["newAgent.folderPath"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("packages")
+        XCTAssertTrue(app.descendants(matching: .any)["newAgent.folderPathError"].waitForExistence(timeout: 5), "not a full path")
+        XCTAssertFalse(app.buttons["newAgent.folderNext"].isEnabled)
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/you/code/shop/packages/api")
+        shot("new-agent-folder")
+        app.buttons["newAgent.folderNext"].tap()
+        XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10), "Which agent, with Start")
+        XCTAssertFalse(app.switches["newAgent.worktree"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["newAgent.notGit"].exists)
+    }
+
     func testAnotherDeviceInControlShowsTheObserveBanner() throws {
         let app = openWindow("claude-auth", term: "busy")
         let notice = app.descendants(matching: .any)["agentScreen.notice.text"]
