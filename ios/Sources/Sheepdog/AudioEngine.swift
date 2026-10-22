@@ -122,13 +122,8 @@ final class AudioEngine {
     // MARK: - Permission
 
     static func requestMicrophone() async -> Bool {
-        if #available(iOS 17.0, *) {
-            if AVAudioApplication.shared.recordPermission == .granted { return true }
-            return await AVAudioApplication.requestRecordPermission()
-        }
-        return await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
-        }
+        if AVAudioApplication.shared.recordPermission == .granted { return true }
+        return await AVAudioApplication.requestRecordPermission()
     }
 
     // MARK: - Lifecycle
@@ -143,7 +138,7 @@ final class AudioEngine {
 
         let input = engine.inputNode
         enableVoiceProcessing()
-        // A voice-processing unit carries its own input mute, and iOS 17 an
+        // A voice-processing unit carries its own input mute, and the system has an
         // app-wide one (AirPods' press-to-mute drives it). Either left on
         // gives exactly the symptom seen on the phone — unmuted in the app,
         // digital zero from the tap — so start from "not muted" and log it.

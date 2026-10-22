@@ -5,15 +5,12 @@ import WidgetKit
 struct SheepdogWidgetsBundle: WidgetBundle {
     var body: some Widget {
         VoiceSessionLiveActivity()
-        if #available(iOSApplicationExtension 18.0, *) {
-            TalkToSheepdogControl()
-        }
+        TalkToSheepdogControl()
     }
 }
 
 /// Control Center, the lock screen's control slots and the Action Button:
 /// one button that runs "Talk to Sheepdog".
-@available(iOSApplicationExtension 18.0, *)
 struct TalkToSheepdogControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.github.kccarlos.herdr-sheepdog-ios.talk") {

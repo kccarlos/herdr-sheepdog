@@ -5,6 +5,9 @@ import SwiftUI
 struct SheepdogApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = SessionViewModel(settings: SheepdogApp.settings())
+    /// The splash covers the first moment after the launch screen, then
+    /// fades. Touches pass through it.
+    @State private var showsSplash = true
 
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
@@ -44,6 +47,25 @@ struct SheepdogApp: App {
     }
 
     private var mainView: some View {
+        content
+            .overlay {
+                if showsSplash {
+                    SplashView()
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .task {
+                #if DEBUG
+                if DebugLaunch.splashHold { return }
+                if DebugLaunch.openDemo { model.openDemo() }
+                #endif
+                try? await Task.sleep(for: .milliseconds(600))
+                withAnimation(.easeOut(duration: 0.3)) { showsSplash = false }
+            }
+    }
+
+    private var content: some View {
         MainView()
             .environmentObject(model)
             .onAppear { PushCoordinator.shared.model = model }

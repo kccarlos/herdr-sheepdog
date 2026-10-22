@@ -33,6 +33,11 @@ enum DebugLaunch {
     /// For the UI tests: on Xcode Cloud's simulators the audio server hangs
     /// and the app aborts in `AURemoteIO::Initialize` (an RPC timeout).
     static var demoSilent: Bool { arguments.contains("-sheepdogDemoSilent") }
+    /// `-sheepdogOpenDemo`: open the offline demo at launch, for the
+    /// redesign screenshots (`RedesignShotsUITests`).
+    static var openDemo: Bool { arguments.contains("-sheepdogOpenDemo") }
+    /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
+    static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
     /// message are markdown, for screenshots (the fixture daemon cannot
     /// produce a worker transcript).
