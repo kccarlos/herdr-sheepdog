@@ -1,0 +1,8 @@
+{
+  "type": "error",
+  "provider": "gemini",
+  "message": "The Gemini key ran out of quota.",
+  "problem": "quota",
+  "role": "voice",
+  "fix": "Wait for the quota to reset, or add a key."
+}

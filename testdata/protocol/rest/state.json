@@ -1,0 +1,694 @@
+{
+  "agents": [
+    {
+      "pane_id": "fake:1",
+      "alias": "auth",
+      "kind": "codex",
+      "workspace": "synthetic",
+      "spoken": "auth",
+      "spoken_was": "Codex",
+      "spoken_changed_at": "2026-10-21T09:00:00Z",
+      "state": "blocked",
+      "state_since": "2026-10-21T09:00:00Z",
+      "last_block": {
+        "question": "would you like to run the following command",
+        "seen_at": "2026-10-21T09:00:00Z",
+        "answered": false
+      },
+      "last_interaction": "2026-10-21T09:00:00Z",
+      "synthetic": true
+    },
+    {
+      "pane_id": "fake:2",
+      "alias": "docs",
+      "kind": "codex",
+      "workspace": "synthetic",
+      "spoken": "docs",
+      "spoken_was": "Codex",
+      "spoken_changed_at": "2026-10-21T09:00:00Z",
+      "state": "working",
+      "state_since": "2026-10-21T09:00:00Z",
+      "last_block": {
+        "question": "",
+        "seen_at": "2026-10-21T09:00:00Z",
+        "answered": true
+      },
+      "last_interaction": "2026-10-21T09:00:00Z",
+      "synthetic": true
+    }
+  ],
+  "pending_action": {
+    "id": "ap-golden-2",
+    "pane_id": "fake:1",
+    "kind": "answer_prompt",
+    "spoken_summary": "auth asks to run printf.",
+    "payload_text": "",
+    "created_at": "2026-10-21T09:00:00Z",
+    "expires_at": "2026-10-21T09:00:00Z",
+    "question": "would you like to run the following command",
+    "command": "printf '%s\\n' 'hello from codex.' \u003e hello.txt",
+    "yes_keys": [
+      "y"
+    ],
+    "no_keys": [
+      "esc"
+    ],
+    "agent": "auth",
+    "summary": "auth asks to run printf.",
+    "options": [
+      {
+        "index": 1,
+        "label": "Yes, proceed",
+        "keys": [
+          "y"
+        ],
+        "default": true
+      },
+      {
+        "index": 2,
+        "label": "Yes, and don't ask again for commands that start with `printf '%s\\n' 'hello from codex.' \u003e hello.txt`",
+        "keys": [
+          "p"
+        ],
+        "default": false
+      },
+      {
+        "index": 3,
+        "label": "No, and tell Codex what to do differently",
+        "keys": [
+          "esc"
+        ],
+        "default": false
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "ap-golden-2",
+      "pane_id": "fake:1",
+      "kind": "answer_prompt",
+      "spoken_summary": "auth asks to run printf.",
+      "payload_text": "",
+      "created_at": "2026-10-21T09:00:00Z",
+      "expires_at": "2026-10-21T09:00:00Z",
+      "question": "would you like to run the following command",
+      "command": "printf '%s\\n' 'hello from codex.' \u003e hello.txt",
+      "yes_keys": [
+        "y"
+      ],
+      "no_keys": [
+        "esc"
+      ],
+      "agent": "auth",
+      "summary": "auth asks to run printf.",
+      "options": [
+        {
+          "index": 1,
+          "label": "Yes, proceed",
+          "keys": [
+            "y"
+          ],
+          "default": true
+        },
+        {
+          "index": 2,
+          "label": "Yes, and don't ask again for commands that start with `printf '%s\\n' 'hello from codex.' \u003e hello.txt`",
+          "keys": [
+            "p"
+          ],
+          "default": false
+        },
+        {
+          "index": 3,
+          "label": "No, and tell Codex what to do differently",
+          "keys": [
+            "esc"
+          ],
+          "default": false
+        }
+      ]
+    }
+  ],
+  "session": {
+    "voice_connected": true
+  },
+  "voice": {
+    "mode": "gemini",
+    "status": "connected",
+    "muted": false,
+    "stalled": false,
+    "client_connected": false
+  },
+  "settings": {
+    "chattiness": "chatty",
+    "levels": [
+      "quiet",
+      "normal",
+      "chatty"
+    ],
+    "languages": [],
+    "language_options": [
+      {
+        "code": "en",
+        "name": "English",
+        "native": "English",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "zh-Hans",
+        "name": "Chinese (Simplified)",
+        "native": "简体中文",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "zh-Hant",
+        "name": "Chinese (Traditional)",
+        "native": "繁體中文",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "af",
+        "name": "Afrikaans",
+        "native": "Afrikaans",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ar",
+        "name": "Arabic",
+        "native": "العربية",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "hy",
+        "name": "Armenian",
+        "native": "Հայերեն",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "az",
+        "name": "Azerbaijani",
+        "native": "Azərbaycanca",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "be",
+        "name": "Belarusian",
+        "native": "Беларуская",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "bs",
+        "name": "Bosnian",
+        "native": "Bosanski",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "bg",
+        "name": "Bulgarian",
+        "native": "Български",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ca",
+        "name": "Catalan",
+        "native": "Català",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "hr",
+        "name": "Croatian",
+        "native": "Hrvatski",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "cs",
+        "name": "Czech",
+        "native": "Čeština",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "da",
+        "name": "Danish",
+        "native": "Dansk",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "nl",
+        "name": "Dutch",
+        "native": "Nederlands",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "et",
+        "name": "Estonian",
+        "native": "Eesti",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "fil",
+        "name": "Filipino",
+        "native": "Filipino",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "fi",
+        "name": "Finnish",
+        "native": "Suomi",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "fr",
+        "name": "French",
+        "native": "Français",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "gl",
+        "name": "Galician",
+        "native": "Galego",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "de",
+        "name": "German",
+        "native": "Deutsch",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "el",
+        "name": "Greek",
+        "native": "Ελληνικά",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "he",
+        "name": "Hebrew",
+        "native": "עברית",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "hi",
+        "name": "Hindi",
+        "native": "हिन्दी",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "hu",
+        "name": "Hungarian",
+        "native": "Magyar",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "is",
+        "name": "Icelandic",
+        "native": "Íslenska",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "id",
+        "name": "Indonesian",
+        "native": "Bahasa Indonesia",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "it",
+        "name": "Italian",
+        "native": "Italiano",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ja",
+        "name": "Japanese",
+        "native": "日本語",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "kn",
+        "name": "Kannada",
+        "native": "ಕನ್ನಡ",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "kk",
+        "name": "Kazakh",
+        "native": "Қазақ тілі",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ko",
+        "name": "Korean",
+        "native": "한국어",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "lv",
+        "name": "Latvian",
+        "native": "Latviešu",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "lt",
+        "name": "Lithuanian",
+        "native": "Lietuvių",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "mk",
+        "name": "Macedonian",
+        "native": "Македонски",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ms",
+        "name": "Malay",
+        "native": "Bahasa Melayu",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "mi",
+        "name": "Maori",
+        "native": "Māori",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "mr",
+        "name": "Marathi",
+        "native": "मराठी",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ne",
+        "name": "Nepali",
+        "native": "नेपाली",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "nb",
+        "name": "Norwegian",
+        "native": "Norsk",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "fa",
+        "name": "Persian",
+        "native": "فارسی",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "pl",
+        "name": "Polish",
+        "native": "Polski",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "pt-BR",
+        "name": "Portuguese (Brazil)",
+        "native": "Português (Brasil)",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "pt-PT",
+        "name": "Portuguese (Portugal)",
+        "native": "Português (Portugal)",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ro",
+        "name": "Romanian",
+        "native": "Română",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ru",
+        "name": "Russian",
+        "native": "Русский",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "sr",
+        "name": "Serbian",
+        "native": "Српски",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "sk",
+        "name": "Slovak",
+        "native": "Slovenčina",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "sl",
+        "name": "Slovenian",
+        "native": "Slovenščina",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "es",
+        "name": "Spanish",
+        "native": "Español",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "sw",
+        "name": "Swahili",
+        "native": "Kiswahili",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "sv",
+        "name": "Swedish",
+        "native": "Svenska",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ta",
+        "name": "Tamil",
+        "native": "தமிழ்",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "th",
+        "name": "Thai",
+        "native": "ไทย",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "tr",
+        "name": "Turkish",
+        "native": "Türkçe",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "uk",
+        "name": "Ukrainian",
+        "native": "Українська",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "ur",
+        "name": "Urdu",
+        "native": "اردو",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "vi",
+        "name": "Vietnamese",
+        "native": "Tiếng Việt",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      },
+      {
+        "code": "cy",
+        "name": "Welsh",
+        "native": "Cymraeg",
+        "providers": [
+          "gemini",
+          "openai"
+        ]
+      }
+    ]
+  },
+  "brain": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash"
+  },
+  "herdr": "mock",
+  "version": "test",
+  "now": "2026-10-21T09:00:00Z",
+  "voice_provider": "off",
+  "voice_model": "",
+  "conversation_started_at": "2026-10-21T09:00:00Z"
+}

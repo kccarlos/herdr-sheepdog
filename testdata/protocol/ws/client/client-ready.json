@@ -1,0 +1,9 @@
+{
+  "type": "client-ready",
+  "protocol": 1,
+  "client": {
+    "name": "sheepdog-ios",
+    "version": "0.2.0 (12)",
+    "platform": "ios"
+  }
+}
