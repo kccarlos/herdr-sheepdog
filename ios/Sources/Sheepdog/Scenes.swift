@@ -56,13 +56,22 @@ final class SceneCoordinator: ObservableObject {
     }
 }
 
-/// What one window keeps for itself: its dialogs and the composer.
+/// What one window keeps for itself: its dialogs, the composer and, on
+/// iPad, what its detail shows (kept across size-class changes).
 @MainActor
 final class SceneUI: ObservableObject {
     @Published var confirmNewConversation = false
     @Published var showsConnection = false
     /// The capsule turned into the composer.
     @Published var typing = false
+
+    // iPad (IPadRootView)
+    @Published var detail: IPadDetail = .conversation
+    @Published var columns: NavigationSplitViewVisibility = .all
+    /// A shell pushed over the detail.
+    @Published var detailPath = NavigationPath()
+    /// Bumped to focus the Conversation's composer (the capsule's keyboard).
+    @Published var focusComposer = 0
 }
 
 /// Where an agent's or a shell's window opens.

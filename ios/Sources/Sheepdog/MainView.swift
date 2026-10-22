@@ -8,12 +8,28 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @StateObject private var ui = SceneUI()
+    @Environment(\.horizontalSizeClass) private var sizeClass
     /// The question collapse, the window zoom and the capsule morph.
     @Namespace private var motion
 
+    private var split: Bool { sizeClass == .regular }
+
+    /// The Conversation is in front, nothing over it.
+    private var voiceScreen: Bool {
+        split
+            ? ui.detail == .conversation && ui.detailPath.isEmpty
+            : model.pane == .conversation && model.navigationPath.isEmpty
+    }
+
     var body: some View {
-        PhoneRootView()
-            .modifier(SessionChrome(ui: ui, voiceScreen: model.pane == .conversation && model.navigationPath.isEmpty))
+        Group {
+            if split {
+                IPadRootView()
+            } else {
+                PhoneRootView()
+            }
+        }
+            .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen))
             .onChange(of: model.windowRequest) { _, request in
                 guard let request else { return }
                 model.windowRequest = nil
@@ -25,8 +41,19 @@ struct MainView: View {
             .environment(\.openAgentWindow, OpenWindowAction { open($0) })
     }
 
-    /// The iPhone layout pushes a window on the main stack.
+    /// The iPhone layout pushes a window on the main stack; the iPad
+    /// shows it in the detail.
     private func open(_ request: WindowRequest) {
+        if split {
+            switch request {
+            case let .agent(paneID), let .newAgent(paneID):
+                ui.detailPath = NavigationPath()
+                ui.detail = .agent(paneID)
+            case let .shell(cwd):
+                ui.detailPath.append(ShellRoute(cwd: cwd))
+            }
+            return
+        }
         switch request {
         case let .agent(paneID), let .newAgent(paneID):
             model.navigationPath.append(AgentWindowRoute(paneID: paneID))
@@ -710,7 +737,7 @@ struct DemoHeader: View {
                 Label("Demo", systemImage: "play.circle.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                Text("Scripted agents, on this phone only")
+                Text("Scripted agents, on this device only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

@@ -336,7 +336,24 @@ section 6.
 - **Layouts** (`MainView.swift`). `MainView` picks the layout and wraps it
   in `SessionChrome` (the sheets, dialogs and lifecycle every layout
   shares). `PhoneRootView` is the iPhone layout, also used on iPad at
-  compact width.
+  compact width (Slide Over, a narrow split).
+- **The iPad layout** (`IPadRootView.swift`), at regular width: a
+  `NavigationSplitView`, balanced in landscape and `prominentDetail` in
+  portrait (the sidebar slides over; portrait opens on the detail).
+  - `IPadSidebar` (390 pt): the title with `+` and `⋯`, Conversation, All
+    agents with the waiting count, then the agents under their spaces
+    (`SidebarSections` in Kit: spaces by name, agents by alias, running
+    only; no computer row with one computer), and the capsule at the foot.
+    Its keyboard button selects the Conversation and focuses its composer.
+    No agents: one line with the action that helps (New agent, Connect,
+    Pair, Retry).
+  - The detail (`SceneUI.detail`): the Conversation in a 720 pt column
+    with the open questions pinned above `IPadComposer`; All agents; or
+    an agent's window as a pane (`AgentScreenView(pane:)` with a
+    `PaneChrome`: its own header with the dot, name and space, ⋯, and
+    Close instead of a pop). A shell pushes on the detail's own stack.
+  - With the sidebar not beside the detail, the detail's header carries
+    Show sidebar and the `MiniCapsule`, so one capsule is on screen.
 - **Opening a window** goes through one seam: `\.openAgentWindow`
   (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
   pushes on `navigationPath`. Requests from the session itself (a card's
