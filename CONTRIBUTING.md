@@ -30,6 +30,8 @@ Architecture first: [docs/dev/architecture.md](docs/dev/architecture.md). The de
 
 Never commit a key, a token, a `.env` file or a log that has not been through `sheepdog doctor --report`. Tests must not touch your real `~/.config/sheepdog`; `cmd/sheepdog`'s tests already point `HOME` at a temp directory.
 
+Tests clean up after themselves: use `t.TempDir()` (or `b.TempDir()`), which Go removes when the test ends. Use `os.MkdirTemp` only where a test needs a path short enough for a unix socket or a directory that outlives one test, and then remove it yourself: `t.Cleanup(func() { os.RemoveAll(dir) })` in a test, or `code := m.Run(); os.RemoveAll(dir); os.Exit(code)` in `TestMain`.
+
 ## Changes
 
 - **One change per PR**, with a test that fails without it. Prompt and harness changes also need the eval evidence described in [docs/dev/eval/README.md](docs/dev/eval/README.md); several ideas that looked good lost there.
