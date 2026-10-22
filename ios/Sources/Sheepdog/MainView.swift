@@ -11,6 +11,9 @@ struct MainView: View {
     @State private var confirmNewConversation = false
     @State private var typing = false
     @State private var showsConnection = false
+    /// The update notice the user put off ("Later"): hidden until the
+    /// daemon reports a different one. Settings keeps showing it.
+    @AppStorage("update.dismissedNotice") private var dismissedUpdate = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -55,6 +58,14 @@ struct MainView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
+                } else if let notice = model.update?.notice, notice.text != dismissedUpdate, !model.isDemo {
+                    UpdateBanner(notice: notice) {
+                        withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
+                    }
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
@@ -536,78 +547,6 @@ private struct Triangle: Shape {
         p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
         p.closeSubpath()
         return p
-    }
-}
-
-/// Errors in plain words, with the one button that helps.
-struct BannerView: View {
-    let banner: SessionViewModel.Banner
-    let retry: () -> Void
-    let dismiss: () -> Void
-
-    private var tint: Color {
-        switch banner.tone {
-        case .error: return Theme.danger
-        case .warning: return Theme.blocked
-        case .info: return Theme.working
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: banner.tone == .info ? "info.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(tint)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(banner.message)
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let hint = banner.hint {
-                    Text(LocalizedStringKey(hint))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 12) {
-                    if let retryTitle = banner.retryTitle {
-                        Button(retryTitle, action: retry)
-                            .font(.caption.weight(.semibold))
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .tint(Theme.primaryText)
-                    }
-                    if let help = banner.help {
-                        Link("How to fix this", destination: help)
-                            .font(.caption.weight(.semibold))
-                            .tint(Theme.primaryText)
-                            .accessibilityIdentifier("banner.help")
-                    }
-                }
-                .padding(.top, 3)
-            }
-            Spacer(minLength: 0)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .padding(-12)
-            .accessibilityLabel("Dismiss")
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .fill(tint.opacity(0.10))
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("banner")
     }
 }
 

@@ -120,6 +120,15 @@ final class RedesignShotsUITests: XCTestCase {
         shot("conversation-top")
     }
 
+    func testBanners() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery", "banners"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("banners")
+    }
+
     /// A ScreenCard's sheet, then its row and a question asked by tap.
     func testCardSheetAndRows() throws {
         let app = launchDemo(["-sheepdogDemoCard"])

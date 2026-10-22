@@ -270,22 +270,28 @@ struct UpdateNoticeRow: View {
 
     var body: some View {
         Label {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(notice.text)
+                    .foregroundStyle(Theme.ink)
                 if let command = notice.command {
                     Text(command)
                         .font(.callout.monospaced())
+                        .foregroundStyle(Theme.ink)
                         .textSelection(.enabled)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
                 }
                 if let after = notice.after {
                     Text(after)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "arrow.down.circle")
-                .foregroundStyle(.tint)
+                .foregroundStyle(Theme.working)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(notice.spoken)
