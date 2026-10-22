@@ -1132,12 +1132,6 @@ func (a *App) Run(ctx context.Context) (err error) {
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(), "urls": a.URLs(),
 		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(), "voice_provider": a.VoiceProvider(),
 	})
-	if notes := a.cfg.Deprecations(); len(notes) > 0 {
-		// Once per run, right after daemon.start: an old config file or
-		// environment still loads, but says what to rename (CONFIG.md
-		// "Deprecated keys").
-		a.log.Log("daemon", "daemon.config_deprecated", "", map[string]any{"notes": notes})
-	}
 	a.restoreBrainModel()
 	a.restoreVoiceProvider()
 	if a.pushErr != nil {
