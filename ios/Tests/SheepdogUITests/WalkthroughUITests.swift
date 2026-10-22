@@ -80,7 +80,8 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
         XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["chip.openSettings"].exists)
+        for _ in 0 ..< 3 where !app.buttons["chip.openSettings"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["chip.openSettings"].waitForExistence(timeout: 5))
         shot(app, "17-voicebar-chip-popover")
         tapWhenReady(app.buttons["Done"], "Done")
 
