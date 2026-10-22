@@ -147,7 +147,14 @@ type ChallengeResponse struct {
 }
 
 // handleChallenge hands out a one-time nonce (public).
-func (s *Server) handleChallenge(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackAddr(r.RemoteAddr) {
+		ip, now := sourceIP(r.RemoteAddr), s.deps.Now()
+		if s.limits.isBlocked("signature", ip, now) || !s.limits.allow("challenge", ip, challengesPerMinute, now) {
+			writeRateLimited(w)
+			return
+		}
+	}
 	nonce, err := randomID(32)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -211,6 +218,9 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fail := func(reason string) {
+		if reason == "bad_signature" && !isLoopbackAddr(r.RemoteAddr) {
+			s.limits.fail("signature", sourceIP(r.RemoteAddr), badSignaturesPerMinute, s.deps.Now())
+		}
 		s.log.Log(logSource, "web.device.auth_failed", "", map[string]any{"reason": reason, "remote": r.RemoteAddr, "device_id": req.DeviceID})
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized", "reason": reason})
 	}

@@ -65,8 +65,10 @@ type termServer struct {
 
 	mu      sync.Mutex
 	bridges int // open or opening, across connections
-	nextID  int
-	conns   map[*termConn]struct{}
+	// perDevice counts bridges per paired device, across its connections.
+	perDevice map[string]int
+	nextID    int
+	conns     map[*termConn]struct{}
 	// version cache for termAvailable
 	checked time.Time
 	ok      bool
@@ -126,19 +128,37 @@ func (t *termServer) available() bool {
 	return t.ok
 }
 
-func (t *termServer) reserve() bool {
+// reserve takes one of the daemon's terminal bridges (MaxBridges) and one
+// of the device's (MaxChannels per paired device, across all its
+// connections; this computer itself has no per-device cap).
+func (t *termServer) reserve(device string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.bridges >= termproto.MaxBridges {
 		return false
 	}
+	if device != "" && device != localDevice {
+		if t.perDevice == nil {
+			t.perDevice = map[string]int{}
+		}
+		if t.perDevice[device] >= termproto.MaxChannels {
+			return false
+		}
+		t.perDevice[device]++
+	}
 	t.bridges++
 	return true
 }
 
-func (t *termServer) unreserve() {
+func (t *termServer) unreserve(device string) {
 	t.mu.Lock()
 	t.bridges--
+	if t.perDevice[device] > 0 {
+		t.perDevice[device]--
+		if t.perDevice[device] == 0 {
+			delete(t.perDevice, device)
+		}
+	}
 	t.mu.Unlock()
 }
 
@@ -179,7 +199,7 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	id := t.nextID
 	t.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &termConn{t: t, conn: conn, id: id, kind: s.kindOf(r.RemoteAddr), ctx: ctx, cancel: cancel,
+	c := &termConn{t: t, conn: conn, id: id, kind: s.kindOf(r.RemoteAddr), device: deviceOf(r), ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
 	defer s.track(r, func() { c.end("device_revoked") })()
 	t.mu.Lock()
@@ -203,6 +223,7 @@ type termConn struct {
 	conn   *websocket.Conn
 	id     int
 	kind   string
+	device string // the paired device (per-device channel cap)
 	ctx    context.Context
 	cancel context.CancelFunc
 	wake   chan struct{}
@@ -427,7 +448,7 @@ func (c *termConn) openChan(m termproto.Message, pane, kind string) {
 		c.control(termproto.Error(m.Ch, "channel already open"))
 		return
 	}
-	if len(c.chans) >= termproto.MaxChannels || !c.t.reserve() {
+	if len(c.chans) >= termproto.MaxChannels || !c.t.reserve(c.device) {
 		c.mu.Unlock()
 		c.refuse(m.Ch, pane, termproto.RefusedTooMany)
 		return
@@ -476,7 +497,7 @@ func (c *termConn) startBridge(tc *termChan, gen int, first bool) {
 		if stale {
 			return
 		}
-		c.t.unreserve()
+		c.t.unreserve(c.device)
 		if first {
 			c.refuse(tc.ch, tc.pane, reason)
 		} else {
@@ -667,7 +688,7 @@ func (c *termConn) onBridgeClosed(tc *termChan, gen int, cl herdr.Closed) {
 	c.mu.Lock()
 	delete(c.chans, tc.ch)
 	c.mu.Unlock()
-	c.t.unreserve()
+	c.t.unreserve(c.device)
 	c.finish(tc, reason)
 	if tc.kind == "shell" && reason == termproto.ReasonGone {
 		c.t.forgetShell(tc.pane)
