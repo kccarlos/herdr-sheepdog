@@ -186,11 +186,11 @@ cannot produce.
 | ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C asks before it is sent (Esc no longer does, so Esc Esc works). |
 | ![](../screenshots/review-light-agent-screen-sent.png) | ![](../screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
 
-The Live Activity, drawn in the DEBUG gallery (`-sheepdogLiveActivityGallery`):
-the widget's own lock-screen view (listening with two agents waiting,
-speaking, muted, stale), and its Dynamic Island pieces inside a stand-in
-island shape. `-sheepdogDemoLiveActivity listening|speaking|muted` starts a
-real activity with no session.
+The Live Activity's lock-screen banner, drawn in the DEBUG gallery
+(`-sheepdogLiveActivityGallery one`) on a stand-in lock screen: listening,
+two agents waiting with their questions, the counts of agents working and
+done, Mute and End. `-sheepdogDemoLiveActivity listening|speaking|muted`
+starts a real activity with no session.
 
 | Light | Dark |
 |---|---|

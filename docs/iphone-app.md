@@ -168,8 +168,14 @@ On the same Wi-Fi this just works. Away from home, see
   ([quick-start.md](quick-start.md#update)). There is no line when the
   daemon is up to date, has `update.check` off, or is too old to report
   updates.
-- **Live Activity.** While a voice session runs, the lock screen and Dynamic
-  Island show it, with buttons.
+- **Live Activity.** While a voice session runs, the lock screen shows what
+  the voice is doing, up to three agents waiting for an answer with their
+  questions, and how many agents are working and done. Tap an agent to open
+  its window; **Mute** and **End** work without opening the app (ending the
+  voice session leaves your agents working). The banner starts and ends with the voice
+  session and is updated by the app while the session runs; if the app was
+  closed, it dims and says "May have ended" after 15 minutes. Turn it off in
+  iOS Settings ▸ Sheepdog ▸ Live Activities.
 - **Earbud remote.** Play/pause on earbuds or AirPods mutes and unmutes the
   microphone; next track stops what is in flight.
 - **Siri, Shortcuts, Action Button.** "Talk to Sheepdog" starts a session.
