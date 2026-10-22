@@ -235,14 +235,23 @@ Agents. It is built from buttons, so Agents can carry an amber
 badge with the number of blocked agents, and it turns into a menu at the
 accessibility text sizes. The voice capsule stays in place.
 
-- **Agents** (`Flock`, `FlockView`). Only running agents are listed (idle,
-  working, blocked, done): blocked first, then working, then idle and
-  done. Unknown and exited agents fold into a closed "Not running (N)"
-  group. Each card shows the agent's state and how long it has been in it,
-  the task, the open question (answerable on the card), `last_result` with
-  its `detail`, and the worker's last message to a human (four lines until
-  tapped). The agent strip above the conversation shows the same running
-  agents.
+- **Agents** (`Flock`, `FlockView`, `AgentCard`). Only running agents are
+  listed (idle, working, blocked, done): blocked first, then working, then
+  idle and done. Unknown and exited agents fold into a closed "Not running
+  (N)" group; with none running, the sleeping mascot and New agent. A card
+  is a dot, the name, the kind, the state with its time, and the second
+  line (`Agent.cardLine`: current task, else last task, else `title`),
+  plus the round window button. A tap opens the details (kept per session
+  in `expandedAgents`): working on, `last_result` with its detail, the
+  newest journal entry with its files and tools, the last answered
+  question with the chosen answer (`Agent.answeredQuestion`), the space.
+  **Every open question** (`/api/state` `questions`) puts its answer
+  buttons on its agent's card (`questionCard(for:)`): the voice's own goes
+  through `ApprovalFlow`, any other straight to `POST /api/pending/answer`
+  with its id. Options are the agent's labels verbatim, in an `OptionFlow`
+  (a long label takes a row); only the screen's first question has the
+  filled accent, the others are outlined in amber. The agent strip above
+  the conversation shows the same running agents.
 - **Agent window** (`AgentScreenView`). "Open window" on an Agents card
   (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
   or in the sheet behind a strip chip, pushes the agent's live terminal;

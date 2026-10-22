@@ -54,8 +54,13 @@ On the same Wi-Fi this just works. Away from home, see
   when you cannot talk; the orb on its left goes back to voice.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
-- **Agents.** Who is working, blocked or done, and a window onto each agent's
-  screen (below). **+ ▸ New agent** starts Claude Code
+- **Agents.** One compact card per agent: its state and for how long, and
+  what it works on. Tap a card for the details (the last result, what the
+  agent last wrote, the files it touched, the last question it was asked
+  and your answer, its space). Every waiting agent shows its question and
+  the agent's own answers as buttons, so you can answer any of them, not
+  only the one the voice is on. The round button opens the agent's window
+  (below). **+ ▸ New agent** starts Claude Code
   or Codex in one of your projects (the folders in `supervisor.project_roots`
   and the workspaces herdr has open), in the project folder or in a fresh
   git worktree on a new branch, with an optional first prompt.
@@ -67,11 +72,13 @@ On the same Wi-Fi this just works. Away from home, see
     **Drag** to scroll back through the output, and **Latest** returns to
     the bottom. A **tap** clicks, for programs that use the mouse.
     **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
-  - The keys under the terminal send esc, tab, the arrows, control-C and
-    return straight to the agent (only control-C asks first). **⌨︎** types
-    straight into the terminal with the phone's keyboard, dictation and
-    input methods included; control-C becomes **⌃**, which holds Control for
-    the next key. **···** has the rest: Ctrl and Alt for the next key,
+  - The keys under the terminal send esc, tab, the arrows and return
+    straight to the agent. Control-C is at the top of **···** (More keys),
+    under Interrupt, and goes at once; esc already stops Claude and Codex.
+    In a shell window control-C sits on the bar. **⌨︎** types straight into
+    the terminal with the phone's keyboard, dictation and input methods
+    included, with **⌃**, which holds Control for the next key. **···** has
+    the rest: Ctrl and Alt for the next key,
     shift-tab, the arrows, Home, End, Page up and down, y, n, the digits,
     F1–F12, and your **snippets** (saved text: a tap puts it in the field,
     or types it in typing mode; swipe to delete).
