@@ -333,9 +333,14 @@ final class SessionViewModel: ObservableObject {
         conversationChanged(save: false)
     }
 
+    private var started = false
+
     /// Called once from the first `onAppear`: an unconfigured app opens
     /// Settings instead of showing a Connect button that cannot work.
     func start() {
+        // Every window's first appearance calls this (iPad); once is enough.
+        guard !started else { return }
+        started = true
         if demo != nil {
             startDemo()
             return
@@ -1798,7 +1803,12 @@ final class SessionViewModel: ObservableObject {
         presentedCard = card
     }
 
-    /// A card's "Open window": close the sheet, then push the agent's
+    /// An agent's window the session asked for (a card's Open window, a
+    /// Live Activity row): the presenting window's layout opens it (a push
+    /// on iPhone, the detail on iPad), then clears it.
+    @Published var windowRequest: WindowRequest?
+
+    /// A card's "Open window": close the sheet, then open the agent's
     /// window (a push made under a sheet that is closing is lost).
     func openAgentWindow(paneID: String) {
         let wasOpen = presentedCard != nil
@@ -1806,7 +1816,7 @@ final class SessionViewModel: ObservableObject {
         pane = .conversation
         Task { @MainActor in
             if wasOpen { try? await Task.sleep(for: .milliseconds(400)) }
-            navigationPath.append(AgentWindowRoute(paneID: paneID))
+            windowRequest = .agent(paneID)
         }
     }
 

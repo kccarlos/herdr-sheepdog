@@ -15,6 +15,7 @@ import SwiftUI
 struct NewAgentSheet: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openAgentWindow) private var openWindow
 
     private enum Load: Equatable {
         case loading
@@ -47,7 +48,7 @@ struct NewAgentSheet: View {
                             if let paneID {
                                 Task {
                                     try? await Task.sleep(for: .milliseconds(400))
-                                    model.navigationPath.append(AgentWindowRoute(paneID: paneID))
+                                    openWindow(.newAgent(paneID))
                                 }
                             }
                         }

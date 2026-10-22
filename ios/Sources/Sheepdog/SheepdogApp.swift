@@ -10,6 +10,9 @@ struct SheepdogApp: App {
     @State private var showsSplash = true
     /// Until the splash has faded: sheets wait for it.
     @State private var splashCovering = true
+    /// Across every window: the session goes to the background only when
+    /// all of them have.
+    @Environment(\.scenePhase) private var appPhase
 
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
@@ -54,10 +57,10 @@ struct SheepdogApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
                 CapsuleGallery()
             } else {
-                mainView
+                MainSceneRoot { mainView }
             }
             #else
-            mainView
+            MainSceneRoot { mainView }
             #endif
         }
     }
@@ -82,6 +85,7 @@ struct SheepdogApp: App {
 
     private var mainView: some View {
         content
+            .environment(\.appPhase, appPhase)
             .environment(\.splashShowing, splashCovering)
             .overlay {
                 if showsSplash {
@@ -114,9 +118,24 @@ struct SheepdogApp: App {
             .onOpenURL { url in model.open(url: url) }
             // The offline demo (Settings ▸ Try the demo): a second view
             // model on a scripted daemon inside the app, over the real one.
-            .fullScreenCover(isPresented: $model.demoActive) {
-                DemoShell(close: { model.demoClosed() })
-            }
+            .modifier(DemoCover(model: model))
+    }
+}
+
+/// The demo opens in one window: the one that asked for it, else the
+/// audio owner.
+private struct DemoCover: ViewModifier {
+    @ObservedObject var model: SessionViewModel
+    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(\.sceneID) private var sceneID
+
+    func body(content: Content) -> some View {
+        content.fullScreenCover(isPresented: Binding(
+            get: { model.demoActive && scenes.isPresenter(sceneID) },
+            set: { model.demoActive = $0 }
+        )) {
+            DemoShell(close: { model.demoClosed() })
+        }
     }
 }
 
