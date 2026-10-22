@@ -244,9 +244,9 @@ nothing here, since their tests run on GitHub Actions.
    the same Apple ID. When a build lands, TestFlight notifies and offers
    **Install**.
 
-Internal testers get builds without App Review, so the app's
-`NSAllowsArbitraryLoads` (plain HTTP to the daemon on your own network)
-needs no justification for this. External testers or the App Store would.
+Internal testers get builds without App Review. The app needs no ATS
+exception beyond `NSAllowsLocalNetworking`: every address but loopback is
+TLS, pinned to the daemon's certificate.
 
 ## 5. Releasing a build
 

@@ -83,7 +83,7 @@ final class ConnectionChipTests: XCTestCase {
     func testTokenRefusedOutranksAPlainFailure() {
         let chip = ConnectionChip(.init(socket: .idle, events: .idle, failed: true, tokenRefused: true))
         XCTAssertEqual(chip.status, .tokenRefused)
-        XCTAssertEqual(chip.word, "Token refused")
+        XCTAssertEqual(chip.word, "Scan again")
         XCTAssertEqual(chip.tint, .red)
     }
 

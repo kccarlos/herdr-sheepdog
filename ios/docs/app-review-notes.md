@@ -78,8 +78,9 @@ in [dev/testflight-metadata.md](dev/testflight-metadata.md).
 | Local network (`NSLocalNetworkUsageDescription`) | The daemon runs on the user's own computer on the same Wi-Fi (or over Tailscale) | On the first connection |
 | Notifications | "An agent needs you" alerts from the user's daemon | After the first successful connection, and only when that daemon reports it can send pushes (never in the demo) |
 
-The app uses plain HTTP to a private address by design (the daemon has no
-TLS), which is why `NSAllowsArbitraryLoads` is set. Encryption export
+The app talks to the daemon over TLS and checks its self-signed certificate
+by fingerprint (the pin in the pairing code); the only ATS setting is
+`NSAllowsLocalNetworking`, for plain HTTP to loopback in development. Encryption export
 compliance: `ITSAppUsesNonExemptEncryption = false` (only what iOS
 provides).
 

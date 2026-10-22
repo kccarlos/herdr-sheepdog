@@ -121,11 +121,14 @@ any ──bot-ready below our minimum──────────────�
   `TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:<port>` is set (new daemon:
   `ready`; old daemon: `legacy` with no error shown), and skips otherwise.
 
-Auth is `Authorization: Bearer <token>` on every request, **including the
-WebSocket upgrade**, so the token never appears in a URL. Before opening
-`/ws`, the app probes `GET /api/state`, where a 401 is a plain status code.
-After a failed reconnect, the same probe tells whether the token was
-revoked mid-session.
+Auth is the session ticket (`Authorization: Bearer sds_…`) on every request
+to the paired computer, **including the WebSocket upgrades**, so it never
+appears in a URL. `DeviceCredentials` (SheepdogKit) signs in with the device
+key, once for all callers, and every `URLSession` checks the computer's
+certificate by its pin (`PinnedTrustDelegate`); see
+[security.md](../../../docs/dev/design/security.md) section 5.5. After a
+failed reconnect, `GET /api/state` (where a 401 is plain) tells whether the
+phone was revoked: that opens "Please scan again".
 
 ## Events
 
@@ -874,25 +877,22 @@ or an installed one not running yet; `UpdateInfo.notice` (SheepdogKit,
 it opens. A daemon without the field shows nothing
 (`UpdateNoticeUITests`, against `StubDaemon`).
 
-The Connection screen can also scan the pairing code `sheepdog pair` prints
-(`PairingScanner.swift`: an `AVCaptureSession` with a QR metadata output,
-behind the camera permission). `PairingLink` (SheepdogKit, tested) reads
-`sheepdog://pair?u=…&u=…&t=…`; the screen fills in the token, tries every
-address at once with `GET /api/hello` (three seconds each) and keeps the
-first in the code's order that answers (LAN before Tailscale), then runs
-Test connection.
-
-The same code scanned with the system Camera app opens the
-`sheepdog://pair?…` link in the app. `SessionViewModel.open(url:)` reads it
-as a `PairingLink` before `AppRoute` sees it, closes Settings if it is open
-(its fields would overwrite the result when it closes) and asks "Pair with
-<host>?" (`PairingLink.confirmation`, which lists the addresses and never
-shows the token). Nothing is contacted or saved before the user taps Pair.
-Then `resolvePairing`, which Settings' scanner shares, finds the first
-address that answers; the address and token are saved and the app
-repointed, and a banner says how it went. Declining, or a code whose
-addresses all fail, reopens the first-run Settings when no daemon is saved
-yet. `PairingLinkUITests` drives this without a daemon.
+Pairing is by code only (`PairingFlow.swift`): one sheet runs the camera
+primer, the scanner (an `AVCaptureSession` with a QR metadata output),
+"Pairing…", and the end: "Paired with X", "This code has expired or was
+used", or "Please scan again" (`PairingProblem`). `PairingCode`
+(SheepdogKit) reads the daemon's `https://…/voice#pair=1&d=…&k=…&e=…&u=…`
+link, or the `sheepdog://pair#…` hand-off the voice page offers.
+`SessionViewModel.pair` tries every address at once over TLS pinned to the
+code's pin, makes the device key, enrolls once (codes are one-time), signs
+in, and only then saves the computer and repoints the app. A link from
+outside the app opens the same sheet, asking "Pair with X?" first; nothing
+is contacted before Pair. Settings ▸ Connection shows the computer, "Paired
+<date> · cert <pin>", Test connection, Scan a new code and Remove (`DELETE
+/api/devices/self`, best effort, then the key and record are deleted).
+`PairingLinkUITests` drives the sheet, including a full walkthrough against
+the pair fixture daemon; DEBUG builds show any stage with
+`-sheepdogPairingScreen <stage>` for screenshots.
 
 ## The offline demo
 

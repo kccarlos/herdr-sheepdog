@@ -23,18 +23,29 @@ setup.
 
 ## Pair
 
-1. On the computer: `sheepdog setup`, step 4 (**Turn on phone access**), or
-   later `sheepdog pair`.
-2. In the app: ⋯ ▸ Settings, your computer's row (Connection), **Scan pairing code**. (Or point the iPhone
-   Camera at the code and open the `sheepdog://pair` link; the app asks
-   "Pair with <host>?" first.)
-3. Allow the microphone and notifications. Tap the orb to connect.
+1. On the computer: open the setup page (`sheepdog setup`), or run
+   `sheepdog pair`. It shows a pairing code. Each code works once, for 10
+   minutes.
+2. In the app: **Scan the pairing code** on the first screen (later:
+   ⋯ ▸ Settings, your computer's row, **Scan a new code**). The app asks
+   for the camera first.
+3. The app checks the computer's key against the code, makes this phone's
+   own key and shows **Paired with <computer>**. Every other paired device
+   is told that a new one was added.
+4. Allow the microphone and notifications. Tap the orb to connect.
    Notifications reach you even with the app closed: see
    [Notifications](#notifications).
 
-Prefer typing: `sheepdog serve` prints a `lan url` line; enter its host and
-port (for example `<lan-address>:7777`, no scheme) and the token in Settings,
-then **Test connection**.
+The connection is encrypted, and the app checks the computer's certificate
+on every connection. There is no address to type and no password. Settings ▸
+Connection shows the address, the date you paired and the start of the
+certificate's fingerprint, with **Test connection**, **Scan a new code** and
+**Remove** (the computer forgets this phone too).
+
+If the app says **Please scan again**, the phone was removed on the
+computer, or the computer's certificate changed (sheepdog reinstalled, or
+**Reset pairing**). Show a new code and scan it. If you did neither, do not
+continue on that network.
 
 On the same Wi-Fi this just works. Away from home, see
 [remote-access.md](remote-access.md) (Tailscale, then pair again).
@@ -222,8 +233,9 @@ in [dev/push.md](dev/push.md).
 
 | Symptom | Fix |
 |---|---|
-| Camera refuses to scan | Allow Camera in iOS Settings, or type the host and token. |
-| Offline or Token refused | [remote-access.md](remote-access.md). |
+| Camera refuses to scan | Allow Camera for Sheepdog in iOS Settings (the app has an **Open Settings** button). |
+| This code has expired or was used | Show a new code on the computer and scan it. |
+| Offline, or Please scan again | [remote-access.md](remote-access.md). |
 | No sound from the voice | Check the daemon: `sheepdog status` shows "NOT connected" with the reason ([troubleshooting.md](troubleshooting.md)). |
 | Local network prompt dismissed | iOS Settings, Sheepdog, Local Network on. |
 | App talks but agents are empty | herdr is not running or not reachable: `sheepdog doctor`. |
