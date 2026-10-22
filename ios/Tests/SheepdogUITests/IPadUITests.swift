@@ -35,8 +35,14 @@ final class IPadUITests: XCTestCase {
     private func shot(_ name: String) {
         guard let directory = environment["SHEEPDOG_IPAD_SHOTS"] else { return }
         let suffix = environment["SHEEPDOG_SHOTS_SUFFIX"] ?? "light"
-        let screenshot = XCUIScreen.main.screenshot()
-        try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: directory).appendingPathComponent("ipad-\(name)-\(suffix).png"))
+        // Drawn upright: in landscape the raw capture is sideways.
+        let image = XCUIScreen.main.screenshot().image
+        let upright = UIGraphicsImageRenderer(size: image.size, format: {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = image.scale
+            return format
+        }()).pngData { _ in image.draw(in: CGRect(origin: .zero, size: image.size)) }
+        try? upright.write(to: URL(fileURLWithPath: directory).appendingPathComponent("ipad-\(name)-\(suffix).png"))
     }
 
     /// Landscape: the sidebar with Conversation, All agents and the agents
