@@ -188,12 +188,18 @@ targets:
   # app's process. No App Group: nothing is shared through a container
   # (ActivityKit carries the content state). Its bundle ID is registered on
   # team GV776BZVA8 with no capabilities (docs/dev/xcode-cloud.md).
+  # It links SheepdogKit (embedded in the app, found through the
+  # extension's default ../../Frameworks runpath) for the content state,
+  # LiveActivityContent, and its words.
   SheepdogWidgets:
     type: app-extension
     platform: iOS
     sources:
       - path: Sources/SheepdogWidgets
       - path: Sources/SheepdogActivity
+    dependencies:
+      - target: SheepdogKit
+        embed: false
     info:
       path: Sources/SheepdogWidgets/Info.plist
       properties:

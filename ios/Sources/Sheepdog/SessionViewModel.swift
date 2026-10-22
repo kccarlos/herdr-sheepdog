@@ -953,16 +953,16 @@ final class SessionViewModel: ObservableObject {
         guard demo == nil else { return }
         #if DEBUG
         if let demo = DebugLaunch.demoLiveActivity {
-            away.sync(VoiceActivityState.make(state: demo, muted: demo == .muted, waiting: 2, voiceName: voiceName), voiceName: voiceName)
+            away.sync(LiveActivitySamples.demo(demo), voiceName: voiceName)
             return
         }
         #endif
         let activityState = wantsConnection
-            ? VoiceActivityState.make(
+            ? LiveActivityContent.make(
                 state: state,
                 muted: isMuted,
-                waiting: flock.waitingCount,
-                voiceName: voiceName,
+                agents: agents,
+                questions: questions,
                 suspendedInBackground: core.suspension.backgroundSuspended
             )
             : nil
@@ -1012,6 +1012,10 @@ final class SessionViewModel: ObservableObject {
             case let .openAgent(id):
                 // What a tap on an agent's notification does.
                 PushCoordinator.shared.focus(paneID: id)
+            case let .openWindow(id, _):
+                // A Live Activity row. One computer for now: the
+                // computer id is for when there are several.
+                openAgentWindow(paneID: id)
             }
         }
     }
@@ -1235,14 +1239,15 @@ final class SessionViewModel: ObservableObject {
         let debugQuestions: [PendingAction] = []
         #endif
         let sorted = Flock.sorted(all)
-        if sorted != agents {
-            agents = sorted
-            syncAway()
-        }
+        let agentsChanged = sorted != agents
+        if agentsChanged { agents = sorted }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
         let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
-        if open != questions { questions = open }
+        let questionsChanged = open != questions
+        if questionsChanged { questions = open }
+        // The Live Activity's rows and counts.
+        if agentsChanged || questionsChanged { syncAway() }
         questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
