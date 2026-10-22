@@ -107,6 +107,19 @@ final class RedesignShotsUITests: XCTestCase {
         shot("floating-answered")
     }
 
+    /// The Conversation once the demo has news and a question: the agent
+    /// strip, the rows and the floating question.
+    func testConversationWithQuestion() throws {
+        let app = launchDemo()
+        // codex-payments asks after about 16 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("conversation-question")
+        app.swipeDown()
+        sleep(1)
+        shot("conversation-top")
+    }
+
     func testEmptyConversation() throws {
         // A saved address with nothing behind it: no history, no banner
         // until the orb is tapped.

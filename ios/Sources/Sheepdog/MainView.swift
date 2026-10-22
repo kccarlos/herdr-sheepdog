@@ -58,9 +58,12 @@ struct MainView: View {
                 }
 
                 if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
+                    // One computer today: no chip names a computer.
                     AgentStrip(agents: model.flock.running, pending: model.pendingAction)
+                        // Chrome: the chips grow up to the first
+                        // accessibility size, then the strip stays one row.
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 2)
                 }
 
                 Rectangle().fill(Theme.line).frame(height: 1)
