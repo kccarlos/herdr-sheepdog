@@ -41,6 +41,11 @@ struct SheepdogApp: App {
                       i + 1 < ProcessInfo.processInfo.arguments.count,
                       let primer = PermissionPrimer(rawValue: ProcessInfo.processInfo.arguments[i + 1]) {
                 PermissionPrimerView(primer: primer) { _ in }
+            } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-sheepdogPairingScreen"),
+                      i + 1 < ProcessInfo.processInfo.arguments.count {
+                // The pairing screens for screenshots (no camera needed).
+                PairingFlowView(stage: Self.pairingStage(ProcessInfo.processInfo.arguments[i + 1]))
+                    .environmentObject(model)
             } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
                 CapsuleGallery()
             } else {
@@ -51,6 +56,24 @@ struct SheepdogApp: App {
             #endif
         }
     }
+
+    #if DEBUG
+    private static func pairingStage(_ name: String) -> PairingStage {
+        switch name {
+        case "primer": return .primer
+        case "denied": return .denied
+        case "noCamera": return .noCamera
+        case "scanning": return .scanning
+        case "confirm": return .confirm(PairingCode(daemonID: "d", name: "Studio Mac", pin: "p", code: "c", addresses: ["192.168.1.20:7777"]))
+        case "working": return .working("Studio Mac")
+        case "paired": return .paired("Studio Mac")
+        case "expired": return .problem(.codeUsed)
+        case "revoked": return .problem(.revoked)
+        case "pinMismatch": return .problem(.pinMismatch)
+        default: return .failed(title: "None of the code's addresses answered", detail: "Tried 192.168.1.20:7777. " + SetupHelp.unreachableFix)
+        }
+    }
+    #endif
 
     private var mainView: some View {
         content

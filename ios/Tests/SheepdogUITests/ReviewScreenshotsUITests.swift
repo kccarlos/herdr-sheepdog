@@ -41,7 +41,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState"]
         app.launch()
-        _ = app.textFields["settings.address"].waitForExistence(timeout: 10)
+        _ = app.buttons["settings.scan"].waitForExistence(timeout: 10)
         sleep(2)
         shot(app, "first-run")
     }

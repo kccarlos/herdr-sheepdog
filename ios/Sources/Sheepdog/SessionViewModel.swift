@@ -772,6 +772,10 @@ final class SessionViewModel: ObservableObject {
             } catch let DaemonError.pairing(problem) {
                 self.pairingProblem = problem
                 self.send(.tokenRefused(endpoint: self.endpointDisplay))
+            } catch DaemonError.unauthorized {
+                // Signing in again did not help: only a new code will.
+                self.pairingProblem = .unknownDevice
+                self.send(.tokenRefused(endpoint: self.endpointDisplay))
             } catch {
                 // Unreachable or anything else: the reconnect loop's own
                 // words already say it.
