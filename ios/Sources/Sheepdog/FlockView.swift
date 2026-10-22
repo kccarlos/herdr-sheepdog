@@ -167,6 +167,7 @@ struct AgentCard: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openAgentWindow) private var openWindow
 
     private var waiting: Bool { question != nil }
     private var showsDetails: Bool { !waiting && expanded }
@@ -315,7 +316,9 @@ struct AgentCard: View {
 
     /// The round window button: opens the agent's live terminal.
     private var windowButton: some View {
-        NavigationLink(value: AgentWindowRoute(paneID: agent.paneID)) {
+        Button {
+            openWindow(.agent(agent.paneID))
+        } label: {
             Image(systemName: "apple.terminal")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Theme.ink)

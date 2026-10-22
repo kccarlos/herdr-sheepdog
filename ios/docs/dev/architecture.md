@@ -309,6 +309,40 @@ accessibility text sizes. The voice capsule stays in place.
   argument `-sheepdogDemoCard` asks it by itself for screenshots
   (`CardsUITests`, `TEST_RUNNER_SHEEPDOG_CARD_SHOTS=<dir>`).
 
+## iPad and several windows
+
+The app runs on iPad (`TARGETED_DEVICE_FAMILY` 1,2 for every target; the
+iPhone stays portrait, the iPad turns every way) with several windows
+(`UIApplicationSupportsMultipleScenes`). Design: docs/dev/design/app-redesign.md
+section 6.
+
+- **One session, several windows** (`Scenes.swift`). The App holds the one
+  `SessionViewModel`, so there is one voice session whatever the number of
+  windows. `SceneCoordinator` tracks the main windows (`MainSceneRoot`
+  registers each one):
+  - **the audio owner** is the oldest main window still open. It shows the
+    full capsule, reports `visibility` and turns the app-wide phase
+    (`\.appPhase`, the `App`'s own `scenePhase`, which is the aggregate)
+    into `becameActive` and `enteredBackground`. Another window going to
+    the background does not end the session.
+  - **the presenter** shows the session's sheets (Settings, New agent,
+    Spaces, a card, pairing, the primers, the demo): the window whose menu
+    asked (`SessionMenus` calls `request(from:)`), else the owner.
+    Otherwise every window would open the same sheet.
+  - every other window shows the **mini capsule** (`MiniCapsule`): a 30 pt
+    orb (Mute while listening, else the big orb's action) and the voice
+    menu.
+  - `SessionViewModel.start()` runs once, whichever window appears first.
+- **Layouts** (`MainView.swift`). `MainView` picks the layout and wraps it
+  in `SessionChrome` (the sheets, dialogs and lifecycle every layout
+  shares). `PhoneRootView` is the iPhone layout, also used on iPad at
+  compact width.
+- **Opening a window** goes through one seam: `\.openAgentWindow`
+  (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
+  pushes on `navigationPath`. Requests from the session itself (a card's
+  Open window, a Live Activity row) arrive as `model.windowRequest`, which
+  the layout opens and clears.
+
 ## The terminal surface
 
 The live agent window ([phone-terminal.md](../../../docs/dev/design/phone-terminal.md))

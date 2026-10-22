@@ -39,6 +39,7 @@ private struct AgentWindowView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openAgentWindow) private var openWindow
     @State private var prompt = ""
     @State private var showsMoreKeys = false
     @State private var action: AgentWindowAction?
@@ -177,7 +178,7 @@ private struct AgentWindowView: View {
             .accessibilityIdentifier("agentScreen.menu.changes")
             if model.shellEntryShown, let cwd = live.cwd, !cwd.isEmpty {
                 Button {
-                    model.navigationPath.append(ShellRoute(cwd: cwd))
+                    openWindow(.shell(cwd: cwd))
                 } label: {
                     Label("Open shell here", systemImage: "apple.terminal")
                 }

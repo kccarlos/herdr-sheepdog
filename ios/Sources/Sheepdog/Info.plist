@@ -45,15 +45,20 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sheepdog connects to the sheepdog daemon on your own computer, over your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sheepdog uses the microphone so you can talk to your coding agents. Your voice goes only to the sheepdog daemon on your own computer; in the demo it stays on this iPhone.</string>
+	<string>Sheepdog uses the microphone so you can talk to your coding agents. Your voice goes only to the sheepdog daemon on your own computer; in the demo it stays on this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>In the demo, Sheepdog recognises your spoken questions on this iPhone only (on-device recognition). Nothing is sent anywhere.</string>
+	<string>In the demo, Sheepdog recognises your spoken questions on this device only (on-device recognition). Nothing is sent anywhere.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>SheepdogAppGroup</key>
 	<string>$(SHEEPDOG_APP_GROUP)</string>
 	<key>SheepdogPushEnvironment</key>
 	<string>$(SHEEPDOG_PUSH_ENVIRONMENT)</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
@@ -65,5 +70,16 @@
 		<key>UIImageName</key>
 		<string>LaunchLogo</string>
 	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

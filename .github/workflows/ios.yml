@@ -253,6 +253,51 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
           sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
 
+      # The iPad layout (IPadUITests, offline demo, no daemon) on an iPad
+      # simulator, from the same build. Only these tests: the rest of the
+      # suite already ran on the iPhone above, and running it all twice
+      # would double the job's time.
+      - name: UI tests - iPad
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: ios
+        run: |
+          xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" || true
+          ipad=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devs = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, items in devs.items():
+              if "iOS" not in runtime:
+                  continue
+              ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
+              for d in items:
+                  if d["name"].startswith("iPad Pro 13") and (best is None or ver > best[0]):
+                      best = (ver, d["udid"], d["name"], runtime)
+          if best is None:
+              for runtime, items in devs.items():
+                  for d in items:
+                      if "iOS" in runtime and d["name"].startswith("iPad") and best is None:
+                          best = ((), d["udid"], d["name"], runtime)
+          if best is None:
+              sys.exit("no iPad simulator available")
+          print(best[1])
+          print(best[2], best[3], file=sys.stderr)
+          ')
+          xcrun simctl boot "$ipad" || true
+          xcrun simctl bootstatus "$ipad" -b
+          status=0
+          xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=$ipad" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            -only-testing:SheepdogUITests/IPadUITests \
+            -resultBundlePath "$RESULTS/IPad.xcresult" \
+            > "$RESULTS/ipad.log" 2>&1 || status=$?
+          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
+
       - name: Stop the fixture daemons
         if: always()
         run: ios/scripts/fixture-daemons.sh stop || true
