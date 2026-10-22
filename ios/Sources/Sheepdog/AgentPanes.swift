@@ -233,7 +233,16 @@ private struct AgentWindowContent: View {
         }
         .background(Theme.surface)
         .environmentObject(ui)
-        // A window restored on its own, before any main window.
-        .onAppear { model.start() }
+        .onAppear {
+            #if DEBUG
+            // A UI test starting clean does not want last run's windows.
+            if DebugLaunch.resetState, Date().timeIntervalSince(DebugLaunch.launchedAt) < 5 {
+                dismissWindow()
+                return
+            }
+            #endif
+            // A window restored on its own, before any main window.
+            model.start()
+        }
     }
 }
