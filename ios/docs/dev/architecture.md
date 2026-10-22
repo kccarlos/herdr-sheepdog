@@ -348,7 +348,12 @@ section 6.
     No agents: one line with the action that helps (New agent, Connect,
     Pair, Retry).
   - The detail (`SceneUI.detail`): the Conversation in a 720 pt column
-    with the open questions pinned above `IPadComposer`; All agents; or
+    with the open questions pinned above `IPadComposer`; All agents
+    (`AllAgentsView`: `AgentCard`s in two independent columns, one at the
+    accessibility sizes; `AgentFilter` All / Waiting / Working with a
+    plain empty state and Show all; Expand all fills `expandedAgents` with
+    every card that has no question; expanded cards add "Earlier", up to 3
+    older messages, `Agent.earlierWorkerMessages`); or
     an agent's window as a pane (`AgentScreenView(pane:)` with a
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.

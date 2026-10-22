@@ -65,6 +65,30 @@ final class IPadUITests: XCTestCase {
         shot("all-agents")
     }
 
+    /// All agents: two columns of cards, the filters, and Expand all,
+    /// which opens every card that has no question.
+    func testAllAgentsFiltersAndExpandAll() throws {
+        let app = launchDemo(["-sheepdogDemoMarkdown"])
+        let all = element(app, "sidebar.allAgents")
+        XCTAssertTrue(all.waitForExistence(timeout: 10))
+        all.tap()
+        XCTAssertTrue(element(app, "allAgents.grid").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "flock.agent.claude-auth").exists)
+        element(app, "allAgents.expandAll").tap()
+        XCTAssertTrue(element(app, "flock.agent.docs.message").waitForExistence(timeout: 5), "expanded cards show the newest message")
+        sleep(1)
+        shot("all-agents-expanded")
+        element(app, "allAgents.filter.working").tap()
+        XCTAssertFalse(element(app, "flock.agent.docs").waitForExistence(timeout: 2), "a finished agent is not working")
+        element(app, "allAgents.filter.waiting").tap()
+        // The demo's agents are not waiting at the start.
+        if element(app, "allAgents.empty").waitForExistence(timeout: 3) {
+            shot("all-agents-waiting-empty")
+            element(app, "allAgents.showAll").tap()
+            XCTAssertTrue(element(app, "flock.agent.docs").waitForExistence(timeout: 5))
+        }
+    }
+
     /// Portrait: the sidebar hides, and the detail's header carries Show
     /// sidebar and the mini capsule.
     func testPortraitHidesTheSidebar() throws {
