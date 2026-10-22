@@ -217,3 +217,25 @@ func (s *Server) handleRunCommand(w http.ResponseWriter, r *http.Request) {
 		return map[string]any{"pane_id": pane}, err
 	})
 }
+
+// handleRunLine is POST /api/spaces/{id}/run {"command", "name"?}: a
+// one-off line in a new tab of the space, not saved. The same gate as a
+// saved command: running a line is shell access.
+func (s *Server) handleRunLine(w http.ResponseWriter, r *http.Request) {
+	if !s.term.shellAllowed() {
+		writeError(w, http.StatusForbidden, "running commands is off on this computer, like the shell")
+		return
+	}
+	var req struct {
+		Name    string `json:"name"`
+		Command string `json:"command"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	s.spaceAction(w, r, "command_run_line", func(ctx context.Context, a AgentActions, id string) (map[string]any, error) {
+		pane, err := a.RunLine(ctx, id, req.Name, req.Command)
+		return map[string]any{"pane_id": pane}, err
+	})
+}

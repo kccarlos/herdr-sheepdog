@@ -1087,6 +1087,7 @@ and told to the orchestrator in one line.
 | `PUT /api/spaces/{id}/commands/{cid}` | `{"name", "command"}` | `{"ok": true, "command"}` |
 | `DELETE /api/spaces/{id}/commands/{cid}` | | `{"ok": true}` |
 | `POST /api/spaces/{id}/commands/{cid}/run` | | `{"ok": true, "pane_id"}` |
+| `POST /api/spaces/{id}/run` | `{"command", "name"?}` | `{"ok": true, "pane_id"}` |
 
 A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
 "worktree", "agents": [{"pane_id", "alias", "name", "kind", "state",
@@ -1135,7 +1136,11 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
   (herdr's `pane run`), then answers with the tab's pane, which the app
   opens as a shell window. Running a command is shell-equivalent, so it
   sits behind the [phone shell's](term-contract.md#the-plain-shell) gate
-  (`403` where the shell is off).
+  (`403` where the shell is off). **Run a line** (`POST
+  /api/spaces/{id}/run`) runs a one-off `command` the same way without
+  saving it, in a tab named `name` or after the command's first word,
+  behind the same gate.
+
 ## Attachments
 
 **`POST /api/agents/{pane_id}/attachments`** — a photo or file the user

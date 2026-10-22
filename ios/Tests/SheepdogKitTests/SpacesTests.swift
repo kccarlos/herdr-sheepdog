@@ -52,4 +52,50 @@ final class SpacesTests: XCTestCase {
         XCTAssertEqual(view.spaces.map(\.name), ["store", "website"])
         XCTAssertEqual(view.kinds.map(\.kind), ["claude", "codex", "agy"])
     }
+
+    func testEditingACommandAndRunningALineInTheDemo() {
+        var demo = DemoSpaces()
+        XCTAssertEqual(demo.handle(method: "PUT", path: "/api/spaces/w1/commands/c1", body: ["name": "Tests", "command": "npm test -- --ci"], busy: false)?.status, 200)
+        XCTAssertEqual(demo.spaces[0].commands.first?.name, "Tests")
+        XCTAssertEqual(demo.spaces[0].commands.first?.command, "npm test -- --ci")
+        XCTAssertEqual(demo.handle(method: "PUT", path: "/api/spaces/w1/commands/nope", body: ["name": "x", "command": "y"], busy: false)?.status, 404)
+        XCTAssertEqual(demo.handle(method: "POST", path: "/api/spaces/w1/run", body: ["command": "make lint"], busy: false)?.status, 200)
+        XCTAssertEqual(demo.spaces[0].commands.count, 2, "a one-off line is not saved")
+    }
+
+    // MARK: - Choose another folder…
+
+    private func folderView() throws -> SpacesView {
+        let json: [String: Any] = [
+            "spaces": [["id": "w1", "name": "shop", "path": "/Users/you/code/shop", "git": true, "worktree": false, "agents": [], "shells": [], "commands": []]],
+            "folders": [["name": "website", "path": "/Users/you/code/website", "git": true],
+                        ["name": "notes", "path": "/Users/you/code/notes", "git": false],
+                        ["name": "lab", "path": "/Volumes/work/lab", "git": true]],
+            "kinds": [["kind": "claude", "name": "Claude"]],
+            "worktrees": true,
+        ]
+        return try JSONDecoder().decode(SpacesView.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    func testTheRootsAreTheFoldersParents() throws {
+        XCTAssertEqual(NewAgentOptions.roots(try folderView()), ["/Users/you/code", "/Volumes/work"])
+    }
+
+    func testATypedFolder() throws {
+        let view = try folderView()
+        let typed = NewAgentOptions.typedFolder(" /Users/you/code/webapp/packages/api/ ", in: view)
+        XCTAssertEqual(typed?.name, "api")
+        XCTAssertEqual(typed?.path, "/Users/you/code/webapp/packages/api")
+        XCTAssertNil(typed?.space)
+        XCTAssertTrue(NewAgentOptions.isTyped(typed!, in: view), "no git claim either way")
+        XCTAssertEqual(NewAgentOptions.typedFolder("~/code/x", in: view)?.path, "~/code/x")
+        // A listed folder or space is that one.
+        XCTAssertEqual(NewAgentOptions.typedFolder("/Users/you/code/notes", in: view)?.git, false)
+        XCTAssertFalse(NewAgentOptions.isTyped(NewAgentOptions.typedFolder("/Users/you/code/notes", in: view)!, in: view))
+        XCTAssertEqual(NewAgentOptions.typedFolder("/Users/you/code/shop", in: view)?.space, "w1")
+        // Not a full path, or climbing out.
+        for bad in ["", "webapp", "code/webapp", "/Users/you/code/../../etc", "/", "~", "~/"] {
+            XCTAssertNil(NewAgentOptions.typedFolder(bad, in: view), bad)
+        }
+    }
 }

@@ -228,7 +228,7 @@ struct SpaceDetailView: View {
     @State private var confirmClose = false
     @State private var confirmRemove = false
     @State private var confirmForce = false
-    @State private var addingCommand = false
+    @State private var editor: CommandSheet.Mode?
     @State private var renaming = false
     @State private var newName = ""
     @State private var notice: String?
@@ -294,21 +294,44 @@ struct SpaceDetailView: View {
                     }
                     .accessibilityLabel("Run \(command.name): \(command.command)")
                     .accessibilityIdentifier("space.command.\(command.name)")
-                }
-                .onDelete { offsets in
-                    let ids = offsets.map { space.commands[$0].id }
-                    Task { for id in ids { await delete(id) } }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) { Task { await delete(command.id) } } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        Button { editor = .edit(command) } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(Theme.working)
+                    }
+                    .contextMenu {
+                        Button { Task { await run(command) } } label: { Label("Run", systemImage: "play") }
+                        Button { editor = .edit(command) } label: { Label("Edit…", systemImage: "pencil") }
+                            .accessibilityIdentifier("space.command.edit")
+                        Button(role: .destructive) { Task { await delete(command.id) } } label: { Label("Delete", systemImage: "trash") }
+                    }
+                    .accessibilityAction(named: "Edit") { editor = .edit(command) }
+                    .accessibilityAction(named: "Delete") { Task { await delete(command.id) } }
                 }
                 Button {
-                    addingCommand = true
+                    editor = .runOnce
                 } label: {
-                    Label("Add a command…", systemImage: "plus")
+                    Label("Run a command…", systemImage: "terminal")
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("space.command.runOnce")
+                Button {
+                    editor = .add
+                } label: {
+                    Label("Save a command…", systemImage: "plus")
+                        .frame(minHeight: 44)
                 }
                 .accessibilityIdentifier("space.command.add")
             } header: {
                 Text("Wrap up")
             } footer: {
-                Text("Each runs in a new tab of this space on your computer.")
+                Text(space.commands.isEmpty
+                     ? "Commands you run when work is done, like your tests. Each runs in a new tab of this space on your computer."
+                     : "Each runs in a new tab of this space on your computer. Swipe one to edit it.")
             }
             Section {
                 if let blocker = SpaceSummary.closeBlocker(space) {
@@ -334,9 +357,19 @@ struct SpaceDetailView: View {
             }
         }
         .task { await loadWorktrees() }
-        .sheet(isPresented: $addingCommand) {
-            AddCommandSheet { name, command in
-                await act { try await $0.addCommand(space: space.id, name: name, command: command) }
+        .sheet(item: $editor) { mode in
+            CommandSheet(mode: mode, spaceName: space.name) { name, command, save in
+                switch mode {
+                case let .edit(old):
+                    await act { try await $0.updateCommand(space: space.id, command: old.id, name: name, command: command) }
+                case .add:
+                    await act { try await $0.addCommand(space: space.id, name: name, command: command) }
+                case .runOnce:
+                    if save {
+                        await act { try await $0.addCommand(space: space.id, name: name, command: command) }
+                    }
+                    await runLine(command)
+                }
             }
         }
         .alert("Rename space", isPresented: $renaming) {
@@ -466,6 +499,17 @@ struct SpaceDetailView: View {
         running = nil
     }
 
+    private func runLine(_ command: String) async {
+        do {
+            _ = try await model.daemon { try await $0.runLine(space: space.id, command: command) }
+            notice = "It is running in a new tab of \(space.name) on your computer."
+            Haptics.answered()
+        } catch {
+            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            Haptics.answerFailed()
+        }
+    }
+
     private func delete(_ id: String) async {
         await act { try await $0.deleteCommand(space: space.id, command: id) }
     }
@@ -496,46 +540,3 @@ struct SpaceDetailView: View {
     }
 }
 
-/// Save a wrap-up command: a name and one line.
-private struct AddCommandSheet: View {
-    let save: (String, String) async -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var command = ""
-
-    private var valid: Bool {
-        let n = name.trimmingCharacters(in: .whitespaces)
-        let c = command.trimmingCharacters(in: .whitespaces)
-        return !n.isEmpty && n.count <= 40 && !c.isEmpty && !c.contains("\n")
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Name, like Run tests", text: $name)
-                    .accessibilityIdentifier("space.command.name")
-                TextField("Command, like npm test", text: $command)
-                    .font(.body.monospaced())
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("space.command.line")
-            }
-            .navigationTitle("Wrap-up command")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task {
-                            await save(name.trimmingCharacters(in: .whitespaces), command.trimmingCharacters(in: .whitespaces))
-                            dismiss()
-                        }
-                    }
-                    .disabled(!valid)
-                    .accessibilityIdentifier("space.command.save")
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
