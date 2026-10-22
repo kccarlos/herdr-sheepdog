@@ -779,12 +779,23 @@ the one real-time boundary is the explicit buffer copy in the tap.
 
 ## Settings
 
-`SettingsView` is a shallow menu: Daemon, Voice, Models, Languages,
-Notifications, Diagnostics, About, each one screen (`SettingsScreens.swift`,
-`ModelsView`, `LanguagesView`). Nothing needs saving. Switches write when
-flipped; the daemon address and token are written, and the app repointed,
-when you leave the Daemon screen or tap Done. The first run opens on the
-Daemon screen and cannot be closed until an address is in.
+`SettingsView` is a shallow menu in three sections, each row one screen
+(`SettingsScreens.swift`, `ModelsView`, `LanguagesView`):
+
+- **Computer:** the computer's row (`ComputerRow`: `[computer] name` from
+  `/api/hello`, a status dot and "Talking here · address" / "Offline ·
+  address"), which opens the Connection screen, then what belongs to the
+  computer: Models, Languages and the shell's state. With several
+  computers this section becomes the list of computers, each with its own
+  page; with one it stays a single row and no computer label shows
+  anywhere else.
+- **This phone:** Voice and Notifications.
+- **Help:** Diagnostics and About; then Try the demo.
+
+Nothing needs saving. Switches write when flipped; the address is written,
+and the app repointed, when you leave the Connection screen or tap Done.
+The first run opens on that screen ("Welcome") and cannot be closed until
+an address is in.
 
 Above the menu, `UpdateNoticeRow` shows `/api/state`'s `update` object
 (daemon docs/dev/update.md) as one line when it reports a newer release
@@ -794,7 +805,7 @@ or an installed one not running yet; `UpdateInfo.notice` (SheepdogKit,
 it opens. A daemon without the field shows nothing
 (`UpdateNoticeUITests`, against `StubDaemon`).
 
-The Daemon screen can also scan the pairing code `sheepdog pair` prints
+The Connection screen can also scan the pairing code `sheepdog pair` prints
 (`PairingScanner.swift`: an `AVCaptureSession` with a QR metadata output,
 behind the camera permission). `PairingLink` (SheepdogKit, tested) reads
 `sheepdog://pair?u=…&u=…&t=…`; the screen fills in the token, tries every

@@ -25,7 +25,7 @@ setup.
 
 1. On the computer: `sheepdog setup`, step 4 (**Turn on phone access**), or
    later `sheepdog pair`.
-2. In the app: Settings, Daemon, **Scan pairing code**. (Or point the iPhone
+2. In the app: ⋯ ▸ Settings, your computer's row (Connection), **Scan pairing code**. (Or point the iPhone
    Camera at the code and open the `sheepdog://pair` link; the app asks
    "Pair with <host>?" first.)
 3. Allow the microphone and notifications. Tap the orb to connect.
@@ -150,6 +150,12 @@ On the same Wi-Fi this just works. Away from home, see
   (Settings, the Agents pane, an agent window), the voice says it instead.
   Needs a daemon new enough to send cards; the demo's "Show me the agents"
   shows one.
+- **Settings** (⋯ ▸ Settings) has three parts. **Computer:** your computer
+  with how the phone reaches it (tap it for the connection), and what
+  belongs to that computer: Models, Languages, and the shell's state.
+  **This phone:** Voice (microphone mode, hold to talk, keep listening
+  with the screen locked) and Notifications. **Help:** Diagnostics and
+  About. **Try the demo** is at the bottom.
 - **Settings, Models.** Switch the voice and the orchestrator
   ([models.md](models.md)). **Settings, Languages** sets the languages you
   speak, most preferred first.
