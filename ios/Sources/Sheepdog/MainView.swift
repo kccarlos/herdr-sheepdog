@@ -18,6 +18,7 @@ struct MainView: View {
     /// The question collapse, the window zoom and the capsule morph.
     @Namespace private var motion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.splashShowing) private var splashShowing
 
     /// Rows that fold to a pointer while their question floats.
     private var pointerIDs: Set<String> {
@@ -187,7 +188,12 @@ struct MainView: View {
             } message: { link in
                 Text(link.confirmation(currentAddress: model.settings.address).message)
             }
-            .sheet(isPresented: $model.showSettings) {
+            // Not while the splash is up: the first-run sheet waits for
+            // it to fade instead of sliding over it.
+            .sheet(isPresented: Binding(
+                get: { model.showSettings && !splashShowing },
+                set: { model.showSettings = $0 }
+            )) {
                 SettingsView(meter: model.meter)
                     .environmentObject(model)
             }

@@ -8,6 +8,8 @@ struct SheepdogApp: App {
     /// The splash covers the first moment after the launch screen, then
     /// fades. Touches pass through it.
     @State private var showsSplash = true
+    /// Until the splash has faded: sheets wait for it.
+    @State private var splashCovering = true
 
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
@@ -57,6 +59,7 @@ struct SheepdogApp: App {
 
     private var mainView: some View {
         content
+            .environment(\.splashShowing, splashCovering)
             .overlay {
                 if showsSplash {
                     SplashView()
@@ -70,6 +73,8 @@ struct SheepdogApp: App {
                 #endif
                 try? await Task.sleep(for: .milliseconds(600))
                 withAnimation(.easeOut(duration: 0.3)) { showsSplash = false }
+                try? await Task.sleep(for: .milliseconds(300))
+                splashCovering = false
                 #if DEBUG
                 // After start() has shown the first-run sheet, which
                 // openDemo() closes first.
