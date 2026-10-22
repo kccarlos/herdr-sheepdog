@@ -9,7 +9,6 @@ struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var started = false
     @State private var confirmNewConversation = false
-    @State private var showsNewAgent = false
     @State private var typing = false
     @State private var showsConnection = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -82,8 +81,15 @@ struct MainView: View {
                     case .flock where paneState != .content:
                         FlockUnavailableView(state: paneState)
                     case .flock:
-                        FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID,
-                                  answer: { model.answer(option: $0) })
+                        FlockView(
+                            flock: model.flock,
+                            question: { model.questionCard(for: $0) },
+                            answer: { model.answer(question: $0, option: $1) },
+                            expanded: $model.expandedAgents,
+                            focusedPaneID: $model.focusedAgentPaneID,
+                            onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil,
+                            voiceQuestionID: model.approval?.pending.id
+                        )
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -157,7 +163,7 @@ struct MainView: View {
                 SettingsView(meter: model.meter)
                     .environmentObject(model)
             }
-            .sheet(isPresented: $showsNewAgent) { NewAgentSheet() }
+            .sheet(isPresented: $model.showsNewAgent) { NewAgentSheet() }
             .sheet(isPresented: $showsConnection) {
                 ConnectionDetailView(
                     showSettings: {
@@ -222,6 +228,7 @@ struct MainView: View {
                     model.dismissCoachMark()
                 }
                 .padding(.horizontal, 4)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .onAppear {
                     AccessibilityNotification.Announcement(VoiceBarModel.coachMark(voiceName: model.voiceName)).post()
@@ -246,7 +253,9 @@ struct MainView: View {
                         .transition(morph)
                 }
             }
-            .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+            // Grows with the text, up to a cap: past it the capsule would
+            // cover the conversation it is there to serve.
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
@@ -347,7 +356,7 @@ struct MainView: View {
     @ViewBuilder
     private var newMenu: some View {
         Button {
-            showsNewAgent = true
+            model.showsNewAgent = true
         } label: {
             Label("New agent", systemImage: "plus.square")
         }
@@ -443,8 +452,9 @@ struct TopBar<NewMenu: View, MoreMenu: View>: View {
             .foregroundStyle(Theme.ink)
             .background(Capsule().fill(Theme.card))
             .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
+        // Chrome stops at the largest non-accessibility size.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.leading, 16)
         .padding(.trailing, 12)
         .padding(.vertical, 6)

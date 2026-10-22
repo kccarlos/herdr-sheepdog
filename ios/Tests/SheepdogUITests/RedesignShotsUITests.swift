@@ -45,23 +45,23 @@ final class RedesignShotsUITests: XCTestCase {
         let app = launchDemo()
         sleep(3)
         shot("conversation")
-        app.buttons["main.pane.flock"].firstMatch.tap()
+        selectPane(app, "flock")
         sleep(2)
         shot("agents")
-        app.buttons["voice.menu"].firstMatch.tap()
+        tapOnScreen(app, "voice.menu")
         sleep(1)
         shot("voice-menu")
         dismissMenu(app)
-        app.buttons["toolbar.more"].firstMatch.tap()
+        tapOnScreen(app, "toolbar.more")
         sleep(1)
         shot("more-menu")
         dismissMenu(app)
-        app.buttons["toolbar.new"].firstMatch.tap()
+        tapOnScreen(app, "toolbar.new")
         sleep(1)
         shot("plus-menu")
         dismissMenu(app)
-        app.buttons["main.pane.conversation"].firstMatch.tap()
-        app.buttons["controls.type"].firstMatch.tap()
+        selectPane(app, "conversation")
+        tapOnScreen(app, "controls.type")
         let field = app.textFields["type.field"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.typeText("and remind me when search is done")
@@ -69,7 +69,52 @@ final class RedesignShotsUITests: XCTestCase {
         shot("composer")
     }
 
+    func testAgentsPage() throws {
+        let app = launchDemo()
+        selectPane(app, "flock")
+        // codex-payments asks after about 16 s; claude-auth is done at 8 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("agents-waiting")
+        let toggle = app.buttons["flock.agent.claude-auth.toggle"].firstMatch
+        if toggle.waitForExistence(timeout: 5) { toggle.tap() }
+        app.swipeUp()
+        sleep(1)
+        shot("agents-expanded")
+        tapOnScreen(app, "flock.agent.claude-auth.window")
+        XCTAssertTrue(app.buttons["agentScreen.key.more"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot("agent-window")
+        app.buttons["agentScreen.key.more"].tap()
+        XCTAssertTrue(app.buttons["moreKeys.ctrlC"].waitForExistence(timeout: 5))
+        sleep(1)
+        shot("more-keys")
+    }
+
     // MARK: - Helpers
+
+    /// Conversation or Agents: the copy on screen (the demo keeps the
+    /// real main view under its cover).
+    func selectPane(_ app: XCUIApplication, _ pane: String) {
+        let matches = app.buttons.matching(identifier: "main.pane.\(pane)")
+        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 5))
+        for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            matches.element(boundBy: i).tap()
+            break
+        }
+        sleep(1)
+    }
+
+    /// Taps the copy of an element that is on screen.
+    func tapOnScreen(_ app: XCUIApplication, _ id: String) {
+        let matches = app.buttons.matching(identifier: id)
+        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 10), id)
+        for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            matches.element(boundBy: i).tap()
+            return
+        }
+        XCTFail("no visible \(id)")
+    }
 
     /// Closes an open menu by tapping the top of the screen.
     func dismissMenu(_ app: XCUIApplication) {

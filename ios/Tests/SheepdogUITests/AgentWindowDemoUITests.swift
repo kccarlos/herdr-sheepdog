@@ -59,11 +59,11 @@ final class AgentWindowDemoUITests: XCTestCase {
         // The scripted session reaches the surface (VoiceOver's copy of it).
         expectation(for: NSPredicate(format: "value CONTAINS 'scripted session'"), evaluatedWith: terminal)
         waitForExpectations(timeout: 10)
-        for key in ["esc", "tab", "up", "down", "ctrl+c", "enter"] {
+        for key in ["esc", "tab", "up", "down", "enter"] {
             XCTAssertTrue(app.buttons["agentScreen.key.\(key)"].exists, key)
         }
+        XCTAssertFalse(app.buttons["agentScreen.key.ctrl+c"].exists, "an agent window keeps ⌃C in More keys")
         XCTAssertEqual(app.buttons["agentScreen.key.esc"].label, "Escape")
-        XCTAssertEqual(app.buttons["agentScreen.key.ctrl+c"].label, "Control C")
         XCTAssertTrue(app.buttons["agentScreen.key.enter"].isEnabled, "live: the keys work")
         XCTAssertFalse(app.descendants(matching: .any)["agentScreen.notice"].exists, "no notice while live")
         sleep(1)

@@ -169,6 +169,8 @@ public struct DemoWorld: Sendable {
         let approved = option == 1
         update(action.paneID) { agent, at in
             agent.lastBlock?.answered = true
+            agent.lastBlock?.answer = chosen.label
+            agent.lastBlock?.via = via
             agent.stateSince = at
             agent.state = approved ? .working : .idle
             if !approved {
@@ -365,7 +367,7 @@ public struct DemoWorld: Sendable {
     // MARK: - Snapshots
 
     public var state: DaemonState {
-        DaemonState(agents: agents, pendingAction: pending,
+        DaemonState(agents: agents, pendingAction: pending, questions: pending.map { [$0] } ?? [],
                     voice: .init(mode: "demo", name: "Sheepdog", status: "connected", clientConnected: true),
                     herdr: "demo", version: "demo",
                     conversationStartedAt: start)

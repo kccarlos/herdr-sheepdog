@@ -253,6 +253,23 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         return nil
     }
 
+    /// An Agents card's second line: what it works on now, else its last
+    /// task, else its own title (an agent started by hand has only that).
+    public var cardLine: String? {
+        for text in [currentTask, lastTask, title] {
+            if let t = text?.trimmed, !t.isEmpty { return t }
+        }
+        return nil
+    }
+
+    /// "Run the benchmark against staging? — Yes": the last question and
+    /// the answer chosen, once it was answered.
+    public var answeredQuestion: String? {
+        guard let block = lastBlock, block.answered == true, let q = block.question?.trimmed, !q.isEmpty else { return nil }
+        guard let answer = block.answer?.trimmed, !answer.isEmpty else { return q }
+        return "\(q) — \(answer)"
+    }
+
     /// The newest journal entry that carries what the worker wrote for a
     /// human, if the daemon has read one from its transcript.
     public var lastWorkerMessage: JournalEntry? {

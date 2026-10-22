@@ -66,6 +66,16 @@ final class SessionViewModel: ObservableObject {
     /// The agent the Agents pane should scroll to (a notification tap).
     @Published var focusedAgentPaneID: String?
     @Published private(set) var pendingAction: PendingAction?
+    /// Every open question (`/api/state` `questions`), oldest first: each
+    /// blocked agent gets its own answer buttons. The voice's question,
+    /// `pendingAction`, is among them and goes through `approval`.
+    @Published private(set) var questions: [PendingAction] = []
+    /// A tapped answer to one of the other questions, by question id.
+    @Published private(set) var questionPhases: [String: ApprovalFlow.Phase] = [:]
+    /// Agents cards the user opened, by pane id; kept for the session.
+    @Published var expandedAgents: Set<String> = []
+    /// The New agent sheet (`+`, and the Agents page's empty state).
+    @Published var showsNewAgent = false
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
     /// engine's jitter-buffer profile explicitly when it changes, rather
     /// than re-deriving and re-setting it on every event regardless of
@@ -1193,6 +1203,9 @@ final class SessionViewModel: ObservableObject {
         }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
+        let open = state.questions ?? state.pendingAction.map { [$0] } ?? []
+        if open != questions { questions = open }
+        questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
         stateVoiceModel = state.voiceModel
@@ -1776,6 +1789,46 @@ final class SessionViewModel: ObservableObject {
             // Without the event stream (not connected), the answered
             // approval item comes from the server.
             if !self.core.connection.wantsConnection { await self.syncHistory() }
+        }
+    }
+
+    /// The question an agent's card shows: the voice's own (through
+    /// `approval`) or another open one, with its tap state.
+    func questionCard(for paneID: String) -> ApprovalFlow.Card? {
+        if let approval, approval.pending.paneID == paneID { return approval }
+        guard let question = questions.first(where: { $0.paneID == paneID }) else { return nil }
+        return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+    }
+
+    /// Answers a question by tap, whichever it is: the voice's question
+    /// goes through the approval flow, any other straight to
+    /// `POST /api/pending/answer` with its id.
+    func answer(question id: String, option index: Int) {
+        if approval?.pending.id == id {
+            answer(option: index)
+            return
+        }
+        guard let question = questions.first(where: { $0.id == id }),
+              let option = question.options?.first(where: { $0.index == index }) else { return }
+        if case .sending = questionPhases[id] { return }
+        questionPhases[id] = .sending(option)
+        Haptics.tap()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let spoken = try await self.client.answerPending(id: id, option: index)
+                self.questionPhases[id] = .answered(outcome: "Answered: \(option.label)", spoken: spoken.isEmpty ? nil : spoken)
+                Haptics.answered()
+            } catch DaemonError.pendingGone {
+                self.questionPhases[id] = .gone(message: ApprovalFlow.goneMessage)
+                Haptics.answerFailed()
+            } catch let error as DaemonError {
+                self.questionPhases[id] = .open(error: error.message)
+                Haptics.answerFailed()
+            } catch {
+                self.questionPhases[id] = .open(error: error.localizedDescription)
+            }
+            await self.refreshState(quiet: true)
         }
     }
 
