@@ -34,7 +34,6 @@ func TestServeSetupModeAndReload(t *testing.T) {
 	built := make(chan *app.App, 4)
 	serveBuilt = func(a *app.App) { built <- a }
 	t.Cleanup(func() { serveBuilt = nil })
-	t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_WEB_TOKEN") })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

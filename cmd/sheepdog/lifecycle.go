@@ -449,10 +449,6 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	url := info.URL + path
-	if page == "setup" && pageMissing(ctx, url) {
-		fprintln(stderr, "This version of sheepdog has no setup page yet. Run `sheepdog init` in a terminal to set it up.")
-		return 1
-	}
 	if !hasDisplay() {
 		fprintf(stdout, "No browser here (SSH?): %s is on this computer. From your own computer: ssh -N -L %[2]d:127.0.0.1:%[2]d <this host>, then open http://127.0.0.1:%[2]d%[3]s there.\n", url, l.cfg.Web.Port, path)
 		return 0
@@ -463,22 +459,6 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
-}
-
-// pageMissing reports whether GET url answers 404.
-func pageMissing(ctx context.Context, url string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return true
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return true
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusNotFound
 }
 
 // getJSON fetches base+path into v (the daemon on loopback needs no
