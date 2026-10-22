@@ -42,11 +42,12 @@ func TestPushRoutes(t *testing.T) {
 	if len(keys) != 1 {
 		t.Errorf("content keys = %v, want one", keys)
 	}
-	// A relay token alone registers too, and unregisters by itself.
-	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", d.ticket, nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 2 {
+	// A relay token alone registers too (replacing the device's earlier
+	// registration: one per paired device), and unregisters by itself.
+	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/push/register", d.ticket, nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 1 {
 		t.Errorf("relay-only register: code=%d devices=%d", code, sender.Status().Devices)
 	}
-	if code, _ := h.do(h.authedRequest(http.MethodDelete, "/api/push/register", d.ticket, nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 1 {
+	if code, _ := h.do(h.authedRequest(http.MethodDelete, "/api/push/register", d.ticket, nil, map[string]string{"relay_token": "AQIDBAUGBwgJCgsMDQ4PEBES"}), nil); code != http.StatusOK || sender.Status().Devices != 0 {
 		t.Errorf("relay-only delete: code=%d devices=%d", code, sender.Status().Devices)
 	}
 	var ok map[string]bool
@@ -56,7 +57,7 @@ func TestPushRoutes(t *testing.T) {
 		}
 	}
 	var st push.Status
-	if code, _ := h.do(h.authedRequest(http.MethodGet, "/api/push/status", d.ticket, nil, nil), &st); code != http.StatusOK || st.Enabled || st.Devices != 1 || !strings.Contains(st.Reason, "not configured") {
+	if code, _ := h.do(h.authedRequest(http.MethodGet, "/api/push/status", d.ticket, nil, nil), &st); code != http.StatusOK || st.Enabled || st.Devices != 0 || !strings.Contains(st.Reason, "not configured") {
 		t.Errorf("status: code=%d %+v", code, st)
 	}
 	if code, _ := h.do(h.authedRequest(http.MethodDelete, "/api/push/register", d.ticket, nil, map[string]string{"token": tok}), &ok); code != http.StatusOK {
