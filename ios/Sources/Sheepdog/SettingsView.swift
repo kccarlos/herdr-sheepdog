@@ -309,10 +309,11 @@ private struct ComputerRow: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 12) {
+        // The icon sits on the name's line at every text size.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: "desktopcomputer")
                 .foregroundStyle(Theme.ink)
-                .frame(width: 28)
+                .frame(minWidth: 28)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)

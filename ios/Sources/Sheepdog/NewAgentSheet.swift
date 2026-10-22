@@ -23,6 +23,8 @@ struct NewAgentSheet: View {
     }
 
     @State private var load: Load = .loading
+    /// One column for the row icons, growing with the text.
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 26
     @State private var path = NavigationPath()
 
     /// "Choose another folder…": a path typed in, inside the project roots.
@@ -156,7 +158,7 @@ struct NewAgentSheet: View {
             Image(systemName: project.open ? "square.stack" : "folder")
                 .font(.body)
                 .foregroundStyle(Theme.muted)
-                .frame(minWidth: 24)
+                .frame(width: iconWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
