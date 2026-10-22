@@ -33,7 +33,6 @@ func TestSetupPageFlowEndToEnd(t *testing.T) {
 	_ = ln.Close()
 	t.Cleanup(func() {
 		_ = os.Unsetenv("GEMINI_API_KEY")
-		_ = os.Unsetenv("SHEEPDOG_WEB_TOKEN")
 		_ = os.Unsetenv("SHEEPDOG_WEB_BIND")
 	})
 	for _, k := range []string{"SHEEPDOG_VOICE_PROVIDER", "SHEEPDOG_BRAIN_PROVIDER"} {

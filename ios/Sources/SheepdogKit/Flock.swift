@@ -70,3 +70,15 @@ extension Agent {
         return "Needs you" + (question.map { " · \($0)" } ?? "")
     }
 }
+
+/// Whether an agent strip chip names a computer (app-redesign.md 1.1):
+/// only a blocked agent on another computer, and only once a second
+/// computer is paired. With one computer the strip looks as it always did.
+public enum AgentStripLabel {
+    public static func computer(state: Agent.State, agentComputer: String?, pairedComputers: Int) -> String? {
+        guard pairedComputers > 1, state == .blocked,
+              let name = agentComputer?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty
+        else { return nil }
+        return name
+    }
+}

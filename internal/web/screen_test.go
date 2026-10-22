@@ -41,7 +41,7 @@ func waitScreenEnd(t *testing.T, h *harness, n int) map[string]any {
 // bot-ready features too.
 func readyClient(t *testing.T, h *harness) (*wsClient, []string) {
 	t.Helper()
-	c := dialWS(t, h)
+	c := dialWSRaw(t, h)
 	c.expect(wsproto.TypeStatus)
 	c.send(wsproto.ClientReady(1, iosClient))
 	return c, c.expect(wsproto.TypeBotReady).Features
@@ -78,8 +78,8 @@ func injectScreen(t *testing.T, h *harness, screen string) {
 }
 
 // The daemon advertises the agent window over /ws; a subscription gets
-// the window at once with the REST route's fields, nothing while it does
-// not change, and a frame when it does.
+// the coloured window at once with the REST route's fields (?ansi=1),
+// nothing while it does not change, and a frame when it does.
 func TestWSScreenStream(t *testing.T) {
 	h := newHarness(t, harnessOpts{screenInterval: 50 * time.Millisecond, screenMinGap: 10 * time.Millisecond})
 	trackWorking(t, h, "fake:1", "auth", "line one\n\x1b[1;32mgreen\x1b[0m line two")
@@ -88,18 +88,18 @@ func TestWSScreenStream(t *testing.T) {
 		t.Fatalf("features %v lack %s", features, wsproto.FeatureScreen)
 	}
 
-	c.send(wsproto.ScreenSubscribe("fake:1", 50))
+	c.send(wsproto.ScreenSubscribe("fake:1"))
 	m := c.expect(wsproto.TypeScreen)
 	s := m.Screen
-	if s.PaneID != "fake:1" || s.Alias != "auth" || s.Spoken == "" || s.Kind != "codex" || s.State != "working" || s.StateSince == "" || s.Lines != 50 || s.Hash == "" {
+	if s.PaneID != "fake:1" || s.Alias != "auth" || s.Spoken == "" || s.Kind != "codex" || s.State != "working" || s.StateSince == "" || s.Lines != 2 || !s.ANSI || s.Hash == "" {
 		t.Fatalf("screen = %+v", s)
 	}
-	if !strings.Contains(s.Text, "green line two") || strings.Contains(s.Text, "\x1b") {
+	if !strings.Contains(s.Text, "\x1b[1;32mgreen\x1b[0m line two") {
 		t.Fatalf("text = %q", s.Text)
 	}
 	// The same window as the REST route.
 	var rest ScreenResponse
-	h.getJSON(windowPath("fake:1", "screen")+"?lines=50", &rest)
+	h.getJSON(windowPath("fake:1", "screen")+"?ansi=1", &rest)
 	if rest.Hash != s.Hash || rest.Text != s.Text {
 		t.Fatalf("rest %+v != ws %+v", rest, s)
 	}
@@ -132,8 +132,8 @@ func TestWSScreenTransitionKicksAndRateCap(t *testing.T) {
 	h := newHarness(t, harnessOpts{screenInterval: time.Hour, screenMinGap: 150 * time.Millisecond})
 	trackWorking(t, h, "fake:1", "auth", "busy")
 	c, _ := readyClient(t, h)
-	c.send(wsproto.ScreenSubscribe("fake:1", 0))
-	if m := c.expect(wsproto.TypeScreen); m.Screen.State != "working" || m.Screen.Lines != 120 {
+	c.send(wsproto.ScreenSubscribe("fake:1"))
+	if m := c.expect(wsproto.TypeScreen); m.Screen.State != "working" {
 		t.Fatalf("first = %+v", m.Screen)
 	}
 	start := time.Now()
@@ -171,7 +171,7 @@ func TestWSScreenTransitionKicksAndRateCap(t *testing.T) {
 func TestWSScreenGone(t *testing.T) {
 	h := newHarness(t, harnessOpts{screenInterval: 30 * time.Millisecond})
 	c, _ := readyClient(t, h)
-	c.send(wsproto.ScreenSubscribe("other:9", 0))
+	c.send(wsproto.ScreenSubscribe("other:9"))
 	m := c.expect(wsproto.TypeScreenError)
 	if m.PaneID != "other:9" || m.Message != "no such agent" || !m.Ended {
 		t.Fatalf("screen-error = %+v", m)
@@ -181,7 +181,7 @@ func TestWSScreenGone(t *testing.T) {
 	}
 
 	trackWorking(t, h, "fake:1", "auth", "hi")
-	c.send(wsproto.ScreenSubscribe("fake:1", 0))
+	c.send(wsproto.ScreenSubscribe("fake:1"))
 	c.expect(wsproto.TypeScreen)
 	if code, body := h.postJSON("/api/inject/remove", map[string]any{"pane_id": "fake:1"}, nil); code != http.StatusOK {
 		t.Fatalf("remove = %d %s", code, body)
@@ -201,9 +201,9 @@ func TestWSScreenOnePerClientAndDisconnect(t *testing.T) {
 	trackWorking(t, h, "fake:1", "auth", "one")
 	trackWorking(t, h, "fake:2", "db", "two")
 	c, _ := readyClient(t, h)
-	c.send(wsproto.ScreenSubscribe("fake:1", 0))
+	c.send(wsproto.ScreenSubscribe("fake:1"))
 	c.expect(wsproto.TypeScreen)
-	c.send(wsproto.ScreenSubscribe("fake:2", 0))
+	c.send(wsproto.ScreenSubscribe("fake:2"))
 	if end := waitScreenEnd(t, h, 1); end["reason"] != "resubscribe" || end["pane"] != "fake:1" {
 		t.Fatalf("end = %v", end)
 	}
@@ -225,7 +225,7 @@ func TestWSScreenNotInheritedByReplacement(t *testing.T) {
 	h := newHarness(t, harnessOpts{screenInterval: 30 * time.Millisecond})
 	trackWorking(t, h, "fake:1", "auth", "one")
 	a, _ := readyClient(t, h)
-	a.send(wsproto.ScreenSubscribe("fake:1", 0))
+	a.send(wsproto.ScreenSubscribe("fake:1"))
 	a.expect(wsproto.TypeScreen)
 	b, _ := readyClient(t, h)
 	if end := waitScreenEnd(t, h, 1); end["reason"] != "closed" {
@@ -235,8 +235,8 @@ func TestWSScreenNotInheritedByReplacement(t *testing.T) {
 	b.expectNoScreen(150 * time.Millisecond)
 }
 
-// Feature screen-ansi: ?ansi=1 and screen-subscribe {ansi:true} keep the
-// colours (the app's snapshot window when the live terminal is not
+// Feature screen-ansi: ?ansi=1 keeps the colours, as the screen frames
+// do (the app's snapshot window when the live terminal is not
 // available); the plain route still strips them.
 func TestScreenANSI(t *testing.T) {
 	h := newHarness(t, harnessOpts{screenInterval: 50 * time.Millisecond, screenMinGap: 10 * time.Millisecond})
@@ -258,10 +258,7 @@ func TestScreenANSI(t *testing.T) {
 	if !slices.Contains(features, wsproto.FeatureScreenANSI) {
 		t.Fatalf("features %v lack %s", features, wsproto.FeatureScreenANSI)
 	}
-	on := true
-	m := wsproto.ScreenSubscribe("fake:1", 0)
-	m.ANSI = &on
-	c.send(m)
+	c.send(wsproto.ScreenSubscribe("fake:1"))
 	got := c.expect(wsproto.TypeScreen).Screen
 	if !got.ANSI || got.Text != rest.Text || got.Hash != rest.Hash {
 		t.Fatalf("ws ansi frame = %+v", got)

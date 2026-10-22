@@ -1,0 +1,10 @@
+{
+  "type": "term-open",
+  "ch": 1,
+  "target": {
+    "pane_id": "w1:p2"
+  },
+  "mode": "control",
+  "cols": 58,
+  "rows": 30
+}

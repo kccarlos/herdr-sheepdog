@@ -185,6 +185,11 @@ type EnrollResponse struct {
 // handleEnroll records a device's public key in exchange for the one-time
 // pairing code (public: the code is the credential).
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
+	remote := !isLoopbackAddr(r.RemoteAddr)
+	if remote && s.limits.isBlocked("enroll", sourceIP(r.RemoteAddr), s.deps.Now()) {
+		writeRateLimited(w)
+		return
+	}
 	var req EnrollRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
@@ -202,6 +207,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reason := s.enroll.burn(req.Code, s.deps.Now()); reason != "" {
+		if remote {
+			s.limits.fail("enroll", sourceIP(r.RemoteAddr), badCodesPerMinute, s.deps.Now())
+		}
 		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
 		writeJSON(w, http.StatusGone, map[string]string{"error": "This code was already used or has expired. Show a new code on your computer and scan it.", "reason": reason})
 		return

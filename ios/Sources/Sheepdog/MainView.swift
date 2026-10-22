@@ -11,6 +11,9 @@ struct MainView: View {
     @State private var confirmNewConversation = false
     @State private var typing = false
     @State private var showsConnection = false
+    /// The update notice the user put off ("Later"): hidden until the
+    /// daemon reports a different one. Settings keeps showing it.
+    @AppStorage("update.dismissedNotice") private var dismissedUpdate = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -55,12 +58,23 @@ struct MainView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
+                } else if let notice = model.update?.notice, notice.text != dismissedUpdate, !model.isDemo {
+                    UpdateBanner(notice: notice) {
+                        withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
+                    }
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
+                    // One computer today: no chip names a computer.
                     AgentStrip(agents: model.flock.running, pending: model.pendingAction)
+                        // Chrome: the chips grow up to the first
+                        // accessibility size, then the strip stays one row.
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 2)
                 }
 
                 Rectangle().fill(Theme.line).frame(height: 1)
@@ -73,8 +87,8 @@ struct MainView: View {
                             voiceName: model.voiceName,
                             canLoadOlder: model.canLoadOlder,
                             loadingOlder: model.loadingOlder,
-                            activePendingID: model.approval?.pending.id,
-                            pointerIDs: QuestionFocus.pointerRowIDs(rows: model.rows, pending: model.approval.flatMap { $0.isSettled ? nil : $0.pending }),
+                            openPendingIDs: model.openQuestionIDs,
+                            pointerIDs: QuestionOrder.pointerRowIDs(rows: model.rows, open: model.questions.filter { model.openQuestionIDs.contains($0.id) }),
                             loadOlder: { await model.loadOlder() },
                             followToken: model.typedSent,
                             ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
@@ -119,7 +133,7 @@ struct MainView: View {
             // content, which scrolls under them.
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
             .animation(.easeInOut(duration: 0.2), value: model.banner)
-            .animation(.spring(duration: 0.3), value: model.approval)
+            .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
             .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
             .animation(.spring(duration: 0.35), value: model.showCoachMark)
             .animation(.easeInOut(duration: 0.2), value: model.pane)
@@ -209,16 +223,20 @@ struct MainView: View {
 
     private var bottomStack: some View {
         VStack(spacing: 8) {
-            // On the Agents pane the question sits on its agent's card.
-            if model.pane != .flock, let card = model.approval {
-                PinnedApprovalCard(card: card) { index in
-                    model.answer(option: index)
+            // Every open question floats above the capsule; on the Agents
+            // pane each sits on its agent's card instead.
+            let cards = model.pane != .flock ? model.floatingQuestions : []
+            if !cards.isEmpty {
+                FloatingQuestions(
+                    cards: cards,
+                    voiceQuestionID: model.approval?.pending.id,
+                    time: { question in
+                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
+                    }
+                ) { id, index in
+                    model.answer(question: id, option: index)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .id(card.pending.id)
-                .onAppear {
-                    AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
-                }
             }
 
             if model.showCoachMark {
@@ -251,9 +269,8 @@ struct MainView: View {
                         .transition(morph)
                 }
             }
-            // Grows with the text, up to a cap: past it the capsule would
-            // cover the conversation it is there to serve.
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            // Grows with the text at every size; the capsule caps its own
+            // height and scrolls inside past it.
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
@@ -274,7 +291,8 @@ struct MainView: View {
             talkMode: model.talkMode,
             holding: model.holding,
             noSignal: model.noMicSignal,
-            questionOpen: model.approval.map { !$0.isSettled } ?? false,
+            // One accent per screen: any open question quiets the orb.
+            questionOpen: !model.openQuestionIDs.isEmpty,
             // The one-time Mute caption takes the status line's place.
             statusText: model.showMuteHint ? model.muteCaption : model.statusLine,
             canType: model.isConfigured,
@@ -523,121 +541,6 @@ private struct Triangle: Shape {
         p.closeSubpath()
         return p
     }
-}
-
-/// Errors in plain words, with the one button that helps.
-struct BannerView: View {
-    let banner: SessionViewModel.Banner
-    let retry: () -> Void
-    let dismiss: () -> Void
-
-    private var tint: Color {
-        switch banner.tone {
-        case .error: return Theme.danger
-        case .warning: return Theme.blocked
-        case .info: return Theme.working
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: banner.tone == .info ? "info.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(tint)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(banner.message)
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let hint = banner.hint {
-                    Text(LocalizedStringKey(hint))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 12) {
-                    if let retryTitle = banner.retryTitle {
-                        Button(retryTitle, action: retry)
-                            .font(.caption.weight(.semibold))
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .tint(Theme.primaryText)
-                    }
-                    if let help = banner.help {
-                        Link("How to fix this", destination: help)
-                            .font(.caption.weight(.semibold))
-                            .tint(Theme.primaryText)
-                            .accessibilityIdentifier("banner.help")
-                    }
-                }
-                .padding(.top, 3)
-            }
-            Spacer(minLength: 0)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .padding(-12)
-            .accessibilityLabel("Dismiss")
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .fill(tint.opacity(0.10))
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("banner")
-    }
-}
-
-/// The approval card pinned above the controls: its whole height when it
-/// fits in half the screen, else half the screen with the card scrolling
-/// inside — never squeezed by the conversation into one-line options.
-struct PinnedApprovalCard: View {
-    let card: ApprovalFlow.Card
-    let answer: (Int) -> Void
-
-    /// The card's own height, measured.
-    @State private var contentHeight: CGFloat = 0
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    /// Half the screen; a third at the accessibility text sizes, where the
-    /// header, the agent strip and the controls are tall too and a half-
-    /// screen card pushed the demo header up under the navigation bar.
-    private var maxHeight: CGFloat {
-        let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800
-        return screen * (dynamicTypeSize.isAccessibilitySize ? 0.3 : 0.5)
-    }
-
-    var body: some View {
-        ScrollView {
-            ApprovalCardView(card: card, answer: answer)
-                .padding(.vertical, 4)
-                .background(GeometryReader { proxy in
-                    Color.clear.preference(key: CardHeightKey.self, value: proxy.size.height)
-                })
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(contentHeight > maxHeight ? .visible : .hidden)
-        .frame(height: min(max(contentHeight, 1), maxHeight))
-        .onPreferenceChange(CardHeightKey.self) { height in
-            // Whole points only: a sub-point wobble must not relayout.
-            let rounded = height.rounded(.up)
-            if rounded != contentHeight { contentHeight = rounded }
-        }
-    }
-}
-
-private struct CardHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// The offline demo's label, its way out, and the questions it understands

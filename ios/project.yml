@@ -182,18 +182,33 @@ targets:
   # The widget extension: the voice session's Live Activity (lock screen
   # and Dynamic Island) and, on iOS 18+, the "Talk to Sheepdog" control.
   # It renders only; its buttons are App Intents the system runs in the
-  # app's process. No App Group: nothing is shared through a container
-  # (ActivityKit carries the content state). Its bundle ID is registered on
-  # team GV776BZVA8 with no capabilities (docs/dev/xcode-cloud.md).
+  # app's process. It joins the App Group for one thing: the push content
+  # key in the group's keychain, which opens the sealed rows of a pushed
+  # Live Activity update (docs/dev/push.md). Its bundle ID needs App
+  # Groups enabled and the group assigned before the next archive
+  # (docs/dev/xcode-cloud.md).
+  # It links SheepdogKit (embedded in the app, found through the
+  # extension's default ../../Frameworks runpath) for the content state,
+  # LiveActivityContent, and its words.
   SheepdogWidgets:
     type: app-extension
     platform: iOS
     sources:
       - path: Sources/SheepdogWidgets
       - path: Sources/SheepdogActivity
+    dependencies:
+      - target: SheepdogKit
+        embed: false
+    entitlements:
+      path: Sources/SheepdogWidgets/SheepdogWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(SHEEPDOG_APP_GROUP)
     info:
       path: Sources/SheepdogWidgets/Info.plist
       properties:
+        # The keychain access group of the push content key (PushContentKeyStore).
+        SheepdogAppGroup: $(SHEEPDOG_APP_GROUP)
         # An extension's versions must match the app's or App Store
         # validation rejects the upload; XcodeGen would write 1.0/1.
         CFBundleShortVersionString: $(MARKETING_VERSION)

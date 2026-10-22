@@ -196,6 +196,9 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 		b, _ := m.Encode()
 		return conn.Write(ctx, websocket.MessageText, b)
 	}
+	if err := send(wsproto.ClientReady(wsproto.ProtocolVersion, wsproto.ClientInfo{Name: "sheepdog-audio-e2e", Version: "dev", Platform: "go"})); err != nil {
+		return res, err
+	}
 	if err := send(wsproto.Mute(false)); err != nil {
 		return res, err
 	}

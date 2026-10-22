@@ -22,9 +22,9 @@ built from tag `ios-v0.1.5` (`b414dda`, #41).
 | Team | the Account Holder, Team ID `GV776BZVA8`, Apple ID: the Account Holder's (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
-| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities, no App Group |
+| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`). Needs App Groups with `group.com.github.kccarlos.herdr-sheepdog-ios` assigned (the Live Activity reads the push content key) before the next archive |
 | Notification Service Extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.NotificationService` (`SheepdogNotificationService`: decrypts relay notifications). Resource `JTDHJGH486`, App Groups capability |
-| App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app and the Notification Service Extension: the push content key's keychain access group |
+| App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app, the Notification Service Extension and the widget extension: the push content key's keychain access group |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
@@ -104,7 +104,14 @@ with `asc bundle-ids create` so the archive's automatic signing only has to
 make profiles. It has no entitlements: Live Activities need only
 `NSSupportsLiveActivities` in the app's Info.plist, and its App Intents run
 in the app's process. Simulator builds do not sign, so the first tag archive after #37 (0.1.4 (48)) was the first real check of
-this, and it signed and exported with no change.
+this, and it signed and exported with no change. Since the Live Activity's
+push updates (2026-10-22) it has one entitlement, the App Group, to read
+the push content key that opens a pushed update's sealed rows. **Before the
+next `ios-v*` archive:** `asc bundle-ids capabilities add --capability
+APP_GROUPS` on the widget's App ID, then assign
+`group.com.github.kccarlos.herdr-sheepdog-ios` to it (developer.apple.com ▸
+Identifiers ▸ the widget ▸ App Groups ▸ Configure, or a local `xcodebuild
+archive -allowProvisioningUpdates` as for the extension below).
 
 **The Notification Service Extension** (`SheepdogNotificationService`)
 decrypts relay notifications. Its App ID,

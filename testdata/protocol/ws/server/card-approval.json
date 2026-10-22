@@ -1,0 +1,33 @@
+{
+  "type": "card",
+  "card": {
+    "card_id": "c-1",
+    "kind": "approval",
+    "at": "2026-10-21T09:00:00Z",
+    "title": "Auth wants to run a command",
+    "agent": "auth",
+    "spoken": "Auth fix",
+    "pane_id": "w1:p2",
+    "pending_id": "p-1",
+    "question": "Run go test ./...?",
+    "command": "go test ./...",
+    "options": [
+      {
+        "index": 1,
+        "label": "Yes",
+        "keys": [
+          "1"
+        ],
+        "default": true
+      },
+      {
+        "index": 2,
+        "label": "No",
+        "keys": [
+          "esc"
+        ],
+        "default": false
+      }
+    ]
+  }
+}

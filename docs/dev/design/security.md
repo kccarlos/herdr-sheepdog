@@ -561,11 +561,11 @@ Every other route is open to any paired device.
 | What | Limit | Today |
 |---|---|---|
 | Voice on `/ws` | One client. A new one replaces the old one. The replaced client sees "Voice moved to Mac · Safari" and a **Take back** button, which simply reconnects. | One client, replaced |
-| `/term` channels | 4 per **device** (was per connection), 8 per daemon | 4 per connection, 8 per daemon |
-| All connections | About 32 open connections from non-loopback addresses. Loopback is not counted, so the setup page always opens. | No limit |
+| `/term` channels | 4 per **device** (was per connection), 8 per daemon | Done (`termServer.reserve`) |
+| All connections | About 32 open connections from non-loopback addresses. Loopback is not counted, so the setup page always opens. | Done (`capListener`, 32) |
 | Unauthenticated connections | 8 per source address; TLS handshake and request headers within 10 seconds | No limit |
-| Challenges | 30 a minute per source address. After 10 bad signatures in a minute, that address waits 5 minutes. | — |
-| Enroll codes | 5 wrong codes in a minute from one address: it waits 5 minutes | — |
+| Challenges | 30 a minute per source address. After 10 bad signatures in a minute, that address waits 5 minutes. | Done (`429 rate_limited`) |
+| Enroll codes | 5 wrong codes in a minute from one address: it waits 5 minutes | Done (`429 rate_limited`) |
 
 ---
 

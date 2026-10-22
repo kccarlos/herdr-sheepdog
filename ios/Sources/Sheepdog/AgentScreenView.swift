@@ -62,8 +62,8 @@ private struct AgentWindowView: View {
     private var state: AgentWindowState { window.state }
 
     private var approval: ApprovalFlow.Card? {
-        guard let card = model.approval, card.pending.paneID == agent.paneID else { return nil }
-        return card
+        // Any open question of this agent, not only the one the voice is on.
+        model.questionCard(for: agent.paneID)
     }
 
     var body: some View {
@@ -74,7 +74,7 @@ private struct AgentWindowView: View {
             }
             terminal
             if let approval {
-                PinnedApprovalCard(card: approval) { index in model.answer(option: index) }
+                FloatingQuestions(cards: [approval], voiceQuestionID: model.approval?.pending.id) { id, index in model.answer(question: id, option: index) }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .id(approval.pending.id)

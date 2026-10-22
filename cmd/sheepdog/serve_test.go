@@ -44,9 +44,6 @@ func TestServeFlagsAndValidation(t *testing.T) {
 	}
 }
 
-// TestServeNonLoopbackBindNeedsToken proves `serve` refuses to start
-// with a non-loopback web.bind and no web.token (exit 2, like the
-// missing-Gemini-key error above), and starts fine once a token is set.
 // TestServeEnvFileFlagParses proves --env-file is a recognised flag.
 func TestServeEnvFileFlagParses(t *testing.T) {
 	var stderr bytes.Buffer
