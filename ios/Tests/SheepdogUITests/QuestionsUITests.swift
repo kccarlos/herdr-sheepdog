@@ -37,6 +37,10 @@ final class QuestionsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
         app.launch()
+
+        // On the Conversation both float above the capsule.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 20), "the voice's question floats")
+        XCTAssertTrue(["qa", "qb"].contains { app.buttons["question.\($0).option.1"].exists }, "and so does the other one")
         showAgentsPane(app)
 
         // The voice is on one of them (approval.*); the other has its own.
