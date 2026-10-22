@@ -379,6 +379,18 @@ section 6.
   demo's view model (`SceneCoordinator.demoModel`).
 - New agent, Spaces and Settings are form sheets on iPad
   (`presentationSizing(.form)`); Start is ⌘↩ (`keyboardShortcut`).
+- **Keyboard** (`Shortcuts.swift`): ⌘N, ⌘⇧M and ⌘1…9 (the sidebar's
+  order, `SidebarSections.agents`) are invisible buttons with
+  `keyboardShortcut` in each window (`KeyboardShortcuts`), not app
+  `Commands`: the demo is a cover with its own view model, and the window's
+  own shortcuts reach it and work while a terminal has the keyboard. ⌘K
+  (Talk to) waits for several computers.
+- **Pointer:** sidebar rows, the filters and the round and header buttons
+  have hover effects; the pane divider highlights.
+- **Tests:** `IPadUITests` (offline demo, skipped on iPhone) covers the
+  sidebar and detail, portrait, All agents, two panes with drag and drop,
+  Open in New Window and the shortcuts. ios.yml runs only these on an iPad
+  simulator, from the same build as the iPhone run.
 - **Opening a window** goes through one seam: `\.openAgentWindow`
   (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
   pushes on `navigationPath`. Requests from the session itself (a card's

@@ -183,4 +183,30 @@ final class IPadUITests: XCTestCase {
         close.tap()
         XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10), "back to the main window")
     }
+
+    /// A hardware keyboard: ⌘1…9 jump to the agents in sidebar order (also
+    /// from inside a terminal), ⌘⇧M mutes, ⌘N opens New agent.
+    func testKeyboardShortcuts() throws {
+        let app = launchDemo()
+        XCTAssertTrue(element(app, "sidebar.agent.claude-migration").waitForExistence(timeout: 10))
+        app.typeKey("2", modifierFlags: .command)
+        let header = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'claude-migration'")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10), "⌘2 opens the second agent")
+        element(app, "agentScreen.terminal").tap()
+        app.typeKey("1", modifierFlags: .command)
+        let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'claude-auth'")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "⌘1 works from the terminal too")
+
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        let status = app.staticTexts["controls.statusLine"].firstMatch
+        let muted = NSPredicate(format: "label CONTAINS[c] 'muted' OR label CONTAINS[c] 'mic off'")
+        expectation(for: muted, evaluatedWith: status)
+        waitForExpectations(timeout: 10)
+        app.typeKey("m", modifierFlags: [.command, .shift])
+
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(app.navigationBars["New agent"].waitForExistence(timeout: 10), "⌘N opens New agent as a form sheet")
+        sleep(2)
+        shot("new-agent-sheet")
+    }
 }

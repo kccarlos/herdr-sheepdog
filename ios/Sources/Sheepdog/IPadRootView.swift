@@ -151,6 +151,7 @@ struct IPadSidebar: View {
             .foregroundStyle(Theme.ink)
             .frame(width: 44, height: 44)
             .contentShape(Circle())
+            .hoverEffect()
     }
 
     // MARK: Rows
@@ -178,7 +179,9 @@ struct IPadSidebar: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? Theme.line : .clear))
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -253,7 +256,9 @@ struct IPadSidebar: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? Theme.line : .clear))
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
