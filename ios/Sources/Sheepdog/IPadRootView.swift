@@ -114,6 +114,10 @@ struct IPadSidebar: View {
             .scrollBounceBehavior(.basedOnSize)
             foot
         }
+        // The sidebar is a 390 pt column: it grows up to the largest
+        // non-accessibility size, as the iPhone's chrome does; the detail
+        // keeps scaling.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Theme.fill.ignoresSafeArea())
     }
 
@@ -234,8 +238,7 @@ struct IPadSidebar: View {
                 Text(agent.alias)
                     .font(.body.weight(selected ? .semibold : .regular))
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if blocked {
                     Image(systemName: "hand.raised")
