@@ -24,7 +24,7 @@
 // not answer and to ask again; either way it sends nothing: deciding
 // what words mean is the orchestrator's work. A voice input that is the
 // assistant's own speech picked up by the microphone is dropped before
-// any of this (the echo guard, utterance.go).
+// any of this (the echo guard, echo.go).
 //
 // investigate.go owns the background jobs the orchestrator's investigate tool
 // starts (docs/dev/roles.md "Investigations and explanations"): one live job

@@ -324,6 +324,7 @@ final class SessionViewModel: ObservableObject {
         #endif
         wire()
         away.onRoute = { [weak self] route in self?.handle(route: route) }
+        away.onActivityToken = { [weak self] token in self?.sendActivityToken(token) }
         // The last conversation, at once: before the network, or without it.
         loadCache()
         conversationChanged(save: false)
@@ -357,6 +358,9 @@ final class SessionViewModel: ObservableObject {
     /// The app came back to the foreground: what happened while it was
     /// away is on the daemon.
     func becameActive() {
+        // The daemon may have pushed the Live Activity while the app was
+        // away: the next sync rewrites it even if our own state is unchanged.
+        away.forgetShownActivity()
         send(.scenePhase(.active))
         Task { await PushCoordinator.shared.refreshAuthorization() }
         guard isConfigured, settings.hasBeenConfigured else { return }
@@ -953,20 +957,35 @@ final class SessionViewModel: ObservableObject {
         guard demo == nil else { return }
         #if DEBUG
         if let demo = DebugLaunch.demoLiveActivity {
-            away.sync(VoiceActivityState.make(state: demo, muted: demo == .muted, waiting: 2, voiceName: voiceName), voiceName: voiceName)
+            away.sync(LiveActivitySamples.demo(demo), voiceName: voiceName)
             return
         }
         #endif
         let activityState = wantsConnection
-            ? VoiceActivityState.make(
+            ? LiveActivityContent.make(
                 state: state,
                 muted: isMuted,
-                waiting: flock.waitingCount,
-                voiceName: voiceName,
+                agents: agents,
+                questions: questions,
                 suspendedInBackground: core.suspension.backgroundSuspended
             )
             : nil
         away.sync(activityState, voiceName: voiceName)
+    }
+
+    /// The Live Activity's push token to the daemon (nil: the activity
+    /// ended), so it can update the banner while the app is away. Best
+    /// effort: without it the banner just stops updating while away.
+    private func sendActivityToken(_ token: String?) {
+        guard demo == nil else { return }
+        let client = self.client
+        Task {
+            if let token {
+                _ = try? await client.registerLiveActivity(token: token, environment: PushCoordinator.environment)
+            } else {
+                _ = try? await client.endLiveActivity()
+            }
+        }
     }
 
     /// A `sheepdog://` link, or an App Intent speaking one.
@@ -1012,6 +1031,10 @@ final class SessionViewModel: ObservableObject {
             case let .openAgent(id):
                 // What a tap on an agent's notification does.
                 PushCoordinator.shared.focus(paneID: id)
+            case let .openWindow(id, _):
+                // A Live Activity row. One computer for now: the
+                // computer id is for when there are several.
+                openAgentWindow(paneID: id)
             }
         }
     }
@@ -1228,14 +1251,15 @@ final class SessionViewModel: ObservableObject {
         if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
         #endif
         let sorted = Flock.sorted(all)
-        if sorted != agents {
-            agents = sorted
-            syncAway()
-        }
+        let agentsChanged = sorted != agents
+        if agentsChanged { agents = sorted }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
         let open = state.questions ?? state.pendingAction.map { [$0] } ?? []
-        if open != questions { questions = open }
+        let questionsChanged = open != questions
+        if questionsChanged { questions = open }
+        // The Live Activity's rows and counts.
+        if agentsChanged || questionsChanged { syncAway() }
         questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
         brain = state.brain
         stateVoiceProvider = state.voiceProvider

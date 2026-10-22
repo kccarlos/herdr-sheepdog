@@ -1,0 +1,12 @@
+{
+  "type": "term-open",
+  "ch": 3,
+  "target": {
+    "shell": {
+      "cwd": "/Users/me/app"
+    }
+  },
+  "mode": "control",
+  "cols": 58,
+  "rows": 30
+}

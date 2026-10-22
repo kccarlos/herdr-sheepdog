@@ -104,6 +104,17 @@ struct DemoSpaces {
             next += 1
             spaces[index].commands.append((cid, name, command))
             return (200, ["ok": true, "command": ["id": cid, "name": name, "command": command]])
+        case let ("PUT", tail) where tail.count == 2 && tail[0] == "commands":
+            let name = (body["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            let command = (body["command"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !command.isEmpty else { return (400, ["error": "a command needs a name and one line"]) }
+            guard let i = spaces[index].commands.firstIndex(where: { $0.id == tail[1] }) else { return (404, ["error": "no such command"]) }
+            spaces[index].commands[i] = (tail[1], name, command)
+            return (200, ["ok": true, "command": ["id": tail[1], "name": name, "command": command]])
+        case ("POST", ["run"]):
+            let command = (body["command"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !command.isEmpty, !command.contains("\n") else { return (400, ["error": "a command is one line"]) }
+            return (200, ["ok": true, "pane_id": ""])
         case let ("DELETE", tail) where tail.count == 2 && tail[0] == "commands":
             spaces[index].commands.removeAll { $0.id == tail[1] }
             return (200, ["ok": true])

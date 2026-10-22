@@ -1,0 +1,11 @@
+{
+  "type": "ping",
+  "gated_frames": 120,
+  "peak": 3400,
+  "underruns": 1,
+  "drains": 4,
+  "buffer_ms": 180,
+  "rate": 0.97,
+  "stretched_ms": 2300,
+  "audio_state": "running"
+}

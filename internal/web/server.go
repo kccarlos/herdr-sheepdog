@@ -55,8 +55,8 @@ type Supervisor interface {
 	// /api/agents/{pane_id}/screen and POST /api/agents/{pane_id}/input
 	// (docs/dev/ws-contract.md "Agent window: screen and input").
 	Screen(ctx context.Context, paneID string, lines int) (supervisor.Screen, error)
-	// ScreenANSI backs the coloured snapshot (?ansi=1, screen-subscribe
-	// ansi): the visible screen with SGR colours, feature screen-ansi.
+	// ScreenANSI backs the coloured snapshot (?ansi=1, screen-subscribe):
+	// the visible screen with SGR colours, feature screen-ansi.
 	ScreenANSI(ctx context.Context, paneID string) (supervisor.Screen, error)
 	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
 	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
@@ -77,6 +77,7 @@ type AgentActions interface {
 	SaveCommand(ctx context.Context, id, cmdID, name, command string) (supervisor.WrapUp, error)
 	DeleteCommand(ctx context.Context, id, cmdID string) error
 	RunCommand(ctx context.Context, id, cmdID string) (string, error)
+	RunLine(ctx context.Context, id, name, command string) (string, error)
 	UserRename(ctx context.Context, paneID, name string) (string, error)
 	UserInterrupt(ctx context.Context, paneID string) (string, error)
 	UserClose(ctx context.Context, paneID string) (string, error)
@@ -194,7 +195,7 @@ type Deps struct {
 	// ToolTimeout bounds one tool call or injected chain (default 90 s).
 	ToolTimeout time.Duration
 	// HandshakeTimeout is how long /ws waits for a client-ready before
-	// it treats the client as a legacy protocol-1 client (default 2 s;
+	// it refuses the client (default 10 s;
 	// docs/dev/ws-contract.md "Protocol version and handshake").
 	HandshakeTimeout time.Duration
 	// MinProtocol is the oldest /ws client protocol served (default
@@ -269,6 +270,8 @@ type Server struct {
 	auth    *authState
 	enroll  enrollCodes
 	live    liveConns
+	// activityWatch backs the Live Activity pushes (activity.go).
+	activityWatch activityWatch
 	// limits rate-limits sign-in and pairing per source address; conns
 	// caps open non-loopback connections (limits.go).
 	limits *rateLimiter
@@ -307,7 +310,7 @@ func New(deps Deps) (*Server, error) {
 		deps.ToolTimeout = 90 * time.Second
 	}
 	if deps.HandshakeTimeout <= 0 {
-		deps.HandshakeTimeout = 2 * time.Second
+		deps.HandshakeTimeout = 10 * time.Second
 	}
 	if deps.MinProtocol <= 0 {
 		deps.MinProtocol = wsproto.MinProtocolVersion
@@ -479,6 +482,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"PUT /api/spaces/{id}/commands/{cid}", accessDevice, s.handleSaveCommand},
 		route{"DELETE /api/spaces/{id}/commands/{cid}", accessDevice, s.handleDeleteCommand},
 		route{"POST /api/spaces/{id}/commands/{cid}/run", accessDevice, s.handleRunCommand},
+		route{"POST /api/spaces/{id}/run", accessDevice, s.handleRunLine},
 		route{"POST /api/agents", accessDevice, s.handleNewAgent},
 		route{"POST /api/agents/{pane_id}/rename", accessDevice, s.handleAgentRename},
 		route{"POST /api/agents/{pane_id}/interrupt", accessDevice, s.handleAgentInterrupt},
@@ -500,6 +504,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
 		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
 		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
+		route{"POST /api/push/activity", accessDevice, s.handlePushActivity},
+		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
 		route{"POST /api/feedback", accessDevice, s.handleFeedback},
 
@@ -665,6 +671,7 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	sl := newSniffListener(capped, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(sl) }()
+	go s.watchActivities(ctx)
 	select {
 	case err := <-errc:
 		return err

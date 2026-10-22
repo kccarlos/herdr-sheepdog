@@ -248,7 +248,7 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 		want    bool
 	}{{"0.9.5", true}, {"0.9.1", false}} {
 		h, _ := newTermHarness(t, tc.version)
-		c := dialWS(t, h)
+		c := dialWSRaw(t, h)
 		c.expect(wsproto.TypeStatus)
 		c.send(wsproto.ClientReady(1, iosClient))
 		m := c.expect(wsproto.TypeBotReady)
@@ -266,7 +266,7 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 	}
 	// No Deps.Term (herdr mock mode): never listed.
 	h := newHarness(t, harnessOpts{})
-	c := dialWS(t, h)
+	c := dialWSRaw(t, h)
 	c.expect(wsproto.TypeStatus)
 	c.send(wsproto.ClientReady(1, iosClient))
 	if m := c.expect(wsproto.TypeBotReady); slices.Contains(m.Features, wsproto.FeatureTerm) {

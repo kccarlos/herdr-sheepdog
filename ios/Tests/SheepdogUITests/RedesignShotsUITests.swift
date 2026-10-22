@@ -115,6 +115,20 @@ final class RedesignShotsUITests: XCTestCase {
         shot("banners")
     }
 
+    /// A ScreenCard's sheet, then its row and a question asked by tap.
+    func testCardSheetAndRows() throws {
+        let app = launchDemo(["-sheepdogDemoCard"])
+        let title = app.descendants(matching: .any)["card.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 45))
+        sleep(2)
+        shot("card-sheet")
+        app.buttons["card.done"].firstMatch.tap()
+        sleep(1)
+        tapOnScreen(app, "demo.question.0")
+        sleep(4)
+        shot("conversation-rows")
+    }
+
     func testEmptyConversation() throws {
         // A saved address with nothing behind it: no history, no banner
         // until the orb is tapped.

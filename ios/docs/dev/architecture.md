@@ -534,6 +534,75 @@ tapped. Tapping any notification opens that agent's Agents card. Nothing is
 shown in the foreground while the session is live. The payload format is
 described in the daemon's `docs/dev/push.md`.
 
+## The Live Activity
+
+The voice session's Live Activity is a lock-screen banner first; the
+Dynamic Island keeps a plain, system-style layout. Its content state is
+SheepdogKit's `LiveActivityContent`, which the widget extension links for
+the type and its words, so the app sends data and the widget writes the
+sentences:
+
+- the voice's phase (`Phase`, raw values on the wire) and mute;
+- the current computer's name, only when several computers are paired
+  (nil with one, so one computer looks as it always did);
+- up to three waiting agents (`Row`: pane, name, the question in one line,
+  and the computer only for a row from another computer), the open
+  questions' order first (oldest first), then by how long they have been
+  blocked;
+- how many agents are waiting, working and done.
+
+`LiveActivityContent.make` builds it from the session state, the agents and
+`/api/state` `questions`; `LiveActivityContentTests` covers the mapping, the
+cuts (questions to 90 characters, names to 32) and the encoded size, which
+must stay well under ActivityKit's 4 KB.
+
+**Layout.** The lock screen gives a Live Activity about 160 pt of height.
+The banner has a header (orb, headline, the line under it with the
+computer and the counts, Mute and End at 44 pt) and the waiting rows under
+a hairline. Rows get three lines up to Large text, two at the largest
+standard sizes and one at the accessibility sizes (capped at AX2); when not
+every waiting agent fits, the last line says "N more waiting"
+(`visibleRows(slots:)`). A row is a `Link` to `sheepdog://window/<pane>`
+(`AppRoute.window`, with `?computer=<id>` for another computer), which
+opens the agent's window; the rest of the banner opens the app. Each row
+is one VoiceOver element ("auth-fix asks: Run npm test in webapp?"), and
+the header reads the phase, the computer, the waiting count and the
+counts. The widget has no asset catalog, so its colours are the app's
+tokens in code (`ActivityPalette`).
+
+**Lifetime.** `VoiceLiveActivity` (`AwayControls.swift`) starts the
+activity when a voice session starts (the app is in the foreground then;
+`Activity.request` fails in the background), updates it from every state
+change while the app runs (the audio session keeps the app running with
+the screen locked), moves the stale date along every five minutes, and
+ends it with immediate dismissal when the session ends. A banner the user
+swiped away stays gone until the next session; one a killed app left
+behind is ended at the next launch and goes stale (dimmed, "May have
+ended") after 15 minutes. It does not run without a voice session
+(docs/dev/design/app-redesign.md, closed question 9).
+
+**While the app is away.** The activity is requested with
+`pushType: .token`; every token iOS issues goes to the daemon
+(`POST /api/push/activity`, `DELETE` when the activity ends). After 30
+seconds without a connection from this phone the daemon pushes each
+change (phase `away`, "Not listening"), with the rows sealed under the
+push content key (`sealed {c, n}`, `rows: []` in the clear). The widget
+joins the App Group so `openedWithStoredKey()` can read that key from the
+group keychain and open the rows; without it the banner shows the counts
+("2 agents waiting"). The daemon side is the daemon's docs/dev/push.md,
+"Live Activity updates".
+
+**Limits and cost.** iOS ends an activity after 8 hours (it can stay on
+the lock screen up to 4 more), and an update, local or pushed, is at most
+4 KB. Local updates cost nothing; pushed ones go through the relay like
+notifications, priority 10 only for a new waiting agent (iOS budgets
+those) and 5 otherwise.
+
+`-sheepdogLiveActivityGallery one|several|many|quiet|away|away-counts|stale` draws the
+widget's own banner on a stand-in lock screen for screenshots (a simulator
+cannot be locked from a script); `-sheepdogDemoLiveActivity <state>`
+starts a real activity with sample rows and no session.
+
 ## Audio
 
 ```
