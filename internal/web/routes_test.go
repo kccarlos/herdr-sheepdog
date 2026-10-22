@@ -25,7 +25,7 @@ func samplePath(pattern string) (method, path string) {
 // route 401 without credentials, a setup route 403, and a public one
 // neither.
 func TestEveryRouteHasAnAccessRule(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "s3cr3t")
+	f := newSetupFixture(t, config.Default())
 	h := f.h
 	table, err := h.srv.routeTable()
 	if err != nil {
@@ -46,7 +46,7 @@ func TestEveryRouteHasAnAccessRule(t *testing.T) {
 			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "loopback_only") {
 				t.Errorf("%s from the network = %d %s, want 403 loopback_only", rt.pattern, w.Code, w.Body)
 			}
-		case accessDevice, accessUpgrade:
+		case accessDevice:
 			if w.Code != http.StatusUnauthorized {
 				t.Errorf("%s without credentials = %d, want 401", rt.pattern, w.Code)
 			}
@@ -55,14 +55,15 @@ func TestEveryRouteHasAnAccessRule(t *testing.T) {
 				t.Errorf("%s from the network = %d, want 403", rt.pattern, w.Code)
 			}
 		case accessPublic:
-			if (w.Code == http.StatusUnauthorized && rt.pattern != "POST /api/login") || w.Code == http.StatusForbidden {
+			// The sign-in route refuses a bad signature with 401 itself.
+			if (w.Code == http.StatusUnauthorized && rt.pattern != "POST /api/auth/session") || w.Code == http.StatusForbidden {
 				t.Errorf("public %s = %d", rt.pattern, w.Code)
 			}
 		default:
 			t.Errorf("%s has no access rule", rt.pattern)
 		}
 	}
-	for _, a := range []access{accessPublic, accessDevice, accessUpgrade, accessLoopback, accessSetup} {
+	for _, a := range []access{accessPublic, accessDevice, accessLoopback, accessSetup} {
 		if seen[a] == 0 {
 			t.Errorf("no route with access %d: the table walk is not covering it", a)
 		}

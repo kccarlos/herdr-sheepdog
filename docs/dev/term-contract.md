@@ -9,9 +9,10 @@ cannot drift.
 
 ## Endpoint and discovery
 
-- `GET /term` on the daemon's port, with the same token as `/ws`
-  (`Authorization: Bearer`, `?token=`, or the cookie; see
-  [ws-contract.md](ws-contract.md#auth)). Without it: `401`.
+- `GET /term` on the daemon's port, authenticated like `/ws` before the
+  upgrade (`Authorization: Bearer sds_<ticket>` or the session cookie; see
+  [ws-contract.md](ws-contract.md#auth)). Without it: `401`. Revoking
+  the device closes it with code **4003**.
 - **Discovery.** `bot-ready` on `/ws` lists the feature `term` only when
   the daemon talks to a real herdr (not `--herdr=mock`) whose `ping`
   reports **0.9.2 or newer**. A client opens `/term` only then. When herdr
@@ -161,18 +162,11 @@ itself the first time), so the user sees it on the computer too.
   `supervisor.project_roots` entry or be a tracked agent's own folder (a
   worktree herdr put elsewhere). An empty `cwd` is the first project root.
   Anything else is `refused:outside_projects`.
-- **The gate** is the address the request came from (`RemoteAddr`), not
-  the bind address:
-
-  | Client address | Shell |
-  |---|---|
-  | loopback | on |
-  | Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48) | on |
-  | anything else (plain-LAN HTTP) | off unless `web.shell_lan` ([CONFIG.md](../../CONFIG.md)), set on the setup page |
-
-  It applies to the shell target, to a shell's `pane_id` (a LAN client
-  cannot attach to a shell opened over Tailscale) and to closing one.
-  Off: `refused:shell_off`.
+- **The gate** is the computer's shell switch, [`web.shell`](../../CONFIG.md)
+  (on by default, set on the setup page), the same for every paired
+  device on every network. It applies to the shell target, to a shell's
+  `pane_id` (nobody attaches to a shell while the switch is off) and to
+  closing one. Off: `refused:shell_off`; `term-ready.shell` is false.
 - **Leaving** the window (`term-close`) only detaches; the shell keeps
   running. **Closing** it ends the pane:
 
@@ -199,5 +193,5 @@ Metadata only, never screen content or input:
 - `web.shell.open {client_id, pane_id, cwd, remote_kind, reused}`,
   `web.shell.close {pane_id, remote_kind}` and `web.shell.error {client_id,
   cwd, error}` (herdr could not open the shell)
-- `web.setup_saved {step: "shell_lan", enable}` when the setup page's switch
+- `web.setup_saved {step: "shell", enable}` when the setup page's switch
   changes

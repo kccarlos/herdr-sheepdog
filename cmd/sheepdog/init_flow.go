@@ -248,22 +248,11 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 	fprintln(out, "")
 	fprintln(out, "Summary: "+f.summary(ch))
 
-	// The web token: only for a new config, and never over one that
-	// exists anywhere (the phone is paired with it).
 	set := map[string]string{}
 	for k, v := range f.keys {
 		if v != existing[k] {
 			set[k] = v
 		}
-	}
-	tokenNote := ""
-	if newConfig && !onboard.HasToken(existing, cur) {
-		tok, err := onboard.NewToken()
-		if err != nil {
-			return err
-		}
-		set["SHEEPDOG_WEB_TOKEN"] = tok
-		tokenNote = "generated a web token (SHEEPDOG_WEB_TOKEN in " + o.envPath + "; the phone app asks for it)"
 	}
 
 	// The same save the setup page does.
@@ -288,9 +277,6 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 		fprintf(out, "sheepdog init: kept %s as it is\n", o.configPath)
 	}
 	fprintf(out, "sheepdog init: wrote %s (0600): %s\n", o.envPath, strings.Join(names, ", "))
-	if tokenNote != "" {
-		fprintln(out, "sheepdog init: "+tokenNote)
-	}
 	fprintf(out, "sheepdog init: next: sheepdog doctor, then sheepdog start, and open http://127.0.0.1:%d/voice (sheepdog open)\n", cur.Web.Port)
 	return nil
 }

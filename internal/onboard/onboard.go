@@ -421,21 +421,13 @@ func CheckPort(ctx context.Context, c *http.Client, bind string, port int) Resul
 	return Result{Name: name, Status: Fail, Detail: addr + " is taken by another program", Fix: "stop that program or set web.port / SHEEPDOG_WEB_PORT to a free port"}
 }
 
-// MinTokenLen is the token length below which doctor warns.
-const MinTokenLen = 24
-
-// CheckBindToken checks the bind/token pairing.
-func CheckBindToken(w config.Web) Result {
-	const name = "bind/token"
-	switch {
-	case w.IsLoopback():
-		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (the phone cannot connect; set web.bind to a LAN or Tailscale address for it)"}
-	case w.Token == "":
-		return Result{Name: name, Status: Fail, Detail: "bind " + w.Bind + " is reachable from the network but web.token is empty (serve refuses to start)", Fix: "run sheepdog setup to generate a token, or set SHEEPDOG_WEB_TOKEN"}
-	case len(w.Token) < MinTokenLen:
-		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("bind %s with a short token (%d characters)", w.Bind, len(w.Token)), Fix: fmt.Sprintf("use a random token of at least %d characters (re-pair the phone after changing it)", MinTokenLen)}
+// CheckBind says who can reach the daemon.
+func CheckBind(w config.Web) Result {
+	const name = "bind"
+	if w.IsLoopback() {
+		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (turn on phone access in sheepdog setup for the app)"}
 	}
-	return Result{Name: name, Status: OK, Detail: fmt.Sprintf("bind %s with a token of %d characters", w.Bind, len(w.Token))}
+	return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": TLS and paired devices only (pair with sheepdog pair)"}
 }
 
 // CheckPush checks phone notifications by push.mode: the relay's

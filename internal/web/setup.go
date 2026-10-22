@@ -2,10 +2,9 @@ package web
 
 // The setup page (/setup) and its API (/api/setup/*): the first-run
 // wizard `sheepdog setup` opens, and the page used later to change keys
-// or re-pair the phone. Both are served to loopback clients only, even
-// when web.bind is wider, and need no web token: whoever can open a page
-// on this computer can read the env file anyway, and on a first run
-// there is no token to type yet. Keys go into the env file (0600) and
+// or pair a phone. Both are served to loopback clients only, even when
+// web.bind is wider, and need no device key: whoever can open a page on
+// this computer can read the env file anyway. Keys go into the env file (0600) and
 // are never sent back to the page or logged.
 
 import (
@@ -201,9 +200,8 @@ func (s *Server) setupRoutes() ([]route, error) {
 		"GET /api/setup/checks":            s.handleSetupChecks,
 		"POST /api/setup/service":          s.handleSetupService,
 		"POST /api/setup/phone":            s.handleSetupPhone,
-		"POST /api/setup/shell-lan":        s.handleSetupShellLAN,
+		"POST /api/setup/shell":            s.handleSetupShell,
 		"GET /api/setup/qr.svg":            s.handleSetupQR,
-		"POST /api/setup/login":            s.handleSetupLogin,
 		"POST /api/setup/demo":             s.handleSetupDemo,
 	}
 	for pattern, h := range routes {
@@ -317,7 +315,6 @@ type SetupHerdr struct {
 type SetupPhone struct {
 	Enabled   bool           `json:"enabled"`
 	Bind      string         `json:"bind"`
-	HasToken  bool           `json:"has_token"`
 	Addresses []pair.Address `json:"addresses"`
 	Tailscale bool           `json:"tailscale"`
 	// Explain says which address the QR leads with (pair.Explain).
@@ -325,8 +322,8 @@ type SetupPhone struct {
 	Connected   bool       `json:"connected"`
 	ConnectedAt *time.Time `json:"connected_at,omitempty"`
 	Remote      string     `json:"remote,omitempty"`
-	// ShellLAN is web.shell_lan: a plain-LAN phone may open the shell.
-	ShellLAN bool `json:"shell_lan"`
+	// Shell is web.shell: paired devices may open the phone shell.
+	Shell bool `json:"shell"`
 }
 
 func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
@@ -491,7 +488,7 @@ func setupVertex(cfg config.Config) SetupVertex {
 func (s *Server) setupPhone() SetupPhone {
 	sd := s.deps.Setup
 	cfg := sd.Config
-	p := SetupPhone{Enabled: !cfg.Web.IsLoopback(), Bind: cfg.Web.Bind, HasToken: cfg.Web.Token != "", Addresses: []pair.Address{}, ShellLAN: s.shellLAN.Load()}
+	p := SetupPhone{Enabled: !cfg.Web.IsLoopback(), Bind: cfg.Web.Bind, Addresses: []pair.Address{}, Shell: s.shellOn.Load()}
 	sys, _ := sd.SysAddrs()
 	for _, a := range sys {
 		if ip4 := a.IP.To4(); ip4 != nil && pair.Kind(ip4, a.Iface) == pair.KindTailscale {
@@ -502,7 +499,7 @@ func (s *Server) setupPhone() SetupPhone {
 		p.Tailscale = sd.TailscaleCLI()
 	}
 	if p.Enabled {
-		if addrs, _, err := s.pairing(); err == nil {
+		if addrs, err := s.pairAddresses(s.Addr()); err == nil {
 			p.Addresses = addrs
 			p.Explain = pair.Explain(addrs)
 		}
@@ -784,11 +781,9 @@ func (s *Server) handleSetupService(w http.ResponseWriter, r *http.Request) {
 
 // SetupPhoneRequest is POST /api/setup/phone. Enable sets the bind to
 // every address of this computer (0.0.0.0: the LAN and Tailscale ones,
-// behind the token) and creates a token if none exists; NewToken
-// replaces the token (the paired phone must scan again).
+// TLS and paired devices only); off goes back to loopback.
 type SetupPhoneRequest struct {
-	Enable   bool `json:"enable"`
-	NewToken bool `json:"new_token"`
+	Enable bool `json:"enable"`
 }
 
 func (s *Server) handleSetupPhone(w http.ResponseWriter, r *http.Request) {
@@ -797,43 +792,27 @@ func (s *Server) handleSetupPhone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	created, err := s.savePhone(req)
-	if err != nil {
+	if err := s.savePhone(req); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token_created": created, "restarting": s.deps.Restart != nil})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restarting": s.deps.Restart != nil})
 	s.restartSoon("setup: phone access")
 }
 
-// savePhone writes the bind and, when needed, a token; it reports
-// whether a token was created.
-func (s *Server) savePhone(req SetupPhoneRequest) (bool, error) {
-	sd := s.deps.Setup
-	created, err := onboard.SetPhoneAccess(sd.EnvPath, sd.Config, req.Enable, req.NewToken)
-	if err != nil {
-		return false, err
+// savePhone writes the bind.
+func (s *Server) savePhone(req SetupPhoneRequest) error {
+	if err := onboard.SetPhoneAccess(s.deps.Setup.EnvPath, req.Enable); err != nil {
+		return err
 	}
-	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "phone", "enable": req.Enable, "token_created": created})
-	return created, nil
+	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "phone", "enable": req.Enable})
+	return nil
 }
 
-// handleSetupQR is the pairing code (it holds the token: never logged,
-// never cached).
+// handleSetupQR is the one-time pairing code (never logged, never
+// cached).
 func (s *Server) handleSetupQR(w http.ResponseWriter, r *http.Request) {
 	s.handlePairQR(w, r)
-}
-
-// handleSetupLogin sets the token cookie for this origin, so /voice and
-// /debug opened from the setup page need no token typed.
-func (s *Server) handleSetupLogin(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Token != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name: tokenCookie, Value: s.deps.Token, Path: "/",
-			HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // SetupDemoRequest is POST /api/setup/demo: action start, stop or ping

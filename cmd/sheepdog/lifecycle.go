@@ -458,9 +458,6 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fprintf(stdout, "opening %s\n", url)
-	if l.cfg.Web.Token != "" && page != "setup" {
-		fprintln(stdout, "The page asks once for the web token: web.token in your config, or SHEEPDOG_WEB_TOKEN in "+config.DefaultEnvPath()+".")
-	}
 	if err := openBrowser(url); err != nil {
 		fprintf(stderr, "sheepdog open: could not start a browser (%v); open the URL above yourself\n", err)
 		return 1
@@ -484,16 +481,14 @@ func pageMissing(ctx context.Context, url string) bool {
 	return resp.StatusCode == http.StatusNotFound
 }
 
-// getJSON fetches base+path with the web token into v.
-func getJSON(ctx context.Context, base, path, token string, v any) error {
+// getJSON fetches base+path into v (the daemon on loopback needs no
+// credentials).
+func getJSON(ctx context.Context, base, path string, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

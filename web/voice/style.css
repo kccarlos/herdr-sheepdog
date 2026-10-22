@@ -100,3 +100,5 @@ input[type=file] { max-width: 100%; }
   .meter { width: 100%; max-width: none; }
   .meter-label { width: 100%; }
 }
+a.button { display: inline-block; padding: .5rem .8rem; border-radius: 8px; text-decoration: none; }
+#auth-choice { gap: .5rem; flex-wrap: wrap; }

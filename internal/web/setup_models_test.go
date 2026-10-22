@@ -67,7 +67,7 @@ func decodeModels(t *testing.T, body string) SetupModelsResponse {
 
 func TestSetupModelsListsWithTheTypedKey(t *testing.T) {
 	fc := newFakeCompat(t, `{"data":[{"id":"a/one","supported_parameters":["tools","temperature"]},{"id":"b/two","supported_parameters":["temperature"]},{"id":"c/three"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	code, body := f.post(t, "/api/setup/models", `{"name":"x","base_url":"`+fc.URL+`/v1","key":"`+secretCompatKey+`"}`)
 	r := decodeModels(t, body)
 	if code != 200 || r.Error != "" || len(r.Models) != 3 || !r.ToolInfo {
@@ -89,7 +89,7 @@ func TestSetupModelsUsesTheSavedKeyOnlyForTheSavedBase(t *testing.T) {
 	other := newFakeCompat(t, `{"data":[{"id":"m1"}]}`)
 	cfg := config.Default()
 	cfg.Brain.OpenAICompat = []config.OpenAICompat{{Name: "x", BaseURL: fc.URL + "/v1", APIKeyEnv: "X_API_KEY", APIKey: secretCompatKey}}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	code, body := f.post(t, "/api/setup/models", `{"name":"x","base_url":"`+fc.URL+`/v1/"}`)
 	r := decodeModels(t, body)
 	if code != 200 || r.Error != "" || len(r.Models) != 1 {
@@ -112,7 +112,7 @@ func TestSetupModelsUsesTheSavedKeyOnlyForTheSavedBase(t *testing.T) {
 
 func TestSetupModelsErrorTexts(t *testing.T) {
 	fc := newFakeCompat(t, `{"data":[{"id":"m1"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	cases := []struct {
 		name, body, wantErr, wantFix string
 	}{
@@ -141,7 +141,7 @@ func TestSetupModelsErrorTexts(t *testing.T) {
 
 func TestSetupProbeAgainstAFakeServer(t *testing.T) {
 	fc := newFakeCompat(t, `{"data":[{"id":"m1"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	req := `{"name":"x","base_url":"` + fc.URL + `/v1","model":"m1","key":"` + secretCompatKey + `"}`
 
 	if fc.chats.Load() != 0 {

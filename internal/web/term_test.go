@@ -274,16 +274,18 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 	}
 }
 
-func TestTermNeedsToken(t *testing.T) {
+func TestTermNeedsADevice(t *testing.T) {
 	ft := &fakeTerm{version: "0.9.5"}
-	h := newHarness(t, harnessOpts{term: ft.deps(), token: "s3cret"})
+	h := newHarness(t, harnessOpts{term: ft.deps()})
+	d := h.pairDevice()
+	h.asRemote()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	url := "ws" + strings.TrimPrefix(h.http.URL, "http") + "/term"
 	if _, resp, err := websocket.Dial(ctx, url, nil); err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("no token: err %v", err)
+		t.Fatalf("no ticket: err %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer s3cret"}}})
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + ticketPrefix + d.ticket}}})
 	if err != nil {
 		t.Fatal(err)
 	}

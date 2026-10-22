@@ -215,7 +215,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			} `json:"voice"`
 			Update *update.Status `json:"update"`
 		}
-		if err := getJSON(ctx, r.URL, "/api/state", cfg.Web.Token, &st); err == nil {
+		if err := getJSON(ctx, r.URL, "/api/state", &st); err == nil {
 			r.Orchestrator = statusOrchestrator{Source: "daemon"}
 			if st.Brain != nil {
 				r.Orchestrator.Enabled, r.Orchestrator.Provider, r.Orchestrator.Model = true, st.Brain.Provider, st.Brain.Model
@@ -223,7 +223,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			var push struct {
 				Devices int `json:"devices"`
 			}
-			_ = getJSON(ctx, r.URL, "/api/push/status", cfg.Web.Token, &push)
+			_ = getJSON(ctx, r.URL, "/api/push/status", &push)
 			r.Phones = &statusPhones{PushDevices: push.Devices, VoiceClientConnected: st.Voice.ClientConnected}
 			r.Voice.Problem = st.Voice.Problem
 			r.Update = st.Update
