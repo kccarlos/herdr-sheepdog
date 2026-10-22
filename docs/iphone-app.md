@@ -173,8 +173,12 @@ On the same Wi-Fi this just works. Away from home, see
   questions, and how many agents are working and done. Tap an agent to open
   its window; **Mute** and **End** work without opening the app (ending the
   voice session leaves your agents working). The banner starts and ends with the voice
-  session and is updated by the app while the session runs; if the app was
-  closed, it dims and says "May have ended" after 15 minutes. Turn it off in
+  session. The app updates it while it runs; when the app has been away
+  for half a minute (the phone locked with the voice paused, or the app
+  closed), your computer keeps it current through the same push service as
+  notifications, with the agents' names and questions encrypted for your
+  phone. A banner nothing has updated for a while dims and says "May have
+  ended". Turn it off in
   iOS Settings ▸ Sheepdog ▸ Live Activities.
 - **Earbud remote.** Play/pause on earbuds or AirPods mutes and unmutes the
   microphone; next track stops what is in flight.

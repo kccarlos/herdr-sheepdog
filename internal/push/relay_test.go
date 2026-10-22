@@ -21,6 +21,8 @@ type fakeRelay struct {
 	registers  []map[string]string
 	sends      []relaySend
 	sendStatus []int
+	activities []activityBody
+	actStatus  []int
 	minted     int
 }
 
@@ -58,6 +60,20 @@ func newFakeRelay(t *testing.T) *fakeRelay {
 				_, _ = w.Write([]byte(`{"error":"bad relay_token"}`))
 			default:
 				_, _ = w.Write([]byte(`{"error":"apns refused","status":429,"reason":"TooManyRequests"}`))
+			}
+		case "/v1/activity":
+			var a activityBody
+			_ = json.Unmarshal(b, &a)
+			f.activities = append(f.activities, a)
+			status := 200
+			if len(f.actStatus) > 0 {
+				status, f.actStatus = f.actStatus[0], f.actStatus[1:]
+			}
+			w.WriteHeader(status)
+			if status == 410 {
+				_, _ = w.Write([]byte(`{"error":"device token is no longer valid","reason":"Unregistered"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"ok":true}`))
 			}
 		case "/v1/health":
 			_, _ = w.Write([]byte(`{"ok":true,"version":"1.0.0"}`))

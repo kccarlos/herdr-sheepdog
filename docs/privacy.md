@@ -84,7 +84,7 @@ connection to your daemon. The phone decrypts it.
 
 | The relay sees | The relay never sees |
 |---|---|
-| Your phone's push token (sealed into a relay token the daemon keeps), your daemon's IP address, when a notification is sent, its size, and its kind (approval, blocked, done, idle) | The title, the agent's name, the text, the options, your screens or anything you said |
+| Your phone's push token (sealed into a relay token the daemon keeps), your daemon's IP address, when a notification is sent, its size, and its kind (approval, blocked, done, idle). For the lock-screen Live Activity while the app is away: its push token, that the voice is not listening, and how many agents are waiting, working and done | The title, the agent's name, the text, the options, a waiting agent's question, your screens or anything you said |
 
 The relay keeps no database and logs only how many requests it answered
 and with which status. Apple sees what any push service sees: the token,

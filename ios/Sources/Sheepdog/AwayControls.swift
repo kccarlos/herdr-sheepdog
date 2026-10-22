@@ -12,6 +12,13 @@ import SwiftUI
 @MainActor
 final class AwayControls {
     var onRoute: (AppRoute) -> Void = { _ in }
+    /// The Live Activity's push token (hex) when iOS issues one, nil when
+    /// the activity ends: the daemon keeps the banner current with it
+    /// while the app is away.
+    var onActivityToken: (String?) -> Void {
+        get { activity.onPushToken }
+        set { activity.onPushToken = newValue }
+    }
 
     private let activity = VoiceLiveActivity()
     private let remote = EarbudRemote()
@@ -36,13 +43,18 @@ final class AwayControls {
 /// The voice session's Live Activity: started when a session starts (the
 /// app is in the foreground then), updated locally while the app runs —
 /// the audio session keeps it running with the screen locked — and ended
-/// with immediate dismissal when the session ends. No push updates: the
-/// daemon is not involved.
+/// with immediate dismissal when the session ends. It is requested with a
+/// push token (`onPushToken`), which the app gives the daemon: once the
+/// app has been away for a while, the daemon pushes the updates
+/// (docs/dev/push.md "Live Activity updates").
 @MainActor
 final class VoiceLiveActivity {
     private typealias Content = LiveActivityContent
 
+    var onPushToken: (String?) -> Void = { _ in }
+
     private var activity: Activity<VoiceSessionAttributes>?
+    private var tokenTask: Task<Void, Never>?
     private var content: Content?
     private var refreshTask: Task<Void, Never>?
     private var watchTask: Task<Void, Never>?
@@ -82,11 +94,12 @@ final class VoiceLiveActivity {
             let started = try Activity.request(
                 attributes: VoiceSessionAttributes(voiceName: voiceName),
                 content: Self.activityContent(next),
-                pushType: nil
+                pushType: .token
             )
             activity = started
             content = next
             watch(started)
+            watchToken(started)
             startRefreshing()
         } catch {
             // Not allowed right now (in the background, or too many
@@ -99,7 +112,9 @@ final class VoiceLiveActivity {
         dismissedByUser = false
         refreshTask?.cancel(); refreshTask = nil
         watchTask?.cancel(); watchTask = nil
+        tokenTask?.cancel(); tokenTask = nil
         guard let ending = activity else { return }
+        onPushToken(nil)
         let last = content.map { ActivityContent(state: $0, staleDate: nil) }
         activity = nil
         content = nil
@@ -117,7 +132,19 @@ final class VoiceLiveActivity {
                 self.content = nil
                 self.dismissedByUser = true
                 self.refreshTask?.cancel(); self.refreshTask = nil
+                self.tokenTask?.cancel(); self.tokenTask = nil
+                self.onPushToken(nil)
                 return
+            }
+        }
+    }
+
+    /// Hands every push token iOS issues for the activity to the daemon.
+    private func watchToken(_ watched: Activity<VoiceSessionAttributes>) {
+        tokenTask = Task { [weak self] in
+            for await token in watched.pushTokenUpdates {
+                guard let self, self.activity?.id == watched.id else { return }
+                self.onPushToken(PushToken.hex(token))
             }
         }
     }

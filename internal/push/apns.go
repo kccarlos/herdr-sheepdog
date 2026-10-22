@@ -93,6 +93,7 @@ type Sender struct {
 	relay   relayClient       // mode relay
 	reason  string            // why disabled
 	devs    *devices
+	acts    activities
 	client  *http.Client
 	baseURL map[string]string
 
@@ -329,6 +330,9 @@ func (s *Sender) Unregister(token string) error {
 func (s *Sender) ForgetDevices(ids []string) error {
 	if s == nil || len(ids) == 0 {
 		return nil
+	}
+	for _, id := range ids {
+		s.ForgetActivity(id)
 	}
 	n, err := s.devs.removeDevices(ids)
 	if err != nil {
