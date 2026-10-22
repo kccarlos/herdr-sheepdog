@@ -93,7 +93,7 @@ type shepherdInput struct {
 	retried bool
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
-	// (echoOf, utterance.go). Empty for anything else.
+	// (echoCandidateLocked, echo.go). Empty for anything else.
 	saidBefore string
 }
 
