@@ -113,9 +113,11 @@ func TestAgentScreenEscapedPane(t *testing.T) {
 	}
 }
 
-// Both window routes need the token like every other /api route.
-func TestAgentWindowNeedsToken(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: "s3cret"})
+// Both window routes need a paired device like every other /api route.
+func TestAgentWindowNeedsADevice(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	d := h.pairDevice()
+	h.asRemote()
 	for _, r := range []*http.Request{
 		h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), "", nil, nil),
 		h.authedRequest(http.MethodPost, windowPath("fake:1", "input"), "", nil, map[string]any{"keys": []string{"enter"}}),
@@ -125,7 +127,7 @@ func TestAgentWindowNeedsToken(t *testing.T) {
 			t.Errorf("%s %s = %d, want 401", r.Method, r.URL.Path, code)
 		}
 	}
-	if code, _ := h.do(h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), "s3cret", nil, nil), nil); code != http.StatusNotFound {
+	if code, _ := h.do(h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), d.ticket, nil, nil), nil); code != http.StatusNotFound {
 		t.Errorf("authed untracked = %d, want 404", code)
 	}
 }

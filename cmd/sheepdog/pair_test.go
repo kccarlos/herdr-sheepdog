@@ -2,75 +2,97 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 )
 
-func fakePairAddrs(t *testing.T) {
+// fakePairDaemon answers GET /api/pair on loopback like a running daemon
+// and returns a config file that points at it.
+func fakePairDaemon(t *testing.T, addrs []pair.Address, errText string) (cfgPath, envPath, code string) {
 	t.Helper()
-	old := pairAddrs
-	pairAddrs = func() ([]pair.IfaceAddr, error) {
-		return []pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun4", IP: net.ParseIP("100.101.102.103")}}, nil
-	}
-	t.Cleanup(func() { pairAddrs = old })
-}
-
-// The code lists both addresses; the token is in the code, never in the
-// text.
-func TestPair(t *testing.T) {
-	fakePairAddrs(t)
+	code = "one-time-code-not-to-be-printed"
+	link := pair.Link(pair.LinkInfo{DaemonID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Studio Mac", Pin: "pin", Code: code, Addresses: addrs})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/pair" || r.URL.Query().Get("new") != "1" {
+			http.NotFound(w, r)
+			return
+		}
+		exp := time.Date(2026, 10, 21, 12, 10, 0, 0, time.UTC)
+		resp := map[string]any{"addresses": addrs, "link": link, "expires": exp}
+		if errText != "" {
+			resp = map[string]any{"addresses": []pair.Address{}, "error": errText}
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
 	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.toml")
-	const token = "pairing-token-not-to-be-printed-0123456789"
-	if err := os.WriteFile(cfg, []byte("[web]\nbind = \"0.0.0.0\"\nport = 7777\ntoken = \""+token+"\"\n"), 0o600); err != nil {
+	cfgPath = filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(fmt.Sprintf("[web]\nbind = \"0.0.0.0\"\nport = %s\n", port)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	envPath = filepath.Join(dir, "x.env")
+	_ = os.WriteFile(envPath, nil, 0o600)
 	unsetWebEnv(t)
+	return cfgPath, envPath, code
+}
+
+var twoAddrs = []pair.Address{{URL: "https://100.101.102.103:7777", Kind: pair.KindTailscale}, {URL: "https://192.168.1.20:7777", Kind: pair.KindLAN}}
+
+// The code comes from the running daemon and lists both addresses; the
+// one-time code is in the QR only, never in the text.
+func TestPair(t *testing.T) {
+	cfg, env, code := fakePairDaemon(t, twoAddrs, "")
 	var out, errb strings.Builder
-	if code := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", filepath.Join(dir, "none.env")}, &out, &errb); code == 0 {
+	if c := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", filepath.Join(filepath.Dir(cfg), "none.env")}, &out, &errb); c == 0 {
 		t.Fatal("a missing --env-file was accepted")
 	}
-	env := filepath.Join(dir, "x.env")
-	_ = os.WriteFile(env, nil, 0o600)
 	out.Reset()
-	if code := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", env}, &out, &errb); code != 0 {
-		t.Fatalf("exit %d: %s", code, errb.String())
+	if c := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", env}, &out, &errb); c != 0 {
+		t.Fatalf("exit %d: %s", c, errb.String())
 	}
 	text := out.String()
-	for _, want := range []string{"lan       http://192.168.1.20:7777", "tailscale http://100.101.102.103:7777", "not printed", "▀", "Uses your Tailscale address 100.101.102.103"} {
+	for _, want := range []string{"lan        192.168.1.20:7777", "tailscale  100.101.102.103:7777", "works once", "▀", "Uses your Tailscale address 100.101.102.103"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, token) || strings.Contains(errb.String(), token) {
-		t.Error("the token was printed")
+	if strings.Contains(text, code) || strings.Contains(errb.String(), code) {
+		t.Error("the code was printed")
 	}
 }
 
-func TestPairLoopback(t *testing.T) {
-	fakePairAddrs(t)
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.toml")
-	_ = os.WriteFile(cfg, []byte("[web]\nbind = \"127.0.0.1\"\n"), 0o600)
-	env := filepath.Join(dir, "x.env")
-	_ = os.WriteFile(env, nil, 0o600)
-	unsetWebEnv(t)
+// No reachable address, or no daemon: a plain error.
+func TestPairNoAddressOrNoDaemon(t *testing.T) {
+	cfg, env, _ := fakePairDaemon(t, nil, "the daemon listens on 127.0.0.1 only, so a phone cannot reach it: set web.bind")
 	var out, errb strings.Builder
-	if code := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", env}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "web.bind") {
-		t.Errorf("exit %d: %q", code, errb.String())
+	if c := run(context.Background(), []string{"pair", "--config", cfg, "--env-file", env}, &out, &errb); c != 1 || !strings.Contains(errb.String(), "web.bind") {
+		t.Errorf("exit %d: %q", c, errb.String())
+	}
+	dir := t.TempDir()
+	none := filepath.Join(dir, "config.toml")
+	_ = os.WriteFile(none, []byte("[web]\nport = 1\n"), 0o600)
+	errb.Reset()
+	if c := run(context.Background(), []string{"pair", "--config", none, "--env-file", env}, &out, &errb); c != 1 || !strings.Contains(errb.String(), "not answering") {
+		t.Errorf("no daemon: exit %d: %q", c, errb.String())
 	}
 }
 
 // unsetWebEnv clears the web overrides for the test (an empty value
 // still counts as set).
 func unsetWebEnv(t *testing.T) {
-	for _, k := range []string{"SHEEPDOG_WEB_TOKEN", "SHEEPDOG_WEB_BIND", "SHEEPDOG_WEB_PORT"} {
+	for _, k := range []string{"SHEEPDOG_WEB_BIND", "SHEEPDOG_WEB_PORT"} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
 	}
@@ -78,33 +100,18 @@ func unsetWebEnv(t *testing.T) {
 
 // The herdr plugin opens `pair --compact` in a popup of 72 columns by 42
 // rows (herdr-plugin.toml), less 2 each for the frame, and its wrapper
-// adds 2 rows (a blank line and the "press Enter" prompt). With a long
-// token and three addresses the output must still fit, the code included.
+// adds 2 rows (a blank line and the "press Enter" prompt). With three
+// addresses the output must still fit, the code included.
 func TestPairCompactFitsThePluginPopup(t *testing.T) {
-	old := pairAddrs
-	pairAddrs = func() ([]pair.IfaceAddr, error) {
-		return []pair.IfaceAddr{
-			{Iface: "en0", IP: net.ParseIP("192.168.100.200")},
-			{Iface: "utun4", IP: net.ParseIP("100.101.102.103")},
-			{Iface: "en1", IP: net.ParseIP("10.20.30.40")},
-		}, nil
+	addrs := []pair.Address{
+		{URL: "https://100.101.102.103:7777", Kind: pair.KindTailscale},
+		{URL: "https://192.168.100.200:7777", Kind: pair.KindLAN},
+		{URL: "https://10.20.30.40:7777", Kind: pair.KindLAN},
 	}
-	t.Cleanup(func() { pairAddrs = old })
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.toml")
-	token := strings.Repeat("0123456789abcdef", 4)
-	if err := os.WriteFile(cfg, []byte("[web]\nbind = \"0.0.0.0\"\nport = 7777\ntoken = \""+token+"\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	unsetWebEnv(t)
-	env := filepath.Join(dir, "x.env")
-	_ = os.WriteFile(env, nil, 0o600)
+	cfg, env, _ := fakePairDaemon(t, addrs, "")
 	var out, errb strings.Builder
-	if code := run(context.Background(), []string{"pair", "--compact", "--plain", "--config", cfg, "--env-file", env}, &out, &errb); code != 0 {
-		t.Fatalf("exit %d: %s", code, errb.String())
-	}
-	if strings.Contains(out.String(), token) {
-		t.Error("the token was printed")
+	if c := run(context.Background(), []string{"pair", "--compact", "--plain", "--config", cfg, "--env-file", env}, &out, &errb); c != 0 {
+		t.Fatalf("exit %d: %s", c, errb.String())
 	}
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 	width := 0

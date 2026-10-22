@@ -119,7 +119,7 @@ the daemon, starts both fixture daemons on free ports with
 `scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
 the main daemon, so the history has a restart divider), and passes the
 ports as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT` and
-`TEST_RUNNER_SHEEPDOG_FIXTURE_TOKEN_PORT`. It runs the unit suite and the UI
+`TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT`. It runs the unit suite and the UI
 tests, then `HistoryApprovalUITests` after `scripts/fixture-daemons.sh
 restart`, then `ReconnectUITests` with `scripts/fixture-daemon-restarter.sh`
 running. Only the opt-in recording and screenshot tests skip there.
@@ -128,7 +128,7 @@ To run the UI tests for real on your Mac, start the two fixture daemons
 from the daemon repository root (`..` from `ios/`). Neither needs a model
 key: `--brain=fake` is a scripted local model, and `--voice=off` means there
 is no live session. The script does it (`SHEEPDOG_FIXTURE_PORT`,
-`SHEEPDOG_FIXTURE_TOKEN_PORT` and `SHEEPDOG_FIXTURE_DATA` move it off 7799,
+`SHEEPDOG_FIXTURE_PAIR_PORT` and `SHEEPDOG_FIXTURE_DATA` move it off 7799,
 7798 and `/tmp/sd-bugs`; `stop` stops them):
 
 ```sh

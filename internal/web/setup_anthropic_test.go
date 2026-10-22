@@ -82,7 +82,7 @@ func (f *fakeAnthropicAPI) seen() ([]string, bool) {
 func anthropicFixture(t *testing.T, cfg config.Config) (*setupFixture, *fakeAnthropicAPI) {
 	t.Helper()
 	api := newFakeAnthropicAPI(t)
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Endpoints.AnthropicBase = api.srv.URL
 	return f, api
 }

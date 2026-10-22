@@ -50,7 +50,7 @@ extension XCTestCase {
             }
             usleep(300_000)
         } while Date() < deadline
-        closeMenu(app)
+        closeMenu(app, item: item)
         return label
     }
 
@@ -65,9 +65,17 @@ extension XCTestCase {
     }
 
     /// Closes an open menu by tapping the very top of the screen.
-    func closeMenu(_ app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.03)).tap()
-        sleep(1)
+    /// Taps until `item` (an item of the open menu) is gone, so a tap
+    /// that lands while the menu still animates in is not lost.
+    func closeMenu(_ app: XCUIApplication, item: String? = nil) {
+        for _ in 0 ..< 4 {
+            sleep(1)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)).tap()
+            guard let item else { sleep(1); return }
+            let gone = NSPredicate(format: "exists == false")
+            let wait = XCTNSPredicateExpectation(predicate: gone, object: app.buttons[item])
+            if XCTWaiter().wait(for: [wait], timeout: 2) == .completed { return }
+        }
     }
 
     private func tapHittable(_ query: XCUIElementQuery) -> Bool {

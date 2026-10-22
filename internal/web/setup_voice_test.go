@@ -74,7 +74,7 @@ func voiceModels(t *testing.T, f *setupFixture, body string) (SetupVoiceModelsRe
 func TestSetupVoiceModelsKeepsLiveModels(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Endpoints.GeminiBase = fakeLiveModels(t)
 
 	r, raw := voiceModels(t, f, `{"provider":"gemini"}`)
@@ -115,7 +115,7 @@ func TestSetupVoiceModelsKeepsLiveModels(t *testing.T) {
 }
 
 func TestSetupVoiceModelsGPTLive(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	f.sd.Endpoints.OpenAIBase = fakeOpenAIModels(t)
 	r, raw := voiceModels(t, f, `{"provider":"openai","key":"`+voiceOpenAIKey+`"}`)
 	if strings.Join(r.Models, ",") != "gpt-live-1,gpt-live-2" || r.Default != "gpt-live-1" || !r.Listed || strings.Contains(raw, voiceOpenAIKey) {
@@ -131,7 +131,7 @@ func TestSetupVoiceModelsGPTLive(t *testing.T) {
 func TestSetupStateHasTheVoicePicks(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gemini.Voice = "Fenrir" // set by hand: offered too
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	st := setupState(t, f)
 	g, o := st.Voice.Gemini, st.Voice.OpenAI
 	if g.Model != "gemini-3.8-live" || g.Voice != "Fenrir" || g.DefaultVoice != "Puck" || strings.Join(g.Voices, ",") != "Puck,Kore,Charon,Aoede,Fenrir" {
@@ -150,7 +150,7 @@ func TestSetupStateHasTheVoicePicks(t *testing.T) {
 func TestSetupSaveVoiceChoice(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Endpoints.OpenAIBase = fakeOpenAIModels(t)
 
 	for _, bad := range []string{
@@ -247,7 +247,7 @@ func TestSetupSaveVertexVoiceModel(t *testing.T) {
 }
 
 func TestSetupServesTheVoiceModule(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	if !strings.Contains(f.get(t, "/setup/voice.js"), "export function talkLine") {
 		t.Error("the page's voice module is not served")
 	}

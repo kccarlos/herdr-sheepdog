@@ -98,3 +98,12 @@ label.check input { margin-top: .3rem; }
 .start-grid { grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); }
 .start-grid .p-need { grid-column: 2; font-size: .85em; color: var(--fg); margin-top: .15rem; }
 .summary { margin: .7rem 0 0; padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--code); }
+
+.devices-h { font-size: 1rem; margin: 1.25rem 0 .25rem; }
+.devices { list-style: none; padding: 0; margin: 0 0 .5rem; }
+.devices li { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; padding: .5rem 0; border-top: 1px solid var(--line); }
+.devices li:last-child { border-bottom: 1px solid var(--line); }
+.devices .name { font-weight: 600; }
+.devices .meta { flex: 1 1 12rem; color: var(--muted, inherit); font-size: .875rem; }
+button.link { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+.pair img.expired { opacity: .25; }
