@@ -19,18 +19,45 @@ struct AgentWindowRoute: Hashable {
 /// `/term` connection stays (`TermHub`) and only the channel changes.
 struct AgentScreenView: View {
     let agent: Agent
+    /// On iPad: the window is a pane in the detail, with its own header.
+    var pane: PaneChrome?
     @EnvironmentObject private var model: SessionViewModel
     @State private var paneID: String?
 
     var body: some View {
         let current = paneID.flatMap { id in model.flock.all.first { $0.paneID == id } } ?? agent
-        AgentWindowView(agent: current) { paneID = $0 }
-            .id(current.paneID)
+        AgentWindowView(agent: current, pane: pane) { id in
+            if let switchTo = pane?.onSwitch { switchTo(id) } else { paneID = id }
+        }
+        .id(current.paneID)
     }
+}
+
+/// An agent window as an iPad pane (canvas "AgentPane"): its header is
+/// drawn in the pane, not in a navigation bar, so two panes each have one.
+struct PaneChrome {
+    /// Before the title: Show sidebar and the mini capsule, when the
+    /// sidebar is hidden.
+    var leading: AnyView?
+    /// The pane's ✕ (only when there are two).
+    var onClose: (() -> Void)?
+    /// "Show another agent beside this one".
+    var onSplit: (() -> Void)?
+    /// The focused pane of two: a 3 pt ink line on top.
+    var focused = false
+    /// The window ended (closed, gone): what Back does.
+    var onGone: () -> Void
+    /// ⋯ ▸ Switch agent shows it in this pane.
+    var onSwitch: ((String) -> Void)?
+    /// Extra ⋯ items (Open in New Window).
+    var extraMenu: AnyView?
+    /// A tap or a key in this pane focuses it.
+    var onInteract: (() -> Void)?
 }
 
 private struct AgentWindowView: View {
     let agent: Agent
+    let pane: PaneChrome?
     let onSwitch: (String) -> Void
 
     @EnvironmentObject private var model: SessionViewModel
@@ -39,6 +66,7 @@ private struct AgentWindowView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openAgentWindow) private var openWindow
     @State private var prompt = ""
     @State private var showsMoreKeys = false
     @State private var action: AgentWindowAction?
@@ -46,8 +74,9 @@ private struct AgentWindowView: View {
     @State private var showChanges = false
     @FocusState private var promptFocused: Bool
 
-    init(agent: Agent, onSwitch: @escaping (String) -> Void) {
+    init(agent: Agent, pane: PaneChrome?, onSwitch: @escaping (String) -> Void) {
         self.agent = agent
+        self.pane = pane
         self.onSwitch = onSwitch
         _window = StateObject(wrappedValue: AgentWindowController(paneID: agent.paneID))
     }
@@ -67,6 +96,38 @@ private struct AgentWindowView: View {
     }
 
     var body: some View {
+        if let pane {
+            VStack(spacing: 0) {
+                paneHeader(pane)
+                content
+            }
+            .overlay(alignment: .top) {
+                if pane.focused {
+                    Rectangle().fill(Theme.ink).frame(height: 3)
+                        .accessibilityHidden(true)
+                }
+            }
+            .simultaneousGesture(TapGesture().onEnded { pane.onInteract?() })
+            .toolbar(.hidden, for: .navigationBar)
+        } else {
+            content
+                .navigationTitle(name)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(background, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .principal) { header }
+                    ToolbarItem(placement: .topBarTrailing) { menu }
+                }
+        }
+    }
+
+    /// Back: the iPhone pops the window; an iPad pane goes away.
+    private func leave() {
+        if let pane { pane.onGone() } else { dismiss() }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             if let notice = state.notice, !(state.phase == .ended && window.screenText.isEmpty) {
                 NoticeBar(notice: notice, fill: noticeFill) { act(on: notice) }
@@ -82,15 +143,7 @@ private struct AgentWindowView: View {
             controls
         }
         .background(background.ignoresSafeArea())
-        .animation(.easeInOut(duration: 0.2), value: state.notice)
-        .navigationTitle(name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(background, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) { header }
-            ToolbarItem(placement: .topBarTrailing) { menu }
-        }
+        .animation(Theme.ease, value: state.notice)
         .onAppear {
             window.surface.apply(theme: theme)
             window.attach(model: model)
@@ -112,7 +165,7 @@ private struct AgentWindowView: View {
             }
         }
         .onChange(of: model.handshake) { _, _ in window.availabilityChanged() }
-        .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { dismiss() })
+        .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { leave() })
         .sheet(isPresented: $showsMoreKeys) {
             MoreKeysSheet(window: window, interrupt: true) { snippet in
                 if window.typing {
@@ -154,6 +207,17 @@ private struct AgentWindowView: View {
 
     private var menu: some View {
         Menu {
+            menuItems
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .accessibilityLabel("More")
+        }
+        .accessibilityIdentifier("agentScreen.menu")
+    }
+
+    @ViewBuilder
+    private var menuItems: some View {
+            if let extra = pane?.extraMenu { extra }
             if state.phase == .observing {
                 Button {
                     confirmTakeover = true
@@ -177,7 +241,7 @@ private struct AgentWindowView: View {
             .accessibilityIdentifier("agentScreen.menu.changes")
             if model.shellEntryShown, let cwd = live.cwd, !cwd.isEmpty {
                 Button {
-                    model.navigationPath.append(ShellRoute(cwd: cwd))
+                    openWindow(.shell(cwd: cwd))
                 } label: {
                     Label("Open shell here", systemImage: "apple.terminal")
                 }
@@ -207,11 +271,75 @@ private struct AgentWindowView: View {
                     Label("Switch agent", systemImage: "rectangle.stack")
                 }
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .accessibilityLabel("More")
+    }
+
+    // MARK: - Pane header (iPad)
+
+    /// Canvas "AgentPane": the dot and name over the space, centred; the
+    /// sidebar button and mini capsule before; ✕, split and ⋯ after.
+    private func paneHeader(_ pane: PaneChrome) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                if let leading = pane.leading { leading }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Circle().fill(Theme.color(for: live.state)).frame(width: 8, height: 8)
+                    Text(name)
+                        .font(.headline)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if let place = live.workspaceLabel?.trimmedOrNil {
+                    Text(place)
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                }
+            }
+            .layoutPriority(1)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(name), \(Theme.word(for: live.state))")
+            .accessibilityIdentifier("agentScreen.header")
+            HStack(spacing: 2) {
+                if let onClose = pane.onClose {
+                    paneButton("xmark", label: "Close this pane", id: "pane.close", weight: .semibold, color: Theme.muted, action: onClose)
+                }
+                if let onSplit = pane.onSplit {
+                    paneButton("rectangle.split.2x1", label: "Show another agent beside this one", id: "pane.split", action: onSplit)
+                }
+                Menu { menuItems } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .accessibilityLabel("Agent actions")
+                .accessibilityIdentifier("agentScreen.menu")
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .accessibilityIdentifier("agentScreen.menu")
+        .padding(.horizontal, 10)
+        .frame(minHeight: 52)
+        .background(background)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private func paneButton(_ symbol: String, label: String, id: String, weight: Font.Weight = .regular, color: Color = Theme.ink, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: weight))
+                .foregroundStyle(color)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(id)
     }
 
     // MARK: - Terminal
@@ -232,7 +360,7 @@ private struct AgentWindowView: View {
                 } description: {
                     Text("Its pane closed, or sheepdog no longer tracks it.")
                 } actions: {
-                    Button("Back to agents") { dismiss() }
+                    Button(pane == nil ? "Back to agents" : "Close") { leave() }
                         .accessibilityIdentifier("agentScreen.ended.back")
                 }
                 .background(background)
@@ -255,7 +383,7 @@ private struct AgentWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(background)
-        .animation(.easeInOut(duration: 0.2), value: state.showsLatest)
+        .animation(Theme.ease, value: state.showsLatest)
     }
 
     // MARK: - Controls
@@ -324,10 +452,10 @@ private struct AgentWindowView: View {
     private func act(on notice: AgentWindowState.Notice) {
         switch notice {
         case .otherDevice: confirmTakeover = true
-        case .gone, .notTracked: dismiss()
+        case .gone, .notTracked: leave()
         case .herdrDown, .tooMany: window.retry()
         case .snapshotOnly, .reconnecting: break
-        case .shellOff, .shellFolder, .shellClosed: dismiss()
+        case .shellOff, .shellFolder, .shellClosed: leave()
         }
     }
 }

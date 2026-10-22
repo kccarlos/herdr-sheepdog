@@ -8,6 +8,11 @@ struct SheepdogApp: App {
     /// The splash covers the first moment after the launch screen, then
     /// fades. Touches pass through it.
     @State private var showsSplash = true
+    /// Until the splash has faded: sheets wait for it.
+    @State private var splashCovering = true
+    /// Across every window: the session goes to the background only when
+    /// all of them have.
+    @Environment(\.scenePhase) private var appPhase
 
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
@@ -17,9 +22,12 @@ struct SheepdogApp: App {
         #if DEBUG
         if DebugLaunch.resetState {
             store.address = ""
-            store.token = ""
+            store.credentials.forget()
             store.hasBeenConfigured = false
             store.keepListeningWhenLocked = true
+            // A test that tried Hold to talk must not leave it on for the
+            // next one (ReconnectUITests waits for "Listening").
+            store.talkMode = .openMic
             try? FileManager.default.removeItem(at: ConversationCache.standard().directory)
             // The one-time hints are cleared by the view model (all of
             // them, as `-sheepdogResetHints` does).
@@ -41,19 +49,44 @@ struct SheepdogApp: App {
                       i + 1 < ProcessInfo.processInfo.arguments.count,
                       let primer = PermissionPrimer(rawValue: ProcessInfo.processInfo.arguments[i + 1]) {
                 PermissionPrimerView(primer: primer) { _ in }
+            } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-sheepdogPairingScreen"),
+                      i + 1 < ProcessInfo.processInfo.arguments.count {
+                // The pairing screens for screenshots (no camera needed).
+                PairingFlowView(stage: Self.pairingStage(ProcessInfo.processInfo.arguments[i + 1]))
+                    .environmentObject(model)
             } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
                 CapsuleGallery()
             } else {
-                mainView
+                MainSceneRoot { mainView }
             }
             #else
-            mainView
+            MainSceneRoot { mainView }
             #endif
         }
     }
 
+    #if DEBUG
+    private static func pairingStage(_ name: String) -> PairingStage {
+        switch name {
+        case "primer": return .primer
+        case "denied": return .denied
+        case "noCamera": return .noCamera
+        case "scanning": return .scanning
+        case "confirm": return .confirm(PairingCode(daemonID: "d", name: "Studio Mac", pin: "p", code: "c", addresses: ["192.168.1.20:7777"]))
+        case "working": return .working("Studio Mac")
+        case "paired": return .paired("Studio Mac")
+        case "expired": return .problem(.codeUsed)
+        case "revoked": return .problem(.revoked)
+        case "pinMismatch": return .problem(.pinMismatch)
+        default: return .failed(title: "None of the code's addresses answered", detail: "Tried 192.168.1.20:7777. " + SetupHelp.unreachableFix)
+        }
+    }
+    #endif
+
     private var mainView: some View {
         content
+            .environment(\.appPhase, appPhase)
+            .environment(\.splashShowing, splashCovering)
             .overlay {
                 if showsSplash {
                     SplashView()
@@ -67,6 +100,8 @@ struct SheepdogApp: App {
                 #endif
                 try? await Task.sleep(for: .milliseconds(600))
                 withAnimation(.easeOut(duration: 0.3)) { showsSplash = false }
+                try? await Task.sleep(for: .milliseconds(300))
+                splashCovering = false
                 #if DEBUG
                 // After start() has shown the first-run sheet, which
                 // openDemo() closes first.
@@ -83,9 +118,24 @@ struct SheepdogApp: App {
             .onOpenURL { url in model.open(url: url) }
             // The offline demo (Settings ▸ Try the demo): a second view
             // model on a scripted daemon inside the app, over the real one.
-            .fullScreenCover(isPresented: $model.demoActive) {
-                DemoShell(close: { model.demoClosed() })
-            }
+            .modifier(DemoCover(model: model))
+    }
+}
+
+/// The demo opens in one window: the one that asked for it, else the
+/// audio owner.
+private struct DemoCover: ViewModifier {
+    @ObservedObject var model: SessionViewModel
+    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(\.sceneID) private var sceneID
+
+    func body(content: Content) -> some View {
+        content.fullScreenCover(isPresented: Binding(
+            get: { model.demoActive && scenes.isPresenter(sceneID) },
+            set: { model.demoActive = $0 }
+        )) {
+            DemoShell(close: { model.demoClosed() })
+        }
     }
 }
 

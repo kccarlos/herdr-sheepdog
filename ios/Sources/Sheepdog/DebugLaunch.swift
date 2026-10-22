@@ -77,11 +77,16 @@ enum DebugLaunch {
     static let markdownAgent = Agent(
         paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),
         lastTask: "Write the **install** section of the README and check `make install` on a clean machine",
-        journal: [Agent.JournalEntry(
+        journal: [
+            Agent.JournalEntry(at: Date().addingTimeInterval(-1500), event: "stop", lastAssistant: "Read the Makefile; install needs a PREFIX."),
+            Agent.JournalEntry(at: Date().addingTimeInterval(-1080), event: "stop", lastAssistant: "Tried make install on a clean user: it needs ~/.local/bin on PATH."),
+            Agent.JournalEntry(at: Date().addingTimeInterval(-600), event: "stop", lastAssistant: "Drafted the Install section; checking the macOS note."),
+            Agent.JournalEntry(
             at: Date().addingTimeInterval(-240), event: "done",
             lastAssistant: "## Summary\nDone. The README now has an *Install* section:\n\n- `make install` copies the binary to `~/.local/bin`\n- a note on **unlinking first** on macOS\n1. build\n2. install\n\n```\nmake build && make install\n```\nSee [the docs](https://github.com/kccarlos/herdr-sheepdog).",
             filesTouched: ["README.md"], tools: ["Edit": 3, "Bash": 2]
-        )]
+        ),
+        ]
     )
     /// `-sheepdogAddress 127.0.0.1:7799`: start configured, for the history
     /// walkthrough and screenshots.

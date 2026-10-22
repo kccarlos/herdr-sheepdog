@@ -37,7 +37,7 @@ struct ApprovalCardView: View {
                 // Up to three lines, never cut in the middle (where the
                 // dangerous part of a command usually is); a tap shows all.
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { commandExpanded.toggle() }
+                    withAnimation(Theme.ease) { commandExpanded.toggle() }
                 } label: {
                     Text(command)
                         .font(.subheadline.monospaced())
@@ -114,6 +114,8 @@ struct ApprovalCardView: View {
             Text(meta)
                 .foregroundStyle(Theme.muted)
                 .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(Theme.ease, value: meta)
         }
     }
 

@@ -121,11 +121,14 @@ any ──bot-ready below our minimum──────────────�
   `TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:<port>` is set (new daemon:
   `ready`; old daemon: `legacy` with no error shown), and skips otherwise.
 
-Auth is `Authorization: Bearer <token>` on every request, **including the
-WebSocket upgrade**, so the token never appears in a URL. Before opening
-`/ws`, the app probes `GET /api/state`, where a 401 is a plain status code.
-After a failed reconnect, the same probe tells whether the token was
-revoked mid-session.
+Auth is the session ticket (`Authorization: Bearer sds_…`) on every request
+to the paired computer, **including the WebSocket upgrades**, so it never
+appears in a URL. `DeviceCredentials` (SheepdogKit) signs in with the device
+key, once for all callers, and every `URLSession` checks the computer's
+certificate by its pin (`PinnedTrustDelegate`); see
+[security.md](../../../docs/dev/design/security.md) section 5.5. After a
+failed reconnect, `GET /api/state` (where a 401 is plain) tells whether the
+phone was revoked: that opens "Please scan again".
 
 ## Events
 
@@ -305,6 +308,62 @@ accessibility text sizes. The voice capsule stays in place.
   "Show me the agents" (`DemoDaemon.onCards`) shows one; the debug launch
   argument `-sheepdogDemoCard` asks it by itself for screenshots
   (`CardsUITests`, `TEST_RUNNER_SHEEPDOG_CARD_SHOTS=<dir>`).
+
+## iPad and several windows
+
+The app runs on iPad (`TARGETED_DEVICE_FAMILY` 1,2 for every target; the
+iPhone stays portrait, the iPad turns every way) with several windows
+(`UIApplicationSupportsMultipleScenes`). Design: docs/dev/design/app-redesign.md
+section 6.
+
+- **One session, several windows** (`Scenes.swift`). The App holds the one
+  `SessionViewModel`, so there is one voice session whatever the number of
+  windows. `SceneCoordinator` tracks the main windows (`MainSceneRoot`
+  registers each one):
+  - **the audio owner** is the oldest main window still open. It shows the
+    full capsule, reports `visibility` and turns the app-wide phase
+    (`\.appPhase`, the `App`'s own `scenePhase`, which is the aggregate)
+    into `becameActive` and `enteredBackground`. Another window going to
+    the background does not end the session.
+  - **the presenter** shows the session's sheets (Settings, New agent,
+    Spaces, a card, pairing, the primers, the demo): the window whose menu
+    asked (`SessionMenus` calls `request(from:)`), else the owner.
+    Otherwise every window would open the same sheet.
+  - every other window shows the **mini capsule** (`MiniCapsule`): a 30 pt
+    orb (Mute while listening, else the big orb's action) and the voice
+    menu.
+  - `SessionViewModel.start()` runs once, whichever window appears first.
+- **Layouts** (`MainView.swift`). `MainView` picks the layout and wraps it
+  in `SessionChrome` (the sheets, dialogs and lifecycle every layout
+  shares). `PhoneRootView` is the iPhone layout, also used on iPad at
+  compact width (Slide Over, a narrow split).
+- **The iPad layout** (`IPadRootView.swift`), at regular width: a
+  `NavigationSplitView`, balanced in landscape and `prominentDetail` in
+  portrait (the sidebar slides over; portrait opens on the detail).
+  - `IPadSidebar` (390 pt): the title with `+` and `⋯`, Conversation, All
+    agents with the waiting count, then the agents under their spaces
+    (`SidebarSections` in Kit: spaces by name, agents by alias, running
+    only; no computer row with one computer), and the capsule at the foot.
+    Its keyboard button selects the Conversation and focuses its composer.
+    No agents: one line with the action that helps (New agent, Connect,
+    Pair, Retry).
+  - The detail (`SceneUI.detail`): the Conversation in a 720 pt column
+    with the open questions pinned above `IPadComposer`; All agents
+    (`AllAgentsView`: `AgentCard`s in two independent columns, one at the
+    accessibility sizes; `AgentFilter` All / Waiting / Working with a
+    plain empty state and Show all; Expand all fills `expandedAgents` with
+    every card that has no question; expanded cards add "Earlier", up to 3
+    older messages, `Agent.earlierWorkerMessages`); or
+    an agent's window as a pane (`AgentScreenView(pane:)` with a
+    `PaneChrome`: its own header with the dot, name and space, ⋯, and
+    Close instead of a pop). A shell pushes on the detail's own stack.
+  - With the sidebar not beside the detail, the detail's header carries
+    Show sidebar and the `MiniCapsule`, so one capsule is on screen.
+- **Opening a window** goes through one seam: `\.openAgentWindow`
+  (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
+  pushes on `navigationPath`. Requests from the session itself (a card's
+  Open window, a Live Activity row) arrive as `model.windowRequest`, which
+  the layout opens and clears.
 
 ## The terminal surface
 
@@ -874,25 +933,22 @@ or an installed one not running yet; `UpdateInfo.notice` (SheepdogKit,
 it opens. A daemon without the field shows nothing
 (`UpdateNoticeUITests`, against `StubDaemon`).
 
-The Connection screen can also scan the pairing code `sheepdog pair` prints
-(`PairingScanner.swift`: an `AVCaptureSession` with a QR metadata output,
-behind the camera permission). `PairingLink` (SheepdogKit, tested) reads
-`sheepdog://pair?u=…&u=…&t=…`; the screen fills in the token, tries every
-address at once with `GET /api/hello` (three seconds each) and keeps the
-first in the code's order that answers (LAN before Tailscale), then runs
-Test connection.
-
-The same code scanned with the system Camera app opens the
-`sheepdog://pair?…` link in the app. `SessionViewModel.open(url:)` reads it
-as a `PairingLink` before `AppRoute` sees it, closes Settings if it is open
-(its fields would overwrite the result when it closes) and asks "Pair with
-<host>?" (`PairingLink.confirmation`, which lists the addresses and never
-shows the token). Nothing is contacted or saved before the user taps Pair.
-Then `resolvePairing`, which Settings' scanner shares, finds the first
-address that answers; the address and token are saved and the app
-repointed, and a banner says how it went. Declining, or a code whose
-addresses all fail, reopens the first-run Settings when no daemon is saved
-yet. `PairingLinkUITests` drives this without a daemon.
+Pairing is by code only (`PairingFlow.swift`): one sheet runs the camera
+primer, the scanner (an `AVCaptureSession` with a QR metadata output),
+"Pairing…", and the end: "Paired with X", "This code has expired or was
+used", or "Please scan again" (`PairingProblem`). `PairingCode`
+(SheepdogKit) reads the daemon's `https://…/voice#pair=1&d=…&k=…&e=…&u=…`
+link, or the `sheepdog://pair#…` hand-off the voice page offers.
+`SessionViewModel.pair` tries every address at once over TLS pinned to the
+code's pin, makes the device key, enrolls once (codes are one-time), signs
+in, and only then saves the computer and repoints the app. A link from
+outside the app opens the same sheet, asking "Pair with X?" first; nothing
+is contacted before Pair. Settings ▸ Connection shows the computer, "Paired
+<date> · cert <pin>", Test connection, Scan a new code and Remove (`DELETE
+/api/devices/self`, best effort, then the key and record are deleted).
+`PairingLinkUITests` drives the sheet, including a full walkthrough against
+the pair fixture daemon; DEBUG builds show any stage with
+`-sheepdogPairingScreen <stage>` for screenshots.
 
 ## The offline demo
 

@@ -36,18 +36,17 @@ final class StubProtocol: URLProtocol {
     static func client(token: String = "") -> DaemonClient {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubProtocol.self]
-        return DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799", token: token)!, session: URLSession(configuration: config))
+        return DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799")!, session: URLSession(configuration: config))
     }
 }
 
 final class EventResumeTests: XCTestCase {
     func testAReconnectSendsLastEventIDAndSince() throws {
-        let client = DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799", token: "t")!)
+        let client = DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799")!)
         let request = try client.eventsRequest(since: 1_790_127_642_099_438)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Last-Event-ID"), "1790127642099438")
         XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:7799/events?since=1790127642099438")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer t")
     }
 
     func testAFirstConnectSendsNeither() throws {
@@ -91,7 +90,6 @@ final class ConversationAndAnswerClientTests: XCTestCase {
             "http://127.0.0.1:7799/api/conversation?limit=200",
             "http://127.0.0.1:7799/api/conversation?limit=100&before=1790065877490932",
         ])
-        XCTAssertEqual(StubProtocol.seen.first?.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
     }
 
     func testAnswerPostsTheOptionIndexAndReturnsSpoken() async throws {

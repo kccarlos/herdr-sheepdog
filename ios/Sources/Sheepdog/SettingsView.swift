@@ -18,11 +18,7 @@ struct SettingsView: View {
     @ObservedObject var meter: VoiceMeter
     @Environment(\.dismiss) private var dismiss
 
-    /// The daemon's address and token as typed. They are written once the
-    /// field is left (return, back, Done): a reconnect per keystroke would
-    /// be worse than none.
-    @State private var address = ""
-    @State private var token = ""
+    @State private var loaded = false
     @State private var path: [SettingsPage] = []
     /// No daemon saved yet: Settings opens on the Daemon screen and cannot
     /// be closed until an address is in.
@@ -122,7 +118,7 @@ struct SettingsView: View {
             .navigationDestination(for: SettingsPage.self) { page in
                 switch page {
                 case .daemon:
-                    DaemonSettingsView(address: $address, token: $token, firstRun: firstRun, commit: commitDaemon, done: done)
+                    DaemonSettingsView(firstRun: firstRun, done: done)
                 case .voice: VoiceSettingsView()
                 case .models: ModelsView()
                 case .languages: LanguagesView()
@@ -136,7 +132,7 @@ struct SettingsView: View {
                     Button("Done", action: done)
                         .tint(Theme.primaryText)
                         .accessibilityIdentifier("settings.done")
-                        .disabled(firstRun && !model.isConfigured && DaemonEndpoint(text: address) == nil)
+                        .disabled(firstRun && !model.isConfigured)
                 }
             }
             .onAppear(perform: load)
@@ -152,7 +148,6 @@ struct SettingsView: View {
             }
         }
         .interactiveDismissDisabled(firstRun && !model.isConfigured)
-        .onDisappear { commitDaemon() }
     }
 
     /// "Talking here · address" while the voice runs, "Connected ·
@@ -182,9 +177,8 @@ struct SettingsView: View {
     }
 
     private func load() {
-        guard address.isEmpty, token.isEmpty, path.isEmpty else { return }
-        address = model.settings.address
-        token = model.settings.token
+        guard !loaded, path.isEmpty else { return }
+        loaded = true
         firstRun = !model.settings.hasBeenConfigured
         // Health's "Change in Settings" opens straight on Models; the first
         // run opens on the Daemon screen.
@@ -200,24 +194,7 @@ struct SettingsView: View {
         }
     }
 
-    /// Writes the address and token when they are valid and different, and
-    /// repoints the app at them.
-    private func commitDaemon() {
-        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAddress.isEmpty, DaemonEndpoint(text: trimmedAddress) != nil else { return }
-        let changed = model.settings.address != trimmedAddress
-            || model.settings.token != trimmedToken
-            || !model.settings.hasBeenConfigured
-        guard changed else { return }
-        model.settings.address = trimmedAddress
-        model.settings.token = trimmedToken
-        model.settings.hasBeenConfigured = true
-        model.endpointChanged()
-    }
-
     private func done() {
-        commitDaemon()
         dismiss()
     }
 }
@@ -270,22 +247,28 @@ struct UpdateNoticeRow: View {
 
     var body: some View {
         Label {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(notice.text)
+                    .foregroundStyle(Theme.ink)
                 if let command = notice.command {
                     Text(command)
                         .font(.callout.monospaced())
+                        .foregroundStyle(Theme.ink)
                         .textSelection(.enabled)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
                 }
                 if let after = notice.after {
                     Text(after)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "arrow.down.circle")
-                .foregroundStyle(.tint)
+                .foregroundStyle(Theme.working)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(notice.spoken)
@@ -303,10 +286,11 @@ private struct ComputerRow: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 12) {
+        // The icon sits on the name's line at every text size.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: "desktopcomputer")
                 .foregroundStyle(Theme.ink)
-                .frame(width: 28)
+                .frame(minWidth: 28)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
