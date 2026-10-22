@@ -76,19 +76,12 @@ final class AgentScreenUITests: XCTestCase {
         enter.tap()
         sleep(1)
 
-        // Ctrl-C asks first; cancel it.
-        app.buttons["agentScreen.key.ctrl+c"].tap()
-        let confirm = app.buttons["agentScreen.confirm"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Ctrl-C asks for confirmation")
-        shot(app, "agent-screen-confirm")
-        // iOS 26+ shows the dialog as a popover without a Cancel button:
-        // a tap outside dismisses it.
-        if app.buttons["Cancel"].exists {
-            app.buttons["Cancel"].firstMatch.tap()
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).tap()
-        }
-        XCTAssertFalse(confirm.waitForExistence(timeout: 2), "cancelling sends nothing")
+        // Ctrl-C lives in More keys, under Interrupt, and goes at once.
+        app.buttons["agentScreen.key.more"].tap()
+        let ctrlC = app.buttons["moreKeys.ctrlC"]
+        XCTAssertTrue(ctrlC.waitForExistence(timeout: 5), "⌃C at the top of More keys")
+        shot(app, "agent-screen-more-keys")
+        app.buttons["moreKeys.done"].tap()
 
         // A prompt shows up on the (mock) screen.
         let field = app.textFields["agentScreen.field"]

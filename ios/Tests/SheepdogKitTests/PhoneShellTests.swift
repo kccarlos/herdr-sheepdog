@@ -28,7 +28,7 @@ final class PhoneShellTests: XCTestCase {
         XCTAssertEqual(off.phase, .ended)
         XCTAssertEqual(off.notice, .shellOff)
         XCTAssertEqual(PhoneShell.endedDescription(off.notice), PhoneShell.offExplanation)
-        XCTAssertTrue(PhoneShell.offExplanation.contains("Tailscale"))
+        XCTAssertFalse(PhoneShell.offExplanation.contains("Tailscale"), "copy does not assume Tailscale")
         XCTAssertTrue(PhoneShell.offExplanation.contains("setup page"))
 
         var folder = opening()

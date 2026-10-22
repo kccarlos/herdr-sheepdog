@@ -93,20 +93,6 @@ public enum AgentKey: String, CaseIterable, Sendable, Identifiable {
         default: return label
         }
     }
-
-    /// Ctrl-C can end the agent's process, so the window asks before
-    /// sending it. Esc goes at once: Claude Code's Esc Esc (rewind) needs
-    /// two quick presses.
-    public var needsConfirmation: Bool { self == .ctrlC }
-
-    /// The confirmation dialog's question.
-    public func confirmationTitle(agent: String) -> String {
-        switch self {
-        case .ctrlC: return "Send Ctrl-C to \(agent)? It interrupts what it is doing."
-        case .esc: return "Send Esc to \(agent)? It dismisses the current prompt or stops the turn."
-        default: return "Send \(label) to \(agent)?"
-        }
-    }
 }
 
 /// The window's state, without SwiftUI: what to show, whether a fetched

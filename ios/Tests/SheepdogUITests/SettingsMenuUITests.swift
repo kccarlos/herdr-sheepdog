@@ -12,7 +12,7 @@ final class SettingsMenuUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders"]
         app.launch()
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
 
         for row in ["daemon", "voice", "models", "languages", "notifications", "diagnostics", "about"] {
             XCTAssertTrue(app.buttons["settings.\(row)"].waitForExistence(timeout: 10), "Settings ▸ \(row) is on the menu")

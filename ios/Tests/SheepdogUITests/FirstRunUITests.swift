@@ -75,7 +75,7 @@ final class FirstRunUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
         app.launch()
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.daemon"], "Daemon")
         tapWhenReady(app.buttons["settings.test"], "Test connection")
         let result = app.descendants(matching: .any)["settings.probe.result"]
@@ -107,12 +107,7 @@ final class FirstRunUITests: XCTestCase {
                 break
             }
         }
-        let settings = app.buttons.matching(identifier: "toolbar.settings")
-        XCTAssertTrue(settings.firstMatch.waitForExistence(timeout: 10))
-        for i in 0 ..< settings.count where settings.element(boundBy: i).isHittable {
-            settings.element(boundBy: i).tap()
-            break
-        }
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.leaveDemo"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["settings.models"].exists)
         XCTAssertFalse(app.buttons["settings.notifications"].exists)

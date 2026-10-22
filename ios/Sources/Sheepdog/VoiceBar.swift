@@ -1,133 +1,107 @@
 import SheepdogKit
 import SwiftUI
 
-/// The bottom bar, one row across the full width: the mic (mute) button,
-/// the orb, the status line beside them, then Type and End (✕). Every
-/// control sits in a fixed slot so a hidden one never shifts the others,
-/// and the bar's height depends only on the text size, never on the state
-/// (a bottom area that grows and shrinks with the state thrashes the
-/// conversation's scroll tracking). Stopping the voice lives on the orb
-/// itself (`VoiceBarModel.orbAction`).
+/// The floating voice capsule (canvas "Dock"): the mic (mute) button, the
+/// orb, the name and status — a button that opens the voice menu — and the
+/// keyboard, which morphs the capsule into the composer.
 ///
-/// The mic button is never a bare microphone that invites "press to talk":
-/// while the mic is live it shows the input level as a ring and says
-/// "Mute microphone"; muted, it is a red slashed mic — the one place that
-/// says "muted" loudly. In hold-to-talk the orb is the talk button and the
-/// mic button is gone; with voice off (or no microphone) it is gone too.
-struct VoiceBarView: View {
+/// Every control sits in a fixed 44 pt slot, so a hidden one never shifts
+/// the others. The capsule grows with the text size up to a cap (the
+/// status wraps to two lines at the accessibility sizes). It is Liquid
+/// Glass, or a solid card under Reduce Transparency. The look comes from
+/// `CapsuleMode`; what the orb does from `VoiceBarModel`.
+struct VoiceCapsule<VoiceMenu: View>: View {
     let state: SessionState
-    /// Only this view (and the mic ring/orb it draws) observes the meter,
-    /// so a micLevel tick re-renders the bar, not the whole main screen.
     @ObservedObject var meter: VoiceMeter
     let muted: Bool
-    let voiceName: String
+    let name: String
     var talkMode: TalkMode = .openMic
     var holding = false
     var noSignal = false
-    /// What the status line says, and in which colour.
+    /// A question is open: the orb goes quiet so the answer has the accent.
+    var questionOpen = false
     var statusText = ""
-    var statusTint: Color = .secondary
-    var typing = false
     var canType = true
     let onConnect: () -> Void
     let onStop: () -> Void
     let onMute: () -> Void
-    let onEnd: () -> Void
     var onResume: () -> Void = {}
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
     var onType: () -> Void = {}
+    /// The voice menu's items.
+    @ViewBuilder let menu: () -> VoiceMenu
 
-    /// Grows with Dynamic Type so two lines of status always fit; capped so
-    /// the conversation keeps the screen at the largest sizes.
-    @ScaledMetric(relativeTo: .footnote) private var scaledHeight: CGFloat = 68
+    @ScaledMetric(relativeTo: .subheadline) private var scaledHeight: CGFloat = 60
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var level: Float { meter.micLevel }
+    private var mode: CapsuleMode {
+        CapsuleMode.resolve(state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen)
+    }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
-    private var barHeight: CGFloat { min(max(scaledHeight, 68), 120) }
+    private var height: CGFloat { min(max(scaledHeight, 60), 110) }
 
     var body: some View {
-        HStack(spacing: 10) {
-            muteButton
-            orbButton
-            Text(statusText)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(statusTint)
-                .lineLimit(3)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("controls.statusLine")
-            typeButton
-            endButton
+        HStack(spacing: 8) {
+            micSlot
+            orb
+            // The status is drawn over the menu button rather than inside
+            // it, so VoiceOver (and the UI tests) read it as its own text;
+            // touches pass through it to the menu.
+            Menu(content: menu) { nameAndStatus(showsName: true) }
+                .menuOrder(.fixed)
+                .overlay { nameAndStatus(showsName: false).allowsHitTesting(false) }
+                .accessibilityLabel("Voice: \(name)")
+                .accessibilityHint("Shows the connection and End voice session")
+                .accessibilityIdentifier("voice.menu")
+            Button(action: onType) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(canType ? Theme.muted : Theme.muted.opacity(0.4))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canType)
+            .accessibilityLabel("Type instead")
+            .accessibilityIdentifier("controls.type")
         }
-        .padding(.horizontal, 12)
-        .frame(height: barHeight)
-        .frame(maxWidth: .infinity)
-        .background(.bar, ignoresSafeAreaEdges: .bottom)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, 7)
+        .frame(minHeight: height)
+        .capsuleSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("voice.capsule")
     }
 
-    private var muteButton: some View {
-        let hidden = model.muteAvailability == .hidden
-        let enabled = model.muteAvailability == .enabled
-        return MicButton(
-            muted: muted,
-            level: enabled && !muted ? level : 0,
-            live: enabled && !muted,
-            noSignal: noSignal,
-            enabled: enabled,
-            action: onMute
-        )
-        .opacity(hidden ? 0 : 1)
-        .allowsHitTesting(!hidden && enabled)
-        .accessibilityHidden(hidden)
-        .accessibilityIdentifier("controls.mute")
-    }
-
-    /// Type instead of talking: a quiet room, or a test that needs the
-    /// exact words.
-    private var typeButton: some View {
-        Button(action: onType) {
-            Image(systemName: typing ? "keyboard.chevron.compact.down" : "keyboard")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(typing ? Color.accentColor : (canType ? Color(.secondaryLabel) : Color(.tertiaryLabel)))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .disabled(!canType)
-        .accessibilityLabel(typing ? "Hide the text field" : "Type instead")
-        .accessibilityIdentifier("controls.type")
-    }
-
-    /// End: the rarest control, so a quiet grey ✕, not the loudest thing
-    /// beside the orb.
-    private var endButton: some View {
-        let visible = model.endVisible
-        return Button(action: onEnd) {
-            Image(systemName: "xmark")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color(.secondaryLabel))
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(Color(.tertiarySystemFill)))
-        }
-        .opacity(visible ? 1 : 0)
-        .allowsHitTesting(visible)
-        .accessibilityHidden(!visible)
-        .accessibilityLabel("End session")
-        .accessibilityIdentifier("controls.end")
-    }
+    // MARK: - Mic
 
     @ViewBuilder
-    private var orbButton: some View {
+    private var micSlot: some View {
+        let visible = mode.showsMic && model.muteAvailability != .hidden
+        CapsuleMicButton(muted: muted, level: meter.micLevel, noSignal: noSignal, enabled: model.muteAvailability == .enabled, action: onMute)
+            .opacity(visible ? (mode.micDimmed ? 0.35 : 1) : 0)
+            .allowsHitTesting(visible && model.muteAvailability == .enabled)
+            .accessibilityHidden(!visible)
+            .accessibilityIdentifier("controls.mute")
+    }
+
+    // MARK: - Orb
+
+    @ViewBuilder
+    private var orb: some View {
         if model.orbAction == .holdToTalk {
-            HoldToTalkOrb(state: state, level: level, holding: holding, onPress: onPress, onRelease: onRelease)
+            CapsuleOrb(mode: mode)
+                .holdToTalk(holding: holding, onPress: onPress, onRelease: onRelease)
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                OrbGlyph(state: state, level: level, size: 56, muted: muted)
+                CapsuleOrb(mode: mode)
             }
+            // Disabled while it has nothing to do, but never dimmed: the
+            // orb's colour is the state.
+            .buttonStyle(UndimmedButtonStyle())
             .disabled(model.orbAction == .none)
-            .accessibilityLabel(orbAccessibilityLabel)
+            .accessibilityLabel(orbLabel)
             .accessibilityIdentifier("controls.orb")
         }
     }
@@ -141,95 +115,250 @@ struct VoiceBarView: View {
         }
     }
 
-    private var orbAccessibilityLabel: String {
-        state == .disconnected ? "Connect" : state.accessibilityLabel(voiceName: voiceName)
+    private var orbLabel: String {
+        switch mode {
+        case .offline: return "Connect"
+        case .speaking, .thinking, .stalled: return "Stop \(name)"
+        case .paused: return "Resume audio"
+        default: return state.accessibilityLabel(voiceName: name)
+        }
+    }
+
+    // MARK: - Name and status
+
+    /// The name row and the status row. Drawn twice: once as the menu's
+    /// label with the status invisible, once over it with only the status.
+    private func nameAndStatus(showsName: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                    .accessibilityHidden(true)
+            }
+            .opacity(showsName ? 1 : 0)
+            .accessibilityHidden(!showsName)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 6, height: 6)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.85)
+                    .accessibilityIdentifier("controls.statusLine")
+            }
+            .opacity(showsName ? 0 : 1)
+            .accessibilityHidden(showsName)
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var dotColor: Color {
+        if noSignal, mode == .live || mode == .quiet { return Theme.blocked }
+        switch mode {
+        case .live, .quiet, .holding: return Theme.done
+        case .muted: return Theme.danger
+        case .speaking: return Theme.working
+        case .thinking: return Theme.thinking
+        case .stalled, .paused, .noMicrophone, .reconnecting: return Theme.blocked
+        case .offline, .voiceOff, .hold: return Theme.unknown
+        }
+    }
+
+    private var statusColor: Color {
+        if noSignal, mode == .live || mode == .quiet { return Theme.blockedText }
+        switch mode {
+        case .muted: return Theme.danger
+        case .stalled, .paused, .noMicrophone, .reconnecting: return Theme.blockedText
+        case .holding: return Theme.done
+        default: return Theme.muted
+        }
     }
 }
 
-/// The mic button. Live: the microphone inside a ring that follows the
-/// input level, so it reads as "this is on and hearing you". Muted: a red,
-/// filled, slashed mic. No signal: an amber ring and a warning badge.
-struct MicButton: View {
-    let muted: Bool
-    let level: Float
-    let live: Bool
-    var noSignal = false
-    let enabled: Bool
-    let action: () -> Void
+/// A button that only dims its label while pressed, never when disabled.
+struct UndimmedButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
 
+/// The capsule's surface: Liquid Glass, or a solid card with a hairline
+/// under Reduce Transparency. The composer uses the same one.
+private struct CapsuleSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content
+                .background(Capsule().fill(Theme.card))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 8)
+        } else {
+            content
+                .glassEffect(.regular, in: .capsule)
+        }
+    }
+}
+
+extension View {
+    func capsuleSurface() -> some View { modifier(CapsuleSurface()) }
+}
+
+/// The capsule's orb, 44 pt: colour, glyph and badge per `CapsuleMode`.
+/// The listening orb breathes (1 to 1.04, 2 s) unless Reduce Motion is on.
+struct CapsuleOrb: View {
+    let mode: CapsuleMode
+    var size: CGFloat = 44
+
+    @State private var breathe = false
+    @State private var spin = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var ringFraction: CGFloat {
-        guard live, !noSignal else { return 0 }
-        return CGFloat(min(1, sqrt(max(0, level)) * 1.8))
+    private var fill: Color {
+        switch mode {
+        case .live: return .accentColor
+        case .speaking: return Theme.workingSoft
+        case .thinking: return Theme.thinkingSoft
+        case .stalled, .paused, .reconnecting: return Theme.accentSoft
+        case .holding: return Theme.doneSoft
+        case .quiet, .muted, .offline, .voiceOff, .hold, .noMicrophone: return Theme.fill
+        }
     }
 
-    private var tint: Color {
-        if muted { return Color(.systemRed) }
-        if noSignal { return Theme.blocked }
-        return enabled ? Color(.label) : Color(.tertiaryLabel)
+    private var glyphColor: Color {
+        switch mode {
+        case .live: return Theme.onAccent
+        case .speaking: return Theme.working
+        case .thinking: return Theme.thinking
+        case .stalled, .paused, .reconnecting: return Theme.blockedText
+        case .holding: return Theme.done
+        case .muted, .voiceOff, .noMicrophone: return Theme.muted
+        case .quiet, .offline, .hold: return Theme.ink
+        }
+    }
+
+    private var stroke: (Color, CGFloat)? {
+        switch mode {
+        case .live: return nil
+        case .speaking: return (Theme.working, 1.5)
+        case .thinking: return (Theme.thinking, 1.5)
+        case .stalled, .paused, .reconnecting: return (Theme.blocked, 1.5)
+        case .holding: return nil
+        default: return (Theme.line, 1)
+        }
+    }
+
+    private var symbol: String {
+        switch mode {
+        case .live, .quiet, .speaking, .muted, .hold, .holding: return "waveform"
+        case .thinking: return "ellipsis"
+        case .stalled: return "hourglass"
+        case .paused: return "play.fill"
+        case .noMicrophone, .voiceOff: return "mic.slash"
+        case .reconnecting: return "arrow.clockwise"
+        case .offline: return "wifi.slash"
+        }
     }
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(muted ? Color(.systemRed).opacity(0.18) : Color(.secondarySystemBackground))
-                if muted {
-                    Circle().strokeBorder(Color(.systemRed).opacity(0.6), lineWidth: 1.5)
-                } else if live {
-                    // The level ring: a faint track, and an arc that grows
-                    // with the voice.
-                    Circle()
-                        .strokeBorder(Theme.done.opacity(0.25), lineWidth: 3)
-                    Circle()
-                        .trim(from: 0, to: max(0.04, ringFraction))
-                        .stroke(noSignal ? Theme.blocked : Theme.done, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .padding(1.5)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: ringFraction)
-                }
-                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(tint)
-                if noSignal, !muted {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Theme.blocked)
-                        .background(Circle().fill(Color(.systemBackground)))
-                        .offset(x: 18, y: -18)
-                }
+        ZStack {
+            Circle().fill(fill)
+            if let stroke {
+                Circle().strokeBorder(stroke.0, lineWidth: stroke.1)
             }
-            .frame(width: 52, height: 52)
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.44, weight: .semibold))
+                .foregroundStyle(glyphColor)
+                .rotationEffect(.degrees(mode == .reconnecting && spin ? 360 : 0))
+                .contentTransition(.symbolEffect(.replace))
         }
-        .disabled(!enabled)
-        .accessibilityLabel(VoiceBarModel.muteLabel(muted: muted))
-        .accessibilityValue(muted ? "Muted" : (noSignal ? "No microphone signal" : "Listening"))
-        .accessibilityHint(SessionViewModel.muteHint)
+        .frame(width: size, height: size)
+        // The cream sticker ring, with a hairline outside it.
+        .overlay {
+            if mode == .live {
+                Circle().stroke(Theme.cream, lineWidth: 3).padding(-1.5)
+                Circle().stroke(Theme.line, lineWidth: 1).padding(-3.5)
+            }
+            if mode == .holding {
+                Circle().stroke(Theme.done, lineWidth: 3).padding(-1.5)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if mode.showsStop {
+                ZStack {
+                    Circle().fill(Theme.ink)
+                    RoundedRectangle(cornerRadius: 1.5).fill(Theme.card).frame(width: 7, height: 7)
+                }
+                .frame(width: 22, height: 22)
+                .overlay(Circle().stroke(Theme.card, lineWidth: 2))
+                .offset(x: 5, y: 5)
+                .accessibilityHidden(true)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if mode == .noMicrophone {
+                Text("!")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundStyle(Theme.onAccent)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Theme.blocked))
+                    .overlay(Circle().stroke(Theme.card, lineWidth: 2))
+                    .offset(x: 5, y: -5)
+                    .accessibilityHidden(true)
+            }
+        }
+        .scaleEffect(mode == .holding ? 1.08 : (mode == .live && breathe ? 1.04 : 1))
+        .animation(Theme.ease(reduceMotion: reduceMotion), value: mode)
+        .onAppear(perform: animate)
+        .onChange(of: mode) { _, _ in animate() }
+    }
+
+    private func animate() {
+        guard !reduceMotion else {
+            breathe = false
+            spin = false
+            return
+        }
+        if mode == .live {
+            breathe = false
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { breathe = true }
+        } else {
+            withAnimation(nil) { breathe = false }
+        }
+        if mode == .reconnecting {
+            spin = false
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { spin = true }
+        } else {
+            withAnimation(nil) { spin = false }
+        }
     }
 }
 
-/// The orb as a walkie-talkie button: press and hold to talk, release to
-/// send. VoiceOver gets a toggle instead of a hold.
-struct HoldToTalkOrb: View {
-    let state: SessionState
-    let level: Float
+private extension View {
+    /// Press and hold to talk, release to send; VoiceOver gets a toggle.
+    func holdToTalk(holding: Bool, onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> some View {
+        modifier(HoldToTalk(holding: holding, onPress: onPress, onRelease: onRelease))
+    }
+}
+
+private struct HoldToTalk: ViewModifier {
     let holding: Bool
     let onPress: () -> Void
     let onRelease: () -> Void
-
     @GestureState private var pressed = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
-        OrbGlyph(state: holding ? .listening : state, level: holding ? level : 0, size: 56)
-            .overlay(
-                Circle()
-                    .strokeBorder(Theme.done, lineWidth: holding ? 3 : 0)
-                    .scaleEffect(holding ? 1.12 : 1)
-            )
-            .scaleEffect(holding ? 1.08 : 1)
-            .animation(reduceMotion ? nil : .spring(duration: 0.2), value: holding)
+    func body(content: Content) -> some View {
+        content
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -241,154 +370,130 @@ struct HoldToTalkOrb: View {
             .accessibilityElement()
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(holding ? "Talking. Double-tap to send" : "Hold to talk")
-            .accessibilityAction {
-                holding ? onRelease() : onPress()
-            }
+            .accessibilityAction { holding ? onRelease() : onPress() }
     }
 }
 
-/// The orb's pure graphic — colour, icon and motion following the session
-/// state, with the microphone level as a ring while listening. Sized for
-/// the 64 pt bar button; the old full-size display is gone, its space
-/// given back to the conversation and the approval card.
-struct OrbGlyph: View {
-    let state: SessionState
+/// The mic button, 44 pt. Live: the mic in a well with a green ring that
+/// follows the input level. Muted: the one loud red control. No signal: an
+/// amber ring.
+struct CapsuleMicButton: View {
+    let muted: Bool
     let level: Float
-    var size: CGFloat = 64
-    /// The microphone is muted. Shown as a small red slashed-mic badge
-    /// while the orb is speaking or thinking (which outrank "Muted"), never
-    /// as a separate orb state.
-    var muted = false
+    var noSignal = false
+    let enabled: Bool
+    let action: () -> Void
 
-    @State private var pulse = false
-    /// The 2 s listening breathe (1 to 1.04); never runs under Reduce Motion.
-    @State private var breathe = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var tint: Color { Theme.color(for: state) }
-    private var showsStopBadge: Bool { state == .thinking || state == .stalled || state == .speaking }
-    private var showsSpinner: Bool { state == .thinking || state == .stalled }
-
-    /// How loud the voice is, 0...1, while listening.
-    private var loudness: CGFloat {
-        guard state == .listening else { return 0 }
-        return CGFloat(min(1, sqrt(max(0, level)) * 1.6))
+    private var ringFraction: CGFloat {
+        guard enabled, !muted, !noSignal else { return 1 }
+        return CGFloat(max(0.25, min(1, sqrt(max(0, level)) * 1.8)))
     }
-
-    /// The halo grows with the voice; under Reduce Motion it stays put and
-    /// only gets denser instead.
-    private var ringScale: CGFloat { reduceMotion ? 1 : 1 + loudness * 0.22 }
-    private var haloOpacity: Double { 0.12 + (reduceMotion ? Double(loudness) * 0.18 : 0) }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(tint.opacity(haloOpacity))
-                .frame(width: size, height: size)
-                .scaleEffect(ringScale)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: ringScale)
-
-            Circle()
-                .strokeBorder(tint.opacity(0.35), lineWidth: max(1.5, size / 64))
-                .frame(width: size * 0.762, height: size * 0.762)
-                .scaleEffect(breathing ? (pulse ? 1.06 : 0.97) : 1)
-
-            Circle()
-                .fill(tint.opacity(0.22))
-                .frame(width: size * 0.655, height: size * 0.655)
-
-            glyph
-
-            if showsStopBadge {
-                stopBadge
+        Button(action: action) {
+            ZStack {
+                Circle().fill(muted ? Theme.danger : Theme.fill)
+                if !muted {
+                    Circle()
+                        .trim(from: 0, to: ringFraction)
+                        .stroke(noSignal ? Theme.blocked : Theme.done, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(1.25)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: ringFraction)
+                }
+                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(muted ? Color.white : Theme.ink)
             }
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(VoiceBarModel.muteLabel(muted: muted))
+        .accessibilityValue(muted ? "Muted" : (noSignal ? "No microphone signal" : "Listening"))
+        .accessibilityHint(SessionViewModel.muteHint)
+    }
+}
 
-            if SessionState.showsMuteBadge(state, muted: muted) {
-                muteBadge
+/// The capsule as the composer: the quiet orb (back to voice), the text
+/// field and the ink send button. What was typed goes to the daemon as if
+/// spoken (`POST /api/utterance`).
+struct CapsuleComposer: View {
+    let voiceName: String
+    let sending: Bool
+    let error: String?
+    let send: (String) async -> Bool
+    let close: () -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    @ScaledMetric(relativeTo: .body) private var scaledHeight: CGFloat = 60
+
+    private var canSend: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .accessibilityIdentifier("type.error")
             }
-
-            if state == .noMicrophone {
-                // The mic button's own "no signal" badge, on the orb: the
-                // microphone was refused or would not start.
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: size * 0.24, weight: .bold))
-                    .foregroundStyle(Theme.blocked)
-                    .background(Circle().fill(Color(.systemBackground)))
-                    .offset(x: size * 0.32, y: -size * 0.32)
-                    .accessibilityHidden(true)
+            HStack(spacing: 8) {
+                Button(action: close) {
+                    CapsuleOrb(mode: .quiet)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to voice")
+                .accessibilityIdentifier("type.close")
+                TextField("Message to \(voiceName)", text: $text, axis: .vertical)
+                    .font(.body)
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1 ... 4)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.send)
+                    .focused($focused)
+                    .onSubmit(submit)
+                    .accessibilityLabel("Message to \(voiceName)")
+                    .accessibilityIdentifier("type.field")
+                Button(action: submit) {
+                    ZStack {
+                        Circle().fill(canSend ? Theme.ink : Theme.line)
+                        if sending {
+                            ProgressView().tint(Theme.surface)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(Theme.surface)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("type.send")
             }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 8)
+            .frame(minHeight: min(max(scaledHeight, 60), 100))
+            .capsuleSurface()
         }
-        .frame(width: size, height: size)
-        .overlay {
-            // The brand's sticker outline while listening.
-            if state == .listening {
-                Circle()
-                    .strokeBorder(Theme.cream.opacity(0.6), lineWidth: 3)
-                    .frame(width: size * 0.82, height: size * 0.82)
-                    .accessibilityHidden(true)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard canSend else { return }
+        let sent = text
+        Task {
+            if await send(sent) {
+                text = ""
+                focused = false
             }
-        }
-        .scaleEffect(state == .listening && breathe ? 1.04 : 1)
-        .onAppear { startPulse() }
-        .onChange(of: state) { _, _ in startPulse() }
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        if showsSpinner {
-            ProgressView()
-                .tint(tint)
-        } else {
-            Image(systemName: Theme.symbol(for: state))
-                .font(.system(size: size * 0.226, weight: .medium))
-                .foregroundStyle(tint)
-                .symbolEffect(.pulse, isActive: breathing && !reduceMotion)
-                .contentTransition(.symbolEffect(.replace))
-        }
-    }
-
-    private var stopBadge: some View {
-        Image(systemName: "stop.fill")
-            .font(.system(size: size * 0.14, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(size * 0.09)
-            .background(Circle().fill(tint))
-            .offset(x: size * 0.32, y: size * 0.32)
-    }
-
-    private var muteBadge: some View {
-        Image(systemName: "mic.slash.fill")
-            .font(.system(size: size * 0.14, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(size * 0.08)
-            .background(Circle().fill(Color(.systemRed)))
-            .offset(x: -size * 0.32, y: size * 0.32)
-            .accessibilityIdentifier("orb.muteBadge")
-            .accessibilityLabel("Microphone muted")
-            .transition(.opacity)
-    }
-
-    private var breathing: Bool {
-        switch state {
-        case .listening, .speaking, .thinking, .connecting, .reconnecting: return true
-        default: return false
-        }
-    }
-
-    private func startPulse() {
-        if state == .listening, !reduceMotion {
-            breathe = false
-            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { breathe = true }
-        } else {
-            withAnimation(nil) { breathe = false }
-        }
-        guard breathing, !reduceMotion else {
-            pulse = false
-            return
-        }
-        pulse = false
-        withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
-            pulse = true
         }
     }
 }

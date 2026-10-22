@@ -43,33 +43,32 @@ struct SettingsView: View {
                     } footer: {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
+                    if model.shellOffered == false {
+                        Section {
+                            MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
+                                .accessibilityIdentifier("settings.shell")
+                        } footer: {
+                            Text(PhoneShell.offExplanation)
+                        }
+                    }
                 } else {
                     if let notice = model.update?.notice {
                         Section {
                             UpdateNoticeRow(notice: notice)
                         }
                     }
+                    // The computer: with one computer, one row and what
+                    // belongs to it. With several, this becomes the list
+                    // of computers, each with its own page.
                     Section {
                         NavigationLink(value: SettingsPage.daemon) {
-                            MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
+                            ComputerRow(
+                                name: model.hello?.computer?.name ?? "Your computer",
+                                status: computerStatus,
+                                tint: computerTint
+                            )
                         }
                         .accessibilityIdentifier("settings.daemon")
-                        Button {
-                            model.openDemo()
-                        } label: {
-                            Label("Try the demo", systemImage: "play.circle")
-                        }
-                        .accessibilityIdentifier("settings.tryDemo")
-                    } footer: {
-                        Text("The demo runs scripted agents on this phone, with no daemon and no network.")
-                    }
-                }
-
-                Section {
-                    row("Voice", "waveform", .voice, id: "settings.voice")
-                    // Models, Languages and Notifications are the daemon's:
-                    // the demo has none to show, so it does not list them.
-                    if !model.isDemo {
                         NavigationLink(value: SettingsPage.models) {
                             MenuRow(title: "Models", symbol: "cpu", value: model.modelsSummary)
                         }
@@ -78,22 +77,44 @@ struct SettingsView: View {
                             MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
+                        if model.shellOffered == false {
+                            MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
+                                .accessibilityIdentifier("settings.shell")
+                        }
+                    } header: {
+                        Text("Computer")
+                    } footer: {
+                        if model.shellOffered == false {
+                            Text(PhoneShell.offExplanation)
+                        }
+                    }
+                }
+
+                Section("This phone") {
+                    row("Voice", "waveform", .voice, id: "settings.voice")
+                    // Notifications come from the computer: the demo has
+                    // none to show, so it does not list them.
+                    if !model.isDemo {
                         row("Notifications", "bell", .notifications, id: "settings.notifications")
                     }
                 }
 
-                if model.shellOffered == false {
-                    Section {
-                        MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this network")
-                            .accessibilityIdentifier("settings.shell")
-                    } footer: {
-                        Text(PhoneShell.offExplanation)
-                    }
-                }
-
-                Section {
+                Section("Help") {
                     row("Diagnostics", "stethoscope", .diagnostics, id: "settings.diagnostics")
                     row("About", "info.circle", .about, id: "settings.about")
+                }
+
+                if !model.isDemo {
+                    Section {
+                        Button {
+                            model.openDemo()
+                        } label: {
+                            Label("Try the demo", systemImage: "play.circle")
+                        }
+                        .accessibilityIdentifier("settings.tryDemo")
+                    } footer: {
+                        Text("Scripted agents on this phone. No computer, no network.")
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -132,6 +153,25 @@ struct SettingsView: View {
         }
         .interactiveDismissDisabled(firstRun && !model.isConfigured)
         .onDisappear { commitDaemon() }
+    }
+
+    /// "Talking here · address" while the voice runs, "Connected ·
+    /// address", "Offline · address", or "Not paired yet".
+    private var computerStatus: String {
+        guard model.isConfigured else { return "Not paired yet" }
+        let address = model.endpointDisplay
+        if model.wantsConnection, model.connectionChip.tint == .green { return "Talking here · \(address)" }
+        return "\(model.connectionChip.word) · \(address)"
+    }
+
+    private var computerTint: Color {
+        guard model.isConfigured else { return Theme.unknown }
+        switch model.connectionChip.tint {
+        case .green: return Theme.done
+        case .amber: return Theme.blocked
+        case .red: return Theme.danger
+        case .grey: return Theme.unknown
+        }
     }
 
     private func row(_ title: String, _ symbol: String, _ page: SettingsPage, id: String) -> some View {
@@ -255,6 +295,37 @@ struct UpdateNoticeRow: View {
 
 /// A menu row: icon and title, with a one-line summary beside it, or under
 /// it at the accessibility sizes where side by side leaves no room.
+/// The computer's row: a status dot, its name, and how the phone reaches
+/// it ("Talking here · 192.168.1.20:7777", "Offline", "Not paired yet").
+private struct ComputerRow: View {
+    let name: String
+    let status: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "desktopcomputer")
+                .foregroundStyle(Theme.ink)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                HStack(spacing: 6) {
+                    Circle().fill(tint).frame(width: 7, height: 7)
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct MenuRow: View {
     let title: String
     let symbol: String

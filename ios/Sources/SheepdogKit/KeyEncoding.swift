@@ -108,10 +108,6 @@ public enum TermKey: Hashable, Sendable, Identifiable {
         default: return nil
         }
     }
-
-    /// Ctrl-C can end the agent's process: the window asks first (outside
-    /// typing mode). Esc goes at once, so Esc Esc (rewind) works.
-    public var needsConfirmation: Bool { self == .ctrl("c") }
 }
 
 /// One-shot modifiers: the next key or typed character gets them, then

@@ -49,7 +49,7 @@ final class VoiceRobustnessUITests: XCTestCase {
 
         // Settings: Models (voice provider), microphone mode, hold to
         // talk, diagnostics.
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.models"], "Settings ▸ Models")
         XCTAssertTrue(app.buttons["settings.voiceProvider.openai"].waitForExistence(timeout: 10), "the provider section shows")
         sleep(1)
@@ -86,7 +86,7 @@ final class VoiceRobustnessUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Hold the orb to talk"].waitForExistence(timeout: 5), "released: closed again")
 
         // Back to open mic for the next run.
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.voice"], "Settings ▸ Voice")
         let hold2 = app.switches["settings.holdToTalk"]
         XCTAssertTrue(hold2.waitForExistence(timeout: 5))
@@ -95,7 +95,7 @@ final class VoiceRobustnessUITests: XCTestCase {
         tapWhenReady(app.buttons["settings.done"], "Done")
 
         // The connection sheet names the voice provider.
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         XCTAssertTrue(app.descendants(matching: .any)["chip.voiceProvider"].waitForExistence(timeout: 10))
         sleep(1)
         shot(app, "25-chip-voice-provider")

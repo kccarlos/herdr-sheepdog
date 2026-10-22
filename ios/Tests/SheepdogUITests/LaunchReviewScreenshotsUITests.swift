@@ -87,7 +87,7 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "demo.question.0")
         sleep(5)
         shot("07-demo-answer")
-        tapVisible(app, "toolbar.settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         sleep(1)
         shot("08-demo-settings")
     }
@@ -120,7 +120,7 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "main.pane.flock")
         sleep(2)
         shot("12-unreachable-agents")
-        tapVisible(app, "toolbar.settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapVisible(app, "settings.daemon")
         tapVisible(app, "settings.test")
         sleep(4)

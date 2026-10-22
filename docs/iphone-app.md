@@ -25,7 +25,7 @@ setup.
 
 1. On the computer: `sheepdog setup`, step 4 (**Turn on phone access**), or
    later `sheepdog pair`.
-2. In the app: Settings, Daemon, **Scan pairing code**. (Or point the iPhone
+2. In the app: ⋯ ▸ Settings, your computer's row (Connection), **Scan pairing code**. (Or point the iPhone
    Camera at the code and open the `sheepdog://pair` link; the app asks
    "Pair with <host>?" first.)
 3. Allow the microphone and notifications. Tap the orb to connect.
@@ -41,15 +41,48 @@ On the same Wi-Fi this just works. Away from home, see
 
 ## What it does
 
-- **Voice.** Talk to the voice; mute turns off only the microphone. "Hold to
-  talk" is an option. "Type instead" works when you cannot talk.
+- **The main screen.** At the top, **Conversation | Agents** (the badge
+  counts the agents waiting on you), **+** (New agent, New shell) and **⋯**
+  (New conversation, Stop, End voice session, Settings).
+- **Voice.** The capsule at the bottom holds the microphone, the orb, the
+  voice's name and status, and the keyboard. Talk to the voice; the mic
+  button turns off only the microphone. While the voice talks or thinks,
+  the orb wears a small stop badge: tap it to stop. Tap the name for the
+  voice menu: the connection (tap it for the details and Health), Manage
+  computers… and **End voice session** (your agents keep working). "Hold to
+  talk" is an option. The keyboard turns the capsule into a text field
+  when you cannot talk; the orb on its left goes back to voice.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
-- **Agents.** Who is working, blocked or done, and a window onto each agent's
-  screen (below). **New agent** at the bottom of the list starts Claude Code
-  or Codex in one of your projects (the folders in `supervisor.project_roots`
-  and the workspaces herdr has open), in the project folder or in a fresh
-  git worktree on a new branch, with an optional first prompt.
+- **Agents.** One compact card per agent: its state and for how long, and
+  what it works on. Tap a card for the details (the last result, what the
+  agent last wrote, the files it touched, the last question it was asked
+  and your answer, its space). Every waiting agent shows its question and
+  the agent's own answers as buttons, so you can answer any of them, not
+  only the one the voice is on. The round button opens the agent's window
+  (below). **+ ▸ New agent** takes two steps. **Where:** one of the
+  spaces herdr has open (with the agents already in it), or a folder in
+  `supervisor.project_roots` that has no space yet. **Which agent:** the
+  coding agents installed on your computer (Claude Code, Codex, agy and
+  the others herdr knows), **New worktree** (off; it gives the agent its
+  own branch and folder, and is hidden when the folder is not a git
+  repository), and an optional first prompt. Start waits until the agent
+  is ready, then opens its window. If it does not start, the sheet says
+  why (not installed, not a git repository, the branch is checked out
+  elsewhere, it took too long) and, when a pane was left open, offers
+  **Open the pane**.
+- **Spaces.** ⋯ ▸ **Spaces** lists herdr's spaces on your computer (a
+  folder with its agents and shells), each with its branch and how its
+  agents are doing. Swipe one to **Rename** or **Close** it, or tap **+**
+  to open a space in a project folder that has none. Close asks first,
+  names what will stop, and waits until no agent there is working or
+  waiting on you. A space's page lists its agents (tap one for its
+  window), its **worktrees** (⋯ opens one as its own space; a worktree
+  space can be removed, and a checkout with uncommitted changes asks a
+  second time) and its **wrap-up commands**, such as "Run tests ·
+  `npm test`": tap one to run it in a new tab of that space on your
+  computer, swipe to delete, or **Add a command…**. Commands are saved on
+  your computer and need the phone shell to be on.
 - **Agent window.** "Open window" on an agent shows its live terminal,
   sized to the phone, in the agent's own colours. While the window is open
   the agent's pane on your computer takes the phone's size; it goes back
@@ -58,11 +91,13 @@ On the same Wi-Fi this just works. Away from home, see
     **Drag** to scroll back through the output, and **Latest** returns to
     the bottom. A **tap** clicks, for programs that use the mouse.
     **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
-  - The keys under the terminal send esc, tab, the arrows, control-C and
-    return straight to the agent (only control-C asks first). **⌨︎** types
-    straight into the terminal with the phone's keyboard, dictation and
-    input methods included; control-C becomes **⌃**, which holds Control for
-    the next key. **···** has the rest: Ctrl and Alt for the next key,
+  - The keys under the terminal send esc, tab, the arrows and return
+    straight to the agent. Control-C is at the top of **···** (More keys),
+    under Interrupt, and goes at once; esc already stops Claude and Codex.
+    In a shell window control-C sits on the bar. **⌨︎** types straight into
+    the terminal with the phone's keyboard, dictation and input methods
+    included, with **⌃**, which holds Control for the next key. **···** has
+    the rest: Ctrl and Alt for the next key,
     shift-tab, the arrows, Home, End, Page up and down, y, n, the digits,
     F1–F12, and your **snippets** (saved text: a tap puts it in the field,
     or types it in typing mode; swipe to delete).
@@ -88,7 +123,7 @@ On the same Wi-Fi this just works. Away from home, see
     not a git repository.
   - **⋯ ▸ Open shell here** opens a plain shell in the agent's folder,
     titled "Shell · folder". It has the same terminal and keys, no prompt
-    field, and starts in typing mode. **Shell** beside New agent opens one
+    field, and starts in typing mode. **+ ▸ New shell** opens one
     in your first project folder. Each folder has one shell, which the app
     reuses. On your computer the shell is a tab in herdr's "phone shell"
     workspace, so you see it there too. Leaving the window keeps the shell
@@ -96,7 +131,7 @@ On the same Wi-Fi this just works. Away from home, see
     - The shell is on unless **Shell from your phone** is turned off on
       your computer's setup page
       ([remote-access.md](remote-access.md#the-phone-shell)).
-    - Where it is off, the app shows no shell button, and Settings says
+    - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
       (`supervisor.project_roots`) or an agent's own folder.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
@@ -115,6 +150,12 @@ On the same Wi-Fi this just works. Away from home, see
   (Settings, the Agents pane, an agent window), the voice says it instead.
   Needs a daemon new enough to send cards; the demo's "Show me the agents"
   shows one.
+- **Settings** (⋯ ▸ Settings) has three parts. **Computer:** your computer
+  with how the phone reaches it (tap it for the connection), and what
+  belongs to that computer: Models, Languages, and the shell's state.
+  **This phone:** Voice (microphone mode, hold to talk, keep listening
+  with the screen locked) and Notifications. **Help:** Diagnostics and
+  About. **Try the demo** is at the bottom.
 - **Settings, Models.** Switch the voice and the orchestrator
   ([models.md](models.md)). **Settings, Languages** sets the languages you
   speak, most preferred first.

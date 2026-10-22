@@ -1,84 +1,9 @@
 import SheepdogKit
 import SwiftUI
 
-/// The top-left chip: a dot and one word for the daemon connection itself
-/// (never the voice state — see `ConnectionChip`). Tapping it opens a sheet
-/// with the address, round-trip time, daemon and voice info, Health, and a
-/// way to reconnect or jump to Settings.
-struct ConnectionChipView: View {
-    @EnvironmentObject private var model: SessionViewModel
-    @State private var showDetail = false
-
-    /// Errors in the last 15 minutes, so a glance at the chip says whether
-    /// something went wrong (the badge Health's tab used to carry).
-    private var recentErrors: Int {
-        model.health.problems(since: Date().addingTimeInterval(-15 * 60)).filter { $0.severity == .error }.count
-    }
-
-    var body: some View {
-        Button {
-            showDetail = true
-        } label: {
-            HStack(spacing: 6) {
-                if model.connectionChip.isBusy {
-                    // A spinner for "in flight"; the word carries the state.
-                    ProgressView()
-                        .controlSize(.mini)
-                        .frame(width: 8, height: 8)
-                } else {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 8, height: 8)
-                }
-                Text(model.connectionChip.word)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if recentErrors > 0 {
-                    Badge(count: recentErrors, fill: Color(.systemRed), text: .white)
-                }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .accessibilityIdentifier("chip.connection")
-        .accessibilityLabel("Connection: \(model.connectionChip.word)" + (recentErrors > 0 ? ", \(recentErrors) \(recentErrors == 1 ? "error" : "errors")" : ""))
-        .sheet(isPresented: $showDetail) {
-            ConnectionDetailView(
-                showSettings: {
-                    showDetail = false
-                    model.showSettings = true
-                },
-                showModels: {
-                    showDetail = false
-                    model.openModels()
-                }
-            )
-            .environmentObject(model)
-            .coversVoiceScreen("connection")
-            // A single detent only: swiping on the Form inside a
-            // multi-detent sheet is ambiguous between "scroll" and "resize
-            // the sheet", and that ambiguity is what triggered a SwiftUI
-            // "onChange(of: Bool) … multiple times per frame" main-thread
-            // hang during manual testing. One detent removes the ambiguity
-            // and leaves room for everything without scrolling.
-            .presentationDetents([.large])
-        }
-    }
-
-    private var color: Color {
-        switch model.connectionChip.tint {
-        case .green: return Theme.done
-        case .amber: return Theme.blocked
-        case .red: return Color(.systemRed)
-        case .grey: return Theme.unknown
-        }
-    }
-}
-
 /// The chip's sheet: everything about the connection that does not fit in
 /// three words up top.
-private struct ConnectionDetailView: View {
+struct ConnectionDetailView: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     let showSettings: () -> Void

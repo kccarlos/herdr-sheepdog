@@ -40,7 +40,6 @@ private struct AgentWindowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var prompt = ""
-    @State private var confirmKey: TermKey?
     @State private var showsMoreKeys = false
     @State private var action: AgentWindowAction?
     @State private var confirmTakeover = false
@@ -113,19 +112,9 @@ private struct AgentWindowView: View {
             }
         }
         .onChange(of: model.handshake) { _, _ in window.availabilityChanged() }
-        .confirmationDialog(
-            confirmKey.map { $0.allowListed?.confirmationTitle(agent: name) ?? "Send \($0.accessibilityLabel) to \(name)?" } ?? "",
-            isPresented: Binding(get: { confirmKey != nil }, set: { if !$0 { confirmKey = nil } }),
-            titleVisibility: .visible,
-            presenting: confirmKey
-        ) { key in
-            Button("Send \(key.allowListed?.label ?? key.label)", role: .destructive) { window.send(termKey: key) }
-                .accessibilityIdentifier("agentScreen.confirm")
-            Button("Cancel", role: .cancel) {}
-        }
         .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { dismiss() })
         .sheet(isPresented: $showsMoreKeys) {
-            MoreKeysSheet(window: window) { snippet in
+            MoreKeysSheet(window: window, interrupt: true) { snippet in
                 if window.typing {
                     window.sendText(snippet)
                 } else {
@@ -273,7 +262,7 @@ private struct AgentWindowView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            KeyBar(window: window, confirm: { confirmKey = $0 }, onMore: { showsMoreKeys = true })
+            KeyBar(window: window, onMore: { showsMoreKeys = true })
             if window.typing {
                 Label("Typing goes straight to \(name).", systemImage: "keyboard")
                     .font(.caption)

@@ -47,8 +47,8 @@ final class ReconnectUITests: XCTestCase {
         XCTAssertFalse(banner.exists, "no banner for a restart shorter than the quiet period")
         // The event stream retries on its own 2 s timer, so the chip may
         // lag the socket by a moment.
-        let chip = app.buttons["chip.connection"]
-        XCTAssertTrue(waitFor(chip, label: "Connection: Connected", timeout: 10, noBanner: banner), "got \(chip.label)")
+        XCTAssertTrue(waitForMenuItem(app, menu: "voice.menu", item: "chip.connection", label: "Connection: Connected", timeout: 20))
+        XCTAssertFalse(banner.exists, "no banner")
     }
 
     // MARK: - Helpers
