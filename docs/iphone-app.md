@@ -71,6 +71,18 @@ On the same Wi-Fi this just works. Away from home, see
   why (not installed, not a git repository, the branch is checked out
   elsewhere, it took too long) and, when a pane was left open, offers
   **Open the pane**.
+- **Spaces.** ⋯ ▸ **Spaces** lists herdr's spaces on your computer (a
+  folder with its agents and shells), each with its branch and how its
+  agents are doing. Swipe one to **Rename** or **Close** it, or tap **+**
+  to open a space in a project folder that has none. Close asks first,
+  names what will stop, and waits until no agent there is working or
+  waiting on you. A space's page lists its agents (tap one for its
+  window), its **worktrees** (⋯ opens one as its own space; a worktree
+  space can be removed, and a checkout with uncommitted changes asks a
+  second time) and its **wrap-up commands**, such as "Run tests ·
+  `npm test`": tap one to run it in a new tab of that space on your
+  computer, swipe to delete, or **Add a command…**. Commands are saved on
+  your computer and need the phone shell to be on.
 - **Agent window.** "Open window" on an agent shows its live terminal,
   sized to the phone, in the agent's own colours. While the window is open
   the agent's pane on your computer takes the phone's size; it goes back

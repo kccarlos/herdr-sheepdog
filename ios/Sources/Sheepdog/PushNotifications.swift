@@ -126,6 +126,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             await loadDaemonStatus()
             guard PushPolicy.shouldAskPermission(daemon: daemonStatus) else { return }
             defaults.set(true, forKey: Key.asked)
+            guard await model?.ask(.notifications) ?? true else { return }
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             await refreshAuthorization()
             if granted { UIApplication.shared.registerForRemoteNotifications() }

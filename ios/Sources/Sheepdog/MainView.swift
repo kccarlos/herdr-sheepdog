@@ -76,7 +76,8 @@ struct MainView: View {
                             activePendingID: model.approval?.pending.id,
                             pointerIDs: QuestionFocus.pointerRowIDs(rows: model.rows, pending: model.approval.flatMap { $0.isSettled ? nil : $0.pending }),
                             loadOlder: { await model.loadOlder() },
-                            followToken: model.typedSent
+                            followToken: model.typedSent,
+                            ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
                         )
                     case .flock where paneState != .content:
                         FlockUnavailableView(state: paneState)
@@ -164,6 +165,10 @@ struct MainView: View {
                     .environmentObject(model)
             }
             .sheet(isPresented: $model.showsNewAgent) { NewAgentSheet() }
+            .sheet(isPresented: $model.showsSpaces) { SpacesSheet() }
+            .fullScreenCover(item: Binding(get: { model.primer }, set: { if $0 == nil, model.primer != nil { model.answerPrimer(false) } })) { primer in
+                PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
+            }
             .sheet(isPresented: $showsConnection) {
                 ConnectionDetailView(
                     showSettings: {
@@ -409,6 +414,13 @@ struct MainView: View {
         .accessibilityIdentifier("toolbar.end")
         Divider()
         Button {
+            model.showsSpaces = true
+        } label: {
+            Label("Spaces", systemImage: "square.stack")
+        }
+        .disabled(!model.agentActionsAvailable)
+        .accessibilityIdentifier("toolbar.spaces")
+        Button {
             model.showSettings = true
         } label: {
             Label("Settings", systemImage: "gearshape")
@@ -528,7 +540,7 @@ struct BannerView: View {
 
     private var tint: Color {
         switch banner.tone {
-        case .error: return Color(.systemRed)
+        case .error: return Theme.danger
         case .warning: return Theme.blocked
         case .info: return Theme.working
         }
@@ -579,8 +591,9 @@ struct BannerView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .fill(tint.opacity(0.10))
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

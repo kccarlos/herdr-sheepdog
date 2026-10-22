@@ -91,6 +91,29 @@ final class RedesignShotsUITests: XCTestCase {
         shot("more-keys")
     }
 
+    func testEmptyConversation() throws {
+        // A saved address with nothing behind it: no history, no banner
+        // until the orb is tapped.
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:9"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["conversation.empty"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("conversation-empty")
+    }
+
+    func testPrimers() throws {
+        for primer in ["microphone", "notifications"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-sheepdogShowPrimer", primer]
+            app.launch()
+            XCTAssertTrue(app.descendants(matching: .any)["primer.\(primer)"].waitForExistence(timeout: 10))
+            sleep(1)
+            shot("primer-\(primer)")
+            app.terminate()
+        }
+    }
+
     // MARK: - Helpers
 
     /// Conversation or Agents: the copy on screen (the demo keeps the

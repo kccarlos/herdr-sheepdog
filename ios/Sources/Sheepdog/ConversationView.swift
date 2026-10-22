@@ -20,6 +20,8 @@ struct ConversationView: View {
     /// Changes when the user typed something: follow the conversation
     /// to its end even if it was scrolled up (the keyboard shrinks it).
     var followToken = 0
+    /// The empty conversation's example questions.
+    var ask: ((String) -> Void)?
 
     @State private var atBottom = true
     @State private var lastSeenID: String?
@@ -40,8 +42,8 @@ struct ConversationView: View {
                         }
                     }
                     if !hasContent {
-                        EmptyConversation(voiceName: voiceName)
-                            .padding(.top, 28)
+                        EmptyConversation(voiceName: voiceName, ask: ask)
+                            .padding(.top, 60)
                     }
                     // Runs of the daemon's pushes and notices fold into one
                     // "N updates" row; what was said stays in the open.
@@ -681,21 +683,49 @@ struct QuestionPointer: View {
 
 struct EmptyConversation: View {
     let voiceName: String
+    /// Sends an example as if typed; nil when there is no daemon to ask.
+    var ask: ((String) -> Void)?
+
+    private static let examples = ["What's going on?", "Is anyone stuck?"]
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-            Text("Nothing said yet")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("Connect and talk to \(voiceName). What you say and what it answers shows up here.")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 12) {
+            MascotCard(name: "MascotListening", width: 150)
+                .frame(height: 167)
+            Text("Just talk")
+                .font(.title.weight(.bold))
+                .fontDesign(.rounded)
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 6)
+            Text("Ask what your agents are doing, or tell one what to do next.")
+                .font(.body)
+                .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
+                .fixedSize(horizontal: false, vertical: true)
+            if let ask {
+                OptionFlow(spacing: 8) {
+                    ForEach(Self.examples, id: \.self) { example in
+                        Button { ask(example) } label: {
+                            Text(example)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .background(Capsule().fill(Theme.card))
+                                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Asks \(voiceName)")
+                    }
+                }
+                .fixedSize()
+                .padding(.top, 6)
+                .accessibilityIdentifier("conversation.examples")
+            }
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("conversation.empty")
     }
 }

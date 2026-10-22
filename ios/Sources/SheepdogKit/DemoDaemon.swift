@@ -27,6 +27,7 @@ public final class DemoDaemon: @unchecked Sendable {
 
     private let lock = NSLock()
     private var world: DemoWorld
+    private var spaces = DemoSpaces()
     private let clock: () -> Date
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "sheepdog.demo")
@@ -167,14 +168,7 @@ public final class DemoDaemon: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
         case ("GET", "/api/spaces"):
-            return json(["kinds": [["kind": "claude", "name": "Claude"], ["kind": "codex", "name": "Codex"], ["kind": "agy", "name": "Antigravity"]], "worktrees": true, "spaces": [
-                ["id": "w1", "name": "sheepdog-bench", "path": "/Users/you/code/sheepdog-bench", "git": true,
-                 "repo": "sheepdog-bench", "branch": "main", "worktree": false,
-                 "agents": [] as [Any], "shells": [] as [Any], "commands": [] as [Any]],
-            ], "folders": [
-                ["name": "website", "path": "/Users/you/code/website", "git": true],
-                ["name": "notes", "path": "/Users/you/code/notes", "git": false],
-            ]])
+            return json(spaces.view(agents: world.agents))
         case ("POST", "/api/agents"):
             // The failure states, on demand: a worktree in the folder that
             // is not a repository, the branch "main", or a first prompt
@@ -191,6 +185,10 @@ public final class DemoDaemon: @unchecked Sendable {
             }
             return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
         default:
+            let busy = world.agents.contains { $0.state == .working || $0.state == .blocked }
+            if let reply = spaces.handle(method: method, path: path, body: object, busy: busy) {
+                return json(reply.body, status: reply.status)
+            }
             if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {
                 return json(["ok": true])
             }
