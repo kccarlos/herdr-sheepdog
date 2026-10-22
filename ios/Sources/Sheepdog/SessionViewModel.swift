@@ -78,6 +78,9 @@ final class SessionViewModel: ObservableObject {
     @Published var showsNewAgent = false
     /// ⋯ ▸ Spaces.
     @Published var showsSpaces = false
+    /// The screen before a system permission prompt, while it waits.
+    @Published private(set) var primer: PermissionPrimer?
+    private var primerAnswer: CheckedContinuation<Bool, Never>?
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
     /// engine's jitter-buffer profile explicitly when it changes, rather
     /// than re-deriving and re-setting it on every event regardless of
@@ -449,10 +452,36 @@ final class SessionViewModel: ObservableObject {
             return
         }
         guard core.connection.wantsConnection else { return }
-        let granted = await AudioEngine.requestMicrophone()
+        // Why first, then the system prompt (only if the user goes on).
+        let granted: Bool
+        if AVAudioApplication.shared.recordPermission == .undetermined, !(await ask(.microphone)) {
+            granted = false
+        } else {
+            granted = await AudioEngine.requestMicrophone()
+        }
         // The permission prompt can sit there for a while; the core ignores
         // the answer if End was tapped meanwhile.
         send(.probeSucceeded(micGranted: granted))
+    }
+
+    /// Shows a permission primer and waits for the answer: true to go on
+    /// to the system prompt. The UI tests start configured and skip it
+    /// (`-sheepdogAskPrimers` shows it).
+    func ask(_ primer: PermissionPrimer) async -> Bool {
+        #if DEBUG
+        if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPrimers { return true }
+        #endif
+        primerAnswer?.resume(returning: false)
+        return await withCheckedContinuation { continuation in
+            primerAnswer = continuation
+            self.primer = primer
+        }
+    }
+
+    func answerPrimer(_ yes: Bool) {
+        primer = nil
+        primerAnswer?.resume(returning: yes)
+        primerAnswer = nil
     }
 
     func disconnect() {

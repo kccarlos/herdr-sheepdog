@@ -37,6 +37,10 @@ struct SheepdogApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-sheepdogLiveActivityGallery") {
                 LiveActivityGallery()
+            } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-sheepdogShowPrimer"),
+                      i + 1 < ProcessInfo.processInfo.arguments.count,
+                      let primer = PermissionPrimer(rawValue: ProcessInfo.processInfo.arguments[i + 1]) {
+                PermissionPrimerView(primer: primer) { _ in }
             } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
                 CapsuleGallery()
             } else {

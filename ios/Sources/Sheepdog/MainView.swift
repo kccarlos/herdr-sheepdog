@@ -166,6 +166,9 @@ struct MainView: View {
             }
             .sheet(isPresented: $model.showsNewAgent) { NewAgentSheet() }
             .sheet(isPresented: $model.showsSpaces) { SpacesSheet() }
+            .fullScreenCover(item: Binding(get: { model.primer }, set: { if $0 == nil, model.primer != nil { model.answerPrimer(false) } })) { primer in
+                PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
+            }
             .sheet(isPresented: $showsConnection) {
                 ConnectionDetailView(
                     showSettings: {
@@ -537,7 +540,7 @@ struct BannerView: View {
 
     private var tint: Color {
         switch banner.tone {
-        case .error: return Color(.systemRed)
+        case .error: return Theme.danger
         case .warning: return Theme.blocked
         case .info: return Theme.working
         }
@@ -588,8 +591,13 @@ struct BannerView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Theme.card)
+        )
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .fill(tint.opacity(0.10))
+                .padding(-0.5)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

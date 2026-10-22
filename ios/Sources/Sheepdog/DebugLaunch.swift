@@ -33,6 +33,9 @@ enum DebugLaunch {
     /// For the UI tests: on Xcode Cloud's simulators the audio server hangs
     /// and the app aborts in `AURemoteIO::Initialize` (an RPC timeout).
     static var demoSilent: Bool { arguments.contains("-sheepdogDemoSilent") }
+    /// `-sheepdogAskPrimers`: show the permission primers even when the
+    /// UI tests start configured.
+    static var askPrimers: Bool { arguments.contains("-sheepdogAskPrimers") }
     /// `-sheepdogOpenDemo`: open the offline demo at launch, for the
     /// redesign screenshots (`RedesignShotsUITests`).
     static var openDemo: Bool { arguments.contains("-sheepdogOpenDemo") }
