@@ -68,7 +68,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		t.Fatalf("inject blocked = %d %s", code, body)
 	}
 	var tr ToolResponse
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasPrefix(tr.Spoken, "The screen ends with:") {
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasPrefix(tr.Spoken, "The screen ends with:") {
 		t.Fatalf("utterance = %d %s", code, body)
 	}
 	h.srv.deps.Brain.Quiesce()
@@ -134,7 +134,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	// The next turn prunes the earlier turns' screens (the tool result
 	// and the event screen) to stubs in the window; the transcript API
 	// still serves the full result.
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK {
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK {
 		t.Fatalf("utterance 2 = %d %s", code, body)
 	}
 	h.srv.deps.Brain.Quiesce()
@@ -149,7 +149,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	// A promise relayed through the text router ("let me know when …":
 	// the orchestrator reads it as promised work and records it) is served with
 	// its record.
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Spoken != "I will tell you when auth finishes." {
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Spoken != "I will tell you when auth finishes." {
 		t.Fatalf("promise utterance = %d %s (%+v)", code, body, tr)
 	}
 	h.srv.deps.Brain.Quiesce()

@@ -21,7 +21,7 @@ func TestUtteranceHeardEcho(t *testing.T) {
 		got = append(got, e)
 	}
 	var tr ToolResponse
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Spoken == "" {
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Spoken == "" {
 		t.Fatalf("utterance = %d %s", code, body)
 	}
 	mu.Lock()

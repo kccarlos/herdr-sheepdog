@@ -694,7 +694,7 @@ and the status wraps to two lines at the accessibility sizes.
   With several computers it will add Talk to.
 - **The composer.** The keyboard morphs the capsule into `CapsuleComposer`:
   the quiet orb (back to voice), the field and the ink send button.
-  Sending goes through `POST /api/inject/utterance`.
+  Sending goes through `POST /api/utterance`.
 - A first-run coach mark explains that the mic is only for muting; the
   first time Mute is used, the status line explains it. **Hold to talk**
   (Settings ▸ Microphone) turns the orb into a push-to-talk button and
@@ -832,7 +832,7 @@ voice speaks; questions get answers.
 - **`DemoDaemon` + `DemoURLProtocol` (SheepdogKit, tested):** the world
   behind the daemon's own routes and JSON (`/api/hello`, `/api/state`,
   `/api/conversation`, `/api/events`, `/events` held open as SSE,
-  `/api/pending/answer`, `/api/inject/utterance`,
+  `/api/pending/answer`, `/api/utterance`,
   `/api/agents/{pane}/screen` and `/input`). `DaemonClient` reaches it on
   a `URLSession` whose protocol class answers everything for the host
   `demo.sheepdog.invalid`, so no request leaves the app. The agent list,

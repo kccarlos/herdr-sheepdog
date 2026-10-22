@@ -95,7 +95,7 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(chip.waitForExistence(timeout: 15), "the chip should arrive over the event stream")
 
 
-        try inject("/api/inject/utterance", ["text": "what's going on right now"])
+        try inject("/api/utterance", ["text": "what's going on right now"])
         // Each bubble is one accessibility element, read as a sentence.
         guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on right now") }) else {
             shot(app, "debug-before-utterance")

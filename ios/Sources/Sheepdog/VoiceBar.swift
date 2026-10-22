@@ -419,7 +419,7 @@ struct CapsuleMicButton: View {
 
 /// The capsule as the composer: the quiet orb (back to voice), the text
 /// field and the ink send button. What was typed goes to the daemon as if
-/// spoken (`POST /api/inject/utterance`).
+/// spoken (`POST /api/utterance`).
 struct CapsuleComposer: View {
     let voiceName: String
     let sending: Bool

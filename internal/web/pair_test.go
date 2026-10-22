@@ -14,11 +14,11 @@ import (
 const pairToken = "pair-test-token-0123456789abcdef"
 
 // Without a reachable address /api/pair says why and the QR route
-// refuses; both are behind the token.
+// refuses; both answer this computer only (no token needed there).
 func TestPairLoopbackServer(t *testing.T) {
 	h := newHarness(t, harnessOpts{token: pairToken})
-	if code, _ := h.do(h.authedRequest("GET", "/api/pair", "", nil, nil), nil); code != http.StatusUnauthorized {
-		t.Errorf("without the token: %d", code)
+	if code, _ := h.do(h.authedRequest("GET", "/api/pair", "", nil, nil), nil); code != http.StatusOK {
+		t.Errorf("on loopback without the token: %d", code)
 	}
 	var resp PairResponse
 	if code, _ := h.do(h.authedRequest("GET", "/api/pair", pairToken, nil, nil), &resp); code != 200 || resp.Error == "" || !resp.HasToken {
