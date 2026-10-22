@@ -153,7 +153,7 @@ public final class DemoDaemon: @unchecked Sendable {
             } catch {
                 return json(["error": "that question is no longer open"], status: 409)
             }
-        case ("POST", "/api/inject/utterance"):
+        case ("POST", "/api/utterance"):
             let text = (object["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return json(["error": "empty text"], status: 400) }
             let reply = world.ask(text)

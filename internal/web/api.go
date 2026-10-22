@@ -506,7 +506,7 @@ func injectStatus(err error) int {
 	return http.StatusBadRequest
 }
 
-// utteranceRequest is the body of POST /api/inject/utterance.
+// utteranceRequest is the body of POST /api/utterance.
 type utteranceRequest struct {
 	Text string `json:"text"`
 }

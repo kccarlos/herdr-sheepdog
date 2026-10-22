@@ -578,6 +578,57 @@ reliably removes is the *click* — an underrun is a faded pause.
   should stop capturing and show the reason. It may retry `/ws` after a few
   seconds; a `connecting` status means the daemon is trying again.
 
+## Transport
+
+One port carries TLS and plain HTTP ([security.md](design/security.md#32-one-port-two-protocols)).
+The daemon reads the first byte of each connection: `0x16` starts a TLS
+handshake (TLS 1.2 or newer, ECDHE only, HTTP/1.1), anything else is
+plain HTTP.
+
+- **TLS** uses the daemon's own self-signed P-256 certificate, valid for
+  one year, kept in `<data_dir>/tls/` (`key.pem`, `cert.pem`; the
+  directory 0700, the files 0600). Clients pin its key, never a host name
+  or address: the pin is `base64url(SHA-256(SubjectPublicKeyInfo))`
+  without padding.
+- **Plain HTTP is served to loopback only** (`127.0.0.0/8`, `::1`), for
+  the local pages, the herdr hooks and the CLI. From any other address a
+  page (`GET /`, `/voice`, `/debug`, their assets) answers `308` to the
+  same path over `https://` at the same host and port, and everything
+  else (`/api/*`, `/ws`, `/events`, `/term`) answers
+  `426 {"error":"tls_required"}`, logged as `web.tls_required {path, remote}`.
+- **On loopback every route checks `Host`**: it must be `127.0.0.1` (any
+  `127.x`), `::1` or `localhost`, with any port. Anything else answers
+  `403 {"error":"host_not_allowed"}` (`web.host_refused`), which stops a
+  DNS-rebinding page.
+- A connection has 10 seconds to send its first byte, and the TLS
+  handshake and request headers must arrive within 10 seconds.
+
+`GET /api/hello` carries the served key as `security`:
+`{"pin":"<pin>","cert_expires":"2027-10-21T00:00:00Z"}`. The pin is a
+public key hash; a client never trusts this field, only the pin in the
+pairing code.
+
+### Loopback-only routes
+
+These answer only this computer (`127.0.0.0/8`, `::1`) and refuse any
+other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
+{path, remote}`), whatever it presents:
+
+- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`;
+- debug and internal: the `/debug` page, `/api/inject/*` (blocked,
+  pane, done, state, screen, remove), `POST /api/herdr/event` (the herdr
+  hooks), `POST /api/prompts/reload`, `GET /api/voice/system_prompt`,
+  `GET /api/brain/{transcript,context,system_prompt}`,
+  `GET /api/context/*`, `/testdata/*`;
+- the setup page, `/setup` and `/api/setup/*`, which also wants a change
+  from its own origin as JSON (*Auth*).
+
+The model picker (`GET /api/brain/models`, `PUT /api/brain/model`) and
+the composer stay open to the app. Typed text goes to
+`POST /api/utterance {"text":"…"}` (it was `/api/inject/utterance`).
+`internal/web/routes_test.go` walks the route table: every route has
+exactly one of public, device, loopback or setup.
+
 ## Pairing
 
 `sheepdog pair` prints, and `/debug` (State → Pair a phone; `GET
@@ -638,7 +689,7 @@ loopback default) every endpoint below is open. With it set:
   A WebSocket upgrade or an SSE stream refused this way never reaches
   the contract below it — the client sees an ordinary HTTP 401, not a
   `status`/`error` frame.
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"}}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…"}}`
   so a client can confirm it found a sheepdog daemon, whether it needs a
   token, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens

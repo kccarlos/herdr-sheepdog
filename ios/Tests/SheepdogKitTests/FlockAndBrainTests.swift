@@ -197,7 +197,7 @@ final class FlockAndBrainTests: XCTestCase {
     func testSendUtterancePostsTheTextAndReadsEitherReply() async throws {
         StubProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(request.url?.path, "/api/inject/utterance")
+            XCTAssertEqual(request.url?.path, "/api/utterance")
             let body = try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String]
             XCTAssertEqual(body?["text"], "what is auth doing")
             return (200, Data(#"{"ok":true,"via":"voice","text":"what is auth doing"}"#.utf8))
