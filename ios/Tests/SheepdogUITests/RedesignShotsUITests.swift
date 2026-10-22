@@ -206,7 +206,8 @@ final class RedesignShotsUITests: XCTestCase {
 
     /// Closes an open menu by tapping the top of the screen.
     func dismissMenu(_ app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        // A tap at the left edge, halfway down: outside every menu.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)).tap()
         sleep(2)
     }
 

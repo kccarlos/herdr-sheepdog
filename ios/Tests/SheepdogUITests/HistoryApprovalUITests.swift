@@ -63,14 +63,19 @@ final class HistoryApprovalUITests: XCTestCase {
         XCTAssertEqual(app.buttons["approval.option.3"].label, "Decline: No, and tell Codex what to do differently")
         shot(app, "11-approval-card")
 
-        // 3. Tap Yes, proceed: the card turns answered.
+        // 3. Tap Yes, proceed: the card collapses into its settled row in
+        //    the conversation (or, before that row has synced, shows the
+        //    answer itself).
         yes.tap()
         let answered = app.staticTexts["approval.answered"]
-        XCTAssertTrue(answered.waitForExistence(timeout: 10))
-        XCTAssertTrue(answered.label.hasPrefix("You approved — Yes, proceed"), "got \(answered.label)")
+        let settledRow = find(app, "bubble.approval", labelContains: "You approved — Yes, proceed", timeout: 10)
+        if settledRow == nil {
+            XCTAssertTrue(answered.waitForExistence(timeout: 5))
+            XCTAssertTrue(answered.label.hasPrefix("You approved — Yes, proceed"), "got \(answered.label)")
+        }
         shot(app, "12-approval-answered")
 
-        // 4. The pinned card steps aside; the conversation keeps the answer.
+        // 4. The floating card steps aside; the conversation keeps the answer.
         XCTAssertNotNil(find(app, "bubble.approval", labelContains: "You approved — Yes, proceed · by tap", timeout: 15))
         XCTAssertTrue(waitForAbsence(card, timeout: 10))
         shot(app, "13-approval-answered-inline")

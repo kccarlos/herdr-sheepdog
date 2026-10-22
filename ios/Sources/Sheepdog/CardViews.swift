@@ -143,7 +143,7 @@ private struct CardRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.6 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+            .animation(Theme.ease, value: configuration.isPressed)
     }
 }
 

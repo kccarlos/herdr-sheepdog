@@ -15,8 +15,16 @@ struct MainView: View {
     /// daemon reports a different one. Settings keeps showing it.
     @AppStorage("update.dismissedNotice") private var dismissedUpdate = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The question collapse, the window zoom and the capsule morph.
+    @Namespace private var motion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.splashShowing) private var splashShowing
+
+    /// Rows that fold to a pointer while their question floats.
+    private var pointerIDs: Set<String> {
+        let open = model.openQuestionIDs
+        return QuestionOrder.pointerRowIDs(rows: model.rows, open: model.questions.filter { open.contains($0.id) })
+    }
 
     private var paneState: FlockPaneState {
         FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
@@ -58,7 +66,7 @@ struct MainView: View {
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 } else if let notice = model.update?.notice, notice.text != dismissedUpdate, !model.isDemo {
                     UpdateBanner(notice: notice) {
                         withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
@@ -66,7 +74,7 @@ struct MainView: View {
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
 
                 if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
@@ -89,7 +97,7 @@ struct MainView: View {
                             canLoadOlder: model.canLoadOlder,
                             loadingOlder: model.loadingOlder,
                             openPendingIDs: model.openQuestionIDs,
-                            pointerIDs: QuestionOrder.pointerRowIDs(rows: model.rows, open: model.questions.filter { model.openQuestionIDs.contains($0.id) }),
+                            pointerIDs: pointerIDs,
                             loadOlder: { await model.loadOlder() },
                             followToken: model.typedSent,
                             ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
@@ -124,31 +132,36 @@ struct MainView: View {
                     if let notice = model.feedbackNotice {
                         FeedbackNoticeView(text: notice)
                             .padding(.top, 8)
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     }
                 }
-                .animation(.easeInOut(duration: 0.2), value: model.feedbackNotice)
+                .animation(Theme.ease, value: model.feedbackNotice)
             }
             .background(Theme.surface)
             // The question, the coach mark and the capsule float over the
             // content, which scrolls under them.
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
-            .animation(.easeInOut(duration: 0.2), value: model.banner)
+            .animation(Theme.ease, value: model.banner)
             .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
-            .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
-            .animation(.spring(duration: 0.35), value: model.showCoachMark)
-            .animation(.easeInOut(duration: 0.2), value: model.pane)
+            .animation(Theme.ease, value: model.showMuteHint)
+            .animation(Theme.ease, value: model.showCoachMark)
+            .animation(Theme.ease, value: model.pane)
             .toolbar(.hidden, for: .navigationBar)
             .navigationTitle(model.voiceName)
             .navigationDestination(for: ShellRoute.self) { route in
                 ShellWindowView(route: route)
             }
             .navigationDestination(for: AgentWindowRoute.self) { route in
-                if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
-                    AgentScreenView(agent: agent)
-                } else {
-                    AgentGoneView()
+                Group {
+                    if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
+                        AgentScreenView(agent: agent)
+                    } else {
+                        AgentGoneView()
+                    }
                 }
+                // The window zooms out of the chip or card it came from (a
+                // plain push under Reduce Motion, or with no source).
+                .modifier(WindowZoom(paneID: route.paneID, namespace: motion, reduceMotion: reduceMotion))
             }
             .confirmationDialog(
                 "Start a new conversation?",
@@ -228,6 +241,7 @@ struct MainView: View {
             }
             .onChange(of: model.pane) { _, _ in model.warmUpTerm() }
         }
+        .environment(\.motionNamespace, motion)
         .environment(\.openCard) { card in model.openCard(card) }
         .environment(\.reportScreenCover) { name, covering in model.setScreenCover(name, covering) }
     }
@@ -245,11 +259,12 @@ struct MainView: View {
                     voiceQuestionID: model.approval?.pending.id,
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
-                    }
+                    },
+                    compact: typing
                 ) { id, index in
                     model.answer(question: id, option: index)
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
 
             if model.showCoachMark {
@@ -258,7 +273,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, 4)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .onAppear {
                     AccessibilityNotification.Announcement(VoiceBarModel.coachMark(voiceName: model.voiceName)).post()
                 }
@@ -276,9 +291,11 @@ struct MainView: View {
                             model.typedError = nil
                         }
                     )
+                    .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
                     .transition(morph)
                 } else {
                     capsule
+                        .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
                         .transition(morph)
                 }
             }
@@ -289,11 +306,9 @@ struct MainView: View {
         .padding(.bottom, 4)
     }
 
-    /// The capsule turns into the composer and back: a short scale and
-    /// fade, only a fade under Reduce Motion.
-    private var morph: AnyTransition {
-        reduceMotion ? .opacity : .scale(scale: 0.96, anchor: .bottom).combined(with: .opacity)
-    }
+    /// The capsule turns into the composer and back: the shared frame
+    /// morphs (`MorphSurface`) while the two cross-fade.
+    private var morph: AnyTransition { .opacity }
 
     private var capsule: some View {
         VoiceCapsule(
@@ -596,5 +611,37 @@ struct DemoHeader: View {
         .background(Color.accentColor.opacity(0.08))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("demo.header")
+    }
+}
+
+/// The capsule and the composer share one frame, so one morphs into the
+/// other (its size and corners) while their contents cross-fade. A fade
+/// only under Reduce Motion.
+private struct MorphSurface: ViewModifier {
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.matchedGeometryEffect(id: "capsule", in: namespace)
+        }
+    }
+}
+
+/// The agent window zooms out of its source (a plain push under Reduce
+/// Motion).
+private struct WindowZoom: ViewModifier {
+    let paneID: String
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.navigationTransition(.zoom(sourceID: "window." + paneID, in: namespace))
+        }
     }
 }

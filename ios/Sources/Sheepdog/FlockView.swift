@@ -210,6 +210,8 @@ struct AgentCard: View {
             RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: waiting && primary ? 1.5 : 1)
         )
+        // The window zooms out of the whole card.
+        .zoomSource(agent.paneID)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flock.agent.\(agent.alias)")
     }
@@ -275,6 +277,8 @@ struct AgentCard: View {
 
     private var dot: some View {
         Circle().fill(tint).frame(width: 8, height: 8)
+            .doneFlash(agent.state)
+            .animation(Theme.ease, value: agent.state)
             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
     }
 
@@ -303,6 +307,7 @@ struct AgentCard: View {
                 .font(.footnote.weight(waiting ? .semibold : .medium))
                 .foregroundStyle(Theme.textColor(for: agent.state))
                 .contentTransition(.numericText())
+                .animation(Theme.ease, value: since)
                 .lineLimit(1)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).state")
         }
