@@ -34,22 +34,22 @@ const screenReadTimeout = 5 * time.Second
 // screenSub is a client's one screen subscription.
 type screenSub struct {
 	pane   string
-	lines  int
-	ansi   bool
 	cancel context.CancelFunc
 	// reason is why it ended, set before cancel (under client.mu).
 	reason string
 }
 
-// subscribeScreen starts (or replaces) the client's screen subscription.
-func (c *client) subscribeScreen(pane string, lines int, ansi bool) {
+// subscribeScreen starts (or replaces) the client's screen subscription:
+// the coloured visible screen (feature screen-ansi), as ?ansi=1 on the
+// screen route.
+func (c *client) subscribeScreen(pane string) {
 	if c.h.s.deps.Supervisor == nil {
 		c.enqueue(controlFrame(wsproto.ScreenError(pane, "no supervisor", true)))
 		return
 	}
 	c.stopScreen("resubscribe")
 	ctx, cancel := context.WithCancel(context.Background())
-	sub := &screenSub{pane: pane, lines: lines, ansi: ansi, cancel: cancel}
+	sub := &screenSub{pane: pane, cancel: cancel}
 	c.mu.Lock()
 	if c.closing {
 		c.mu.Unlock()
@@ -58,7 +58,7 @@ func (c *client) subscribeScreen(pane string, lines int, ansi bool) {
 	}
 	c.screen = sub
 	c.mu.Unlock()
-	c.h.s.log.Log(logSource, "web.screen.subscribe", pane, map[string]any{"client_id": c.id, "lines": lines, "ansi": ansi})
+	c.h.s.log.Log(logSource, "web.screen.subscribe", pane, map[string]any{"client_id": c.id})
 	go c.screenLoop(ctx, sub)
 }
 
@@ -155,15 +155,7 @@ func (c *client) screenLoop(ctx context.Context, sub *screenSub) {
 		case <-timer.C:
 		}
 		rctx, cancel := context.WithTimeout(ctx, screenReadTimeout)
-		var (
-			scr supervisor.Screen
-			err error
-		)
-		if sub.ansi {
-			scr, err = deps.Supervisor.ScreenANSI(rctx, sub.pane)
-		} else {
-			scr, err = deps.Supervisor.Screen(rctx, sub.pane, sub.lines)
-		}
+		scr, err := deps.Supervisor.ScreenANSI(rctx, sub.pane)
 		cancel()
 		last = time.Now()
 		due = last.Add(deps.ScreenInterval)
