@@ -250,10 +250,6 @@ func TestOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/setup" {
-			http.NotFound(w, r)
-			return
-		}
 		_, _ = w.Write([]byte(`{"name":"sheepdog"}`))
 	})}
 	go func() { _ = srv.Serve(ln) }()
@@ -270,9 +266,6 @@ func TestOpen(t *testing.T) {
 	}
 	if code, _, _ := runCLI("open", "debug", "--config", cfg); code != 0 {
 		t.Errorf("debug: exit %d", code)
-	}
-	if code, _, errs := runCLI("open", "setup", "--config", cfg); code != 1 || !strings.Contains(errs, "no setup page yet") {
-		t.Errorf("setup: exit %d %q", code, errs)
 	}
 	if strings.Join(opened, " ") != base+"/voice "+base+"/debug" {
 		t.Errorf("opened %q", opened)

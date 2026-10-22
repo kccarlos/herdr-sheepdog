@@ -54,7 +54,7 @@ func fakeKeyAPI(t *testing.T) {
 func noOnboardKeys(t *testing.T) {
 	t.Helper()
 	noKeys(t)
-	for _, k := range []string{"GEMINI_API_KEY_4", "GEMINI_API_KEY_5", "GEMINI_API_KEY_6", "GEMINI_API_KEY_7", "GEMINI_API_KEY_8", "GEMINI_API_KEY_9", "OPENAI_API_KEY", "VERTEX_API_KEY", "VERTEX_PROJECT", "OPENROUTER_API_KEY", "SHEEPDOG_WEB_TOKEN"} {
+	for _, k := range []string{"GEMINI_API_KEY_4", "GEMINI_API_KEY_5", "GEMINI_API_KEY_6", "GEMINI_API_KEY_7", "GEMINI_API_KEY_8", "GEMINI_API_KEY_9", "OPENAI_API_KEY", "VERTEX_API_KEY", "VERTEX_PROJECT", "OPENROUTER_API_KEY"} {
 		t.Setenv(k, "")
 	}
 }
@@ -75,8 +75,8 @@ func mode(t *testing.T, path string) os.FileMode {
 	return st.Mode().Perm()
 }
 
-// A new setup: the key is validated, written 0600 with a fresh long
-// token, config.toml is written 0600 and loads; nothing prints the key.
+// A new setup: the key is validated and written 0600, config.toml is
+// written 0600 and loads; nothing prints the key.
 func TestInitNonInteractiveNew(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
@@ -91,7 +91,7 @@ func TestInitNonInteractiveNew(t *testing.T) {
 		t.Error("the key was printed")
 	}
 	env, err := onboard.ReadEnvFile(envPath)
-	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey || env["SHEEPDOG_WEB_TOKEN"] != "" {
+	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey {
 		t.Fatalf("env file = %v (%v)", len(env), err)
 	}
 	if mode(t, envPath) != 0o600 || mode(t, cfgPath) != 0o600 {
@@ -115,7 +115,7 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(envPath, []byte("SHEEPDOG_WEB_TOKEN=phone-paired-token\n"), 0o600); err != nil {
+	if err := os.WriteFile(envPath, []byte("SHEEPDOG_COMPUTER_NAME=test-mac\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -138,25 +138,8 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	if env["SHEEPDOG_BRAIN_PROVIDER"] != "openrouter" || env["SHEEPDOG_BRAIN_MODEL"] != "vendor/model-a" {
 		t.Errorf("brain env = %q %q", env["SHEEPDOG_BRAIN_PROVIDER"], env["SHEEPDOG_BRAIN_MODEL"])
 	}
-	if env["SHEEPDOG_WEB_TOKEN"] != "phone-paired-token" || env["OPENROUTER_API_KEY"] != initCompatKey || env["GEMINI_API_KEY"] != initGeminiKey {
-		t.Errorf("env = token %q, keys set %v %v", env["SHEEPDOG_WEB_TOKEN"], env["OPENROUTER_API_KEY"] != "", env["GEMINI_API_KEY"] != "")
-	}
-}
-
-// A token in the environment counts as existing too: a new config does
-// not get a second one.
-func TestInitTokenInEnvironment(t *testing.T) {
-	fakeKeyAPI(t)
-	noOnboardKeys(t)
-	t.Setenv("GEMINI_API_KEY", initGeminiKey)
-	t.Setenv("SHEEPDOG_WEB_TOKEN", "from-the-environment")
-	dir := t.TempDir()
-	if code, out := runInitTest(t, "", "--non-interactive", "--config", filepath.Join(dir, "config.toml")); code != 0 {
-		t.Fatalf("code %d: %s", code, out)
-	}
-	env, _ := onboard.ReadEnvFile(filepath.Join(dir, ".env"))
-	if _, ok := env["SHEEPDOG_WEB_TOKEN"]; ok {
-		t.Error("a token was generated over the environment's")
+	if env["SHEEPDOG_COMPUTER_NAME"] != "test-mac" || env["OPENROUTER_API_KEY"] != initCompatKey || env["GEMINI_API_KEY"] != initGeminiKey {
+		t.Errorf("env = computer name %q, keys set %v %v", env["SHEEPDOG_COMPUTER_NAME"], env["OPENROUTER_API_KEY"] != "", env["GEMINI_API_KEY"] != "")
 	}
 }
 

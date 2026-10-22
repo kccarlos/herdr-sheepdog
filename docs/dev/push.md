@@ -96,7 +96,7 @@ a device token behind it is dropped.
 Each registered phone has a **content key**: 32 random bytes the daemon
 generates at the phone's first registration and answers (base64) in
 every `POST /api/push/register` response, over the same authenticated
-connection as the rest of `/api` (it is as private as `web.token`). The
+connection as the rest of `/api` (it is as private as the device's key). The
 app keeps it where its Notification Service Extension can read it (the
 shared app-group keychain). It lives in `push_devices.json` (mode 600)
 with the device and goes when the device is unregistered or dropped. A
