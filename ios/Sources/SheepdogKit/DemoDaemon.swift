@@ -176,6 +176,19 @@ public final class DemoDaemon: @unchecked Sendable {
                 ["name": "notes", "path": "/Users/you/code/notes", "git": false],
             ]])
         case ("POST", "/api/agents"):
+            // The failure states, on demand: a worktree in the folder that
+            // is not a repository, the branch "main", or a first prompt
+            // with "fail" in it (a start that timed out, its pane open).
+            let worktree = (object["worktree"] as? [String: Any])?["branch"] as? String
+            if worktree != nil, (object["dir"] as? String)?.hasSuffix("/notes") == true {
+                return json(["error": "notes is not in a git repository", "reason": "not_git"], status: 400)
+            }
+            if worktree == "main" {
+                return json(["error": "the branch main is already checked out", "reason": "branch_exists"], status: 400)
+            }
+            if (object["text"] as? String)?.lowercased().contains("fail") == true {
+                return json(["error": "herdr never saw the agent running", "reason": "timeout", "pane_id": DemoWorld.authPane], status: 502)
+            }
             return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
         default:
             if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {

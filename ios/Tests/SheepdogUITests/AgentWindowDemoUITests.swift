@@ -154,36 +154,64 @@ final class AgentWindowDemoUITests: XCTestCase {
         showAgentsPane(app)
         // The sheet comes from + ▸ New agent; a tap lost while something
         // still animates is retried.
-        let start = app.buttons["newAgent.start"]
-        for _ in 0 ..< 3 where !start.exists {
+        let space = app.buttons["newAgent.space.sheepdog-bench"]
+        for _ in 0 ..< 3 where !space.exists {
             tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
-            if start.waitForExistence(timeout: 10) { break }
+            if space.waitForExistence(timeout: 10) { break }
         }
-        XCTAssertTrue(start.exists, "New agent opens its sheet")
-        sleep(1)
+        XCTAssertTrue(space.exists, "New agent opens on Where")
         shot("new-agent")
-        // A tap on the segment while the sheet still settles can be lost on
-        // a slow Mac; choosing the same segment again is harmless.
+        space.tap()
+        let start = app.buttons["newAgent.start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10), "Which agent, with Start")
+        XCTAssertTrue(app.buttons["newAgent.kind.agy"].exists, "every installed kind, agy too")
+        let toggle = app.switches["newAgent.worktree"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "0", "New worktree is off by default")
+        toggle.switches.firstMatch.tap()
         let branch = app.textFields["newAgent.branch"]
-        for _ in 0 ..< 3 where !branch.exists {
-            app.buttons["New worktree"].tap()
-            if branch.waitForExistence(timeout: 5) { break }
-        }
-        XCTAssertTrue(branch.exists, "New worktree shows the branch field")
+        XCTAssertTrue(branch.waitForExistence(timeout: 5), "New worktree shows the branch field")
         branch.tap()
         branch.typeText("fix-login")
-        XCTAssertTrue(app.buttons["newAgent.start"].isEnabled)
+        XCTAssertTrue(start.isEnabled)
         shot("new-agent-worktree")
-        app.buttons["newAgent.start"].tap()
+        start.tap()
         // "Started" shows for 1.4 s, then the sheet closes by itself, which
-        // it does only after a successful start. The tap's own wait for the
-        // app to idle can outlast the label on a slow Mac, so either counts.
+        // it does only after a successful start.
         let started = app.descendants(matching: .any)["newAgent.started"]
-        let startButton = app.buttons["newAgent.start"]
-        let startedOrClosed = NSPredicate { _, _ in started.exists || !startButton.exists }
+        let startedOrClosed = NSPredicate { _, _ in started.exists || !start.exists }
         wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
         XCTAssertEqual(app.state, .runningForeground, "the app is still up")
         XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
+    }
+
+    /// A folder that is not a repository has no worktree switch; a start
+    /// that times out says so and offers its pane.
+    func testNewAgentFailureStates() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launch()
+        let tryDemo = app.buttons["settings.firstRun.tryDemo"]
+        XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
+        tryDemo.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
+        let folder = app.buttons["newAgent.folder.notes"]
+        for _ in 0 ..< 3 where !folder.exists {
+            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
+            if folder.waitForExistence(timeout: 10) { break }
+        }
+        folder.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["newAgent.notGit"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.switches["newAgent.worktree"].exists, "no worktree outside a repository")
+        let prompt = app.textFields["newAgent.prompt"]
+        prompt.tap()
+        prompt.typeText("make it fail")
+        app.buttons["newAgent.start"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["newAgent.error"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["newAgent.openPane"].exists, "the pane it left open")
+        shot("new-agent-failed")
+        app.buttons["newAgent.openPane"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10), "Open the pane opens its window")
     }
 
     func testAnotherDeviceInControlShowsTheObserveBanner() throws {

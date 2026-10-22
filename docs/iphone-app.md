@@ -60,10 +60,17 @@ On the same Wi-Fi this just works. Away from home, see
   and your answer, its space). Every waiting agent shows its question and
   the agent's own answers as buttons, so you can answer any of them, not
   only the one the voice is on. The round button opens the agent's window
-  (below). **+ ▸ New agent** starts Claude Code
-  or Codex in one of your projects (the folders in `supervisor.project_roots`
-  and the workspaces herdr has open), in the project folder or in a fresh
-  git worktree on a new branch, with an optional first prompt.
+  (below). **+ ▸ New agent** takes two steps. **Where:** one of the
+  spaces herdr has open (with the agents already in it), or a folder in
+  `supervisor.project_roots` that has no space yet. **Which agent:** the
+  coding agents installed on your computer (Claude Code, Codex, agy and
+  the others herdr knows), **New worktree** (off; it gives the agent its
+  own branch and folder, and is hidden when the folder is not a git
+  repository), and an optional first prompt. Start waits until the agent
+  is ready, then opens its window. If it does not start, the sheet says
+  why (not installed, not a git repository, the branch is checked out
+  elsewhere, it took too long) and, when a pane was left open, offers
+  **Open the pane**.
 - **Agent window.** "Open window" on an agent shows its live terminal,
   sized to the phone, in the agent's own colours. While the window is open
   the agent's pane on your computer takes the phone's size; it goes back
