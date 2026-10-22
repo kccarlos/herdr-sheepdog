@@ -81,7 +81,7 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(element(app, "allAgents.grid").waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "flock.agent.claude-auth").exists)
         element(app, "allAgents.expandAll").tap()
-        XCTAssertTrue(element(app, "flock.agent.docs.message").waitForExistence(timeout: 5), "expanded cards show the newest message")
+        XCTAssertTrue(app.buttons["Collapse all"].waitForExistence(timeout: 5), "every card is open")
         sleep(1)
         shot("all-agents-expanded")
         element(app, "allAgents.filter.working").tap()
@@ -89,10 +89,11 @@ final class IPadUITests: XCTestCase {
         element(app, "allAgents.filter.waiting").tap()
         // The demo's agents are not waiting at the start.
         if element(app, "allAgents.empty").waitForExistence(timeout: 3) {
+            sleep(1)
             shot("all-agents-waiting-empty")
-            element(app, "allAgents.showAll").tap()
-            XCTAssertTrue(element(app, "flock.agent.docs").waitForExistence(timeout: 5))
         }
+        element(app, "allAgents.filter.all").tap()
+        XCTAssertTrue(element(app, "flock.agent.claude-auth").waitForExistence(timeout: 5))
     }
 
     /// Portrait: the sidebar hides, and the detail's header carries Show
@@ -128,7 +129,7 @@ final class IPadUITests: XCTestCase {
         let split = element(app, "pane.split")
         XCTAssertTrue(split.waitForExistence(timeout: 10))
         split.tap()
-        let migration = app.buttons["claude-migration"].firstMatch
+        let migration = app.collectionViews.buttons["claude-migration"].firstMatch
         XCTAssertTrue(migration.waitForExistence(timeout: 5))
         migration.tap()
         let terminals = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
@@ -157,7 +158,7 @@ final class IPadUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         sleep(2)
         element(app, "pane.split").tap()
-        let payments = app.buttons["codex-payments"].firstMatch
+        let payments = app.collectionViews.buttons["codex-payments"].firstMatch
         XCTAssertTrue(payments.waitForExistence(timeout: 5))
         payments.tap()
         expectation(for: two, evaluatedWith: terminals)

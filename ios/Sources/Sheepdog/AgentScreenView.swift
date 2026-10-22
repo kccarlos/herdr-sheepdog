@@ -318,6 +318,7 @@ private struct AgentWindowView: View {
                                 } label: {
                                     Label(other.alias, systemImage: other.state == .blocked ? "hand.raised" : "terminal")
                                 }
+                                .accessibilityIdentifier("pane.split.\(other.alias)")
                             }
                         }
                     } label: {
