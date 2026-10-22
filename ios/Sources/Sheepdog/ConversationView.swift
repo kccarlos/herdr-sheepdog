@@ -11,8 +11,8 @@ struct ConversationView: View {
     let voiceName: String
     var canLoadOlder = false
     var loadingOlder = false
-    /// The pending id the pinned approval card is showing, if any.
-    var activePendingID: String?
+    /// The questions floating above the capsule, still open.
+    var openPendingIDs: Set<String> = []
     /// Rows that fold to a one-line pointer while their question is
     /// pinned on the approval card (`QuestionFocus`).
     var pointerIDs: Set<String> = []
@@ -54,14 +54,14 @@ struct ConversationView: View {
                                 if pointerIDs.contains(row.id) {
                                     QuestionPointer(row: row)
                                 } else {
-                                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
                                 }
                             case let .updates(id, members):
                                 UpdatesGroup(
                                     rows: members,
                                     isOpen: openGroups.contains(id),
                                     voiceName: voiceName,
-                                    activePendingID: activePendingID
+                                    openPendingIDs: openPendingIDs
                                 ) {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
@@ -142,7 +142,7 @@ struct ConversationView: View {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
-            .onChange(of: activePendingID) { _, _ in
+            .onChange(of: openPendingIDs) { _, _ in
                 // The pinned card appearing or leaving resizes the list:
                 // keep the newest message, the one it is about, in view.
                 Task { @MainActor in
@@ -202,7 +202,7 @@ private struct OlderButton: View {
 struct RowView: View {
     let row: TimelineRow
     let voiceName: String
-    let activePendingID: String?
+    let openPendingIDs: Set<String>
 
     var body: some View {
         switch row {
@@ -217,7 +217,7 @@ struct RowView: View {
             case .push:
                 SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), voiceName: voiceName)
             case .approval:
-                ApprovalItemCard(item: item, isPinned: item.pendingID != nil && item.pendingID == activePendingID)
+                ApprovalItemCard(item: item, isPinned: item.pendingID.map { openPendingIDs.contains($0) } ?? false)
             case .card:
                 CardRow(card: item.card, text: item.text, at: item.card?.at ?? item.ts)
             case .notice, .unknown:
@@ -241,7 +241,7 @@ struct UpdatesGroup: View {
     let rows: [TimelineRow]
     let isOpen: Bool
     let voiceName: String
-    let activePendingID: String?
+    let openPendingIDs: Set<String>
     let toggle: () -> Void
 
     private var title: String { ConversationTimeline.updatesTitle(rows.count) }
@@ -290,7 +290,7 @@ struct UpdatesGroup: View {
 
             if isOpen {
                 ForEach(rows) { row in
-                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
                 }
                 .transition(.opacity)
             }

@@ -1226,6 +1226,13 @@ final class SessionViewModel: ObservableObject {
         var all = state.agents
         #if DEBUG
         if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
+        var debugQuestions: [PendingAction] = []
+        if DebugLaunch.demoSecondQuestion {
+            all.append(DebugLaunch.secondQuestionAgent)
+            debugQuestions.append(DebugLaunch.secondQuestion)
+        }
+        #else
+        let debugQuestions: [PendingAction] = []
         #endif
         let sorted = Flock.sorted(all)
         if sorted != agents {
@@ -1234,7 +1241,7 @@ final class SessionViewModel: ObservableObject {
         }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
-        let open = state.questions ?? state.pendingAction.map { [$0] } ?? []
+        let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
         if open != questions { questions = open }
         questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
         brain = state.brain
@@ -1829,6 +1836,27 @@ final class SessionViewModel: ObservableObject {
         if let approval, approval.pending.paneID == paneID { return approval }
         guard let question = questions.first(where: { $0.paneID == paneID }) else { return nil }
         return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+    }
+
+    /// The questions floating above the capsule on the Conversation: every
+    /// open one, the current computer's first and then by age (one
+    /// computer today, so by age), each with its tap state; the voice's
+    /// own one through `approval`, kept in front while it shows how it
+    /// ended.
+    var floatingQuestions: [ApprovalFlow.Card] {
+        let open = QuestionOrder.ordered(questions) { _ in true }
+        let list = QuestionOrder.floating(open: open, voice: approval?.pending, voiceSettled: approval?.isSettled ?? false)
+        return list.map { question in
+            if let approval, approval.pending.id == question.id { return approval }
+            return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+        }
+    }
+
+    /// The ids of the questions still open, for the rows that point at them.
+    var openQuestionIDs: Set<String> {
+        var ids = Set(questions.map(\.id))
+        if let approval, approval.isSettled { ids.remove(approval.pending.id) }
+        return ids
     }
 
     /// Answers a question by tap, whichever it is: the voice's question

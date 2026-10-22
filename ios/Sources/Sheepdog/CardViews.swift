@@ -255,7 +255,7 @@ struct CardSheet: View {
     /// The question, read-only. The pinned approval card answers it.
     @ViewBuilder
     private var approval: some View {
-        let isOpen = card.pendingID != nil && model.approval?.pending.id == card.pendingID && model.approval?.isSettled == false
+        let isOpen = card.pendingID.map { model.openQuestionIDs.contains($0) } ?? false
         if let question = card.question?.trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty {
             Text(question.prefix(1).uppercased() + question.dropFirst())
                 .font(.body)

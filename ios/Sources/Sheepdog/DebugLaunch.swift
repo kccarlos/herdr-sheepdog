@@ -62,6 +62,17 @@ enum DebugLaunch {
         guard let i = arguments.firstIndex(of: "-sheepdogDemoTerm"), i + 1 < arguments.count else { return .normal }
         return DemoTermTransport.Behavior(rawValue: arguments[i + 1]) ?? .normal
     }
+    /// `-sheepdogDemoSecondQuestion`: a second agent waits too, so two
+    /// questions float at once (screenshots; its answer goes nowhere).
+    static var demoSecondQuestion: Bool { arguments.contains("-sheepdogDemoSecondQuestion") }
+    static let secondQuestionAgent = Agent(
+        paneID: "demo-blog", alias: "blog", kind: "claude", state: .blocked, stateSince: Date().addingTimeInterval(-60)
+    )
+    static let secondQuestion = PendingAction(
+        id: "demo-blog-q", paneID: "demo-blog", kind: "answer_prompt",
+        options: [PendingOption(index: 1, label: "Publish", isDefault: true), PendingOption(index: 2, label: "Not yet")],
+        agent: "blog", summary: "Publish the draft to the staging site?"
+    )
     /// The agent `-sheepdogDemoMarkdown` adds.
     static let markdownAgent = Agent(
         paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),
