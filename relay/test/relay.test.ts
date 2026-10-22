@@ -266,6 +266,20 @@ describe("activity", () => {
     expect(apns.calls[0].body.aps).toMatchObject({ event: "end", timestamp: 1_800_000_123, "dismissal-date": 1 });
   });
 
+  it("takes an activity token longer than a device token", async () => {
+    const e = fullEnv();
+    const long = "b2".repeat(160);
+    const reg = await handle(post("/v1/register", { device_token: long, environment: "production", bundle_id: TOPIC }), e, deps(fakeAPNs().fetch));
+    expect(reg.status).toBe(200);
+    const { relay_token } = (await reg.json()) as { relay_token: string };
+    const apns = fakeAPNs();
+    const r = await handle(post("/v1/activity", { relay_token, content_state: state }), e, deps(apns.fetch));
+    expect(r.status).toBe(200);
+    expect(apns.calls[0].url).toBe(`https://api.push.apple.com/3/device/${long}`);
+    const tooLong = await handle(post("/v1/register", { device_token: "b2".repeat(201), environment: "production", bundle_id: TOPIC }), e, deps(fakeAPNs().fetch));
+    expect(tooLong.status).toBe(400);
+  });
+
   it("maps a gone activity token to 410", async () => {
     const e = fullEnv();
     const tok = await register(e);
