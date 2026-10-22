@@ -130,6 +130,49 @@ public struct AgentActionReply: Codable, Equatable, Sendable {
     }
 }
 
+/// A new agent that did not start: the daemon's `reason` code, its words
+/// and the pane it left open, if any (`POST /api/agents`).
+public struct AgentStartError: Error, Equatable, Sendable {
+    public enum Reason: String, Sendable {
+        case notInstalled = "not_installed"
+        case notGit = "not_git"
+        case branchExists = "branch_exists"
+        case timeout
+        case startFailed = "start_failed"
+    }
+
+    public var reason: Reason
+    public var message: String
+    public var paneID: String?
+
+    public init(reason: Reason, message: String, paneID: String? = nil) {
+        self.reason = reason
+        self.message = message
+        self.paneID = paneID
+    }
+
+    /// The headline the New agent sheet shows, in plain words.
+    public func title(kind: String, place: String) -> String {
+        switch reason {
+        case .notInstalled: return "\(kind) isn't installed on this computer"
+        case .notGit: return "\(place) isn't a git repository"
+        case .branchExists: return "That branch is checked out elsewhere"
+        case .timeout: return "\(kind) didn't start in time"
+        case .startFailed: return "\(kind) didn't start"
+        }
+    }
+
+    /// What to do about it.
+    public var fix: String {
+        switch reason {
+        case .notInstalled: return "Install it on your computer, then try again, or pick another agent."
+        case .notGit: return "Start it in the folder itself, without a worktree."
+        case .branchExists: return "Pick another branch name."
+        case .timeout, .startFailed: return paneID == nil ? "Try again in a moment." : "Its pane is still open: look at it to see why."
+        }
+    }
+}
+
 public enum AgentAction {
     /// The `bot-ready` feature.
     public static let feature = "agent-actions"
@@ -179,7 +222,21 @@ extension DaemonClient {
             body["dir"] = project.path
         }
         if let text, !text.isEmpty { body["text"] = text }
-        return try await postAction(encodedPath: "/api/agents", body: body)
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let request = try request(encodedPath: "/api/agents", method: "POST", body: data)
+        let (reply, response) = try await perform(request)
+        if let failure = Self.startError(data: reply, response: response) { throw failure }
+        return try decodeAction(AgentActionReply.self, data: reply, response: response)
+    }
+
+    /// A failed start with a `reason` code; nil for anything else.
+    static func startError(data: Data, response: URLResponse) -> AgentStartError? {
+        guard let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let code = object["reason"] as? String, let reason = AgentStartError.Reason(rawValue: code)
+        else { return nil }
+        let pane = (object["pane_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return AgentStartError(reason: reason, message: object["error"] as? String ?? "", paneID: pane)
     }
 
     /// `POST /api/agents/{pane}/rename`.
