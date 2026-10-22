@@ -43,6 +43,14 @@ struct SettingsView: View {
                     } footer: {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
+                    if model.shellOffered == false {
+                        Section {
+                            MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
+                                .accessibilityIdentifier("settings.shell")
+                        } footer: {
+                            Text(PhoneShell.offExplanation)
+                        }
+                    }
                 } else {
                     if let notice = model.update?.notice {
                         Section {
