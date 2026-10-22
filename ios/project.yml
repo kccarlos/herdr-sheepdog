@@ -157,7 +157,7 @@ targets:
           computer. Nothing is recorded in the background.
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
-          your Wi-Fi or Tailscale.
+          your local network.
         # The daemon speaks plain HTTP on a private network by design
         # (docs/ws-contract.md "Non-goals": no TLS in v1), so arbitrary loads
         # have to be allowed. Only this key: ATS ignores

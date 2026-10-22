@@ -18,7 +18,7 @@ public enum SetupHelp {
     public static let requirement = "Sheepdog needs the sheepdog daemon running on your computer. Install it from the herdr plugin marketplace and run `sheepdog setup`: its last step shows a pairing code to scan."
 
     /// The plain fix for a daemon the phone cannot reach.
-    public static let unreachableFix = "Check that sheepdog is running on your computer (`sheepdog status`) and that this phone is on the same Wi-Fi, or on Tailscale with the same account."
+    public static let unreachableFix = "Check that sheepdog is running on your computer (`sheepdog status`) and that this phone is on the same network as your computer (the same Wi-Fi, or a VPN such as Tailscale)."
     /// The plain fix for a token the daemon turned down.
     public static let tokenFix = "The token changed or was mistyped. Run `sheepdog pair` on your computer and scan the code again."
     /// Something answered, but not sheepdog.
