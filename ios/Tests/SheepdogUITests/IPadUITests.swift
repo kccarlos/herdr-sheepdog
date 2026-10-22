@@ -24,7 +24,9 @@ final class IPadUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        let header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
+        if !header { shot("launch-failed") }
+        XCTAssertTrue(header)
         return app
     }
 

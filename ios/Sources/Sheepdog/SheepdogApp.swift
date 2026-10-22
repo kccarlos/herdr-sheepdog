@@ -14,6 +14,12 @@ struct SheepdogApp: App {
     /// all of them have.
     @Environment(\.scenePhase) private var appPhase
 
+    init() {
+        #if DEBUG
+        _ = DebugLaunch.launchedAt
+        #endif
+    }
+
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
     /// last one saved. Debug builds only.

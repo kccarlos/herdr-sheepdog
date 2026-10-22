@@ -12,6 +12,9 @@ enum DebugLaunch {
     /// `-sheepdogResetState`: the walkthrough and screenshots start from a
     /// clean slate rather than whatever the last run saved.
     static var resetState: Bool { arguments.contains("-sheepdogResetState") }
+    /// When the process started: an agent window that appears within a few
+    /// seconds of it was restored from the last run, which a reset closes.
+    static let launchedAt = Date()
     /// `-sheepdogResetHints`: clears the one-time hints (also implied by
     /// `resetState`).
     static var resetHints: Bool { arguments.contains("-sheepdogResetHints") }
