@@ -58,10 +58,6 @@ type Config struct {
 	Events     Events     `toml:"events"`
 	Update     Update     `toml:"update"`
 	Computer   Computer   `toml:"computer"`
-
-	// deprecations are the notes about deprecated keys Load read
-	// (Deprecations, deprecated.go).
-	deprecations []string
 }
 
 // Prompts configures the prompt workspace (docs/dev/roles.md "Prompt files"):
@@ -98,7 +94,7 @@ type Brain struct {
 	MaxSteps int `toml:"max_steps"`
 	// UtteranceTimeoutS bounds one utterance turn (the user's relayed
 	// words) and an investigation delivery turn, including tool calls
-	// (default 12; formerly propose_timeout_s, still accepted).
+	// (default 25).
 	UtteranceTimeoutS int `toml:"utterance_timeout_s"`
 	// WindowTokens is the context window target (estimated tokens); above
 	// it the oldest half is compacted into a summary (default 12000;
@@ -122,8 +118,7 @@ type Brain struct {
 	// A finish waits this long (plus final_grace_s) for the orchestrator's line
 	// before anything is said, counted from when the turn gets the turn
 	// lock; queued behind a user turn, it may first wait up to
-	// utterance_timeout_s (default 6; formerly enrich_timeout_s, still
-	// accepted).
+	// utterance_timeout_s (default 6).
 	AnnounceTurnTimeoutS int `toml:"announce_turn_timeout_s"`
 	// AnnounceTimeoutS bounds an announce turn the user is owed: one
 	// that keeps a promise or reports the finish of an instruction they
@@ -791,9 +786,6 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, parseError(path, err)
 		}
 		modelSet = md.IsDefined("brain", "model")
-		if err := applyDeprecatedKeys(&cfg, data, md); err != nil {
-			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
-		}
 	case errors.Is(err, os.ErrNotExist):
 		// No file: defaults + env only.
 	default:
@@ -801,9 +793,6 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	}
 	if cfg.Aliases == nil {
 		cfg.Aliases = map[string]string{}
-	}
-	if err := applyDeprecatedEnv(&cfg, lookup); err != nil {
-		return Config{}, err
 	}
 	if err := applyEnv(&cfg, lookup); err != nil {
 		return Config{}, err
@@ -1039,11 +1028,11 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	SHEEPDOG_GEMINI_BACKEND, VERTEX_API_KEY, VERTEX_PROJECT, VERTEX_LOCATION,
 //	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_PROVIDER, SHEEPDOG_BRAIN_MODEL,
 //	SHEEPDOG_BRAIN_MAX_STEPS,
-//	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
+//	SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S,
 //	SHEEPDOG_BRAIN_WINDOW_TOKENS, SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS,
 //	SHEEPDOG_BRAIN_STEP_RESERVE_S, SHEEPDOG_BRAIN_FINAL_GRACE_S,
 //	SHEEPDOG_BRAIN_REPLY_WAIT_S,
-//	SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S, SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S,
+//	SHEEPDOG_BRAIN_ANNOUNCE_TURN_TIMEOUT_S, SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S,
 //	SHEEPDOG_PROMPTS_DIR,
 //	SHEEPDOG_PUSH_MODE, SHEEPDOG_PUSH_RELAY_URL,
 //	SHEEPDOG_APNS_KEY_PATH, SHEEPDOG_APNS_KEY_ID, SHEEPDOG_APNS_TEAM_ID,
