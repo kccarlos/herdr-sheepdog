@@ -17,7 +17,7 @@ struct SheepdogApp: App {
         #if DEBUG
         if DebugLaunch.resetState {
             store.address = ""
-            store.token = ""
+            store.credentials.forget()
             store.hasBeenConfigured = false
             store.keepListeningWhenLocked = true
             try? FileManager.default.removeItem(at: ConversationCache.standard().directory)

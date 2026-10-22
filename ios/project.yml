@@ -158,16 +158,13 @@ targets:
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
           your local network.
-        # The daemon speaks plain HTTP on a private network by design
-        # (docs/ws-contract.md "Non-goals": no TLS in v1), so arbitrary loads
-        # have to be allowed. Only this key: ATS ignores
-        # NSAllowsArbitraryLoads whenever NSAllowsLocalNetworking (or the
-        # media/web-content variants) is also present, and local networking
-        # does not cover a Tailscale 100.64/10 address — with both keys the
-        # app got NSURLErrorAppTransportSecurityRequiresSecureConnection
-        # against the Mac's Tailscale IP.
+        # Every address but loopback is TLS (docs/dev/design/security.md):
+        # the app checks the daemon's self-signed certificate by its pin
+        # (PinnedTrustDelegate), so no arbitrary loads. Local networking
+        # stays allowed only for plain HTTP to this Mac's loopback, where
+        # the fixture daemons the UI tests use run.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
         # Export compliance: the app implements no encryption of its own; it
         # uses only what iOS provides (URLSession, URLSessionWebSocketTask;
         # HTTPS/WSS when the daemon offers it; CryptoKit's AES-GCM to open

@@ -145,20 +145,13 @@ struct MainView: View {
             } message: {
                 Text("Sheepdog and the orchestrator forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
-            // sheepdog://pair from the Camera app: ask before applying.
-            .alert(
-                model.pendingPairing?.confirmation(currentAddress: model.settings.address).title ?? "",
-                isPresented: Binding(
-                    get: { model.pendingPairing != nil },
-                    set: { if !$0, model.pendingPairing != nil { model.cancelPairing() } }
-                ),
-                presenting: model.pendingPairing
-            ) { _ in
-                Button("Pair") { model.confirmPairing() }
-                    .accessibilityIdentifier("pairing.confirm")
-                Button("Cancel", role: .cancel) { model.cancelPairing() }
-            } message: { link in
-                Text(link.confirmation(currentAddress: model.settings.address).message)
+            // A pairing code from outside the app (asked about first), or
+            // "Please scan again".
+            .sheet(item: $model.pairingSheet, onDismiss: {
+                if !model.isConfigured { model.showSettings = true }
+            }) { sheet in
+                PairingFlowView(stage: sheet.stage)
+                    .environmentObject(model)
             }
             .sheet(isPresented: $model.showSettings) {
                 SettingsView(meter: model.meter)

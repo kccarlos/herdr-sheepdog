@@ -56,8 +56,8 @@ public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked
         self.pins = pins
     }
 
-    /// True once a server offered a key that matches no pin: the app shows
-    /// "Scan the pairing code again" instead of retrying.
+    /// True when the last server offered a key that matches no pin: the app
+    /// shows "Scan the pairing code again" instead of retrying.
     public var sawMismatch: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -76,6 +76,9 @@ public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked
             return
         }
         if Self.accepts(trust: trust, pins: pins()) {
+            lock.lock()
+            mismatched = false
+            lock.unlock()
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             lock.lock()

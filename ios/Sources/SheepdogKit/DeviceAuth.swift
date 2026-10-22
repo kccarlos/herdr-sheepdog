@@ -58,6 +58,12 @@ public struct SessionTicket: Equatable, Sendable {
     public var nextPin: String?
 
     public var header: String { "Bearer sds_\(ticket)" }
+
+    public init(ticket: String, expires: Date, nextPin: String? = nil) {
+        self.ticket = ticket
+        self.expires = expires
+        self.nextPin = nextPin
+    }
 }
 
 /// Enrolling and signing in against one computer, over a pinned session.

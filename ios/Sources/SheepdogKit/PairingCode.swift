@@ -58,4 +58,38 @@ public struct PairingCode: Equatable, Sendable {
     private static func decode(_ raw: Substring) -> String? {
         String(raw).replacingOccurrences(of: "+", with: " ").removingPercentEncoding
     }
+
+    /// The first address, in the code's order, that answers `probe` within
+    /// `timeout`. All are tried at once, so an unreachable LAN address away
+    /// from home costs one timeout, not one per address.
+    public func firstReachable(
+        timeout: Duration = .seconds(4),
+        probe: @escaping @Sendable (String) async -> Bool
+    ) async -> String? {
+        let ordered = addresses
+        let answered = await withTaskGroup(of: (Int, Bool).self) { group -> Set<Int> in
+            for (index, address) in ordered.enumerated() {
+                group.addTask { (index, await Self.withTimeout(timeout) { await probe(address) } ?? false) }
+            }
+            var ok = Set<Int>()
+            for await (index, reached) in group where reached { ok.insert(index) }
+            return ok
+        }
+        guard let best = answered.min() else { return nil }
+        return ordered[best]
+    }
+
+    /// The result of `body`, or nil when it takes longer than `timeout`.
+    static func withTimeout<T: Sendable>(_ timeout: Duration, _ body: @escaping @Sendable () async -> T) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await body() }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
 }

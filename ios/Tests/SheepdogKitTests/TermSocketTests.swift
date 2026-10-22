@@ -84,12 +84,14 @@ final class TermSocketTests: XCTestCase {
 
     // MARK: - Connection
 
-    func testHelloFirstWithTheTokenOnTheUpgrade() throws {
+    func testHelloFirstWithTheTicketOnTheUpgrade() throws {
+        DeviceCredentials.shared.adopt(SessionTicket(ticket: "s3cret", expires: Date().addingTimeInterval(3600)))
+        defer { DeviceCredentials.shared.dropTicket() }
         let rig = Rig(token: "s3cret")
         rig.socket.connect()
         let t = try XCTUnwrap(rig.last)
         XCTAssertEqual(t.request.url?.path, "/term")
-        XCTAssertEqual(t.request.value(forHTTPHeaderField: "Authorization"), "Bearer s3cret")
+        XCTAssertEqual(t.request.value(forHTTPHeaderField: "Authorization"), "Bearer sds_s3cret")
         XCTAssertNil(t.request.url?.query, "the token is never in the URL")
         XCTAssertEqual(try t.messages().first?.type, .hello)
         XCTAssertEqual(rig.socket.state, .connecting)
@@ -279,8 +281,7 @@ final class TermSocketTests: XCTestCase {
         let server = try LocalWebSocketServer()
         defer { server.stop() }
         let port = try await server.start()
-        var endpoint = DaemonEndpoint(host: "127.0.0.1", port: Int(port))
-        endpoint.token = "tok"
+        let endpoint = DaemonEndpoint(host: "127.0.0.1", port: Int(port))
         let socket = TermSocket(endpoint: endpoint)
         socket.client = WSMessage.ClientInfo(name: "sheepdog-ios", version: "test", platform: "ios")
         socket.connect()
@@ -332,7 +333,7 @@ private final class Rig {
 
     init(token: String = "", now: @escaping () -> Date = Date.init) {
         weak var weakSelf: Rig?
-        socket = TermSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 7777, token: token),
+        socket = TermSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 7777, secure: !token.isEmpty),
                             makeTransport: { request in
                                 let t = FakeTermTransport(request: request)
                                 weakSelf?.transports.append(t)
