@@ -10,7 +10,7 @@ import (
 // spaces (mock herdr), and running a wrap-up command is gated like the
 // phone shell.
 func TestSpacesRoutes(t *testing.T) {
-	h, _, _ := newShellHarness(t, "lan", false)
+	h, _, _ := newShellHarness(t, false)
 	if code := h.getJSON("/api/spaces", nil); code != http.StatusBadGateway {
 		t.Errorf("GET /api/spaces on mock herdr = %d", code)
 	}
@@ -18,9 +18,9 @@ func TestSpacesRoutes(t *testing.T) {
 		t.Error("the old /api/projects route still answers")
 	}
 	if code, body := h.postJSON("/api/spaces/w1/commands/abc/run", map[string]any{}, nil); code != http.StatusForbidden || !strings.Contains(body, "like the shell") {
-		t.Errorf("run on a plain LAN with the shell off = %d %s", code, body)
+		t.Errorf("run with the shell off = %d %s", code, body)
 	}
-	h.srv.kindHook = func(string) string { return "loopback" }
+	h.srv.shellOn.Store(true)
 	if code, _ := h.postJSON("/api/spaces/w1/commands/abc/run", map[string]any{}, nil); code == http.StatusForbidden {
 		t.Error("run refused on loopback")
 	}

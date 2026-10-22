@@ -125,7 +125,7 @@ func setupState(t *testing.T, f *setupFixture) SetupState {
 }
 
 func TestSetupStateListsThePresets(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	st := setupState(t, f)
 	var ids []string
 	for _, p := range st.Presets {
@@ -171,7 +171,7 @@ func TestSetupStatePresetsShowWhatIsSaved(t *testing.T) {
 		{Name: "openai", BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", Model: "m", APIKey: voiceOpenAIKey},
 		{Name: "ollama", BaseURL: "http://192.168.1.9:11434/v1", Model: "q"},
 	}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	if err := os.WriteFile(f.env, []byte("OPENROUTER_API_KEY="+secretCompatKey+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func saveReq(orch string, compat map[string]any) string {
 func TestSetupSaveKeyedPresets(t *testing.T) {
 	or := newFakeCompat(t, `{"data":[{"id":"x/tools","supported_parameters":["tools"]}]}`)
 	oa := newFakeCompat(t, `{"data":[{"id":"gpt-9-mini"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	f.sd.Presets = testPresets(map[string]string{"openrouter": or.URL + "/v1", "openai": oa.URL + "/v1"})
 
 	code, body := f.post(t, "/api/setup/keys", saveReq("openrouter", map[string]any{"model": "x/tools", "key": secretCompatKey, "name": "ignored", "base_url": "https://ignored.example/v1"}))
@@ -246,7 +246,7 @@ func TestSetupSaveOpenAIReuseOnAndOff(t *testing.T) {
 	oa := newFakeCompat(t, `{"data":[{"id":"gpt-9-mini"}]}`)
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Presets = testPresets(map[string]string{"openai": routed(t, f, oa.Server, "api.openai.test")})
 
 	// No voice key saved: reuse has nothing to point at.
@@ -304,7 +304,7 @@ func TestSetupSaveOpenAIUnderOtherURLNeverUsesTheVoiceKey(t *testing.T) {
 	oa := newFakeCompat(t, `{"data":[{"id":"gpt-9-mini"}]}`)
 	cfg := config.Default()
 	cfg.Voice.OpenAI.APIKey = voiceOpenAIKey
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	base := routed(t, f, oa.Server, "openai.example.test")
 	code, body := f.post(t, "/api/setup/keys", saveReq("compat", map[string]any{"name": "openai", "base_url": base, "model": "gpt-9-mini", "reuse_key": true}))
 	if code != 422 || !strings.Contains(body, onboard.OpenAIOrchKeyEnv) {
@@ -316,7 +316,7 @@ func TestSetupSaveLocalPresets(t *testing.T) {
 	for _, id := range []string{"ollama", "lmstudio"} {
 		t.Run(id, func(t *testing.T) {
 			srv := newFakeLocal(t, "qwen3:8b")
-			f := newSetupFixture(t, config.Default(), "")
+			f := newSetupFixture(t, config.Default())
 			f.sd.Presets = testPresets(map[string]string{id: srv.URL + "/v1"})
 			code, body := f.post(t, "/api/setup/keys", saveReq(id, map[string]any{"model": "qwen3:8b"}))
 			if code != 200 {
@@ -344,7 +344,7 @@ func TestSetupSaveLocalPresets(t *testing.T) {
 }
 
 func TestSetupSavePresetNeedsAModel(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	code, body := f.post(t, "/api/setup/keys", saveReq("openrouter", map[string]any{"key": secretCompatKey}))
 	if code != 400 || !strings.Contains(body, "model") {
 		t.Errorf("%d %s", code, body)
@@ -358,7 +358,7 @@ func TestSetupSavePresetNeedsAModel(t *testing.T) {
 func TestSetupLocalDetection(t *testing.T) {
 	srv := newFakeLocal(t, "nomic-embed-text", "llama3.2:3b", "qwen3:8b")
 	empty := newFakeLocal(t)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	f.sd.Presets = testPresets(map[string]string{"ollama": srv.URL + "/v1", "lmstudio": closedURL(t)})
 
 	_, body := f.post(t, "/api/setup/models", `{"preset":"ollama","base_url":"http://ignored.example/v1"}`)
@@ -381,7 +381,7 @@ func TestSetupLocalDetection(t *testing.T) {
 
 func TestSetupModelsSuggestsAnOpenAIModelAndHidesNonChat(t *testing.T) {
 	oa := newFakeCompat(t, `{"data":[{"id":"gpt-4.1-mini"},{"id":"gpt-9-mini"},{"id":"gpt-9-mini-2031-01-01"},{"id":"gpt-9-mini-tts"},{"id":"text-embedding-3-small"},{"id":"gpt-9"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	f.sd.Presets = testPresets(map[string]string{"openai": oa.URL + "/v1"})
 	_, body := f.post(t, "/api/setup/models", `{"preset":"openai","key":"`+secretCompatKey+`"}`)
 	r := decodeModels(t, body)
@@ -402,7 +402,7 @@ func TestSetupReuseSendsTheVoiceKeyOnlyToOpenAI(t *testing.T) {
 	elsewhere := newFakeCompat(t, `{"data":[{"id":"m"}]}`)
 	cfg := config.Default()
 	cfg.Voice.OpenAI.APIKey = secretCompatKey // the fakes accept this one
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Presets = testPresets(map[string]string{"openai": oa.URL + "/v1"})
 
 	_, body := f.post(t, "/api/setup/models", `{"preset":"openai"}`)
@@ -440,7 +440,7 @@ func TestSetupGeminiOrchestratorModel(t *testing.T) {
 	t.Cleanup(gem.Close)
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Endpoints.GeminiBase = gem.URL
 
 	_, body := f.post(t, "/api/setup/gemini-models", `{}`)
@@ -466,7 +466,7 @@ func TestSetupGeminiOrchestratorModel(t *testing.T) {
 func TestSetupPresetsNeverLeakAKey(t *testing.T) {
 	const sentinel = "sk-SENTINEL-presets-0000000000000000"
 	oa := newFakeCompat(t, `{"data":[{"id":"gpt-9-mini"}]}`)
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	f.sd.Presets = testPresets(map[string]string{"openai": oa.URL + "/v1", "ollama": closedURL(t)})
 	var out bytes.Buffer
 	for _, c := range []struct{ path, body string }{

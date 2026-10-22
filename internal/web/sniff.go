@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -127,12 +128,30 @@ func isPageRoute(path string) bool {
 	return true
 }
 
+// crossOrigin reports a request another website made: an upgrade or a
+// request that changes something, whose Origin is present and is not
+// this daemon's own. The app sends no Origin. This stops cross-site
+// WebSocket hijacking and request forgery even with a cookie.
+func crossOrigin(r *http.Request) bool {
+	o := r.Header.Get("Origin")
+	if o == "" {
+		return false
+	}
+	upgrade := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	if !upgrade && (r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions) {
+		return false
+	}
+	u, err := url.Parse(o)
+	return err != nil || !strings.EqualFold(u.Host, r.Host)
+}
+
 // guard is the first check on every request:
 //   - plain HTTP from another machine: a page is redirected (308) to the
 //     same address over https, anything else is refused with 426
 //     {"error":"tls_required"};
 //   - from loopback, the Host must be a loopback name (127.0.0.1, ::1,
-//     localhost), which stops a DNS-rebinding page.
+//     localhost), which stops a DNS-rebinding page;
+//   - an upgrade or a change from another website's Origin is refused.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loop := s.kindOf(r.RemoteAddr) == "loopback"
@@ -150,6 +169,11 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if loop && !isLoopbackHost(r.Host) {
 			s.log.Log(logSource, "web.host_refused", "", map[string]any{"path": r.URL.Path, "host": r.Host})
 			writeError(w, http.StatusForbidden, "host_not_allowed")
+			return
+		}
+		if crossOrigin(r) {
+			s.log.Log(logSource, "web.origin_refused", "", map[string]any{"path": r.URL.Path, "origin": r.Header.Get("Origin")})
+			writeError(w, http.StatusForbidden, "origin_not_allowed")
 			return
 		}
 		next.ServeHTTP(w, r)

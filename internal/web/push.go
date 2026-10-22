@@ -91,3 +91,13 @@ func writePushError(w http.ResponseWriter, err error) {
 	}
 	writeError(w, http.StatusInternalServerError, err.Error())
 }
+
+// forgetPush drops the push registrations of revoked devices. Push
+// registrations are not yet linked to devices, so there is nothing to
+// drop; the devices list adds the link (docs/dev/design/security.md
+// "The new-device push").
+func (s *Server) forgetPush([]string) {}
+
+// devicePaired tells the other devices a new one paired. The push and
+// the device-paired message come with the devices list.
+func (s *Server) devicePaired(Device) {}

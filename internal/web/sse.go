@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -91,7 +92,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, ": sheepdog events %s\n\n", s.deps.Version)
 	flusher.Flush()
 
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer s.track(r, cancel)()
 	// Subscribe before replaying so nothing logged in between is lost;
 	// duplicates are skipped by id.
 	live := s.deps.Log.Subscribe(ctx)

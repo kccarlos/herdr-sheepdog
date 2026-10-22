@@ -178,18 +178,12 @@ func TestCheckPort(t *testing.T) {
 	}
 }
 
-func TestCheckBindTokenPushVoice(t *testing.T) {
-	if r := CheckBindToken(config.Web{Bind: "127.0.0.1"}); r.Status != OK {
-		t.Errorf("loopback: %+v", r)
+func TestCheckBindPushVoice(t *testing.T) {
+	if r := CheckBind(config.Web{Bind: "127.0.0.1"}); r.Status != OK || !strings.Contains(r.Detail, "this machine only") {
+		t.Errorf("loopback = %+v", r)
 	}
-	if r := CheckBindToken(config.Web{Bind: "0.0.0.0"}); r.Status != Fail {
-		t.Errorf("no token: %+v", r)
-	}
-	if r := CheckBindToken(config.Web{Bind: "0.0.0.0", Token: "short"}); r.Status != Warn {
-		t.Errorf("short: %+v", r)
-	}
-	if r := CheckBindToken(config.Web{Bind: "100.64.0.2", Token: strings.Repeat("x", 43)}); r.Status != OK || strings.Contains(r.Detail, "xxx") {
-		t.Errorf("long: %+v", r)
+	if r := CheckBind(config.Web{Bind: "0.0.0.0"}); r.Status != OK || !strings.Contains(r.Detail, "paired devices") {
+		t.Errorf("0.0.0.0 = %+v", r)
 	}
 
 	ctx := context.Background()
@@ -276,10 +270,6 @@ func TestEnvFile(t *testing.T) {
 	}
 	if m, err := ReadEnvFile(filepath.Join(t.TempDir(), "none")); err != nil || len(m) != 0 {
 		t.Errorf("missing = %v %v", m, err)
-	}
-	tok, err := NewToken()
-	if err != nil || len(tok) != 43 {
-		t.Errorf("token len %d err %v", len(tok), err)
 	}
 }
 

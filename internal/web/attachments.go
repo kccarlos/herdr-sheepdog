@@ -62,6 +62,12 @@ func (s *Server) attachmentsRoot() string {
 // handleAttachment stores one uploaded file (multipart field "file") for a
 // tracked agent. It logs the size and type, never the file's name.
 func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
+	if !s.shellOn.Load() {
+		// Attachments write files on the computer: the shell switch
+		// covers them too.
+		writeError(w, http.StatusForbidden, "attachments are off on this computer, like the shell (the setup page switches it)")
+		return
+	}
 	root := s.attachmentsRoot()
 	if root == "" {
 		writeError(w, http.StatusServiceUnavailable, "attachments need a data directory")
