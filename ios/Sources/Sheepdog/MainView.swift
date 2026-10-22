@@ -253,7 +253,8 @@ struct MainView: View {
                     voiceQuestionID: model.approval?.pending.id,
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
-                    }
+                    },
+                    compact: typing
                 ) { id, index in
                     model.answer(question: id, option: index)
                 }

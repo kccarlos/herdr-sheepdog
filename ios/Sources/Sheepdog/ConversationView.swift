@@ -24,6 +24,8 @@ struct ConversationView: View {
     var ask: ((String) -> Void)?
 
     @State private var atBottom = true
+    /// The list's own height on screen.
+    @State private var visibleHeight: CGFloat = 1000
     @State private var lastSeenID: String?
     /// The "N updates" rows the user opened, by their id.
     @State private var openGroups: Set<String> = []
@@ -103,13 +105,19 @@ struct ConversationView: View {
                 .padding(.vertical, 12)
             }
             .defaultScrollAnchor(.bottom)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                let rounded = h.rounded()
+                if rounded != visibleHeight { visibleHeight = rounded }
+            }
             .refreshable {
                 // Pulling down at the top is "show me what came before".
                 guard canLoadOlder else { return }
                 await loadKeepingPosition(proxy)
             }
             .overlay(alignment: .bottom) {
-                if !atBottom, let newest = rows.last?.id, newest != lastSeenID {
+                // Not when the list is a sliver (keyboard and question up):
+                // the pill would sit on the agent strip.
+                if !atBottom, visibleHeight > 160, let newest = rows.last?.id, newest != lastSeenID {
                     Button {
                         withAnimation { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
                     } label: {
