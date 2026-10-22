@@ -41,12 +41,21 @@ On the same Wi-Fi this just works. Away from home, see
 
 ## What it does
 
-- **Voice.** Talk to the voice; mute turns off only the microphone. "Hold to
-  talk" is an option. "Type instead" works when you cannot talk.
+- **The main screen.** At the top, **Conversation | Agents** (the badge
+  counts the agents waiting on you), **+** (New agent, New shell) and **⋯**
+  (New conversation, Stop, End voice session, Settings).
+- **Voice.** The capsule at the bottom holds the microphone, the orb, the
+  voice's name and status, and the keyboard. Talk to the voice; the mic
+  button turns off only the microphone. While the voice talks or thinks,
+  the orb wears a small stop badge: tap it to stop. Tap the name for the
+  voice menu: the connection (tap it for the details and Health), Manage
+  computers… and **End voice session** (your agents keep working). "Hold to
+  talk" is an option. The keyboard turns the capsule into a text field
+  when you cannot talk; the orb on its left goes back to voice.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
 - **Agents.** Who is working, blocked or done, and a window onto each agent's
-  screen (below). **New agent** at the bottom of the list starts Claude Code
+  screen (below). **+ ▸ New agent** starts Claude Code
   or Codex in one of your projects (the folders in `supervisor.project_roots`
   and the workspaces herdr has open), in the project folder or in a fresh
   git worktree on a new branch, with an optional first prompt.
@@ -88,7 +97,7 @@ On the same Wi-Fi this just works. Away from home, see
     not a git repository.
   - **⋯ ▸ Open shell here** opens a plain shell in the agent's folder,
     titled "Shell · folder". It has the same terminal and keys, no prompt
-    field, and starts in typing mode. **Shell** beside New agent opens one
+    field, and starts in typing mode. **+ ▸ New shell** opens one
     in your first project folder. Each folder has one shell, which the app
     reuses. On your computer the shell is a tab in herdr's "phone shell"
     workspace, so you see it there too. Leaving the window keeps the shell
@@ -96,7 +105,7 @@ On the same Wi-Fi this just works. Away from home, see
     - The shell is on unless **Shell from your phone** is turned off on
       your computer's setup page
       ([remote-access.md](remote-access.md#the-phone-shell)).
-    - Where it is off, the app shows no shell button, and Settings says
+    - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
       (`supervisor.project_roots`) or an agent's own folder.
   - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog

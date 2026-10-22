@@ -21,7 +21,7 @@ final class UpdateNoticeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
         app.launch()
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
 
         let line = app.descendants(matching: .any)["settings.update"]
         XCTAssertTrue(line.waitForExistence(timeout: 15), "the update line")
@@ -46,7 +46,7 @@ final class UpdateNoticeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
         app.launch()
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
         // Give the state refresh time to land before asserting absence.
         sleep(2)

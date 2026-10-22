@@ -37,6 +37,8 @@ struct SheepdogApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-sheepdogLiveActivityGallery") {
                 LiveActivityGallery()
+            } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
+                CapsuleGallery()
             } else {
                 mainView
             }
@@ -58,10 +60,14 @@ struct SheepdogApp: App {
             .task {
                 #if DEBUG
                 if DebugLaunch.splashHold { return }
-                if DebugLaunch.openDemo { model.openDemo() }
                 #endif
                 try? await Task.sleep(for: .milliseconds(600))
                 withAnimation(.easeOut(duration: 0.3)) { showsSplash = false }
+                #if DEBUG
+                // After start() has shown the first-run sheet, which
+                // openDemo() closes first.
+                if DebugLaunch.openDemo { model.openDemo() }
+                #endif
             }
     }
 

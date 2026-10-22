@@ -152,13 +152,11 @@ final class AgentWindowDemoUITests: XCTestCase {
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
         showAgentsPane(app)
-        let new = app.buttons.matching(identifier: "flock.newAgent")
-        for _ in 0 ..< 4 where !new.firstMatch.isHittable { app.swipeUp() }
-        // The sheet comes from the tap; a tap lost while the list still
-        // scrolls is retried once the list is still.
+        // The sheet comes from + ▸ New agent; a tap lost while something
+        // still animates is retried.
         let start = app.buttons["newAgent.start"]
         for _ in 0 ..< 3 where !start.exists {
-            tapVisible(app.buttons, "flock.newAgent")
+            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
             if start.waitForExistence(timeout: 10) { break }
         }
         XCTAssertTrue(start.exists, "New agent opens its sheet")
