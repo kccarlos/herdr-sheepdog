@@ -412,7 +412,7 @@ max_output_kb   = 16
 prefer          = "auto"  # codex if on PATH, else claude
 ```
 
-`internal/config/config.go`'s `defaultCLI` is authoritative.
+`internal/config/sections.go`'s `defaultCLI` is authoritative.
 
 The fork templates of `investigate(source: "worker")` (§2c) are not in
 the config: they are fixed in `internal/cli` (`defaultClaudeForkCmd`,

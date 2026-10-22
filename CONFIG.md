@@ -5,7 +5,7 @@ exists (create one with `sheepdog config init`), then overridden by
 `SHEEPDOG_*` environment variables (and, for the keys, `DEEPSEEK_API_KEY`,
 the Gemini pool `GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`
 and the Vertex AI `VERTEX_API_KEY`/`VERTEX_PROJECT`/`VERTEX_LOCATION`).
-The environment always wins over the file. See `internal/config/config.go` for the
+The environment always wins over the file. See `internal/config/` for the
 authoritative source; this file is checked against it in
 `internal/config/doc_test.go` — a struct field without a matching entry
 here fails `go test`.
@@ -305,10 +305,10 @@ flag in the argv templates is there.
 | `cli.prefer` | `SHEEPDOG_CLI_PREFER` | `auto` | Picks the backend: `codex`, `claude`, or `auto` (codex if detected on `PATH`, else claude, else the orchestrator simply has no `run_cli` tool). |
 | `cli.codex_bin` | `SHEEPDOG_CLI_CODEX_BIN` | `codex` | Looked up on `PATH`, or an absolute path; also becomes `argv[0]` of `cli.codex_cmd`. |
 | `cli.claude_bin` | `SHEEPDOG_CLI_CLAUDE_BIN` | `claude` | Same, for the claude backend and `cli.claude_cmd`. |
-| `cli.codex_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template for the codex invocation; `{question}`, `{cwd}`, `{model}`, `{reasoning}` are substituted. No shell is invoked. It asks for `--json`, so the sub-agent's thread id is captured and an investigation's follow-up can resume it. |
-| `cli.claude_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Same, for claude; its `session_id` comes from the JSON result. |
-| `cli.codex_resume_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template of a follow-up in an existing codex session (`codex exec resume`): `{session}` is substituted as well. `resume` has no `--sandbox`, `-C` or `--color` of its own, so the sandbox is set with `-c sandbox_mode=read-only` and the directory by the child's cwd. |
-| `cli.claude_resume_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Same, for claude (`claude -p --resume {session}`), with the same read-only flags as `cli.claude_cmd`. |
+| `cli.codex_cmd` | *(TOML only)* | see `internal/config/sections.go`'s `defaultCLI` | Argv template for the codex invocation; `{question}`, `{cwd}`, `{model}`, `{reasoning}` are substituted. No shell is invoked. It asks for `--json`, so the sub-agent's thread id is captured and an investigation's follow-up can resume it. |
+| `cli.claude_cmd` | *(TOML only)* | see `internal/config/sections.go`'s `defaultCLI` | Same, for claude; its `session_id` comes from the JSON result. |
+| `cli.codex_resume_cmd` | *(TOML only)* | see `internal/config/sections.go`'s `defaultCLI` | Argv template of a follow-up in an existing codex session (`codex exec resume`): `{session}` is substituted as well. `resume` has no `--sandbox`, `-C` or `--color` of its own, so the sandbox is set with `-c sandbox_mode=read-only` and the directory by the child's cwd. |
+| `cli.claude_resume_cmd` | *(TOML only)* | see `internal/config/sections.go`'s `defaultCLI` | Same, for claude (`claude -p --resume {session}`), with the same read-only flags as `cli.claude_cmd`. |
 | `cli.claude_model` | `SHEEPDOG_CLI_CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Fills `{model}` in `cli.claude_cmd`. |
 | `cli.codex_reasoning` | `SHEEPDOG_CLI_CODEX_REASONING` | `low` | Fills `{reasoning}` in `cli.codex_cmd`. |
 | `cli.timeout_s` | `SHEEPDOG_CLI_TIMEOUT_S` | `60` | Bounds one invocation of the orchestrator's `run_cli` lookup; the process group is killed on expiry. It does **not** bound a background investigation, which has `brain.investigate_max_s` instead. |
