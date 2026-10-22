@@ -93,6 +93,20 @@ final class RedesignShotsUITests: XCTestCase {
         shot("more-keys")
     }
 
+    /// Two questions float above the capsule: the voice's first with the
+    /// filled button, the other outlined.
+    func testFloatingQuestions() throws {
+        let app = launchDemo(["-sheepdogDemoSecondQuestion"])
+        XCTAssertTrue(app.buttons["question.blog.option.1"].waitForExistence(timeout: 15), "the second agent's question floats")
+        // codex-payments asks after about 16 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("floating-questions")
+        app.buttons["approval.option.1"].tap()
+        sleep(3)
+        shot("floating-answered")
+    }
+
     /// The Conversation once the demo has news and a question: the agent
     /// strip, the rows and the floating question.
     func testConversationWithQuestion() throws {
