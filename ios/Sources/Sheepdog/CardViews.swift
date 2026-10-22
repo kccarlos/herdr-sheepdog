@@ -102,23 +102,23 @@ struct CardRow: View {
     }
 
     private func content(symbol: String, chevron: Bool) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 36, height: 36)
-                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 32, height: 32)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(chevron ? .subheadline.weight(.semibold) : .footnote)
-                    .foregroundStyle(chevron ? .primary : .secondary)
+                    .foregroundStyle(chevron ? Theme.ink : Theme.muted)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if chevron {
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -126,22 +126,15 @@ struct CardRow: View {
             if chevron {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color(.separator), lineWidth: 0.5)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .rowCard()
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
@@ -173,12 +166,14 @@ struct CardSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text(card.displayTitle)
-                    .font(.title2.weight(.semibold))
+                    .font(.title2.weight(.bold))
                     .fontDesign(.rounded)
+                    .foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("card.title")
                 content
+                    .foregroundStyle(Theme.ink)
             }
             .padding(.horizontal, 20)
             .padding(.top, 4)
@@ -186,29 +181,36 @@ struct CardSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .top, spacing: 8) { header }
-        .background(Color(.systemBackground))
+        .safeAreaInset(edge: .top, spacing: 12) { header }
+        .background(Theme.surface)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.scrolls)
+        .presentationBackground(Theme.surface)
     }
 
+    /// The card's icon in its tile, what it is and whose, and Done.
     private var header: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Label(meta, systemImage: card.symbol)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .labelStyle(.titleAndIcon)
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: card.symbol)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 32, height: 32)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .accessibilityHidden(true)
+            Text(meta)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button("Done") { dismiss() }
                 .font(.body.weight(.semibold))
-                .tint(Theme.primaryText)
-                .frame(minHeight: 44)
+                .foregroundStyle(Theme.primaryText)
+                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityIdentifier("card.done")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 14)
+        .padding(.top, 16)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
@@ -221,11 +223,11 @@ struct CardSheet: View {
                     .textSelection(.enabled)
             } else {
                 Text("This card is empty.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
             }
         case .agent:
             Text("See \(card.agentName ?? "the agent")'s terminal, and send it keys or a prompt.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             openWindowButton(prominent: true)
         case .excerpt:
@@ -233,7 +235,7 @@ struct CardSheet: View {
                 CodeBlockView(text: text)
             } else {
                 Text("The screen was empty.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
             }
             openWindowButton(prominent: false)
         case .approval:
@@ -245,7 +247,7 @@ struct CardSheet: View {
                 CodeBlockView(text: text)
             } else {
                 Text("This version of the app can't show this kind of card. Update the app to see it.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             openWindowButton(prominent: false)
@@ -268,7 +270,7 @@ struct CardSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Choices")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                 FlowOptions(options: options.map(\.label))
             }
         }
@@ -277,18 +279,14 @@ struct CardSheet: View {
                 dismiss()
             } label: {
                 Label("Go to the question", systemImage: "arrow.down.circle")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 30)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.accentColor)
-            .foregroundStyle(Color("OnAccent"))
+            .buttonStyle(PillButtonStyle(prominent: true))
             .accessibilityHint("Closes this card. Answer on the card below the conversation.")
             .accessibilityIdentifier("card.goToQuestion")
         } else {
             Label("This question is no longer open.", systemImage: "checkmark.circle")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         openWindowButton(prominent: false)
@@ -297,21 +295,10 @@ struct CardSheet: View {
     @ViewBuilder
     private func openWindowButton(prominent: Bool) -> some View {
         if let pane = card.windowPaneID {
-            let label = Label("Open \(card.agentName ?? "agent") window", systemImage: "macwindow")
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 30)
-            Group {
-                if prominent {
-                    Button { model.openAgentWindow(paneID: pane) } label: { label }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.accentColor)
-                        .foregroundStyle(Color("OnAccent"))
-                } else {
-                    Button { model.openAgentWindow(paneID: pane) } label: { label }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.primaryText)
-                }
+            Button { model.openAgentWindow(paneID: pane) } label: {
+                Label("Open \(card.agentName ?? "agent") window", systemImage: "macwindow")
             }
+            .buttonStyle(PillButtonStyle(prominent: prominent))
             .accessibilityIdentifier("card.openWindow")
         }
     }
@@ -356,7 +343,7 @@ struct MarkdownBlocksView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(item.marker)
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                         Text(MarkdownRenderer.inline(item.text))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -386,7 +373,7 @@ struct CodeBlockView: View {
         }
         .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -434,12 +421,12 @@ struct MarkdownTableView: View {
                 ForEach(Array(table.header.enumerated()), id: \.offset) { column, title in
                     Text(MarkdownRenderer.inline(title))
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                         .fixedSize()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: frameAlignment(column))
-                        .background(Color(.secondarySystemBackground).padding(.horizontal, -1))
+                        .background(Theme.fill.padding(.horizontal, -1))
                         .gridColumnAlignment(alignment(column))
                 }
             }
@@ -463,7 +450,7 @@ struct MarkdownTableView: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color(.separator), lineWidth: 0.5)
+                .strokeBorder(Theme.line, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
@@ -483,7 +470,7 @@ struct MarkdownTableView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(MarkdownRenderer.inline(column < table.header.count ? table.header[column] : ""))
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.muted)
                                 Text(MarkdownRenderer.inline(value))
                                     .font(.subheadline)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -493,7 +480,7 @@ struct MarkdownTableView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .accessibilityElement(children: .combine)
             }
         }
