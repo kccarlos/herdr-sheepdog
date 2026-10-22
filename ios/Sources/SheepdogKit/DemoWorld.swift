@@ -184,7 +184,7 @@ public struct DemoWorld: Sendable {
         return "Declined. codex-payments did not install the package and is waiting for new instructions."
     }
 
-    /// `POST /api/inject/utterance`: a question typed, tapped or said.
+    /// `POST /api/utterance`: a question typed, tapped or said.
     /// Logs it and the answer the way a real daemon logs a typed turn, and
     /// returns the answer.
     @discardableResult

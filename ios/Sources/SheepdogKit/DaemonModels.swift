@@ -475,7 +475,7 @@ public enum ConversationResetAvailability: Equatable, Sendable {
     public var showsAction: Bool { self == .supported }
 }
 
-/// The reply to `POST /api/inject/utterance`: `{"ok":true,"via":"voice"}`
+/// The reply to `POST /api/utterance`: `{"ok":true,"via":"voice"}`
 /// with a voice session (the answer comes as speech), or the text router's
 /// tool response (`tool`, `spoken`, `via: "text_router"`) with
 /// `--voice=off`.

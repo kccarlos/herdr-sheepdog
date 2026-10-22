@@ -422,7 +422,7 @@ struct BannerView: View {
 }
 
 /// Type instead of talking: one line to the daemon, as if spoken
-/// (`POST /api/inject/utterance`). What was typed shows up in the
+/// (`POST /api/utterance`). What was typed shows up in the
 /// conversation like anything else the user said.
 struct TypeBar: View {
     let voiceName: String

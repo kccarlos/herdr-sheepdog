@@ -4,7 +4,7 @@
 // throwaway clone of the bench repo per workspace, real Claude Code or
 // Codex workers started in its panes, and a scratch daemon bound to that
 // session's socket. The simulated user of internal/eval talks to the
-// daemon in text (POST /api/inject/utterance, the text router standing in
+// daemon in text (POST /api/utterance, the text router standing in
 // for the voice model; `serve --heard-echo` reports what it says back as
 // heard), hears its pushes (voice.push events), and the judge of
 // internal/eval grades the conversation against the workers' real

@@ -90,7 +90,7 @@ stop_token() {
 seed() {
   local i
   curl -fsS -o /dev/null --max-time 20 -H 'Content-Type: application/json' \
-    -d '{"text":"what is going on"}' "http://127.0.0.1:$PORT/api/inject/utterance"
+    -d '{"text":"what is going on"}' "http://127.0.0.1:$PORT/api/utterance"
   for i in $(seq 1 50); do
     if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/conversation" | grep -q 'what is going on'; then return 0; fi
     sleep 0.2

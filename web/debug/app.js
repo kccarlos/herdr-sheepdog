@@ -654,7 +654,7 @@ function setupInject() {
 
   const sendUtterance = (text) => {
     if (!text) return;
-    showResult('utt-result', post('/api/inject/utterance', { text }));
+    showResult('utt-result', post('/api/utterance', { text }));
   };
   $('utt-send').addEventListener('click', () => sendUtterance($('utt-text').value.trim()));
   $('utt-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendUtterance($('utt-text').value.trim()); });
@@ -722,7 +722,7 @@ function setupConversation() {
     const text = $('conv-text').value.trim();
     if (!text) return;
     $('conv-text').value = '';
-    showResult('conv-result', post('/api/inject/utterance', { text }));
+    showResult('conv-result', post('/api/utterance', { text }));
   };
   $('conv-send').addEventListener('click', sendChat);
   $('conv-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -839,7 +839,7 @@ function setupSupervisor() {
     const text = $('svp-text').value.trim();
     if (!text) return;
     $('svp-text').value = '';
-    showResult('svp-result', post('/api/inject/utterance', { text }));
+    showResult('svp-result', post('/api/utterance', { text }));
   };
   $('svp-send').addEventListener('click', sendChat);
   $('svp-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -902,7 +902,7 @@ function setupSwimlane() {
     const text = $('sw-text').value.trim();
     if (!text) return;
     $('sw-text').value = '';
-    showResult('sw-result', post('/api/inject/utterance', { text }));
+    showResult('sw-result', post('/api/utterance', { text }));
   };
   $('sw-send').addEventListener('click', sendChat);
   $('sw-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });

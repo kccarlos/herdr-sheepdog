@@ -279,7 +279,7 @@ type Reply struct {
 // Say sends the user's words through the text router.
 func (d *Daemon) Say(ctx context.Context, text string) (Reply, error) {
 	var r Reply
-	err := d.post(ctx, "/api/inject/utterance", map[string]string{"text": text}, &r)
+	err := d.post(ctx, "/api/utterance", map[string]string{"text": text}, &r)
 	return r, err
 }
 

@@ -180,12 +180,13 @@ func localProblem(r *http.Request) string {
 	return ""
 }
 
-func (s *Server) setupRoutes() error {
+func (s *Server) setupRoutes() ([]route, error) {
 	if s.deps.Setup == nil {
-		return nil
+		return nil, nil
 	}
-	if err := s.staticWrapped("setup", s.localOnly); err != nil {
-		return err
+	out, err := s.staticRoutes("setup", accessSetup)
+	if err != nil {
+		return nil, err
 	}
 	routes := map[string]http.HandlerFunc{
 		"GET /api/setup/state":             s.handleSetupState,
@@ -206,9 +207,9 @@ func (s *Server) setupRoutes() error {
 		"POST /api/setup/demo":             s.handleSetupDemo,
 	}
 	for pattern, h := range routes {
-		s.mux.HandleFunc(pattern, s.localOnly(h))
+		out = append(out, route{pattern, accessSetup, h})
 	}
-	return nil
+	return out, nil
 }
 
 // SetupState is GET /api/setup/state.

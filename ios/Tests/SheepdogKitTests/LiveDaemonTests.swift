@@ -49,7 +49,7 @@ final class LiveDaemonTests: XCTestCase {
         // Give the stream a moment to attach before making something happen.
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
-        var request = URLRequest(url: endpoint.url(path: "/api/inject/utterance")!)
+        var request = URLRequest(url: endpoint.url(path: "/api/utterance")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["text": "what's going on"])
