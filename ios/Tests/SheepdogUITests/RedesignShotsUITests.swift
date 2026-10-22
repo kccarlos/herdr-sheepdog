@@ -14,6 +14,8 @@ final class RedesignShotsUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var directory: String? { environment["SHEEPDOG_REDESIGN_SHOTS"] }
     private var suffix: String { environment["SHEEPDOG_SHOTS_SUFFIX"] ?? "light" }
+    /// `ui` by default; `SHEEPDOG_SHOTS_PREFIX=ui2` keeps a later round apart.
+    private var prefix: String { environment["SHEEPDOG_SHOTS_PREFIX"] ?? "ui" }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -89,6 +91,19 @@ final class RedesignShotsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["moreKeys.ctrlC"].waitForExistence(timeout: 5))
         sleep(1)
         shot("more-keys")
+    }
+
+    /// The Conversation once the demo has news and a question: the agent
+    /// strip, the rows and the floating question.
+    func testConversationWithQuestion() throws {
+        let app = launchDemo()
+        // codex-payments asks after about 16 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("conversation-question")
+        app.swipeDown()
+        sleep(1)
+        shot("conversation-top")
     }
 
     func testEmptyConversation() throws {
@@ -171,9 +186,9 @@ final class RedesignShotsUITests: XCTestCase {
         guard let directory else { return }
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "ui-\(name)-\(suffix)"
+        attachment.name = "\(prefix)-\(name)-\(suffix)"
         attachment.lifetime = .keepAlways
         add(attachment)
-        try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: directory).appendingPathComponent("ui-\(name)-\(suffix).png"))
+        try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(prefix)-\(name)-\(suffix).png"))
     }
 }
