@@ -358,6 +358,9 @@ final class SessionViewModel: ObservableObject {
     /// The app came back to the foreground: what happened while it was
     /// away is on the daemon.
     func becameActive() {
+        // The daemon may have pushed the Live Activity while the app was
+        // away: the next sync rewrites it even if our own state is unchanged.
+        away.forgetShownActivity()
         send(.scenePhase(.active))
         Task { await PushCoordinator.shared.refreshAuthorization() }
         guard isConfigured, settings.hasBeenConfigured else { return }

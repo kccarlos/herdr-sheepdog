@@ -140,8 +140,13 @@ func New(cfg Config, log logging.Logger) (*Sender, error) {
 	if err != nil {
 		return nil, err
 	}
+	actsPath := ""
+	if cfg.DataDir != "" {
+		actsPath = filepath.Join(cfg.DataDir, ActivitiesFile)
+	}
 	s := &Sender{cfg: cfg, log: log, devs: devs, client: client, seen: map[string]bool{},
 		baseURL: map[string]string{EnvProduction: cfg.ProductionURL, EnvSandbox: cfg.SandboxURL}}
+	s.acts.load(actsPath, cfg.Now())
 	switch cfg.Mode {
 	case ModeOff:
 		s.reason = "push.mode is off"

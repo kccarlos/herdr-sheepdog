@@ -17,12 +17,18 @@ enum LiveActivitySamples {
     )
     static let many = LiveActivityContent(phase: .speaking, rows: [authFix, blog, migrate], waiting: 5, working: 1)
     static let quiet = LiveActivityContent(phase: .muted, muted: true, working: 2, done: 3)
+    /// What the daemon pushes while the app is away, its rows opened.
+    static let away = LiveActivityContent(phase: .away, rows: [authFix, blog], working: 3, done: 1)
+    /// The same push when the widget cannot open the rows: counts only.
+    static let awayCounts = LiveActivityContent(phase: .away, waiting: 2, working: 3, done: 1)
 
     static func named(_ name: String) -> LiveActivityContent {
         switch name {
         case "several": return several
         case "many": return many
         case "quiet": return quiet
+        case "away": return away
+        case "away-counts": return awayCounts
         default: return one
         }
     }
@@ -36,7 +42,7 @@ enum LiveActivitySamples {
     }
 }
 
-/// `-sheepdogLiveActivityGallery [one|several|many|quiet|stale]`: the
+/// `-sheepdogLiveActivityGallery [one|several|many|quiet|away|away-counts|stale]`: the
 /// Live Activity's lock-screen banner, the widget's own view, drawn on a
 /// stand-in lock screen for screenshots (a simulator cannot be locked
 /// from a script).

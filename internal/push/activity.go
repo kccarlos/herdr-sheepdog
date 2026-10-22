@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -66,22 +69,80 @@ type sealedRows struct {
 // Activity is a Live Activity's push token, registered by a paired
 // device. One per device: a new activity replaces the old one.
 type Activity struct {
-	Token       string
-	RelayToken  string
-	Environment string
-	DeviceID    string
-	At          time.Time
+	Token       string    `json:"token"`
+	RelayToken  string    `json:"relay_token,omitempty"`
+	Environment string    `json:"environment"`
+	DeviceID    string    `json:"device_id"`
+	At          time.Time `json:"at"`
 }
+
+// ActivitiesFile holds the registered activities under the data
+// directory, so a daemon restart (an update while the phone is away)
+// keeps updating the banner.
+const ActivitiesFile = "push_activities.json"
+
+// ActivityLifetime is how long iOS keeps an activity running: a token
+// older than this is dropped.
+const ActivityLifetime = 8 * time.Hour
 
 // ErrNoDevice is a Live Activity registration without a paired device.
 var ErrNoDevice = errors.New("a Live Activity needs a paired device")
 
-// activities holds the registered activities in memory: a token lives
-// at most as long as the activity (8 hours), and the app registers again
-// whenever it starts one.
+// activities holds the registered activities, persisted to path (""
+// keeps them in memory only). A token lives at most as long as the
+// activity (ActivityLifetime).
 type activities struct {
-	mu sync.Mutex
-	m  map[string]Activity // by device id
+	mu   sync.Mutex
+	path string
+	m    map[string]Activity // by device id
+}
+
+// load reads path, dropping activities iOS has surely ended; a missing
+// or damaged file is an empty set (the app registers again with its next
+// activity).
+func (a *activities) load(path string, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.path, a.m = path, map[string]Activity{}
+	if path == "" {
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var list []Activity
+	if json.Unmarshal(b, &list) != nil {
+		return
+	}
+	for _, x := range list {
+		if x.DeviceID != "" && now.Sub(x.At) < ActivityLifetime {
+			a.m[x.DeviceID] = x
+		}
+	}
+}
+
+// saveLocked writes the set atomically, mode 0600.
+func (a *activities) saveLocked() {
+	if a.path == "" {
+		return
+	}
+	list := make([]Activity, 0, len(a.m))
+	for _, x := range a.m {
+		list = append(list, x)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].DeviceID < list[j].DeviceID })
+	b, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return
+	}
+	if os.MkdirAll(filepath.Dir(a.path), 0o700) != nil {
+		return
+	}
+	tmp := a.path + ".tmp"
+	if os.WriteFile(tmp, append(b, '\n'), 0o600) == nil {
+		_ = os.Rename(tmp, a.path)
+	}
 }
 
 // RegisterActivity stores the activity push token of a paired device's
@@ -110,6 +171,7 @@ func (s *Sender) RegisterActivity(deviceID, token, environment string) error {
 		return nil
 	}
 	s.acts.m[deviceID] = Activity{Token: tok, Environment: environment, DeviceID: deviceID, At: s.cfg.Now()}
+	s.acts.saveLocked()
 	s.log.Log(logSource, "push.activity.registered", "", map[string]any{"token_tail": tokenTail(tok), "environment": environment})
 	return nil
 }
@@ -121,7 +183,10 @@ func (s *Sender) ForgetActivity(deviceID string) {
 	}
 	s.acts.mu.Lock()
 	defer s.acts.mu.Unlock()
-	delete(s.acts.m, deviceID)
+	if _, ok := s.acts.m[deviceID]; ok {
+		delete(s.acts.m, deviceID)
+		s.acts.saveLocked()
+	}
 }
 
 // Activities lists the registered activities.
@@ -268,6 +333,7 @@ func (s *Sender) activityRelay(ctx context.Context, a *Activity, body activityBo
 		if cur, ok := s.acts.m[a.DeviceID]; ok && cur.Token == a.Token {
 			cur.RelayToken = rt
 			s.acts.m[a.DeviceID] = cur
+			s.acts.saveLocked()
 		}
 		s.acts.mu.Unlock()
 	}

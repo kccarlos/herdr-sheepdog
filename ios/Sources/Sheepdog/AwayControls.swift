@@ -33,6 +33,12 @@ final class AwayControls {
         remote.sync(state, voiceName: voiceName)
     }
 
+    /// The banner may show what the daemon pushed: the next sync writes
+    /// it again.
+    func forgetShownActivity() {
+        activity.forgetShown()
+    }
+
     /// The app is being terminated: do not leave a banner behind.
     func tearDown() {
         activity.sync(nil, voiceName: "")
@@ -139,6 +145,11 @@ final class VoiceLiveActivity {
         }
     }
 
+    /// Drops the cached content, so the next sync updates the banner.
+    func forgetShown() {
+        if activity != nil { content = nil }
+    }
+
     /// Hands every push token iOS issues for the activity to the daemon.
     private func watchToken(_ watched: Activity<VoiceSessionAttributes>) {
         tokenTask = Task { [weak self] in
@@ -156,7 +167,9 @@ final class VoiceLiveActivity {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(LiveActivityContent.refreshInterval * 1_000_000_000))
-                guard !Task.isCancelled, let self, let activity = self.activity, let content = self.content else { return }
+                guard !Task.isCancelled, let self, let activity = self.activity else { return }
+                // No cached content (forgetShown): the next sync writes it.
+                guard let content = self.content else { continue }
                 await activity.update(Self.activityContent(content))
             }
         }

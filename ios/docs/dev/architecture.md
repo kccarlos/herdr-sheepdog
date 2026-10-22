@@ -598,7 +598,7 @@ the lock screen up to 4 more), and an update, local or pushed, is at most
 notifications, priority 10 only for a new waiting agent (iOS budgets
 those) and 5 otherwise.
 
-`-sheepdogLiveActivityGallery one|several|many|quiet|stale` draws the
+`-sheepdogLiveActivityGallery one|several|many|quiet|away|away-counts|stale` draws the
 widget's own banner on a stand-in lock screen for screenshots (a simulator
 cannot be locked from a script); `-sheepdogDemoLiveActivity <state>`
 starts a real activity with sample rows and no session.

@@ -153,7 +153,7 @@ func TestActivityStepForgetsOldActivities(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := sender.Activities()[0].At
-	h.srv.deps.Now = func() time.Time { return at.Add(activityLifetime + time.Minute) }
+	h.srv.deps.Now = func() time.Time { return at.Add(push.ActivityLifetime + time.Minute) }
 	h.srv.activityStep(context.Background())
 	if len(sender.Activities()) != 0 || len(rec.sent()) != 0 {
 		t.Errorf("activities = %+v, sent = %d", sender.Activities(), len(rec.sent()))

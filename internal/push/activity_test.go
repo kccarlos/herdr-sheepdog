@@ -53,6 +53,40 @@ func TestRegisterActivityChecks(t *testing.T) {
 	}
 }
 
+// Activities survive a daemon restart (an update while the phone is
+// away), with their relay tokens; one iOS has surely ended does not.
+func TestActivitiesPersist(t *testing.T) {
+	f := newFakeRelay(t)
+	dir := t.TempDir()
+	s, _ := newRelaySender(t, f, dir)
+	if err := s.RegisterActivity("dev-1", tokAct, EnvProduction); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateActivity(context.Background(), "dev-1", ActivityUpdate{State: activityState()}); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := newRelaySender(t, f, dir)
+	a := s2.Activities()
+	if len(a) != 1 || a[0].Token != tokAct || a[0].RelayToken == "" || a[0].DeviceID != "dev-1" {
+		t.Fatalf("reloaded = %+v", a)
+	}
+	s2.ForgetActivity("dev-1")
+	if s3, _ := newRelaySender(t, f, dir); len(s3.Activities()) != 0 {
+		t.Error("a forgotten activity came back")
+	}
+
+	// Older than iOS keeps an activity: dropped on load.
+	_ = s2.RegisterActivity("dev-2", tokAct, EnvProduction)
+	later := time.Now().Add(ActivityLifetime + time.Minute)
+	s4, err := New(Config{Mode: ModeRelay, RelayURL: f.srv.URL, DataDir: dir, Client: f.srv.Client(), Now: func() time.Time { return later }}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := s4.Activities(); len(a) != 0 {
+		t.Errorf("stale activity loaded: %+v", a)
+	}
+}
+
 // Through the relay, the rows go sealed with the phone's content key and
 // the relay sees only the phase and the counts.
 func TestActivityThroughRelaySealsTheRows(t *testing.T) {

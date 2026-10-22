@@ -27,9 +27,6 @@ const (
 	activityGrace = 30 * time.Second
 	// activityTick is how often the daemon looks for changes.
 	activityTick = 5 * time.Second
-	// activityLifetime is when iOS has ended the activity for sure (8
-	// hours active): the token is forgotten.
-	activityLifetime = 8 * time.Hour
 	// activityStale is when a pushed banner dims as out of date.
 	activityStale = 30 * time.Minute
 	// The cuts the app makes too (LiveActivityContent).
@@ -123,7 +120,7 @@ func (s *Server) activityStep(ctx context.Context) {
 	snap := s.activityState()
 	w := &s.activityWatch
 	for _, a := range acts {
-		if now.Sub(a.At) > activityLifetime {
+		if now.Sub(a.At) > push.ActivityLifetime {
 			s.deps.Push.ForgetActivity(a.DeviceID)
 			w.reset(a.DeviceID)
 			continue
