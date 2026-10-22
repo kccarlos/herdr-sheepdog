@@ -114,6 +114,19 @@ final class RedesignShotsUITests: XCTestCase {
         }
     }
 
+    func testSettings() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7891"]
+        app.launch()
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
+        XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot("settings")
+        app.buttons["settings.daemon"].tap()
+        sleep(2)
+        shot("settings-connection")
+    }
+
     // MARK: - Helpers
 
     /// Conversation or Agents: the copy on screen (the demo keeps the

@@ -169,7 +169,7 @@ final class WalkthroughUITests: XCTestCase {
     /// applies the address), then Done.
     private func closeSettings(_ app: XCUIApplication) {
         if !app.buttons["settings.done"].isHittable {
-            tapWhenReady(app.navigationBars["Daemon"].buttons.firstMatch, "Back to Settings")
+            tapWhenReady(app.navigationBars["Connection"].buttons.firstMatch, "Back to Settings")
         }
         tapWhenReady(app.buttons["settings.done"], "Done")
     }

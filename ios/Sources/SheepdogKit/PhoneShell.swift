@@ -14,7 +14,7 @@ public enum PhoneShell {
 
     /// Why the shell is not offered, with the fix (Settings and the
     /// window's ended state).
-    public static let offExplanation = "Shell is available over Tailscale, or turn it on for this network on your computer's setup page."
+    public static let offExplanation = "The shell is off on this computer. Turn on Shell from your phone on its setup page."
 
     /// The ended window's description, with its plain fix.
     public static func endedDescription(_ notice: AgentWindowState.Notice?) -> String {

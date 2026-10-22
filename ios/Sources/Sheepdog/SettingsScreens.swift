@@ -112,7 +112,7 @@ struct DaemonSettingsView: View {
                 Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain. Changes apply when you leave this screen.")
             }
         }
-        .navigationTitle(firstRun ? "Welcome" : "Daemon")
+        .navigationTitle(firstRun ? "Welcome" : "Connection")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if firstRun {
