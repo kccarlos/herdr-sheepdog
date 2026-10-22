@@ -47,6 +47,8 @@ struct AllAgentsView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)
+                // A container, so Show all keeps its own identifier.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("allAgents.empty")
             } else {
                 grid

@@ -93,6 +93,8 @@ final class IPadUITests: XCTestCase {
         if element(app, "allAgents.empty").waitForExistence(timeout: 3) {
             sleep(1)
             shot("all-agents-waiting-empty")
+            element(app, "allAgents.showAll").tap()
+            XCTAssertTrue(element(app, "flock.agent.docs").waitForExistence(timeout: 5))
         }
         element(app, "allAgents.filter.all").tap()
         XCTAssertTrue(element(app, "flock.agent.claude-auth").waitForExistence(timeout: 5))
@@ -145,26 +147,38 @@ final class IPadUITests: XCTestCase {
 
         // Drag codex-docs onto the detail: it replaces the pane not focused
         // (claude-auth; the new one is focused).
+        // Drop it on the pane it replaces, slowly, and hold there before
+        // lifting: a quick drag that lifts at once can leave the drop
+        // session hanging on a slow simulator (the drop target stays up and
+        // nothing lands).
         let docs = element(app, "sidebar.agent.codex-docs")
-        docs.press(forDuration: 1.2, thenDragTo: element(app, "panes.divider"))
+        let target = terminals.element(boundBy: 0)
+        docs.press(forDuration: 1.2, thenDragTo: target, withVelocity: .slow, thenHoldForDuration: 1.0)
         let docsHeader = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'codex-docs'")).firstMatch
-        XCTAssertTrue(docsHeader.waitForExistence(timeout: 10), "the dropped agent is on screen")
+        XCTAssertTrue(docsHeader.waitForExistence(timeout: 20), "the dropped agent is on screen")
+        XCTAssertTrue(element(app, "panes.dropTarget").waitForNonExistence(timeout: 10), "the drop target is gone after the drop")
+        // A working agent's terminal keeps the tree busy, so a snapshot can
+        // take seconds on a CI runner: give the counts room.
         expectation(for: two, evaluatedWith: terminals)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 30)
 
         app.descendants(matching: .any).matching(identifier: "pane.close").firstMatch.tap()
         let one = NSPredicate(format: "count == 1")
         expectation(for: one, evaluatedWith: terminals)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 30)
 
         XCUIDevice.shared.orientation = .portrait
-        sleep(2)
-        element(app, "pane.split").tap()
+        let splitButton = element(app, "pane.split")
+        let hittable = NSPredicate(format: "exists == true AND hittable == true")
+        expectation(for: hittable, evaluatedWith: splitButton)
+        waitForExpectations(timeout: 15)
+        splitButton.tap()
         let payments = app.collectionViews.buttons["codex-payments"].firstMatch
-        XCTAssertTrue(payments.waitForExistence(timeout: 5))
+        expectation(for: hittable, evaluatedWith: payments)
+        waitForExpectations(timeout: 15)
         payments.tap()
         expectation(for: two, evaluatedWith: terminals)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 30)
         sleep(2)
         shot("split-portrait")
     }
