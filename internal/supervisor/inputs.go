@@ -56,7 +56,7 @@ const (
 	// InputVoice is the voice model's input transcription of the
 	// user's speech, fragments merged per user turn.
 	InputVoice InputKind = "voice"
-	// InputTyped is text the user typed (/api/inject/utterance, the
+	// InputTyped is text the user typed (/api/utterance, the
 	// /voice text box; the only input with --voice=off).
 	InputTyped InputKind = "typed"
 	// InputTap is a tap on one option of the pending question

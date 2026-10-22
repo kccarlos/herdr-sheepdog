@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -118,6 +119,9 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 		}
 		r := httptest.NewRequest(method, path, body)
 		r.RemoteAddr, r.Host = remote, host
+		if !strings.HasPrefix(remote, "127.") && !strings.HasPrefix(remote, "[::1]") {
+			r.TLS = &tls.ConnectionState{} // another machine comes over TLS
+		}
 		for k, v := range hdr {
 			r.Header.Set(k, v)
 		}
@@ -150,7 +154,7 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 		if w.Code != c.want {
 			t.Errorf("%s: %d, want %d (%s)", c.name, w.Code, c.want, w.Body.String())
 		}
-		if c.want == 403 && !strings.Contains(w.Body.String(), "The setup page only opens on the computer sheepdog runs on") {
+		if c.want == 403 && c.name != "rebinding host name" && !strings.Contains(w.Body.String(), "The setup page only opens on the computer sheepdog runs on") {
 			t.Errorf("%s: body %q", c.name, w.Body.String())
 		}
 	}
@@ -333,6 +337,7 @@ func TestSetupPhoneConnected(t *testing.T) {
 	mux := f.h.srv.Handler()
 	r := httptest.NewRequest("GET", "/api/state", nil)
 	r.RemoteAddr = "192.168.1.77:4000"
+	r.TLS = &tls.ConnectionState{}
 	r.Header.Set("Authorization", "Bearer "+cfg.Web.Token)
 	mux.ServeHTTP(httptest.NewRecorder(), r)
 	body := f.get(t, "/api/setup/state")

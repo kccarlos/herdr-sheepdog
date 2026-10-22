@@ -23,7 +23,7 @@ final class NewConversationUITests: XCTestCase {
         // logged on the daemon ahead of time, so it is already on the
         // newest `/api/conversation` page the app fetches at launch —
         // no need to be connected for "New conversation" to work.
-        _ = try? postJSON("\(daemon)/api/inject/utterance", ["text": "what's going on"])
+        _ = try? postJSON("\(daemon)/api/utterance", ["text": "what's going on"])
 
         app.launch()
         // Each bubble is one accessibility element, read as a sentence

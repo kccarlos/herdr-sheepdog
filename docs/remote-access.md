@@ -43,9 +43,10 @@ too (same account), the app works away from home."
   reach the port can read your agents' screens and answer their prompts.
   `sheepdog setup` creates a random one and never replaces it silently.
   It sits in `~/.config/sheepdog/.env` (mode 0600) and in the phone's keychain.
-- **There is no TLS.** Traffic between phone and computer is plain HTTP and
-  WebSocket. A trusted LAN or Tailscale (which encrypts its own tunnel) is
-  fine.
+- **Everything off this computer is encrypted.** sheepdog serves TLS on its
+  usual port with its own certificate (made on first start, valid for a
+  year, kept in its data folder). Plain HTTP answers only this computer
+  itself (`127.0.0.1`): the local setup, voice and debug pages.
 - **Never expose the port to the open internet:** no port forwarding, no public
   tunnel, no `0.0.0.0` on a machine with a public address.
 - The daemon refuses to start on a non-loopback address without a token.

@@ -17,7 +17,8 @@
 //   - POST /api/pending/answer {id, option}: answer the open question by
 //     tap, a user input through the one rail.
 //   - POST /api/pending/cancel, POST /api/inject/{blocked,done,state,
-//     screen,remove,utterance}: the debug page's controls, all routed
+//     screen,remove} (loopback only) and POST /api/utterance (typed
+//     text): the debug page's controls, all routed
 //     through the same supervisor paths real events take
 //     (internal/inject). /api/inject/screen replaces a synthetic pane's
 //     text without moving its state or touching the supervisor — the

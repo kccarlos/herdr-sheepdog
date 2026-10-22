@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -325,7 +326,14 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 			}
 		}()
 	}
-	hs := httptest.NewServer(srv.Handler())
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A client the test makes look remote (kindHook) comes over TLS,
+		// as every real one does.
+		if srv.kindHook != nil && srv.kindHook(r.RemoteAddr) != "loopback" && r.TLS == nil {
+			r.TLS = &tls.ConnectionState{}
+		}
+		srv.Handler().ServeHTTP(w, r)
+	}))
 	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, session2: session2, sw: sw, watcher: watcher, model: model, brain: b, cancel: cancel}
 	t.Cleanup(func() {
 		hs.Close()

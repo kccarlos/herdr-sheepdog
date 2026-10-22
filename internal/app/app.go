@@ -624,6 +624,11 @@ func (a *App) wire() error {
 		}
 	}
 	deps.ShellLAN = cfg.Web.ShellLAN
+	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
+	if err != nil {
+		return err
+	}
+	deps.TLS = tlsID
 	if a.push != nil {
 		deps.Push = a.push
 	}
@@ -1063,7 +1068,7 @@ func (a *App) URL() string {
 
 // URLs returns every URL the daemon can be reached on: just URL() for a
 // loopback bind (unchanged); for a non-loopback bind (CONFIG.md
-// "web.bind"), "http://<ip>:<port>" for every non-loopback IPv4 address
+// "web.bind"), "https://<ip>:<port>" for every non-loopback IPv4 address
 // of the host, so the operator can read the LAN or Tailscale URL off the
 // log instead of guessing which interface it is — falling back to
 // URL() alone when none was found (no network, or interface enumeration
@@ -1086,7 +1091,7 @@ func (a *App) URLs() []string {
 	return []string{a.URL()}
 }
 
-// lanURLs returns "http://<ip>:<port>" for every non-loopback IPv4
+// lanURLs returns "https://<ip>:<port>" for every non-loopback IPv4
 // address of the host, sorted. Best-effort: a failure to enumerate
 // interfaces yields nil, never an error (the caller falls back to
 // URL()).
@@ -1105,7 +1110,7 @@ func lanURLs(port string) []string {
 		if ip4 == nil {
 			continue
 		}
-		out = append(out, "http://"+net.JoinHostPort(ip4.String(), port))
+		out = append(out, "https://"+net.JoinHostPort(ip4.String(), port))
 	}
 	sort.Strings(out)
 	return out

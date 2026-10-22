@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
@@ -88,6 +89,16 @@ type HelloResponse struct {
 	// (computer.name, else the system's): the app keys everything by
 	// the id. Omitted when the daemon has no id (a test server).
 	Computer *identity.Computer `json:"computer,omitempty"`
+	// Security is the TLS key the daemon serves (docs/dev/design/security.md
+	// "GET /api/hello"). The pin is a public key hash, safe to publish;
+	// the app never trusts this field, it trusts the pairing code's pin.
+	Security HelloSecurity `json:"security"`
+}
+
+// HelloSecurity is /api/hello's security object.
+type HelloSecurity struct {
+	Pin         string    `json:"pin"`
+	CertExpires time.Time `json:"cert_expires"`
 }
 
 // HelloAudio is the /ws audio contract (docs/dev/ws-contract.md): what a
@@ -109,6 +120,7 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
 		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
 		Computer: s.computer(),
+		Security: HelloSecurity{Pin: s.deps.TLS.Pin(), CertExpires: s.deps.TLS.Expires().UTC()},
 	})
 }
 

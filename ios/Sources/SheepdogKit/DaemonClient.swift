@@ -339,7 +339,7 @@ public final class DaemonClient: @unchecked Sendable {
         return events
     }
 
-    /// `POST /api/inject/utterance {"text": …}` — what the user typed,
+    /// `POST /api/utterance {"text": …}` — what the user typed,
     /// as if spoken. The daemon records it as typed user input first
     /// (so the one rail accepts it like a transcript), then hands it to the
     /// voice session, or with `--voice=off` to its text router, which
@@ -347,7 +347,7 @@ public final class DaemonClient: @unchecked Sendable {
     /// daemon's words.
     public func sendUtterance(_ text: String) async throws -> UtteranceReply {
         let body = try JSONSerialization.data(withJSONObject: ["text": text])
-        let request = try request(path: "/api/inject/utterance", method: "POST", body: body)
+        let request = try request(path: "/api/utterance", method: "POST", body: body)
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         switch http.statusCode {
