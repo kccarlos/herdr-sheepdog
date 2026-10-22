@@ -76,7 +76,8 @@ struct MainView: View {
                             activePendingID: model.approval?.pending.id,
                             pointerIDs: QuestionFocus.pointerRowIDs(rows: model.rows, pending: model.approval.flatMap { $0.isSettled ? nil : $0.pending }),
                             loadOlder: { await model.loadOlder() },
-                            followToken: model.typedSent
+                            followToken: model.typedSent,
+                            ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
                         )
                     case .flock where paneState != .content:
                         FlockUnavailableView(state: paneState)
