@@ -292,48 +292,45 @@ struct MainView: View {
     /// computers) arrives with several computers.
     @ViewBuilder
     private var voiceMenu: some View {
-        Section {
+        Button {
+            showsConnection = true
+        } label: {
+            Label {
+                Text(model.connectionChip.word)
+                Text(model.endpointDisplay)
+            } icon: {
+                Image(systemName: connectionSymbol)
+            }
+        }
+        .accessibilityLabel("Connection: \(model.connectionChip.word)")
+        .accessibilityIdentifier("chip.connection")
+        Button {
+            model.showSettings = true
+        } label: {
+            Label("Manage computers…", systemImage: "desktopcomputer")
+        }
+        .accessibilityIdentifier("voice.manageComputers")
+        Divider()
+        if model.wantsConnection {
             Button {
-                showsConnection = true
+                model.disconnect()
             } label: {
                 Label {
-                    Text(model.connectionChip.word)
-                    Text(model.endpointDisplay)
+                    Text("End voice session")
+                    Text("Your agents keep working.")
                 } icon: {
-                    Image(systemName: connectionSymbol)
+                    Image(systemName: "phone.down")
                 }
             }
-            .accessibilityLabel("Connection: \(model.connectionChip.word)")
-            .accessibilityIdentifier("chip.connection")
+            .accessibilityIdentifier("controls.end")
+        } else {
             Button {
-                model.showSettings = true
+                model.connect()
             } label: {
-                Label("Manage computers…", systemImage: "desktopcomputer")
+                Label("Start voice session", systemImage: "waveform")
             }
-            .accessibilityIdentifier("voice.manageComputers")
-        }
-        Section {
-            if model.wantsConnection {
-                Button {
-                    model.disconnect()
-                } label: {
-                    Label {
-                        Text("End voice session")
-                        Text("Your agents keep working.")
-                    } icon: {
-                        Image(systemName: "phone.down")
-                    }
-                }
-                .accessibilityIdentifier("controls.end")
-            } else {
-                Button {
-                    model.connect()
-                } label: {
-                    Label("Start voice session", systemImage: "waveform")
-                }
-                .disabled(!model.isConfigured)
-                .accessibilityIdentifier("voice.start")
-            }
+            .disabled(!model.isConfigured)
+            .accessibilityIdentifier("voice.start")
         }
     }
 
@@ -377,40 +374,37 @@ struct MainView: View {
     /// `⋯`: the session's rarer actions, then Settings.
     @ViewBuilder
     private var moreMenu: some View {
-        Section {
-            if model.conversationResetSupported {
-                Button {
-                    confirmNewConversation = true
-                } label: {
-                    Label("New conversation", systemImage: "arrow.counterclockwise")
-                }
-                .accessibilityIdentifier("toolbar.newConversation")
-            }
-            // The orb stops the voice while it talks; this is the same
-            // Stop, reachable whatever the orb is doing.
+        if model.conversationResetSupported {
             Button {
-                model.stop()
+                confirmNewConversation = true
             } label: {
-                Label("Stop \(model.voiceName)", systemImage: "stop.circle")
+                Label("New conversation", systemImage: "arrow.counterclockwise")
             }
-            .disabled(!model.wantsConnection)
-            .accessibilityIdentifier("toolbar.stop")
-            Button {
-                model.disconnect()
-            } label: {
-                Label("End voice session", systemImage: "phone.down")
-            }
-            .disabled(!model.wantsConnection)
-            .accessibilityIdentifier("toolbar.end")
+            .accessibilityIdentifier("toolbar.newConversation")
         }
-        Section {
-            Button {
-                model.showSettings = true
-            } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .accessibilityIdentifier("toolbar.settings")
+        // The orb stops the voice while it talks; this is the same
+        // Stop, reachable whatever the orb is doing.
+        Button {
+            model.stop()
+        } label: {
+            Label("Stop \(model.voiceName)", systemImage: "stop.circle")
         }
+        .disabled(!model.wantsConnection)
+        .accessibilityIdentifier("toolbar.stop")
+        Button {
+            model.disconnect()
+        } label: {
+            Label("End voice session", systemImage: "phone.down")
+        }
+        .disabled(!model.wantsConnection)
+        .accessibilityIdentifier("toolbar.end")
+        Divider()
+        Button {
+            model.showSettings = true
+        } label: {
+            Label("Settings", systemImage: "gearshape")
+        }
+        .accessibilityIdentifier("toolbar.settings")
     }
 }
 
