@@ -112,7 +112,10 @@ jobs:
       - name: Pick a simulator and start booting it
         id: sim
         run: |
-          # The newest available iPhone simulator on the image.
+          # The newest available iPhone simulator on the image, but not a
+          # foldable one (iPhone Duo): unfolded it has regular width, which
+          # gets the iPad layout, and this suite tests the iPhone layout
+          # (the iPad step below tests the other).
           udid=$(xcrun simctl list devices available --json | python3 -c '
           import json, sys
           devs = json.load(sys.stdin)["devices"]
@@ -122,8 +125,11 @@ jobs:
                   continue
               ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
               for d in items:
-                  if d["name"].startswith("iPhone") and (best is None or ver > best[0]):
-                      best = (ver, d["udid"], d["name"], runtime)
+                  name = d["name"]
+                  if not name.startswith("iPhone") or "Duo" in name or "Fold" in name:
+                      continue
+                  if best is None or ver > best[0]:
+                      best = (ver, d["udid"], name, runtime)
           if best is None:
               sys.exit("no iPhone simulator available")
           print(best[1])
