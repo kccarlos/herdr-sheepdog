@@ -419,6 +419,8 @@ private struct NewAgentKindStep: View {
         }
         .buttonStyle(.plain)
         .disabled(!canStart)
+        // A hardware keyboard: ⌘↩ starts.
+        .keyboardShortcut(.return, modifiers: .command)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.bar)

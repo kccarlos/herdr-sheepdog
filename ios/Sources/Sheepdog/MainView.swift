@@ -46,9 +46,13 @@ struct MainView: View {
     private func open(_ request: WindowRequest) {
         if split {
             switch request {
-            case let .agent(paneID), let .newAgent(paneID):
+            case let .agent(paneID):
                 ui.detailPath = NavigationPath()
-                ui.detail = .agent(paneID)
+                ui.show(paneID)
+            case let .newAgent(paneID):
+                // A new agent opens beside the current pane.
+                ui.detailPath = NavigationPath()
+                ui.beside(paneID)
             case let .shell(cwd):
                 ui.detailPath.append(ShellRoute(cwd: cwd))
             }
@@ -574,9 +578,15 @@ struct SessionChrome: ViewModifier {
             .sheet(isPresented: gate(model.showSettings && !splashShowing) { model.showSettings = $0 }) {
                 SettingsView(meter: model.meter)
                     .environmentObject(model)
+                    // A form sheet on iPad; the iPhone ignores it.
+                    .presentationSizing(.form)
             }
-            .sheet(isPresented: gate(model.showsNewAgent) { model.showsNewAgent = $0 }) { NewAgentSheet() }
-            .sheet(isPresented: gate(model.showsSpaces) { model.showsSpaces = $0 }) { SpacesSheet() }
+            .sheet(isPresented: gate(model.showsNewAgent) { model.showsNewAgent = $0 }) {
+                NewAgentSheet().presentationSizing(.form)
+            }
+            .sheet(isPresented: gate(model.showsSpaces) { model.showsSpaces = $0 }) {
+                SpacesSheet().presentationSizing(.form)
+            }
             .fullScreenCover(item: gate(model.primer) { if $0 == nil, model.primer != nil { model.answerPrimer(false) } }) { primer in
                 PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
             }

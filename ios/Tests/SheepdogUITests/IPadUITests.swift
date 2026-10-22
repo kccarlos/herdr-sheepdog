@@ -110,4 +110,77 @@ final class IPadUITests: XCTestCase {
         sleep(2)
         shot("portrait-agent")
     }
+
+    /// Two agents side by side: the split menu puts one beside the other,
+    /// each pane has its own keys and composer and ✕, and a sidebar row
+    /// dragged onto the detail replaces the pane that is not focused.
+    func testTwoPanesSideBySide() throws {
+        let app = launchDemo()
+        let auth = element(app, "sidebar.agent.claude-auth")
+        XCTAssertTrue(auth.waitForExistence(timeout: 10))
+        auth.tap()
+        let split = element(app, "pane.split")
+        XCTAssertTrue(split.waitForExistence(timeout: 10))
+        split.tap()
+        let migration = app.buttons["claude-migration"].firstMatch
+        XCTAssertTrue(migration.waitForExistence(timeout: 5))
+        migration.tap()
+        let terminals = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
+        let two = NSPredicate(format: "count == 2")
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(element(app, "panes.divider").exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "pane.close").count, 2)
+        sleep(2)
+        shot("split")
+
+        // Drag codex-docs onto the detail: it replaces the pane not focused
+        // (claude-auth; the new one is focused).
+        let docs = element(app, "sidebar.agent.codex-docs")
+        docs.press(forDuration: 1.2, thenDragTo: element(app, "panes.divider"))
+        let docsHeader = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'codex-docs'")).firstMatch
+        XCTAssertTrue(docsHeader.waitForExistence(timeout: 10), "the dropped agent is on screen")
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 10)
+
+        app.descendants(matching: .any).matching(identifier: "pane.close").firstMatch.tap()
+        let one = NSPredicate(format: "count == 1")
+        expectation(for: one, evaluatedWith: terminals)
+        waitForExpectations(timeout: 10)
+
+        XCUIDevice.shared.orientation = .portrait
+        sleep(2)
+        element(app, "pane.split").tap()
+        let payments = app.buttons["codex-payments"].firstMatch
+        XCTAssertTrue(payments.waitForExistence(timeout: 5))
+        payments.tap()
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 10)
+        sleep(2)
+        shot("split-portrait")
+    }
+
+    /// ⋯ ▸ Open in New Window gives the agent a window of its own, with the
+    /// mini capsule.
+    func testOpenInNewWindow() throws {
+        let app = launchDemo()
+        let auth = element(app, "sidebar.agent.claude-auth")
+        XCTAssertTrue(auth.waitForExistence(timeout: 10))
+        auth.tap()
+        let menu = element(app, "agentScreen.menu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let item = element(app, "agentScreen.menu.newWindow")
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        XCTAssertTrue(element(app, "mini.capsule").waitForExistence(timeout: 10), "the new window has the mini capsule")
+        sleep(2)
+        shot("new-window")
+        // Close it, so the next launch does not restore it.
+        element(app, "agentScreen.menu").tap()
+        let close = element(app, "agentWindow.closeWindow")
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10), "back to the main window")
+    }
 }

@@ -142,6 +142,13 @@ targets:
         # the others show the mini capsule.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
+        # An agent dragged from the iPad sidebar (AgentPanes.swift).
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.github.kccarlos.herdr-sheepdog-ios.agent
+            UTTypeDescription: Sheepdog agent
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
         # Brand launch screen: #1B1D22 with the cream mono logo at 80 pt.
         UILaunchScreen:
           UIColorName: LaunchBackground
