@@ -178,10 +178,8 @@ final class AgentScreenModelTests: XCTestCase {
         XCTAssertEqual(model.inputError, "The daemon refused: key \"f1\" is not allowed")
     }
 
-    func testOnlyEscAndCtrlCAskFirst() {
-        XCTAssertEqual(AgentKey.allCases.filter(\.needsConfirmation), [.ctrlC])
+    func testTheAllowListedKeys() {
         XCTAssertEqual(AgentKey.allCases.map(\.rawValue), ["enter", "esc", "ctrl+c", "1", "2", "3", "up", "down", "tab"])
-        XCTAssertTrue(AgentKey.ctrlC.confirmationTitle(agent: "Auth fix").contains("Auth fix"))
     }
 
     func testCanSendWantsSomeTextWithinTheLimit() {

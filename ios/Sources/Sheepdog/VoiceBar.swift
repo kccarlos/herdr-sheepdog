@@ -39,7 +39,7 @@ struct VoiceCapsule<VoiceMenu: View>: View {
         CapsuleMode.resolve(state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen)
     }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
-    private var height: CGFloat { min(max(scaledHeight, 60), 100) }
+    private var height: CGFloat { min(max(scaledHeight, 60), 110) }
 
     var body: some View {
         HStack(spacing: 8) {

@@ -22,17 +22,16 @@ struct FlockUnavailableView: View {
                     Text("Your agents appear here as soon as the daemon answers.")
                 }
             case .empty:
-                ContentUnavailableView {
-                    Label {
-                        Text("No agents yet").fontDesign(.rounded)
-                    } icon: {
-                        MascotCard(name: "MascotSleeping", width: 200)
+                ScrollView {
+                    VStack(spacing: 4) {
+                        NoAgentsView(onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil)
+                        Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.muted)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("flock.empty.refresh")
                     }
-                } description: {
-                    Text("Start a coding agent in herdr on your computer and it shows up here.")
-                } actions: {
-                    Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
-                        .accessibilityIdentifier("flock.empty.refresh")
+                    .padding(.top, 80)
                 }
             case .notConnected:
                 ContentUnavailableView {

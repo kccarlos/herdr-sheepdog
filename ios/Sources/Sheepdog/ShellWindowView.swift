@@ -160,7 +160,7 @@ struct ShellWindowView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            KeyBar(window: window, confirm: { window.send(termKey: $0) }, onMore: { showsMoreKeys = true })
+            KeyBar(window: window, shell: true, onMore: { showsMoreKeys = true })
             Group {
                 if let closeError {
                     Text(closeError)

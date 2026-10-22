@@ -88,7 +88,8 @@ enum Theme {
         switch state {
         case .blocked: return blocked
         case .working: return working
-        case .idle, .done: return done
+        case .idle: return idle
+        case .done: return done
         case .unknown, .exited: return unknown
         }
     }

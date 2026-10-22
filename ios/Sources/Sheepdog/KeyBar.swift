@@ -1,13 +1,16 @@
 import SheepdogKit
 import SwiftUI
 
-/// The key bar under the terminal: esc ⇥ ↑ ↓ ⌃C ⏎, then ⌨︎ (typing mode)
-/// and ··· (more keys). In typing mode ⌃C becomes ⌃, which latches for
-/// the next key or typed character.
+/// The key bar under the terminal: esc ⇥ ↑ ↓ ⏎, then ⌨︎ (typing mode)
+/// and ··· (more keys). A shell window adds ⌃C before ⏎: there it is the
+/// everyday key; an agent window keeps it in More keys. Every key goes out
+/// at once, with no confirm. In typing mode the ⌃C slot (or, in an agent
+/// window, a slot before ⏎) is ⌃, which latches for the next key or typed
+/// character.
 struct KeyBar: View {
     @ObservedObject var window: AgentWindowController
-    /// A key that interrupts asks first (outside typing mode).
-    let confirm: (TermKey) -> Void
+    /// A shell window: ⌃C on the bar.
+    var shell = false
     let onMore: () -> Void
 
     var body: some View {
@@ -20,8 +23,8 @@ struct KeyBar: View {
                 }
                 .accessibilityValue(window.modifiers.ctrl ? "on" : "off")
                 .accessibilityIdentifier("agentScreen.key.ctrl")
-            } else {
-                key(.ctrl("c"), tint: Color(.systemRed))
+            } else if shell {
+                key(.ctrl("c"))
             }
             key(.enter)
             KeyCap(systemImage: window.typing ? "keyboard.chevron.compact.down" : "keyboard",
@@ -39,11 +42,7 @@ struct KeyBar: View {
 
     private func key(_ key: TermKey, tint: Color? = nil) -> some View {
         KeyCap(label: key.label, accessibility: key.accessibilityLabel, enabled: window.canSend(key), tint: tint) {
-            if key.needsConfirmation, !window.typing {
-                confirm(key)
-            } else {
-                window.send(termKey: key)
-            }
+            window.send(termKey: key)
         }
         .accessibilityIdentifier("agentScreen.key.\(key.allowListed?.rawValue ?? key.label)")
     }
@@ -105,17 +104,30 @@ struct KeyCap: View {
 /// mode) and closes it.
 struct MoreKeysSheet: View {
     @ObservedObject var window: AgentWindowController
+    /// An agent window: ⌃C sits at the top, under Interrupt.
+    var interrupt = false
     let onSnippet: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var snippets = SnippetStore.load()
     @State private var newSnippet = ""
-    @State private var confirmKey: TermKey?
 
     private let columns = [GridItem(.adaptive(minimum: 58), spacing: 8)]
 
     var body: some View {
         NavigationStack {
             List {
+                if interrupt {
+                    Section {
+                        KeyCap(label: "⌃C", accessibility: "Control C, interrupts the agent", enabled: window.canSend(.ctrl("c"))) {
+                            window.send(termKey: .ctrl("c"))
+                        }
+                        .accessibilityIdentifier("moreKeys.ctrlC")
+                    } header: {
+                        Text("Interrupt")
+                    } footer: {
+                        Text("Sends Ctrl-C at once. Esc on the bar also stops Claude and Codex.")
+                    }
+                }
                 if window.state.takesRawInput {
                     Section("Modifiers, for the next key") {
                         HStack(spacing: 8) {
@@ -147,12 +159,6 @@ struct MoreKeysSheet: View {
                         .accessibilityIdentifier("moreKeys.done")
                 }
             }
-            .confirmationDialog(confirmKey.map { "Send \($0.accessibilityLabel)? It interrupts or dismisses what the agent is doing." } ?? "",
-                                isPresented: Binding(get: { confirmKey != nil }, set: { if !$0 { confirmKey = nil } }),
-                                titleVisibility: .visible, presenting: confirmKey) { key in
-                Button("Send \(key.label)", role: .destructive) { window.send(termKey: key) }
-                Button("Cancel", role: .cancel) {}
-            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -163,11 +169,7 @@ struct MoreKeysSheet: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(keys) { key in
                     KeyCap(label: key.label, accessibility: key.accessibilityLabel, enabled: window.canSend(key)) {
-                        if key.needsConfirmation, !window.typing {
-                            confirmKey = key
-                        } else {
-                            window.send(termKey: key)
-                        }
+                        window.send(termKey: key)
                     }
                     .accessibilityIdentifier("moreKeys.\(key.label)")
                 }
