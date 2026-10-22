@@ -46,16 +46,17 @@ func TestMain(m *testing.M) {
 }
 
 // pinGoCaches sets GOCACHE, GOMODCACHE and GOPATH to the values the go
-// command resolves now, before HOME moves.
+// command resolves now, before HOME moves. Without a go command it does
+// nothing: only the tests that build the binary need it.
 func pinGoCaches() {
 	keys := []string{"GOCACHE", "GOMODCACHE", "GOPATH"}
 	out, err := exec.Command("go", append([]string{"env"}, keys...)...).Output()
 	if err != nil {
-		panic("go env: " + err.Error())
+		return
 	}
 	vals := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 	if len(vals) != len(keys) {
-		panic("go env: unexpected output: " + string(out))
+		return
 	}
 	for i, k := range keys {
 		_ = os.Setenv(k, vals[i])
