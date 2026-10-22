@@ -165,6 +165,7 @@ struct MainView: View {
                     .environmentObject(model)
             }
             .sheet(isPresented: $model.showsNewAgent) { NewAgentSheet() }
+            .sheet(isPresented: $model.showsSpaces) { SpacesSheet() }
             .sheet(isPresented: $showsConnection) {
                 ConnectionDetailView(
                     showSettings: {
@@ -409,6 +410,13 @@ struct MainView: View {
         .disabled(!model.wantsConnection)
         .accessibilityIdentifier("toolbar.end")
         Divider()
+        Button {
+            model.showsSpaces = true
+        } label: {
+            Label("Spaces", systemImage: "square.stack")
+        }
+        .disabled(!model.agentActionsAvailable)
+        .accessibilityIdentifier("toolbar.spaces")
         Button {
             model.showSettings = true
         } label: {

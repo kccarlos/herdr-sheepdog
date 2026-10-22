@@ -76,6 +76,8 @@ final class SessionViewModel: ObservableObject {
     @Published var expandedAgents: Set<String> = []
     /// The New agent sheet (`+`, and the Agents page's empty state).
     @Published var showsNewAgent = false
+    /// ⋯ ▸ Spaces.
+    @Published var showsSpaces = false
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
     /// engine's jitter-buffer profile explicitly when it changes, rather
     /// than re-deriving and re-setting it on every event regardless of

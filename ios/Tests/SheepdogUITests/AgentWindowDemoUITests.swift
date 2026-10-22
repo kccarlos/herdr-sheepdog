@@ -154,7 +154,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         showAgentsPane(app)
         // The sheet comes from + ▸ New agent; a tap lost while something
         // still animates is retried.
-        let space = app.buttons["newAgent.space.sheepdog-bench"]
+        let space = app.buttons["newAgent.space.shop"]
         for _ in 0 ..< 3 where !space.exists {
             tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
             if space.waitForExistence(timeout: 10) { break }
