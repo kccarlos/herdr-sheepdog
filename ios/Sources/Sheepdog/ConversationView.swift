@@ -63,7 +63,7 @@ struct ConversationView: View {
                                     voiceName: voiceName,
                                     openPendingIDs: openPendingIDs
                                 ) {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                    withAnimation(Theme.ease) {
                                         if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
                                     }
                                 }
@@ -132,13 +132,13 @@ struct ConversationView: View {
             .onChange(of: rows.last) { _, newest in
                 guard atBottom else { return }
                 if let id = newest?.id, id != lastSeenID { lastSeenID = id }
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(Theme.ease) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
             .onChange(of: followToken) { _, _ in
                 atBottom = true
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(Theme.ease) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
@@ -147,7 +147,7 @@ struct ConversationView: View {
                 // keep the newest message, the one it is about, in view.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 350_000_000)
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(Theme.ease) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                     }
                 }
@@ -262,6 +262,8 @@ struct UpdatesGroup: View {
                         Text(title)
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.muted)
+                            .contentTransition(.numericText())
+                            .animation(Theme.ease, value: rows.count)
                         if !isOpen, !latest.isEmpty {
                             Text(latest)
                                 .font(.subheadline)
@@ -531,6 +533,8 @@ struct ApprovalItemCard: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .rowCard(border: outcome == nil && isPinned ? Theme.blocked : Theme.line)
+        // The floating question collapses into this row once settled.
+        .modifier(SettledMatch(id: outcome == nil ? nil : item.pendingID))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("bubble.approval")
     }
@@ -751,5 +755,18 @@ struct RowCard: ViewModifier {
 extension View {
     func rowCard(border: Color = Theme.line) -> some View {
         modifier(RowCard(border: border))
+    }
+}
+
+/// `matchedInMotion` for a settled approval row with a question id.
+private struct SettledMatch: ViewModifier {
+    let id: String?
+
+    func body(content: Content) -> some View {
+        if let id {
+            content.matchedInMotion(id: id)
+        } else {
+            content
+        }
     }
 }

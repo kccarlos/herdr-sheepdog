@@ -17,6 +17,7 @@ struct FloatingQuestions: View {
 
     @State private var contentHeight: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Half the screen; a little less at the accessibility sizes, where
     /// the capsule above the home indicator is taller too.
@@ -36,6 +37,10 @@ struct FloatingQuestions: View {
                         meta: meta(card, index: index),
                         answer: { answer(card.pending.id, $0) }
                     )
+                    // Rises from the capsule; collapses into its settled
+                    // row in the conversation when answered.
+                    .matchedInMotion(id: card.pending.id)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .onAppear {
                         AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
                     }

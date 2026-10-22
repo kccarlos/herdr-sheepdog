@@ -692,6 +692,9 @@ final class SessionViewModel: ObservableObject {
         audio.onLevel = { [weak self] level in
             self?.meter.setLevel(level)
         }
+        audio.onOutputLevel = { [weak self] level in
+            self?.meter.setOutputLevel(level)
+        }
         audio.onSpeakingChanged = { [weak self] speaking in
             self?.send(.playbackChanged(speaking: speaking))
         }
@@ -1264,7 +1267,20 @@ final class SessionViewModel: ObservableObject {
         applyApproval(approvalFlow.present(state.pendingAction))
         let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
         let questionsChanged = open != questions
-        if questionsChanged { questions = open }
+        if questionsChanged {
+            // A question that arrived without its own event (another
+            // agent's, read from the state) rises with a light tap; the
+            // event-driven one already had the needs-you cue.
+            if questionsSeen {
+                for q in open where q.isAnswerPrompt && q.id != state.pendingAction?.id && cuedPendingIDs.insert(q.id).inserted {
+                    Haptics.push()
+                }
+            } else {
+                for q in open { cuedPendingIDs.insert(q.id) }
+            }
+            questions = open
+        }
+        questionsSeen = true
         // The Live Activity's rows and counts.
         if agentsChanged || questionsChanged { syncAway() }
         questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
@@ -1711,6 +1727,8 @@ final class SessionViewModel: ObservableObject {
 
     /// Questions the needs-you cue already played for.
     private var cuedPendingIDs: Set<String> = []
+    /// The first state has been read: questions open before it are not news.
+    private var questionsSeen = false
 
     private func applyApproval(_ effect: ApprovalFlow.Effect) {
         switch effect {
@@ -1869,7 +1887,17 @@ final class SessionViewModel: ObservableObject {
     /// ended.
     var floatingQuestions: [ApprovalFlow.Card] {
         let open = QuestionOrder.ordered(questions) { _ in true }
-        let list = QuestionOrder.floating(open: open, voice: approval?.pending, voiceSettled: approval?.isSettled ?? false)
+        // A settled question with a row in the conversation collapses into
+        // that row at once (the motion pass); one without stays to say how
+        // it ended.
+        let settledVoice = approval.flatMap { card -> PendingAction? in
+            guard card.isSettled, !rows.contains(where: { row in
+                if case let .item(item) = row { return item.kind == .approval && item.pendingID == card.pending.id }
+                return false
+            }) else { return nil }
+            return card.pending
+        }
+        let list = QuestionOrder.floating(open: open, voice: settledVoice, voiceSettled: settledVoice != nil)
         return list.map { question in
             if let approval, approval.pending.id == question.id { return approval }
             return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
