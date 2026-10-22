@@ -178,9 +178,6 @@ func runFlow(t *testing.T, stdin string, args ...string) flowRun {
 			t.Errorf("a key reached the output")
 		}
 	}
-	if tok := r.env["SHEEPDOG_WEB_TOKEN"]; tok != "" && strings.Contains(r.out, tok) {
-		t.Error("the web token reached the output")
-	}
 	return r
 }
 
@@ -207,16 +204,10 @@ func webSave(t *testing.T, in onboard.ModelsInput) (env map[string]string, cfg s
 	return env, string(b)
 }
 
-// sameSaved compares a terminal run with the page's save (the web token
-// is the terminal's own).
+// sameSaved compares a terminal run with the page's save.
 func sameSaved(t *testing.T, r flowRun, wantEnv map[string]string, wantCfg string) {
 	t.Helper()
-	got := map[string]string{}
-	for k, v := range r.env {
-		if k != "SHEEPDOG_WEB_TOKEN" {
-			got[k] = v
-		}
-	}
+	got := r.env
 	if len(got) != len(wantEnv) {
 		t.Errorf("env names: terminal %v, page %v", names(got), names(wantEnv))
 	}

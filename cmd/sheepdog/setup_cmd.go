@@ -76,11 +76,6 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		}
 	}
 	url := info.URL + "/setup"
-	if pageMissing(ctx, url) {
-		fprintf(stderr, "The running sheepdog (version %s) is older and has no setup page.\n", info.Version)
-		fprintln(stderr, "Restart it on this version (sheepdog restart), then run sheepdog setup again; or: sheepdog setup --terminal")
-		return 1
-	}
 	fprintln(stdout, "")
 	fprintln(stdout, "Set up sheepdog in your browser:")
 	fprintln(stdout, "")

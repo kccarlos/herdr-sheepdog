@@ -190,10 +190,15 @@ func TestServeExitsForTheLoginServiceAfterAnUpgrade(t *testing.T) {
 	}
 }
 
+// The watcher marks the restart pending as soon as the file changes, and
+// only learns the new version (and whether it may restart into it) once
+// `sheepdog version` answers, so the test waits for that answer
+// (RestartTo) rather than for RestartPending plus a fixed sleep: a slow
+// probe under load used to leave AutoRestart still true at the assert.
 func TestServeNoRestartWhenAutoRestartOffOrSameVersion(t *testing.T) {
-	for name, tc := range map[string]struct{ cfg, line string }{
-		"auto_restart off": {"[update]\nauto_restart = false\n", newLine},
-		"same version":     {"", runningLine},
+	for name, tc := range map[string]struct{ cfg, line, to string }{
+		"auto_restart off": {"[update]\nauto_restart = false\n", newLine, "v0.2.0"},
+		"same version":     {"", runningLine, "v0.1.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			upgrade := fakeInstall(t)
@@ -203,9 +208,10 @@ func TestServeNoRestartWhenAutoRestartOffOrSameVersion(t *testing.T) {
 			execSelf = func(string, []string, []string) error { t.Error("exec"); return nil }
 			base, _, cancel, done, _ := serveForUpdate(t, tc.cfg)
 			upgrade(tc.line)
-			waitFor(t, func() bool { s, ok := tryStateUpdate(base); return ok && s.RestartPending })
+			waitFor(t, func() bool { s, ok := tryStateUpdate(base); return ok && s.RestartPending && s.RestartTo == tc.to })
+			// Time for a wrong exec to show up (execSelf fails the test).
 			time.Sleep(200 * time.Millisecond)
-			if s := stateUpdate(t, base); s.AutoRestart {
+			if s := stateUpdate(t, base); s.AutoRestart || !s.RestartPending || s.RestartTo != tc.to {
 				t.Errorf("%+v", s)
 			}
 			cancel()
