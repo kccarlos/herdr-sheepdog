@@ -1,17 +1,10 @@
-// Package pair builds the pairing link the iOS app scans: the daemon's
-// reachable addresses (its Tailscale and real LAN addresses)
-// and its web token, in one sheepdog:// URL shown as a QR code by
-// `sheepdog pair` (terminal) and /debug (SVG).
-//
-// The URL scheme (docs/dev/ws-contract.md "Pairing"):
-//
-//	sheepdog://pair?u=<base URL>&u=<base URL>…&t=<token>
-//
-// Each u is an http base URL (http://192.168.1.20:7777), Tailscale
-// addresses first, then LAN ones; the app tries them all, keeps the
-// first in this order that answers /api/hello, and saves that one. t is web.token, absent when none is set.
-// The token is a secret: this package never logs it, and its callers
-// print only the QR code and the addresses.
+// Package pair builds the pairing link the app and browsers scan
+// (docs/dev/design/security.md "The QR"): an https link to /voice with
+// the daemon id, the computer's name, the TLS pin, a one-time enroll code
+// and the daemon's reachable addresses (Tailscale first, then LAN, then
+// web.advertise) in the fragment. `sheepdog pair` and the setup page show
+// it as a QR code; the daemon mints the code (internal/web/pair.go). The
+// code is a secret until used: this package never logs it.
 package pair
 
 import (
@@ -39,7 +32,7 @@ type Address struct {
 }
 
 // ErrLoopback: the daemon listens on loopback only; no phone can reach it.
-var ErrLoopback = errors.New(`the daemon listens on 127.0.0.1 only, so a phone cannot reach it: turn on phone access in step 4 of the setup page (sheepdog setup), or set web.bind (a LAN or Tailscale address, or "0.0.0.0") and a web.token yourself and restart`)
+var ErrLoopback = errors.New(`the daemon listens on 127.0.0.1 only, so a phone cannot reach it: turn on phone access in step 4 of the setup page (sheepdog setup), or set web.bind (a LAN or Tailscale address, or "0.0.0.0") yourself and restart`)
 
 // tailnet is Tailscale's IPv4 range (CGNAT 100.64.0.0/10); tailnet6 is
 // its IPv6 range (fd7a:115c:a1e0::/48).
@@ -151,14 +144,14 @@ var DefaultRouteIP = func() net.IP {
 // address or host name as bind is used as given. ErrLoopback when bind is
 // loopback.
 func Addresses(bind string, port int, sys []IfaceAddr) ([]Address, error) {
-	base := func(ip net.IP) string { return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(port)) }
+	base := func(ip net.IP) string { return "https://" + net.JoinHostPort(ip.String(), strconv.Itoa(port)) }
 	ip := net.ParseIP(bind)
 	switch {
 	case bind == "localhost" || ip != nil && ip.IsLoopback():
 		return nil, ErrLoopback
 	case bind != "" && ip == nil:
 		// A host name: the phone resolves it.
-		return []Address{{URL: "http://" + net.JoinHostPort(bind, strconv.Itoa(port)), Kind: KindLAN}}, nil
+		return []Address{{URL: "https://" + net.JoinHostPort(bind, strconv.Itoa(port)), Kind: KindLAN}}, nil
 	case ip != nil && !ip.IsUnspecified():
 		iface := ""
 		for _, a := range sys {
@@ -236,33 +229,111 @@ func Explain(addrs []Address) string {
 	return "Uses your Wi-Fi address " + host(first) + ": the phone must be on the same Wi-Fi. To use it away from home, install Tailscale on this computer and your phone, then pair again."
 }
 
-// URL is the pairing link for addrs and token.
-func URL(addrs []Address, token string) string {
-	q := url.Values{}
-	for _, a := range addrs {
-		q.Add("u", a.URL)
-	}
-	if token != "" {
-		q.Set("t", token)
-	}
-	return "sheepdog://pair?" + q.Encode()
+// LinkInfo is what a pairing link holds (docs/dev/design/security.md
+// "The QR").
+type LinkInfo struct {
+	DaemonID string
+	Name     string
+	// Pin is the TLS key's pin, base64url(SHA-256(SPKI)).
+	Pin string
+	// Code is the one-time enroll code.
+	Code      string
+	Addresses []Address
 }
 
-// Parse reads a pairing link back: the base URLs in order and the token.
-func Parse(link string) (urls []string, token string, err error) {
+// Link is the pairing link: an https link to /voice at the first address,
+// everything else in the fragment, which browsers never send to a server:
+//
+//	https://<host:port>/voice#pair=1&d=<id>&n=<name>&k=<pin>&e=<code>&u=<host:port>&u=…
+//
+// A phone camera opens it in the browser (which pairs itself); the app's
+// scanner reads the same link.
+func Link(in LinkInfo) string {
+	q := url.Values{}
+	q.Set("d", in.DaemonID)
+	q.Set("n", in.Name)
+	q.Set("k", in.Pin)
+	q.Set("e", in.Code)
+	first := ""
+	for _, a := range in.Addresses {
+		hp := HostPort(a.URL)
+		if first == "" {
+			first = hp
+		}
+		q.Add("u", hp)
+	}
+	// pair=1 first, so a page tells a pairing link at a glance.
+	return "https://" + first + "/voice#pair=1&" + q.Encode()
+}
+
+// ParseLink reads a pairing link back (tests, and the CLI's own check).
+func ParseLink(link string) (LinkInfo, error) {
 	u, err := url.Parse(link)
 	if err != nil {
-		return nil, "", err
+		return LinkInfo{}, err
 	}
-	if u.Scheme != "sheepdog" || u.Host != "pair" {
-		return nil, "", fmt.Errorf("pair: not a sheepdog://pair link")
+	q, err := url.ParseQuery(u.EscapedFragment())
+	if err != nil {
+		return LinkInfo{}, err
 	}
-	q := u.Query()
-	urls = q["u"]
-	if len(urls) == 0 {
-		return nil, "", errors.New("pair: no address")
+	if q.Get("pair") != "1" {
+		return LinkInfo{}, errors.New("pair: not a pairing link")
 	}
-	return urls, q.Get("t"), nil
+	in := LinkInfo{DaemonID: q.Get("d"), Name: q.Get("n"), Pin: q.Get("k"), Code: q.Get("e")}
+	for _, hp := range q["u"] {
+		in.Addresses = append(in.Addresses, Address{URL: "https://" + hp, Kind: KindLAN})
+	}
+	if in.DaemonID == "" || in.Pin == "" || in.Code == "" || len(in.Addresses) == 0 {
+		return LinkInfo{}, errors.New("pair: incomplete pairing link")
+	}
+	return in, nil
+}
+
+// HostPort is a base URL's host:port.
+func HostPort(base string) string {
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return base
+}
+
+// KindAdvertised marks an address from web.advertise.
+const KindAdvertised = "advertised"
+
+// Advertised turns web.advertise entries (host:port, a host alone for
+// port 7777, or a URL) into addresses.
+func Advertised(list []string) []Address {
+	var out []Address
+	for _, a := range list {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if i := strings.Index(a, "://"); i >= 0 {
+			a = a[i+3:]
+		}
+		a = strings.TrimSuffix(a, "/")
+		if _, _, err := net.SplitHostPort(a); err != nil {
+			a = net.JoinHostPort(strings.Trim(a, "[]"), "7777")
+		}
+		out = append(out, Address{URL: "https://" + a, Kind: KindAdvertised})
+	}
+	return out
+}
+
+// Merge appends extra to addrs, skipping any already there.
+func Merge(addrs, extra []Address) []Address {
+	out := append([]Address(nil), addrs...)
+	for _, e := range extra {
+		dup := false
+		for _, a := range out {
+			dup = dup || a.URL == e.URL
+		}
+		if !dup {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Terminal renders link as a QR code for a terminal: two modules per

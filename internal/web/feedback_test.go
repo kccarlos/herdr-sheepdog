@@ -135,14 +135,16 @@ func TestFeedbackSnapshot(t *testing.T) {
 	}
 }
 
-// TestFeedbackNeedsTheToken: POST /api/feedback is behind web.token like
+// TestFeedbackNeedsADevice: POST /api/feedback needs a paired device like
 // every other /api route.
-func TestFeedbackNeedsTheToken(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: "s3cr3t"})
+func TestFeedbackNeedsADevice(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	d := h.pairDevice()
+	h.asRemote()
 	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", "", nil, map[string]any{"tag": "paused"}), nil); code != http.StatusUnauthorized {
-		t.Fatalf("no token: %d", code)
+		t.Fatalf("no ticket: %d", code)
 	}
-	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", "s3cr3t", nil, map[string]any{"tag": "paused"}), nil); code != http.StatusOK {
-		t.Fatalf("with token: %d", code)
+	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", d.ticket, nil, map[string]any{"tag": "paused"}), nil); code != http.StatusOK {
+		t.Fatalf("with a ticket: %d", code)
 	}
 }

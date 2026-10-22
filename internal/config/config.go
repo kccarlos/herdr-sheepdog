@@ -406,21 +406,13 @@ type CLI struct {
 // Web configures the HTTP server (plan §3.8). It binds to Bind:Port,
 // loopback only by default; a non-loopback Bind (a LAN or Tailscale
 // address, or 0.0.0.0 for every interface) is how a phone reaches the
-// daemon, and needs Token set (app.Build refuses to start without one —
-// see IsLoopback and CONFIG.md "web.token").
+// daemon. Off this computer it serves TLS only, and only to paired
+// devices (docs/dev/design/security.md).
 type Web struct {
 	// Bind is the listen address (default 127.0.0.1).
 	Bind string `toml:"bind"`
 	// Port is the TCP port (default 7777).
 	Port int `toml:"port"`
-	// Token, when non-empty, is the bearer token every request to /ws,
-	// /events and /api/* must present: Authorization: Bearer <token>,
-	// ?token=<token> for /ws and /events (a browser cannot set a header
-	// on a WebSocket or EventSource request), or the cookie POST
-	// /api/login sets so it is typed once. Required when Bind is not
-	// loopback. Never logged: config show prints set/unset, like the LLM
-	// keys.
-	Token string `toml:"token"`
 	// Dev enables developer-only routes: /testdata/<name>.wav serves the
 	// audio fixtures so the /voice page can use one as a fake microphone
 	// (WP6 file-source test mode). Off by default; `serve --dev` sets it.
@@ -428,15 +420,17 @@ type Web struct {
 	// DevTestdataDir is where /testdata/ reads from when Dev is on
 	// (default testdata/audio relative to the working directory).
 	DevTestdataDir string `toml:"dev_testdata_dir"`
-	// ShellLAN lets a client on the plain LAN (not loopback, not
-	// Tailscale) open the phone shell. Off by default: plain-LAN HTTP
-	// carries every keystroke in clear text. Set from the setup page.
-	ShellLAN bool `toml:"shell_lan"`
+	// Shell lets paired devices open the phone shell and send
+	// attachments. On by default; the setup page switches it.
+	Shell bool `toml:"shell"`
+	// Advertise lists more host:port addresses for the pairing code,
+	// after the daemon's own: a router's port forward, which the daemon
+	// cannot see (docs/remote-access.md).
+	Advertise []string `toml:"advertise"`
 }
 
 // IsLoopback reports whether Bind reaches only this machine (127.0.0.1,
-// ::1, or the hostname "localhost") — the one case that needs no Token,
-// since nothing off-host can reach it.
+// ::1, or the hostname "localhost"): no phone can reach it.
 func (w Web) IsLoopback() bool {
 	if w.Bind == "localhost" {
 		return true
@@ -657,7 +651,7 @@ func Default() Config {
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default", BriefingChannel: "function_response", Backend: "aistudio", Vertex: GeminiVertex{Location: "us-central1"}},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
 		Anthropic:         Anthropic{BaseURL: DefaultAnthropicBaseURL, Effort: "medium", EventEffort: "low", Fallbacks: true},
-		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
+		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort, Shell: true},
 		CLI:               defaultCLI(),
 		Voice:             Voice{Name: DefaultVoiceName, Provider: "gemini", OpenAI: VoiceOpenAI{Model: "gpt-live-1", Voice: "marin", IdleCloseS: 45}},
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60, AuthoriseWindowS: 30, ProjectRoots: []string{"~/Documents"}},
@@ -1030,7 +1024,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
 //	SHEEPDOG_DEEPSEEK_REASONING_EFFORT, ANTHROPIC_API_KEY, SHEEPDOG_ANTHROPIC_BASE_URL,
 //	SHEEPDOG_ANTHROPIC_EFFORT, SHEEPDOG_ANTHROPIC_EVENT_EFFORT, SHEEPDOG_ANTHROPIC_FALLBACKS,
-//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_TOKEN, SHEEPDOG_WEB_SHELL_LAN,
+//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_SHELL, SHEEPDOG_WEB_ADVERTISE,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
@@ -1161,17 +1155,20 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Web.Port = n
 	}
-	// Like DEEPSEEK_API_KEY: an empty env value does not clear a file
-	// value (never logged).
-	if v, ok := lookup("SHEEPDOG_WEB_TOKEN"); ok && v != "" {
-		cfg.Web.Token = v
-	}
-	if v, ok := lookup("SHEEPDOG_WEB_SHELL_LAN"); ok && v != "" {
+	if v, ok := lookup("SHEEPDOG_WEB_SHELL"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("config: SHEEPDOG_WEB_SHELL_LAN=%q: want true or false", v)
+			return fmt.Errorf("config: SHEEPDOG_WEB_SHELL=%q: want true or false", v)
 		}
-		cfg.Web.ShellLAN = b
+		cfg.Web.Shell = b
+	}
+	if v, ok := lookup("SHEEPDOG_WEB_ADVERTISE"); ok && strings.TrimSpace(v) != "" {
+		cfg.Web.Advertise = nil
+		for _, a := range strings.Split(v, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				cfg.Web.Advertise = append(cfg.Web.Advertise, a)
+			}
+		}
 	}
 	if err := applyCLIEnv(cfg, lookup); err != nil {
 		return err
@@ -1470,8 +1467,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s herdr.bin=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s anthropic.api_key=%s anthropic.base_url=%s anthropic.effort=%s anthropic.event_effort=%s anthropic.fallbacks=%t web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.Herdr.Bin, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, setOrUnset(c.Anthropic.APIKey), c.Anthropic.BaseURL, c.Anthropic.Effort, c.Anthropic.EventEffort, c.Anthropic.Fallbacks, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s herdr.bin=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s anthropic.api_key=%s anthropic.base_url=%s anthropic.effort=%s anthropic.event_effort=%s anthropic.fallbacks=%t web.bind=%s web.port=%d web.shell=%t web.advertise=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.mode=%s push.relay.url=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
+		c.DataDir, c.Herdr.Socket, c.Herdr.Bin, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, setOrUnset(c.Anthropic.APIKey), c.Anthropic.BaseURL, c.Anthropic.Effort, c.Anthropic.EventEffort, c.Anthropic.Fallbacks, c.Web.Bind, c.Web.Port, c.Web.Shell, strings.Join(c.Web.Advertise, ","), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, c.Push.EffectiveMode(), c.Push.Relay.URL, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
 }
 
 // compatString renders the [[brain.openai_compat]] entries for String,

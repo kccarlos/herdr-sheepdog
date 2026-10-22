@@ -61,13 +61,10 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	out = append(out, CheckOpenAIVoiceKey(ctx, o.Endpoints, cfg.Voice.OpenAI.APIKey))
 	out = append(out, CheckVoice(cfg))
 	out = append(out, CheckPort(ctx, o.PortClient, cfg.Web.Bind, cfg.Web.Port))
-	out = append(out, CheckBindToken(cfg.Web))
+	out = append(out, CheckBind(cfg.Web))
 	out = append(out, CheckPush(ctx, o.Endpoints, cfg.Push))
 	if o.EnvPath != "" {
 		out = append(out, CheckSecretFile("env file", o.EnvPath))
-	}
-	if o.ConfigPath != "" && cfg.Web.Token != "" {
-		out = append(out, CheckSecretFile("config file", o.ConfigPath))
 	}
 	return out
 }

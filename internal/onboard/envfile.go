@@ -2,8 +2,6 @@ package onboard
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -145,24 +143,6 @@ func EditEnvFile(path string, set map[string]string, del []string) error {
 	return os.Chmod(path, 0o600)
 }
 
-// NewToken returns a random web token: 32 bytes, base64url (43
-// characters).
-func NewToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// HasToken reports whether a web token exists anywhere the daemon reads
-// one: the process environment, the env file (env) or the config.
-// A token that exists is never replaced silently: the phone is paired
-// with it (`sheepdog init`, the setup page's "new token" is explicit).
-func HasToken(env map[string]string, cfg config.Config) bool {
-	return strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" || strings.TrimSpace(env["SHEEPDOG_WEB_TOKEN"]) != "" || cfg.Web.Token != ""
-}
-
 // WriteConfig writes a new config file: the commented template with the
 // chosen orchestrator (gemini, deepseek or compat) filled in, mode 0600.
 func WriteConfig(path, orch string, compat *config.OpenAICompat) error {
@@ -195,37 +175,19 @@ func CompatTOML(c config.OpenAICompat) string {
 }
 
 // PhoneBind is the web.bind phone access sets: every address of this
-// computer (its LAN and Tailscale ones), behind the web token. web.bind
-// is one address, so this is the narrowest setting that covers both.
+// computer (its LAN and Tailscale ones), TLS only and paired devices
+// only. web.bind is one address, so this is the narrowest setting that
+// covers both.
 const PhoneBind = "0.0.0.0"
 
 // SetPhoneAccess writes phone access to the env file: enable sets
-// SHEEPDOG_WEB_BIND to PhoneBind (off: back to loopback) and creates a
-// token when none exists anywhere (HasToken); newToken replaces the
-// token, which a paired phone must then scan again. It reports whether
-// a token was written. cfg is the config in force (its token counts).
-func SetPhoneAccess(envPath string, cfg config.Config, enable, newToken bool) (bool, error) {
-	saved, err := ReadEnvFile(envPath)
-	if err != nil {
-		return false, err
-	}
-	set := map[string]string{"SHEEPDOG_WEB_BIND": config.DefaultWebBind}
+// SHEEPDOG_WEB_BIND to PhoneBind, off goes back to loopback.
+func SetPhoneAccess(envPath string, enable bool) error {
+	bind := config.DefaultWebBind
 	if enable {
-		set["SHEEPDOG_WEB_BIND"] = PhoneBind
+		bind = PhoneBind
 	}
-	created := false
-	if newToken || (enable && !HasToken(saved, cfg)) {
-		if newToken && saved["SHEEPDOG_WEB_TOKEN"] == "" && strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" && os.Getenv("SHEEPDOG_WEB_TOKEN") == cfg.Web.Token {
-			return false, errors.New("the token comes from the environment variable SHEEPDOG_WEB_TOKEN, not the env file; change it there")
-		}
-		tok, err := NewToken()
-		if err != nil {
-			return false, err
-		}
-		set["SHEEPDOG_WEB_TOKEN"] = tok
-		created = true
-	}
-	return created, UpsertEnvFile(envPath, set)
+	return UpsertEnvFile(envPath, map[string]string{"SHEEPDOG_WEB_BIND": bind})
 }
 
 // SetVertexConfig writes project and, when not empty, location into the

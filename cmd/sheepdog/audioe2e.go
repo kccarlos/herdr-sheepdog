@@ -26,7 +26,6 @@ func printAudioE2EUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --url URL          daemon base URL (default http://127.0.0.1:7799)")
-	fprintln(w, "  --token T          web.token (or SHEEPDOG_WEB_TOKEN)")
 	fprintln(w, "  --scenarios FILE   scenarios (default testdata/audio-e2e/scenarios.json)")
 	fprintln(w, "  --only LIST        comma-separated scenario names to run")
 	fprintln(w, "  --cache DIR        rendered speech cache (default $TMPDIR/sheepdog-audio-e2e)")
@@ -45,7 +44,6 @@ func runAudioE2E(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printAudioE2EUsage(stderr) }
 	base := fs.String("url", "http://127.0.0.1:7799", "daemon URL")
-	token := fs.String("token", os.Getenv("SHEEPDOG_WEB_TOKEN"), "web token")
 	scen := fs.String("scenarios", filepath.Join("testdata", "audio-e2e", "scenarios.json"), "scenarios file")
 	only := fs.String("only", "", "scenario names")
 	cache := fs.String("cache", filepath.Join(os.TempDir(), "sheepdog-audio-e2e"), "speech cache")
@@ -81,7 +79,7 @@ func runAudioE2E(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			want[n] = true
 		}
 	}
-	opts := audioe2e.Options{BaseURL: url, Token: *token, CacheDir: *cache, FixtureDir: filepath.Join(filepath.Dir(filepath.Dir(*scen)), "herdr"),
+	opts := audioe2e.Options{BaseURL: url, CacheDir: *cache, FixtureDir: filepath.Join(filepath.Dir(filepath.Dir(*scen)), "herdr"),
 		Provider: provider, DefaultVoice: file.Voice, Save: *save, Log: stderr, FloorDBFS: *floor, RecordAudioTimeline: *timeline}
 	var results []audioe2e.Result
 	failed := false

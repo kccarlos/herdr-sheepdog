@@ -128,23 +128,22 @@ func TestSetupPageFlowEndToEnd(t *testing.T) {
 		t.Fatalf("checks: %d %s", code, body)
 	}
 
-	// 4. Phone: every address, a token, the QR code; "Connected" later.
+	// 4. Phone: every address, the one-time QR code; "Connected" later.
 	boot = state().Boot
-	if code, body := post("/api/setup/phone", `{"enable":true}`); code != 200 || !strings.Contains(body, `"token_created": true`) {
+	if code, body := post("/api/setup/phone", `{"enable":true}`); code != 200 || strings.Contains(body, "token") {
 		t.Fatalf("phone: %d %s", code, body)
 	}
 	next()
 	waitFor(t, func() bool { st := state(); return st.Boot != boot && st.Phone.Enabled })
-	if st := state(); !st.Phone.HasToken || st.Phone.Bind != "0.0.0.0" {
+	if st := state(); !st.Phone.Shell || st.Phone.Bind != "0.0.0.0" {
 		t.Errorf("phone %+v", st.Phone)
 	}
 	if code, body := get("/api/setup/qr.svg"); code != 200 && code != 409 || code == 200 && !strings.Contains(body, "<svg") {
 		t.Errorf("qr: %d", code)
 	}
-	// The voice page's API now needs the token; the setup login sets the
-	// cookie for this browser.
-	if code, _ := get("/api/state"); code != 401 {
-		t.Errorf("/api/state without the token: %d", code)
+	// This computer itself still needs no device key.
+	if code, _ := get("/api/state"); code != 200 {
+		t.Errorf("/api/state from this computer: %d", code)
 	}
 
 	// `sheepdog setup` and `open setup` with the daemon running.

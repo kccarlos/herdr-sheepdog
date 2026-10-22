@@ -229,9 +229,12 @@ type Deps struct {
 	// windows (docs/dev/term-contract.md), and the `term` feature; nil
 	// (herdr mock mode) serves neither.
 	Term *TermDeps
-	// ShellLAN is config web.shell_lan: a plain-LAN client may open the
-	// phone shell (loopback and Tailscale always may).
-	ShellLAN bool
+	// Shell is config web.shell: paired devices may open the phone shell
+	// and send attachments (on by default; the setup page switches it).
+	Shell bool
+	// Advertise is config web.advertise: more host:port addresses the
+	// pairing code lists after the daemon's own (a router's port forward).
+	Advertise []string
 
 	// DataDir is the daemon's data directory; attachments are kept in its
 	// attachments/ folder. Empty answers the attachments route with 503.
@@ -243,13 +246,6 @@ type Deps struct {
 	// served on the same port as plain HTTP; nil makes a fresh one in
 	// memory (tests).
 	TLS *TLSIdentity
-
-	// Token, when non-empty, is the bearer token (config web.token) every
-	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
-	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
-	// /events, or the sheepdog_token cookie POST /api/login sets. Empty
-	// means no auth: every route is public, as in v1.
-	Token string
 }
 
 // Server is the HTTP server. Create with New, then Listen + Serve.
@@ -259,11 +255,20 @@ type Server struct {
 	mux  *http.ServeMux
 	hub  *hub
 	term *termServer
-	// shellLAN is config web.shell_lan, live: the setup page switches it
+	// shellOn is config web.shell, live: the setup page switches it
 	// without a restart (shell.go). kindHook, when set, classifies a
 	// request's peer in place of remoteKind (tests).
-	shellLAN atomic.Bool
+	shellOn  atomic.Bool
 	kindHook func(remote string) string
+
+	// devices, auth, enroll and live are device auth
+	// (docs/dev/design/security.md): the paired devices, open challenges
+	// and tickets, the one-time pairing code, and every long-lived
+	// connection by device.
+	devices *deviceStore
+	auth    *authState
+	enroll  enrollCodes
+	live    liveConns
 	// audio records the voice's output chunks for user.feedback
 	// snapshots (POST /api/feedback).
 	audio *feedback.AudioLog
@@ -343,7 +348,12 @@ func New(deps Deps) (*Server, error) {
 		ch.SetCardSink(cardSink{s.hub})
 	}
 	s.term = newTermServer(s, deps.Term)
-	s.shellLAN.Store(deps.ShellLAN)
+	s.shellOn.Store(deps.Shell)
+	devs, err := loadDeviceStore(deps.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	s.devices, s.auth = devs, newAuthState()
 	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err
@@ -363,9 +373,6 @@ const (
 	accessPublic access = iota
 	// accessDevice: a paired device, or this computer itself.
 	accessDevice
-	// accessUpgrade: accessDevice for /ws, /events and /term, which
-	// also take ?token= (a browser cannot set a header there).
-	accessUpgrade
 	// accessLoopback: this computer only (debug and internal routes).
 	accessLoopback
 	// accessSetup: this computer only, and a change only from this
@@ -395,9 +402,7 @@ func (s *Server) routes() error {
 func (s *Server) wrap(a access, h http.HandlerFunc) http.HandlerFunc {
 	switch a {
 	case accessDevice:
-		return s.authFunc(h, false)
-	case accessUpgrade:
-		return s.authFunc(h, true)
+		return s.authFunc(h)
 	case accessLoopback:
 		return s.loopbackOnly(h)
 	case accessSetup:
@@ -440,13 +445,19 @@ func (s *Server) routeTable() ([]route, error) {
 		// Public: a client has to reach /api/hello to learn it found a
 		// sheepdog daemon before it can authenticate at all.
 		route{"GET /api/hello", accessPublic, s.handleHello},
-		route{"POST /api/login", accessPublic, s.handleLogin},
+		// Pairing and signing in: the one-time code and the device's
+		// signature are the credentials.
+		route{"GET /api/auth/challenge", accessPublic, s.handleChallenge},
+		route{"POST /api/auth/session", accessPublic, s.handleSession},
+		route{"POST /api/devices/enroll", accessPublic, s.handleEnroll},
 
 		// A paired device: the app and the voice page. /ws, /events and
 		// /term authenticate before the upgrade like any other request.
-		route{"GET /events", accessUpgrade, s.handleEvents},
-		route{"GET /ws", accessUpgrade, s.hub.handle},
-		route{"GET /term", accessUpgrade, s.handleTerm},
+		route{"GET /events", accessDevice, s.handleEvents},
+		route{"GET /ws", accessDevice, s.hub.handle},
+		route{"GET /term", accessDevice, s.handleTerm},
+		route{"GET /api/devices/self", accessDevice, s.handleDeviceSelf},
+		route{"DELETE /api/devices/self", accessDevice, s.handleDeviceUnpair},
 		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
 		route{"GET /api/state", accessDevice, s.handleState},
 		route{"GET /api/agents", accessDevice, s.handleAgents},
@@ -491,6 +502,11 @@ func (s *Server) routeTable() ([]route, error) {
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
 		route{"GET /api/pair/qr.svg", accessLoopback, s.handlePairQR},
+		route{"GET /api/devices", accessLoopback, s.handleDevices},
+		route{"PATCH /api/devices/{id}", accessSetup, s.handleDeviceRename},
+		route{"DELETE /api/devices/{id}", accessSetup, s.handleDeviceRevoke},
+		route{"POST /api/devices/disconnect-all", accessSetup, s.handleDisconnectAll},
+		route{"POST /api/devices/reset-pairing", accessSetup, s.handleResetPairing},
 		route{"POST /api/inject/blocked", accessLoopback, s.handleInjectBlocked},
 		route{"POST /api/inject/pane", accessLoopback, s.handleInjectPane},
 		route{"POST /api/inject/done", accessLoopback, s.handleInjectDone},

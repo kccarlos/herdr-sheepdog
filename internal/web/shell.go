@@ -13,16 +13,14 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
-	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 	"github.com/kccarlos/herdr-sheepdog/internal/termproto"
 )
 
 // The phone shell (docs/dev/term-contract.md "The plain shell"): a plain
 // shell in a project folder, opened over /term as a herdr tab in the
-// "phone shell" workspace, one per folder and reused. It is gated by the
-// address the request came from: loopback and Tailscale get it; a plain
-// LAN client only when web.shell_lan is on (set on the setup page),
-// because plain-LAN HTTP carries every keystroke in clear text.
+// "phone shell" workspace, one per folder and reused. One switch per
+// computer gates it, web.shell (on by default, set on the setup page),
+// for every paired device on every network.
 
 // ShellWorkspace is the label of the herdr workspace phone shells open in.
 const ShellWorkspace = "phone shell"
@@ -42,16 +40,13 @@ var _ ShellHost = (*herdr.Client)(nil)
 // nor a tracked agent's folder.
 var errOutsideProjects = errors.New("that folder is outside the project directories")
 
-// shellAllowed is the gate for a client of the given remote kind.
-func (t *termServer) shellAllowed(kind string) bool {
+// shellAllowed is the gate: herdr can open shells and the computer's
+// shell switch is on.
+func (t *termServer) shellAllowed() bool {
 	if t == nil || t.deps.Shells == nil {
 		return false
 	}
-	switch kind {
-	case "loopback", pair.KindTailscale:
-		return true
-	}
-	return t.s.shellLAN.Load()
+	return t.s.shellOn.Load()
 }
 
 // shellDir resolves the folder a shell asks for: empty is the first
@@ -215,8 +210,8 @@ func (s *Server) handleShellClose(w http.ResponseWriter, r *http.Request) {
 	t := s.term
 	pane := r.PathValue("pane_id")
 	kind := s.kindOf(r.RemoteAddr)
-	if !t.shellAllowed(kind) {
-		writeError(w, http.StatusForbidden, "the shell is off on this network")
+	if !t.shellAllowed() {
+		writeError(w, http.StatusForbidden, "the shell is off on this computer (the setup page switches it)")
 		return
 	}
 	if !t.isShell(pane) {
@@ -245,11 +240,10 @@ func (s *Server) kindOf(remote string) string {
 	return remoteKind(remote)
 }
 
-// handleSetupShellLAN is POST /api/setup/shell-lan {"enable"} (loopback
-// only): the setup page's "Shell on this network" switch
-// (web.shell_lan). It is written to the env file and applies at once,
-// with no restart.
-func (s *Server) handleSetupShellLAN(w http.ResponseWriter, r *http.Request) {
+// handleSetupShell is POST /api/setup/shell {"enable"} (loopback only):
+// the setup page's "Shell from your phone" switch (web.shell). It is
+// written to the env file and applies at once, with no restart.
+func (s *Server) handleSetupShell(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enable bool `json:"enable"`
 	}
@@ -257,11 +251,11 @@ func (s *Server) handleSetupShellLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if err := onboard.UpsertEnvFile(s.deps.Setup.EnvPath, map[string]string{"SHEEPDOG_WEB_SHELL_LAN": strconv.FormatBool(req.Enable)}); err != nil {
+	if err := onboard.UpsertEnvFile(s.deps.Setup.EnvPath, map[string]string{"SHEEPDOG_WEB_SHELL": strconv.FormatBool(req.Enable)}); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.shellLAN.Store(req.Enable)
-	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "shell_lan", "enable": req.Enable})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "shell_lan": req.Enable})
+	s.shellOn.Store(req.Enable)
+	s.log.Log(logSource, "web.setup_saved", "", map[string]any{"step": "shell", "enable": req.Enable})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "shell": req.Enable})
 }

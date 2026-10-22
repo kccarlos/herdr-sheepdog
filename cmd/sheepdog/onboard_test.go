@@ -91,11 +91,8 @@ func TestInitNonInteractiveNew(t *testing.T) {
 		t.Error("the key was printed")
 	}
 	env, err := onboard.ReadEnvFile(envPath)
-	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey || len(env["SHEEPDOG_WEB_TOKEN"]) < 40 {
+	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey || env["SHEEPDOG_WEB_TOKEN"] != "" {
 		t.Fatalf("env file = %v (%v)", len(env), err)
-	}
-	if strings.Contains(out, env["SHEEPDOG_WEB_TOKEN"]) {
-		t.Error("the token was printed")
 	}
 	if mode(t, envPath) != 0o600 || mode(t, cfgPath) != 0o600 {
 		t.Errorf("modes %o %o", mode(t, envPath), mode(t, cfgPath))

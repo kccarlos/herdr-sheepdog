@@ -207,8 +207,8 @@ func (s *Server) handleDeleteCommand(w http.ResponseWriter, r *http.Request) {
 // handleRunCommand is POST /api/spaces/{id}/commands/{cid}/run: the
 // command runs in a new tab of the space; behind the phone shell's gate.
 func (s *Server) handleRunCommand(w http.ResponseWriter, r *http.Request) {
-	if !s.term.shellAllowed(s.kindOf(r.RemoteAddr)) {
-		writeError(w, http.StatusForbidden, "running commands is off on this network, like the shell")
+	if !s.term.shellAllowed() {
+		writeError(w, http.StatusForbidden, "running commands is off on this computer, like the shell")
 		return
 	}
 	cid := r.PathValue("cid")
