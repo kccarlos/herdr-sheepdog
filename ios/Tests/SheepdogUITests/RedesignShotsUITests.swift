@@ -106,6 +106,15 @@ final class RedesignShotsUITests: XCTestCase {
         shot("conversation-top")
     }
 
+    func testBanners() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery", "banners"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("banners")
+    }
+
     func testEmptyConversation() throws {
         // A saved address with nothing behind it: no history, no banner
         // until the orb is tapped.
