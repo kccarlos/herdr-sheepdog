@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import SheepdogKit
 
@@ -55,7 +56,7 @@ final class LiveActivityContentTests: XCTestCase {
 
     func testPhaseRawValuesAreTheWireStrings() {
         XCTAssertEqual(LiveActivityContent.Phase.allCases.map(\.rawValue),
-                       ["connecting", "reconnecting", "listening", "speaking", "thinking", "muted", "locked", "paused", "no_microphone", "voice_off"])
+                       ["connecting", "reconnecting", "listening", "speaking", "thinking", "muted", "locked", "paused", "no_microphone", "voice_off", "away"])
     }
 
     // MARK: - Counts and rows
@@ -200,6 +201,37 @@ final class LiveActivityContentTests: XCTestCase {
         XCTAssertEqual(decoded.phase, .listening)
         XCTAssertEqual(decoded.waiting, 1)
         XCTAssertEqual(decoded.rows, [])
+    }
+
+    // MARK: - Pushed updates
+
+    /// What the daemon pushes (internal/push ActivityState): the phase and
+    /// counts in the clear, the rows sealed with the phone's content key.
+    func testOpensThePushedRowsWithTheContentKey() throws {
+        let key = SymmetricKey(size: .bits256)
+        let keyData = key.withUnsafeBytes { Data($0) }
+        let rows = #"{"rows":[{"pane":"w1:p1","agent":"auth-fix","question":"Run npm test?"}]}"#
+        let box = try AES.GCM.seal(Data(rows.utf8), using: key)
+        let c = (box.ciphertext + box.tag).base64EncodedString()
+        let n = box.nonce.withUnsafeBytes { Data($0) }.base64EncodedString()
+        let pushed = #"{"phase":"away","muted":false,"rows":[],"waiting":2,"working":1,"done":0,"sealed":{"c":"\#(c)","n":"\#(n)"}}"#
+        let content = try JSONDecoder().decode(LiveActivityContent.self, from: Data(pushed.utf8))
+        XCTAssertEqual(content.phase, .away)
+        XCTAssertEqual(content.title, "Not listening")
+        XCTAssertEqual(content.rows, [])
+        XCTAssertNotNil(content.sealed)
+
+        let opened = content.opened(key: keyData)
+        XCTAssertNil(opened.sealed)
+        XCTAssertEqual(opened.rows.map(\.agent), ["auth-fix"])
+        XCTAssertEqual(opened.rows.first?.url.absoluteString, "sheepdog://window/w1:p1")
+        XCTAssertEqual(opened.waiting, 2)
+        XCTAssertEqual(opened.visibleRows(slots: 3).more, 1)
+
+        // No key, or the wrong one: the counts still show.
+        XCTAssertEqual(content.opened(key: nil), content)
+        XCTAssertEqual(content.opened(key: Data(repeating: 7, count: 32)), content)
+        XCTAssertEqual(content.visibleRows(slots: 3).more, 2)
     }
 
     func testRefreshComesWellBeforeStale() {

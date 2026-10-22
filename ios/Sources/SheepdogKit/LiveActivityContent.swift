@@ -29,6 +29,9 @@ public struct LiveActivityContent: Codable, Hashable, Sendable {
         case noMicrophone = "no_microphone"
         /// The daemon has no voice session.
         case voiceOff = "voice_off"
+        /// The app has been away (suspended or closed) and the daemon
+        /// pushed this update: the voice is not listening.
+        case away
     }
 
     /// One agent waiting for an answer. Tapping it opens the agent's
@@ -84,8 +87,23 @@ public struct LiveActivityContent: Codable, Hashable, Sendable {
     public var waiting: Int
     public var working: Int
     public var done: Int
+    /// The rows of a pushed update, sealed with this phone's push content
+    /// key (`opened(key:)`), so the relay and Apple see only the phase and
+    /// the counts.
+    public var sealed: Sealed?
 
-    public init(phase: Phase, muted: Bool = false, computer: String? = nil, rows: [Row] = [], waiting: Int? = nil, working: Int = 0, done: Int = 0) {
+    /// AES-256-GCM output as the daemon seals notifications: `c` is the
+    /// ciphertext with the tag appended, `n` the nonce, standard base64.
+    public struct Sealed: Codable, Hashable, Sendable {
+        public var c: String
+        public var n: String
+        public init(c: String, n: String) {
+            self.c = c
+            self.n = n
+        }
+    }
+
+    public init(phase: Phase, muted: Bool = false, computer: String? = nil, rows: [Row] = [], waiting: Int? = nil, working: Int = 0, done: Int = 0, sealed: Sealed? = nil) {
         self.phase = phase
         self.muted = muted
         self.computer = computer
@@ -93,6 +111,28 @@ public struct LiveActivityContent: Codable, Hashable, Sendable {
         self.waiting = max(waiting ?? rows.count, self.rows.count)
         self.working = max(0, working)
         self.done = max(0, done)
+        self.sealed = sealed
+    }
+
+    /// The content with a pushed update's sealed rows opened under `key`
+    /// (the push content key the app stored in the App Group keychain).
+    /// Without a key, or with rows that do not open, it stays as it is:
+    /// the counts still show.
+    public func opened(key: Data?) -> LiveActivityContent {
+        guard let sealed, let key,
+              let object = try? PushE2E.open(ciphertext: sealed.c, nonce: sealed.n, key: key),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let inner = try? JSONDecoder().decode(SealedRows.self, from: data)
+        else { return self }
+        var out = self
+        out.rows = Array(inner.rows.prefix(Self.maxRows))
+        out.waiting = max(out.waiting, out.rows.count)
+        out.sealed = nil
+        return out
+    }
+
+    private struct SealedRows: Decodable {
+        var rows: [Row]
     }
 
     public static let maxRows = 3
@@ -210,6 +250,7 @@ extension LiveActivityContent {
         case .paused: return "Paused by iOS"
         case .noMicrophone: return "No microphone"
         case .voiceOff: return "Voice is off"
+        case .away: return "Not listening"
         }
     }
 
@@ -271,6 +312,7 @@ extension LiveActivityContent {
         case .paused: sentence = "iOS paused the audio. Open Sheepdog to resume"
         case .noMicrophone: sentence = "No microphone. \(voiceName) cannot hear you"
         case .voiceOff: sentence = "The computer has no voice session"
+        case .away: sentence = "\(voiceName) is not listening. Open Sheepdog to talk"
         }
         if let computer { sentence += ", on \(computer)" }
         if muted, phase == .speaking || phase == .thinking { sentence += ". Microphone muted" }
@@ -295,7 +337,7 @@ extension LiveActivityContent {
 
 extension LiveActivityContent {
     enum CodingKeys: String, CodingKey {
-        case phase, muted, computer, rows, waiting, working, done
+        case phase, muted, computer, rows, waiting, working, done, sealed
     }
 
     /// Lenient where it costs nothing: ActivityKit drops a whole update
@@ -311,7 +353,8 @@ extension LiveActivityContent {
             rows: try c.decodeIfPresent([Row].self, forKey: .rows) ?? [],
             waiting: try c.decodeIfPresent(Int.self, forKey: .waiting),
             working: try c.decodeIfPresent(Int.self, forKey: .working) ?? 0,
-            done: try c.decodeIfPresent(Int.self, forKey: .done) ?? 0
+            done: try c.decodeIfPresent(Int.self, forKey: .done) ?? 0,
+            sealed: try? c.decodeIfPresent(Sealed.self, forKey: .sealed)
         )
     }
 }

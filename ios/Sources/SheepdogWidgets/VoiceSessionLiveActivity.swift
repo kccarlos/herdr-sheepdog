@@ -13,7 +13,7 @@ import WidgetKit
 struct VoiceSessionLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceSessionAttributes.self) { context in
-            VoiceSessionLockScreenView(state: context.state, voiceName: context.attributes.voiceName, isStale: context.isStale)
+            VoiceSessionLockScreenView(state: context.state.openedWithStoredKey(), voiceName: context.attributes.voiceName, isStale: context.isStale)
                 .activityBackgroundTint(ActivityPalette.card)
                 .activitySystemActionForegroundColor(ActivityPalette.ink)
         } dynamicIsland: { context in
@@ -250,7 +250,7 @@ struct PhaseLook {
             symbol = "waveform"; tint = ActivityPalette.idle; glyph = .white
         case .connecting, .reconnecting:
             symbol = "arrow.triangle.2.circlepath"; tint = ActivityPalette.idle; glyph = .white
-        case .locked, .paused:
+        case .locked, .paused, .away:
             symbol = "pause.fill"; tint = ActivityPalette.idle; glyph = .white
         case .noMicrophone, .voiceOff:
             symbol = "mic.slash"; tint = ActivityPalette.idle; glyph = .white
@@ -282,5 +282,13 @@ enum ActivityPalette {
 
     private static func rgb(_ hex: UInt32) -> UIColor {
         UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+
+extension LiveActivityContent {
+    /// A pushed update's rows, opened with the push content key the app
+    /// stored in the App Group keychain (the widget shares the group).
+    func openedWithStoredKey() -> LiveActivityContent {
+        sealed == nil ? self : opened(key: PushContentKeyStore().key())
     }
 }

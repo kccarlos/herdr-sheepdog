@@ -581,12 +581,24 @@ behind is ended at the next launch and goes stale (dimmed, "May have
 ended") after 15 minutes. It does not run without a voice session
 (docs/dev/design/app-redesign.md, closed question 9).
 
+**While the app is away.** The activity is requested with
+`pushType: .token`; every token iOS issues goes to the daemon
+(`POST /api/push/activity`, `DELETE` when the activity ends). After 30
+seconds without a connection from this phone the daemon pushes each
+change (phase `away`, "Not listening"), with the rows sealed under the
+push content key (`sealed {c, n}`, `rows: []` in the clear). The widget
+joins the App Group so `openedWithStoredKey()` can read that key from the
+group keychain and open the rows; without it the banner shows the counts
+("2 agents waiting"). The daemon side is the daemon's docs/dev/push.md,
+"Live Activity updates".
+
 **Limits and cost.** iOS ends an activity after 8 hours (it can stay on
 the lock screen up to 4 more), and an update, local or pushed, is at most
-4 KB. Local updates cost nothing; pushed updates are budgeted by iOS
-(priority 10 sparingly, priority 5 otherwise).
+4 KB. Local updates cost nothing; pushed ones go through the relay like
+notifications, priority 10 only for a new waiting agent (iOS budgets
+those) and 5 otherwise.
 
-`-sheepdogLiveActivityGallery one|several|many|quiet|stale` draws the
+`-sheepdogLiveActivityGallery one|several|many|quiet|away|away-counts|stale` draws the
 widget's own banner on a stand-in lock screen for screenshots (a simulator
 cannot be locked from a script); `-sheepdogDemoLiveActivity <state>`
 starts a real activity with sample rows and no session.

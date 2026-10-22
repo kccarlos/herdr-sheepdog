@@ -270,6 +270,8 @@ type Server struct {
 	auth    *authState
 	enroll  enrollCodes
 	live    liveConns
+	// activityWatch backs the Live Activity pushes (activity.go).
+	activityWatch activityWatch
 	// limits rate-limits sign-in and pairing per source address; conns
 	// caps open non-loopback connections (limits.go).
 	limits *rateLimiter
@@ -502,6 +504,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
 		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
 		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
+		route{"POST /api/push/activity", accessDevice, s.handlePushActivity},
+		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
 		route{"POST /api/feedback", accessDevice, s.handleFeedback},
 
@@ -667,6 +671,7 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	sl := newSniffListener(capped, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(sl) }()
+	go s.watchActivities(ctx)
 	select {
 	case err := <-errc:
 		return err

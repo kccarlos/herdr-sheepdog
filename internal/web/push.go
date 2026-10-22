@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -15,6 +16,11 @@ type PushService interface {
 	Status() push.Status
 	ForgetDevices(ids []string) error
 	Notify(push.Notification)
+	// Live Activity push tokens and updates (activity.go).
+	RegisterActivity(deviceID, token, environment string) error
+	ForgetActivity(deviceID string)
+	Activities() []push.Activity
+	UpdateActivity(ctx context.Context, deviceID string, u push.ActivityUpdate) error
 }
 
 // pushRegisterRequest is the body of POST and DELETE /api/push/register.
