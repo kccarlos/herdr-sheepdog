@@ -133,6 +133,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(wsReadLimit)
 	c := newClient(h, conn, r.RemoteAddr, h.s.deps.OutQueue)
+	defer h.s.track(r, func() { c.closeAfterFlush(closeDeviceRevoked, "device_revoked") })()
 
 	h.mu.Lock()
 	h.seq++

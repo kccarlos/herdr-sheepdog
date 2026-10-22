@@ -31,8 +31,8 @@ import (
 
 // Options configure a world.
 type Options struct {
-	// BaseURL is the daemon; Token its web.token, if any.
-	BaseURL, Token string
+	// BaseURL is the daemon (on loopback: no credentials).
+	BaseURL string
 	// FixtureDir is testdata/herdr (screens not in the scenario's own
 	// screens/ directory).
 	FixtureDir string
@@ -400,9 +400,6 @@ func (w *World) post(ctx context.Context, path string, body any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if w.o.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+w.o.Token)
-	}
 	resp, err := w.http.Do(req)
 	if err != nil {
 		return err
@@ -422,9 +419,6 @@ func (w *World) follow(ready chan<- error) {
 	if err != nil {
 		ready <- err
 		return
-	}
-	if w.o.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+w.o.Token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

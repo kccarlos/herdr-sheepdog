@@ -73,8 +73,8 @@ every app of the team; a key from another team is refused by APNs with
 
 ## Device registration (HTTP)
 
-The same auth as every other `/api` route (`web.token`: bearer header or
-the login cookie, [`ws-contract.md`](ws-contract.md) "Auth").
+The same auth as every other `/api` route (a paired device's session
+ticket, [`ws-contract.md`](ws-contract.md) "Auth").
 
 | Route | Body | Answer |
 |---|---|---|

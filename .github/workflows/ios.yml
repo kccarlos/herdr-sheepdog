@@ -151,13 +151,13 @@ jobs:
           # The app asks for the microphone when the session starts.
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
 
-      # Two free ports for the main (--voice=off) and the token daemon, and
+      # Two free ports for the main (--voice=off) and the pair daemon, and
       # a control directory for scripts/fixture-daemon-restarter.sh. The
       # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift).
       - name: Start the fixture daemons
         id: fixture
         run: |
-          read -r port token_port < <(python3 -c '
+          read -r port pair_port < <(python3 -c '
           import socket
           socks = [socket.socket() for _ in range(2)]
           for s in socks: s.bind(("127.0.0.1", 0))
@@ -166,15 +166,15 @@ jobs:
           {
             echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
             echo "SHEEPDOG_FIXTURE_PORT=$port"
-            echo "SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port"
+            echo "SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
             echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
             echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
             echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
-            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
             echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
           } >> "$GITHUB_ENV"
           SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
-            SHEEPDOG_FIXTURE_TOKEN_PORT=$token_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
+            SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
             ios/scripts/fixture-daemons.sh start
 
       # Everything but the two tests that need a fresh restart or the

@@ -26,9 +26,7 @@ DeepSeek / any OpenAI-compatible orchestrator (`[[brain.openai_compat]]`)
 plus a Gemini key for the voice — validates each with a free model-list
 call, and writes the keys to `~/.config/sheepdog/.env` (or `--env-file`)
 and, only when there is none yet, `config.toml` (both mode 0600). A new
-config also gets a random 43-character `SHEEPDOG_WEB_TOKEN`; an existing
-token (in the file, the env file or the environment) is never changed,
-and an existing `config.toml` is never rewritten (init prints the lines to
+an existing `config.toml` is never rewritten (init prints the lines to
 add). Keys are read without echo and never printed. `--non-interactive`
 takes the keys from the environment (for scripts and tests).
 `sheepdog doctor` checks the result and prints one line per check with
@@ -37,12 +35,14 @@ an OpenRouter key's credit where the API shows them; AI Studio does not
 expose its quota), a one-call tool-calling probe on each OpenAI-compatible
 orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
 voice providers, the web port (free, this daemon, or another program),
-the bind/token pairing, push (the relay's health, or the `[push.apns]` key) and the secret files' permissions.
+who can reach the daemon (the bind), push (the relay's health, or the `[push.apns]` key) and the secret files' permissions.
 It exits 1 on any failure.
-`sheepdog pair` prints the QR code the iOS app scans: every LAN and
-Tailscale address the daemon listens on (from `web.bind`/`web.port`) and
-`web.token`, as `sheepdog://pair?u=…&u=…&t=…` (docs/dev/ws-contract.md
-"Pairing"); on a terminal it draws the code in explicit colours, so it scans on a light or a dark theme (`--plain` and `--invert` otherwise). It needs a non-loopback bind.
+`sheepdog pair` asks the running daemon for a new one-time pairing code
+and prints it as a QR code: the app scans it, and so does any phone's
+camera (it opens `/voice` in the browser). It holds the daemon's
+Tailscale and LAN addresses, `web.advertise`, the certificate's
+fingerprint and a code that works once and expires after 10 minutes
+(docs/dev/ws-contract.md "Pairing"); on a terminal it draws the code in explicit colours, so it scans on a light or a dark theme (`--plain` and `--invert` otherwise). It needs a running daemon with a non-loopback bind.
 `sheepdog start` runs the daemon in the background and `stop`, `restart`,
 `status [--json]` and `logs [-f] [-n N]` manage it, with or without the
 login service. `sheepdog service install` runs it as a user service (a
@@ -281,16 +281,17 @@ fails the call and the orchestrator's failover decides.
 
 The HTTP server. Binds to `web.bind:web.port`, loopback only by
 default; a phone on the LAN or over Tailscale can reach it once
-`web.bind` is a non-loopback address and `web.token` is set (docs/remote-access.md).
+`web.bind` is a non-loopback address, over TLS and only as a paired
+device (docs/remote-access.md).
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `web.bind` | `SHEEPDOG_WEB_BIND` | `127.0.0.1` | The listen address. `127.0.0.1` (or `localhost`, `::1`) is loopback: reachable only from this machine, and `web.token` is not required. Any other address — a LAN IP, a Tailscale IP, or `0.0.0.0` for every interface — needs `web.token` set; without one the daemon refuses to start (exit 2, "web.token is required when web.bind is not loopback"). With a non-loopback bind, `daemon.start`'s `urls` and the startup banner list every non-loopback IPv4 address of the host, so you can read the LAN URL off the log instead of guessing which interface it is. |
+| `web.bind` | `SHEEPDOG_WEB_BIND` | `127.0.0.1` | The listen address. `127.0.0.1` (or `localhost`, `::1`) is loopback: reachable only from this machine. Any other address — a LAN IP, a Tailscale IP, or `0.0.0.0` for every interface — lets paired devices in: off this machine the daemon answers TLS only, with its own certificate, and every request needs a paired device's session (docs/dev/ws-contract.md "Auth"). With a non-loopback bind, `daemon.start`'s `urls` and the startup banner list every non-loopback IPv4 address of the host, so you can read the LAN URL off the log instead of guessing which interface it is. |
 | `web.port` | `SHEEPDOG_WEB_PORT` | `7777` | TCP port. `0` with an empty config picks a free port (used by tests). |
-| `web.token` | `SHEEPDOG_WEB_TOKEN` | `""` (unset) | The bearer token every request to `/ws`, `/events` and `/api/*` must present once this is set: `Authorization: Bearer <token>`, `?token=<token>` for `/ws` and `/events` (a browser cannot set a header on a WebSocket or EventSource request), or the cookie `POST /api/login {"token": "…"}` sets so it is typed once — `/voice` and `/debug` show an inline prompt and do this themselves the first time a request answers 401. Missing or wrong: `401 {"error":"unauthorized"}`, logged as `web.unauthorized {path, remote}` (never the token itself). The static pages (`/`, `/voice`, `/debug`, assets) and `GET /api/hello` stay public — they hold no data. Never logged: `config show` prints `set`/`unset`, like the LLM keys. Like `DEEPSEEK_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file` so it never sits in a checked-in file; an empty env value does not clear a file value. |
 | `web.dev` | *(flag only: `serve --dev`)* | `false` | Turns on developer-only routes: `/testdata/<name>.wav` serves the audio fixtures so `/voice?src=file` can use one as a fake microphone. |
 | `web.dev_testdata_dir` | *(TOML only)* | `testdata/audio` (relative to the working directory) | Where `/testdata/` serves from when `web.dev` is on and this is empty. |
-| `web.shell_lan` | `SHEEPDOG_WEB_SHELL_LAN` | `false` | Lets a phone on the plain LAN open the iPhone app's plain shell. The shell is always available from this machine (loopback) and over Tailscale; on the plain LAN it is off unless this is on, because plain-LAN HTTP carries the token and every keystroke in clear text. The setup page's **Shell on this network** switch writes it to the env file and applies it at once, with no restart. See [docs/remote-access.md](docs/remote-access.md#the-phone-shell). |
+| `web.shell` | `SHEEPDOG_WEB_SHELL` | `true` | Lets paired devices open the iPhone app's plain shell and send attachments, on every network. One switch per computer: the setup page's **Shell from your phone** writes it to the env file and applies it at once, with no restart. Off, the shell target of `/term` answers `refused:shell_off`, attachments and wrap-up commands answer `403`; agent windows stay available. See [docs/remote-access.md](docs/remote-access.md#the-phone-shell). |
+| `web.advertise` | `SHEEPDOG_WEB_ADVERTISE` (comma-separated) | `[]` | More `host:port` addresses for the pairing code, listed after the daemon's own Tailscale and LAN addresses: a router's port forward, whose address the daemon cannot see (for example `["100.101.1.1:7777"]`). A host without a port gets `7777`. Subnet routing needs nothing. See [docs/remote-access.md](docs/remote-access.md#through-a-router). |
 
 ## `[cli]`
 
@@ -543,8 +544,8 @@ Nothing is sent anywhere except to the model providers you configured.
 
 | Path | What it holds | Kept |
 |---|---|---|
-| `~/.config/sheepdog/config.toml` | Your settings (mode 0600 when it holds `web.token`). | Until you delete it (`sheepdog uninstall` asks). |
-| `~/.config/sheepdog/.env` | Your API keys and the web token (mode 0600). | Until you delete it. |
+| `~/.config/sheepdog/config.toml` | Your settings (mode 0600). | Until you delete it (`sheepdog uninstall` asks). |
+| `~/.config/sheepdog/.env` | Your API keys (mode 0600). | Until you delete it. |
 | `~/.config/sheepdog/prompts/` | Your prompt overrides, if you made any (`prompts.dir`). | Until you delete it. |
 | `~/.local/share/sheepdog/events/YYYY-MM-DD.jsonl` | The event log: every event of the daemon, including **transcripts of what you said**, the voice's and the orchestrator's answers, and agent screen excerpts. | `events.retention_days` (14 days). `sheepdog data clear --events` deletes it now. |
 | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
@@ -555,7 +556,8 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
-| `~/.local/share/sheepdog/tls/daemon_id` | This computer's id for the apps (16 random bytes; directory 0700, file 0600). No personal data. | Until you delete it; a new one means the apps see a new computer. |
+| `~/.local/share/sheepdog/tls/` | This computer's id for the apps (`daemon_id`, 16 random bytes) and its TLS key and self-signed certificate (`key.pem`, `cert.pem`; during a renewal also `next_key.pem`, `next_cert.pem`). Directory 0700, files 0600. No personal data. | Until you delete it; Reset pairing replaces the key and certificate. |
+| `~/.local/share/sheepdog/devices.json` | The paired phones and browsers: a name, a kind, each one's public key, when it paired and was last seen, and whether it was revoked (mode 0600). No secret: the private keys stay on the devices. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 

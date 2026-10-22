@@ -17,7 +17,6 @@ func fakeSecrets() (config.Config, map[string]string) {
 		"vertex":          "vtx-FAKEVALUEcccccccccccc",
 		"deepseek":        "dsk-FAKEVALUEdddddddddddd",
 		"openai voice":    "oai-FAKEVALUEeeeeeeeeeeee",
-		"web token":       "tok-FAKEVALUEffffffffffff",
 		"openrouter":      "orr-FAKEVALUEgggggggggggg",
 		"env-only secret": "envonly-FAKEVALUEhhhhhhh",
 	}
@@ -26,7 +25,6 @@ func fakeSecrets() (config.Config, map[string]string) {
 	cfg.Gemini.Vertex.APIKey = s["vertex"]
 	cfg.DeepSeek.APIKey = s["deepseek"]
 	cfg.Voice.OpenAI.APIKey = s["openai voice"]
-	cfg.Web.Token = s["web token"]
 	cfg.Brain.OpenAICompat = []config.OpenAICompat{{Name: "openrouter", APIKey: s["openrouter"]}}
 	return cfg, s
 }

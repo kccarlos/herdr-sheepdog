@@ -9,7 +9,6 @@ import XCTest
 /// Run it with `-scheme SheepdogUITests` while the daemon is up.
 final class WalkthroughUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
-    private let tokenDaemon = "http://\(Fixture.tokenHost)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -80,7 +79,8 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
         XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["chip.openSettings"].exists)
+        for _ in 0 ..< 3 where !app.buttons["chip.openSettings"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["chip.openSettings"].waitForExistence(timeout: 5))
         shot(app, "17-voicebar-chip-popover")
         tapWhenReady(app.buttons["Done"], "Done")
 
@@ -161,50 +161,6 @@ final class WalkthroughUITests: XCTestCase {
         // grey "Not connected" of a session that was never opened.
         XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Offline")
         shot(app, "18-voicebar-offline")
-    }
-
-    /// The token path, against a second daemon started with
-    /// `SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_TOKEN=devtoken … --port 7798`.
-    func testTokenIsCheckedBeforeAnythingElse() throws {
-        try XCTSkipUnless(reachable(tokenDaemon), "no token daemon on \(Fixture.tokenHost)")
-        let app = launch()
-
-        let address = app.textFields["settings.address"]
-        XCTAssertTrue(address.waitForExistence(timeout: 10))
-        address.tap()
-        address.typeText(Fixture.tokenHost)
-
-        // A wrong token still passes /api/hello (it is public), so the probe
-        // has to go on to /api/state.
-        let token = app.secureTextFields["settings.token"]
-        token.tap()
-        token.typeText("wrong-token")
-        app.buttons["settings.test"].tap()
-        XCTAssertTrue(
-            app.staticTexts["\(Fixture.tokenHost) turned the token down. Check the token in Settings."].waitForExistence(timeout: 15),
-            "a wrong token must be named as such"
-        )
-        shot(app, "08-settings-wrong-token")
-
-        // The right one connects.
-        token.tap()
-        token.press(forDuration: 1.1)
-        if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
-        token.typeText("devtoken")
-        app.buttons["settings.test"].tap()
-        XCTAssertTrue(app.staticTexts["Token accepted."].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["Auth: token required"].exists)
-        shot(app, "09-settings-token-accepted")
-        tapWhenReady(app.buttons["settings.done"], "Done")
-        dismissPasswordPrompt(app)
-        if !app.buttons["controls.orb"].isHittable {
-            shot(app, "debug-after-token-save")
-        }
-        tapWhenReady(app.buttons["controls.orb"], "Connect")
-        if !app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15) {
-            shot(app, "debug-token-connect")
-            XCTFail("connecting with the right token should reach the daemon")
-        }
     }
 
     // MARK: - Helpers

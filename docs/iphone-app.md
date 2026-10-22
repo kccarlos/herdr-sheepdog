@@ -116,9 +116,8 @@ On the same Wi-Fi this just works. Away from home, see
     reuses. On your computer the shell is a tab in herdr's "phone shell"
     workspace, so you see it there too. Leaving the window keeps the shell
     running, and ⋯ ▸ **Close shell** ends it (it asks first).
-    - The shell works over Tailscale. On plain Wi-Fi it is off unless you
-      turn on **Shell on this network** on your computer's setup page,
-      because plain Wi-Fi carries what you type in clear text
+    - The shell is on unless **Shell from your phone** is turned off on
+      your computer's setup page
       ([remote-access.md](remote-access.md#the-phone-shell)).
     - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
