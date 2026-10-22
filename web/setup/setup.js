@@ -1,12 +1,12 @@
 // The setup page (/setup): the five steps of `sheepdog setup`. It talks
-// only to /api/setup/* (loopback only, no token); keys are posted once
+// only to /api/setup/*, /api/pair and /api/devices (loopback only); keys are posted once
 // and never come back.
 import { datalistOptions, modelsStatus, probeStatus } from './models.js';
 import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from './vertex.js';
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 import { cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
-import { shellLAN, shellLANSaved } from './phone.js';
+import { shellSwitch, shellSaved, countdown, deviceKind, lastSeen } from './phone.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -144,11 +144,11 @@ function render() {
     $('phone-state').className = p.connected ? 'state ok' : 'state';
     $('phone-state').textContent = p.connected ? '✓ connected' : 'on';
     if (!$('qr').getAttribute('src') || $('qr').dataset.boot !== s.boot) {
-      $('qr').src = '/api/setup/qr.svg?b=' + encodeURIComponent(s.boot);
       $('qr').dataset.boot = s.boot;
+      showCode(false);
     }
     setResult($('phone-connected'), p.connected ? 'ok' : 'wait', p.connected ? 'Connected ✓ (' + p.remote + ')' : 'Waiting for the phone…');
-    $('addresses').textContent = p.addresses.length ? p.explain + ' (' + p.addresses.map((a) => a.url).join(', ') + ')' : 'No network address found: is this computer on Wi-Fi?';
+    $('addresses').textContent = p.addresses.length ? p.explain + ' (' + p.addresses.map((a) => a.url.replace('https://', '')).join(', ') + ')' : 'No network address found: is this computer on Wi-Fi?';
     const tf = $('testflight');
     tf.textContent = '';
     if (s.links.testflight) {
@@ -165,10 +165,11 @@ function render() {
     } else {
       hint.append('To use the app away from home, install Tailscale on this computer and your phone. More: ', doc);
     }
-    const sh = shellLAN(p);
-    $('shell-lan-box').classList.toggle('hidden', !sh.show);
-    $('shell-lan').checked = sh.checked;
-    if (!$('shell-lan').disabled) $('shell-lan-note').textContent = sh.note;
+    const sh = shellSwitch(p);
+    $('shell-box').classList.toggle('hidden', !sh.show);
+    $('shell-on').checked = sh.checked;
+    if (!$('shell-on').disabled) $('shell-note').textContent = sh.note;
+    loadDevices();
   } else {
     $('phone-state').textContent = '';
   }
@@ -738,25 +739,84 @@ async function saveService() {
   if (!state.service.installed) { $('service-msg').textContent = 'The service did not install: see `sheepdog logs`.'; $('save-service').disabled = false; }
 }
 
-// setShellLAN saves the "Shell on this network" switch (web.shell_lan); it
+// setShell saves the "Shell from your phone" switch (web.shell); it
 // applies at once, with no restart.
-async function setShellLAN(on) {
-  const box = $('shell-lan');
+async function setShell(on) {
+  const box = $('shell-on');
   box.disabled = true;
-  const r = await api('shell-lan', { enable: on }).catch((e) => ({ error: String(e) }));
+  const r = await api('shell', { enable: on }).catch((e) => ({ error: String(e) }));
   box.disabled = false;
-  if (r.error) { box.checked = !on; $('shell-lan-note').textContent = shellLANSaved(r); return; }
+  if (r.error) { box.checked = !on; $('shell-note').textContent = shellSaved(r); return; }
   await loadState();
 }
 
-async function setPhone(enable, newToken, msgEl) {
+async function setPhone(enable, msgEl) {
   msgEl.textContent = enable ? 'Turning phone access on…' : 'Saving…';
   const old = state.boot;
-  const r = await api('phone', { enable, new_token: newToken }).catch((e) => ({ error: String(e) }));
+  const r = await api('phone', { enable }).catch((e) => ({ error: String(e) }));
   if (r.error) { msgEl.textContent = r.error; return; }
   await waitForReload(old, 20000);
-  await api('login', {});
-  msgEl.textContent = r.token_created ? 'A new token was created (inside the code; never shown).' : '';
+  msgEl.textContent = '';
+}
+
+// The one-time pairing code: GET /api/pair says when it expires, the QR
+// shows the same code; fresh asks for a new one.
+let codeExpires = '';
+async function showCode(fresh) {
+  const r = await fetch('/api/pair' + (fresh ? '?new=1' : ''), { cache: 'no-store' }).then((x) => x.json()).catch(() => ({}));
+  codeExpires = r.expires || '';
+  $('qr').src = '/api/pair/qr.svg?t=' + Date.now();
+  tickCode();
+}
+
+function tickCode() {
+  const left = countdown(codeExpires, Date.now());
+  const el = $('code-expiry');
+  if (!el) return;
+  el.textContent = left ? 'Works once, for ' + left + '.' : 'This code has expired.';
+  $('qr').classList.toggle('expired', !left);
+}
+
+// Devices: the paired phones and browsers, each with rename and revoke.
+async function loadDevices() {
+  const r = await fetch('/api/devices', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+  if (!r) return;
+  const list = $('devices');
+  const key = JSON.stringify(r.devices.map((d) => [d.id, d.name, d.last_seen]));
+  if (list.dataset.key === key) return;
+  list.dataset.key = key;
+  list.textContent = '';
+  for (const d of r.devices) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'name'; name.textContent = d.name;
+    const meta = document.createElement('span');
+    meta.className = 'meta'; meta.textContent = deviceKind(d) + ' · ' + lastSeen(d, Date.now());
+    const rename = document.createElement('button');
+    rename.textContent = 'Rename'; rename.setAttribute('aria-label', 'Rename ' + d.name);
+    rename.addEventListener('click', async () => {
+      const n = prompt('Name for this device', d.name);
+      if (!n || !n.trim()) return;
+      await deviceCall('PATCH', '/api/devices/' + encodeURIComponent(d.id), { name: n.trim() });
+    });
+    const revoke = document.createElement('button');
+    revoke.textContent = 'Revoke'; revoke.setAttribute('aria-label', 'Revoke ' + d.name);
+    revoke.addEventListener('click', async () => {
+      if (!confirm('Revoke ' + d.name + '? It disconnects now and must scan a new code to come back.')) return;
+      await deviceCall('DELETE', '/api/devices/' + encodeURIComponent(d.id), {});
+    });
+    li.append(name, meta, rename, revoke);
+    list.append(li);
+  }
+  $('devices-empty').classList.toggle('hidden', r.devices.length > 0);
+}
+
+async function deviceCall(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ error: String(e) }));
+  $('phone-msg2').textContent = r.error || '';
+  $('devices').dataset.key = '';
+  await loadDevices();
+  return r;
 }
 
 function stopDemoOnClose() {
@@ -907,12 +967,21 @@ function init() {
   $('save-models').addEventListener('click', saveModels);
   $('run-checks').addEventListener('click', runChecks);
   $('save-service').addEventListener('click', saveService);
-  $('phone-enable').addEventListener('click', () => setPhone(true, false, $('phone-msg')));
-  $('phone-disable').addEventListener('click', () => setPhone(false, false, $('phone-msg2')));
-  $('shell-lan').addEventListener('change', (e) => setShellLAN(e.target.checked));
-  $('new-token').addEventListener('click', () => {
-    if (confirm('Make a new token? A phone paired with the old one must scan the new code.')) setPhone(true, true, $('phone-msg2'));
+  $('phone-enable').addEventListener('click', () => setPhone(true, $('phone-msg')));
+  $('phone-disable').addEventListener('click', () => setPhone(false, $('phone-msg2')));
+  $('shell-on').addEventListener('change', (e) => setShell(e.target.checked));
+  $('new-code').addEventListener('click', () => showCode(true));
+  $('disconnect-all').addEventListener('click', async () => {
+    if (!confirm('Disconnect all devices? Every phone and browser will need to scan the code again.')) return;
+    const r = await deviceCall('POST', '/api/devices/disconnect-all', {});
+    if (!r.error) $('phone-msg2').textContent = 'Disconnected ' + r.count + '.';
   });
+  $('reset-pairing').addEventListener('click', async () => {
+    if (!confirm('Reset pairing? Every phone and browser will need to scan the code again, and each will show a security warning until it does.')) return;
+    const r = await deviceCall('POST', '/api/devices/reset-pairing', {});
+    if (!r.error) { $('phone-msg2').textContent = 'Pairing reset: new certificate, new code.'; showCode(false); }
+  });
+  setInterval(tickCode, 1000);
   $('demo-start').addEventListener('click', async () => {
     $('demo-start').disabled = true;
     $('demo-msg').textContent = 'Starting the demo…';
@@ -928,8 +997,6 @@ function init() {
     if (r.demo) { state.demo = r.demo; renderDemo(r.demo); }
   });
   window.addEventListener('pagehide', stopDemoOnClose);
-  // The token cookie for /voice (when phone access set a token).
-  api('login', {}).catch(() => {});
   loadState().then((s) => { if (s && (s.keys.gemini || !s.voice.setup_needed)) runChecks(); });
   // Keep the page current (the phone connecting, the voice coming up).
   setInterval(loadState, 3000);

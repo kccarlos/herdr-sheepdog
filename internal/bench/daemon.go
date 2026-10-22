@@ -63,7 +63,7 @@ type Daemon struct {
 }
 
 // ScratchConfig is o.Config made safe for a scratch daemon: loopback
-// only, no token, its own data dir and state file, no phone
+// only, its own data dir and state file, no phone
 // notifications, the bench's orchestrator.
 func ScratchConfig(o DaemonOptions) config.Config {
 	cfg := o.Config
@@ -71,7 +71,6 @@ func ScratchConfig(o DaemonOptions) config.Config {
 	cfg.State.Path = filepath.Join(o.Dir, "state.json")
 	cfg.Web.Bind = "127.0.0.1"
 	cfg.Web.Port = o.Port
-	cfg.Web.Token = ""
 	cfg.Web.Dev = false
 	cfg.Push.APNs.KeyPath = "" // never APNs the user's phone
 	cfg.Herdr.Socket = filepath.Join(o.Dir, "no-herdr.sock")

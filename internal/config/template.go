@@ -89,12 +89,12 @@ func Template() string {
 # fallbacks = %[56]t   # server-side refusal fallbacks (fallbacks "default")
 
 [web]
-# bind = %[43]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
+# bind = %[43]q   # loopback only by default; a LAN or Tailscale address (or "0.0.0.0") lets paired devices in, over TLS
 # port = %[10]d
-# token = ""   # required once bind is not loopback: Authorization: Bearer, ?token= for /ws and /events, or POST /api/login sets a cookie
 # dev = false
 # dev_testdata_dir = ""   # default: testdata/audio relative to the working directory
-# shell_lan = false   # let a plain-LAN client open the phone shell (loopback and Tailscale always can); set on the setup page
+# shell = true   # paired devices may open the phone shell and send attachments; set on the setup page
+# advertise = []   # more host:port addresses for the pairing code, e.g. ["100.101.1.1:7777"] for a router's port forward
 
 [cli]
 # prefer = %[11]q   # "codex" | "claude" | "auto"

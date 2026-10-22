@@ -626,19 +626,19 @@ func TestDeepSeekConfig(t *testing.T) {
 	}
 }
 
-// TestWebBindAndToken covers the web.bind / web.token defaults, file and
-// env overrides, and IsLoopback's loopback/non-loopback classification
-// (app.Build's "web.token is required when web.bind is not loopback"
-// check depends on it).
-func TestWebBindAndToken(t *testing.T) {
+// TestWebBind covers the web.bind defaults, file and env overrides, the
+// shell switch and web.advertise, and IsLoopback's classification. An
+// old file with web.token or web.shell_lan still loads: the keys are
+// ignored.
+func TestWebBind(t *testing.T) {
 	def := Default()
-	if def.Web.Bind != "127.0.0.1" || def.Web.Token != "" || !def.Web.IsLoopback() {
+	if def.Web.Bind != "127.0.0.1" || !def.Web.Shell || !def.Web.IsLoopback() {
 		t.Errorf("defaults = %+v", def.Web)
 	}
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	body := "[web]\nbind = \"0.0.0.0\"\ntoken = \"file-token\"\n"
+	body := "[web]\nbind = \"0.0.0.0\"\ntoken = \"old-token\"\nshell_lan = true\nshell = false\nadvertise = [\"100.101.1.1:7777\"]\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -646,32 +646,22 @@ func TestWebBindAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Web.Bind != "0.0.0.0" || cfg.Web.Token != "file-token" || cfg.Web.IsLoopback() {
+	if cfg.Web.Bind != "0.0.0.0" || cfg.Web.Shell || cfg.Web.IsLoopback() || len(cfg.Web.Advertise) != 1 {
 		t.Errorf("file values = %+v", cfg.Web)
 	}
-	if s := cfg.String(); !strings.Contains(s, "web.token=set") || strings.Contains(s, "file-token") {
-		t.Errorf("String() leaks or misreports web.token: %s", s)
+	if s := cfg.String(); strings.Contains(s, "old-token") || !strings.Contains(s, "web.advertise=100.101.1.1:7777") {
+		t.Errorf("String() = %s", s)
 	}
 
-	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_BIND": "192.168.1.5", "SHEEPDOG_WEB_TOKEN": "env-token"}))
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_BIND": "192.168.1.5", "SHEEPDOG_WEB_SHELL": "true", "SHEEPDOG_WEB_ADVERTISE": "100.101.1.1:7777, router.example:8443"}))
 	if err != nil {
 		t.Fatalf("load with env: %v", err)
 	}
-	if cfg.Web.Bind != "192.168.1.5" || cfg.Web.Token != "env-token" || cfg.Web.IsLoopback() {
+	if cfg.Web.Bind != "192.168.1.5" || !cfg.Web.Shell || len(cfg.Web.Advertise) != 2 || cfg.Web.Advertise[1] != "router.example:8443" {
 		t.Errorf("env values = %+v", cfg.Web)
 	}
-
-	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL_LAN": "true"})); err != nil || !cfg.Web.ShellLAN {
-		t.Errorf("SHEEPDOG_WEB_SHELL_LAN=true: %v %v", err, cfg.Web.ShellLAN)
-	}
-	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL_LAN": "maybe"})); err == nil {
-		t.Error("SHEEPDOG_WEB_SHELL_LAN=maybe loaded")
-	}
-
-	// An empty SHEEPDOG_WEB_TOKEN does not clear a file token (like
-	// DEEPSEEK_API_KEY).
-	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_TOKEN": ""})); err != nil || cfg.Web.Token != "file-token" {
-		t.Errorf("empty env token: %v %q", err, cfg.Web.Token)
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL": "maybe"})); err == nil {
+		t.Error("SHEEPDOG_WEB_SHELL=maybe loaded")
 	}
 
 	for _, bind := range []string{"127.0.0.1", "localhost", "::1"} {

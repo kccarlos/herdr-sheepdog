@@ -181,6 +181,7 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &termConn{t: t, conn: conn, id: id, kind: s.kindOf(r.RemoteAddr), ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
+	defer s.track(r, func() { c.end("device_revoked") })()
 	t.mu.Lock()
 	if t.conns == nil {
 		t.conns = map[*termConn]struct{}{}
@@ -273,7 +274,11 @@ func (c *termConn) serve() {
 	c.wg.Wait()
 	c.writing.Wait()
 	c.flush()
-	_ = c.conn.Close(websocket.StatusNormalClosure, reason)
+	code := websocket.StatusNormalClosure
+	if reason == "device_revoked" {
+		code = closeDeviceRevoked
+	}
+	_ = c.conn.Close(code, reason)
 	c.t.s.log.Log(logSource, "web.term.disconnect", "", map[string]any{"client_id": c.id, "reason": reason})
 }
 
@@ -329,7 +334,7 @@ func (c *termConn) onMessage(m termproto.Message) {
 		}
 		c.t.s.log.Log(logSource, "web.term.hello", "", map[string]any{"client_id": c.id, "protocol": *m.Protocol, "client": info})
 		// Advice only: open checks the gate again on every shell.
-		c.control(termproto.Ready(c.t.shellAllowed(c.kind)))
+		c.control(termproto.Ready(c.t.shellAllowed()))
 	case termproto.TypeOpen:
 		c.open(m)
 	case termproto.TypeResize:
@@ -391,7 +396,7 @@ func (c *termConn) refuse(ch int, pane, reason string) {
 func (c *termConn) open(m termproto.Message) {
 	pane := m.Target.PaneID
 	if m.Target.Shell != nil {
-		if !c.t.shellAllowed(c.kind) {
+		if !c.t.shellAllowed() {
 			c.refuse(m.Ch, "", termproto.RefusedShellOff)
 			return
 		}
@@ -402,7 +407,7 @@ func (c *termConn) open(m termproto.Message) {
 	kind := "agent"
 	if c.t.isShell(pane) {
 		// A shell opened over Tailscale stays behind the gate by pane id.
-		if !c.t.shellAllowed(c.kind) {
+		if !c.t.shellAllowed() {
 			c.refuse(m.Ch, pane, termproto.RefusedShellOff)
 			return
 		}

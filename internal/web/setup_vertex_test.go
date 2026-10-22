@@ -60,7 +60,7 @@ func newVertexFixture(t *testing.T, cfg config.Config) *setupFixture {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
 	}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	f.sd.Endpoints.VertexBase = fakeVertexAPI(t)
 	f.sd.Endpoints.VertexLive = fakeLive
 	return f

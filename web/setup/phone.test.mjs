@@ -1,27 +1,44 @@
 // Unit tests for the setup page's phone helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shellLAN, shellLANSaved } from './phone.js';
+import { shellSwitch, shellSaved, countdown, deviceKind, lastSeen } from './phone.js';
 
 test('the shell switch shows only once phone access is on', () => {
-  assert.equal(shellLAN({ enabled: false, shell_lan: true }).show, false);
-  assert.equal(shellLAN(undefined).show, false);
-  assert.equal(shellLAN({ enabled: true }).show, true);
+  assert.equal(shellSwitch({ enabled: false, shell: true }).show, false);
+  assert.equal(shellSwitch(undefined).show, false);
+  assert.equal(shellSwitch({ enabled: true }).show, true);
 });
 
-test('the switch follows web.shell_lan and states the risk either way', () => {
-  const off = shellLAN({ enabled: true, shell_lan: false });
+test('the switch follows web.shell and says what it covers', () => {
+  const off = shellSwitch({ enabled: true, shell: false });
   assert.equal(off.checked, false);
-  assert.match(off.note, /Tailscale only/);
-  assert.match(off.note, /could read what you type/);
-  const on = shellLAN({ enabled: true, shell_lan: true });
+  assert.match(off.note, /no shell and no attachments/);
+  const on = shellSwitch({ enabled: true, shell: true });
   assert.equal(on.checked, true);
-  assert.match(on.note, /could read what you type/);
+  assert.doesNotMatch(on.note, /network/);
 });
 
 test('the saved message says what changed, or why not', () => {
-  assert.match(shellLANSaved({ ok: true, shell_lan: true }), /works on this network/);
-  assert.match(shellLANSaved({ ok: true, shell_lan: false }), /Tailscale-only/);
-  assert.equal(shellLANSaved({ error: 'disk full' }), 'Not saved: disk full');
-  assert.match(shellLANSaved(null), /Not saved/);
+  assert.match(shellSaved({ ok: true, shell: true }), /can open a shell/);
+  assert.match(shellSaved({ ok: true, shell: false }), /off/);
+  assert.equal(shellSaved({ error: 'disk full' }), 'Not saved: disk full');
+  assert.match(shellSaved(null), /Not saved/);
+});
+
+test('the code countdown runs to empty', () => {
+  const now = Date.parse('2026-10-21T12:00:00Z');
+  assert.equal(countdown('2026-10-21T12:10:00Z', now), '10:00');
+  assert.equal(countdown('2026-10-21T12:00:05Z', now), '0:05');
+  assert.equal(countdown('2026-10-21T11:59:00Z', now), '');
+  assert.equal(countdown(undefined, now), '');
+});
+
+test('device rows name the kind and the last contact', () => {
+  const now = Date.parse('2026-10-21T12:00:00Z');
+  assert.equal(deviceKind({ kind: 'ios' }), 'iPhone');
+  assert.equal(deviceKind({ kind: 'browser' }), 'Browser');
+  assert.equal(lastSeen({}, now), 'Not seen yet');
+  assert.equal(lastSeen({ last_seen: '2026-10-21T11:55:00Z', last_network: 'lan' }, now), 'Wi-Fi · 5 min ago');
+  assert.equal(lastSeen({ last_seen: '2026-10-21T11:59:59Z', last_network: 'tailscale' }, now), 'Tailscale · just now');
+  assert.equal(lastSeen({ last_seen: '2026-10-19T12:00:00Z' }, now), '2 d ago');
 });

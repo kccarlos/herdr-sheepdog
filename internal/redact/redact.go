@@ -72,10 +72,10 @@ func New(values ...string) *Redactor {
 
 // ConfigSecrets are every secret value in cfg: the Gemini key pool, the
 // Vertex, DeepSeek and OpenAI voice keys, each OpenAI-compatible
-// provider's key and the web token.
+// provider's key.
 func ConfigSecrets(cfg config.Config) []string {
 	out := append([]string{}, cfg.Gemini.APIKeys...)
-	out = append(out, cfg.Gemini.Vertex.APIKey, cfg.DeepSeek.APIKey, cfg.Voice.OpenAI.APIKey, cfg.Web.Token)
+	out = append(out, cfg.Gemini.Vertex.APIKey, cfg.DeepSeek.APIKey, cfg.Voice.OpenAI.APIKey)
 	for _, c := range cfg.Brain.OpenAICompat {
 		out = append(out, c.APIKey)
 	}

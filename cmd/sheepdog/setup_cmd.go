@@ -121,22 +121,17 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 	}
 	if p := shared; p.tty != nil && l.cfg.Web.IsLoopback() {
 		fprintln(stdout, "")
-		yes, err := p.yesNo("Let the iOS app reach sheepdog on your network (Wi-Fi, Tailscale), behind a long token?", false)
+		yes, err := p.yesNo("Let the iOS app reach sheepdog on your network (Wi-Fi, Tailscale), encrypted and for paired devices only?", false)
 		if err == nil && yes {
 			envPath := envFile
 			if envPath == "" {
 				envPath = initEnvPath(configPath)
 			}
-			created, err := onboard.SetPhoneAccess(envPath, l.cfg, true, false)
-			if err != nil {
+			if err := onboard.SetPhoneAccess(envPath, true); err != nil {
 				fprintf(stderr, "sheepdog setup: %v\n", err)
 				return 1
 			}
-			fprintf(stdout, "Phone access on: SHEEPDOG_WEB_BIND=%s in %s", onboard.PhoneBind, envPath)
-			if created {
-				fprint(stdout, " (and a new web token)")
-			}
-			fprintln(stdout, ". Scan the code from: sheepdog pair")
+			fprintf(stdout, "Phone access on: SHEEPDOG_WEB_BIND=%s in %s. Scan the code from: sheepdog pair\n", onboard.PhoneBind, envPath)
 			if l, code, ok = loadLifecycle(ctx, "setup", configPath, envFile, io.Discard, stderr); !ok {
 				return code
 			}
@@ -175,5 +170,3 @@ func initEnvPath(configPath string) string {
 	}
 	return filepath.Join(filepath.Dir(configPath), ".env")
 }
-
-func fprint(w io.Writer, s string) { _, _ = io.WriteString(w, s) }

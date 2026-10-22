@@ -208,26 +208,31 @@
   <section class="card step" id="step-phone" aria-labelledby="h-phone">
     <h2 id="h-phone"><span class="num" aria-hidden="true">4</span> Pair your phone <span class="state" id="phone-state"></span></h2>
     <div id="phone-off">
-      <p>Optional. Turning phone access on lets the iOS app reach sheepdog on your network, protected by a long secret token.</p>
+      <p>Optional. Turning phone access on lets your phone reach sheepdog on your network, encrypted and only after you pair it here.</p>
       <div class="row actions"><button id="phone-enable" class="primary">Turn on phone access</button><span id="phone-msg" class="muted small" aria-live="polite"></span></div>
     </div>
     <div id="phone-on" class="hidden">
       <div class="pair">
-        <img id="qr" alt="Pairing code for the sheepdog iOS app" width="220" height="220">
+        <img id="qr" alt="Pairing code: scan it with the Sheepdog app or your phone's camera" width="220" height="220">
         <div>
-          <p>In the iOS app: Settings → <strong>Scan pairing code</strong>.</p>
+          <p>Scan it with the Sheepdog app, or with any phone's camera to use sheepdog in the browser.</p>
+          <p class="small"><span id="code-expiry" aria-live="polite"></span> <button id="new-code" class="link">New code</button></p>
           <p id="phone-connected" class="result" aria-live="polite">Waiting for the phone…</p>
           <p class="small"><span id="testflight"></span> <a id="ios-repo" href="#" target="_blank" rel="noopener">or build the app yourself</a>.</p>
           <p class="small muted" id="addresses"></p>
         </div>
       </div>
       <p id="remote-hint" class="hint small"></p>
-      <div class="shell-lan" id="shell-lan-box">
-        <label class="check"><input type="checkbox" id="shell-lan"> Shell on this network: let the phone open a plain shell over this Wi-Fi</label>
-        <p class="small muted" id="shell-lan-note" aria-live="polite"></p>
+      <div class="shell-lan" id="shell-box">
+        <label class="check"><input type="checkbox" id="shell-on"> Shell from your phone</label>
+        <p class="small muted" id="shell-note" aria-live="polite"></p>
       </div>
+      <h3 class="devices-h">Devices</h3>
+      <ul id="devices" class="devices" aria-label="Paired devices"></ul>
+      <p id="devices-empty" class="small muted">No devices yet. Scan the code above with the Sheepdog app or your phone's camera.</p>
       <div class="row actions">
-        <button id="new-token">New token</button>
+        <button id="disconnect-all">Disconnect all devices</button>
+        <button id="reset-pairing">Reset pairing</button>
         <button id="phone-disable">Turn phone access off</button>
         <span id="phone-msg2" class="muted small" aria-live="polite"></span>
       </div>

@@ -322,9 +322,6 @@ func Check(cfg config.Config, opts Options) error {
 			}
 		}
 	}
-	if !cfg.Web.IsLoopback() && cfg.Web.Token == "" {
-		return errors.New("app: web.token is required when web.bind is not loopback")
-	}
 	return nil
 }
 
@@ -575,7 +572,6 @@ func (a *App) wire() error {
 		BrainOffReason: a.brainOff,
 		Accounts:       accountsOf(a.brain),
 		BrainProviders: a.brainProviders,
-		Token:          cfg.Web.Token,
 		VoiceContext:   a.voiceCtx,
 		RouterContext:  a.routerCtx,
 		VoiceIssue:     a.VoiceIssue,
@@ -623,7 +619,7 @@ func (a *App) wire() error {
 			Shells: hc, ProjectRoots: cfg.Supervisor.ProjectRoots,
 		}
 	}
-	deps.ShellLAN = cfg.Web.ShellLAN
+	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {
 		return err

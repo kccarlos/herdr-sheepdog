@@ -13,9 +13,8 @@ inline code; only real messages go in `json` blocks.
 ## Endpoint
 
 - `GET /ws` on the daemon's HTTP port, upgraded to a WebSocket. Same origin as
-  `/voice`. Public (no token needed) when `web.bind` is loopback and
-  `web.token` is unset, the default; see "Auth" below for a non-loopback
-  bind (a phone on the LAN or over Tailscale).
+  `/voice`. Open to this computer (loopback) and to paired devices; see
+  "Auth" below.
 - **One client at a time.** A second connection replaces the first: the
   daemon sends the first client `{"type":"status","voice":"closed","reason":"replaced"}`
   and closes it with WebSocket code 1000, then serves the new one. The
@@ -631,24 +630,52 @@ exactly one of public, device, loopback or setup.
 
 ## Pairing
 
-`sheepdog pair` prints, and `/debug` (State → Pair a phone; `GET
-/api/pair/qr.svg`) shows, a QR code holding one link:
+The setup page (`/setup`) and `sheepdog pair` show a QR code holding one
+link ([security.md](design/security.md#41-the-qr)):
 
 ```
-sheepdog://pair?u=<base URL>&u=<base URL>…&t=<token>
+https://100.101.102.103:7777/voice#pair=1&d=<daemon id>&n=<name>&k=<pin>&e=<code>&u=100.101.102.103:7777&u=192.168.1.20:7777
 ```
 
-- `u` (one or more, URL-encoded): an `http://host:port` base URL of the
-  daemon — every IPv4 LAN address and then every Tailscale address
-  (100.64.0.0/10 or a `tailscale*` interface) when `web.bind` is
-  `0.0.0.0`, else the bound address itself. Loopback and link-local
-  addresses are never listed; with a loopback bind there is no code.
-- `t`: `web.token`, absent when none is set.
+- It opens `/voice` at the first address, so a phone camera or a laptop
+  opens it in the browser, which pairs itself (*Browser pairing*). The
+  app's scanner reads the same link and never opens the browser.
+- Everything after `#` is a fragment, form-encoded: browsers never send
+  it to a server. Parse the raw fragment (`%26` in a name is a literal
+  `&`).
+- `d`: the daemon id. `n`: the computer's name (`computer.name`). `k`: the
+  TLS pin (*Transport*). `e`: the **enroll code**, 16 random bytes,
+  base64url.
+- `u` (one or more): `host:port` addresses, Tailscale first (100.64.0.0/10
+  or a `tailscale*` interface), then real LAN addresses (RFC 1918 on a
+  non-virtual interface, the default route's first), then
+  [`web.advertise`](../../CONFIG.md). With a loopback bind and no
+  `web.advertise` there is no code.
 
-The app tries the addresses in order with `GET /api/hello` and keeps the
-first that answers. The token is never printed beside the code, never
-logged, and `GET /api/pair` (the address list for `/debug`) leaves it
-out. Both routes need the token like the rest of `/api`.
+**The enroll code works once and expires 10 minutes after it is made.**
+Only this computer gets one (loopback only):
+
+- `GET /api/pair` answers `{"link":"…","expires":"…","addresses":[{"url":"https://…","kind":"tailscale"|"lan"|"advertised"}]}`,
+  or `{"addresses":[],"error":"…"}` when there is no reachable address.
+  Reading it again returns the same code until it expires or is used;
+  `?new=1` makes a new one, which invalidates the old one.
+- `GET /api/pair/qr.svg` is the current code as SVG (`?new=1` as above).
+- `web.pair.code {expires}` is logged for each new code. No event, page
+  state or log line carries a code.
+
+**Enrolling.** `POST /api/devices/enroll` (public; the code is the
+credential) `{"code":"…","public_key":"<base64url>","name":"iPhone","kind":"ios"|"ipados"|"browser","hardware":true}`:
+
+- `public_key` is the device's P-256 public key as the uncompressed point
+  (65 bytes, `0x04‖X‖Y`); a DER SubjectPublicKeyInfo is accepted too.
+- `200 {"device_id":"…","daemon_id":"…","name":"…"}`. The same key
+  enrolled again (the app scanning a new code for a computer it knows)
+  keeps its device id.
+- `410 {"error":"This code was already used or has expired…","reason":"code_used"|"code_expired"}`,
+  logged as `web.pair.code_refused {reason, remote}`. A code never shown
+  is `code_used`.
+- `400` for a bad key or kind. Logged as `web.device.enroll {device_id,
+  kind, name, hardware, remote_kind}`.
 
 After pairing, a phone that allows notifications registers with
 `POST /api/push/register` (authenticated like the rest of `/api`). The
@@ -660,38 +687,93 @@ extension, which decrypts the end-to-end encrypted notifications that
 come through the push relay ([`push.md`](push.md), "End-to-end
 encryption").
 
+### Browser pairing
+
+`/voice` opened with a pairing fragment removes it from the address bar
+(`history.replaceState`), then:
+
+- on an iPhone or iPad offers **Open in the Sheepdog app**
+  (`sheepdog://pair#<the same fragment>`) and **Use in this browser**; the
+  code is used only by whichever enrolls;
+- elsewhere, or after "Use in this browser", makes a non-extractable
+  WebCrypto P-256 key, enrolls it (`kind: "browser"`, a name such as
+  "Android · Chrome"), keeps it in IndexedDB keyed by daemon id, and signs
+  in for the session cookie (`web/voice/pairing.js`).
+
+A browser on a later visit that gets a `401` signs a new challenge with
+its saved key; without one it asks the user to scan the pairing code.
+
 ## Auth
 
-`web.bind`/`web.token` (CONFIG.md "web.token") let the daemon be reached
-from a phone on the LAN or over Tailscale. With `web.token` unset (the
-loopback default) every endpoint below is open. With it set:
+Every device holds its own P-256 key; there is no shared secret
+([security.md](design/security.md#5-device-authentication)).
 
-- `GET /`, `/voice`, `/debug` and their assets, and `GET /api/hello`
-  stay public — they hold no data, and a client has to be able to reach
-  `/api/hello` before it knows the daemon needs a token at all.
-- Every other endpoint — `GET /ws`, `GET /events`, every `/api/*` route —
-  requires the token, presented one of three ways: the header
-  `Authorization: Bearer <token>`; the query parameter `?token=<token>`,
-  accepted only on `/ws` and `/events` (a browser cannot set a header on
-  a WebSocket or `EventSource` request); or the cookie `sheepdog_token`,
-  set by `POST /api/login {"token": "…"}` so the token is typed once —
-  `/voice` and `/debug` do this themselves, showing an inline prompt the
-  first time a request answers 401.
-- `/setup` and `/api/setup/*` (the setup page, `sheepdog setup`) need no
-  token but answer only a loopback client that names a loopback host
-  (`127.0.0.1`, `::1`, `localhost`), and a request that changes something
-  only from that origin as JSON; anything else gets `403` with "The setup
-  page only opens on the computer sheepdog runs on…". The phone never
-  uses them. `POST /api/setup/login` sets the `sheepdog_token` cookie for
-  this browser, so `/voice` opened from the setup page asks for nothing.
-- Missing or wrong: `401` with a JSON body `{"error":"unauthorized"}`,
-  logged as `web.unauthorized {path, remote}` (never the token itself).
-  A WebSocket upgrade or an SSE stream refused this way never reaches
-  the contract below it — the client sees an ordinary HTTP 401, not a
-  `status`/`error` frame.
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…"}}`
-  so a client can confirm it found a sheepdog daemon, whether it needs a
-  token, this contract's audio format, the voice model behind it and the
+- **This computer** (loopback, with a loopback `Host`) needs nothing: the
+  local pages, the herdr hooks and the CLI. A ticket presented on
+  loopback is still checked.
+- **Public:** `GET /`, `/voice` and their assets, `GET /api/hello`,
+  `GET /api/auth/challenge`, `POST /api/auth/session` and
+  `POST /api/devices/enroll`.
+- **Loopback only:** the routes in *Loopback-only routes*.
+- **Everything else** — `GET /ws`, `GET /events`, `GET /term` and every
+  other `/api/*` route — needs a session ticket, before any upgrade: the
+  app sends `Authorization: Bearer sds_<ticket>`, a browser the
+  `sheepdog_session` cookie (`HttpOnly`, `Secure` over TLS,
+  `SameSite=Strict`). No credential is ever put in a URL.
+
+**Signing in.**
+
+1. `GET /api/auth/challenge` → `{"nonce":"<base64url, 32 bytes>","daemon_id":"…","expires_in":60}`.
+   The nonce works once, for 60 seconds.
+2. The device signs, ECDSA P-256 with SHA-256, the UTF-8 text
+   `sheepdog-auth-v1\n<daemon id>\n<pin>\n<device id>\n<nonce>\n<unix time>\nsession`.
+   A browser signs an empty pin line. The signature may be ASN.1 DER
+   (Security framework) or `r‖s` (WebCrypto), in any base64 alphabet.
+3. `POST /api/auth/session {"device_id","nonce","time","signature","client":"app"|"browser"}`
+   → `200 {"ticket":"…","expires_in":43200,"device":{"id","name"},"next_pin":"…"?}`;
+   a browser also gets the cookie. `next_pin` appears while the daemon is
+   about to replace its certificate. Refused with `401 {"error":"unauthorized","reason":…}`:
+   `bad_nonce`, `bad_time` (more than 5 minutes off), `bad_signature`,
+   `unknown_device`, `device_revoked`. Logged as `web.device.session
+   {device_id, remote_kind}` or `web.device.auth_failed {reason, remote,
+   device_id}`.
+4. Tickets live in memory for 12 hours; a restart forgets them all.
+
+**Refusals.** A request without a usable ticket answers
+`401 {"error":"unauthorized","reason":"no_session"|"session_expired"|"device_revoked"|"unknown_device"}`
+(never the ticket in a log). On `no_session` or `session_expired` sign
+again and retry once; on `device_revoked` or `unknown_device` the device
+must scan a new code. A WebSocket upgrade or an SSE stream refused this
+way never reaches the contract below it.
+
+**Origin.** An upgrade, or a request that changes something, with an
+`Origin` that is not the daemon's own is refused with
+`403 {"error":"origin_not_allowed"}` (cross-site WebSocket hijacking,
+request forgery). The app sends no `Origin`.
+
+**Devices.**
+
+- `GET /api/devices/self` is the caller's record; `DELETE /api/devices/self`
+  unpairs it (the app's Remove), logged as `web.device.revoke {device_id, by: "self"}`.
+- The setup page's list (loopback only; a change only from its own
+  origin as JSON): `GET /api/devices` → `{"devices":[{"id","name","kind","public_key","hardware","created","last_seen","last_network"}]}`;
+  `PATCH /api/devices/{id} {"name"}`; `DELETE /api/devices/{id}`;
+  `POST /api/devices/disconnect-all` → `{"ok":true,"count":n}` (the
+  certificate stays); `POST /api/devices/reset-pairing` (also a new TLS
+  key, certificate and pin; the daemon id stays). Logged as
+  `web.device.revoke {device_id, by: "setup"}`,
+  `web.device.disconnect_all {count}`, `web.device.reset_pairing {count}`.
+- **Revoking** drops the device's tickets and closes its `/ws` and
+  `/term` (close code **4003**, reason `device_revoked`) and its
+  `/events` stream at once.
+
+- The setup page itself, `/setup` and `/api/setup/*`, answers only a
+  loopback client that names a loopback host (`127.0.0.1`, `::1`,
+  `localhost`), and a request that changes something only from that
+  origin as JSON; anything else gets `403` with "The setup page only
+  opens on the computer sheepdog runs on…".
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…"}}`
+  so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
   random bytes base64url, made once): the app keys a computer's
@@ -779,7 +861,7 @@ there is no rate limiting or lockout on a wrong token.
 
 Added so a client that was away (a phone asleep, a browser tab
 reloaded, the daemon restarted) can show the conversation it missed and
-answer a question by tap. All three need the token under "Auth".
+answer a question by tap. All three need a paired device under "Auth".
 
 - **Event ids.** Every event-log line carries `id`: an integer, strictly
   increasing across day files and daemon restarts, close to the event's
@@ -1079,8 +1161,9 @@ does not track, `413 {"error":"too big (max 20 MB)"}`, `400` for a missing
 or empty file, `503` without a data directory. Each upload is logged as
 `web.attachment {bytes, type, remote_kind}`, never the file's name.
 
-An upload is allowed on every network the token works on, like a prompt:
-the shell gate (`web.shell_lan`, phase 5) does not apply.
+Uploads follow the computer's shell switch ([`web.shell`](../../CONFIG.md)):
+off, `403` ("attachments are off on this computer, like the shell"),
+since they write files on the computer.
 
 ## Changes
 
@@ -1253,7 +1336,7 @@ The contract (routes, payload, when an alert is sent) is in
 ## Non-goals
 
 No compression, no multiple clients, no more than one agent window per client, no client-side resampling contract
-beyond "send 16 kHz PCM16 mono", no timestamps in frames. No TLS: the
-`Secure` cookie flag stays off and the token travels in the clear, so a
-non-loopback bind should be a private network (a LAN you trust, or a
-Tailscale address) rather than an open one.
+beyond "send 16 kHz PCM16 mono", no timestamps in frames. Never put the
+port on the open internet: off this computer it is TLS and paired
+devices only (*Transport*, *Auth*), but it is meant for a private network
+(a LAN you trust, or a tailnet).

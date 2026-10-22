@@ -24,10 +24,10 @@ func TestAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Address{
-		{"http://10.200.0.1:7777", KindTailscale},
-		{"http://100.101.102.103:7777", KindTailscale},
-		{"http://10.0.0.7:7777", KindLAN},
-		{"http://192.168.1.20:7777", KindLAN},
+		{"https://10.200.0.1:7777", KindTailscale},
+		{"https://100.101.102.103:7777", KindTailscale},
+		{"https://10.0.0.7:7777", KindLAN},
+		{"https://192.168.1.20:7777", KindLAN},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)
@@ -40,10 +40,10 @@ func TestAddresses(t *testing.T) {
 	if got, _ := Addresses("", 7777, sys); len(got) != 4 {
 		t.Errorf("empty bind: %+v", got)
 	}
-	if got, err := Addresses("100.101.102.103", 7000, sys); err != nil || len(got) != 1 || got[0] != (Address{"http://100.101.102.103:7000", KindTailscale}) {
+	if got, err := Addresses("100.101.102.103", 7000, sys); err != nil || len(got) != 1 || got[0] != (Address{"https://100.101.102.103:7000", KindTailscale}) {
 		t.Errorf("specific bind: %+v, %v", got, err)
 	}
-	if got, err := Addresses("mac.tailnet.ts.net", 7777, sys); err != nil || got[0].URL != "http://mac.tailnet.ts.net:7777" {
+	if got, err := Addresses("mac.tailnet.ts.net", 7777, sys); err != nil || got[0].URL != "https://mac.tailnet.ts.net:7777" {
 		t.Errorf("host bind: %+v, %v", got, err)
 	}
 	for _, b := range []string{"127.0.0.1", "localhost", "::1"} {
@@ -56,28 +56,29 @@ func TestAddresses(t *testing.T) {
 	}
 }
 
-func TestURLRoundTrip(t *testing.T) {
-	addrs := []Address{{"http://192.168.1.20:7777", KindLAN}, {"http://100.101.102.103:7777", KindTailscale}}
-	link := URL(addrs, "s3cr&t=x y")
-	if !strings.HasPrefix(link, "sheepdog://pair?") {
+func TestLinkRoundTrip(t *testing.T) {
+	addrs := []Address{{"https://100.101.102.103:7777", KindTailscale}, {"https://192.168.1.20:7777", KindLAN}}
+	addrs = Merge(addrs, Advertised([]string{"100.101.1.1:7777", "router.example", "https://192.168.1.20:7777"}))
+	if len(addrs) != 4 || addrs[3].URL != "https://router.example:7777" {
+		t.Fatalf("merged = %+v", addrs)
+	}
+	link := Link(LinkInfo{DaemonID: "abc", Name: "Studio Mac & co", Pin: "pin_-x", Code: "c0de", Addresses: addrs})
+	if !strings.HasPrefix(link, "https://100.101.102.103:7777/voice#pair=1&") {
 		t.Fatalf("link = %s", link)
 	}
-	urls, tok, err := Parse(link)
-	if err != nil || tok != "s3cr&t=x y" || len(urls) != 2 || urls[0] != addrs[0].URL || urls[1] != addrs[1].URL {
-		t.Errorf("parse = %q %q %v", urls, tok, err)
+	in, err := ParseLink(link)
+	if err != nil || in.DaemonID != "abc" || in.Name != "Studio Mac & co" || in.Pin != "pin_-x" || in.Code != "c0de" || len(in.Addresses) != 4 || HostPort(in.Addresses[2].URL) != "100.101.1.1:7777" {
+		t.Errorf("parse = %+v %v", in, err)
 	}
-	if _, tok, _ := Parse(URL(addrs, "")); tok != "" {
-		t.Errorf("token without one: %q", tok)
-	}
-	for _, bad := range []string{"https://pair?u=x", "sheepdog://other?u=x", "sheepdog://pair?t=x"} {
-		if _, _, err := Parse(bad); err == nil {
+	for _, bad := range []string{"https://x/voice", "https://x/voice#pair=1&d=a", "sheepdog://pair?u=x"} {
+		if _, err := ParseLink(bad); err == nil {
 			t.Errorf("%s parsed", bad)
 		}
 	}
 }
 
 func TestRenderings(t *testing.T) {
-	link := URL([]Address{{"http://192.168.1.20:7777", KindLAN}}, "tok")
+	link := Link(LinkInfo{DaemonID: "d", Pin: "p", Code: "c", Addresses: []Address{{"https://192.168.1.20:7777", KindLAN}}})
 	term, err := Terminal(link, false)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +99,7 @@ func TestRenderings(t *testing.T) {
 
 // The coloured code draws the same modules as the plain one.
 func TestANSIMatchesPlain(t *testing.T) {
-	link := URL([]Address{{"http://192.168.1.20:7777", KindLAN}}, "tok")
+	link := Link(LinkInfo{DaemonID: "d", Pin: "p", Code: "c", Addresses: []Address{{"https://192.168.1.20:7777", KindLAN}}})
 	ansi, err := ANSI(link)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func urls(t *testing.T, sys []IfaceAddr, route string) []string {
 	}
 	var out []string
 	for _, a := range got {
-		out = append(out, strings.TrimSuffix(strings.TrimPrefix(a.URL, "http://"), ":7777")+" "+a.Kind)
+		out = append(out, strings.TrimSuffix(strings.TrimPrefix(a.URL, "https://"), ":7777")+" "+a.Kind)
 	}
 	return out
 }
@@ -183,8 +184,8 @@ func TestAddressRules(t *testing.T) {
 }
 
 func TestExplain(t *testing.T) {
-	ts := Address{"http://100.101.102.103:7777", KindTailscale}
-	lan := Address{"http://192.168.1.20:7777", KindLAN}
+	ts := Address{"https://100.101.102.103:7777", KindTailscale}
+	lan := Address{"https://192.168.1.20:7777", KindLAN}
 	if got := Explain([]Address{ts, lan}); !strings.Contains(got, "Tailscale address 100.101.102.103: works anywhere your phone is on Tailscale") || !strings.Contains(got, "Wi-Fi") {
 		t.Errorf("both: %q", got)
 	}

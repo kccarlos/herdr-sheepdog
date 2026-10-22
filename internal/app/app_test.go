@@ -72,17 +72,13 @@ func TestBuildValidation(t *testing.T) {
 	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: "maybe"}); err == nil || !strings.Contains(err.Error(), "--brain") {
 		t.Errorf("bad brain: %v", err)
 	}
-	// A non-loopback web.bind needs web.token set (CONFIG.md "web.token");
-	// exit 2 like the missing-key error above.
+	// A non-loopback web.bind needs nothing more: devices pair with a
+	// one-time code.
 	lan := cfg
 	lan.Web.Bind = "0.0.0.0"
-	if _, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "web.token is required when web.bind is not loopback") {
-		t.Errorf("non-loopback bind without a token: %v", err)
-	}
-	lan.Web.Token = "s3cr3t"
 	lanApp, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock})
 	if err != nil {
-		t.Fatalf("non-loopback bind with a token: %v", err)
+		t.Fatalf("non-loopback bind: %v", err)
 	}
 	_ = lanApp.elog.Close()
 	// A Gemini key without a network: Build succeeds (nothing connects),
@@ -624,12 +620,12 @@ func TestBrainProviderRestoreFallsBackToConfigured(t *testing.T) {
 	}
 }
 
-// TestWebTokenProtectsAPI proves cfg.Web.Token reaches web.Deps.Token:
-// /api/hello stays public, /api/state 401s without the token and 200s
-// with the Authorization header, and daemon.start carries urls.
-func TestWebTokenProtectsAPI(t *testing.T) {
+// TestWebDeviceAuth proves the daemon serves device auth: /api/hello
+// says so and carries the TLS pin from the data directory, this
+// computer (loopback) needs no ticket, a made-up ticket is refused, and
+// daemon.start carries urls.
+func TestWebDeviceAuth(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Web.Token = "s3cr3t"
 	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Drain: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -644,8 +640,12 @@ func TestWebTokenProtectsAPI(t *testing.T) {
 
 	var hello map[string]any
 	getJSON(t, url+"/api/hello", &hello)
-	if hello["auth"] != "token" || hello["ws"] != "/ws" {
+	sec, _ := hello["security"].(map[string]any)
+	if hello["auth"] != "device" || hello["ws"] != "/ws" || sec["pin"] == "" {
 		t.Fatalf("hello = %v", hello)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "tls", "key.pem")); err != nil {
+		t.Errorf("no TLS key in the data directory: %v", err)
 	}
 
 	resp, err := http.Get(url + "/api/state")
@@ -653,19 +653,19 @@ func TestWebTokenProtectsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("GET /api/state without a token = %d, want 401", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/state from this computer = %d, want 200", resp.StatusCode)
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, url+"/api/state", nil)
-	req.Header.Set("Authorization", "Bearer s3cr3t")
+	req.Header.Set("Authorization", "Bearer sds_made-up")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /api/state with the token = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /api/state with a made-up ticket = %d, want 401", resp.StatusCode)
 	}
 
 	cancel()
@@ -716,7 +716,7 @@ func TestAppURLsNonLoopbackBind(t *testing.T) {
 	}
 
 	lan := cfg
-	lan.Web.Bind, lan.Web.Token = "0.0.0.0", "s3cr3t"
+	lan.Web.Bind = "0.0.0.0"
 	a2, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock})
 	if err != nil {
 		t.Fatal(err)
