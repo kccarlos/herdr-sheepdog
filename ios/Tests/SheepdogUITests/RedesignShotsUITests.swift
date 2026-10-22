@@ -116,7 +116,7 @@ final class RedesignShotsUITests: XCTestCase {
 
     func testSettings() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7891"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
         app.launch()
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
