@@ -23,6 +23,8 @@ struct NewAgentSheet: View {
     }
 
     @State private var load: Load = .loading
+    /// One column for the row icons, growing with the text.
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 26
     @State private var path = NavigationPath()
 
     /// "Choose another folder…": a path typed in, inside the project roots.
@@ -126,7 +128,7 @@ struct NewAgentSheet: View {
                     .accessibilityIdentifier("newAgent.folder.\(project.name)")
                 }
                 NavigationLink(value: ChooseFolderRoute()) {
-                    HStack(spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Image(systemName: "folder.badge.plus")
                             .foregroundStyle(Theme.muted)
                             .frame(width: 24)
@@ -150,10 +152,13 @@ struct NewAgentSheet: View {
     }
 
     private func placeRow(_ project: NewAgentOptions.Project, detail: String) -> some View {
-        HStack(spacing: 12) {
+        // The icon sits on the name's line at every text size, not in the
+        // middle of a tall, wrapped row.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: project.open ? "square.stack" : "folder")
+                .font(.body)
                 .foregroundStyle(Theme.muted)
-                .frame(width: 24)
+                .frame(width: iconWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
@@ -492,7 +497,7 @@ private struct ChooseFolderStep: View {
                             text = root + "/"
                             focused = true
                         } label: {
-                            HStack(spacing: 12) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Image(systemName: "folder")
                                     .foregroundStyle(Theme.muted)
                                     .frame(width: 24)

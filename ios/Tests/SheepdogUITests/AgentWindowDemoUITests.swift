@@ -154,12 +154,9 @@ final class AgentWindowDemoUITests: XCTestCase {
         showAgentsPane(app)
         // The sheet comes from + ▸ New agent; a tap lost while something
         // still animates is retried.
+        openNewAgent(app)
         let space = app.buttons["newAgent.space.shop"]
-        for _ in 0 ..< 3 where !space.exists {
-            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
-            if space.waitForExistence(timeout: 10) { break }
-        }
-        XCTAssertTrue(space.exists, "New agent opens on Where")
+        XCTAssertTrue(space.waitForExistence(timeout: 10), "New agent opens on Where")
         shot("new-agent")
         space.tap()
         let start = app.buttons["newAgent.start"]
@@ -195,22 +192,18 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        let folder = app.buttons["newAgent.folder.notes"]
-        for _ in 0 ..< 3 where !folder.exists {
-            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
-            if folder.waitForExistence(timeout: 10) { break }
-        }
-        folder.tap()
+        openNewAgent(app)
+        scrollToVisible(app, app.buttons["newAgent.folder.notes"]).tap()
         XCTAssertTrue(app.descendants(matching: .any)["newAgent.notGit"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.switches["newAgent.worktree"].exists, "no worktree outside a repository")
-        let prompt = app.textFields["newAgent.prompt"]
+        let prompt = scrollToVisible(app, app.textFields["newAgent.prompt"])
         prompt.tap()
         prompt.typeText("make it fail")
-        app.buttons["newAgent.start"].tap()
+        scrollToVisible(app, app.buttons["newAgent.start"]).tap()
         XCTAssertTrue(app.descendants(matching: .any)["newAgent.error"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["newAgent.openPane"].exists, "the pane it left open")
+        let openPane = scrollToVisible(app, app.buttons["newAgent.openPane"])
         shot("new-agent-failed")
-        app.buttons["newAgent.openPane"].tap()
+        openPane.tap()
         XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10), "Open the pane opens its window")
     }
 
@@ -221,13 +214,8 @@ final class AgentWindowDemoUITests: XCTestCase {
         app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
-        let choose = app.buttons["newAgent.chooseFolder"]
-        for _ in 0 ..< 3 where !choose.exists {
-            tapMenuItem(app, menu: "toolbar.new", item: "new.agent")
-            if choose.waitForExistence(timeout: 10) { break }
-        }
-        for _ in 0 ..< 4 where !choose.isHittable { app.swipeUp() }
-        choose.tap()
+        openNewAgent(app)
+        scrollToVisible(app, app.buttons["newAgent.chooseFolder"]).tap()
         let field = app.textFields["newAgent.folderPath"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.typeText("packages")
@@ -235,7 +223,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         XCTAssertFalse(app.buttons["newAgent.folderNext"].isEnabled)
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/you/code/shop/packages/api")
         shot("new-agent-folder")
-        app.buttons["newAgent.folderNext"].tap()
+        scrollToVisible(app, app.buttons["newAgent.folderNext"]).tap()
         XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10), "Which agent, with Start")
         XCTAssertFalse(app.switches["newAgent.worktree"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["newAgent.notGit"].exists)

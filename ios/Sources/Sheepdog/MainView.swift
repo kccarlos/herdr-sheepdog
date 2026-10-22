@@ -16,6 +16,7 @@ struct MainView: View {
     @AppStorage("update.dismissedNotice") private var dismissedUpdate = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.splashShowing) private var splashShowing
 
     private var paneState: FlockPaneState {
         FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
@@ -174,7 +175,12 @@ struct MainView: View {
             } message: { link in
                 Text(link.confirmation(currentAddress: model.settings.address).message)
             }
-            .sheet(isPresented: $model.showSettings) {
+            // Not while the splash is up: the first-run sheet waits for
+            // it to fade instead of sliding over it.
+            .sheet(isPresented: Binding(
+                get: { model.showSettings && !splashShowing },
+                set: { model.showSettings = $0 }
+            )) {
                 SettingsView(meter: model.meter)
                     .environmentObject(model)
             }

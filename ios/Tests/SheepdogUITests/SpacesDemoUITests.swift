@@ -30,11 +30,10 @@ final class SpacesDemoUITests: XCTestCase {
         // shop: its agents and commands; Close waits for the agents.
         shop.tap()
         XCTAssertTrue(app.buttons["space.agent.claude-auth"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["space.command.Run tests"].exists)
+        scrollToVisible(app, app.buttons["space.command.Run tests"])
         sleep(1)
         shot("space-detail")
-        for _ in 0 ..< 4 where !app.staticTexts["space.close.blocked"].exists { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["space.close.blocked"].exists, "no Close while agents work")
+        scrollToVisible(app, app.staticTexts["space.close.blocked"])
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
         // The worktree: Remove asks, then asks again for the changes.
@@ -70,9 +69,7 @@ final class SpacesDemoUITests: XCTestCase {
         XCTAssertTrue(shop.waitForExistence(timeout: 10))
         shop.tap()
 
-        let runOnce = app.buttons["space.command.runOnce"]
-        for _ in 0 ..< 4 where !runOnce.isHittable { app.swipeUp() }
-        runOnce.tap()
+        scrollToVisible(app, app.buttons["space.command.runOnce"]).tap()
         let line = app.textFields["space.command.line"]
         XCTAssertTrue(line.waitForExistence(timeout: 5))
         line.typeText("make lint")
@@ -85,8 +82,7 @@ final class SpacesDemoUITests: XCTestCase {
         XCTAssertFalse(app.buttons["space.command.make lint"].exists, "a one-off line is not saved")
 
         // Edit "Lint" from its menu.
-        let lint = app.buttons["space.command.Lint"]
-        XCTAssertTrue(lint.waitForExistence(timeout: 5))
+        let lint = scrollToVisible(app, app.buttons["space.command.Lint"])
         lint.press(forDuration: 1.2)
         let edit = app.buttons["space.command.edit"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
@@ -99,6 +95,7 @@ final class SpacesDemoUITests: XCTestCase {
         sleep(1)
         shot("edit-command")
         app.buttons["space.command.save"].tap()
-        XCTAssertTrue(app.buttons["space.command.Lint all"].waitForExistence(timeout: 10), "the edit is saved")
+        sleep(1)
+        XCTAssertTrue(scrollToVisible(app, app.buttons["space.command.Lint all"]).exists, "the edit is saved")
     }
 }
