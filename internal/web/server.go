@@ -604,10 +604,26 @@ func (s *Server) Run(ctx context.Context) {
 
 // Listen binds addr (host:port; ":0" picks a free port). Addr() is valid
 // afterwards.
+//
+// A specific non-loopback address (web.bind set to one LAN IP) also gets a
+// loopback listener on the same port: plain HTTP is served to loopback
+// only, so the CLI (`status`, `open`, `pair`) and the setup page reach the
+// daemon at 127.0.0.1 whatever the bind.
 func (s *Server) Listen(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("web: listen %s: %w", addr, err)
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+			_, port, _ := net.SplitHostPort(ln.Addr().String())
+			lo, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", port))
+			if err != nil {
+				_ = ln.Close()
+				return fmt.Errorf("web: listen 127.0.0.1:%s next to %s: %w", port, addr, err)
+			}
+			ln = newMergedListener(ln, lo)
+		}
 	}
 	s.mu.Lock()
 	s.ln = ln
