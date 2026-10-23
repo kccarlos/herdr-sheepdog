@@ -35,7 +35,7 @@ final class QuestionsUITests: XCTestCase {
         XCTAssertEqual(post("/api/inject/blocked", ["pane_id": "p-qb", "alias": "qb", "kind": "codex", "screen": Self.screen("npm run lint")]), 200)
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         app.launch()
 
         // On the Conversation both float above the capsule.

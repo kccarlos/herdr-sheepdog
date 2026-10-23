@@ -19,7 +19,7 @@ final class FeedbackUITests: XCTestCase {
     func testAFlagTapAndPausedFilesAMark() throws {
         let before = feedbackCount()
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice"]
         app.launch()
         let orb = app.buttons["controls.orb"]
         XCTAssertTrue(orb.waitForExistence(timeout: 10))

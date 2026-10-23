@@ -17,7 +17,7 @@ final class FirstRunUITests: XCTestCase {
 
     func testFirstRunSaysWhatTheAppNeedsAndOffersTheDemo() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations"]
         app.launch()
 
         let intro = app.descendants(matching: .any)["settings.firstRun.intro"]
@@ -26,7 +26,7 @@ final class FirstRunUITests: XCTestCase {
         XCTAssertTrue(requirement.exists, "the first run names `sheepdog setup`")
         XCTAssertTrue(app.descendants(matching: .any)["settings.firstRun.guide"].exists, "a link to the setup guide")
         let demo = app.buttons["settings.firstRun.tryDemo"]
-        XCTAssertTrue(demo.isHittable, "Try the demo is on the first screen without scrolling")
+        XCTAssertTrue(demo.isTappable, "Try the demo is on the first screen without scrolling")
         XCTAssertEqual(app.keyboards.count, 0, "no keyboard covers the first screen")
     }
 
@@ -34,7 +34,7 @@ final class FirstRunUITests: XCTestCase {
         let app = XCUIApplication()
         // A closed loopback port: nothing answers, as with a daemon that is
         // down or a phone on another network.
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:9"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", "127.0.0.1:9"]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
@@ -55,7 +55,7 @@ final class FirstRunUITests: XCTestCase {
         defer { stub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", host]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
@@ -71,7 +71,7 @@ final class FirstRunUITests: XCTestCase {
         defer { stub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", host]
         app.launch()
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.daemon"], "Daemon")
@@ -92,7 +92,7 @@ final class FirstRunUITests: XCTestCase {
             return false
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         app.launch()
         tapWhenReady(app.buttons["settings.firstRun.tryDemo"], "Try the demo")
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
@@ -105,7 +105,7 @@ final class FirstRunUITests: XCTestCase {
                 break
             }
         }
-        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings", until: app.buttons["settings.leaveDemo"])
         XCTAssertTrue(app.buttons["settings.leaveDemo"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["settings.models"].exists)
         XCTAssertFalse(app.buttons["settings.notifications"].exists)

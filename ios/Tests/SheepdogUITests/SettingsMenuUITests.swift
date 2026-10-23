@@ -10,7 +10,7 @@ final class SettingsMenuUITests: XCTestCase {
 
     func testSettingsIsAShallowMenuWithNoSaveOrCancel() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders"]
         app.launch()
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
 
@@ -42,7 +42,7 @@ final class SettingsMenuUITests: XCTestCase {
 
     func testAnUnreachableDaemonOffersOneActionInTheAgentsPane() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7791"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", "127.0.0.1:7791"]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
         tapWhenReady(app.buttons["main.pane.flock"], "the Agents pane")
@@ -54,7 +54,7 @@ final class SettingsMenuUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 }

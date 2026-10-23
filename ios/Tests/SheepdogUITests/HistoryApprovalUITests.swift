@@ -41,7 +41,7 @@ final class HistoryApprovalUITests: XCTestCase {
 
         // A clean phone: nothing cached, then the daemon's address.
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         app.launch()
 
         // 1. History on launch, without connecting: the earlier
@@ -66,7 +66,7 @@ final class HistoryApprovalUITests: XCTestCase {
         // 3. Tap Yes, proceed: the card collapses into its settled row in
         //    the conversation (or, before that row has synced, shows the
         //    answer itself).
-        yes.tap()
+        tapWhenTappable(yes, "Yes, proceed")
         let answered = app.staticTexts["approval.answered"]
         let settledRow = find(app, "bubble.approval", labelContains: "You approved — Yes, proceed", timeout: 10)
         if settledRow == nil {
@@ -84,7 +84,7 @@ final class HistoryApprovalUITests: XCTestCase {
         //    at once, from the cache.
         app.terminate()
         let again = XCUIApplication()
-        again.launchArguments = ["-sheepdogAddress", Fixture.host]
+        again.launchArguments = ["-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         again.launch()
         XCTAssertNotNil(find(again, "bubble.approval", labelContains: "You approved — Yes, proceed", timeout: 3), "the cached conversation shows straight away")
         shot(again, "14-relaunch-cached")

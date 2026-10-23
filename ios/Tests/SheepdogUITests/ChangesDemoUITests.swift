@@ -21,7 +21,7 @@ final class ChangesDemoUITests: XCTestCase {
         // demo's cover still animating, slower on a CI Mac): keep looking.
         let deadline = Date().addingTimeInterval(10)
         repeat {
-            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isTappable {
                 matches.element(boundBy: i).tap()
                 return
             }
@@ -32,7 +32,7 @@ final class ChangesDemoUITests: XCTestCase {
 
     private func openWindow() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
@@ -40,15 +40,16 @@ final class ChangesDemoUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
         showAgentsPane(app)
         tapVisible(app.buttons, "flock.agent.claude-auth.window")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
+        // The first terminal on a simulator that just booted can take well
+        // over 10 s to come up (the first test of a CI job).
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 30))
         return app
     }
 
     func testChangesListAndDiff() throws {
         let app = openWindow()
-        tapVisible(app.buttons, "agentScreen.menu")
-        tapVisible(app.buttons, "agentScreen.menu.changes")
         let file = app.buttons["changes.file.internal/auth/token.go"]
+        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.changes", until: file)
         XCTAssertTrue(file.waitForExistence(timeout: 10))
         XCTAssertTrue(file.label.contains("9 added"), file.label)
         sleep(1)

@@ -599,7 +599,7 @@ struct TerminalSkeleton: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .opacity(dim ? 0.5 : 1)
         .onAppear {
-            guard !reduceMotion else { return }
+            guard !reduceMotion, !debugNoAnimations else { return }
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
         }
         .accessibilityElement(children: .ignore)

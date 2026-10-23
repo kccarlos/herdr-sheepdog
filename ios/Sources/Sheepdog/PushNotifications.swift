@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         MainActor.assumeIsolated { PushCoordinator.shared.launched() }
         Self.useRoundedNavigationTitles()
+        #if DEBUG
+        if DebugLaunch.noAnimations { UIView.setAnimationsEnabled(false) }
+        #endif
         return true
     }
 

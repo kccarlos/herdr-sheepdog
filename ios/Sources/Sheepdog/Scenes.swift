@@ -197,5 +197,39 @@ struct MainSceneRoot<Content: View>: View {
             .environment(\.sceneID, id)
             .onAppear { scenes.register(id) }
             .onDisappear { scenes.unregister(id) }
+            .debugAnimationsOff()
+    }
+}
+
+/// `-sheepdogNoAnimations` in a debug build; always false in a release.
+/// The endless animations (the orb breathing, a spinner) check it too, as
+/// they do Reduce Motion: one left running keeps the main thread busy and a
+/// UI test's queries time out.
+var debugNoAnimations: Bool {
+    #if DEBUG
+    DebugLaunch.noAnimations
+    #else
+    false
+    #endif
+}
+
+extension View {
+    /// `-sheepdogNoAnimations` (debug builds, UI tests): no SwiftUI
+    /// animation runs in this window, so a test's tap never lands on a
+    /// sheet, menu or cover that is still moving. UIKit's own (the
+    /// presentations) are off from launch (`AppDelegate`).
+    @ViewBuilder func debugAnimationsOff() -> some View {
+        #if DEBUG
+        if DebugLaunch.noAnimations {
+            transaction { transaction in
+                transaction.disablesAnimations = true
+                transaction.animation = nil
+            }
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }

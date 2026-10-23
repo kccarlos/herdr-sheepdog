@@ -22,7 +22,7 @@ final class IPadUITests: XCTestCase {
 
     private func launchDemo(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
         app.launch()
         let header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
         if !header { shot("launch-failed") }
@@ -152,14 +152,9 @@ final class IPadUITests: XCTestCase {
     func testTwoPanesSideBySide() throws {
         let app = launchDemo()
         let auth = element(app, "sidebar.agent.claude-auth")
-        XCTAssertTrue(auth.waitForExistence(timeout: 10))
-        auth.tap()
-        let split = element(app, "pane.split")
-        XCTAssertTrue(split.waitForExistence(timeout: 10))
-        split.tap()
-        let migration = app.collectionViews.buttons["claude-migration"].firstMatch
-        XCTAssertTrue(migration.waitForExistence(timeout: 5))
-        migration.tap()
+        tapWhenTappable(auth, "claude-auth in the sidebar")
+        tapWhenTappable(element(app, "pane.split"), "Split")
+        tapWhenTappable(app.collectionViews.buttons["claude-migration"].firstMatch, "claude-migration in the picker")
         let terminals = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
         let two = NSPredicate(format: "count == 2")
         expectation(for: two, evaluatedWith: terminals)
@@ -192,15 +187,15 @@ final class IPadUITests: XCTestCase {
         waitForExpectations(timeout: 30)
 
         XCUIDevice.shared.orientation = .portrait
+        // Right after the rotation a tap on Split can be lost while the
+        // layout settles: tap again until the picker is up.
         let splitButton = element(app, "pane.split")
-        let hittable = NSPredicate(format: "exists == true AND hittable == true")
-        expectation(for: hittable, evaluatedWith: splitButton)
-        waitForExpectations(timeout: 15)
-        splitButton.tap()
         let payments = app.collectionViews.buttons["codex-payments"].firstMatch
-        expectation(for: hittable, evaluatedWith: payments)
-        waitForExpectations(timeout: 15)
-        payments.tap()
+        for _ in 0 ..< 3 where !payments.exists {
+            tapWhenTappable(splitButton, "Split", timeout: 15)
+            _ = payments.waitForExistence(timeout: 5)
+        }
+        tapWhenTappable(payments, "codex-payments in the picker", timeout: 15)
         expectation(for: two, evaluatedWith: terminals)
         waitForExpectations(timeout: 30)
         sleep(2)
@@ -212,22 +207,16 @@ final class IPadUITests: XCTestCase {
     func testOpenInNewWindow() throws {
         let app = launchDemo()
         let auth = element(app, "sidebar.agent.claude-auth")
-        XCTAssertTrue(auth.waitForExistence(timeout: 10))
-        auth.tap()
-        let menu = element(app, "agentScreen.menu")
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let item = element(app, "agentScreen.menu.newWindow")
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
-        item.tap()
-        XCTAssertTrue(element(app, "mini.capsule").waitForExistence(timeout: 10), "the new window has the mini capsule")
+        tapWhenTappable(auth, "claude-auth in the sidebar")
+        XCTAssertTrue(element(app, "agentScreen.menu").waitForExistence(timeout: 10))
+        let capsule = element(app, "mini.capsule")
+        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.newWindow", until: capsule)
+        XCTAssertTrue(capsule.waitForExistence(timeout: 10), "the new window has the mini capsule")
         sleep(2)
         shot("new-window")
         // Close it, so the next launch does not restore it.
-        element(app, "agentScreen.menu").tap()
-        let close = element(app, "agentWindow.closeWindow")
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
-        close.tap()
+        tapWhenTappable(element(app, "agentScreen.menu"), "the new window's menu")
+        tapWhenTappable(element(app, "agentWindow.closeWindow"), "Close Window")
         XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10), "back to the main window")
     }
 
@@ -244,11 +233,19 @@ final class IPadUITests: XCTestCase {
         let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'claude-auth'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 10), "⌘1 works from the terminal too")
 
-        app.typeKey("m", modifierFlags: [.command, .shift])
-        let status = app.staticTexts["controls.statusLine"].firstMatch
+        // Any status line that says so: the real main view stays under the
+        // demo's cover with its own (unmuted) one, and `firstMatch` was
+        // sometimes that one. A key press sent while the window was still
+        // switching agents was lost now and then, so press again until it
+        // reads muted (a toggle: a late first press is undone by the second
+        // and redone by the third).
         let muted = NSPredicate(format: "label CONTAINS[c] 'muted' OR label CONTAINS[c] 'mic off'")
-        expectation(for: muted, evaluatedWith: status)
-        waitForExpectations(timeout: 10)
+        let mutedStatus = app.staticTexts.matching(identifier: "controls.statusLine").matching(muted).firstMatch
+        for _ in 0 ..< 3 where !mutedStatus.exists {
+            app.typeKey("m", modifierFlags: [.command, .shift])
+            _ = mutedStatus.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(mutedStatus.exists, "⌘⇧M mutes")
         app.typeKey("m", modifierFlags: [.command, .shift])
 
         app.typeKey("n", modifierFlags: .command)
@@ -269,7 +266,7 @@ final class IPadUITests: XCTestCase {
         defer { workStub.stop(); homeStub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
         app.launch()
         XCTAssertTrue(element(app, "computerLabel.sidebar.fixture-1").waitForExistence(timeout: 15), "the current computer's row")
         XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-2").waitForExistence(timeout: 15), "Talk to Home Mac")

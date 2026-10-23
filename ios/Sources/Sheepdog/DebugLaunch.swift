@@ -46,6 +46,12 @@ enum DebugLaunch {
     /// stays at the start), so no agent finishes or asks: a UI test sees
     /// the opening state for as long as it needs, on a Mac of any speed.
     static var demoPaused: Bool { arguments.contains("-sheepdogDemoPaused") }
+    /// `-sheepdogNoAnimations`: no UIKit or SwiftUI animations
+    /// (`AppDelegate`, `View.debugAnimationsOff()`), for the UI tests that
+    /// tap through screens: on a slow Mac a tap landed on a sheet or menu
+    /// still moving in and was lost. The recordings and screenshots keep
+    /// the motion.
+    static var noAnimations: Bool { arguments.contains("-sheepdogNoAnimations") }
     /// `-sheepdogDemoUpdate`: the demo's daemon reports a newer release,
     /// so the update notice can be filmed without an older daemon
     /// (docs/dev/launch-video.md, shot 10b).
