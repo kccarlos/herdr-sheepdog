@@ -962,6 +962,43 @@ Order and dependencies:
 - 8 can start after 3, one feature at a time, and run in parallel with
   5–7.
 
+**Progress.**
+
+- **Phase 3, the pure part (done).** The machine is in Kit, not yet
+  wired. It is named `ComputerLink`, because a public `Link` would clash
+  with SwiftUI's `Link` view in every app file. The pure decisions of
+  phases 5 and 6 are in the same PR, since they belong to the same type:
+  - `ComputerLink.swift`: the states, events and effects, and `apply`;
+  - `LinkDemand.swift`: the demand and channel table, and `LinkBackoff`;
+  - `AddressRace.swift`: the race order, the stagger and the verdict;
+  - `LinkPresentation.swift`.
+
+  The tests are `LinkTests`, `LinkPresentationTests`,
+  `LinkDemandAndRaceTests` and `LinkPropertyTests` (400 seeds × 400
+  steps). Choices this doc left open:
+  - **Mixed results.** Any pin mismatch with no verified address is
+    `untrustedAnswer`, as in 3.4. `renewedWhileAway` needs *every*
+    address to mismatch inside the rotation window.
+  - **A mismatch on the address in use** starts a full race before
+    warning.
+  - **A 401 with no known reason** is a ticket to renew (`renewTicket`),
+    then a retry. It is not `refused`.
+  - **`refused`** outlives a loss of demand.
+  - **`untrustedAnswer`** does not retry on coming to the foreground.
+  - **`incompatible`** retries on Retry and on the foreground, never on
+    a timer.
+  - **A path change or Prefer while online** re-races without leaving
+    `online`.
+  - **The 30 s refresh** is a confirming probe.
+  - **A connect after an outage** reads "Reconnecting…", and one past the
+    quiet period stays "Offline".
+  - **New copy:** "Replies are slow" in Health; "Connecting…" as the hint
+    on cached questions during a first connect.
+- **The wiring PR (rest of phase 3)** runs the effects, feeds the events
+  and renders `LinkPresentation` in place of `connectionChip` and
+  `currentReachability`. It also classifies errors per attempt
+  (`LinkError`), with a per-task trust delegate.
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on

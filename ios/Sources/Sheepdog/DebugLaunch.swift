@@ -59,6 +59,9 @@ enum DebugLaunch {
         guard arguments.contains("-sheepdogDemoUpdate") else { return nil }
         return UpdateInfo(current: "v0.1.16", latest: "v0.1.17", available: true, how: "brew upgrade sheepdog", autoRestart: true)
     }
+    /// `-sheepdogDemoRecording`: a prompt sent to a demo agent is answered
+    /// as a daemon answers it, for the launch video's shot 8.
+    static var demoRecording: Bool { arguments.contains("-sheepdogDemoRecording") }
     /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
     static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last

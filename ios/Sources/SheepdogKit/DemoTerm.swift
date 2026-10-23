@@ -111,7 +111,7 @@ public final class DemoTermTransport: TermTransport {
             switch byte {
             case 0x0d where c.shellCwd != nil:
                 c.history += [Self.shellPrompt(c.shellCwd!) + c.typed]
-                if !c.typed.isEmpty { c.history += ["demo: nothing runs here; on your computer this is a real shell."] }
+                if !c.typed.isEmpty { c.history += Self.shellAnswer(c.typed) }
                 c.typed = ""
             case 0x0d: c.typed = ""
             case 0x7f, 0x08: if !c.typed.isEmpty { c.typed.removeLast() }
@@ -151,13 +151,54 @@ public final class DemoTermTransport: TermTransport {
         sendFull(ch)
     }
 
+    /// What the demo's shell prints for a command: a few scripted ones
+    /// about the sample project, and a plain note for anything else.
+    static func shellAnswer(_ command: String) -> [String] {
+        let yellow = "\u{1b}[33m", green = "\u{1b}[32m", red = "\u{1b}[31m", reset = "\u{1b}[0m"
+        switch command.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ") {
+        case "git log --oneline -3", "git log --oneline":
+            return ["\(yellow)4f2a9c1\(reset) Retry the payment webhook with backoff",
+                    "\(yellow)9b13e70\(reset) Fix the login redirect loop",
+                    "\(yellow)2d6f0b8\(reset) Add the users.plan migration"]
+        case "git status":
+            return ["On branch main", "Your branch is up to date with 'origin/main'.", "",
+                    "Changes not staged for commit:", "  \(red)modified:   README.md\(reset)"]
+        case "make test":
+            return ["go test ./...", "ok   shop/internal/auth  0.42s", "ok   shop/internal/web   0.61s", "\(green)PASS\(reset)"]
+        case "ls":
+            return ["README.md  go.mod  internal  migrations  package.json  src  test"]
+        case "pwd":
+            return ["/Users/demo/code/shop"]
+        default:
+            return ["demo: only git log --oneline -3, git status, make test, ls and pwd answer here; on your computer this is a real shell."]
+        }
+    }
+
     static func shellPrompt(_ cwd: String) -> String {
         "\u{1b}[36m" + ((cwd as NSString).lastPathComponent) + "\u{1b}[0m % "
     }
 
     private func shellLines(_ c: Channel) -> [String] {
-        let lines = c.history + [Self.shellPrompt(c.shellCwd ?? "~") + c.typed]
+        let lines = c.history.flatMap { Self.wrap($0, cols: c.cols) } + [Self.shellPrompt(c.shellCwd ?? "~") + c.typed]
         return Array(lines.suffix(max(1, c.rows)))
+    }
+
+    /// A plain line cut at the window's width, so a long one does not run
+    /// into the next row (lines with colour codes are short and kept whole).
+    static func wrap(_ line: String, cols: Int) -> [String] {
+        guard cols > 0, line.count > cols, !line.contains("\u{1b}") else { return [line] }
+        var out: [String] = []
+        var rest = Substring(line)
+        while rest.count > cols {
+            // At the last space that fits, or mid-word when there is none.
+            let head = rest.prefix(cols + 1)
+            let cut = head.lastIndex(of: " ").map { rest.distance(from: rest.startIndex, to: $0) } ?? 0
+            let n = cut > 0 ? cut : cols
+            out.append(String(rest.prefix(n)).trimmingCharacters(in: .whitespaces))
+            rest = rest.dropFirst(n).drop { $0 == " " }
+        }
+        out.append(String(rest))
+        return out
     }
 
     // MARK: - Frames
