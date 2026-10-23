@@ -7,6 +7,7 @@ import SwiftUI
 struct SpacesSheet: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openAgentWindow) private var openAgentWindow
 
     enum Load: Equatable {
         case loading
@@ -138,7 +139,7 @@ struct SpacesSheet: View {
         dismiss()
         Task {
             try? await Task.sleep(for: .milliseconds(400))
-            model.navigationPath.append(AgentWindowRoute(paneID: paneID))
+            openAgentWindow(.agent(paneID))
         }
     }
 

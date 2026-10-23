@@ -40,7 +40,7 @@ public struct ConnectionChip: Equatable, Sendable {
         case .reconnecting: return "Reconnecting…"
         case .connected: return "Connected"
         case .offline: return "Offline"
-        case .tokenRefused: return "Token refused"
+        case .tokenRefused: return "Scan again"
         case .updateNeeded: return "Update needed"
         }
     }

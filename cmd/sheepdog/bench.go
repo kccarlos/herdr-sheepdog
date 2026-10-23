@@ -83,7 +83,7 @@ func (b *benchCommon) register(fs *flag.FlagSet) {
 	fs.StringVar(&b.envFile, "env-file", "", "load KEY=VALUE lines first (default ./.env if present)")
 	fs.StringVar(&b.cacheDir, "cache-dir", defaultBenchCache(), "rendered speech cache")
 	fs.StringVar(&b.ttsModel, "tts-model", speech.DefaultModel, "Gemini TTS model on Vertex")
-	fs.StringVar(&b.scratch, "scratch", "", "scratch directory for the daemons (default a temp dir)")
+	fs.StringVar(&b.scratch, "scratch", "", "scratch directory for the daemons, kept afterwards (default a temp dir, removed at the end)")
 	fs.BoolVar(&b.noGemini, "say", false, "render with macOS say only (no Gemini TTS)")
 }
 
@@ -130,11 +130,17 @@ func benchSynths(apiKey, project, cacheDir, ttsModel string, sayOnly bool, stder
 	return speech.Fallback{Synths: []speech.Synth{&speech.Cache{Dir: cacheDir, Inner: g}, say}, Warn: warn}, say, nil
 }
 
-func (b *benchCommon) scratchDir() (string, error) {
+// scratchDir returns --scratch, kept for inspection, or a temp dir that
+// cleanup removes.
+func (b *benchCommon) scratchDir() (dir string, cleanup func(), err error) {
 	if b.scratch != "" {
-		return b.scratch, os.MkdirAll(b.scratch, 0o755)
+		return b.scratch, func() {}, os.MkdirAll(b.scratch, 0o755)
 	}
-	return os.MkdirTemp("", "sheepdog-bench-")
+	dir, err = os.MkdirTemp("", "sheepdog-bench-")
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -164,11 +170,12 @@ func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Wri
 		fprintf(stderr, "sheepdog bench calibrate: %v\n", err)
 		return 1
 	}
-	dir, err := common.scratchDir()
+	dir, cleanup, err := common.scratchDir()
 	if err != nil {
 		fprintf(stderr, "sheepdog bench calibrate: %v\n", err)
 		return 1
 	}
+	defer cleanup()
 	if *samples == "" {
 		home, _ := os.UserHomeDir()
 		*samples = filepath.Join(home, "Documents", "sheepdog-voice-bench", "calibration-"+time.Now().Format("2006-01-02"))
@@ -432,11 +439,12 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			setup["openings"] = "pinned by " + *manifest
 		}
 	}
-	dir, err := common.scratchDir()
+	dir, cleanup, err := common.scratchDir()
 	if err != nil {
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
 	}
+	defer cleanup()
 	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel, Personas: personas}
 	sem := make(chan struct{}, 4) // one limit for every judge and simulated-user call (#94)
 	vx := judgeVertex{key: cfg.Gemini.Vertex.APIKey, project: cfg.Gemini.Vertex.Project}

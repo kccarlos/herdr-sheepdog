@@ -14,10 +14,10 @@ final class SetupHelpTests: XCTestCase {
         XCTAssertEqual(SetupHelp.helpURL(for: refused), SetupHelp.remoteAccessURL)
     }
 
-    func testWrongTokenSaysPairAgain() {
+    func testARefusedPhoneSaysPairAgain() {
         let error = DaemonError.unauthorized(endpoint: "192.168.1.20:7777")
-        XCTAssertEqual(error.hint, SetupHelp.tokenFix)
-        XCTAssertTrue(SetupHelp.tokenFix.contains("sheepdog pair"))
+        XCTAssertEqual(error.hint, SetupHelp.pairFix)
+        XCTAssertTrue(SetupHelp.pairFix.contains("sheepdog pair"))
         XCTAssertEqual(SetupHelp.helpURL(for: error), SetupHelp.remoteAccessURL)
     }
 

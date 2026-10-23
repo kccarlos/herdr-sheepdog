@@ -36,6 +36,7 @@ struct AgentStrip: View {
                             )
                         }
                         .buttonStyle(ChipButtonStyle())
+                        .zoomSource(agent.paneID)
                         .accessibilityIdentifier("agent.chip.\(agent.alias)")
                     }
                 }
@@ -62,6 +63,8 @@ struct AgentChip: View {
             Circle()
                 .fill(Theme.color(for: agent.state))
                 .frame(width: 7, height: 7)
+                .doneFlash(agent.state)
+                .animation(Theme.ease, value: agent.state)
                 .accessibilityHidden(true)
             Text(agent.alias)
                 .font(.subheadline.weight(.semibold))

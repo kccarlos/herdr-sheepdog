@@ -30,7 +30,6 @@ final class PushTests: XCTestCase {
         let request = try client.pushRegisterRequest(PushRegistration(token: "abcd", environment: .sandbox, device: "iPhone"))
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.url?.path, "/api/push/register")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer s3cr3t")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(String(decoding: request.httpBody ?? Data(), as: UTF8.self), #"{"device":"iPhone","environment":"sandbox","token":"abcd"}"#)
     }

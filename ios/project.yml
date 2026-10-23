@@ -67,6 +67,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.kit
         GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO
         DEFINES_MODULE: YES
@@ -93,11 +94,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios
         PRODUCT_NAME: Sheepdog
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone and iPad (docs/dev/design/app-redesign.md section 6).
+        TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
       # Phone notifications (APNs). The entitlement's aps-environment and
       # the environment the app tells the daemon its token belongs to are
       # one decision, made per configuration: Debug (Xcode runs,
@@ -128,6 +129,26 @@ targets:
         LSRequiresIPhoneOS: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The iPhone stays portrait; the iPad turns every way, which iPad
+        # multitasking (Split View, Stage Manager) also requires.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Several windows on iPad: one owns the voice (SceneCoordinator),
+        # the others show the mini capsule.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        # An agent dragged from the iPad sidebar (AgentPanes.swift).
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.github.kccarlos.herdr-sheepdog-ios.agent
+            UTTypeDescription: Sheepdog agent
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
         # Brand launch screen: #1B1D22 with the cream mono logo at 80 pt.
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -146,10 +167,10 @@ targets:
         NSMicrophoneUsageDescription: >-
           Sheepdog uses the microphone so you can talk to your coding agents.
           Your voice goes only to the sheepdog daemon on your own computer; in
-          the demo it stays on this iPhone.
+          the demo it stays on this device.
         NSSpeechRecognitionUsageDescription: >-
           In the demo, Sheepdog recognises your spoken questions on this
-          iPhone only (on-device recognition). Nothing is sent anywhere.
+          device only (on-device recognition). Nothing is sent anywhere.
         NSCameraUsageDescription: >-
           Sheepdog uses the camera to scan the pairing code that
           "sheepdog setup" or "sheepdog pair" shows on your computer, and to
@@ -158,16 +179,13 @@ targets:
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
           your local network.
-        # The daemon speaks plain HTTP on a private network by design
-        # (docs/ws-contract.md "Non-goals": no TLS in v1), so arbitrary loads
-        # have to be allowed. Only this key: ATS ignores
-        # NSAllowsArbitraryLoads whenever NSAllowsLocalNetworking (or the
-        # media/web-content variants) is also present, and local networking
-        # does not cover a Tailscale 100.64/10 address — with both keys the
-        # app got NSURLErrorAppTransportSecurityRequiresSecureConnection
-        # against the Mac's Tailscale IP.
+        # Every address but loopback is TLS (docs/dev/design/security.md):
+        # the app checks the daemon's self-signed certificate by its pin
+        # (PinnedTrustDelegate), so no arbitrary loads. Local networking
+        # stays allowed only for plain HTTP to this Mac's loopback, where
+        # the fixture daemons the UI tests use run.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
         # Export compliance: the app implements no encryption of its own; it
         # uses only what iOS provides (URLSession, URLSessionWebSocketTask;
         # HTTPS/WSS when the daemon offers it; CryptoKit's AES-GCM to open
@@ -224,7 +242,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.widgets
         PRODUCT_NAME: SheepdogWidgets
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
 
   # Decrypts end-to-end encrypted relay notifications (the daemon's
@@ -258,7 +276,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.NotificationService
         PRODUCT_NAME: SheepdogNotificationService
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
 
   SheepdogUITests:
@@ -272,6 +290,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.uitests
         GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
 
   SheepdogKitTests:
     type: bundle.unit-test
@@ -288,6 +307,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.kit.tests
         GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
 
 schemes:
   # Shared (XcodeGen writes schemes to xcshareddata), which Xcode Cloud

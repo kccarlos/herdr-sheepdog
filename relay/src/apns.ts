@@ -75,6 +75,8 @@ export interface APNsRequest {
   deviceToken: string;
   environment: Environment;
   topic: string;
+  /** apns-push-type: "alert" (the default) or "liveactivity". */
+  pushType?: "alert" | "liveactivity";
   priority: 5 | 10;
   collapseId?: string;
   body: string;
@@ -98,7 +100,7 @@ async function post(creds: APNsCredentials, req: APNsRequest, fetcher: typeof fe
   const headers: Record<string, string> = {
     authorization: `bearer ${jwt}`,
     "apns-topic": req.topic,
-    "apns-push-type": "alert",
+    "apns-push-type": req.pushType ?? "alert",
     "apns-priority": String(req.priority),
     "content-type": "application/json",
   };

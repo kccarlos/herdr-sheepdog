@@ -112,12 +112,12 @@ struct VoiceCapsule<VoiceMenu: View>: View {
     @ViewBuilder
     private var orb: some View {
         if model.orbAction == .holdToTalk {
-            CapsuleOrb(mode: mode)
+            CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
                 .holdToTalk(holding: holding, onPress: onPress, onRelease: onRelease)
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                CapsuleOrb(mode: mode)
+                CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
             }
             // Disabled while it has nothing to do, but never dimmed: the
             // orb's colour is the state.
@@ -243,6 +243,8 @@ extension View {
 struct CapsuleOrb: View {
     let mode: CapsuleMode
     var size: CGFloat = 44
+    /// The voice's output level while it speaks: the waveform follows it.
+    var outputLevel: Float = 0
 
     @State private var breathe = false
     @State private var spin = false
@@ -300,11 +302,17 @@ struct CapsuleOrb: View {
             if let stroke {
                 Circle().strokeBorder(stroke.0, lineWidth: stroke.1)
             }
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.44, weight: .semibold))
-                .foregroundStyle(glyphColor)
-                .rotationEffect(.degrees(mode == .reconnecting && spin ? 360 : 0))
-                .contentTransition(.symbolEffect(.replace))
+            if mode == .speaking, !reduceMotion {
+                SpeakingWave(level: outputLevel, color: glyphColor, height: size * 0.44)
+                    .transition(.opacity)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.44, weight: .semibold))
+                    .foregroundStyle(glyphColor)
+                    .rotationEffect(.degrees(mode == .reconnecting && spin ? 360 : 0))
+                    .contentTransition(.symbolEffect(.replace))
+                    .transition(.opacity)
+            }
         }
         .frame(width: size, height: size)
         // The cream sticker ring, with a hairline outside it.
@@ -520,5 +528,29 @@ struct CapsuleComposer: View {
                 focused = false
             }
         }
+    }
+}
+
+/// The speaking orb's glyph: four bars that follow the voice's output
+/// level (one easing, 200 ms). Under Reduce Motion the orb keeps the still
+/// waveform symbol instead.
+private struct SpeakingWave: View {
+    let level: Float
+    let color: Color
+    let height: CGFloat
+
+    private static let shape: [CGFloat] = [0.55, 1, 0.8, 0.45]
+
+    var body: some View {
+        HStack(spacing: height * 0.14) {
+            ForEach(Array(Self.shape.enumerated()), id: \.offset) { _, factor in
+                Capsule()
+                    .fill(color)
+                    .frame(width: height * 0.13, height: max(height * 0.18, height * factor * CGFloat(0.3 + 0.7 * min(1, level * 2.2))))
+            }
+        }
+        .frame(height: height)
+        .animation(Theme.ease, value: level)
+        .accessibilityHidden(true)
     }
 }
