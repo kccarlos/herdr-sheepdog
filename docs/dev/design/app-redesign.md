@@ -601,6 +601,14 @@ The lock screen comes first.
 Dark variants: [main](app-redesign/ipad-main-dark.jpg),
 [side by side](app-redesign/ipad-split-dark.jpg).
 
+**As built (2026-10-22, one computer):** no computer row in the sidebar,
+no "Talking to …" subtitle, no computer sections in All agents, and the
+mini capsule shows the voice's name. ⌘K is not bound until there are
+several computers. The iPhone keeps its Agents tab rather than a separate
+All agents page. The sheets use the system form size. Dragging a sidebar
+row out of the app to make a window is wired (the row carries an
+`AgentWindowRoute`) but not verified; Open in New Window is.
+
 ## 7. States, accessibility and dark mode
 
 | Screen | Empty | Error | Offline computer | Blocked agent | One vs several |

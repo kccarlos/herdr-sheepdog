@@ -36,9 +36,9 @@ export function isEnvironment(v: unknown): v is Environment {
   return v === "production" || v === "sandbox";
 }
 
-/** A device token: lowercase hex, an even count of 64 to 200 digits. */
+/** A device or Live Activity push token: lowercase hex, an even count of 64 to 400 digits (the daemon's bounds; Apple does not fix the length). */
 export function isDeviceToken(v: unknown): v is string {
-  return typeof v === "string" && v.length >= 64 && v.length <= 200 && v.length % 2 === 0 && /^[0-9a-f]+$/.test(v);
+  return typeof v === "string" && v.length >= 64 && v.length <= 400 && v.length % 2 === 0 && /^[0-9a-f]+$/.test(v);
 }
 
 export async function sealToken(secret: string, claims: TokenClaims): Promise<string> {

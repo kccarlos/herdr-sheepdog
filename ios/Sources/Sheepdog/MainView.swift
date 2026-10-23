@@ -9,6 +9,8 @@ struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @StateObject private var ui = SceneUI()
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(\.sceneID) private var sceneID
     /// The question collapse, the window zoom and the capsule morph.
     @Namespace private var motion
 
@@ -35,10 +37,26 @@ struct MainView: View {
                 model.windowRequest = nil
                 open(request)
             }
+            .background { KeyboardShortcuts(commands: commands) }
             // Outside the chrome, so its sheets (New agent, Spaces) see them.
             .environmentObject(ui)
             .environment(\.motionNamespace, motion)
             .environment(\.openAgentWindow, OpenWindowAction { open($0) })
+    }
+
+    /// ⌘N, ⌘⇧M and ⌘1…9 (SheepdogCommands) in this window.
+    private var commands: SessionCommands {
+        SessionCommands(
+            newAgent: model.agentActionsAvailable ? {
+                scenes.request(from: sceneID)
+                model.showsNewAgent = true
+            } : nil,
+            toggleMute: VoiceBarModel(state: model.state, talkMode: model.talkMode).muteAvailability == .enabled
+                ? { model.toggleMute() } : nil,
+            muted: model.isMuted,
+            agents: SidebarSections(computers: [.computer(id: "current", name: model.voiceName, agents: model.flock.all)]).agents,
+            openAgent: { open(.agent($0)) }
+        )
     }
 
     /// The iPhone layout pushes a window on the main stack; the iPad

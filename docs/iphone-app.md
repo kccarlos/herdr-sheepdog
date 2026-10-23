@@ -5,7 +5,8 @@
 **Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for
-notifications, if you set up push). It needs iOS 26 or newer.
+notifications, if you set up push). It needs iOS 26 or newer, and runs on
+iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 
 ## Install
 
@@ -194,6 +195,36 @@ On the same Wi-Fi this just works. Away from home, see
 - **Earbud remote.** Play/pause on earbuds or AirPods mutes and unmutes the
   microphone; next track stops what is in flight.
 - **Siri, Shortcuts, Action Button.** "Talk to Sheepdog" starts a session.
+
+## On iPad
+
+The same app, with the room an iPad has. In Slide Over or a narrow split
+it looks exactly like the iPhone app.
+
+- **Sidebar:** Conversation, All agents (with how many are waiting), then
+  your agents under their spaces. A waiting agent shows a hand and
+  "waiting"; the others show how long they have been in their state. The
+  voice capsule sits at the foot of the sidebar.
+- **Detail:** an agent's window (terminal, its question above the keys,
+  the keys and a composer), the Conversation in a centred column with its
+  own composer, or **All agents**: every agent as a card in two columns,
+  with the filters All, Waiting and Working, and Expand all. Expanded
+  cards also list up to three earlier messages.
+- **Portrait:** the sidebar hides; tap the sidebar button to slide it
+  over. The header then carries a small capsule: tap its orb to mute or
+  unmute, its name for the voice menu.
+- **Two agents side by side:** tap the split button in an agent's header
+  and pick another agent, or drag an agent from the sidebar onto the
+  window. In portrait the two stack. Each has its own question, keys and
+  composer; the one you used last has a dark line on top. Drag the line
+  between them to share the room; ✕ closes one. A new agent opens beside
+  the one you are looking at.
+- **Several windows:** an agent's ⋯ ▸ **Open in New Window** gives it a
+  window of its own (Split View, Stage Manager). There is still one voice
+  session: the first window has the full capsule, the others a small one.
+- **Keyboard:** ⌘N new agent, ⌘1 to ⌘9 jump to the agents in sidebar
+  order, ⌘⇧M mute or unmute, and ⌘↩ starts the agent in New agent. Hold ⌘
+  to see the list.
 
 ## Notifications
 

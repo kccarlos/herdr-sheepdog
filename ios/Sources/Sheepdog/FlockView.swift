@@ -329,6 +329,7 @@ struct AgentCard: View {
                 .overlay(Circle().strokeBorder(Theme.line, lineWidth: 1))
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
+                .hoverEffect()
         }
         .buttonStyle(.plain)
         .padding(.top, -6)

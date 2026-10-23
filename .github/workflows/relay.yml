@@ -29,7 +29,7 @@ jobs:
         working-directory: relay
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -60,7 +60,7 @@ jobs:
       - if: steps.creds.outputs.ok == 'true'
         uses: actions/checkout@v7
       - if: steps.creds.outputs.ok == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -69,7 +69,7 @@ jobs:
         run: npm ci
         working-directory: relay
       - if: steps.creds.outputs.ok == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

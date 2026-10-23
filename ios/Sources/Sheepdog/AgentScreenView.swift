@@ -318,6 +318,7 @@ private struct AgentWindowView: View {
                                 } label: {
                                     Label(other.alias, systemImage: other.state == .blocked ? "hand.raised" : "terminal")
                                 }
+                                .accessibilityIdentifier("pane.split.\(other.alias)")
                             }
                         }
                     } label: {
@@ -326,6 +327,7 @@ private struct AgentWindowView: View {
                             .foregroundStyle(Theme.ink)
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
+                            .hoverEffect()
                     }
                     .accessibilityLabel("Show another agent beside this one")
                     .accessibilityIdentifier("pane.split")
@@ -336,6 +338,7 @@ private struct AgentWindowView: View {
                         .foregroundStyle(Theme.ink)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
+                        .hoverEffect()
                 }
                 .accessibilityLabel("Agent actions")
                 .accessibilityIdentifier("agentScreen.menu")
@@ -356,6 +359,7 @@ private struct AgentWindowView: View {
                 .foregroundStyle(color)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
+                .hoverEffect()
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

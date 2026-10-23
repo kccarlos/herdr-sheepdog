@@ -89,6 +89,7 @@ struct AllAgentsView: View {
                     .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
                     .frame(minHeight: 44)
                     .contentShape(Capsule())
+                    .hoverEffect()
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("allAgents.expandAll")
@@ -115,6 +116,7 @@ struct AllAgentsView: View {
                         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? Theme.selected : .clear))
                         .shadow(color: .black.opacity(on ? 0.1 : 0), radius: 1, y: 1)
                         .contentShape(Rectangle())
+                        .hoverEffect(.highlight)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
