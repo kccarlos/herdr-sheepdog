@@ -28,8 +28,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR cancels its older run; every push to main runs to
+# the end (a docs merge right after an app merge must not cancel the app
+# merge's smoke run).
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
