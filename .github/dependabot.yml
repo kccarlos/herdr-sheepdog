@@ -1,11 +1,19 @@
 version: 2
+# Monthly, one grouped PR per ecosystem, to keep the noise down. Security
+# updates ignore the schedule and still arrive as soon as they are published.
 updates:
   - package-ecosystem: gomod
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      go:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
