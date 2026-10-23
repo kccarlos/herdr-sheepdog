@@ -28,6 +28,12 @@ type Web struct {
 	// after the daemon's own: a router's port forward, which the daemon
 	// cannot see (docs/remote-access.md).
 	Advertise []string `toml:"advertise"`
+	// TailscaleHTTPS serves a real Let's Encrypt certificate, fetched
+	// with `tailscale cert`, to browsers that open the computer's
+	// *.ts.net name. Off by default: turning it on logs the name
+	// publicly (certificate transparency). The app never uses it; it
+	// pins the daemon's own key. The setup page switches it.
+	TailscaleHTTPS bool `toml:"tailscale_https"`
 }
 
 // IsLoopback reports whether Bind reaches only this machine (127.0.0.1,

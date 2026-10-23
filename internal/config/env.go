@@ -33,7 +33,7 @@ func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
 //	SHEEPDOG_DEEPSEEK_REASONING_EFFORT, ANTHROPIC_API_KEY, SHEEPDOG_ANTHROPIC_BASE_URL,
 //	SHEEPDOG_ANTHROPIC_EFFORT, SHEEPDOG_ANTHROPIC_EVENT_EFFORT, SHEEPDOG_ANTHROPIC_FALLBACKS,
-//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_SHELL, SHEEPDOG_WEB_ADVERTISE,
+//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_SHELL, SHEEPDOG_WEB_ADVERTISE, SHEEPDOG_WEB_TAILSCALE_HTTPS,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
@@ -170,6 +170,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_WEB_SHELL=%q: want true or false", v)
 		}
 		cfg.Web.Shell = b
+	}
+	if v, ok := lookup("SHEEPDOG_WEB_TAILSCALE_HTTPS"); ok && v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_WEB_TAILSCALE_HTTPS=%q: want true or false", v)
+		}
+		cfg.Web.TailscaleHTTPS = b
 	}
 	if v, ok := lookup("SHEEPDOG_WEB_ADVERTISE"); ok && strings.TrimSpace(v) != "" {
 		cfg.Web.Advertise = nil

@@ -135,7 +135,7 @@ func (s *Server) pairing(fresh bool) PairResponse {
 	}
 	resp.Link = pair.Link(pair.LinkInfo{
 		DaemonID: s.deps.Computer.ID, Name: s.deps.Computer.Name, Pin: s.deps.TLS.Pin(),
-		Code: code, Addresses: addrs,
+		Code: code, Addresses: addrs, Host: s.tailscaleHost(port(s.Addr())),
 	})
 	e := exp.UTC()
 	resp.Expires = &e
@@ -331,4 +331,10 @@ func (s *Server) handleResetPairing(w http.ResponseWriter, _ *http.Request) {
 	s.log.Log(logSource, "web.device.reset_pairing", "", map[string]any{"count": len(done)})
 	s.log.Log(logSource, "web.tls.rotate", "", map[string]any{"old_pin": old, "new_pin": s.deps.TLS.Pin(), "phase": "reset"})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(done)})
+}
+
+// port is the port of a host:port address ("" when there is none).
+func port(addr string) string {
+	_, p, _ := net.SplitHostPort(addr)
+	return p
 }

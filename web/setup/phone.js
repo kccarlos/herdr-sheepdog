@@ -22,6 +22,28 @@ export function shellSaved(r) {
   return r.shell ? 'Saved. Your phones can open a shell.' : 'Saved. The phone shell is off.';
 }
 
+// tsnetSwitch is the "Use a Tailscale certificate for browsers" switch
+// (web.tailscale_https): shown once phone access is on and Tailscale is
+// on this computer, off by default. The note says the cost first: the
+// machine name goes into the public certificate logs.
+export function tsnetSwitch(phone) {
+  const p = phone || {};
+  let note = 'Browsers on other computers open sheepdog with no warning. Tailscale\'s certificates are public: this computer\'s name and your tailnet\'s name get logged in public certificate logs. The app does not need it.';
+  if (p.tailscale_https) {
+    note = p.tailscale_name
+      ? 'On: browsers open https://' + p.tailscale_name + ' without a warning. This name is in the public certificate logs.'
+      : 'On, but there is no certificate yet' + (p.tailscale_error ? ': ' + p.tailscale_error : '.');
+  }
+  return { show: !!p.enabled && !!p.tailscale, checked: !!p.tailscale_https, note };
+}
+
+// tsnetSaved is the message after the switch was saved (r is the
+// POST /api/setup/tailscale_https answer).
+export function tsnetSaved(r) {
+  if (!r || r.error) return 'Not turned on: ' + ((r && r.error) || 'no answer');
+  return r.tailscale_https ? 'Saved. Browsers can open https://' + r.name + '.' : 'Saved. Browsers use the computer\'s own certificate again.';
+}
+
 // countdown is the pairing code's remaining time as "9:41", or "" once it
 // has expired (expires is an ISO time, now a Date or milliseconds).
 export function countdown(expires, now) {
