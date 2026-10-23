@@ -94,9 +94,10 @@ jobs:
   # Five Mac jobs at most: GitHub runs five macOS jobs of an account at
   # once, and a separate build job beside five test jobs could wait for a
   # slot while the test jobs wait for it. So one test job builds (the one
-  # ci-plan.sh marks "build": the iPad job, whose short tests and long boot
-  # hide the build, or smoke alone in the smoke tier), and the others boot
-  # their simulator (2 to 8 minutes) while it builds (about 3).
+  # ci-plan.sh marks "build", from ci-shards.txt; smoke alone in the smoke
+  # tier) and boots its own simulator only after the upload (a simulator
+  # booting beside the build made it 12 minutes instead of 3), and the
+  # others boot theirs (2 to 8 minutes) while it builds.
   tests:
     needs: plan
     if: needs.plan.outputs.tier != 'none'
@@ -139,8 +140,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
-      # The building job: the checkout, the daemon and the project, before
-      # its simulator boots.
+      # The building job: the checkout, the daemon, the project and the
+      # build, before its simulator boots.
       - uses: actions/checkout@v7
         if: matrix.build
 
@@ -182,42 +183,8 @@ jobs:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
-      - name: Pick the simulator and boot it
-        id: sim
-        run: |
-          # The newest iPhone on the image, but not a foldable one (iPhone
-          # Duo): unfolded it has regular width, which gets the iPad layout,
-          # and the iPhone tests test the iPhone layout. The newest iPad Pro
-          # 13" (any iPad if there is none) for IPadUITests.
-          udid=$(xcrun simctl list devices available --json | python3 -c '
-          import json, os, sys
-          devs = json.load(sys.stdin)["devices"]
-          def newest(ok):
-              best = None
-              for runtime, items in devs.items():
-                  if "iOS" not in runtime:
-                      continue
-                  ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
-                  for d in items:
-                      if ok(d["name"]) and (best is None or ver > best[0]):
-                          best = (ver, d["udid"], d["name"], runtime)
-              return best
-          if os.environ["DEVICE"] == "ipad":
-              best = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
-          else:
-              best = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
-          if best is None:
-              sys.exit("no %s simulator available" % os.environ["DEVICE"])
-          print(best[2], best[3], file=sys.stderr)
-          print(best[1])
-          ')
-          xcrun simctl boot "$udid" || true
-          echo "boot started $(date +%s)" >> "$TIMINGS"
-          echo "udid=$udid" >> "$GITHUB_OUTPUT"
-
       # For any simulator; arm64 only (the hosted Macs are Apple silicon),
-      # without the index store nobody reads. One simulator booting beside
-      # it costs the build little (#380).
+      # without the index store nobody reads.
       - name: Build for testing
         if: matrix.build
         working-directory: ios
@@ -284,6 +251,39 @@ jobs:
           path: ${{ runner.temp }}/${{ env.BUILD_FAILED }}
           archive: false
           retention-days: 1
+
+      - name: Pick the simulator and boot it
+        id: sim
+        run: |
+          # The newest iPhone on the image, but not a foldable one (iPhone
+          # Duo): unfolded it has regular width, which gets the iPad layout,
+          # and the iPhone tests test the iPhone layout. The newest iPad Pro
+          # 13" (any iPad if there is none) for IPadUITests.
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, os, sys
+          devs = json.load(sys.stdin)["devices"]
+          def newest(ok):
+              best = None
+              for runtime, items in devs.items():
+                  if "iOS" not in runtime:
+                      continue
+                  ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
+                  for d in items:
+                      if ok(d["name"]) and (best is None or ver > best[0]):
+                          best = (ver, d["udid"], d["name"], runtime)
+              return best
+          if os.environ["DEVICE"] == "ipad":
+              best = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
+          else:
+              best = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
+          if best is None:
+              sys.exit("no %s simulator available" % os.environ["DEVICE"])
+          print(best[2], best[3], file=sys.stderr)
+          print(best[1])
+          ')
+          xcrun simctl boot "$udid" || true
+          echo "boot started $(date +%s)" >> "$TIMINGS"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the simulator
         id: wait

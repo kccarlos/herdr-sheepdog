@@ -148,8 +148,10 @@ fi
 
 # The matrix: in the full tier the smoke method is left to the job that
 # runs its whole class, the iPad classes go to the iPad, the two special
-# classes become flags, and the iPad job (else the first) builds.
+# classes become flags, and the job the build line names (else the first)
+# builds.
 cat > "$work/shards" <<'EOF'
+build    shard-1
 smoke    SheepdogKitTests
 smoke    SheepdogUITests/HistoryApprovalUITests
 smoke    SheepdogUITests/CardsUITests/testCards

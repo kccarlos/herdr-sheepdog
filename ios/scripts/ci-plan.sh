@@ -8,9 +8,9 @@
 #       mixes iPad and iPhone tests
 #   scripts/ci-plan.sh matrix <full|smoke> [shards]
 #       prints the jobs as a GitHub Actions matrix (JSON). Exactly one job
-#       has "build": true and builds the app for the others: the iPad job
-#       (its tests are short and its boot long, so the build hides in the
-#       boot), or the first job when the tier has no iPad job.
+#       has "build": true and builds the app for the others: the one the
+#       list's "build <job>" line names, or the first job when that one is
+#       not in the tier.
 #
 # Tests: bash scripts/ci-plan_test.sh
 set -euo pipefail
@@ -57,6 +57,7 @@ check() {
       n = split(ENVIRON["METHODS"], m, "\n"); for (i = 1; i <= n; i++) if (m[i] != "") meth[m[i]] = 1
     }
     function err(msg) { printf "ci-plan: %s: %s\n", file, msg; bad = 1 }
+    $1 == "build" { if (NF != 2 || builder != "") err("want one \"build <job>\" line, got: " $0); builder = $2; next }
     {
       if (NF != 2) { err("want \"<job> <test>\", got: " $0); next }
       job = $1; id = $2
@@ -81,6 +82,7 @@ check() {
     }
     END {
       if (!kit) err("SheepdogKitTests is in no job; smoke runs the unit tests")
+      if (builder != "" && !(builder in jdev)) err("build " builder ": no such job")
       for (cl in known) {
         if (!(cl in whole)) err(cl " is in no job: add \"shard-<n> SheepdogUITests/" cl "\"")
         else if (whole[cl] > 1) err(cl " is in more than one job:" wjob[cl])
@@ -96,6 +98,7 @@ matrix() {
   local which="${1:?full or smoke}" shards="${2:-$default_shards}"
   [[ "$which" == full || "$which" == smoke ]] || { echo "ci-plan: matrix full|smoke" >&2; return 2; }
   entries "$shards" | awk -v which="$which" '
+    $1 == "build" { want = $2; next }
     which == "smoke" && $1 != "smoke" { next }
     {
       if (!($1 in seen)) { seen[$1] = 1; order[++jobs] = $1 }
@@ -117,8 +120,7 @@ matrix() {
         dev = (cl ~ /^IPad/) ? "ipad" : "iphone"
         add(dev, j, "-only-testing:" eid[i])
       }
-      builder = order[1]
-      for (o = jobs; o >= 1; o--) if (ipad[order[o]] != "") builder = order[o]
+      builder = (want in seen) ? want : order[1]
       printf "{\"include\":["
       for (o = 1; o <= jobs; o++) {
         j = order[o]

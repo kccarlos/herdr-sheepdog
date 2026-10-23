@@ -47,9 +47,9 @@ extension XCTestCase {
         func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if tapHittable(app.buttons.matching(identifier: item)), landed() { return }
-            if tapHittable(app.buttons.matching(identifier: menu)) {
-                if app.buttons[item].waitForExistence(timeout: 3), tapHittable(app.buttons.matching(identifier: item)), landed() { return }
+            if tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+            if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
+                if app.buttons[item].waitForExistence(timeout: 3), tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
             }
             usleep(300_000)
         } while Date() < deadline
@@ -88,7 +88,7 @@ extension XCTestCase {
         let deadline = Date().addingTimeInterval(15)
         var label = ""
         repeat {
-            if tapHittable(app.buttons.matching(identifier: menu)), app.buttons[item].waitForExistence(timeout: 3) {
+            if tapOnScreen(app, app.buttons.matching(identifier: menu)), app.buttons[item].waitForExistence(timeout: 3) {
                 label = app.buttons[item].label
                 break
             }
@@ -146,9 +146,22 @@ extension XCTestCase {
         }
     }
 
-    private func tapHittable(_ query: XCUIElementQuery) -> Bool {
-        for i in 0 ..< query.count where query.element(boundBy: i).isTappable {
-            query.element(boundBy: i).tap()
+    /// Taps the first match that has a place on screen, at the middle of
+    /// the frame it has now. A menu item can lose its frame between the
+    /// check and the tap (the menu closes or is rebuilt when the state
+    /// under it changes), and both `isHittable` and an element `tap()` then
+    /// fail the test; a coordinate tap cannot, and `tapMenuItem(until:)`
+    /// notices one that landed nowhere. The copy under the demo's cover
+    /// sits at the same place, and a coordinate tap reaches the top one.
+    private func tapOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        let screen = app.frame
+        for i in 0 ..< query.count {
+            let element = query.element(boundBy: i)
+            guard element.exists else { continue }
+            let frame = element.frame
+            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty,
+                  screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - screen.minX, dy: frame.midY - screen.minY)).tap()
             return true
         }
         return false
