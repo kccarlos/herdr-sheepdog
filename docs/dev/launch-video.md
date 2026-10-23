@@ -160,7 +160,7 @@ English into the README cut; ship the Chinese as a subtitle file or a separate e
 - **Screen:** in the same window, 📎 **Attach**, then a staged screenshot of a login error (a fake staging page). The user types "This is the error from staging. Handle it too." and sends. The agent picks it up in the terminal.
 - **Caption:** "Send a prompt, a photo or a log." / 「发一句话、一张图或一段日志。」
 - **You:** none (typed). **Voice:** none.
-- **Source:** **a real daemon.** The demo accepts the attachment but answers the send with "This is the demo: … nothing was sent".
+- **Source:** a real daemon, or the offline demo with `-sheepdogDemoRecording` (the send answers "Sent to claude-auth.").
 
 **9. Start a new agent (0:48–0:56)**
 
@@ -171,7 +171,7 @@ English into the README cut; ship the Chinese as a subtitle file or a separate e
 - **Caption:** "Start the next agent from the sidewalk." / 「在路边就能开一个新 agent。」
 - **You:** none (typed). It can also be said: "Start a Claude in shop to fix the migration."
 - **Voice:** a short confirmation that the agent started (whatever the take says).
-- **Source:** **a real daemon.** The demo shows the sheet but answers "This is the demo: its agents are scripted, so no agent was started."
+- **Source:** a real daemon, or the offline demo (Start adds a scripted agent and opens its window).
 
 **10. And: the shell, the update notice (0:56–1:02)**
 
@@ -179,7 +179,7 @@ A three-beat montage, about 2 s each, with one caption each.
 
 - **10a.** ⋯ ▸ **Open shell here**: "Shell · shop" runs `git log --oneline -3`.
   - **Caption:** "A real shell when you need one." / 「需要时，还有一个真正的 shell。」
-  - **Source:** a real daemon (the shell is on by default once the security work lands). The demo's shell prints "demo: nothing runs here", so don't use it on camera.
+  - **Source:** a real daemon (the shell is on by default), or the offline demo, whose shell answers a few scripted commands about the sample project.
 - **10b.** Settings, the top line: "sheepdog vX.Y.Z is available. To update, run this on your computer: `brew upgrade sheepdog`".
   - **Caption:** "It tells you when there's an update." / 「有新版本，它会告诉你。」
   - **Source:** this line shows only when the daemon knows of a newer release: film the offline demo with `-sheepdogDemoUpdate` in the simulator, or film just after a release with an older daemon.
@@ -316,9 +316,9 @@ for some final shots.
 | 6. Card "Your agents" | yes (`-sheepdogDemoCard`) | or real |
 | 7. Live terminal and key bar | yes | or real |
 | 7. Changes and diff | yes | or real |
-| 8. Attach and send a prompt | no (it says "This is the demo") | yes |
-| 9. New agent | no (it says "no agent was started") | yes |
-| 10a. Shell | no (it says "demo: nothing runs here") | yes |
+| 8. Attach and send a prompt | yes (`-sheepdogDemoRecording`) | or real |
+| 9. New agent | yes | or real |
+| 10a. Shell | yes (a few scripted commands) | or real |
 | 10b. Update notice | yes (`-sheepdogDemoUpdate`) | or an older daemon |
 | 11, 12 | | real herdr, real setup |
 
@@ -377,13 +377,13 @@ link in the README.
 
 ### Product changes that would help filming
 
-Items 1, 5 and 7 are built; the rest are not. Each one is small, and each one only matters if the shot cannot be
+Items 1 to 5 and 7 are built; 6 and 8 are not. Each one is small, and each one only matters if the shot cannot be
 filmed on a real daemon.
 
 1. **Demo update notice.** Done: under `-sheepdogDemoUpdate` (debug builds) the demo's `/api/state` reports sheepdog v0.1.17 as available, so the main screen shows the update notice and shot 10b can be filmed offline.
-2. **Demo new agent.** In the demo, Start would add a scripted, working agent to the list, instead of answering "no agent was started". This makes shot 9 filmable offline.
-3. **Demo sends without the "This is the demo" replies.** The composer, attachments and agent actions would answer as a real daemon does, behind a recording-only flag. This covers shot 8.
-4. **A demo shell with a few scripted commands** (`git log --oneline -3`, `git status`, `make test`) instead of "demo: nothing runs here". This covers shot 10a.
+2. **Demo new agent.** Done: in the demo, Start adds a scripted agent (`claude-3`, at work on its first prompt) and opens its window, as a daemon does. Shot 9 is filmable offline.
+3. **Demo sends without the "This is the demo" replies.** Done: under `-sheepdogDemoRecording` (debug builds) a prompt sent from an agent window is answered "Sent to claude-auth.", as a daemon answers it. Attachments already upload in the demo. This covers shot 8.
+4. **A demo shell with a few scripted commands.** Done: the demo's shell answers `git log --oneline -3`, `git status`, `make test`, `ls` and `pwd` about the sample project, and says that nothing else runs. This covers shot 10a.
 5. **Consistent demo paths.** Done: the demo's agents, Changes and New agent folders all use `shop` under `/Users/demo/code` (agents in `~/code/shop`, Changes on branch `fix-login`), the same paths as the `demo` macOS user above.
 6. **More demo cards.** Today the demo only answers "Show me the agents". A "show me what claude-auth changed" card would back shot 6 with something closer to the diff.
 7. **The recording pipeline (scripts and a test, not the app).** Done: `LaunchRecordingUITests`, `phone.sh`, `compose.py` and `lines.tsv` make the synthetic cut described in [The video we have now](#the-video-we-have-now).
