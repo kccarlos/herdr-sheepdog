@@ -6,6 +6,11 @@ import Foundation
 /// against the pairing code's pin, and every request carries a session
 /// ticket (`DeviceCredentials`). An unpaired address is plain HTTP, which
 /// the daemon serves to loopback only: the fixture daemons in the tests.
+///
+/// The app enforces that rule itself, here, because App Transport Security
+/// is off (it can express neither a pin nor an IP exception): an endpoint
+/// that is not `secure` and not loopback builds no URL at all, so no request
+/// or web socket can go out in plain text (`allowsConnection`).
 public struct DaemonEndpoint: Equatable, Sendable {
     /// Host or IP, without a scheme.
     public var host: String
@@ -53,6 +58,31 @@ public struct DaemonEndpoint: Equatable, Sendable {
     public var scheme: String { secure ? "https" : "http" }
     public var webSocketScheme: String { secure ? "wss" : "ws" }
 
+    /// False for plain HTTP to anything but this device: the URL builders
+    /// below then return nil and `DaemonClient` refuses with
+    /// `PairingProblem.notPaired`. The offline demo's made-up `.invalid`
+    /// host is allowed too: it never resolves and never leaves the app
+    /// (`DemoURLProtocol`).
+    public var allowsConnection: Bool { secure || Self.isLoopback(host) || host == DemoDaemon.host }
+
+    /// `localhost`, `127.0.0.0/8` or `::1`, written as literals. A name that
+    /// only resolves to loopback (`127.0.0.1.nip.io`) is not loopback.
+    public static func isLoopback(_ host: String) -> Bool {
+        var h = host.lowercased()
+        if h.hasPrefix("["), h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
+        if h.hasSuffix(".") { h = String(h.dropLast()) }
+        if h == "localhost" { return true }
+        var v4 = in_addr()
+        if h.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 {
+            return UInt32(bigEndian: v4.s_addr) >> 24 == 127
+        }
+        var v6 = in6_addr()
+        if h.withCString({ inet_pton(AF_INET6, $0, &v6) }) == 1 {
+            return withUnsafeBytes(of: &v6) { Array($0) } == [UInt8](repeating: 0, count: 15) + [1]
+        }
+        return false
+    }
+
     /// What the error banners say: `192.168.1.20:7777`.
     public var display: String { "\(host):\(port)" }
 
@@ -63,14 +93,17 @@ public struct DaemonEndpoint: Equatable, Sendable {
         request.setValue(header, forHTTPHeaderField: "Authorization")
     }
 
-    public var webSocketURL: URL? { URL(string: "\(webSocketScheme)://\(hostForURL):\(port)/ws") }
+    public var webSocketURL: URL? {
+        guard allowsConnection else { return nil }
+        return URL(string: "\(webSocketScheme)://\(hostForURL):\(port)/ws")
+    }
 
     private var hostForURL: String {
         host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
     }
 
     public func url(path: String, query: [URLQueryItem] = []) -> URL? {
-        guard var components = URLComponents(string: "\(scheme)://\(hostForURL):\(port)") else { return nil }
+        guard allowsConnection, var components = URLComponents(string: "\(scheme)://\(hostForURL):\(port)") else { return nil }
         components.path = path
         components.queryItems = query.isEmpty ? nil : query
         return components.url
@@ -79,7 +112,7 @@ public struct DaemonEndpoint: Equatable, Sendable {
     /// `url(path:query:)` for a path whose segments are already
     /// percent-encoded (a pane id with `%` or `/` in it).
     public func url(percentEncodedPath: String, query: [URLQueryItem] = []) -> URL? {
-        guard var components = URLComponents(string: "\(scheme)://\(hostForURL):\(port)") else { return nil }
+        guard allowsConnection, var components = URLComponents(string: "\(scheme)://\(hostForURL):\(port)") else { return nil }
         components.percentEncodedPath = percentEncodedPath
         components.queryItems = query.isEmpty ? nil : query
         return components.url
@@ -191,6 +224,7 @@ public final class DaemonClient: @unchecked Sendable {
     }
 
     private func request(url: URL?, method: String, body: Data?) throws -> URLRequest {
+        guard endpoint.allowsConnection else { throw DaemonError.pairing(.notPaired) }
         guard let url else {
             throw DaemonError.malformed("the address \(endpoint.display) is not a URL")
         }
