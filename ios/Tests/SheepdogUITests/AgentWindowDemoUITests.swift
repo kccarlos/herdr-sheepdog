@@ -180,6 +180,11 @@ final class AgentWindowDemoUITests: XCTestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
         XCTAssertEqual(app.state, .runningForeground, "the app is still up")
         XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
+        // The demo starts a scripted agent, and its window opens.
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10), "the new agent's window")
+        XCTAssertTrue(app.staticTexts["claude-3"].waitForExistence(timeout: 5), "the new agent's name")
+        sleep(1)
+        shot("new-agent-started")
     }
 
     /// A folder that is not a repository has no worktree switch; a start
@@ -221,7 +226,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         field.typeText("packages")
         XCTAssertTrue(app.descendants(matching: .any)["newAgent.folderPathError"].waitForExistence(timeout: 5), "not a full path")
         XCTAssertFalse(app.buttons["newAgent.folderNext"].isEnabled)
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/you/code/shop/packages/api")
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/demo/code/shop/packages/api")
         shot("new-agent-folder")
         scrollToVisible(app, app.buttons["newAgent.folderNext"]).tap()
         XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10), "Which agent, with Start")

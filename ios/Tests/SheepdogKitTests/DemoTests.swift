@@ -124,6 +124,56 @@ final class DemoDaemonTests: XCTestCase {
         super.tearDown()
     }
 
+    func testUpdateOnlyWhenARecordingSetsOne() async throws {
+        let plain = try await client.state()
+        XCTAssertNil(plain.update, "a demo daemon has no release to compare with")
+        daemon.update = UpdateInfo(current: "v0.1.16", latest: "v0.1.17", available: true, how: "brew upgrade sheepdog")
+        let state = try await client.state()
+        XCTAssertEqual(state.update?.latest, "v0.1.17")
+        XCTAssertEqual(state.update?.notice?.command, "brew upgrade sheepdog")
+    }
+
+    func testNewAgentStartsAScriptedAgent() async throws {
+        let options = try await client.newAgentOptions()
+        let shop = try XCTUnwrap(options.projects.first { $0.name == "shop" })
+        let reply = try await client.newAgent(kind: "claude", project: shop, text: "Fix the migration: users.plan already exists.")
+        XCTAssertEqual(reply.spoken, "Claude is ready in shop.")
+        let pane = try XCTUnwrap(reply.paneID)
+        let state = try await client.state()
+        let agent = try XCTUnwrap(state.agents.first { $0.paneID == pane })
+        XCTAssertEqual(agent.alias, "claude-3")
+        XCTAssertEqual(agent.state, .working)
+        XCTAssertEqual(agent.currentTask, "Fix the migration: users.plan already exists.")
+        let screen = try await client.agentScreen(paneID: pane)
+        XCTAssertNotNil(screen, "its window opens")
+    }
+
+    func testAPromptIsSentOnlyInARecording() async throws {
+        let plain = try await client.agentInput(paneID: DemoWorld.authPane, text: "Handle the staging error too.")
+        XCTAssertTrue(plain.spoken?.hasPrefix("This is the demo") == true)
+        daemon.recording = true
+        let sent = try await client.agentInput(paneID: DemoWorld.authPane, text: "Handle the staging error too.")
+        XCTAssertEqual(sent.spoken, "Sent to claude-auth.")
+    }
+
+    @MainActor
+    func testTheShellAnswersAFewCommands() {
+        XCTAssertEqual(DemoTermTransport.shellAnswer("git  status").first, "On branch main")
+        XCTAssertEqual(DemoTermTransport.shellAnswer("git log --oneline -3").count, 3)
+        XCTAssertEqual(DemoTermTransport.shellAnswer("pwd"), ["/Users/demo/code/shop"])
+        XCTAssertTrue(DemoTermTransport.shellAnswer("rm -rf /").first?.hasPrefix("demo: only") == true, "anything else runs nothing")
+        XCTAssertEqual(DemoTermTransport.wrap("abcdefgh", cols: 3), ["abc", "def", "gh"], "a long word is cut at the width")
+        XCTAssertEqual(DemoTermTransport.wrap("go.mod  internal  migrations", cols: 18), ["go.mod  internal", "migrations"], "between words where it can")
+    }
+
+    func testOneProjectPath() async throws {
+        // Demo and real shots cut together: every path is shop under /Users/demo/code.
+        let state = try await client.state()
+        XCTAssertTrue(state.agents.allSatisfy { $0.cwd == "~/code/shop" })
+        let changes = try await client.agentChanges(paneID: DemoWorld.authPane)
+        XCTAssertEqual(changes?.root, "/Users/demo/code/shop")
+    }
+
     func testRoundTrip() async throws {
         let hello = try await client.hello()
         XCTAssertEqual(hello.version, "demo")

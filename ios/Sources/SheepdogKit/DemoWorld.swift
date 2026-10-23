@@ -44,6 +44,7 @@ public struct DemoWorld: Sendable {
     private var lastSeq: UInt64 = 0
     private var steps: [(at: TimeInterval, step: Step)]
     private var pendingCount = 0
+    private var startedCount = 0
 
     enum Step: Sendable {
         case finishAuth, askPayments, failMigration, finishDocs, finishPayments
@@ -68,13 +69,13 @@ public struct DemoWorld: Sendable {
         self.now = now
         agents = [
             Agent(paneID: Self.authPane, alias: "claude-auth", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Fix the login redirect loop", spoken: "claude-auth", cwd: "~/Documents/shop"),
+                  currentTask: "Fix the login redirect loop", spoken: "claude-auth", cwd: "~/code/shop"),
             Agent(paneID: Self.paymentsPane, alias: "codex-payments", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments", cwd: "~/Documents/shop"),
+                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments", cwd: "~/code/shop"),
             Agent(paneID: Self.migrationPane, alias: "claude-migration", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration", cwd: "~/Documents/shop"),
+                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration", cwd: "~/code/shop"),
             Agent(paneID: Self.docsPane, alias: "codex-docs", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Update the install section of the README", spoken: "codex-docs", cwd: "~/Documents/shop"),
+                  currentTask: "Update the install section of the README", spoken: "codex-docs", cwd: "~/code/shop"),
         ]
         // The migration fails before the approval, so the status answer
         // after it has news (done, failed, still writing).
@@ -272,6 +273,26 @@ public struct DemoWorld: Sendable {
         }
     }
 
+    // MARK: - New agent
+
+    /// How the daemon says a kind ("Claude is ready in shop.").
+    static let kindWords = ["claude": "Claude", "codex": "Codex", "agy": "Antigravity"]
+
+    /// `POST /api/agents`: a scripted agent that is ready at once, at work
+    /// on its first prompt (idle without one), in `workspace`. Returns its
+    /// pane and what the daemon says.
+    public mutating func startAgent(kind: String, workspace: String, text: String?) -> (paneID: String, spoken: String) {
+        startedCount += 1
+        let alias = "\(kind)-\(agents.filter { $0.kind == kind }.count + 1)"
+        let pane = "demo-new-\(startedCount)"
+        let task = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let state: Agent.State = task.isEmpty ? .idle : .working
+        agents.append(Agent(paneID: pane, alias: alias, kind: kind, workspaceLabel: workspace, state: state, stateSince: now,
+                            currentTask: task.isEmpty ? nil : task, spoken: alias, cwd: "~/code/\(workspace)"))
+        log(source: "herdr", type: "herdr.state", pane: pane, payload: ["state": .string(state.rawValue)])
+        return (pane, "\(Self.kindWords[kind] ?? kind.capitalized) is ready in \(workspace).")
+    }
+
     // MARK: - Cards
 
     /// "Show me the agents": a card with the agents as a table and what
@@ -345,10 +366,12 @@ public struct DemoWorld: Sendable {
     public func screen(paneID: String) -> AgentScreen? {
         guard let agent = agents.first(where: { $0.paneID == paneID }) else { return nil }
         let task = agent.currentTask ?? agent.lastTask ?? ""
-        var text = "> \(task)\n\n"
+        var text = task.isEmpty ? "" : "> \(task)\n\n"
         switch (agent.paneID, agent.state) {
         case (_, .working):
             text += "● Reading the code…\n● Editing files…\n"
+        case (_, .idle) where task.isEmpty:
+            text += "Ready. Type a first prompt below.\n"
         case (Self.paymentsPane, .blocked):
             text += "● I'll add p-retry for the retries.\n\nWould you like to run the following command?\n\n  $ npm install p-retry\n\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n"
         case (Self.migrationPane, _):

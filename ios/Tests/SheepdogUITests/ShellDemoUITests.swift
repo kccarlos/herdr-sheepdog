@@ -67,6 +67,19 @@ final class ShellDemoUITests: XCTestCase {
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "the shell's prompt")
         sleep(1)
         shot("shell")
+        // A few scripted commands answer, about the sample project. The
+        // terminal takes keys, not synthesized text: tap them.
+        for key in ["l", "s"] { app.keyboards.keys[key].tap() }
+        let ret = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch
+        if ret.exists { ret.tap() } else { app.keyboards.keys.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch.tap() }
+        let listed = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
+            .matching(NSPredicate(format: "value CONTAINS 'package.json'")).firstMatch
+        if !listed.waitForExistence(timeout: 10) {
+            shot("shell-ls-failed")
+            XCTFail("ls answers")
+        }
+        sleep(1)
+        shot("shell-ls")
 
         // Close shell asks first.
         tapVisible(app.buttons, "shell.menu")

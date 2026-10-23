@@ -52,6 +52,16 @@ enum DebugLaunch {
     /// UI test catches a view whose identity changes on every re-render
     /// (a sheet that closes and reopens forever).
     static var renderChurn: Bool { arguments.contains("-sheepdogRenderChurn") }
+    /// `-sheepdogDemoUpdate`: the demo's daemon reports a newer release,
+    /// so the update notice can be filmed without an older daemon
+    /// (docs/dev/launch-video.md, shot 10b).
+    static var demoUpdate: UpdateInfo? {
+        guard arguments.contains("-sheepdogDemoUpdate") else { return nil }
+        return UpdateInfo(current: "v0.1.16", latest: "v0.1.17", available: true, how: "brew upgrade sheepdog", autoRestart: true)
+    }
+    /// `-sheepdogDemoRecording`: a prompt sent to a demo agent is answered
+    /// as a daemon answers it, for the launch video's shot 8.
+    static var demoRecording: Bool { arguments.contains("-sheepdogDemoRecording") }
     /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
     static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
