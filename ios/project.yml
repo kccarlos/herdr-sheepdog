@@ -37,7 +37,7 @@ settings:
     # Xcode Cloud gives every build its own (CI_BUILD_NUMBER) and uses it
     # for the uploaded build, so CURRENT_PROJECT_VERSION stays 1 for local
     # builds. docs/dev/xcode-cloud.md.
-    MARKETING_VERSION: "0.1.15"
+    MARKETING_VERSION: "0.1.16"
     CURRENT_PROJECT_VERSION: "1"
     # The paid team. Automatic signing locally; Xcode Cloud
     # signs with its own cloud-managed certificates for this team.
@@ -181,11 +181,16 @@ targets:
           your local network.
         # Every address but loopback is TLS (docs/dev/design/security.md):
         # the app checks the daemon's self-signed certificate by its pin
-        # (PinnedTrustDelegate), so no arbitrary loads. Local networking
-        # stays allowed only for plain HTTP to this Mac's loopback, where
-        # the fixture daemons the UI tests use run.
+        # (PinnedTrustDelegate). ATS cannot express that: even after the
+        # delegate accepts the pinned key, ATS runs its own system trust
+        # check and fails the connection ("ATS failed system trust",
+        # NSURLErrorDomain -1200 / -9802) on a Tailscale or LAN address, and
+        # exception domains cannot name IP addresses. So ATS is off for the
+        # app; the pin is the check. NSAllowsLocalNetworking must stay
+        # unset: when it is present iOS ignores NSAllowsArbitraryLoads.
+        # Plain HTTP is still used only for loopback (the fixture daemons).
         NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
         # Export compliance: the app implements no encryption of its own; it
         # uses only what iOS provides (URLSession, URLSessionWebSocketTask;
         # HTTPS/WSS when the daemon offers it; CryptoKit's AES-GCM to open
