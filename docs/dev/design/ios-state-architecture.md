@@ -1,6 +1,6 @@
 # iOS app: state and runtime architecture
 
-*Proposal, 2026-10-23, for the CEO's review. Nothing here is built.
+*Accepted 2026-10-23; built phase by phase (section 6).
 Code references are `file:line` at commit `d425f46a` (TestFlight 0.1.17);
 the fix for the three 0.1.17 bugs will move some lines.*
 
@@ -89,7 +89,7 @@ There is no rewrite and no compatibility code.
 4. [Real-world conditions](#4-real-world-conditions)
 5. [Testing strategy](#5-testing-strategy)
 6. [Migration plan](#6-migration-plan)
-7. [Open questions](#7-open-questions)
+7. [Decisions](#7-decisions)
 
 ## 1. Current state
 
@@ -980,7 +980,9 @@ Order and dependencies:
 - **No safety rail moved into the app or a prompt.** The approval rule
   stays in the daemon's code.
 
-## 7. Open questions
+## 7. Decisions
+
+Decided on 2026-10-23: each question below takes its recommendation.
 
 1. **A pin mismatch on a network that is not the computer's.** Today any
    mismatch ends the session with "scan again" and the interception
