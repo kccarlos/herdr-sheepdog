@@ -113,23 +113,39 @@ paths a PR or push changes (`ios/scripts/ci-plan.sh tier`) and picks a tier:
 
 | Change | Mac jobs |
 |---|---|
-| A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and four shards, the full suite |
+| A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and three shards, the full suite |
 | A PR that changes only the daemon's API: `cmd/`, `internal/web/`, `internal/voice/wsproto/`, `internal/termproto/`, `testdata/protocol/`, `go.mod`, `go.sum` | smoke |
 | A push to `main` that changes any of the above | smoke |
 | Anything else (docs, other Go code, the web UI) | none |
 
 Smoke is the unit tests (`SheepdogKitTests`, which include the protocol
-goldens), the first-run, settings, pairing, questions, history, agent
-window and reconnect UI tests, and, in the smoke tier, one iPad test (in
-the full tier the iPad shard runs it, so no job boots two simulators); the shards split the
-other UI test classes, balanced by their CI durations.
+goldens) and the fixture-daemon UI tests closest to the API (pairing,
+history, settings, reconnect, questions), about ten minutes of tests; the
+shards split the other UI test classes, balanced by their CI durations:
+one runs `IPadUITests` on an iPad, two split the rest on an iPhone.
 `ios/scripts/ci-shards.txt` lists which job runs which tests, and the
-`plan` job fails if a UI test class is in no job (`ci-plan.sh check`,
-tested by `ci-plan_test.sh`), so a new class cannot be skipped silently.
-Smoke and the shards run side by side, one Mac each, and the first that
-fails cancels the rest (`fail-fast`). Each job builds the app and the
-daemon itself (the build hides the simulator's boot) and starts two
-fixture daemons on free ports
+`plan` job fails if a UI test class is in no job or a job mixes iPad and
+iPhone tests (`ci-plan.sh check`, tested by `ci-plan_test.sh`), so a new
+class cannot be skipped silently.
+
+A `build` job (one Mac) builds the app and its test bundles once
+(`build-for-testing` for any simulator, arm64 only, no index store, about
+three minutes) and the daemon, and hands Build/Products, `bin/sheepdog`
+and the scripts and test sources the tests read to the test jobs as one
+zstd tar (an artifact of about 50 MB, kept for a day). Each test job (one
+Mac, one simulator) downloads it, boots its simulator, and runs
+`xcodebuild test-without-building -xctestrun` for its tests; it needs no
+checkout, Go or XcodeGen. A booting simulator slows everything else on the
+Mac badly (a download or the daemon's first launch takes minutes beside
+it), so it boots last; the boot is the biggest fixed cost of a test job
+(two to five minutes), which is why there are only four test jobs. Smoke
+and the shards run side by side and the first that fails cancels the
+rest (`fail-fast`); the shards do not wait for smoke, because that would
+add smoke's whole time to every run, and a compile error already stops
+the run in `build` before any test Mac starts. Each test job prints its
+timings (download, boot, first test) in the job summary and every test
+case with its time in the log. Each iPhone job starts two fixture daemons
+on free ports
 (`ios/scripts/fixture-daemons.sh`, `--brain=fake --herdr=mock --voice=off`,
 temp data dirs) for its tests; `HistoryApprovalUITests` runs after
 a fresh daemon restart, and `ReconnectUITests` with

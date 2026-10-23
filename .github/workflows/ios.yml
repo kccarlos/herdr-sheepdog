@@ -255,9 +255,39 @@ jobs:
           echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
           echo "build unpacked $(date +%s)" >> "$TIMINGS"
 
+      # Two free ports for the main (--voice=off) and the pair daemon, and
+      # a control directory for scripts/fixture-daemon-restarter.sh. The
+      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift). Every
+      # iPhone job starts them (a test that needs a daemon skips without
+      # one), before the boot: beside a booting simulator, macOS takes
+      # minutes to clear the new daemon binary's first launch.
+      - name: Start the fixture daemons
+        id: fixture
+        if: env.DEVICE == 'iphone'
+        run: |
+          read -r port pair_port < <(python3 -c '
+          import socket
+          socks = [socket.socket() for _ in range(2)]
+          for s in socks: s.bind(("127.0.0.1", 0))
+          print(*[s.getsockname()[1] for s in socks])
+          ')
+          {
+            echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
+            echo "SHEEPDOG_FIXTURE_PORT=$port"
+            echo "SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
+            echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
+            echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
+            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
+          } >> "$GITHUB_ENV"
+          SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
+            SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
+            ios/scripts/fixture-daemons.sh start
+
       # A booting simulator slows everything else on the Mac to a crawl
       # (a 52 MB download took 3 to 7 minutes beside it), so it boots
-      # after the download.
+      # after the download and the fixture daemons.
       - name: Pick the simulator and boot it
         id: sim
         run: |
@@ -292,38 +322,12 @@ jobs:
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the simulator
+        id: wait
         run: |
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
           # The app asks for the microphone when the session starts.
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
           echo "simulator booted $(date +%s)" >> "$TIMINGS"
-
-      # Two free ports for the main (--voice=off) and the pair daemon, and
-      # a control directory for scripts/fixture-daemon-restarter.sh. The
-      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift). Every
-      # job starts them: a test that needs a daemon skips without one.
-      - name: Start the fixture daemons
-        id: fixture
-        run: |
-          read -r port pair_port < <(python3 -c '
-          import socket
-          socks = [socket.socket() for _ in range(2)]
-          for s in socks: s.bind(("127.0.0.1", 0))
-          print(*[s.getsockname()[1] for s in socks])
-          ')
-          {
-            echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
-            echo "SHEEPDOG_FIXTURE_PORT=$port"
-            echo "SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
-            echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
-            echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
-            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
-            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
-            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
-          } >> "$GITHUB_ENV"
-          SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
-            SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
-            ios/scripts/fixture-daemons.sh start
 
       # A hosted Mac is slow enough that a UI tap now and then lands while
       # an animation runs and is lost, a different test each run; a test
@@ -336,7 +340,7 @@ jobs:
       # screenshot tests skip themselves (they need SHEEPDOG_SHOTS and the
       # like).
       - name: Unit and UI tests - iPhone
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.iphone != '' }}
+        if: ${{ !cancelled() && steps.wait.outcome == 'success' && steps.fixture.outcome == 'success' && matrix.iphone != '' }}
         working-directory: ios
         run: |
           status=0
@@ -355,7 +359,7 @@ jobs:
       # just before it (the other UI tests add conversation after the seeded
       # restart).
       - name: UI test - history and approval
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.history }}
+        if: ${{ !cancelled() && steps.wait.outcome == 'success' && steps.fixture.outcome == 'success' && matrix.history }}
         working-directory: ios
         run: |
           ./scripts/fixture-daemons.sh restart
@@ -372,7 +376,7 @@ jobs:
 
       # The restarter kills and restarts the main daemon when the test asks.
       - name: UI test - reconnect after a daemon restart
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.reconnect }}
+        if: ${{ !cancelled() && steps.wait.outcome == 'success' && steps.fixture.outcome == 'success' && matrix.reconnect }}
         working-directory: ios
         run: |
           mkdir -p "$SHEEPDOG_CONTROL_DIR"
@@ -392,7 +396,7 @@ jobs:
 
       # The iPad layout (IPadUITests, offline demo, no daemon).
       - name: UI tests - iPad
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.ipad != '' }}
+        if: ${{ !cancelled() && steps.wait.outcome == 'success' && matrix.ipad != '' }}
         working-directory: ios
         run: |
           status=0
