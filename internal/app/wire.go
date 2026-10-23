@@ -293,6 +293,7 @@ func (a *App) wire() error {
 		}
 	}
 	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
+	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {
 		return err

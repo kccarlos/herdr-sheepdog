@@ -432,6 +432,9 @@ type HelloResponse struct {
 type HelloSecurity struct {
 	Pin         string    `json:"pin"`
 	CertExpires time.Time `json:"cert_expires"`
+	// TailscaleHTTPS is the *.ts.net name browsers can open with a real
+	// certificate (web.tailscale_https), omitted when none is served.
+	TailscaleHTTPS string `json:"tailscale_https,omitempty"`
 }
 
 // HelloAudio is the /ws audio contract (docs/dev/ws-contract.md): what a
@@ -449,8 +452,16 @@ func (s *Server) handleHello(w http.ResponseWriter, _ *http.Request) {
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
 		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
 		Computer: s.computer(),
-		Security: HelloSecurity{Pin: s.deps.TLS.Pin(), CertExpires: s.deps.TLS.Expires().UTC()},
+		Security: s.helloSecurity(),
 	})
+}
+
+func (s *Server) helloSecurity() HelloSecurity {
+	sec := HelloSecurity{Pin: s.deps.TLS.Pin(), CertExpires: s.deps.TLS.Expires().UTC()}
+	if s.tsOn.Load() {
+		sec.TailscaleHTTPS, _ = s.deps.TLS.Tailscale()
+	}
+	return sec
 }
 
 // computer is Deps.Computer, nil without an id.

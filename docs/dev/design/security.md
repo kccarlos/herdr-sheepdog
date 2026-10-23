@@ -162,14 +162,20 @@ the QR once more.
   certificate.
 - **SNI equal to the machine's `*.ts.net` name**, only when the setup
   page's **"Use a Tailscale certificate for browsers"** switch is on: the
-  real certificate, fetched from the Tailscale LocalAPI (the same call
-  `tailscale cert` uses). The daemon checks once a day and renews it when
-  Tailscale does.
+  real certificate, fetched with `tailscale cert` (the CLI on `PATH`, or
+  the one inside the macOS app) into `<data_dir>/tls/tsnet.crt` and
+  `tsnet.key`. The SNI is compared in lower case without a trailing dot.
+  Turning the switch on fetches the certificate first and saves nothing
+  when that fails, with the fix ("HTTPS certificates are on for your
+  tailnet"). The daemon checks every 6 hours and fetches again in the
+  certificate's last 30 days, when Tailscale renews it. Logged as
+  `web.tls.tsnet {name, expires}` or `web.tls.tsnet_failed {error}`.
 - The switch is **off by default**. Its copy says: "Browsers on other
   computers open sheepdog with no warning. Tailscale's certificates are
   public: this computer's name and your tailnet's name get logged in
-  public certificate logs." The switch is hidden when Tailscale or its
-  HTTPS feature is not available.
+  public certificate logs." The switch is hidden when Tailscale is not
+  on this computer; a tailnet without HTTPS certificates fails when the
+  switch is turned on, with the fix.
 - The app **never pins the `*.ts.net` certificate**: it rotates about
   every 90 days and its key can change. The app always connects by IP
   and pins the self-signed key.

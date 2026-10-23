@@ -593,9 +593,14 @@ plain HTTP.
   handshake and request headers must arrive within 10 seconds.
 
 `GET /api/hello` carries the served key as `security`:
-`{"pin":"<pin>","cert_expires":"2027-10-21T00:00:00Z"}`. The pin is a
-public key hash; a client never trusts this field, only the pin in the
-pairing code.
+`{"pin":"<pin>","cert_expires":"2027-10-21T00:00:00Z","tailscale_https":"<name>"?}`.
+The pin is a public key hash; a client never trusts this field, only the
+pin in the pairing code. `tailscale_https` is the computer's `*.ts.net`
+name while `web.tailscale_https` is on and its real certificate is
+served: a TLS client asking for that name (SNI) gets it, every other
+client (the app connects by address, with no SNI) gets the pinned key.
+The pairing link's browser host is then that name; the `u=` addresses
+stay the same.
 
 ### Loopback-only routes
 
@@ -762,7 +767,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…"}}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?}}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16

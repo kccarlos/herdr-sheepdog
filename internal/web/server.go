@@ -236,6 +236,11 @@ type Deps struct {
 	// Advertise is config web.advertise: more host:port addresses the
 	// pairing code lists after the daemon's own (a router's port forward).
 	Advertise []string
+	// TailscaleHTTPS is config web.tailscale_https: serve the *.ts.net
+	// certificate TailscaleCert fetches to browsers asking for that name
+	// (tsnet.go). The setup page switches it.
+	TailscaleHTTPS bool
+	TailscaleCert  TailscaleCertFunc
 
 	// DataDir is the daemon's data directory; attachments are kept in its
 	// attachments/ folder. Empty answers the attachments route with 503.
@@ -259,7 +264,11 @@ type Server struct {
 	// shellOn is config web.shell, live: the setup page switches it
 	// without a restart (shell.go). kindHook, when set, classifies a
 	// request's peer in place of remoteKind (tests).
-	shellOn  atomic.Bool
+	shellOn atomic.Bool
+	// tsOn is web.tailscale_https, live; tsErr the last failure to get
+	// the certificate (tsnet.go).
+	tsOn     atomic.Bool
+	tsErr    atomic.Value
 	kindHook func(remote string) string
 
 	// devices, auth, enroll and live are device auth
@@ -356,6 +365,7 @@ func New(deps Deps) (*Server, error) {
 	}
 	s.term = newTermServer(s, deps.Term)
 	s.shellOn.Store(deps.Shell)
+	s.tsOn.Store(deps.TailscaleHTTPS)
 	devs, err := loadDeviceStore(deps.DataDir)
 	if err != nil {
 		return nil, err
@@ -672,6 +682,7 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(sl) }()
 	go s.watchActivities(ctx)
+	go s.watchTailscale(ctx)
 	select {
 	case err := <-errc:
 		return err

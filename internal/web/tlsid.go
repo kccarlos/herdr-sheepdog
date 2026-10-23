@@ -30,6 +30,7 @@ const CertLifetime = 365 * 24 * time.Hour
 type TLSIdentity struct {
 	dir string // "" keeps everything in memory (tests)
 	now func() time.Time
+	ts  tsCert // the *.ts.net certificate, when served (tsnet.go)
 
 	mu   sync.RWMutex
 	cur  *certPair
@@ -143,11 +144,8 @@ func (t *TLSIdentity) TLSConfig() *tls.Config {
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 		},
-		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-			t.mu.RLock()
-			defer t.mu.RUnlock()
-			c := t.cur.cert
-			return &c, nil
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return t.certFor(hello), nil
 		},
 	}
 }

@@ -62,6 +62,24 @@ router that does (OpenWrt, GL.iNet and the like):
 The app checks the computer by its certificate's fingerprint, never by
 its address, so any path to the computer works.
 
+## A real certificate for browsers
+
+A browser on another computer shows a certificate warning the first time
+it opens sheepdog, because the certificate is sheepdog's own. With
+Tailscale on this computer you can avoid that: on the setup page, turn on
+**Use a Tailscale certificate for browsers**. sheepdog then asks Tailscale
+for a real certificate for this computer's Tailscale name
+(`<machine>.<tailnet>.ts.net`), and the pairing code's browser link opens
+that name.
+
+- **It is off by default, because the name becomes public:** every such
+  certificate is logged in public certificate transparency logs, with
+  this computer's name and your tailnet's name.
+- It needs HTTPS certificates turned on for your tailnet (Tailscale admin
+  console, DNS page). If they are off, the switch says so and stays off.
+- The iPhone app does not need it and does not use it: it keeps checking
+  sheepdog's own certificate by its fingerprint.
+
 ## Security
 
 - **Everything off this computer is encrypted.** sheepdog serves TLS on its
