@@ -15,8 +15,13 @@ public struct PairedComputer: Codable, Equatable, Sendable {
     public var nextPin: String?
     public var deviceID: String
     public var pairedAt: Date
+    /// When the certificate behind `pin` expires (the session's
+    /// `cert_expires`), nil until the first sign-in or right after a
+    /// switch: it tells a missed rotation from an interception
+    /// (`PairingProblem.forPinMismatch`).
+    public var certExpires: Date?
 
-    public init(daemonID: String, name: String, addresses: [String], pin: String, nextPin: String? = nil, deviceID: String, pairedAt: Date) {
+    public init(daemonID: String, name: String, addresses: [String], pin: String, nextPin: String? = nil, deviceID: String, pairedAt: Date, certExpires: Date? = nil) {
         self.daemonID = daemonID
         self.name = name
         self.addresses = addresses
@@ -24,6 +29,7 @@ public struct PairedComputer: Codable, Equatable, Sendable {
         self.nextPin = nextPin
         self.deviceID = deviceID
         self.pairedAt = pairedAt
+        self.certExpires = certExpires
     }
 
     /// The pin as Settings shows it: its first 8 characters.
@@ -44,6 +50,7 @@ public final class DeviceCredentials: @unchecked Sendable {
 
     private let secrets: SecretStore
     private let lock = NSLock()
+    private let updating = NSLock()
     private var loaded = false
     private var cached: PairedComputer?
     private var ticket: SessionTicket?
@@ -75,6 +82,38 @@ public final class DeviceCredentials: @unchecked Sendable {
             signing?.cancel()
             signing = nil
             lock.unlock()
+        }
+    }
+
+    /// Saves an updated record of the same computer without dropping the
+    /// ticket (a new next pin, the certificate's expiry, a switch).
+    /// It never cancels a sign-in in flight: the TLS delegate calls it in
+    /// the middle of one (`served(pin:)`).
+    private func update(_ change: (inout PairedComputer) -> Void) {
+        updating.lock()
+        defer { updating.unlock() }
+        guard var updated = computer else { return }
+        let before = updated
+        change(&updated)
+        guard updated != before else { return }
+        let text = (try? JSONEncoder().encode(updated)).flatMap { String(data: $0, encoding: .utf8) }
+        secrets.setSecret(text, for: Self.account)
+        lock.lock()
+        loaded = true
+        cached = updated
+        lock.unlock()
+    }
+
+    /// The pin a TLS handshake matched (`PinnedTrustDelegate` `onMatch`).
+    /// When it is the next pin, the computer has switched keys: it becomes
+    /// the pin and the old one is dropped. The ticket stays valid.
+    public func served(pin: String) {
+        guard let computer, computer.nextPin == pin, computer.pin != pin else { return }
+        update { c in
+            guard c.nextPin == pin else { return }
+            c.pin = pin
+            c.nextPin = nil
+            c.certExpires = nil // the new certificate's comes with the next sign-in
         }
     }
 
@@ -124,7 +163,10 @@ public final class DeviceCredentials: @unchecked Sendable {
             task = Task {
                 guard let key = DeviceKey.load(daemonID: computer.daemonID) else { throw PairingProblem.noKey }
                 let auth = DeviceAuth(base: base, session: DeviceCredentials.session(timeout: 8))
-                return try await auth.signIn(daemonID: computer.daemonID, pin: computer.pin, deviceID: computer.deviceID, key: key)
+                // Read after the challenge's handshake, which may have
+                // switched to the next pin.
+                return try await auth.signIn(daemonID: computer.daemonID, pins: { [weak self] in self?.pins ?? [computer.pin] },
+                                             deviceID: computer.deviceID, key: key)
             }
             signing = task
         }
@@ -135,13 +177,10 @@ public final class DeviceCredentials: @unchecked Sendable {
             if signing == task { signing = nil }
             ticket = fresh
             lock.unlock()
-            if let next = fresh.nextPin, next != computer.nextPin, var updated = self.computer, updated.daemonID == computer.daemonID {
-                updated.nextPin = next
-                let ticketKept = fresh
-                self.computer = updated
-                lock.lock()
-                ticket = ticketKept
-                lock.unlock()
+            update { c in
+                guard c.daemonID == computer.daemonID else { return }
+                if let next = fresh.nextPin, next != c.pin { c.nextPin = next }
+                if let expires = fresh.certExpires { c.certExpires = expires }
             }
             return fresh
         } catch {
@@ -163,7 +202,8 @@ public final class DeviceCredentials: @unchecked Sendable {
     /// The delegate behind every app session: a server must offer a key
     /// that matches one of the paired computer's pins. Plain HTTP to
     /// loopback (the fixture daemons) never reaches it.
-    public static let trust = PinnedTrustDelegate { DeviceCredentials.shared.pins }
+    public static let trust = PinnedTrustDelegate(pins: { DeviceCredentials.shared.pins },
+                                                  onMatch: { DeviceCredentials.shared.served(pin: $0) })
 
     /// A pinned session with the given configuration.
     public static func session(configuration: URLSessionConfiguration) -> URLSession {
