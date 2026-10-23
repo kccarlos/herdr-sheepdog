@@ -93,11 +93,11 @@ jobs:
 
   # Five Mac jobs at most: GitHub runs five macOS jobs of an account at
   # once, and a separate build job beside five test jobs could wait for a
-  # slot while the test jobs wait for it. So one test job builds (the one
-  # ci-plan.sh marks "build", from ci-shards.txt; smoke alone in the smoke
-  # tier) and boots its own simulator only after the upload (a simulator
-  # booting beside the build made it 12 minutes instead of 3), and the
-  # others boot theirs (2 to 8 minutes) while it builds.
+  # slot while the test jobs wait for it. So one test job builds: the
+  # first to start (a job named in advance could get its Mac last, with
+  # the others waiting). It boots its own simulator only after the upload
+  # (a simulator booting beside the build made it 12 minutes instead of
+  # 3), and the others boot theirs (2 to 8 minutes) while it builds.
   tests:
     needs: plan
     if: needs.plan.outputs.tier != 'none'
@@ -114,6 +114,26 @@ jobs:
       fail-fast: true
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
+      JOB_NAME: ${{ matrix.name }}
+      # This run's artifacts, through the Actions runtime API with the job
+      # token actions/download-artifact itself uses (no repository token);
+      # the github-script steps below run it.
+      LIST_ARTIFACTS: |
+        const token = process.env.ACTIONS_RUNTIME_TOKEN
+        const results = process.env.ACTIONS_RESULTS_URL
+        if (!token || !results) throw new Error('no Actions runtime token in this step')
+        const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+        const scope = String(claims.scp).split(' ').find(s => s.startsWith('Actions.Results:'))
+        if (!scope) throw new Error('the runtime token has no Actions.Results scope')
+        const [, run, job] = scope.split(':')
+        const url = new URL(results).origin + '/twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts'
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ workflow_run_backend_id: run, workflow_job_run_backend_id: job }),
+        })
+        if (!response.ok) throw new Error(`ListArtifacts: ${response.status} ${await response.text()}`)
+        return (await response.json()).artifacts || []
       IPHONE_TESTS: ${{ matrix.iphone }}
       IPAD_TESTS: ${{ matrix.ipad }}
       # One simulator per job: an iPad job runs only iPad tests
@@ -140,27 +160,66 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
+      # Who builds: each job that finds no build yet leaves a claim (a tiny
+      # artifact), and the oldest claim wins. Two jobs that claim at the
+      # same moment can both build; the second upload replaces the first.
+      - name: Look for a build
+        id: look
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const list = new (Object.getPrototypeOf(async function () {}).constructor)(process.env.LIST_ARTIFACTS)
+            const artifacts = await list()
+            core.setOutput('built', String(artifacts.some(a => a.name === process.env.BUILD_ARTIFACT)))
+
+      - name: Claim the build
+        if: steps.look.outputs.built != 'true'
+        run: echo "$JOB_NAME" > "$RUNNER_TEMP/ios-build-claim-$JOB_NAME.txt"
+
+      - name: Upload the claim
+        if: steps.look.outputs.built != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/ios-build-claim-${{ matrix.name }}.txt
+          archive: false
+          retention-days: 1
+
+      - name: Decide who builds
+        id: claim
+        if: steps.look.outputs.built != 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const list = new (Object.getPrototypeOf(async function () {}).constructor)(process.env.LIST_ARTIFACTS)
+            const artifacts = await list()
+            const first = artifacts.filter(a => a.name.startsWith('ios-build-claim-'))
+              .sort((a, b) => Number(a.database_id) - Number(b.database_id))[0]
+            const mine = `ios-build-claim-${process.env.JOB_NAME}.txt`
+            const build = !artifacts.some(a => a.name === process.env.BUILD_ARTIFACT) && first !== undefined && first.name === mine
+            core.info(build ? 'this job builds' : `${first ? first.name : 'another job'} builds`)
+            core.setOutput('build', String(build))
+
       # The building job: the checkout, the daemon, the project and the
       # build, before its simulator boots.
       - uses: actions/checkout@v7
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
 
       # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
       # checkout's daemon, so an API change that breaks the app fails the
       # tests.
       - uses: actions/setup-go@v7
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Build the daemon
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         run: make build
 
       # The same pinned XcodeGen as ci_scripts/ci_post_clone.sh (Xcode Cloud).
       - name: Install XcodeGen
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         run: |
           zip="$RUNNER_TEMP/xcodegen.zip"
           curl -fsSL --retry 3 -o "$zip" \
@@ -170,14 +229,14 @@ jobs:
           echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
 
       - name: Generate the project
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         working-directory: ios
         run: |
           xcodegen --version
           xcodegen generate --spec project.yml
 
       - name: Cache Swift packages
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/spm
@@ -186,7 +245,7 @@ jobs:
       # For any simulator; arm64 only (the hosted Macs are Apple silicon),
       # without the index store nobody reads.
       - name: Build for testing
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         working-directory: ios
         run: |
           status=0
@@ -215,7 +274,7 @@ jobs:
       # checkout. An artifact keeps neither execute bits nor symlinks,
       # hence the tar.
       - name: Pack the build
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         run: |
           start=$(date +%s)
           tar -cf - -C "$DERIVED/Build" Products \
@@ -227,25 +286,26 @@ jobs:
 
       - name: Upload the build
         id: upload
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         uses: actions/upload-artifact@v7
         with:
           path: ${{ runner.temp }}/${{ env.BUILD_ARTIFACT }}
           archive: false
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
 
       - name: Note the upload
-        if: matrix.build
+        if: steps.claim.outputs.build == 'true'
         run: echo "build uploaded $(date +%s)" >> "$TIMINGS"
 
       # Tells the other jobs the build is not coming, so they stop at once.
       - name: Tell the other jobs the build failed
-        if: (failure() || cancelled()) && matrix.build && steps.upload.outcome != 'success'
+        if: (failure() || cancelled()) && steps.claim.outputs.build == 'true' && steps.upload.outcome != 'success'
         run: echo "the build failed" > "$RUNNER_TEMP/$BUILD_FAILED"
 
       - name: Upload the build failure
-        if: (failure() || cancelled()) && matrix.build && steps.upload.outcome != 'success'
+        if: (failure() || cancelled()) && steps.claim.outputs.build == 'true' && steps.upload.outcome != 'success'
         uses: actions/upload-artifact@v7
         with:
           path: ${{ runner.temp }}/${{ env.BUILD_FAILED }}
@@ -298,35 +358,20 @@ jobs:
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
           echo "simulator booted $(date +%s)" >> "$TIMINGS"
 
-      # The other jobs: the building job's artifact, polled through the
-      # Actions runtime API with the job token actions/download-artifact
-      # itself uses, no repository token. A booting simulator slows
+      # The other jobs: the building job's artifact. A booting simulator slows
       # everything else on the Mac to a crawl (a 52 MB download took 3 to 7
       # minutes beside it, the daemon's first launch up to 4.5), so the
       # download and the fixture daemons wait for the boot to finish.
       - name: Wait for the build
-        if: ${{ !matrix.build }}
+        if: steps.claim.outputs.build != 'true'
         uses: actions/github-script@v8
         with:
           script: |
-            const token = process.env.ACTIONS_RUNTIME_TOKEN
-            const results = process.env.ACTIONS_RESULTS_URL
-            if (!token || !results) throw new Error('no Actions runtime token in this step')
-            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
-            const scope = String(claims.scp).split(' ').find(s => s.startsWith('Actions.Results:'))
-            if (!scope) throw new Error('the runtime token has no Actions.Results scope')
-            const [, run, job] = scope.split(':')
-            const url = new URL(results).origin + '/twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts'
+            const list = new (Object.getPrototypeOf(async function () {}).constructor)(process.env.LIST_ARTIFACTS)
             const want = process.env.BUILD_ARTIFACT, failed = process.env.BUILD_FAILED
             const deadline = Date.now() + 25 * 60 * 1000
             for (;;) {
-              const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ workflow_run_backend_id: run, workflow_job_run_backend_id: job }),
-              })
-              if (!response.ok) throw new Error(`ListArtifacts: ${response.status} ${await response.text()}`)
-              const names = ((await response.json()).artifacts || []).map(a => a.name)
+              const names = (await list()).map(a => a.name)
               if (names.includes(want)) break
               if (names.includes(failed)) throw new Error('the building job failed; see its log')
               if (Date.now() > deadline) throw new Error(`no ${want} after 25 minutes`)
@@ -336,7 +381,7 @@ jobs:
             core.info(`${want} is ready`)
 
       - name: Download the build
-        if: ${{ !matrix.build }}
+        if: steps.claim.outputs.build != 'true'
         uses: actions/download-artifact@v8
         with:
           name: ${{ env.BUILD_ARTIFACT }}
@@ -344,7 +389,7 @@ jobs:
 
       # Into the workspace, where the building job's checkout is.
       - name: Unpack the build
-        if: ${{ !matrix.build }}
+        if: steps.claim.outputs.build != 'true'
         run: |
           echo "build downloaded $(date +%s)" >> "$TIMINGS"
           zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"

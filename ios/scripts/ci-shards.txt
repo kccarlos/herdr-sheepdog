@@ -20,13 +20,7 @@
 # - Shards are balanced by the median of recent CI durations (seconds, in
 #   the comments); put a new class in the shortest shard.
 
-# - `build <job>` names the job that builds the app for the others (before
-#   its own simulator boots, so it runs build, boot and tests in a row):
-#   the iPhone shard with the shortest tests. In the smoke tier smoke builds.
-
-build    shard-3
-
-smoke    SheepdogKitTests                             # 212 (136 + a PairingE2ETests retry)
+smoke    SheepdogKitTests                              # 136
 smoke    SheepdogUITests/PairingLinkUITests            # 126
 smoke    SheepdogUITests/SettingsMenuUITests           # 63
 smoke    SheepdogUITests/HistoryApprovalUITests        # 48

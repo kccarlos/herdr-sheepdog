@@ -131,9 +131,10 @@ class cannot be skipped silently.
 Every Mac job is a test job (one Mac, one simulator), at most five: GitHub
 runs five macOS jobs of an account at once, and a separate build job
 beside five test jobs could wait for a slot while they wait for it. One
-of them, the one `ci-plan.sh matrix` marks `"build": true` (the
-`build <job>` line of `ci-shards.txt`, an iPhone shard with short tests;
-smoke in the smoke tier), builds the app and its test bundles once
+of them, the first to get a Mac (each job that finds no build yet
+uploads a tiny claim artifact, and the oldest claim wins; a job named in
+advance could get its Mac last while the others wait), builds the app
+and its test bundles once
 (`build-for-testing` for any simulator, arm64 only, no index store, about
 three minutes; twelve with a simulator booting beside it, so it boots its
 own only after the upload) and the daemon, and hands Build/Products,

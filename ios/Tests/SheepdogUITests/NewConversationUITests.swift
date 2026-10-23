@@ -97,13 +97,16 @@ final class NewConversationUITests: XCTestCase {
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The daemon answers once the change is in its state, within its
+        // own tool timeout; a busy CI Mac took more than 6 s.
+        request.timeoutInterval = 30
         var out = Data()
         let done = expectation(description: "post")
         URLSession.shared.dataTask(with: request) { data, _, _ in
             out = data ?? Data()
             done.fulfill()
         }.resume()
-        wait(for: [done], timeout: 6)
+        wait(for: [done], timeout: 35)
         return out
     }
 
