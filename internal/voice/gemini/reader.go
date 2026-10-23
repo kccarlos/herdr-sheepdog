@@ -32,6 +32,9 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		// First message after Connect; nothing to do.
 	case msg.GoAway != nil:
 		s.log.Log(logSource, "voice.goaway", "", map[string]any{"time_left_ms": msg.GoAway.TimeLeft.Milliseconds()})
+		s.mu.Lock()
+		s.noteGoAwayLocked(gen, msg.GoAway.TimeLeft)
+		s.mu.Unlock()
 		select {
 		case s.goAway <- struct{}{}:
 		default:

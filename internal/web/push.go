@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -13,6 +14,13 @@ type PushService interface {
 	RegisterDevice(push.Registration) (push.Device, error)
 	Unregister(token string) error
 	Status() push.Status
+	ForgetDevices(ids []string) error
+	Notify(push.Notification)
+	// Live Activity push tokens and updates (activity.go).
+	RegisterActivity(deviceID, token, environment string) error
+	ForgetActivity(deviceID string)
+	Activities() []push.Activity
+	UpdateActivity(ctx context.Context, deviceID string, u push.ActivityUpdate) error
 }
 
 // pushRegisterRequest is the body of POST and DELETE /api/push/register.
@@ -44,7 +52,11 @@ func (s *Server) handlePushRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	dev, err := s.deps.Push.RegisterDevice(push.Registration{Token: req.Token, RelayToken: req.RelayToken, Environment: req.Environment, Name: req.Device})
+	deviceID := deviceOf(r)
+	if deviceID == localDevice {
+		deviceID = ""
+	}
+	dev, err := s.deps.Push.RegisterDevice(push.Registration{Token: req.Token, RelayToken: req.RelayToken, Environment: req.Environment, Name: req.Device, DeviceID: deviceID})
 	if err != nil {
 		writePushError(w, err)
 		return
@@ -90,4 +102,39 @@ func writePushError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
+// forgetPush drops the push registrations of revoked devices (each
+// registration carries the device id it was made with).
+func (s *Server) forgetPush(ids []string) {
+	if s.deps.Push == nil || len(ids) == 0 {
+		return
+	}
+	if err := s.deps.Push.ForgetDevices(ids); err != nil {
+		s.log.Log(logSource, "push.forget_failed", "", map[string]any{"error": err.Error()})
+	}
+}
+
+// devicePaired tells every other paired device that a new one paired
+// (docs/dev/design/security.md "The new-device push"); tapping it shows
+// how to revoke.
+func (s *Server) devicePaired(d Device) {
+	if s.deps.Push == nil {
+		return
+	}
+	s.deps.Push.Notify(push.Notification{
+		EventID:      "device-paired:" + d.ID,
+		Kind:         push.KindDevicePaired,
+		Text:         devicePairedText(s.deps.Computer.Name),
+		NeedsYou:     true,
+		ExceptDevice: d.ID,
+	})
+}
+
+// devicePairedText is the new-device push's words.
+func devicePairedText(computer string) string {
+	if computer == "" {
+		computer = "your computer"
+	}
+	return "New device paired to " + computer + ". Not you? Open the computer's setup page to revoke."
 }

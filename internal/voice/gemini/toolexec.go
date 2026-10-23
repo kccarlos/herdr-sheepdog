@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/genai"
@@ -37,13 +38,21 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 	go func() {
 		defer s.wg.Done()
 		defer cancel()
+		var once sync.Once
+		toolDone := func() {
+			once.Do(func() {
+				s.mu.Lock()
+				s.noteToolDoneLocked()
+				s.mu.Unlock()
+			})
+		}
 		defer func() {
 			s.mu.Lock()
 			delete(s.inflight, call.ID)
-			s.noteToolDoneLocked()
 			s.mu.Unlock()
+			toolDone()
 		}()
-		s.execTool(ctx, gen, call, turnDone)
+		s.execTool(ctx, gen, call, turnDone, toolDone)
 	}()
 }
 
@@ -51,7 +60,12 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 // the turn that issued the call before sending the response: a
 // NON_BLOCKING call ends the model's turn, and answering before that
 // turnComplete arrives makes the model discard the result.
-func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, turnDone <-chan struct{}) {
+//
+// toolDone releases the open turn's hold on this call
+// (noteToolDoneLocked). It runs right before the response is sent: the
+// model may answer at once, and that turnComplete must find the turn no
+// longer waiting for this call.
+func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, turnDone <-chan struct{}, toolDone func()) {
 	handler := s.cfg.Handler
 	if handler == nil {
 		handler = func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
@@ -115,6 +129,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	if res.Pending {
 		resp["pending"] = true
 	}
+	toolDone()
 	sendErr := s.sendOn(gen, func(c Conn) error {
 		return c.SendToolResponse(genai.LiveToolResponseInput{FunctionResponses: []*genai.FunctionResponse{{
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(sched),
@@ -254,6 +269,9 @@ func answerLine(call voice.ToolCall, res voice.ToolResult) (string, map[string]a
 	}
 	if len(res.Agents) > 0 {
 		tags[voice.TagAgents] = res.Agents
+	}
+	if len(res.Shown) > 0 {
+		tags[voice.TagOnScreen] = res.Shown
 	}
 	return line, tags
 }

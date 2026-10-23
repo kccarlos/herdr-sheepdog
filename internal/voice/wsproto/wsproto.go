@@ -23,13 +23,10 @@ const (
 // Protocol versions of the /ws contract (docs/dev/ws-contract.md "Protocol
 // version and handshake"). ProtocolVersion is what this build speaks;
 // MinProtocolVersion is the oldest client protocol the daemon still
-// serves. A client that never sends client-ready is protocol 1.
+// serves. A client that never sends client-ready is refused.
 const (
 	ProtocolVersion    = 1
 	MinProtocolVersion = 1
-	// LegacyProtocol is the protocol assumed for a client that sends no
-	// client-ready (the contract as it stood before the handshake).
-	LegacyProtocol = 1
 )
 
 // CloseProtocolUnsupported is the WebSocket close code the daemon uses
@@ -73,12 +70,25 @@ const (
 	// FeatureFeedback: POST /api/feedback (the user's "that paused"
 	// marks) and the client's drain messages ("Feedback and drains").
 	FeatureFeedback = "feedback"
+	// FeatureCards: the client's visibility reports and the daemon's
+	// card messages (the orchestrator's show tool; "Cards").
+	FeatureCards = "cards"
+	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
+	// listed only when herdr is new enough for its terminal bridge.
+	FeatureTerm = "term"
+	// FeatureScreenANSI: screen frames and ?ansi=1 on the screen route
+	// give the visible screen with SGR colours.
+	FeatureScreenANSI = "screen-ansi"
+	// FeatureAgentActions: the user's own agent and space actions — GET
+	// /api/spaces and the /api/spaces/{id}/… routes, POST /api/agents (new agent) and POST
+	// /api/agents/{pane_id}/rename|interrupt|close.
+	FeatureAgentActions = "agent-actions"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
-// playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe.
-// Server→client: bot-ready, flush, status, transcript, error, pong,
-// screen, screen-error.
+// playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe,
+// visibility. Server→client: bot-ready, flush, status, transcript, error,
+// pong, screen, screen-error, card.
 const (
 	TypeClientReady = "client-ready"
 	TypeBotReady    = "bot-ready"
@@ -100,6 +110,9 @@ const (
 	TypeScreenUnsubscribe = "screen-unsubscribe"
 	TypeScreen            = "screen"
 	TypeScreenError       = "screen-error"
+
+	TypeVisibility = "visibility"
+	TypeCard       = "card"
 )
 
 // Voice states carried by a status message.
@@ -154,7 +167,47 @@ type Screen struct {
 	Lines      int    `json:"lines"`
 	Truncated  bool   `json:"truncated"`
 	Hash       string `json:"hash"`
+	// ANSI marks Text as SGR-coloured lines (feature screen-ansi).
+	ANSI bool `json:"ansi,omitempty"`
 }
+
+// Card is a card on a card message: something the orchestrator put on
+// the user's screen ("Cards"). Kind card carries Title and Markdown;
+// agent names the agent whose window it opens (PaneID); excerpt adds
+// Text, the agent's screen lines verbatim; approval adds the open
+// question (PendingID, Question, Command, Options), read-only.
+type Card struct {
+	ID        string       `json:"card_id"`
+	Kind      string       `json:"kind"`
+	At        string       `json:"at"`
+	Title     string       `json:"title"`
+	Markdown  string       `json:"markdown,omitempty"`
+	Agent     string       `json:"agent,omitempty"`
+	Spoken    string       `json:"spoken,omitempty"`
+	PaneID    string       `json:"pane_id,omitempty"`
+	Text      string       `json:"text,omitempty"`
+	PendingID string       `json:"pending_id,omitempty"`
+	Question  string       `json:"question,omitempty"`
+	Command   string       `json:"command,omitempty"`
+	Options   []CardOption `json:"options,omitempty"`
+}
+
+// CardOption is one option of an approval card's question (as
+// /api/state's pending_action lists it).
+type CardOption struct {
+	Index   int      `json:"index"`
+	Label   string   `json:"label"`
+	Keys    []string `json:"keys"`
+	Default bool     `json:"default"`
+}
+
+// Card kinds.
+const (
+	CardKindCard     = "card"
+	CardKindAgent    = "agent"
+	CardKindExcerpt  = "excerpt"
+	CardKindApproval = "approval"
+)
 
 // Message is the union of all control messages. Type selects which of the
 // optional fields are meaningful; unused fields are omitted on the wire.
@@ -241,13 +294,19 @@ type Message struct {
 	Role    string `json:"role,omitempty"`
 	Fix     string `json:"fix,omitempty"`
 
-	// screen-subscribe (PaneID, Lines), screen-error (PaneID, Ended) and
+	// screen-subscribe (PaneID), screen-error (PaneID, Ended) and
 	// screen (Screen): the agent window over /ws. Ended is set on a
 	// screen-error that ended the subscription.
 	PaneID string  `json:"pane_id,omitempty"`
-	Lines  *int    `json:"lines,omitempty"`
 	Screen *Screen `json:"screen,omitempty"`
 	Ended  bool    `json:"ended,omitempty"`
+
+	// visibility (client→server): whether the client's screen is
+	// visible (the app in the foreground, the page not hidden) and its
+	// voice screen is the one in front. card (server→client): Card.
+	Visible     *bool `json:"visible,omitempty"`
+	VoiceScreen *bool `json:"voice_screen,omitempty"`
+	Card        *Card `json:"card,omitempty"`
 }
 
 // ClientReady builds the client→server handshake message, the first text
@@ -342,14 +401,9 @@ func AccountError(msg, problem, role, provider, fix string) Message {
 // Pong builds the reply to Ping.
 func Pong() Message { return Message{Type: TypePong} }
 
-// ScreenSubscribe builds the client→server request for an agent's window;
-// lines <= 0 leaves the daemon's default.
-func ScreenSubscribe(paneID string, lines int) Message {
-	m := Message{Type: TypeScreenSubscribe, PaneID: paneID}
-	if lines > 0 {
-		m.Lines = &lines
-	}
-	return m
+// ScreenSubscribe builds the client→server request for an agent's window.
+func ScreenSubscribe(paneID string) Message {
+	return Message{Type: TypeScreenSubscribe, PaneID: paneID}
 }
 
 // ScreenUnsubscribe builds the client→server end of the subscription.
@@ -363,6 +417,14 @@ func ScreenFrame(s Screen) Message { return Message{Type: TypeScreen, Screen: &s
 func ScreenError(paneID, msg string, ended bool) Message {
 	return Message{Type: TypeScreenError, PaneID: paneID, Message: msg, Ended: ended}
 }
+
+// Visibility builds the client→server visibility report.
+func Visibility(visible, voiceScreen bool) Message {
+	return Message{Type: TypeVisibility, Visible: &visible, VoiceScreen: &voiceScreen}
+}
+
+// CardFrame builds a server→client card message.
+func CardFrame(c Card) Message { return Message{Type: TypeCard, Card: &c} }
 
 // Parse decodes one text frame and validates the fields the type requires.
 func Parse(data []byte) (Message, error) {
@@ -442,9 +504,6 @@ func (m Message) Validate() error {
 		if m.PaneID == "" {
 			return fmt.Errorf("wsproto: screen-subscribe: missing \"pane_id\"")
 		}
-		if m.Lines != nil && *m.Lines < 1 {
-			return fmt.Errorf("wsproto: screen-subscribe: \"lines\" must be positive")
-		}
 	case TypeScreen:
 		if m.Screen == nil || m.Screen.PaneID == "" {
 			return fmt.Errorf("wsproto: screen: missing \"screen\"")
@@ -452,6 +511,14 @@ func (m Message) Validate() error {
 	case TypeScreenError:
 		if m.PaneID == "" || m.Message == "" {
 			return fmt.Errorf("wsproto: screen-error: missing \"pane_id\" or \"message\"")
+		}
+	case TypeVisibility:
+		if m.Visible == nil {
+			return fmt.Errorf("wsproto: visibility: missing \"visible\"")
+		}
+	case TypeCard:
+		if m.Card == nil || m.Card.ID == "" || m.Card.Kind == "" {
+			return fmt.Errorf("wsproto: card: missing \"card\" with \"card_id\" and \"kind\"")
 		}
 	case TypeCancel, TypePing, TypeFlush, TypePong, TypeScreenUnsubscribe:
 	case "":

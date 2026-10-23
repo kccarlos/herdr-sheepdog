@@ -119,6 +119,9 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	if len(st.Agents) != 1 || st.PendingAction == nil || st.PendingAction.Kind != state.PendingAnswerPrompt || st.PendingAction.PaneID != "fake:1" {
 		t.Fatalf("state = %+v", st)
 	}
+	if len(st.Questions) != 1 || st.Questions[0].ID != st.PendingAction.ID || len(st.Questions[0].Options) == 0 {
+		t.Fatalf("questions = %+v", st.Questions)
+	}
 	if st.Voice.Mode != "off" || st.Voice.Status != "closed" || st.Herdr != "mock" || st.Version != "test" {
 		t.Fatalf("state meta = %+v", st.Voice)
 	}
@@ -134,7 +137,7 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	// "yes" → to_supervisor → the bare-answer fast path → send_keys →
 	// pending.confirmed (no model involved at all).
 	var tr ToolResponse
-	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "yes"}, &tr)
+	code, body = h.postJSON("/api/utterance", map[string]any{"text": "yes"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Via != "text_router" || !strings.Contains(tr.Spoken, "Told auth yes") {
 		t.Fatalf("utterance yes = %d %s", code, body)
 	}
@@ -151,17 +154,17 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 			}
 		}
 	}
-	if h.getJSON("/api/state", &st); st.PendingAction != nil {
-		t.Fatalf("pending not cleared: %+v", st.PendingAction)
+	if h.getJSON("/api/state", &st); st.PendingAction != nil || len(st.Questions) != 0 {
+		t.Fatalf("pending not cleared: %+v %+v", st.PendingAction, st.Questions)
 	}
 
 	// Anything else is relayed verbatim: the router classifies nothing,
 	// so only empty text is rejected.
-	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "please reticulate splines"}, &tr)
+	code, body = h.postJSON("/api/utterance", map[string]any{"text": "please reticulate splines"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Args["text"] != "please reticulate splines" {
 		t.Fatalf("relay = %d %s", code, body)
 	}
-	code, _ = h.postJSON("/api/inject/utterance", map[string]any{"text": ""}, nil)
+	code, _ = h.postJSON("/api/utterance", map[string]any{"text": ""}, nil)
 	if code != http.StatusBadRequest {
 		t.Fatalf("empty text = %d", code)
 	}
@@ -269,14 +272,14 @@ func TestPendingCancelAndProposeStop(t *testing.T) {
 	// The prompt has left the screen: an instruction is never typed into
 	// a menu that is still on it (supervisor.menuOnScreen).
 	h.postJSON("/api/inject/screen", map[string]any{"pane_id": "fake:1", "screen": "• Working (3s • esc to interrupt)\n"}, nil)
-	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "tell auth to skip the flaky test and rerun"}, &tr)
+	code, body = h.postJSON("/api/utterance", map[string]any{"text": "tell auth to skip the flaky test and rerun"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasSuffix(tr.Spoken, "Sent.") {
 		t.Fatalf("propose = %d %s", code, body)
 	}
 	if h.getJSON("/api/state", &st); st.PendingAction == nil || st.PendingAction.Kind != state.PendingSendInstruction {
 		t.Fatalf("no send_instruction pending: %+v", st.PendingAction)
 	}
-	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "stop"}, &tr)
+	code, body = h.postJSON("/api/utterance", map[string]any{"text": "stop"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolStop {
 		t.Fatalf("stop = %d %s", code, body)
 	}

@@ -8,16 +8,16 @@ final class SetupHelpTests: XCTestCase {
     func testUnreachableNamesSameWiFiOrTailscale() {
         let refused = DaemonError.unreachable(endpoint: "192.168.1.20:7777", detail: "Nothing is listening on that port.")
         XCTAssertEqual(refused.hint, "Nothing is listening on that port. " + SetupHelp.unreachableFix)
+        XCTAssertTrue(SetupHelp.unreachableFix.contains("same network"))
         XCTAssertTrue(SetupHelp.unreachableFix.contains("same Wi-Fi"))
-        XCTAssertTrue(SetupHelp.unreachableFix.contains("Tailscale"))
         XCTAssertEqual(DaemonError.unreachable(endpoint: "x:1", detail: "").hint, SetupHelp.unreachableFix)
         XCTAssertEqual(SetupHelp.helpURL(for: refused), SetupHelp.remoteAccessURL)
     }
 
-    func testWrongTokenSaysPairAgain() {
+    func testARefusedPhoneSaysPairAgain() {
         let error = DaemonError.unauthorized(endpoint: "192.168.1.20:7777")
-        XCTAssertEqual(error.hint, SetupHelp.tokenFix)
-        XCTAssertTrue(SetupHelp.tokenFix.contains("sheepdog pair"))
+        XCTAssertEqual(error.hint, SetupHelp.pairFix)
+        XCTAssertTrue(SetupHelp.pairFix.contains("sheepdog pair"))
         XCTAssertEqual(SetupHelp.helpURL(for: error), SetupHelp.remoteAccessURL)
     }
 

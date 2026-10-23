@@ -102,6 +102,10 @@ type ToolResult struct {
 	// Agents are the aliases the answer's tools read or acted on
 	// (brain.Reply.Agents): the voice gets their state at delivery.
 	Agents []string
+	// Shown lists the titles of the cards the answer put on the user's
+	// screen (brain.Reply.Shown): the voice says the line and the gist,
+	// and does not read the card out.
+	Shown []string
 }
 
 // ToolHandler executes one tool call. ctx is cancelled when the model

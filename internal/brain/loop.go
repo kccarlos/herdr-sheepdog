@@ -55,6 +55,8 @@ type turn struct {
 	// consulted: the aliases the tools named (Reply.Agents).
 	notVerified []string
 	consulted   []string
+	// shown: the titles of the cards show put on the screen (Reply.Shown).
+	shown []string
 	// prior is the answer an event turn wrote before it learned a line
 	// about its event had gone out meanwhile (recheck): the turn asks
 	// once more with that fact; should the second step fail, prior is
@@ -78,12 +80,14 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	host, closed := b.host, b.closed
 	if !closed {
 		b.inFlight.Add(1)
+		b.activeTurns.Add(1)
 	}
 	b.mu.Unlock()
 	if closed {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrClosed)
 	}
 	defer b.inFlight.Done()
+	defer b.activeTurns.Add(-1)
 	if host == nil {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
@@ -216,11 +220,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	}
 
 	system, secs, state := b.systemPrompt()
-	tools := b.tools
-	if t.req.Kind.ReadOnly() {
-		tools = b.readTools
-	}
-	base := genai.GenerateContentConfig{Tools: tools, ThinkingConfig: turnThinking(t.req.Trigger, b.cfg.ThinkingLevel)}
+	base := b.turnConfig(t.req.Kind, t.req.Trigger)
 	corrected := false
 	for step := 1; step <= b.cfg.MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -258,10 +258,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 		}
 		asm := b.engine.Assemble(b.cfg.WindowTokens)
-		text := system
-		if asm.SystemAddition != "" {
-			text += "\n\n" + asm.SystemAddition
-		}
+		text := systemWith(system, asm.SystemAddition)
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
 		if step > 1 {
 			state = b.stateNow()
@@ -301,6 +298,12 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				t.tokIn += int(u.PromptTokenCount)
 				t.tokOut += int(u.CandidatesTokenCount)
 			}
+			if resp.ModelVersion != "" {
+				// The model that actually answered, as the provider
+				// reports it: under Anthropic's server-side fallbacks it
+				// can differ from model, which is what was asked for.
+				payload["served_model"] = resp.ModelVersion
+			}
 			calls = resp.FunctionCalls()
 			names := make([]string, 0, len(calls))
 			for _, c := range calls {
@@ -334,7 +337,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 			b.ingest(t.reply(answer, raw), t.n)
 			reply.Turn, reply.Acted, reply.ActedOn = t.n, len(t.acted) > 0, t.actedOn
-			reply.NotVerified, reply.Agents = t.notVerified, t.consulted
+			reply.NotVerified, reply.Agents, reply.Shown = t.notVerified, t.consulted, t.shown
 			if b.recheck(t, step, reply) {
 				continue
 			}
@@ -415,7 +418,11 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 			m.Raw, m.Content = raw, modelText
 		}
 		b.ingest(m, t.n)
-		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": fc.Args, "turn": t.n})
+		args := fc.Args
+		if fc.Name == ToolShow {
+			args = redactShowArgs(args)
+		}
+		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": args, "turn": t.n})
 	}
 	var promises []Message
 	for i, fc := range calls {
@@ -432,6 +439,9 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		}
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
+		}
+		if out.shown != "" {
+			t.shown = append(t.shown, out.shown)
 		}
 		if out.acted != "" {
 			t.acted = append(t.acted, out.acted)
@@ -522,7 +532,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 		b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: mustJSON(reply)}, t.n)
 		b.logTurn(t, false)
 		reply.Turn, reply.Acted, reply.ActedOn = t.n, true, t.actedOn
-		reply.NotVerified, reply.Agents = t.notVerified, t.consulted
+		reply.NotVerified, reply.Agents, reply.Shown = t.notVerified, t.consulted, t.shown
 		return reply, nil
 	}
 	b.logTurn(t, true)
@@ -698,6 +708,7 @@ func (b *Brain) sections() []PromptSection {
 	var investigations []InvestigationInfo
 	var language string
 	var unanswered []UnansweredInfo
+	var screen string
 	if host != nil {
 		agents, notes, promises, investigations = host.Agents(), host.Notes(), host.Promises(), host.Investigations()
 		if lh, ok := host.(LanguageHost); ok {
@@ -706,10 +717,17 @@ func (b *Brain) sections() []PromptSection {
 		if uh, ok := host.(UnansweredHost); ok {
 			unanswered = uh.Unanswered()
 		}
+		if dh, ok := host.(DisplayHost); ok {
+			screen = screenLine(dh.ScreenVisible())
+		}
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
 	now := b.cfg.Now()
-	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, recordLine(started, compaction, now))...)
+	record := recordLine(started, compaction, now)
+	if screen != "" {
+		record = strings.TrimSpace(record + "\n" + screen)
+	}
+	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
 }
 
 // stateNow renders the state block from the Host as it is now: the loop
@@ -805,6 +823,27 @@ func reasonFor(err error) string {
 	default:
 		return "model_error"
 	}
+}
+
+// turnConfig is the per-turn part of a model call's config: the tools
+// (read-only on event turns) and the thinking setting. The system
+// instruction is set per step (systemWith). The cache warm-up builds
+// its request from the same function, so its prefix is the turn's.
+func (b *Brain) turnConfig(kind Kind, trigger Trigger) genai.GenerateContentConfig {
+	tools := b.tools
+	if kind.ReadOnly() {
+		tools = b.readTools
+	}
+	return genai.GenerateContentConfig{Tools: tools, ThinkingConfig: turnThinking(trigger, b.cfg.ThinkingLevel)}
+}
+
+// systemWith is the system text a step sends: the stable text plus the
+// context engine's addition, when it has one.
+func systemWith(system, addition string) string {
+	if addition != "" {
+		return system + "\n\n" + addition
+	}
+	return system
 }
 
 // turnThinking is a turn's thinking setting. An event turn (announce,

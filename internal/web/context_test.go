@@ -65,7 +65,7 @@ func TestContextEndpointsRoundTrip(t *testing.T) {
 		t.Fatalf("inject blocked = %d %s", code, body)
 	}
 	var tr ToolResponse
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK {
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK {
 		t.Fatalf("utterance = %d %s", code, body)
 	}
 	h.srv.deps.Brain.Quiesce()
@@ -144,7 +144,7 @@ func TestContextEndpointsRoundTrip(t *testing.T) {
 	}
 	// The utterance turn's reply is only in the next step's window: the
 	// step that produced it holds its request, not its answer.
-	h.postJSON("/api/inject/utterance", map[string]any{"text": "and now?"}, &tr)
+	h.postJSON("/api/utterance", map[string]any{"text": "and now?"}, &tr)
 	h.srv.deps.Brain.Quiesce()
 	h.getJSON("/api/context/brain", &b)
 	if !hasLabel(linksOf(b.Sections)[call], "orchestrator reply") {

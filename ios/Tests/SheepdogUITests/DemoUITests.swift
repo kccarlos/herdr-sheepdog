@@ -39,10 +39,16 @@ final class DemoUITests: XCTestCase {
     private func tapVisible(_ query: XCUIElementQuery, _ id: String) {
         let matches = query.matching(identifier: id)
         XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 10), id)
-        for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
-            matches.element(boundBy: i).tap()
-            return
-        }
+        // It can exist a moment before it is hittable (a sheet or the
+        // demo's cover still animating, slower on a CI Mac): keep looking.
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+                matches.element(boundBy: i).tap()
+                return
+            }
+            usleep(200_000)
+        } while Date() < deadline
         XCTFail("no visible \(id)")
     }
 
@@ -66,7 +72,7 @@ final class DemoUITests: XCTestCase {
         dismissPermissionAlerts()
 
         // The scripted agents, in the real Agents pane.
-        tapVisible(app.buttons, "main.pane.flock")
+        showAgentsPane(app)
         for alias in ["claude-auth", "codex-payments", "claude-migration", "codex-docs"] {
             XCTAssertTrue(app.descendants(matching: .any)["flock.agent.\(alias)"].waitForExistence(timeout: 10), alias)
         }

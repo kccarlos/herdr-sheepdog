@@ -21,9 +21,13 @@ public final class DemoDaemon: @unchecked Sendable {
 
     /// New lines for the voice, on the main queue.
     public var onLines: (([DemoWorld.Line]) -> Void)?
+    /// New cards for the screen, on the main queue (the demo's `/ws`
+    /// `card` messages).
+    public var onCards: (([ScreenCard]) -> Void)?
 
     private let lock = NSLock()
     private var world: DemoWorld
+    private var spaces = DemoSpaces()
     private let clock: () -> Date
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "sheepdog.demo")
@@ -96,6 +100,15 @@ public final class DemoDaemon: @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in self?.onLines?(lines) }
     }
 
+    /// An agent's scripted screen, for the demo's live window
+    /// (`DemoTermTransport`).
+    public func agentScreen(paneID: String) -> AgentScreen? {
+        lock.lock()
+        defer { lock.unlock() }
+        world.advance(to: clock())
+        return world.screen(paneID: paneID)
+    }
+
     // MARK: - Routes
 
     struct Response {
@@ -141,14 +154,48 @@ public final class DemoDaemon: @unchecked Sendable {
             } catch {
                 return json(["error": "that question is no longer open"], status: 409)
             }
-        case ("POST", "/api/inject/utterance"):
+        case ("POST", "/api/utterance"):
             let text = (object["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return json(["error": "empty text"], status: 400) }
             let reply = world.ask(text)
+            let cards = world.takeCards()
+            if !cards.isEmpty {
+                // Before the reply reaches the app, as the daemon's `/ws`
+                // card comes before its history item.
+                DispatchQueue.main.async { [weak self] in self?.onCards?(cards) }
+            }
             DispatchQueue.global().async { [weak self] in self?.publish() }
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
+        case ("GET", "/api/spaces"):
+            return json(spaces.view(agents: world.agents))
+        case ("POST", "/api/agents"):
+            // The failure states, on demand: a worktree in the folder that
+            // is not a repository, the branch "main", or a first prompt
+            // with "fail" in it (a start that timed out, its pane open).
+            let worktree = (object["worktree"] as? [String: Any])?["branch"] as? String
+            if worktree != nil, (object["dir"] as? String)?.hasSuffix("/notes") == true {
+                return json(["error": "notes is not in a git repository", "reason": "not_git"], status: 400)
+            }
+            if worktree == "main" {
+                return json(["error": "the branch main is already checked out", "reason": "branch_exists"], status: 400)
+            }
+            if (object["text"] as? String)?.lowercased().contains("fail") == true {
+                return json(["error": "herdr never saw the agent running", "reason": "timeout", "pane_id": DemoWorld.authPane], status: 502)
+            }
+            return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
         default:
+            let busy = world.agents.contains { $0.state == .working || $0.state == .blocked }
+            if let reply = spaces.handle(method: method, path: path, body: object, busy: busy) {
+                return json(reply.body, status: reply.status)
+            }
+            if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {
+                return json(["ok": true])
+            }
+            if path.hasPrefix("/api/agents/"), method == "POST",
+               let last = path.split(separator: "/").last, ["rename", "interrupt", "close"].contains(String(last)) {
+                return json(["ok": true, "spoken": "This is the demo: its agents are scripted, so nothing changed."])
+            }
             if path.hasPrefix("/api/agents/") {
                 let parts = path.dropFirst("/api/agents/".count).split(separator: "/")
                 let pane = parts.first.flatMap { String($0).removingPercentEncoding } ?? ""
@@ -157,6 +204,9 @@ public final class DemoDaemon: @unchecked Sendable {
                 }
                 if parts.last == "input", method == "POST" {
                     return json(["ok": true, "kind": "prompt", "spoken": "This is the demo: its agents are scripted, so nothing was sent."])
+                }
+                if world.screen(paneID: pane) != nil, parts.count >= 2, parts[1] == "changes" || parts[1] == "attachments" {
+                    return demoPhase4(parts: parts.map(String.init), method: method, body: body)
                 }
                 return json(["error": "no such agent"], status: 404)
             }
@@ -183,11 +233,11 @@ public final class DemoDaemon: @unchecked Sendable {
 
     // MARK: - Encoding
 
-    private func json(_ object: [String: Any], status: Int = 200) -> Response {
+    func json(_ object: [String: Any], status: Int = 200) -> Response {
         Response(status: status, body: (try? JSONSerialization.data(withJSONObject: object)) ?? Data())
     }
 
-    private func encoded<T: Encodable>(_ value: T) -> Response {
+    func encoded<T: Encodable>(_ value: T) -> Response {
         Response(status: 200, body: (try? Self.encoder.encode(value)) ?? Data())
     }
 

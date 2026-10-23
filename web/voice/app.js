@@ -6,6 +6,8 @@
 
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
+import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
+import { parsePairing, isAppleMobile, appLink, enroll, signIn, keyStore, MSG } from './pairing.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -338,6 +340,7 @@ function openWS() {
     // (docs/dev/ws-contract.md "Protocol version and handshake"); nothing
     // waits for bot-ready — an older daemon never sends one.
     state.handshake = new Handshake();
+    state.cardsOn = false;
     send(clientReady());
     clearTimeout(state.handshakeTimer);
     state.handshakeTimer = setTimeout(() => {
@@ -457,6 +460,11 @@ function onControl(m) {
       return;
     }
     if (r.consumed) {
+      if (state.handshake.state === 'ready' && cardsEnabled(state.handshake.features)) {
+        // Each connection starts "not visible" on the daemon: say so now.
+        state.cardsOn = true;
+        send(visibilityMessage(document.hidden));
+      }
       render();
       return;
     }
@@ -478,6 +486,15 @@ function onControl(m) {
       break;
     case 'transcript':
       addTranscript(m.dir, m.text, !!m.final);
+      break;
+    case 'card':
+      if (m.card && !state.transcript.some((t) => t.card && t.card.card_id === m.card.card_id)) {
+        closeTranscript('in');
+        closeTranscript('out');
+        state.transcript.push({ dir: 'card', text: cardLabel(m.card), final: true, card: m.card });
+        while (state.transcript.length > TRANSCRIPT_LINES) state.transcript.shift();
+        openCard(m.card);
+      }
       break;
     case 'error':
       if (m.problem) showAccountProblem(m);
@@ -669,7 +686,7 @@ function render() {
   setDot('ws', open ? 'open' : state.wsState === 'connecting' ? 'connecting' : state.wsState === 'closed' ? 'closed' : 'idle',
     `ws: ${state.wsState}${state.wsState === 'closed' && connected ? ' (reconnecting)' : ''}`);
   const v = connected ? state.voice : '…';
-  setDot('voice', v === '…' ? 'idle' : state.voiceStalled ? 'stalled' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}${state.voiceStalled && open ? ' · stalled (no reply)' : ''}`);
+  setDot('voice', v === '…' ? 'idle' : state.voiceStalled ? 'stalled' : v === 'open' && state.playback.speaking ? 'open speaking' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}${state.voiceStalled && open ? ' · stalled (no reply)' : ''}`);
 
   const btnConnect = $('btn-connect');
   btnConnect.textContent = connected ? 'Disconnect' : 'Connect';
@@ -730,6 +747,21 @@ function renderTranscript() {
     return;
   }
   for (const t of state.transcript) {
+    if (t.card) {
+      const line = document.createElement('div');
+      line.className = 'line card-row';
+      const dir = document.createElement('span');
+      dir.className = 'dir';
+      dir.textContent = 'card';
+      const open = document.createElement('button');
+      open.className = 'card-open';
+      open.textContent = t.text;
+      open.setAttribute('aria-label', `Open card: ${t.text}`);
+      open.addEventListener('click', () => openCard(t.card));
+      line.append(dir, open);
+      box.appendChild(line);
+      continue;
+    }
     const line = document.createElement('div');
     line.className = `line ${t.dir}${t.final ? '' : ' partial'}`;
     const dir = document.createElement('span');
@@ -744,19 +776,59 @@ function renderTranscript() {
   box.scrollTop = box.scrollHeight;
 }
 
+// ---------------------------------------------------------------- cards
+
+function openCard(card) {
+  const dlg = $('card-dialog');
+  $('card-title').textContent = card.title || 'Card';
+  const who = card.spoken || card.agent || '';
+  $('card-meta').textContent = who;
+  $('card-body').innerHTML = cardBodyHTML(card); // cards.js escapes everything
+  if (typeof dlg.showModal === 'function') {
+    if (!dlg.open) dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (state.cardsOn) send(visibilityMessage(document.hidden));
+});
+
 // ---------------------------------------------------------------- auth
 
-// authGate probes an endpoint that needs the daemon's token (config
-// web.token) before anything else runs. No token configured, or the
-// token cookie from an earlier POST /api/login already covers it: the
-// probe answers normally and the rest of init() proceeds. A 401 means
-// the daemon wants a token: show the inline prompt and hide the rest of
-// the page instead of wiring up a Connect button that would only 401
-// itself on /ws. Submitting POSTs /api/login, which sets the cookie
-// every later request on this origin then carries automatically —
-// including the WebSocket one this page cannot attach a header to — and
-// reloads the page. Returns false while the gate is up.
+// authGate makes sure this browser may use the daemon before anything
+// else runs (docs/dev/design/security.md "Browser or Android phone"). On
+// this computer (loopback) nothing is needed. A pairing link (the QR's
+// fragment) enrolls a WebCrypto key with its one-time code; on an iPhone
+// or iPad the page first offers the app. Otherwise a 401 signs a
+// challenge with the saved key for a session cookie, and with no key
+// asks the user to scan the pairing code. Returns false while the gate is
+// up.
 async function authGate() {
+  const deps = { fetch: (u, o) => fetch(u, o), subtle: crypto.subtle, ua: navigator.userAgent, touch: navigator.maxTouchPoints, now: Date.now, ...keyStore(indexedDB) };
+  const gate = (title, text) => {
+    $('auth-title').textContent = title;
+    $('auth-text').textContent = text;
+    $('auth-gate').classList.remove('hidden');
+    $('app-main').classList.add('hidden');
+    return false;
+  };
+  const pairing = parsePairing(location.hash);
+  if (pairing) {
+    const hash = location.hash;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (isAppleMobile(navigator.userAgent, navigator.maxTouchPoints)) {
+      $('auth-app').href = appLink(hash);
+      $('auth-choice').classList.remove('hidden');
+      $('auth-browser').addEventListener('click', async () => {
+        $('auth-choice').classList.add('hidden');
+        await pairHere(pairing, deps, gate);
+      });
+      return gate('Pair with ' + (pairing.name || 'this computer'), 'Open this code in the Sheepdog app, or use sheepdog in this browser.');
+    }
+    return pairHere(pairing, deps, gate);
+  }
   let res;
   try {
     res = await fetch('/api/state', { cache: 'no-store' });
@@ -764,25 +836,24 @@ async function authGate() {
     return true; // offline: let the rest of the page surface the error
   }
   if (res.status !== 401) return true;
-  $('auth-gate').classList.remove('hidden');
-  $('app-main').classList.add('hidden');
-  const submit = async () => {
-    const token = $('auth-token').value.trim();
-    if (!token) return;
-    $('auth-submit').disabled = true;
-    try {
-      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || `${r.status}`);
-      location.reload();
-    } catch (err) {
-      $('auth-error').textContent = `error: ${err.message}`;
-      $('auth-error').classList.remove('hidden');
-      $('auth-submit').disabled = false;
-    }
-  };
-  $('auth-submit').addEventListener('click', submit);
-  $('auth-token').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  const hello = await fetch('/api/hello').then((r) => r.json()).catch(() => ({}));
+  const id = hello.computer && hello.computer.id;
+  if (id) {
+    const s = await signIn(id, deps).catch(() => ({ ok: false }));
+    if (s.ok) return true;
+    if (s.reason === 'device_revoked' || s.reason === 'unknown_device') return gate('Scan the pairing code again', MSG.revoked);
+  }
+  return gate('Pair this browser', MSG.pair);
+}
+
+// pairHere enrolls this browser and signs it in, then starts the page.
+async function pairHere(pairing, deps, gate) {
+  gate('Pairing…', 'Making this browser\'s key.');
+  const r = await enroll(pairing, deps).catch((e) => ({ ok: false, message: String(e && e.message || e) }));
+  if (!r.ok) return gate('Could not pair', r.message);
+  const s = await signIn(r.daemonId, deps).catch(() => ({ ok: false }));
+  if (!s.ok) return gate('Could not sign in', 'Paired, but the computer refused the sign-in. Reload the page to try again.');
+  location.reload();
   return false;
 }
 
@@ -812,7 +883,7 @@ function resumeIfSuspended() {
 }
 
 async function init() {
-  if (!(await authGate())) return; // token prompt is up; wiring resumes after the reload
+  if (!(await authGate())) return; // pairing or the pair prompt is up
   const params = new URLSearchParams(location.search);
   state.gate.opts = gateOptions(params);
   if (params.get('src') === 'file') {
@@ -870,6 +941,7 @@ async function init() {
 
   document.addEventListener('keydown', (e) => {
     const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
+    if ($('card-dialog').open) return; // Esc closes the card, not the voice
     if (e.key === 'Escape') {
       if (!$('btn-stop').disabled) stop();
       return;

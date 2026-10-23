@@ -101,7 +101,7 @@ public final class VoiceSocket {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 60
             config.shouldUseExtendedBackgroundIdleMode = true
-            self.session = URLSession(configuration: config)
+            self.session = DeviceCredentials.session(configuration: config)
         }
     }
 
@@ -133,11 +133,8 @@ public final class VoiceSocket {
         let generation = self.generation
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        if !endpoint.token.isEmpty {
-            // URLSession can set a header on the upgrade request, which a
-            // browser cannot — so the app never needs `?token=`.
-            request.setValue("Bearer \(endpoint.token)", forHTTPHeaderField: "Authorization")
-        }
+        // The session ticket on the upgrade (docs/dev/ws-contract.md "Auth").
+        endpoint.authorize(&request)
         let task = session.webSocketTask(with: request)
         // Model chunks can be ~700 ms of 24 kHz PCM16; leave plenty of room.
         task.maximumMessageSize = 8 * 1024 * 1024

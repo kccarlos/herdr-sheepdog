@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -112,6 +113,20 @@ func (h *Herdr) Read(ctx context.Context, paneID string, source herdr.ReadSource
 	return herdr.ReadResult{PaneID: paneID, Source: source, Text: text, Truncated: len(text) < len(p.screen)}, nil
 }
 
+// ReadANSI implements supervisor.ANSIReader: a synthetic pane's screen
+// has no colours, so it is Read; a real one goes to the inner client
+// when it can keep them.
+func (h *Herdr) ReadANSI(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+	if _, ok := h.get(paneID); !ok && h.inner != nil {
+		if r, ok := h.inner.(interface {
+			ReadANSI(context.Context, string, herdr.ReadSource, int) (herdr.ReadResult, error)
+		}); ok {
+			return r.ReadANSI(ctx, paneID, source, lines)
+		}
+	}
+	return h.Read(ctx, paneID, source, lines)
+}
+
 // Prompt implements supervisor.Herdr: for a synthetic pane it records the
 // send and appends the text to the screen so a later Read shows it.
 func (h *Herdr) Prompt(ctx context.Context, paneID, text string) (herdr.AgentInfo, error) {
@@ -205,6 +220,16 @@ func (h *Herdr) CreateWorkspace(ctx context.Context, cwd, label string) (herdr.P
 	return sp.CreateWorkspace(ctx, cwd, label)
 }
 
+// CreateWorktree implements supervisor.WorktreeCreator (the inner
+// client's; mock herdr has none).
+func (h *Herdr) CreateWorktree(ctx context.Context, cwd, branch, label string) (herdr.PaneInfo, error) {
+	wt, ok := h.inner.(supervisor.WorktreeCreator)
+	if !ok {
+		return herdr.PaneInfo{}, fmt.Errorf("herdr: cannot make worktrees here")
+	}
+	return wt.CreateWorktree(ctx, cwd, branch, label)
+}
+
 // SplitPane implements supervisor.Spawner.
 func (h *Herdr) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
 	sp, err := h.spawner()
@@ -214,13 +239,31 @@ func (h *Herdr) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneIn
 	return sp.SplitPane(ctx, paneID, cwd)
 }
 
-// SendInput implements supervisor.Spawner.
-func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+// StartAgent implements supervisor.Spawner.
+func (h *Herdr) StartAgent(ctx context.Context, paneID, name, kind string, args []string, timeout time.Duration) error {
 	sp, err := h.spawner()
 	if err != nil {
 		return err
 	}
-	return sp.SendInput(ctx, paneID, text, keys...)
+	return sp.StartAgent(ctx, paneID, name, kind, args, timeout)
+}
+
+// GetAgent implements supervisor.Spawner.
+func (h *Herdr) GetAgent(ctx context.Context, target string) (herdr.AgentInfo, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.AgentInfo{}, err
+	}
+	return sp.GetAgent(ctx, target)
+}
+
+// AgentKinds implements supervisor.Spawner.
+func (h *Herdr) AgentKinds(ctx context.Context) ([]string, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return nil, err
+	}
+	return sp.AgentKinds(ctx)
 }
 
 // ProcessInfo implements supervisor.Spawner.
@@ -286,4 +329,79 @@ func tailLines(s string, n int) string {
 		}
 	}
 	return s
+}
+
+var _ supervisor.SpaceHost = (*Herdr)(nil)
+
+// spaceHost is the inner client's workspace half, or an error (mock
+// herdr has none).
+func (h *Herdr) spaceHost() (supervisor.SpaceHost, error) {
+	sh, ok := h.inner.(supervisor.SpaceHost)
+	if !ok {
+		return nil, fmt.Errorf("herdr: cannot manage spaces here")
+	}
+	return sh, nil
+}
+
+// RenameWorkspace implements supervisor.SpaceHost.
+func (h *Herdr) RenameWorkspace(ctx context.Context, workspaceID, label string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.RenameWorkspace(ctx, workspaceID, label)
+}
+
+// CloseWorkspace implements supervisor.SpaceHost.
+func (h *Herdr) CloseWorkspace(ctx context.Context, workspaceID string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.CloseWorkspace(ctx, workspaceID)
+}
+
+// ListWorktrees implements supervisor.SpaceHost.
+func (h *Herdr) ListWorktrees(ctx context.Context, workspaceID string) (herdr.WorktreeList, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.WorktreeList{}, err
+	}
+	return sh.ListWorktrees(ctx, workspaceID)
+}
+
+// OpenWorktree implements supervisor.SpaceHost.
+func (h *Herdr) OpenWorktree(ctx context.Context, workspaceID, path, branch string) (herdr.PaneInfo, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sh.OpenWorktree(ctx, workspaceID, path, branch)
+}
+
+// RemoveWorktree implements supervisor.SpaceHost.
+func (h *Herdr) RemoveWorktree(ctx context.Context, workspaceID string, force bool) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.RemoveWorktree(ctx, workspaceID, force)
+}
+
+// CreateTab implements supervisor.SpaceHost.
+func (h *Herdr) CreateTab(ctx context.Context, workspaceID, cwd, label string) (herdr.PaneInfo, error) {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sh.CreateTab(ctx, workspaceID, cwd, label)
+}
+
+// SendInput implements supervisor.SpaceHost.
+func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+	sh, err := h.spaceHost()
+	if err != nil {
+		return err
+	}
+	return sh.SendInput(ctx, paneID, text, keys...)
 }

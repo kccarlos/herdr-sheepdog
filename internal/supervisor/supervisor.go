@@ -131,7 +131,7 @@ type Config struct {
 	// ReplyWait is how long a to_supervisor call waits for the orchestrator's
 	// reply before it returns a silent pending result and the reply is
 	// pushed when it lands (default DefaultReplyWait, brain.reply_wait_s;
-	// utterance.go). Above the utterance budget, the reply is the tool
+	// reply.go). Above the utterance budget, the reply is the tool
 	// result (Gemini: the late function response) unless the user
 	// barges in, the connection goes or the page leaves, which push it
 	// (docs/dev/research/reply-as-function-response-2026-10-03.md). Negative
@@ -313,6 +313,8 @@ type Supervisor struct {
 	names namesState
 	// focus is the voice's current-focus line bookkeeping (focus.go).
 	focus focusState
+	// cards is the screen and the card store (cards.go).
+	cards cardState
 
 	// startedAt is when this run's Supervisor was built: openPromises
 	// created before it are from an earlier run (promises.go,
@@ -352,7 +354,7 @@ type Supervisor struct {
 	promptHeard promptHearing
 	// acceptedSeq counts the user's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
-	// utterance reply is stale once it moved on (utterance.go). Unlike
+	// utterance reply is stale once it moved on (reply.go). Unlike
 	// relayedSeq it never moves for transcript fragments that trail the
 	// same relay.
 	acceptedSeq uint64
@@ -370,7 +372,7 @@ type Supervisor struct {
 	answeredRecs []askedRec
 	// replies tracks every background goroutine that may call the orchestrator
 	// after the call that started it returned: detached utterance turns
-	// and their late delivery (utterance.go), the daemon's own relay
+	// and their late delivery (utterance.go, reply.go), the daemon's own relay
 	// (relay.go) and investigation jobs with their delivery turn
 	// (investigate.go). shutdown waits for it, so the orchestrator is never
 	// closed under a turn; a test waits on it for a late reply to land.
@@ -389,7 +391,7 @@ type Supervisor struct {
 	// relay is the unanswered-utterance watch (relay.go).
 	relay relayWatch
 	// echo is what the voice is saying or just said, for the echo guard
-	// (utterance.go).
+	// (echo.go).
 	echo echoWatch
 	// promptSeenAt is when each pane's current prompt (lastPrompt's
 	// signature) was first recorded, so a revived pending action keeps
@@ -398,6 +400,11 @@ type Supervisor struct {
 	// spawns are when the last new agents were started (spawn.go's
 	// rate cap).
 	spawns []time.Time
+
+	// wrapMu guards the spaces' wrap-up commands file (spaces.go);
+	// wrapMem holds them without a data dir (tests).
+	wrapMu  sync.Mutex
+	wrapMem map[string][]WrapUp
 
 	// conversationStartedAt is when the current conversation began: the
 	// last reset, or startedAt (reset.go, GET /api/state).
@@ -440,12 +447,18 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		s.investigator = inv
 	}
 	s.restoreInvestigations()
+	s.loadCards()
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The orchestrator's notices about itself (a provider failing over and
 		// over) are spoken like any daemon line, in the user's language.
 		s.brain.SetNotifier(func(n brain.Notice) { s.push("", s.noticeText(n), voice.UrgencyIdle) })
 		s.restorePromises()
+		// The roster is loaded (state.Open ran before New), so the
+		// system text is what the first turn sends: write the prompt
+		// cache now, in the background, for a provider that needs it
+		// (Anthropic; a no-op for the others).
+		s.brain.WarmCache()
 	}
 	return s, nil
 }

@@ -34,21 +34,22 @@ const screenReadTimeout = 5 * time.Second
 // screenSub is a client's one screen subscription.
 type screenSub struct {
 	pane   string
-	lines  int
 	cancel context.CancelFunc
 	// reason is why it ended, set before cancel (under client.mu).
 	reason string
 }
 
-// subscribeScreen starts (or replaces) the client's screen subscription.
-func (c *client) subscribeScreen(pane string, lines int) {
+// subscribeScreen starts (or replaces) the client's screen subscription:
+// the coloured visible screen (feature screen-ansi), as ?ansi=1 on the
+// screen route.
+func (c *client) subscribeScreen(pane string) {
 	if c.h.s.deps.Supervisor == nil {
 		c.enqueue(controlFrame(wsproto.ScreenError(pane, "no supervisor", true)))
 		return
 	}
 	c.stopScreen("resubscribe")
 	ctx, cancel := context.WithCancel(context.Background())
-	sub := &screenSub{pane: pane, lines: lines, cancel: cancel}
+	sub := &screenSub{pane: pane, cancel: cancel}
 	c.mu.Lock()
 	if c.closing {
 		c.mu.Unlock()
@@ -57,7 +58,7 @@ func (c *client) subscribeScreen(pane string, lines int) {
 	}
 	c.screen = sub
 	c.mu.Unlock()
-	c.h.s.log.Log(logSource, "web.screen.subscribe", pane, map[string]any{"client_id": c.id, "lines": lines})
+	c.h.s.log.Log(logSource, "web.screen.subscribe", pane, map[string]any{"client_id": c.id})
 	go c.screenLoop(ctx, sub)
 }
 
@@ -154,7 +155,7 @@ func (c *client) screenLoop(ctx context.Context, sub *screenSub) {
 		case <-timer.C:
 		}
 		rctx, cancel := context.WithTimeout(ctx, screenReadTimeout)
-		scr, err := deps.Supervisor.Screen(rctx, sub.pane, sub.lines)
+		scr, err := deps.Supervisor.ScreenANSI(rctx, sub.pane)
 		cancel()
 		last = time.Now()
 		due = last.Add(deps.ScreenInterval)
@@ -190,7 +191,7 @@ func (c *client) screenLoop(ctx context.Context, sub *screenSub) {
 func screenFrame(s supervisor.Screen) wsproto.Screen {
 	f := wsproto.Screen{
 		PaneID: s.PaneID, Alias: s.Alias, Spoken: s.Spoken, Kind: s.Kind, State: string(s.State),
-		Text: s.Text, Lines: s.Lines, Truncated: s.Truncated, Hash: s.Hash,
+		Text: s.Text, Lines: s.Lines, Truncated: s.Truncated, Hash: s.Hash, ANSI: s.ANSI,
 	}
 	if !s.StateSince.IsZero() {
 		f.StateSince = s.StateSince.Format(time.RFC3339Nano)

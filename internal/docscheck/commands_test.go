@@ -100,9 +100,20 @@ func commandsIn(file, md string) []docCommand {
 
 var (
 	binOnce sync.Once
+	binDir  string
 	binPath string
 	binErr  error
 )
+
+// TestMain removes the binary sheepdogBinary built, which outlives any
+// one test (t.TempDir would go with the first test that asked for it).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if binDir != "" {
+		_ = os.RemoveAll(binDir)
+	}
+	os.Exit(code)
+}
 
 // sheepdogBinary builds the CLI once per test run.
 func sheepdogBinary(t testing.TB, root string) string {
@@ -113,6 +124,7 @@ func sheepdogBinary(t testing.TB, root string) string {
 			binErr = err
 			return
 		}
+		binDir = dir
 		binPath = filepath.Join(dir, "sheepdog")
 		cmd := exec.Command("go", "build", "-o", binPath, "./cmd/sheepdog")
 		cmd.Dir = root

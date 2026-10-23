@@ -1,6 +1,8 @@
-# Quick start
+# quick start
 
-From install to your first spoken answer, about three minutes. You need
+**From install to your first spoken answer, in about three minutes.**
+
+You need
 [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a
 microphone (on this computer, or over SSH: see below) and one free Gemini API
 key (the setup page links to it; [models.md](models.md) lists the
@@ -23,23 +25,24 @@ binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/relea
 herdr plugin install kccarlos/herdr-sheepdog
 ```
 
-herdr shows the build step before it runs it. It downloads the `sheepdog`
-binary for your machine (Apple silicon Mac or x86-64 Linux), checks its
-sha256, links it into `~/.local/bin` and ends with:
+It needs herdr 0.9.4 or newer (`herdr --version`; update herdr the way you
+installed it). herdr shows the build step before it runs it. The build step
+downloads the `sheepdog` binary for your machine (Apple silicon Mac or x86-64
+Linux), checks its sha256 and links it into `~/.local/bin`; herdr then prints:
 
 ```text
-Next: run `sheepdog setup` (or open the "Set up sheepdog" action in herdr).
+Installed kccarlos.sheepdog from kccarlos/herdr-sheepdog.
 ```
 
-If it warns that `~/.local/bin` is not on your PATH, add it as the message
-says (then open a new terminal), or run the printed path directly.
+herdr does not show the build step's own messages when it succeeds. If
+`sheepdog` is then not found, `~/.local/bin` is not on your PATH: add
+`export PATH="$HOME/.local/bin:$PATH"` to your shell profile and open a new
+terminal, or run `~/.local/bin/sheepdog` directly.
 
 Any other machine (an Intel Mac, ARM Linux), or a release that is not
-published yet, builds from source instead and needs [Go](https://go.dev/dl/).
-You then see `plugin-fetch: no release found at …` and `plugin-fetch:
-building from source with go`; that takes about ten seconds on a fast
-connection. Without Go the install stops and says so
-([troubleshooting.md](troubleshooting.md)).
+published yet, builds from source instead and needs [Go](https://go.dev/dl/);
+that takes about ten seconds on a fast connection. Without Go the install
+stops and says so ([troubleshooting.md](troubleshooting.md)).
 
 ## 2. Set up in your browser
 
@@ -130,6 +133,55 @@ login service (`systemd --user`) may stop when your last session ends unless
 lingering is on (`loginctl enable-linger $USER`); this is a systemd setting
 that sheepdog does not change.
 
+### Setting up in the terminal
+
+`sheepdog setup --terminal` (or `sheepdog init`) asks the same questions as the
+setup page's Models step: a starting point, the voice, then the orchestrator.
+The starting points are the page's cards: **Recommended** (Gemini Live and
+DeepSeek), **Claude Opus 5.5** (Gemini Live and Anthropic), **Free quick
+start** (Gemini for both) and **Custom**, where you pick the voice (Gemini Live
+on AI Studio or Vertex AI, or GPT-Live) and the orchestrator preset yourself.
+On a fresh install Enter takes Recommended; otherwise it takes the card that
+matches what you saved. Keys are typed without echo, checked live, and
+nothing is written until they pass. Enter keeps the default at every model and
+voice question. A short run, with the key lines as you would see them (the key
+you type is not shown):
+
+```text
+$ sheepdog setup --terminal
+Step 1 of 3. Starting point:
+  1) Recommended: DeepSeek: 92 % understood in our tests, replies in about 3 s, and costs little. Needs a DeepSeek API key (paid).
+  2) Claude Opus 5.5: 92 % understood in our tests, like DeepSeek, with fewer unsupported statements. Slower (about 7 s) and costs much more. Needs an Anthropic API key (paid).
+  3) Free quick start: One free key for both. Good for trying; can be slow or busy. Upgrade any time.
+  4) Custom: Pick each part yourself.
+choice [1]:
+Starting point: Recommended (voice: Gemini Live on AI Studio, orchestrator: DeepSeek)
+Gemini API key (https://aistudio.google.com/apikey):
+  ok    gemini key  valid (14 models); AI Studio does not expose the quota left
+Live model:
+  1) gemini-3.8-live (default)
+Live model [gemini-3.8-live] (Enter keeps it; a number or a name picks another):
+Voices: Puck, Kore, Charon, Aoede
+Voice (Enter keeps the default) [Puck]:
+DeepSeek API key (https://platform.deepseek.com/api_keys):
+  ok    deepseek key  valid (2 models)
+
+Summary: You talk to gemini-3.8-live (Google AI Studio). Your agents are handled by deepseek-flash (DeepSeek). Cost: free with daily limits · pay per use
+sheepdog init: wrote ~/.config/sheepdog/config.toml (0600)
+sheepdog init: wrote ~/.config/sheepdog/.env (0600): DEEPSEEK_API_KEY, GEMINI_API_KEY, SHEEPDOG_BRAIN_PROVIDER, ...
+```
+
+Choose **Custom** to pick an orchestrator preset: OpenRouter, OpenAI, Ollama and
+LM Studio (found on this computer; the terminal says when the server is not
+running) or any OpenAI-compatible URL. The model comes from a numbered list of
+what the endpoint offers, with the models that call tools first. The summary
+line is the page's, and the save is the page's too, so either one can change
+what the other saved. Then it offers phone access and the login service, as
+before.
+
+For scripts, `sheepdog init --non-interactive` takes each choice as a flag and
+each key from the environment; see [commands.md](commands.md#flags-of-sheepdog-init).
+
 ## If something stalls
 
 | You see | Do |
@@ -139,6 +191,34 @@ that sheepdog does not change.
 | Voice page says "Setup needed" | Run `sheepdog setup` and finish step 1. |
 | No microphone prompt, or "blocked" | Allow your browser under System Settings, Privacy & Security, Microphone; permission is per address ([faq.md](faq.md)). |
 | Anything else | `sheepdog doctor`, then [troubleshooting.md](troubleshooting.md). |
+
+## Update
+
+sheepdog checks for a new release once a day (one request to
+`api.github.com`, nothing personal sent; [privacy.md](privacy.md)). When there
+is one, `sheepdog status` and the setup and voice pages
+say so, with the command for the way you installed. The voice never
+speaks it. Update with the command for your install method:
+
+| You installed with | Update with |
+|---|---|
+| herdr plugin | `herdr plugin update kccarlos.sheepdog` |
+| Homebrew | `brew upgrade sheepdog` |
+| From source | `git pull` in your clone, then `make install` |
+| Release download | Download the new archive from the release page and replace the binary |
+
+Then the running daemon has to start the new version:
+
+- **It restarts itself when idle.** The daemon notices that its program was
+  replaced and restarts into it as soon as nobody is using it: no voice
+  client connected, no orchestrator turn running, no approval waiting, no
+  demo running. It checks every minute and never interrupts a live session.
+  Turn it off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md)).
+- **Or restart it yourself:** `sheepdog restart`. Any command that finds the
+  daemon older than the installed program says so and prints this.
+
+`update.check = false` turns the daily check and its notices off.
+`sheepdog update` checks right now and prints the steps.
 
 ## Other ways to install
 
@@ -150,7 +230,8 @@ The plugin is the supported path. The daemon is also a plain binary:
   PATH. The macOS binary is signed and notarized.
 - **From source** (Go, see `go.mod`): `git clone https://github.com/kccarlos/herdr-sheepdog.git`,
   then `make install` builds it and copies it to `~/.local/bin/`.
-- **Homebrew:** not published yet.
+- **Homebrew:** `brew install kccarlos/tap/sheepdog` (macOS and Linux;
+  the macOS binary is signed and notarized). `brew upgrade sheepdog` updates it.
 
 Then run `sheepdog setup` as above. `sheepdog update` prints the upgrade steps
 for the way you installed.

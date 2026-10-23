@@ -37,6 +37,7 @@ struct FeedbackButton: View {
                     mark(tag, note, at)
                     markedAt = nil
                 }
+                .coversVoiceScreen("feedback")
             }
         }
     }
@@ -67,6 +68,7 @@ struct FeedbackSheet: View {
                 pick(.paused, note)
             } label: {
                 Label(FeedbackTag.paused.label, systemImage: FeedbackTag.paused.systemImage)
+                    .foregroundStyle(Color("OnAccent"))
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }

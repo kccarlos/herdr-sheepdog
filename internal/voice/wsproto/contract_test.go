@@ -72,7 +72,7 @@ func TestContractExamplesRoundTrip(t *testing.T) {
 	for _, typ := range []string{
 		TypeClientReady, TypeBotReady, TypeMute, TypeSilence, TypeSpeaking, TypePlayback, TypeDrain, TypeCancel,
 		TypeText, TypePing, TypeFlush, TypeStatus, TypeTranscript, TypeError, TypePong,
-		TypeScreenSubscribe, TypeScreenUnsubscribe, TypeScreen, TypeScreenError,
+		TypeScreenSubscribe, TypeScreenUnsubscribe, TypeScreen, TypeScreenError, TypeVisibility, TypeCard,
 	} {
 		if !seen[typ] {
 			t.Errorf("ws-contract.md has no json example of %q", typ)

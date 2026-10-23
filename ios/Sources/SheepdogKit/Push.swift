@@ -275,6 +275,23 @@ extension DaemonClient {
         return try request(path: "/api/push/register", method: "POST", body: try encoder.encode(registration))
     }
 
+    /// `POST /api/push/activity`: the voice session's Live Activity push
+    /// token, so the daemon can keep the lock-screen banner current while
+    /// the app is away. False when the daemon has no push service.
+    @discardableResult
+    public func registerLiveActivity(token: String, environment: PushEnvironment) async throws -> Bool {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let body = try encoder.encode(["token": token, "environment": environment.rawValue])
+        return try await sendPush(try request(path: "/api/push/activity", method: "POST", body: body))
+    }
+
+    /// `DELETE /api/push/activity`: the activity ended.
+    @discardableResult
+    public func endLiveActivity() async throws -> Bool {
+        try await sendPush(try request(path: "/api/push/activity", method: "DELETE"))
+    }
+
     private func sendPush(_ request: URLRequest) async throws -> Bool {
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }

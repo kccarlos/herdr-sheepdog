@@ -1,0 +1,22 @@
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+rejudged workday-morning-standup r3: fail
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r2: fail
+rejudged workday-scale-ten r3: fail
+rejudged workday-zh-evening r1: fail
+rejudged workday-zh-evening r2: fail
+rejudged workday-zh-evening r3: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-interruptions r3: fail
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-explain-deep r3: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-long-haul r3: fail
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 31m57s, 620 calls
+-- spend judge    sonnet                   calls   620  in   8546616  out   529211  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

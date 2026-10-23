@@ -1,0 +1,23 @@
+{
+  "type": "bot-ready",
+  "protocol": 1,
+  "min_protocol": 1,
+  "daemon": {
+    "version": "v0.2.0"
+  },
+  "features": [
+    "playback",
+    "speaking",
+    "silence",
+    "provider",
+    "history",
+    "push",
+    "models",
+    "screen",
+    "screen-ansi",
+    "agent-actions",
+    "cards",
+    "term",
+    "feedback"
+  ]
+}

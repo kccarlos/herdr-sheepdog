@@ -35,7 +35,15 @@ func (s *Server) handleAgentScreen(w http.ResponseWriter, r *http.Request) {
 		}
 		lines = n
 	}
-	scr, err := s.deps.Supervisor.Screen(r.Context(), r.PathValue("pane_id"), lines)
+	var (
+		scr supervisor.Screen
+		err error
+	)
+	if r.URL.Query().Get("ansi") == "1" {
+		scr, err = s.deps.Supervisor.ScreenANSI(r.Context(), r.PathValue("pane_id"))
+	} else {
+		scr, err = s.deps.Supervisor.Screen(r.Context(), r.PathValue("pane_id"), lines)
+	}
 	if err != nil {
 		writeError(w, windowStatus(err), err.Error())
 		return

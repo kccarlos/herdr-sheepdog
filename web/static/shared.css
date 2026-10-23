@@ -1,0 +1,24 @@
+/* Shared by /setup, /voice and /debug (linked after tokens.css and fonts.css): the header,
+   type, focus ring and card surface. Colours come from tokens.css only. */
+body { font-family: var(--font-ui); background: var(--bg); color: var(--fg); }
+h1, h2 { font-family: var(--font-display); font-weight: 600; }
+code, kbd, pre, textarea { font-family: var(--font-mono); }
+
+/* The header is the same markup on every page: logo, wordmark, page name, then page extras. */
+header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
+header h1 { display: flex; align-items: center; gap: .5rem; font-size: 1.25rem; line-height: 1; margin: 0; }
+header .logo { width: 28px; height: 28px; flex: none; background: currentColor; -webkit-mask: url(/static/logo-mono.svg) center / contain no-repeat; mask: url(/static/logo-mono.svg) center / contain no-repeat; }
+header .wordmark { font-family: var(--font-display); font-weight: 700; letter-spacing: -.01em; }
+header .page-name { color: var(--muted); font-weight: 500; }
+
+/* Keyboard focus. The orange ring (--focus) alone is about 2:1 on the light surfaces, below the 3:1 a
+   control outline needs, so a thin ring in the text colour sits inside it. This is a ring, not a drop shadow. */
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--fg); }
+a { color: var(--primary-text); }
+
+/* The update notice under the header (static/update-banner.js): small, dismissible, never a modal. */
+.update-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: 0; padding: .45rem 1rem; background: var(--primary-soft); color: var(--fg); border-bottom: 1px solid var(--line); font-size: .9rem; }
+.update-banner a { font-weight: 600; }
+.update-banner code { background: var(--card); padding: .05rem .35rem; border-radius: var(--radius-sm); }
+.update-dismiss { flex: none; min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--fg); font-size: 1.25rem; line-height: 1; cursor: pointer; border-radius: var(--radius-sm); }
+.update-dismiss:hover { background: var(--card); }

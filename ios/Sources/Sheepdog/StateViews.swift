@@ -22,13 +22,16 @@ struct FlockUnavailableView: View {
                     Text("Your agents appear here as soon as the daemon answers.")
                 }
             case .empty:
-                ContentUnavailableView {
-                    Label("No agents yet", systemImage: "pawprint")
-                } description: {
-                    Text("Start a coding agent in herdr on your computer and it shows up here.")
-                } actions: {
-                    Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
-                        .accessibilityIdentifier("flock.empty.refresh")
+                ScrollView {
+                    VStack(spacing: 4) {
+                        NoAgentsView(onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil)
+                        Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.muted)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("flock.empty.refresh")
+                    }
+                    .padding(.top, 80)
                 }
             case .notConnected:
                 ContentUnavailableView {
@@ -48,17 +51,17 @@ struct FlockUnavailableView: View {
                     Button("Try again") { model.reconnect() }
                         .accessibilityIdentifier("flock.unreachable.retry")
                     Link("How to fix this", destination: SetupHelp.remoteAccessURL)
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("flock.unreachable.help")
                 }
             case .tokenRefused:
                 ContentUnavailableView {
-                    Label("Token refused", systemImage: "key.slash")
+                    Label((model.pairingProblem ?? .revoked).title, systemImage: "qrcode.viewfinder")
                 } description: {
-                    Text(LocalizedStringKey(SetupHelp.tokenFix))
+                    Text((model.pairingProblem ?? .revoked).message)
                 } actions: {
-                    Button("Scan the code again") {
-                        model.settingsRoute = .daemon
-                        model.showSettings = true
+                    Button("Scan again") {
+                        model.needsNewScan(model.pairingProblem ?? .revoked)
                     }
                     .accessibilityIdentifier("flock.tokenRefused.settings")
                 }
@@ -74,7 +77,53 @@ struct FlockUnavailableView: View {
                 EmptyView()
             }
         }
+        .tint(Theme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A brand mascot pose from the asset catalog: transparent, with the cream
+/// sticker outline baked in, the same art in light and dark. Decorative:
+/// VoiceOver skips it.
+///
+/// - sleeping: first run, offline, no agents;
+/// - listening: the empty conversation, the microphone primer;
+/// - alert: the notification primer;
+/// - celebrating: the "Paired" screen only.
+struct MascotCard: View {
+    let name: String
+    var width: CGFloat = 160
+
+    var body: some View {
+        Image(decorative: name)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: width)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The splash: the launch screen's logo on `LaunchBackground`, with the
+/// lowercase wordmark under it. The launch screen (Info.plist) shows the
+/// same logo at the same size and place, so the hand-off does not jump;
+/// the wordmark fades in, then the whole splash fades out.
+struct SplashView: View {
+    var body: some View {
+        ZStack {
+            Color("LaunchBackground").ignoresSafeArea()
+            Image(decorative: "LaunchLogo")
+                .overlay(alignment: .bottom) {
+                    Text("sheepdog")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .tracking(-0.4)
+                        .foregroundStyle(Theme.cream)
+                        .fixedSize()
+                        .offset(y: 58)
+                }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Sheepdog")
+        .accessibilityIdentifier("splash")
     }
 }
 

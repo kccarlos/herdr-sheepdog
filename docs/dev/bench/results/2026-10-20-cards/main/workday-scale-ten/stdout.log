@@ -1,0 +1,14 @@
+[1/3] workday-scale-ten r1: pass (end_call, ) ≈ $0.1412, total ≈ $0.141
+[2/3] workday-scale-ten r3: pass (end_call, ) ≈ $0.1498, total ≈ $0.291
+[3/3] workday-scale-ten r2: pass (end_call, ) ≈ $0.1587, total ≈ $0.450
+  pass    workday-scale-ten r1  end_call  12 turns   80.7s                         ≈ $0.1412
+  pass    workday-scale-ten r2  end_call  12 turns   87.1s                         ≈ $0.1587
+  pass    workday-scale-ten r3  end_call  12 turns   81.7s                         ≈ $0.1498
+-- 3 runs, spend ≈ $0.4497 (estimate at list prices) --
+reports: /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/main/workday-scale-ten/report.json, /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a24dffcf6b23de439/docs/dev/bench/results/2026-10-20-cards/main/workday-scale-ten/report.md
+== eval sim, repeat 3 ==
+  workday-scale-ten  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL              runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   104  in   1390031  out    15894  reasoning     5282  ≈ $0.4297 --
+-- spend simuser  deepseek-flash           calls    33  in     65301  out      740  reasoning        0  ≈ $0.0200 --
+-- spend total ≈ $0.4497 (estimate at list prices) --

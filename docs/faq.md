@@ -1,4 +1,6 @@
-# FAQ
+# faq
+
+**Short answers to what people ask first.**
 
 **Do I need herdr?** For real use, yes: sheepdog watches the agents herdr runs
 (Claude Code, Codex, agy). To try it without herdr, use `sheepdog demo` or the
@@ -41,7 +43,9 @@ investigation in about 30 s (acknowledged at once). From a 2026-10-02 phone run.
 Privacy & Security, Microphone, enable your browser. Browsers ask per origin, so
 `127.0.0.1:7777` and `localhost:7777` are separate.
 
-**How do I update or remove it?** `sheepdog update` prints the upgrade steps;
+**How do I update or remove it?** sheepdog tells you when a new version exists
+and restarts itself into it when idle ([quick-start.md](quick-start.md#update)).
+`sheepdog update` prints the upgrade steps;
 `sheepdog uninstall` removes it ([commands.md](commands.md)).
 
 **It broke. What do I send?** `sheepdog doctor --report` and the

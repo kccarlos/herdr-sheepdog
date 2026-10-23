@@ -133,6 +133,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(wsReadLimit)
 	c := newClient(h, conn, r.RemoteAddr, h.s.deps.OutQueue)
+	defer h.s.track(r, func() { c.closeAfterFlush(closeDeviceRevoked, "device_revoked") })()
 
 	h.mu.Lock()
 	h.seq++
@@ -154,9 +155,8 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced, "pending": busy})
 
-	// The contract: a status message before any binary frame — sent at
-	// once, before the handshake, so a legacy client is served exactly
-	// as before. A pending client is told it starts unmuted (it will, on
+	// The contract: a status message before any binary frame, sent at
+	// once, before the handshake. A pending client is told it starts unmuted (it will, on
 	// attach) rather than the attached client's mute.
 	st := h.statusMsg()
 	if busy {
@@ -495,6 +495,9 @@ type client struct {
 	hs handshake
 	// screen is the client's one agent-window subscription (screen.go).
 	screen *screenSub
+	// visible / voiceScreen: the client's last visibility report
+	// (cards.go); visReported once it sent one.
+	visible, voiceScreen, visReported bool
 	// pendingAttach: another client was attached when this one
 	// connected, so it replaces that one only once its handshake is
 	// accepted. firstStatus is the status it was sent on connect.
@@ -703,7 +706,7 @@ func (c *client) readLoop(ctx context.Context) string {
 
 // onAudio forwards a microphone frame to the session.
 func (c *client) onAudio(data []byte) {
-	if !c.legacyIfUnresolved("first_frame") {
+	if !c.readyOrRefuse("first_frame") {
 		return
 	}
 	h := c.h
@@ -729,7 +732,7 @@ func (c *client) onControl(data []byte) {
 		c.onClientReady(m)
 		return
 	}
-	if !c.legacyIfUnresolved("first_frame") {
+	if !c.readyOrRefuse("first_frame") {
 		return
 	}
 	if err != nil {
@@ -786,13 +789,11 @@ func (c *client) onControl(data []byte) {
 	case wsproto.TypeDrain:
 		h.clientDrain(c, m)
 	case wsproto.TypeScreenSubscribe:
-		lines := 0
-		if m.Lines != nil {
-			lines = *m.Lines
-		}
-		c.subscribeScreen(m.PaneID, lines)
+		c.subscribeScreen(m.PaneID)
 	case wsproto.TypeScreenUnsubscribe:
 		c.stopScreen("unsubscribe")
+	case wsproto.TypeVisibility:
+		c.setVisibility(*m.Visible, m.VoiceScreen != nil && *m.VoiceScreen)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")

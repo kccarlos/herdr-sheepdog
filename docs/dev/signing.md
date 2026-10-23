@@ -6,49 +6,180 @@ it with a browser can run it without Gatekeeper blocking it. The Linux
 build is not affected.
 
 This is for the daemon's own macOS binary only. The **iOS companion app**
-([`ios/`](../../ios/README.md)) is signed and shipped separately, by Xcode Cloud, not
+([`ios/`](../../ios/README.md)) is signed and shipped separately, by Xcode Cloud (which only archives
+TestFlight builds; the app's tests run in `ios.yml` on GitHub Actions), not
 by anything in this document — see
 [`ios/docs/dev/xcode-cloud.md`](../../ios/docs/dev/xcode-cloud.md). As of 2026-09-28 this Mac's login keychain already
 holds both certificates for team `GV776BZVA8`: the **Developer ID
 Application** one this flow uses, and a separate **Apple Distribution**
 one Xcode Cloud/Xcode use for the iOS app.
 
-This happens **on the maintainer's Mac, not in GitHub Actions**:
+## The release flow
 
-1. Pushing a `v*` tag runs `.github/workflows/release.yml` on
-   `ubuntu-latest`. It cross-builds both binaries with `CGO_ENABLED=0`,
-   publishes the GitHub Release with both tarballs and `checksums.txt`,
-   and adds a notice that the darwin asset is unsigned for now.
-2. On the Mac, `make release-sign TAG=<tag>` (`scripts/release-sign.sh`)
-   downloads the darwin tarball, checks it against `checksums.txt`, signs
-   the binary with the Developer ID identity in the login keychain,
-   notarizes it, re-packs the tarball under the same name, rewrites the
-   darwin line of `checksums.txt`, and uploads both over the unsigned ones
-   (`gh release upload --clobber`). It ends by asking Gatekeeper whether it
-   now sees a notarized Developer ID binary.
+Signing runs in GitHub Actions, in `.github/workflows/release.yml`, since
+the repository went public (macOS runner minutes are free on public
+repositories). Pushing a `v*` tag runs three jobs:
 
-**Why locally.** The repository is private, and GitHub bills macOS runner
-minutes at ten times the Linux rate on private repositories. Signing needs
-a Mac; this Mac already holds the certificate, so the release workflow
-stays on Ubuntu and uses no macOS minutes. It also means the certificate's
-private key never leaves the login keychain and there are no signing
-secrets in GitHub.
+```
+release (Cloud Run, ubuntu)      build darwin/arm64 + linux/amd64, create the GitHub Release
+   │                              (darwin tarball unsigned for now)
+   ▼  ── the maintainer approves the `release` environment ──
+sign-macos (GitHub-hosted macos-15, environment: release)
+   │                              temporary keychain ← MACOS_CERT_P12_BASE64
+   │                              scripts/release-sign.sh <tag>: codesign, notarytool, re-tar,
+   │                              rewrite checksums.txt, gh release upload --clobber
+   │                              then download the published tarball and verify it again
+   ▼
+homebrew (GitHub-hosted ubuntu-latest, environment: release)
+                                  render.sh → ruby -c → brew audit --strict →
+                                  commit Formula/sheepdog.rb to kccarlos/homebrew-tap, push →
+                                  brew install kccarlos/tap/sheepdog (Linux smoke test)
+```
 
-Between steps 1 and 2 the release carries an unsigned darwin binary. It
-runs fine from `curl`, `gh release download` or a terminal `tar -x`, and is
-blocked by Gatekeeper only when downloaded with a browser (see
+1. **release** cross-builds both binaries with `CGO_ENABLED=0` and
+   publishes the Release with both tarballs and `checksums.txt`.
+2. **sign-macos** waits for the maintainer to approve the `release`
+   environment (Actions ▸ the run ▸ Review deployments). It imports the
+   Developer ID certificate into a throwaway keychain with a random
+   password, writes the App Store Connect API key to `$RUNNER_TEMP` (mode
+   0600), and runs `scripts/release-sign.sh <tag>`, the same script as the
+   local fallback below: download, check the sha256, `codesign --options
+   runtime --timestamp`, zip and `notarytool submit --wait` (on anything
+   but `Accepted` it prints Apple's log and fails before uploading),
+   re-pack under the same name, replace the darwin line of
+   `checksums.txt` (the linux line stays), `gh release upload --clobber`.
+   It then downloads the published tarball and checks it with `codesign
+   --verify --strict` and Gatekeeper (`spctl --assess --type open
+   --context context:primary-signature`, the check that works for a bare
+   CLI binary; see [Checking a download](#checking-a-download)). The
+   keychain and the key file are deleted in an always-run step.
+3. **homebrew** renders `Formula/sheepdog.rb` from the signed
+   `checksums.txt` with `packaging/homebrew/render.sh`, checks it with
+   `ruby -c` and `brew audit --strict`, and `packaging/homebrew/tap-update.sh`
+   commits it to `kccarlos/homebrew-tap` as `sheepdog <version>` (author
+   KC) together with a README table row the first time, then pushes to
+   the tap's `main`. A rerun with an unchanged formula commits nothing. It
+   ends by installing the formula from the tap on Linux and running `brew
+   test`.
+
+Both sign-macos and homebrew run in the `release` environment, so a run
+asks for approval twice: once before signing, and again when homebrew
+becomes pending after signing succeeds.
+
+If `OP_SERVICE_ACCOUNT_TOKEN` is missing from the environment,
+sign-macos skips with a notice and the darwin tarball stays unsigned;
+homebrew runs only after a successful signing, so the tap never points at
+an unsigned binary. The tap token comes from the same 1Password vault.
+
+The `policy` CI check (`scripts/workflow-policy.sh`) allows a macOS runner
+and these secrets in `release.yml` only inside a job that declares
+`environment: release` (see [development.md](development.md#cicd)).
+
+### The `release` environment
+
+Settings ▸ Environments ▸ `release`: required reviewer the maintainer,
+deployment policy "tags matching `v*`". Its one secret is
+`OP_SERVICE_ACCOUNT_TOKEN`, a 1Password service account token that can
+read only the vault `github`; the jobs install the 1Password CLI
+(`1password/install-cli-action`) and load everything else into step outputs
+with `scripts/op-load.sh`, which retries each `op read` up to four times with
+growing sleeps (1Password is sometimes flaky) and masks every value. It is an **environment**
+secret, not a repository one, so only jobs that pass the approval can read it.
+
+| 1Password item (vault `github`) | Fields | Workflow name |
+| --- | --- | --- |
+| `apple-developer-id-application` | `p12_base64`, `password` | `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`: the Developer ID Application `.p12` (certificate and private key) for team `GV776BZVA8` |
+| `app-store-connect-api-key` | `p8_base64`, `key_id` | `NOTARY_API_KEY_P8`, `NOTARY_KEY_ID`: the App Store Connect API key (base64 of the `.p8`) and its Key ID |
+| `homebrew-tap-token` | `credential` | `HOMEBREW_TAP_TOKEN`: fine-grained PAT, repository `kccarlos/homebrew-tap` only, Contents read and write |
+
+The issuer ID (`686fbf99-b25d-4e9c-af7c-2b7cb2c3f1eb`) is not secret and is
+set in the workflow as `NOTARY_ISSUER_ID`.
+
+Setting the token (from 1Password, never the command line):
+
+```sh
+op read "op://Private/OP service account github-actions/credential" \
+  | gh secret set OP_SERVICE_ACCOUNT_TOKEN --env release
+```
+
+Export the identity (certificate with its private key) as the `.p12`;
+the job also imports Apple's Developer ID G2 intermediate, so the chain
+need not be in the file. Delete the local `.p12` and `.p8` copies after
+storing them in 1Password.
+
+### Rotating
+
+- **Certificate** (expires after five years, or if revoked): create a new
+  Developer ID Application certificate (see [the local
+  setup](#2-the-developer-id-application-certificate)), export it, and
+  update both fields of the 1Password item `apple-developer-id-application`.
+  Binaries signed with the old certificate keep working unless it is
+  revoked.
+- **API key**: create a new key in App Store Connect ▸ Users and Access ▸
+  Integrations, update the 1Password item `app-store-connect-api-key`, then
+  revoke the old key.
+- **Tap token**: fine-grained PATs expire; create a new one with the same
+  scope, update `homebrew-tap-token` in vault `github` (and
+  `GITHUB_PAT_HOMEBREW` in `Developer`, the same token), delete the old one.
+
+The next run picks them up; nothing in the repository changes.
+
+### Re-signing an existing release
+
+A `workflow_dispatch` with the `tag` input re-runs sign-macos and homebrew
+for a release that already exists, without rebuilding it. The run must be
+dispatched on the tag's own ref so the environment's tag policy admits
+it:
+
+```sh
+gh workflow run release.yml --ref v0.1.1 -f tag=v0.1.1
+```
+
+`release-sign.sh` is idempotent: an already signed and notarized tarball
+is left alone, and the homebrew job then only re-publishes the formula.
+
+GitHub runs the workflow file **as it is at the dispatched ref**. Tags
+created before this workflow had `workflow_dispatch` (v0.1.0) cannot be
+dispatched on their own ref: GitHub answers that the workflow has no
+`workflow_dispatch` trigger. For those, either add a deployment branch
+rule for `main` to the `release` environment and dispatch from `main`:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+(remove the rule afterwards if only tags should deploy), or sign on the
+Mac with `make release-sign TAG=v0.1.0` and push the formula by hand
+(`packaging/homebrew/README.md`).
+
+## Local fallback: `make release-sign`
+
+The same signing runs on the maintainer's Mac when Actions cannot, using
+the Developer ID identity in the login keychain and a notarytool keychain
+profile:
+
+1. `make release-sign TAG=<tag>` (`scripts/release-sign.sh`) downloads
+   the darwin tarball, checks it against `checksums.txt`, signs, notarizes,
+   re-packs, rewrites the darwin line of `checksums.txt`, uploads both
+   over the unsigned ones (`gh release upload --clobber`), and ends by
+   asking Gatekeeper whether it now sees a notarized Developer ID binary.
+
+Between the release job and signing, the release carries an unsigned
+darwin binary. It runs fine from `curl`, `gh release download` or a
+terminal `tar -x`, and is blocked by Gatekeeper only when downloaded with
+a browser (see
 [When Gatekeeper actually checks](#when-gatekeeper-actually-checks)).
 
-## One-time setup
+### One-time setup
 
-### 1. Agreements
+#### 1. Agreements
 
 Signed in as the Account Holder (team
 `GV776BZVA8`), accept any pending agreement at
 <https://developer.apple.com/account>. Notarization fails with a 403
 while one is pending.
 
-### 2. The Developer ID Application certificate
+#### 2. The Developer ID Application certificate
 
 It already exists on this Mac. To check:
 
@@ -74,7 +205,7 @@ name, so `codesign -dv` on the released binary shows
 `Authority=Developer ID Application: <Account Holder name> (GV776BZVA8)`. Anyone can
 read it from the download; that is how Developer ID works.
 
-### 3. Notary credentials
+#### 3. Notary credentials
 
 `notarytool` reads its credentials from a keychain profile named
 `sheepdog-notary` (override with `NOTARY_PROFILE`). Create it once with an
@@ -107,7 +238,7 @@ Developer role is enough; the iOS app's key works too (see the iOS repo's
 Check the profile with `xcrun notarytool history --keychain-profile
 sheepdog-notary`.
 
-## Per release
+### Per release (local)
 
 ```sh
 git tag v0.1.0
@@ -116,7 +247,8 @@ gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId -
 make release-sign TAG=v0.1.0
 ```
 
-`make release-sign` prints the signing identity, the `codesign --display`
+The tag push also starts the Actions flow above; reject its environment
+approval when signing locally. `make release-sign` prints the signing identity, the `codesign --display`
 summary (`flags=0x10000(runtime)`, `Authority=Developer ID Application:
 …`, `TeamIdentifier=GV776BZVA8`, `Timestamp=`), the notarytool JSON with
 `"status":"Accepted"` (a few minutes; it waits up to 30), the new
@@ -202,6 +334,11 @@ runs.
 | notarytool `HTTP status code: 401` | wrong app-specific password / API key, or it was revoked |
 | notarytool `403` | an agreement is pending at developer.apple.com |
 | notarization `Invalid` | the log printed by the script names the file and the issue (e.g. missing hardened runtime or timestamp) |
+| sign-macos: `no valid Developer ID Application identity` | the 1Password item `apple-developer-id-application` holds the certificate without its private key, the wrong certificate, or an expired one |
+| sign-macos: `security import` fails | the item's `password` does not match its `.p12` |
+| sign-macos skipped with a notice | `OP_SERVICE_ACCOUNT_TOKEN` is not set in the `release` environment |
+| dispatch refused by the environment | the run was not dispatched on a `v*` tag ref |
+| homebrew: push rejected (403) | `homebrew-tap-token` expired or lacks Contents write on the tap |
 | `sha256 mismatch` | the release asset does not match its `checksums.txt`; do not sign it, rebuild the release |
 
 ## Testing without the real certificate

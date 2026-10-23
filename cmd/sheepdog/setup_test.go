@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -11,8 +12,14 @@ import (
 // a test points it at a temp file. HOME and the XDG directories point at
 // a throwaway directory too, so no test can reach the developer's real
 // config, data dir, pid file, runtime log or login service.
+//
+// The tests that build the binary run `go build` under that HOME, so the
+// Go caches are pinned to the developer's real ones first: otherwise the
+// build downloads every module into HOME/go/pkg/mod, whose read-only
+// files os.RemoveAll cannot delete (about 120 MB left behind per run).
 func TestMain(m *testing.M) {
 	configEnvPath = func() string { return "" }
+	pinGoCaches()
 	home, err := os.MkdirTemp("", "sheepdog-test-home-")
 	if err != nil {
 		panic(err)
@@ -31,7 +38,27 @@ func TestMain(m *testing.M) {
 	// The default push mode is the deployed shared relay: keep doctor and
 	// setup checks from calling it over the network.
 	_ = os.Setenv("SHEEPDOG_PUSH_MODE", "off")
+	// No test asks GitHub: the daily check points at a closed port.
+	releaseAPI = "http://127.0.0.1:9"
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
+}
+
+// pinGoCaches sets GOCACHE, GOMODCACHE and GOPATH to the values the go
+// command resolves now, before HOME moves. Without a go command it does
+// nothing: only the tests that build the binary need it.
+func pinGoCaches() {
+	keys := []string{"GOCACHE", "GOMODCACHE", "GOPATH"}
+	out, err := exec.Command("go", append([]string{"env"}, keys...)...).Output()
+	if err != nil {
+		return
+	}
+	vals := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(vals) != len(keys) {
+		return
+	}
+	for i, k := range keys {
+		_ = os.Setenv(k, vals[i])
+	}
 }

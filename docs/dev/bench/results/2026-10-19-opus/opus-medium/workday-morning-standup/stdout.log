@@ -1,0 +1,14 @@
+[1/3] workday-morning-standup r3: pass (end_call, ) ≈ $1.2101, total ≈ $1.210
+[2/3] workday-morning-standup r2: pass (end_call, ) ≈ $1.1929, total ≈ $2.403
+[3/3] workday-morning-standup r1: pass (end_call, ) ≈ $1.2981, total ≈ $3.701
+  pass    workday-morning-standup r1  end_call  12 turns  168.0s                         ≈ $1.2981
+  pass    workday-morning-standup r2  end_call  12 turns  158.6s                         ≈ $1.1929
+  pass    workday-morning-standup r3  end_call  12 turns  151.7s                         ≈ $1.2101
+-- 3 runs, spend ≈ $3.7012 (estimate at list prices) --
+reports: docs/dev/bench/results/2026-10-19-opus/opus-medium/workday-morning-standup/report.json, docs/dev/bench/results/2026-10-19-opus/opus-medium/workday-morning-standup/report.md
+== eval sim, repeat 3 ==
+  workday-morning-standup  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                    runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    claude-opus-5-5          calls    83  in   1409773  out    22073  reasoning        0  ≈ $3.6810 --
+-- spend simuser  deepseek-flash           calls    33  in     65996  out      637  reasoning        0  ≈ $0.0202 --
+-- spend total ≈ $3.7012 (estimate at list prices) --

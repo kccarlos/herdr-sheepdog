@@ -33,8 +33,8 @@ Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `ios-v0.1.4` (`b90c38d`
 workflow, the first signed archive with the widget extension; it exported with
 no signing change. It adds the UI polish (#36) and the Live Activity widget,
 App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
-No GitHub Actions run anything here (Xcode Cloud
-only, see [`xcode-cloud.md`](xcode-cloud.md)).
+Xcode Cloud only archives TestFlight builds on `ios-v*` tags ([`xcode-cloud.md`](xcode-cloud.md));
+the tests run on GitHub Actions (`.github/workflows/ios.yml`, below).
 The App Store Connect record is **"Sheepdog for herdr"**. For setup,
 workflows and troubleshooting, see [`xcode-cloud.md`](xcode-cloud.md).
 
@@ -56,9 +56,11 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
   the announcements, a spoken "what failed?" is answered, mute stops
   listening, and the voice does not hear itself.
 
-- **Pairing from the Camera app (`sheepdog://pair`):** scanning
-  `sheepdog pair`'s code with the system Camera app and confirming "Pair
-  with <host>?". Checked in the simulator (`PairingLinkUITests`) only.
+- **Pairing on a real phone:** scanning the code with the in-app camera,
+  then enrolling over pinned TLS. The whole path (code, pinned TLS, enroll,
+  ticket, `/ws`, revoke) runs in the simulator against the pair fixture
+  daemon (`PairingE2ETests`, `PairingLinkUITests`); the camera itself only
+  on a device.
 
 - **Everything new in 0.1.1 (20)** has only run in the simulator and the
   unit and fixture-daemon tests: the `client-ready` / `bot-ready`
@@ -94,9 +96,6 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ## Known rough edges
 
-- iOS offers to save the token to Passwords when Settings closes.
-  `.textContentType(.oneTimeCode)` does not suppress the offer. It is a
-  system dialog, and "Not Now" is the right answer.
 - The blocked state is **amber** here (asset catalog `Blocked`, plus the
   darker `BlockedText` for words). The daemon's `/debug` page uses red. On a
   phone a red dot reads as "broken", while a blocked agent is only waiting
@@ -108,28 +107,46 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ```sh
 xcodegen generate
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' build test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation build test
 ```
 
 The unit suite (`SheepdogKitTests`) has 437 tests. `LiveDaemonTests` and
-every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
-so Xcode Cloud stays green without a daemon.
+the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
-To run the UI tests for real, start two fixture daemons from the daemon
-repository root (`..` from `ios/`). Neither needs a model key: `--brain=fake` is a scripted local
-model, and `--voice=off` means there is no live session.
+**In CI** (`.github/workflows/ios.yml`, a GitHub-hosted Mac) the job builds
+the daemon, starts both fixture daemons on free ports with
+`scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
+the main daemon, so the history has a restart divider), and passes the
+ports as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT` and
+`TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT`. It runs the unit suite and the UI
+tests, then `HistoryApprovalUITests` after `scripts/fixture-daemons.sh
+restart`, then `ReconnectUITests` with `scripts/fixture-daemon-restarter.sh`
+running. Only the opt-in recording and screenshot tests skip there.
+
+To run the UI tests for real on your Mac, start the two fixture daemons
+from the daemon repository root (`..` from `ios/`). Neither needs a model
+key: `--brain=fake` is a scripted local model, and `--voice=off` means there
+is no live session. The script does it (`SHEEPDOG_FIXTURE_PORT`,
+`SHEEPDOG_FIXTURE_PAIR_PORT` and `SHEEPDOG_FIXTURE_DATA` move it off 7799,
+7798 and `/tmp/sd-bugs`; `stop` stops them):
+
+```sh
+make build && SHEEPDOG_DAEMON_REPO=$PWD ios/scripts/fixture-daemons.sh start
+```
+
+or by hand:
 
 ```sh
 cd ..   # the repository root; build bin/sheepdog first with make build
 SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios/state.json \
   bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7799 --env-file /dev/null &
-SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-token SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-token/state.json \
-  SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_TOKEN=devtoken \
+SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-pair SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-pair/state.json \
+  SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_ADVERTISE=127.0.0.1:7798 \
   bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7798 --env-file /dev/null &
 
 cd ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
-xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' test
+xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation test
 ```
 
 - `HistoryApprovalUITests` expects a restart divider, so restart the 7799
@@ -165,14 +182,14 @@ cannot produce.
 | ![](../screenshots/review-light-models.png) | ![](../screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
 | ![](../screenshots/review-light-models-notifications.png) | ![](../screenshots/review-dark-models-notifications.png) | Notifications: this phone, and the daemon's `GET /api/push/status`. |
 | ![](../screenshots/review-light-agent-screen.png) | ![](../screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
-| ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
+| ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C asks before it is sent (Esc no longer does, so Esc Esc works). |
 | ![](../screenshots/review-light-agent-screen-sent.png) | ![](../screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
 
-The Live Activity, drawn in the DEBUG gallery (`-sheepdogLiveActivityGallery`):
-the widget's own lock-screen view (listening with two agents waiting,
-speaking, muted, stale), and its Dynamic Island pieces inside a stand-in
-island shape. `-sheepdogDemoLiveActivity listening|speaking|muted` starts a
-real activity with no session.
+The Live Activity's lock-screen banner, drawn in the DEBUG gallery
+(`-sheepdogLiveActivityGallery one`) on a stand-in lock screen: listening,
+two agents waiting with their questions, the counts of agents working and
+done, Mute and End. `-sheepdogDemoLiveActivity listening|speaking|muted`
+starts a real activity with no session.
 
 | Light | Dark |
 |---|---|

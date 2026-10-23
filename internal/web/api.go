@@ -14,17 +14,22 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/lang"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // StateResponse is the body of GET /api/state.
 type StateResponse struct {
-	Agents        []state.Agent     `json:"agents"`
-	PendingAction *PendingView      `json:"pending_action"`
-	Session       state.Session     `json:"session"`
-	Voice         VoiceInfo         `json:"voice"`
-	Settings      *SettingsResponse `json:"settings,omitempty"`
+	Agents        []state.Agent `json:"agents"`
+	PendingAction *PendingView  `json:"pending_action"`
+	// Questions are every open question, oldest first: one per blocked
+	// agent whose prompt was read, the voice's pending_action among
+	// them. Each has its options for POST /api/pending/answer.
+	Questions []PendingView     `json:"questions"`
+	Session   state.Session     `json:"session"`
+	Voice     VoiceInfo         `json:"voice"`
+	Settings  *SettingsResponse `json:"settings,omitempty"`
 	// Brain is the orchestrator's provider and current model; omitted
 	// when the orchestrator is off.
 	Brain   *BrainInfo `json:"brain,omitempty"`
@@ -38,6 +43,11 @@ type StateResponse struct {
 	// ConversationStartedAt is when the current conversation began: the
 	// last "New conversation" reset, or daemon start.
 	ConversationStartedAt time.Time `json:"conversation_started_at"`
+	// Update is the update notice: the newest release, whether it is
+	// newer, how to upgrade, and whether an upgrade is installed but not
+	// running yet. Omitted when the daemon does not track updates. The
+	// voice never speaks it.
+	Update *update.Status `json:"update,omitempty"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -121,6 +131,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:                agents,
 		PendingAction:         s.pendingView(snap.PendingAction),
+		Questions:             s.questionViews(),
 		Session:               snap.Session,
 		Voice:                 s.voiceInfo(hs),
 		Settings:              s.settings(),
@@ -131,8 +142,22 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		VoiceProvider:         s.voiceProvider(),
 		VoiceModel:            s.voiceModel(),
 		ConversationStartedAt: s.conversationStartedAt(),
+		Update:                s.updateStatus(),
 	})
 }
+
+// updateStatus is /api/state's update object (nil without a tracker).
+func (s *Server) updateStatus() *update.Status {
+	if s.deps.Update == nil {
+		return nil
+	}
+	st := s.deps.Update()
+	return &st
+}
+
+// VoiceClientConnected reports whether a browser or phone holds the voice
+// connection now.
+func (s *Server) VoiceClientConnected() bool { return s.hub.state().client }
 
 // conversationStartedAt is StateResponse's conversation_started_at (the
 // zero time when there is no supervisor).
@@ -165,6 +190,15 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 		v.Agent = row.Alias
 	}
 	return v
+}
+
+// questionViews lists the open questions for /api/state.
+func (s *Server) questionViews() []PendingView {
+	out := []PendingView{}
+	for _, q := range s.deps.Store.Questions() {
+		out = append(out, *s.pendingView(&q))
+	}
+	return out
 }
 
 // pendingAnswerRequest is the body of POST /api/pending/answer.
@@ -472,7 +506,7 @@ func injectStatus(err error) int {
 	return http.StatusBadRequest
 }
 
-// utteranceRequest is the body of POST /api/inject/utterance.
+// utteranceRequest is the body of POST /api/utterance.
 type utteranceRequest struct {
 	Text string `json:"text"`
 }

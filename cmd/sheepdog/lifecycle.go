@@ -48,6 +48,15 @@ func lifecycleFlags(fs *flag.FlagSet) (configPath, envFile *string) {
 
 // loadLifecycle loads the env file and config the daemon would use.
 func loadLifecycle(ctx context.Context, name, configPath, envFile string, stdout, stderr io.Writer) (*lifecycle, int, bool) {
+	// start and restart read the env file the last daemon loaded (an
+	// explicit --env-file wins), not whatever ./.env this working
+	// directory offers.
+	if envFile == "" && (name == "start" || name == "restart") {
+		if p := recordedEnvFile(configPath); p != "" {
+			envFile = p
+			fprintf(stdout, "using the env file the last run loaded: %s\n", p)
+		}
+	}
 	if code, ok := loadServeEnvFile(envFile, stderr); !ok {
 		return nil, code, false
 	}
@@ -62,6 +71,24 @@ func loadLifecycle(ctx context.Context, name, configPath, envFile string, stdout
 	}
 	_ = ctx
 	return l, 0, true
+}
+
+// recordedEnvFile is the env file the last daemon recorded
+// (daemon.EnvRecord) when it still exists and differs from the default
+// ("" otherwise: the usual lookup applies).
+func recordedEnvFile(configPath string) string {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return ""
+	}
+	p := daemon.ReadEnvRecord(cfg.DataDir).Path
+	if p == "" || p == configEnvPath() {
+		return ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 // serviceInstalled reports whether the login service's unit file exists.
@@ -134,6 +161,9 @@ func (l *lifecycle) start(ctx context.Context) int {
 		fprintf(l.errw, "sheepdog cannot start: %s\n", strings.TrimSuffix(strings.TrimPrefix(err.Error(), "app: "), "; use --voice=off to run without it"))
 		fprintln(l.errw, "Run `sheepdog setup` to set it up, or `sheepdog doctor` to see what is missing.")
 		return 1
+	}
+	if k := keysStatus(l.cfg.DataDir); k != nil && k.Problem != "" {
+		fprintf(l.errw, "sheepdog start: warning: %s; the daemon will come up in setup mode (copy your keys to %s, chmod 600, or pass --env-file)\n", k.Problem, config.DefaultEnvPath())
 	}
 	stdio, logFile := daemon.StdioFile(l.cfg.DataDir), daemon.LogFile(l.cfg.DataDir)
 	from, logFrom := fileSize(stdio), fileSize(logFile)
@@ -419,18 +449,11 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	url := info.URL + path
-	if page == "setup" && pageMissing(ctx, url) {
-		fprintln(stderr, "This version of sheepdog has no setup page yet. Run `sheepdog init` in a terminal to set it up.")
-		return 1
-	}
 	if !hasDisplay() {
 		fprintf(stdout, "No browser here (SSH?): %s is on this computer. From your own computer: ssh -N -L %[2]d:127.0.0.1:%[2]d <this host>, then open http://127.0.0.1:%[2]d%[3]s there.\n", url, l.cfg.Web.Port, path)
 		return 0
 	}
 	fprintf(stdout, "opening %s\n", url)
-	if l.cfg.Web.Token != "" && page != "setup" {
-		fprintln(stdout, "The page asks once for the web token: web.token in your config, or SHEEPDOG_WEB_TOKEN in "+config.DefaultEnvPath()+".")
-	}
 	if err := openBrowser(url); err != nil {
 		fprintf(stderr, "sheepdog open: could not start a browser (%v); open the URL above yourself\n", err)
 		return 1
@@ -438,32 +461,14 @@ func runOpen(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// pageMissing reports whether GET url answers 404.
-func pageMissing(ctx context.Context, url string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return true
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return true
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusNotFound
-}
-
-// getJSON fetches base+path with the web token into v.
-func getJSON(ctx context.Context, base, path, token string, v any) error {
+// getJSON fetches base+path into v (the daemon on loopback needs no
+// credentials).
+func getJSON(ctx context.Context, base, path string, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -54,6 +54,10 @@ func TestHerdrWatchPrintsTransitionsAndPersists(t *testing.T) {
 	}()
 
 	waitFor(t, func() bool { return len(stdout.lines()) >= 1 })
+	// The first line comes from the snapshot; the pane's own subscription
+	// opens after it. An event sent before the server has it (fleet +
+	// w5:p1) reaches no one, and the next snapshot is 30 s away.
+	waitFor(t, func() bool { return srv.SubscriptionCount() >= 2 })
 	srv.EmitStatus("w5:p1", herdr.StateWorking)
 	srv.EmitStatus("w5:p1", herdr.StateBlocked)
 	waitFor(t, func() bool { return len(stdout.lines()) >= 3 })

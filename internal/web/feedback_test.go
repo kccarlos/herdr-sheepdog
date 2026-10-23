@@ -73,6 +73,12 @@ func TestFeedbackSnapshot(t *testing.T) {
 			n++
 		}
 	}
+	// The writer marks a chunk sent after Write returns, which can be
+	// after the client has read it.
+	waitFor(t, 2*time.Second, func() bool {
+		cs := h.srv.audio.Since(time.Time{})
+		return len(cs) == 2 && !cs[0].SentAt.IsZero() && !cs[1].SentAt.IsZero()
+	}, "both chunks marked sent")
 	h.session.emit(voice.EventTranscript{Dir: voice.DirOut, Text: "hello"})
 	h.log.Log("voice", "voice.transcript.out", "", map[string]any{"text": strings.Repeat("x", 300)})
 	h.log.Log("brain", "brain.turn_started", "", map[string]any{"turn_id": "turn-1", "kind": "utterance"})
@@ -129,14 +135,16 @@ func TestFeedbackSnapshot(t *testing.T) {
 	}
 }
 
-// TestFeedbackNeedsTheToken: POST /api/feedback is behind web.token like
+// TestFeedbackNeedsADevice: POST /api/feedback needs a paired device like
 // every other /api route.
-func TestFeedbackNeedsTheToken(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: "s3cr3t"})
+func TestFeedbackNeedsADevice(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	d := h.pairDevice()
+	h.asRemote()
 	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", "", nil, map[string]any{"tag": "paused"}), nil); code != http.StatusUnauthorized {
-		t.Fatalf("no token: %d", code)
+		t.Fatalf("no ticket: %d", code)
 	}
-	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", "s3cr3t", nil, map[string]any{"tag": "paused"}), nil); code != http.StatusOK {
-		t.Fatalf("with token: %d", code)
+	if code, _ := h.do(h.authedRequest(http.MethodPost, "/api/feedback", d.ticket, nil, map[string]any{"tag": "paused"}), nil); code != http.StatusOK {
+		t.Fatalf("with a ticket: %d", code)
 	}
 }

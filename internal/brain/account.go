@@ -35,7 +35,7 @@ const (
 func AccountProblemOf(status int, message string) AccountProblem {
 	msg := strings.ToLower(message)
 	switch {
-	case status == 402 || hasAny(msg, "insufficient balance", "insufficient_balance", "insufficient credits", "insufficient_credits"):
+	case status == 402 || hasAny(msg, "insufficient balance", "insufficient_balance", "insufficient credits", "insufficient_credits", "billing_error", "credit balance is too low"):
 		return ProblemBalance
 	case status == 401 || status == 403 || invalidKeyText(msg):
 		return ProblemInvalidKey
@@ -48,7 +48,7 @@ func AccountProblemOf(status int, message string) AccountProblem {
 // invalidKeyText: the message itself says the key is bad (Google's
 // API_KEY_INVALID and Live's close 1007, OpenAI's invalid_api_key).
 func invalidKeyText(msg string) bool {
-	return hasAny(msg, "api_key_invalid", "api key not valid", "api key expired", "invalid_api_key", "incorrect api key", "invalid api key")
+	return hasAny(msg, "api_key_invalid", "api key not valid", "api key expired", "invalid_api_key", "incorrect api key", "invalid api key", "authentication_error", "invalid x-api-key")
 }
 
 // quotaText: the message says a quota is used up, and it is not a
@@ -116,6 +116,8 @@ func ServiceOf(id string) Service {
 		return Service{Name: "DeepSeek", KeyVar: "DEEPSEEK_API_KEY", Console: "https://platform.deepseek.com"}
 	case "openai":
 		return Service{Name: "OpenAI", KeyVar: "OPENAI_API_KEY", Console: "https://platform.openai.com/api-keys"}
+	case ProviderAnthropic:
+		return Service{Name: "Anthropic", KeyVar: "ANTHROPIC_API_KEY", Console: "https://console.anthropic.com/settings/keys"}
 	}
 	return Service{Name: id}
 }
@@ -168,7 +170,20 @@ type AccountAlert struct {
 // vendor: a failover is the daemon's business, a key, a quota or a
 // balance is the user's to fix, and they cannot fix what is not named.
 func NewAccountAlert(role, provider string, p AccountProblem, backup bool) AccountAlert {
+	return newAccountAlert(role, provider, ServiceOf(provider), p, backup)
+}
+
+// serviceOf is provider as ServiceOf describes it, with the key variable
+// the orchestrator's config names for it (Config.KeyVars), if any.
+func (b *Brain) serviceOf(provider string) Service {
 	s := ServiceOf(provider)
+	if v := b.cfg.KeyVars[provider]; v != "" {
+		s.KeyVar = v
+	}
+	return s
+}
+
+func newAccountAlert(role, provider string, s Service, p AccountProblem, backup bool) AccountAlert {
 	ear, _, _ := strings.Cut(s.Name, " (") // "Gemini (AI Studio)" is said "Gemini"
 	what, whatZh := "the orchestrator", "调度模型"
 	if role == RoleVoice {

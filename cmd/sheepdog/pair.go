@@ -6,22 +6,22 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 )
-
-// pairAddrs lists this machine's interface addresses (tests replace it).
-var pairAddrs = pair.SystemAddrs
 
 func printPairUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog pair [flags]")
 	fprintln(w, "")
-	fprintln(w, "Prints a QR code for the iOS app (Settings → Scan pairing code): every LAN and")
-	fprintln(w, "Tailscale address the daemon listens on, and its web.token, as")
-	fprintln(w, "sheepdog://pair?u=<url>&u=<url>…&t=<token>. The app picks the first address")
-	fprintln(w, "that answers. The token is in the code only; it is not printed. /debug (State")
-	fprintln(w, "tab) shows the same code.")
+	fprintln(w, "Asks the running daemon for a new pairing code and prints it as a QR code. Scan it")
+	fprintln(w, "in the iOS app, or with any phone's camera to use sheepdog in the browser. The code")
+	fprintln(w, "works once and expires after 10 minutes; showing a new one (here or on the setup")
+	fprintln(w, "page) replaces it. It holds the computer's addresses, its certificate's")
+	fprintln(w, "fingerprint and the one-time code.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
@@ -31,8 +31,18 @@ func printPairUsage(w io.Writer) {
 	fprintln(w, "  --invert          with --plain (or piped): for a light terminal background")
 }
 
-// runPair implements `sheepdog pair`.
-func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
+// pairResponse is the daemon's GET /api/pair.
+type pairResponse struct {
+	Link      string         `json:"link"`
+	Expires   *time.Time     `json:"expires"`
+	Addresses []pair.Address `json:"addresses"`
+	Error     string         `json:"error"`
+}
+
+// runPair implements `sheepdog pair`: the daemon mints the one-time code
+// (only it can check it later), so this asks the running daemon on
+// loopback for a new one.
+func runPair(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pair", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printPairUsage(stderr) }
@@ -55,32 +65,34 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "sheepdog pair: %v\n", err)
 		return 1
 	}
-	sys, err := pairAddrs()
-	if err != nil {
-		fprintf(stderr, "sheepdog pair: %v\n", err)
+	var p pairResponse
+	if err := getJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/pair?new=1", &p); err != nil {
+		fprintf(stderr, "sheepdog pair: the daemon is not answering on port %d (%v): start it with sheepdog start\n", cfg.Web.Port, err)
 		return 1
 	}
-	addrs, err := pair.Addresses(cfg.Web.Bind, cfg.Web.Port, sys)
-	if err != nil {
-		fprintf(stderr, "sheepdog pair: %v\n", err)
+	if p.Link == "" {
+		fprintf(stderr, "sheepdog pair: %s\n", p.Error)
 		return 1
 	}
-	link := pair.URL(addrs, cfg.Web.Token)
 	tty := isTerminal(stdout) && !*plain
 	var code string
 	if tty {
-		code, err = pair.ANSI(link)
+		code, err = pair.ANSI(p.Link)
 	} else {
-		code, err = pair.Terminal(link, *invert)
+		code, err = pair.Terminal(p.Link, *invert)
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog pair: %v\n", err)
 		return 1
 	}
-	if *compact {
-		return printPairCompact(stdout, code, addrs, cfg.Web.Token != "")
+	expires := ""
+	if p.Expires != nil {
+		expires = p.Expires.Local().Format("15:04")
 	}
-	fprintln(stdout, "Scan this in the iOS app (Settings → Scan pairing code):")
+	if *compact {
+		return printPairCompact(stdout, code, p.Addresses, expires)
+	}
+	fprintln(stdout, "Scan this in the Sheepdog app, or with your phone's camera:")
 	fprintln(stdout, "")
 	_, _ = io.WriteString(stdout, code)
 	fprintln(stdout, "")
@@ -88,15 +100,12 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintln(stdout, "Does not scan? Try --invert (for a light background).")
 		fprintln(stdout, "")
 	}
-	fprintln(stdout, "It holds these addresses (the app uses the first that answers):")
-	for _, a := range addrs {
-		fprintf(stdout, "  %-9s %s\n", a.Kind, a.URL)
+	fprintln(stdout, pair.Explain(p.Addresses))
+	fprintln(stdout, "The code holds these addresses (the app keeps the first that answers):")
+	for _, a := range p.Addresses {
+		fprintf(stdout, "  %-10s %s\n", a.Kind, pair.HostPort(a.URL))
 	}
-	if cfg.Web.Token == "" {
-		fprintln(stdout, "and no token: web.token is not set, so anyone on these networks can use the daemon (sheepdog setup sets one).")
-	} else {
-		fprintln(stdout, "and the web token (not printed). Treat the code like a password.")
-	}
+	fprintf(stdout, "It works once and expires at %s. Every device already paired is told when a new one pairs.\n", expires)
 	return 0
 }
 
@@ -112,16 +121,29 @@ func isTerminal(w io.Writer) bool {
 
 // printPairCompact is the code with a one-line title and
 // the addresses, one per line.
-func printPairCompact(w io.Writer, code string, addrs []pair.Address, hasToken bool) int {
-	fprintln(w, "Scan in the iOS app (Settings → Scan pairing code):")
+func printPairCompact(w io.Writer, code string, addrs []pair.Address, expires string) int {
+	fprintln(w, "Scan in the Sheepdog app or with your phone's camera:")
 	_, _ = io.WriteString(w, code)
+	fprintln(w, wrapText(pair.Explain(addrs), 68))
 	for _, a := range addrs {
-		fprintln(w, a.URL)
+		fprintln(w, pair.HostPort(a.URL))
 	}
-	if hasToken {
-		fprintln(w, "The code holds the web token (not printed): treat it like a password.")
-	} else {
-		fprintln(w, "No web.token is set: anyone on these networks can use the daemon (sheepdog setup sets one).")
-	}
+	fprintf(w, "Works once, until %s.\n", expires)
 	return 0
+}
+
+// wrapText breaks s at spaces into lines of at most width runes.
+func wrapText(s string, width int) string {
+	var out, line strings.Builder
+	for _, w := range strings.Fields(s) {
+		if line.Len() > 0 && line.Len()+1+len(w) > width {
+			out.WriteString(line.String() + "\n")
+			line.Reset()
+		}
+		if line.Len() > 0 {
+			line.WriteByte(' ')
+		}
+		line.WriteString(w)
+	}
+	return out.String() + line.String()
 }

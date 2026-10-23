@@ -34,10 +34,12 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --live                real orchestrator, simulated user and judge (costs money)")
-	fprintln(w, "  --provider ID         live orchestrator provider: vertex or deepseek (gemini, the AI")
-	fprintln(w, "                        Studio free tier, only with --allow-ai-studio)")
+	fprintln(w, "  --provider ID         live orchestrator provider: vertex, deepseek or anthropic")
+	fprintln(w, "                        (gemini, the AI Studio free tier, only with --allow-ai-studio);")
+	fprintln(w, "                        anthropic's effort comes from [anthropic] in --config")
 	fprintln(w, "  --fallback-provider ID second orchestrator provider the failover can retry a step on:")
-	fprintln(w, "                        vertex, deepseek, gemini (needs --allow-ai-studio) or none.")
+	fprintln(w, "                        vertex, deepseek, anthropic, gemini (needs --allow-ai-studio)")
+	fprintln(w, "                        or none.")
 	fprintln(w, "                        Default: every provider with credentials, as the daemon")
 	fprintln(w, "                        registers them (gemini only with --allow-ai-studio)")
 	fprintln(w, "  --model ID            live orchestrator model (default brain.model)")
@@ -61,6 +63,9 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --config PATH         config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --prompts-dir PATH    prompt override directory (default config prompts.dir)")
+	fprintln(w, "  --screen MODE         the simulated phone screen the show tool puts cards on:")
+	fprintln(w, "                        visible, hidden, or alternate (about half the runs, by")
+	fprintln(w, "                        scenario and repeat); default none")
 }
 
 type evalSimOpts struct {
@@ -74,6 +79,7 @@ type evalSimOpts struct {
 	repeat, parallel                                 int
 	budget                                           float64
 	personas                                         string
+	screen                                           string
 }
 
 func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool) {
@@ -84,7 +90,7 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.BoolVar(&o.live, "live", false, "real models")
 	fs.BoolVar(&o.allowAIStudio, "allow-ai-studio", false, "allow the gemini (AI Studio) orchestrator provider")
 	fs.StringVar(&o.provider, "provider", "", "live orchestrator provider")
-	fs.StringVar(&o.fallback, "fallback-provider", "", "failover provider (vertex, deepseek, gemini, none)")
+	fs.StringVar(&o.fallback, "fallback-provider", "", "failover provider (vertex, deepseek, anthropic, gemini, none)")
 	fs.StringVar(&o.model, "model", "", "live orchestrator model")
 	fs.StringVar(&o.simuser, "simuser", "", "simulated user backend")
 	fs.StringVar(&o.simuserModel, "simuser-model", "", "simulated user model")
@@ -103,11 +109,16 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
 	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
 	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
+	fs.StringVar(&o.screen, "screen", "", "simulated phone screen: visible, hidden or alternate (default none)")
 	fs.StringVar(&o.personas, "personas", "", "simulated-user personas rotated by repeat: rotate, or a list of terse, rambling, zh, impatient, vague (default: each scenario's own)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
 		}
+		return o, 2, false
+	}
+	if !eval.ValidScreenMode(o.screen) {
+		fprintf(stderr, "sheepdog eval sim: --screen %q: want visible, hidden or alternate\n", o.screen)
 		return o, 2, false
 	}
 	if _, err := eval.ParsePersonas(o.personas); err != nil {
@@ -120,26 +131,26 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	}
 	if o.live {
 		switch o.provider {
-		case brain.ProviderVertex, brain.ProviderDeepSeek:
+		case brain.ProviderVertex, brain.ProviderDeepSeek, brain.ProviderAnthropic:
 		case brain.ProviderGemini:
 			if !o.allowAIStudio {
 				fprintln(stderr, "sheepdog eval sim: --provider gemini is the AI Studio free tier; pass --allow-ai-studio to use it anyway")
 				return o, 2, false
 			}
 		default:
-			fprintln(stderr, "sheepdog eval sim --live: --provider must be vertex or deepseek")
+			fprintln(stderr, "sheepdog eval sim --live: --provider must be vertex, deepseek or anthropic")
 			return o, 2, false
 		}
 	}
 	switch o.fallback {
-	case "", "none", brain.ProviderVertex, brain.ProviderDeepSeek:
+	case "", "none", brain.ProviderVertex, brain.ProviderDeepSeek, brain.ProviderAnthropic:
 	case brain.ProviderGemini:
 		if !o.allowAIStudio {
 			fprintln(stderr, "sheepdog eval sim: --fallback-provider gemini is the AI Studio free tier; pass --allow-ai-studio to use it anyway")
 			return o, 2, false
 		}
 	default:
-		fprintln(stderr, "sheepdog eval sim: --fallback-provider must be vertex, deepseek, gemini or none")
+		fprintln(stderr, "sheepdog eval sim: --fallback-provider must be vertex, deepseek, anthropic, gemini or none")
 		return o, 2, false
 	}
 	if o.live && o.fallback != "" && o.fallback == o.provider {
@@ -191,7 +202,7 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	})
 	eval.WriteSimTable(stdout, runs)
 	if o.out != "" {
-		rep := eval.NewCampaignReport(started, simSetup(o, opts), o.repeat, runs, meter)
+		rep := eval.NewCampaignReport(started, simSetup(o, opts, cfg), o.repeat, runs, meter)
 		rep.NorthStar = eval.NorthStarBlock(runs, eval.NorthStarOptions{Tier: "1", Scenarios: scenarios, EventsDir: opts.EventsDir})
 		if err := writeSimReports(o.out, rep); err != nil {
 			fprintf(stderr, "sheepdog eval sim: %v\n", err)
@@ -222,7 +233,7 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 }
 
 // simSetup records what a campaign ran on, for its report.
-func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
+func simSetup(o evalSimOpts, opts eval.SimOptions, cfg config.Config) map[string]string {
 	if !o.live {
 		return map[string]string{"mode": "offline (scripted orchestrator, scripted user, fake judge)"}
 	}
@@ -243,10 +254,14 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		"budget_usd":         fmt.Sprint(o.budget),
 		"scenarios":          o.files + filterNote(o.filter),
 		"personas":           orDefaultStr(o.personas, "each scenario's own"),
+		"screen":             orDefaultStr(o.screen, "none"),
 		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the orchestrator default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
 	if line, err := bench.PromptsArm(o.promptsDir); err == nil && line != "" {
 		setup["prompts_dir"] = line
+	}
+	if opts.BrainConfig.Provider == brain.ProviderAnthropic {
+		setup["anthropic effort"] = cfg.Anthropic.Effort + " (user turns), " + cfg.Anthropic.EventEffort + " (event turns)"
 	}
 	return setup
 }
@@ -269,7 +284,7 @@ func fallbackModels(o evalSimOpts, models map[string]brain.Model) (map[string]br
 	default:
 		m, ok := models[o.fallback]
 		if !ok {
-			return nil, fmt.Errorf("fallback provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY; gemini: GEMINI_API_KEY)", o.fallback)
+			return nil, fmt.Errorf("fallback provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY; anthropic: ANTHROPIC_API_KEY; gemini: GEMINI_API_KEY)", o.fallback)
 		}
 		out[o.fallback] = m
 	}
@@ -351,7 +366,7 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 	}
 	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
 	personas, _ := eval.ParsePersonas(o.personas)
-	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events, Personas: personas}
+	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events, Personas: personas, Screen: o.screen}
 	if o.events != "" {
 		opts.EventsDir = filepath.Clean(o.events)
 	}
@@ -366,7 +381,7 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 	}
 	m, ok := models[o.provider]
 	if !ok {
-		return opts, fmt.Errorf("provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY)", o.provider)
+		return opts, fmt.Errorf("provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY; anthropic: ANTHROPIC_API_KEY)", o.provider)
 	}
 	opts.BrainConfig.Provider = o.provider
 	if o.uttTimeout > 0 {

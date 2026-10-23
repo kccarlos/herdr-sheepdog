@@ -28,8 +28,8 @@ run-dev: build
 # Regenerates CHANGELOG.md from the full commit history (there are no
 # tags yet; see scripts/changelog.sh).
 # Signs and notarizes the darwin binary of a published release on this Mac
-# and replaces its tarball and checksums.txt (docs/dev/signing.md). The release
-# workflow runs on ubuntu only, so the darwin asset is unsigned until then.
+# and replaces its tarball and checksums.txt (docs/dev/signing.md). Local
+# fallback: release.yml's sign-macos job normally does this in Actions.
 #   make release-sign TAG=v0.1.0 [DRY_RUN=1]
 release-sign:
 	@test -n "$(TAG)" || { echo "usage: make release-sign TAG=v0.1.0 [DRY_RUN=1]"; exit 2; }
@@ -46,7 +46,7 @@ test:
 # stays Go-only.
 test-web:
 	@if command -v node >/dev/null 2>&1; then \
-		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'; \
+		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs' 'web/static/*.test.mjs' 'web/setup/*.test.mjs'; \
 	else \
 		echo "test-web: node not found, skipping"; \
 	fi

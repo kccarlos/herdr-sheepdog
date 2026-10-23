@@ -22,7 +22,7 @@ final class HealthUITests: XCTestCase {
 
         // Health is not a pane any more: connection chip > Health.
         XCTAssertFalse(app.buttons["main.pane.health"].exists, "Health left the pane switcher")
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         tapWhenReady(app.buttons["chip.health"], "Health in the chip's popover")
 
         XCTAssertTrue(element(app, "health.version").waitForExistence(timeout: 10))

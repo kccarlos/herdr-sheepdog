@@ -8,6 +8,10 @@ holds the Account Holder's App Store Connect login. The rest of the Xcode
 Cloud setup (signing, TestFlight groups, costs, troubleshooting) is in
 [`ios/docs/dev/xcode-cloud.md`](../../ios/docs/dev/xcode-cloud.md).
 
+Since 2026-10-21 the app's tests run on GitHub Actions (`ios.yml`) and the
+**PR** workflow below is gone from App Store Connect; only the TestFlight
+workflows remain. The PR steps are kept as the record of the switch.
+
 ## What changed in the repository
 
 | | Before | Now |

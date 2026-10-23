@@ -62,7 +62,7 @@ type call interface {
 	finish(rec *Record) []eval.Failure
 }
 
-// textCall is the text router (POST /api/inject/utterance): the daemon's
+// textCall is the text router (POST /api/utterance): the daemon's
 // pushes arrive as voice.push events.
 type textCall struct {
 	w      *world

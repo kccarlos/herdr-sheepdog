@@ -12,6 +12,9 @@ enum DebugLaunch {
     /// `-sheepdogResetState`: the walkthrough and screenshots start from a
     /// clean slate rather than whatever the last run saved.
     static var resetState: Bool { arguments.contains("-sheepdogResetState") }
+    /// When the process started: an agent window that appears within a few
+    /// seconds of it was restored from the last run, which a reset closes.
+    static let launchedAt = Date()
     /// `-sheepdogResetHints`: clears the one-time hints (also implied by
     /// `resetState`).
     static var resetHints: Bool { arguments.contains("-sheepdogResetHints") }
@@ -33,10 +36,21 @@ enum DebugLaunch {
     /// For the UI tests: on Xcode Cloud's simulators the audio server hangs
     /// and the app aborts in `AURemoteIO::Initialize` (an RPC timeout).
     static var demoSilent: Bool { arguments.contains("-sheepdogDemoSilent") }
+    /// `-sheepdogAskPrimers`: show the permission primers even when the
+    /// UI tests start configured.
+    static var askPrimers: Bool { arguments.contains("-sheepdogAskPrimers") }
+    /// `-sheepdogOpenDemo`: open the offline demo at launch, for the
+    /// redesign screenshots (`RedesignShotsUITests`).
+    static var openDemo: Bool { arguments.contains("-sheepdogOpenDemo") }
+    /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
+    static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
     /// message are markdown, for screenshots (the fixture daemon cannot
     /// produce a worker transcript).
     static var demoMarkdown: Bool { arguments.contains("-sheepdogDemoMarkdown") }
+    /// `-sheepdogDemoCard`: the demo asks "Show me the agents" by itself
+    /// once the script has news (about 18 s in), so its card opens for screenshots.
+    static var demoCard: Bool { arguments.contains("-sheepdogDemoCard") }
     /// `-sheepdogDemoLiveActivity speaking|muted|listening`: show the voice
     /// session's Live Activity with two agents waiting, without a session,
     /// for the lock-screen and Dynamic Island screenshots.
@@ -44,15 +58,38 @@ enum DebugLaunch {
         guard let i = arguments.firstIndex(of: "-sheepdogDemoLiveActivity"), i + 1 < arguments.count else { return nil }
         return SessionState(rawValue: arguments[i + 1])
     }
+    /// `-sheepdogDemoTerm busy|gone|herdr`: the demo's live window answers
+    /// every open that way, for screenshots and UI tests of the observe
+    /// banner and the error states.
+    static var demoTerm: DemoTermTransport.Behavior {
+        guard let i = arguments.firstIndex(of: "-sheepdogDemoTerm"), i + 1 < arguments.count else { return .normal }
+        return DemoTermTransport.Behavior(rawValue: arguments[i + 1]) ?? .normal
+    }
+    /// `-sheepdogDemoSecondQuestion`: a second agent waits too, so two
+    /// questions float at once (screenshots; its answer goes nowhere).
+    static var demoSecondQuestion: Bool { arguments.contains("-sheepdogDemoSecondQuestion") }
+    static let secondQuestionAgent = Agent(
+        paneID: "demo-blog", alias: "blog", kind: "claude", state: .blocked, stateSince: Date().addingTimeInterval(-60)
+    )
+    static let secondQuestion = PendingAction(
+        id: "demo-blog-q", paneID: "demo-blog", kind: "answer_prompt",
+        options: [PendingOption(index: 1, label: "Publish", isDefault: true), PendingOption(index: 2, label: "Not yet")],
+        agent: "blog", summary: "Publish the draft to the staging site?"
+    )
     /// The agent `-sheepdogDemoMarkdown` adds.
     static let markdownAgent = Agent(
         paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),
         lastTask: "Write the **install** section of the README and check `make install` on a clean machine",
-        journal: [Agent.JournalEntry(
+        journal: [
+            Agent.JournalEntry(at: Date().addingTimeInterval(-1500), event: "stop", lastAssistant: "Read the Makefile; install needs a PREFIX."),
+            Agent.JournalEntry(at: Date().addingTimeInterval(-1080), event: "stop", lastAssistant: "Tried make install on a clean user: it needs ~/.local/bin on PATH."),
+            Agent.JournalEntry(at: Date().addingTimeInterval(-600), event: "stop", lastAssistant: "Drafted the Install section; checking the macOS note."),
+            Agent.JournalEntry(
             at: Date().addingTimeInterval(-240), event: "done",
             lastAssistant: "## Summary\nDone. The README now has an *Install* section:\n\n- `make install` copies the binary to `~/.local/bin`\n- a note on **unlinking first** on macOS\n1. build\n2. install\n\n```\nmake build && make install\n```\nSee [the docs](https://github.com/kccarlos/herdr-sheepdog).",
             filesTouched: ["README.md"], tools: ["Edit": 3, "Bash": 2]
-        )]
+        ),
+        ]
     )
     /// `-sheepdogAddress 127.0.0.1:7799`: start configured, for the history
     /// walkthrough and screenshots.

@@ -109,11 +109,19 @@ func (s *Supervisor) pollReprompt(paneID string) {
 // (Run, after the roster is loaded from the state file) and on every
 // Config.SnapshotInterval afterwards.
 func (s *Supervisor) reconcileReprompts(ctx context.Context) {
+	open := map[string]state.PendingAction{}
+	for _, q := range s.store.Questions() {
+		open[q.PaneID] = q
+	}
 	for _, row := range s.store.List() {
 		if p, has := s.store.Pending(); has && p.PaneID == row.PaneID {
 			if p.Kind == state.PendingAnswerPrompt {
 				s.checkOpenPrompt(ctx, row, p)
 			}
+			continue
+		}
+		if q, ok := open[row.PaneID]; ok {
+			s.checkQuestion(ctx, row, q)
 			continue
 		}
 		if row.State != herdr.StateBlocked {
@@ -184,6 +192,50 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 	if !s.raiseReprompt(ctx, row, prompt, "reconcile", 0) {
 		s.releasePromptClaim(row.PaneID, sig, prev)
 	}
+}
+
+// checkQuestion is checkOpenPrompt for an open question the voice moved
+// past: no prompt on screen, or a pane off blocked, ends it; a different
+// prompt replaces it quietly (the voice stays where it is). A failed
+// read keeps it.
+func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state.PendingAction) {
+	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
+		return
+	}
+	prompt, ok := herdr.ParsePrompt(read.Text)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, has := s.store.Question(q.ID); !has || cur.PaneID != q.PaneID {
+		return
+	}
+	switch {
+	case !ok || row.State != herdr.StateBlocked:
+		s.dropQuestionLocked(q)
+		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "prompt_gone"})
+	case promptSignature(prompt) != pendingSignature(q):
+		p := s.newAnswerPrompt(row.PaneID, prompt, aliasOr(state.Say(row)), row.StateSince)
+		if err := s.store.SetQuestion(p); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.log.Log(logSource, "question.replaced", p.PaneID, map[string]any{"old_id": q.ID, "id": p.ID, "question": p.Question})
+	}
+}
+
+// stillAskingLocked reads p's pane and reports whether it is blocked at
+// p's prompt. Caller holds s.mu.
+func (s *Supervisor) stillAskingLocked(ctx context.Context, p state.PendingAction) bool {
+	row, ok := s.store.Get(p.PaneID)
+	if !ok || row.State != herdr.StateBlocked {
+		return false
+	}
+	read, err := s.herdr.Read(ctx, p.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		return false
+	}
+	prompt, parsed := herdr.ParsePrompt(read.Text)
+	return parsed && promptSignature(prompt) == pendingSignature(p)
 }
 
 // claimPrompt atomically compares sig against s.lastPrompt[paneID] and,

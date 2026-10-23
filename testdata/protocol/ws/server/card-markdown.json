@@ -1,0 +1,10 @@
+{
+  "type": "card",
+  "card": {
+    "card_id": "c-2",
+    "kind": "card",
+    "at": "2026-10-21T09:00:00Z",
+    "title": "What changed",
+    "markdown": "- `auth.go`: the token check"
+  }
+}

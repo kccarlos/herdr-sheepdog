@@ -24,9 +24,10 @@ minutes ran out again on 2026-10-05, so since #162 every job runs on
 self-hosted ephemeral runners in a Cloud Run worker pool (GCP project
 `herdr-sheepdog-ci`, scaled 0–3 by a webhook, about $0.07 per CI run on
 trial credit; [`infra/ci-runners`](../../infra/ci-runners/README.md)); the repo
-variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow is Ubuntu-only; the darwin binary is
-signed and notarized locally with `make release-sign`
-([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
+variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow builds on Ubuntu; after the maintainer
+approves the `release` environment it signs and notarizes the darwin binary
+on a GitHub-hosted Mac and pushes the Homebrew formula to the tap
+([`signing.md`](signing.md); `make release-sign` is the local fallback). The iOS
 companion app ([`ios/`](../../ios/README.md), until 2026-10-15 the separate
 `herdr-sheepdog-ios` repository) is built and shipped by Xcode Cloud,
 not GitHub Actions; TestFlight build 0.1.3 (35) (Settings ▸ Languages)
@@ -209,6 +210,20 @@ What is in:
 
 ## Open
 
+- **iPhone UI polish together with iPad support (CEO, 2026-10-21):** the
+  Agents page is cluttered. Planned: compact agent cards with details
+  collapsed, icon buttons (open window as an icon), New agent and shell
+  moved to a `+` in the header, and one layout pass that also fits iPad
+  (sidebar and detail, windows side by side). Do it as one design pass, with
+  screenshots for review first.
+- **New agent like herdr (CEO, 2026-10-21):** the daemon side has started.
+  Voice and tap share one start path through herdr's `agent.start`, and
+  the app's kinds are herdr's supported kinds that are installed (agy
+  included). Still to come: spaces (pick or create one, optional new
+  worktree) and the app's sheet. The orchestrator's spawn kinds stay
+  Claude and Codex until an eval adds more. Both items, plus several
+  computers, are designed in [design/app-redesign.md](design/app-redesign.md)
+  (decided 2026-10-21).
 - **Next work (agreed, not started; see the handover's queue):** voice
   prompt toward facts (hand off anything new, comparative or historical;
   ask when unsure), briefings carrying their age and a finished flag, tool
@@ -216,12 +231,49 @@ What is in:
   voice, the roster formatter, stable agent names, reliable spawn
   launch; then a **language preference in Settings** fed into the voice and the orchestrator'
   prompts. Prompt and information changes only, no judgment in code.
-- **Orchestrator failover is broken in practice:** DeepSeek returns 402
-  Insufficient Balance (since 2026-10-03), so a Vertex timeout ends in the
-  fallback line. The user is to top it up or pick another fallback. The live
-  orchestrator is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
-  bursts of 20-50 s steps and 504s.
-- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
+- **Phone terminal (decided 2026-10-20, not built):** a live, resizable
+  agent window, composer, agent actions, attachments, a changes view and a
+  plain shell on the iPhone, over herdr's `terminal session control`
+  bridge, rendered with SwiftTerm. The decision, the evidence and the
+  PR-sized phases are in
+  [`design/phone-terminal.md`](design/phone-terminal.md).
+- **Live orchestrator:** DeepSeek `deepseek-flash`; the DeepSeek balance
+  was topped up, so the earlier 402 Insufficient Balance (from 2026-10-03)
+  no longer breaks failover.
+- **The roster in the orchestrator system text defeats prompt caching
+  (deferred by the CEO, 2026-10-20):** the system text lists the agent
+  aliases, so any agent joining or leaving rewrites the whole cached prompt
+  prefix, for every provider. On Anthropic it also wastes the start-up
+  cache warm-up (#291). Possible fix: move the roster out of the system
+  text into a later message or a tool result. That is a prompt/information
+  change, so it needs eval evidence first: a DeepSeek tier-1 run is cheap,
+  an Opus run costs about $20. See
+  [`eval/anthropic-opus-2026-10-19.md`](eval/anthropic-opus-2026-10-19.md)
+  and [`anthropic-adapter.md`](anthropic-adapter.md).
+- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8 on Vertex). **On AI Studio chained resumes keep the context** (canary 2026-10-20, `-backend aistudio -text-turns`: 8/8 and 11/11), so the rail now applies to Vertex only.
+- **The hourly Gemini Live error on AI Studio lost the context; fixed, to
+  verify live:** every ~58 min the GoAway's make-before-break resume was
+  refused with 1008 "session is already connected to an existing client"
+  (`ERROR voice.connect_error`), the old connection ended at the deadline
+  with a 1011, and the 1011 rule dropped the handle, so every hour the voice
+  started fresh from the recap (no GoAway resumed on AI Studio, 2026-10-12..20).
+  The daemon now closes the old connection at a quiet moment and resumes
+  with the same handle (`voice.handover`; details in
+  [`gemini-live-notes.md`](gemini-live-notes.md#goaway)). To verify once the
+  live daemon runs it: `voice.handover {step: closing}` followed by
+  `voice.resume {resumed: true}`, and no `handle_dropped` at the GoAway.
+  The other `handle_dropped server_internal_error` lines (no GoAway before
+  them, a few a day) are real mid-session 1011s and still start fresh.
+  Live 2026-10-20 the handover resumed every GoAway, but AI Studio ends a
+  session 60 minutes after it opened (1008 "Requested entity was not
+  found", the handle dead), about 3 minutes after that resume, which the
+  log showed as `resumed_twice`. Now an AI Studio session refreshes at a
+  quiet moment after 54 minutes (`voice.session_refreshed {reason:
+  max_age}`), a GoAway past that age goes fresh at once, and the 1008 drops
+  the handle as `session_expired`
+  ([`gemini-live-notes.md`](gemini-live-notes.md#goaway)). Expected live:
+  one fresh, re-seeded session about every 54 minutes, no `resumed_twice`
+  and no 1008 on AI Studio.
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.
@@ -239,9 +291,10 @@ What is in:
   busy Claude Code pane interrupts the running turn but the queued prompt
   still runs (acceptance run, 2026-10-02 00:34). An idle-then-working
   agent stops cleanly.
-- **`v0.1.0` of the daemon is not tagged** (the release workflow builds
-  on Ubuntu; the darwin binary is then signed and notarized on the Mac
-  with `make release-sign`, see [`signing.md`](signing.md)).
+- **`v0.1.0` of the daemon is not signed**: signing moved into the
+  release workflow afterwards; v0.1.1 onward are signed and notarized, and
+  v0.1.4 is the latest
+  ([`signing.md`](signing.md#re-signing-an-existing-release)).
 - **Not yet checked on a device:** AirPods and route changes, and a
   multi-question (tabbed) AskUserQuestion widget.
 - **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as

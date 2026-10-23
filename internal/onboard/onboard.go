@@ -25,6 +25,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
 
 // Status is a check's outcome.
@@ -77,13 +78,22 @@ type Endpoints struct {
 	GeminiBase string
 	// OpenAIBase is the OpenAI API root (https://api.openai.com/v1).
 	OpenAIBase string
+	// VertexBase is the Vertex AI REST root for the key and project
+	// check ("": https://aiplatform.googleapis.com).
+	VertexBase string
+	// VertexLive opens a setup-only Gemini Live session on Vertex AI and
+	// closes it (CheckVertex's location check); nil skips that check.
+	VertexLive func(ctx context.Context, apiKey, project, location, model string) error
+	// AnthropicBase is the Anthropic API root ("":
+	// https://api.anthropic.com).
+	AnthropicBase string
 	// HTTP is the client (default: a 10 s timeout).
 	HTTP *http.Client
 }
 
 // DefaultEndpoints are the real API roots.
 func DefaultEndpoints() Endpoints {
-	return Endpoints{GeminiBase: "https://generativelanguage.googleapis.com", OpenAIBase: "https://api.openai.com/v1"}
+	return Endpoints{GeminiBase: "https://generativelanguage.googleapis.com", OpenAIBase: "https://api.openai.com/v1", VertexLive: gemini.CheckVertexLive}
 }
 
 func (e Endpoints) client() *http.Client {
@@ -268,8 +278,14 @@ func CheckCompat(ctx context.Context, ep Endpoints, c Compat, probe bool) []Resu
 	return out
 }
 
+// generator is the one call the tool-calling probe makes (an
+// OpenAI-compatible or an Anthropic model).
+type generator interface {
+	Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
+}
+
 // probeToolCall runs one tiny turn that must call probeTool.
-func probeToolCall(ctx context.Context, m *brain.OpenAICompatModel, c Compat, console string) Result {
+func probeToolCall(ctx context.Context, m generator, c Compat, console string) Result {
 	name := c.Name + " tools"
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -279,6 +295,9 @@ func probeToolCall(ctx context.Context, m *brain.OpenAICompatModel, c Compat, co
 		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelMinimal},
 	}
 	resp, err := m.Generate(ctx, c.Model, []*genai.Content{genai.NewContentFromText("Call the tool now.", genai.RoleUser)}, cfg)
+	if errors.Is(err, brain.ErrRefused) {
+		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("model %s declined the probe request", c.Model), Fix: "try again, or pick another model"}
+	}
 	if err != nil {
 		r := keyFailure(name, c.Name, c.KeyEnv, console, err)
 		if status, _ := statusOf(err); status == http.StatusNotFound || status == http.StatusBadRequest {
@@ -297,6 +316,8 @@ func consoleOf(name, base string) string {
 	switch {
 	case name == brain.ProviderDeepSeek:
 		return "https://platform.deepseek.com"
+	case name == brain.ProviderAnthropic:
+		return brain.ServiceOf(brain.ProviderAnthropic).Console
 	case strings.Contains(base, "openrouter.ai"):
 		return "https://openrouter.ai/settings/keys"
 	case strings.Contains(base, "groq.com"):
@@ -400,21 +421,13 @@ func CheckPort(ctx context.Context, c *http.Client, bind string, port int) Resul
 	return Result{Name: name, Status: Fail, Detail: addr + " is taken by another program", Fix: "stop that program or set web.port / SHEEPDOG_WEB_PORT to a free port"}
 }
 
-// MinTokenLen is the token length below which doctor warns.
-const MinTokenLen = 24
-
-// CheckBindToken checks the bind/token pairing.
-func CheckBindToken(w config.Web) Result {
-	const name = "bind/token"
-	switch {
-	case w.IsLoopback():
-		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (the phone cannot connect; set web.bind to a LAN or Tailscale address for it)"}
-	case w.Token == "":
-		return Result{Name: name, Status: Fail, Detail: "bind " + w.Bind + " is reachable from the network but web.token is empty (serve refuses to start)", Fix: "run sheepdog setup to generate a token, or set SHEEPDOG_WEB_TOKEN"}
-	case len(w.Token) < MinTokenLen:
-		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("bind %s with a short token (%d characters)", w.Bind, len(w.Token)), Fix: fmt.Sprintf("use a random token of at least %d characters (re-pair the phone after changing it)", MinTokenLen)}
+// CheckBind says who can reach the daemon.
+func CheckBind(w config.Web) Result {
+	const name = "bind"
+	if w.IsLoopback() {
+		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (turn on phone access in sheepdog setup for the app)"}
 	}
-	return Result{Name: name, Status: OK, Detail: fmt.Sprintf("bind %s with a token of %d characters", w.Bind, len(w.Token))}
+	return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": TLS and paired devices only (pair with sheepdog pair)"}
 }
 
 // CheckPush checks phone notifications by push.mode: the relay's
@@ -503,9 +516,4 @@ func CheckSecretFile(name, path string) Result {
 		return Result{Name: name, Status: Warn, Detail: fmt.Sprintf("%s is readable by other users (%04o)", path, st.Mode().Perm()), Fix: "chmod 600 " + path}
 	}
 	return Result{Name: name, Status: OK, Detail: path + " is private (0600)"}
-}
-
-// IsLoopbackURL reports whether a base URL points at this machine.
-func IsLoopbackURL(base string) bool {
-	return config.OpenAICompat{BaseURL: base}.KeyOptional()
 }

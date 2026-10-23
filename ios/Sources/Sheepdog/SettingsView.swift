@@ -18,11 +18,7 @@ struct SettingsView: View {
     @ObservedObject var meter: VoiceMeter
     @Environment(\.dismiss) private var dismiss
 
-    /// The daemon's address and token as typed. They are written once the
-    /// field is left (return, back, Done): a reconnect per keystroke would
-    /// be worse than none.
-    @State private var address = ""
-    @State private var token = ""
+    @State private var loaded = false
     @State private var path: [SettingsPage] = []
     /// No daemon saved yet: Settings opens on the Daemon screen and cannot
     /// be closed until an address is in.
@@ -43,28 +39,32 @@ struct SettingsView: View {
                     } footer: {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
+                    if model.shellOffered == false {
+                        Section {
+                            MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
+                                .accessibilityIdentifier("settings.shell")
+                        } footer: {
+                            Text(PhoneShell.offExplanation)
+                        }
+                    }
                 } else {
+                    if let notice = model.update?.notice {
+                        Section {
+                            UpdateNoticeRow(notice: notice)
+                        }
+                    }
+                    // The computer: with one computer, one row and what
+                    // belongs to it. With several, this becomes the list
+                    // of computers, each with its own page.
                     Section {
                         NavigationLink(value: SettingsPage.daemon) {
-                            MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
+                            ComputerRow(
+                                name: model.hello?.computer?.name ?? "Your computer",
+                                status: computerStatus,
+                                tint: computerTint
+                            )
                         }
                         .accessibilityIdentifier("settings.daemon")
-                        Button {
-                            model.openDemo()
-                        } label: {
-                            Label("Try the demo", systemImage: "play.circle")
-                        }
-                        .accessibilityIdentifier("settings.tryDemo")
-                    } footer: {
-                        Text("The demo runs scripted agents on this phone, with no daemon and no network.")
-                    }
-                }
-
-                Section {
-                    row("Voice", "waveform", .voice, id: "settings.voice")
-                    // Models, Languages and Notifications are the daemon's:
-                    // the demo has none to show, so it does not list them.
-                    if !model.isDemo {
                         NavigationLink(value: SettingsPage.models) {
                             MenuRow(title: "Models", symbol: "cpu", value: model.modelsSummary)
                         }
@@ -73,13 +73,44 @@ struct SettingsView: View {
                             MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
+                        if model.shellOffered == false {
+                            MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
+                                .accessibilityIdentifier("settings.shell")
+                        }
+                    } header: {
+                        Text("Computer")
+                    } footer: {
+                        if model.shellOffered == false {
+                            Text(PhoneShell.offExplanation)
+                        }
+                    }
+                }
+
+                Section("This phone") {
+                    row("Voice", "waveform", .voice, id: "settings.voice")
+                    // Notifications come from the computer: the demo has
+                    // none to show, so it does not list them.
+                    if !model.isDemo {
                         row("Notifications", "bell", .notifications, id: "settings.notifications")
                     }
                 }
 
-                Section {
+                Section("Help") {
                     row("Diagnostics", "stethoscope", .diagnostics, id: "settings.diagnostics")
                     row("About", "info.circle", .about, id: "settings.about")
+                }
+
+                if !model.isDemo {
+                    Section {
+                        Button {
+                            model.openDemo()
+                        } label: {
+                            Label("Try the demo", systemImage: "play.circle")
+                        }
+                        .accessibilityIdentifier("settings.tryDemo")
+                    } footer: {
+                        Text("Scripted agents on this phone. No computer, no network.")
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -87,7 +118,7 @@ struct SettingsView: View {
             .navigationDestination(for: SettingsPage.self) { page in
                 switch page {
                 case .daemon:
-                    DaemonSettingsView(address: $address, token: $token, firstRun: firstRun, commit: commitDaemon, done: done)
+                    DaemonSettingsView(firstRun: firstRun, done: done)
                 case .voice: VoiceSettingsView()
                 case .models: ModelsView()
                 case .languages: LanguagesView()
@@ -99,12 +130,15 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: done)
+                        .tint(Theme.primaryText)
                         .accessibilityIdentifier("settings.done")
-                        .disabled(firstRun && !model.isConfigured && DaemonEndpoint(text: address) == nil)
+                        .disabled(firstRun && !model.isConfigured)
                 }
             }
             .onAppear(perform: load)
             .task {
+                // The update line reads /api/state: make it current.
+                if !model.isDemo { await model.refreshState(quiet: true) }
                 await model.loadVoiceProviders()
                 await model.loadDaemonSettings()
             }
@@ -114,7 +148,25 @@ struct SettingsView: View {
             }
         }
         .interactiveDismissDisabled(firstRun && !model.isConfigured)
-        .onDisappear { commitDaemon() }
+    }
+
+    /// "Talking here · address" while the voice runs, "Connected ·
+    /// address", "Offline · address", or "Not paired yet".
+    private var computerStatus: String {
+        guard model.isConfigured else { return "Not paired yet" }
+        let address = model.endpointDisplay
+        if model.wantsConnection, model.connectionChip.tint == .green { return "Talking here · \(address)" }
+        return "\(model.connectionChip.word) · \(address)"
+    }
+
+    private var computerTint: Color {
+        guard model.isConfigured else { return Theme.unknown }
+        switch model.connectionChip.tint {
+        case .green: return Theme.done
+        case .amber: return Theme.blocked
+        case .red: return Theme.danger
+        case .grey: return Theme.unknown
+        }
     }
 
     private func row(_ title: String, _ symbol: String, _ page: SettingsPage, id: String) -> some View {
@@ -125,9 +177,8 @@ struct SettingsView: View {
     }
 
     private func load() {
-        guard address.isEmpty, token.isEmpty, path.isEmpty else { return }
-        address = model.settings.address
-        token = model.settings.token
+        guard !loaded, path.isEmpty else { return }
+        loaded = true
         firstRun = !model.settings.hasBeenConfigured
         // Health's "Change in Settings" opens straight on Models; the first
         // run opens on the Daemon screen.
@@ -143,24 +194,7 @@ struct SettingsView: View {
         }
     }
 
-    /// Writes the address and token when they are valid and different, and
-    /// repoints the app at them.
-    private func commitDaemon() {
-        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAddress.isEmpty, DaemonEndpoint(text: trimmedAddress) != nil else { return }
-        let changed = model.settings.address != trimmedAddress
-            || model.settings.token != trimmedToken
-            || !model.settings.hasBeenConfigured
-        guard changed else { return }
-        model.settings.address = trimmedAddress
-        model.settings.token = trimmedToken
-        model.settings.hasBeenConfigured = true
-        model.endpointChanged()
-    }
-
     private func done() {
-        commitDaemon()
         dismiss()
     }
 }
@@ -205,8 +239,77 @@ struct EchoCancellationRow: View {
     }
 }
 
+/// Settings' update line: what the daemon reports about a newer release
+/// (`UpdateInfo.notice`), with the command to run on the computer in
+/// monospace. Wraps at every text size; VoiceOver reads it as one sentence.
+struct UpdateNoticeRow: View {
+    let notice: UpdateNotice
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(notice.text)
+                    .foregroundStyle(Theme.ink)
+                if let command = notice.command {
+                    Text(command)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(Theme.ink)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                }
+                if let after = notice.after {
+                    Text(after)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(Theme.working)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(notice.spoken)
+        .accessibilityIdentifier("settings.update")
+    }
+}
+
 /// A menu row: icon and title, with a one-line summary beside it, or under
 /// it at the accessibility sizes where side by side leaves no room.
+/// The computer's row: a status dot, its name, and how the phone reaches
+/// it ("Talking here · 192.168.1.20:7777", "Offline", "Not paired yet").
+private struct ComputerRow: View {
+    let name: String
+    let status: String
+    let tint: Color
+
+    var body: some View {
+        // The icon sits on the name's line at every text size.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: "desktopcomputer")
+                .foregroundStyle(Theme.ink)
+                .frame(minWidth: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                HStack(spacing: 6) {
+                    Circle().fill(tint).frame(width: 7, height: 7)
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct MenuRow: View {
     let title: String
     let symbol: String

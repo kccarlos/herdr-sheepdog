@@ -82,16 +82,6 @@ func ParseEvents(r io.Reader) ([]Event, error) {
 	return out, sc.Err()
 }
 
-// FromTS sets every event's AtMS to its ts relative to origin (events
-// without a ts keep theirs).
-func FromTS(evs []Event, origin time.Time) {
-	for i := range evs {
-		if !evs[i].TS.IsZero() {
-			evs[i].AtMS = evs[i].TS.Sub(origin).Milliseconds()
-		}
-	}
-}
-
 // Align shifts the events' clock onto a record's (tier 3: records count
 // from the call's start, events carry wall-clock ts). The record's first
 // action and the first herdr.send are the same event, so they align

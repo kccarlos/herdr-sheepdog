@@ -222,9 +222,11 @@ func GetHello(ctx context.Context, base string) (Hello, error) {
 
 // LocalURL is the URL the CLI reaches a daemon on for web.bind and port.
 func LocalURL(bind string, port int) string {
-	host := bind
-	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
-		host = "127.0.0.1"
+	// Always loopback: plain HTTP is served only there, and a daemon bound
+	// to one LAN address listens on loopback too (web.Server.Listen).
+	host := "127.0.0.1"
+	if ip := net.ParseIP(bind); ip != nil && ip.IsLoopback() {
+		host = bind
 	}
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 }

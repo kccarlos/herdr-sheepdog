@@ -1,0 +1,14 @@
+[1/3] workday-zh-evening r3: pass (end_call, ) ≈ $0.0942, total ≈ $0.094
+[2/3] workday-zh-evening r2: pass (end_call, ) ≈ $0.0968, total ≈ $0.191
+[3/3] workday-zh-evening r1: pass (end_call, ) ≈ $0.1122, total ≈ $0.303
+  pass    workday-zh-evening r1  end_call  12 turns  118.5s                         ≈ $0.1122
+  pass    workday-zh-evening r2  end_call  12 turns  106.6s                         ≈ $0.0968
+  pass    workday-zh-evening r3  end_call  12 turns  105.6s                         ≈ $0.0942
+-- 3 runs, spend ≈ $0.3032 (estimate at list prices) --
+reports: /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a828dcb9b89e08095/docs/dev/bench/results/2026-10-21-spawn/main/workday-zh-evening/report.json, /Users/kc/Documents/herdr-sheepdog/.claude/worktrees/agent-a828dcb9b89e08095/docs/dev/bench/results/2026-10-21-spawn/main/workday-zh-evening/report.md
+== eval sim, repeat 3 ==
+  workday-zh-evening  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL               runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    76  in    901772  out    14715  reasoning     6245  ≈ $0.2831 --
+-- spend simuser  deepseek-flash           calls    33  in     65019  out      955  reasoning        0  ≈ $0.0201 --
+-- spend total ≈ $0.3032 (estimate at list prices) --

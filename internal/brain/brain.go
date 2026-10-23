@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/genai"
@@ -108,6 +109,11 @@ type Config struct {
 	// a used-up quota or balance), shared with the web layer that shows
 	// them; nil gives the orchestrator a set of its own (Accounts).
 	Accounts *AccountAlerts
+	// KeyVars names the variable that holds a provider's key where it is
+	// not ServiceOf's (an OpenAI-compatible entry's api_key_env: the
+	// OpenAI orchestrator reads OPENAI_ORCH_API_KEY unless it reuses the
+	// voice's key), so an account problem's fix line names the right one.
+	KeyVars map[string]string
 }
 
 func (c Config) withDefaults() Config {
@@ -177,9 +183,11 @@ type Brain struct {
 	// setting closed (under mu), so a turn never runs into a closed
 	// transcript and no Add on after races Close's Wait.
 	inFlight sync.WaitGroup
-	closed   bool
-	ctx      context.Context // ends on Close (bounds after-turn work)
-	stop     context.CancelFunc
+	// activeTurns counts the same turns for Busy.
+	activeTurns atomic.Int32
+	closed      bool
+	ctx         context.Context // ends on Close (bounds after-turn work)
+	stop        context.CancelFunc
 
 	mu     sync.Mutex
 	host   Host
@@ -422,6 +430,9 @@ func (b *Brain) SetModel(provider, name, via string) error {
 	b.accounts.Clear(RoleOrchestrator, provider)
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)
+	// Caches are per model: write the new one's (a no-op unless it is a
+	// CacheWarmer).
+	b.WarmCache()
 	return nil
 }
 
@@ -793,6 +804,20 @@ func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 		return "", errors.New("brain: empty summary")
 	}
 	return out, nil
+}
+
+// Busy reports whether a turn or its after-turn work is running now: the
+// daemon does not restart itself then (internal/update).
+func (b *Brain) Busy() bool {
+	if b == nil {
+		return false
+	}
+	if b.activeTurns.Load() > 0 {
+		return true
+	}
+	b.after.mu.Lock()
+	defer b.after.mu.Unlock()
+	return b.after.n > 0
 }
 
 // afterWork counts after-turn work in flight. Unlike sync.WaitGroup, Add

@@ -10,20 +10,21 @@ import (
 )
 
 // The /ws protocol handshake (docs/dev/ws-contract.md "Protocol version and
-// handshake"). A protocol-aware client sends client-ready as its first
-// frame and the daemon answers bot-ready. A client whose first frame is
-// anything else, or that sends nothing for Deps.HandshakeTimeout, is a
-// legacy protocol-1 client (the iOS app 0.1.0, the /voice page before
-// the handshake, voice-test): it is served exactly as before and never
-// sees a bot-ready, which it could not parse.
+// handshake"). Every client sends client-ready as its first frame and the
+// daemon answers bot-ready. A client whose first frame is anything else,
+// or that sends nothing for Deps.HandshakeTimeout, predates the handshake:
+// it is refused like a client below the minimum protocol.
+
+// unreadyProtocol is the protocol a client that skipped client-ready is
+// refused as: older than every protocol the daemon serves.
+const unreadyProtocol = 0
 
 // handshake is a client's handshake state, under client.mu.
 type handshake struct {
-	// resolved: the client's protocol is known (a client-ready arrived,
-	// or it was taken for legacy).
+	// resolved: a client-ready arrived, or the client was refused for
+	// skipping it.
 	resolved bool
 	protocol int
-	legacy   bool
 	timer    *time.Timer
 }
 
@@ -42,19 +43,28 @@ func (s *Server) features() []string {
 		f = append(f, wsproto.FeatureModels)
 	}
 	if s.deps.Supervisor != nil {
-		f = append(f, wsproto.FeatureScreen)
+		f = append(f, wsproto.FeatureScreen, wsproto.FeatureScreenANSI)
+		if _, ok := s.deps.Supervisor.(AgentActions); ok {
+			f = append(f, wsproto.FeatureAgentActions)
+		}
+	}
+	if _, ok := s.cardHost(); ok {
+		f = append(f, wsproto.FeatureCards)
+	}
+	if s.term.available() {
+		f = append(f, wsproto.FeatureTerm)
 	}
 	return append(f, wsproto.FeatureFeedback)
 }
 
-// startHandshake arms the legacy timer for a new client.
+// startHandshake arms the handshake timer for a new client.
 func (c *client) startHandshake(timeout time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.hs.timer = time.AfterFunc(timeout, func() { _ = c.legacyIfUnresolved("timeout") })
+	c.hs.timer = time.AfterFunc(timeout, func() { _ = c.readyOrRefuse("timeout") })
 }
 
-// stopHandshake disarms the legacy timer (the connection ended).
+// stopHandshake disarms the handshake timer (the connection ended).
 func (c *client) stopHandshake() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -63,18 +73,17 @@ func (c *client) stopHandshake() {
 	}
 }
 
-// legacyIfUnresolved takes a client that has not sent client-ready for a
-// legacy protocol-1 client: why is "timeout" (nothing within
-// HandshakeTimeout) or "first_frame" (it sent something else first). It
-// reports false when the client was refused just now (the frame that
-// prompted it must not be handled).
-func (c *client) legacyIfUnresolved(why string) bool {
+// readyOrRefuse reports whether the client's handshake is done, so the
+// frame that prompted it may be handled. A client that has not sent
+// client-ready is refused here: why is "timeout" (nothing within
+// HandshakeTimeout) or "first_frame" (it sent something else first).
+func (c *client) readyOrRefuse(why string) bool {
 	c.mu.Lock()
 	if c.hs.resolved {
 		c.mu.Unlock()
 		return true
 	}
-	c.hs.resolved, c.hs.legacy, c.hs.protocol = true, true, wsproto.LegacyProtocol
+	c.hs.resolved, c.hs.protocol = true, unreadyProtocol
 	if c.hs.timer != nil {
 		c.hs.timer.Stop()
 	}
@@ -83,24 +92,23 @@ func (c *client) legacyIfUnresolved(why string) bool {
 	if closed {
 		return false
 	}
-	ok := c.checkProtocol(wsproto.LegacyProtocol)
+	ok := c.checkProtocol(unreadyProtocol)
 	c.h.s.log.Log(logSource, "web.client.hello", "", map[string]any{
-		"client_id": c.id, "protocol": wsproto.LegacyProtocol, "client": nil, "legacy": true, "why": why, "accepted": ok,
+		"client_id": c.id, "protocol": unreadyProtocol, "client": nil, "why": why, "accepted": ok,
 	})
-	if ok {
-		c.attachIfPending()
-	}
 	return ok
 }
 
 // onClientReady answers a client-ready: bot-ready when its protocol is
-// served, otherwise the rejection. A client-ready after the client was
-// taken for legacy (late, past the timeout) is still answered; the log
-// line says late.
+// served, otherwise the rejection. A second client-ready on the same
+// connection is ignored.
 func (c *client) onClientReady(m wsproto.Message) {
 	c.mu.Lock()
-	late := c.hs.resolved
-	c.hs.resolved, c.hs.legacy, c.hs.protocol = true, false, *m.Protocol
+	if c.hs.resolved {
+		c.mu.Unlock()
+		return
+	}
+	c.hs.resolved, c.hs.protocol = true, *m.Protocol
 	if c.hs.timer != nil {
 		c.hs.timer.Stop()
 	}
@@ -110,11 +118,7 @@ func (c *client) onClientReady(m wsproto.Message) {
 		info = map[string]any{"name": m.Client.Name, "version": m.Client.Version, "platform": m.Client.Platform}
 	}
 	ok := c.checkProtocol(*m.Protocol)
-	payload := map[string]any{"client_id": c.id, "protocol": *m.Protocol, "client": info, "legacy": false, "accepted": ok}
-	if late {
-		payload["late"] = true
-	}
-	c.h.s.log.Log(logSource, "web.client.hello", "", payload)
+	c.h.s.log.Log(logSource, "web.client.hello", "", map[string]any{"client_id": c.id, "protocol": *m.Protocol, "client": info, "accepted": ok})
 	if !ok {
 		return
 	}

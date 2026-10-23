@@ -1,28 +1,28 @@
 import Foundation
 
-/// Where the daemon lives and how to authenticate to it.
+/// Where the daemon lives and whether it is the paired computer.
+///
+/// A paired computer is reached over TLS (`https`, `wss`), its key checked
+/// against the pairing code's pin, and every request carries a session
+/// ticket (`DeviceCredentials`). An unpaired address is plain HTTP, which
+/// the daemon serves to loopback only: the fixture daemons in the tests.
 public struct DaemonEndpoint: Equatable, Sendable {
-    /// Host or IP, without a scheme — the `lan url` line of the daemon's banner.
+    /// Host or IP, without a scheme.
     public var host: String
     public var port: Int
-    /// The daemon's `web.token`, empty when it is bound to loopback.
-    public var token: String
 
-    public init(host: String, port: Int = 7777, token: String = "") {
+    public init(host: String, port: Int = 7777, secure: Bool = false) {
         self.host = host
         self.port = port
-        self.token = token
+        self.secure = secure
     }
 
-    /// Parses what someone types into Settings: `192.168.1.20:7777`,
-    /// `http://mac.local:7777`, `mac.local`. No TLS in v1 (docs/ws-contract.md
-    /// "Non-goals"), but an `https://` prefix is honoured if it is typed.
-    public init?(text: String, defaultPort: Int = 7777, token: String = "") {
+    /// Parses an address: `192.168.1.20:7777`, `http://mac.local:7777`,
+    /// `[fd00::1]:7777`. `secure` is whether it is the paired computer.
+    public init?(text: String, defaultPort: Int = 7777, secure: Bool = false) {
         var s = text.trimmed
         guard !s.isEmpty else { return nil }
-        var secure = false
         if s.lowercased().hasPrefix("https://") {
-            secure = true
             s = String(s.dropFirst(8))
         } else if s.lowercased().hasPrefix("http://") {
             s = String(s.dropFirst(7))
@@ -44,10 +44,10 @@ public struct DaemonEndpoint: Equatable, Sendable {
         guard !s.isEmpty, port > 0, port < 65_536 else { return nil }
         self.host = s
         self.port = port
-        self.token = token
         self.secure = secure
     }
 
+    /// TLS, pinned, with a ticket: the paired computer.
     public var secure = false
 
     public var scheme: String { secure ? "https" : "http" }
@@ -55,6 +55,13 @@ public struct DaemonEndpoint: Equatable, Sendable {
 
     /// What the error banners say: `192.168.1.20:7777`.
     public var display: String { "\(host):\(port)" }
+
+    /// Sets the current ticket on a request built synchronously (the `/ws`
+    /// and `/term` upgrades); `DaemonClient` signs in when there is none.
+    public func authorize(_ request: inout URLRequest) {
+        guard secure, let header = DeviceCredentials.shared.header() else { return }
+        request.setValue(header, forHTTPHeaderField: "Authorization")
+    }
 
     public var webSocketURL: URL? { URL(string: "\(webSocketScheme)://\(hostForURL):\(port)/ws") }
 
@@ -83,8 +90,10 @@ public struct DaemonEndpoint: Equatable, Sendable {
 public enum DaemonError: Error, Equatable, Sendable {
     /// Nothing answered: wrong address, daemon not running, phone on another network.
     case unreachable(endpoint: String, detail: String)
-    /// 401: the daemon wants a token, or the one we have is wrong.
+    /// 401 that signing in again did not fix.
     case unauthorized(endpoint: String)
+    /// The app must scan the pairing code again (revoked, a changed key…).
+    case pairing(PairingProblem)
     /// Something answered, but it was not a sheepdog daemon.
     case notSheepdog(endpoint: String)
     case http(status: Int, endpoint: String)
@@ -100,7 +109,9 @@ public enum DaemonError: Error, Equatable, Sendable {
         case let .unreachable(endpoint, _):
             return "Can't reach the daemon at \(endpoint) — is it running?"
         case let .unauthorized(endpoint):
-            return "\(endpoint) turned the token down. Check the token in Settings."
+            return "\(endpoint) turned this phone down. Scan the pairing code again."
+        case let .pairing(problem):
+            return problem.title
         case let .notSheepdog(endpoint):
             return "Something answered at \(endpoint), but it isn't a sheepdog daemon."
         case let .http(status, endpoint):
@@ -120,7 +131,9 @@ public enum DaemonError: Error, Equatable, Sendable {
         case let .unreachable(_, detail):
             return detail.isEmpty ? SetupHelp.unreachableFix : "\(detail) \(SetupHelp.unreachableFix)"
         case .unauthorized:
-            return SetupHelp.tokenFix
+            return SetupHelp.pairFix
+        case let .pairing(problem):
+            return problem.message
         case .notSheepdog:
             return SetupHelp.notSheepdogFix
         case .http, .malformed, .pendingGone, .rejected:
@@ -129,12 +142,13 @@ public enum DaemonError: Error, Equatable, Sendable {
     }
 }
 
-/// The daemon's HTTP surface: `/api/hello`, `/api/state`, `/api/login`, and
-/// the `/events` SSE stream.
+/// The daemon's HTTP surface: `/api/hello`, `/api/state`, and the `/events`
+/// SSE stream.
 ///
-/// Auth is the `Authorization: Bearer <token>` header on everything,
-/// including the WebSocket upgrade — `URLSession` can set headers where a
-/// browser cannot, so the `?token=` query form is not needed.
+/// Auth is the session ticket (`Authorization: Bearer sds_…`) on everything
+/// sent to the paired computer, including the WebSocket upgrades
+/// (docs/dev/ws-contract.md "Auth"); `perform` signs in when there is no
+/// ticket and once more on a `401 session_expired`.
 public final class DaemonClient: @unchecked Sendable {
     public private(set) var endpoint: DaemonEndpoint
     private let session: URLSession
@@ -152,17 +166,14 @@ public final class DaemonClient: @unchecked Sendable {
             self.session = session
             self.streamSession = session
         } else {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 8
-            config.waitsForConnectivity = false
-            self.session = URLSession(configuration: config)
+            self.session = DeviceCredentials.session(timeout: 8)
 
             let stream = URLSessionConfiguration.ephemeral
             stream.timeoutIntervalForRequest = DaemonClient.eventKeepalive * 4
             stream.timeoutIntervalForResource = 24 * 60 * 60
             stream.waitsForConnectivity = false
             stream.shouldUseExtendedBackgroundIdleMode = true
-            self.streamSession = URLSession(configuration: stream)
+            self.streamSession = DeviceCredentials.session(configuration: stream)
         }
     }
 
@@ -187,9 +198,7 @@ public final class DaemonClient: @unchecked Sendable {
         request.httpMethod = method
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        if !endpoint.token.isEmpty {
-            request.setValue("Bearer \(endpoint.token)", forHTTPHeaderField: "Authorization")
-        }
+        endpoint.authorize(&request)
         return request
     }
 
@@ -204,22 +213,6 @@ public final class DaemonClient: @unchecked Sendable {
     /// where a 401 is much harder to read back.
     public func state() async throws -> DaemonState {
         try await get(DaemonState.self, path: "/api/state")
-    }
-
-    /// `POST /api/login` — trades a correct token for the cookie the browser
-    /// pages use. The app carries the header instead, so this is only the
-    /// "is this token right?" check behind Test connection.
-    @discardableResult
-    public func login(token: String) async throws -> Bool {
-        let body = try JSONSerialization.data(withJSONObject: ["token": token])
-        let request = try request(path: "/api/login", method: "POST", body: body)
-        let (_, response) = try await perform(request)
-        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
-        if http.statusCode == 401 { throw DaemonError.unauthorized(endpoint: endpoint.display) }
-        guard (200 ..< 300).contains(http.statusCode) else {
-            throw DaemonError.http(status: http.statusCode, endpoint: endpoint.display)
-        }
-        return true
     }
 
     /// `GET /api/conversation?limit=&before=` — the conversation the daemon
@@ -339,7 +332,7 @@ public final class DaemonClient: @unchecked Sendable {
         return events
     }
 
-    /// `POST /api/inject/utterance {"text": …}` — what the user typed,
+    /// `POST /api/utterance {"text": …}` — what the user typed,
     /// as if spoken. The daemon records it as typed user input first
     /// (so the one rail accepts it like a transcript), then hands it to the
     /// voice session, or with `--voice=off` to its text router, which
@@ -347,7 +340,7 @@ public final class DaemonClient: @unchecked Sendable {
     /// daemon's words.
     public func sendUtterance(_ text: String) async throws -> UtteranceReply {
         let body = try JSONSerialization.data(withJSONObject: ["text": text])
-        let request = try request(path: "/api/inject/utterance", method: "POST", body: body)
+        let request = try request(path: "/api/utterance", method: "POST", body: body)
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         switch http.statusCode {
@@ -449,12 +442,60 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// Sends a request with a fresh ticket (the paired computer), signs in
+    /// again once on `401 no_session` / `session_expired`, and turns a
+    /// refusal only a new scan fixes into `.pairing`.
     func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        guard endpoint.secure else { return try await send(request) }
+        var request = request
+        try await authorize(&request)
+        let first = try await send(request)
+        guard let reason = Self.refusal(first) else { return first }
+        if let problem = PairingProblem(reason: reason) { throw DaemonError.pairing(problem) }
+        DeviceCredentials.shared.dropTicket()
+        try await authorize(&request)
+        let second = try await send(request)
+        if let reason = Self.refusal(second), let problem = PairingProblem(reason: reason) { throw DaemonError.pairing(problem) }
+        return second
+    }
+
+    /// Sets a ticket on a request to the paired computer, signing in first
+    /// when there is none.
+    func authorize(_ request: inout URLRequest) async throws {
+        guard endpoint.secure, let base = endpoint.url(path: "/") else { return }
+        do {
+            let ticket = try await DeviceCredentials.shared.ticket(base: base)
+            request.setValue(ticket.header, forHTTPHeaderField: "Authorization")
+        } catch let problem as PairingProblem {
+            throw DaemonError.pairing(problem)
+        } catch let error as URLError {
+            throw Self.translate(error, endpoint: endpoint)
+        }
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
         } catch let error as URLError {
-            throw DaemonError.unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(error))
+            throw Self.translate(error, endpoint: endpoint)
         }
+    }
+
+    /// A transport error in the app's words; a key that matches no pin is
+    /// "scan again", not "unreachable".
+    public static func translate(_ error: URLError, endpoint: DaemonEndpoint) -> DaemonError {
+        if endpoint.secure, DeviceCredentials.trust.sawMismatch,
+           [.cancelled, .serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot].contains(error.code) {
+            return .pairing(.pinMismatch)
+        }
+        return .unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(error))
+    }
+
+    /// The `reason` of a 401, nil for any other answer.
+    static func refusal(_ result: (Data, URLResponse)) -> String? {
+        guard (result.1 as? HTTPURLResponse)?.statusCode == 401 else { return nil }
+        let object = (try? JSONSerialization.jsonObject(with: result.0)) as? [String: Any]
+        return (object?["reason"] as? String) ?? ""
     }
 
     public static func describe(_ error: URLError) -> String {
@@ -508,9 +549,22 @@ public final class DaemonClient: @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try self.eventsRequest(since: since)
-                    let (bytes, response) = try await self.streamSession.bytes(for: request)
+                    var request = try self.eventsRequest(since: since)
+                    try await self.authorize(&request)
+                    let bytes: URLSession.AsyncBytes
+                    let response: URLResponse
+                    do {
+                        (bytes, response) = try await self.streamSession.bytes(for: request)
+                    } catch let error as URLError {
+                        throw Self.translate(error, endpoint: self.endpoint)
+                    }
                     if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+                        let body = try? await bytes.reduce(into: Data()) { $0.append($1) }
+                        if let reason = Self.refusal((body ?? Data(), response)), let problem = PairingProblem(reason: reason) {
+                            throw DaemonError.pairing(problem)
+                        }
+                        // An expired ticket: the next attempt signs in again.
+                        DeviceCredentials.shared.dropTicket()
                         throw DaemonError.unauthorized(endpoint: self.endpoint.display)
                     }
                     onOpen?()

@@ -5,16 +5,17 @@
 <title>Set up sheepdog</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<link rel="icon" type="image/svg+xml" href="/static/logo-solid.svg">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/shared.css">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/setup/style.css">
 </head>
 <body>
 <header>
-  <picture class="logo">
-    <source srcset="/static/logo-transparent.svg" media="(prefers-color-scheme: dark)">
-    <img src="/static/logo-solid.svg" alt="" width="28" height="28">
-  </picture>
-  <h1>Set up sheepdog</h1>
+  <h1><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">setup</span></h1>
   <span id="voice-badge" class="badge" role="status" aria-live="polite">checking…</span>
 </header>
 
@@ -25,53 +26,158 @@
   <!-- 1. Models -->
   <section class="card step" id="step-models" aria-labelledby="h-models">
     <h2 id="h-models"><span class="num" aria-hidden="true">1</span> Models <span class="state" id="models-state"></span></h2>
-    <p>sheepdog needs one free Gemini API key: it runs the voice and the model that reads your agents.</p>
-    <div class="field">
-      <label for="gemini-key">Gemini API key</label>
-      <div class="row">
-        <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with AIza…)" aria-describedby="gemini-result">
-        <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
-      </div>
-      <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
-      <p id="gemini-result" class="result" aria-live="polite"></p>
-    </div>
+    <p>Two parts: <strong>your voice</strong>, which hears you and speaks, and <strong>your orchestrator</strong>, which reads your agents and acts.</p>
+    <p class="recommend" id="orch-tip">One free Gemini key is enough to start: pick Free quick start. The free Gemini model can be slow or busy at times; for steadier answers pick Recommended. <a id="which-doc" href="#" target="_blank" rel="noopener">Which to choose &rarr;</a></p>
 
-    <details id="advanced">
-      <summary>Advanced: other voice or orchestrator models</summary>
-      <fieldset>
-        <legend>Voice</legend>
-        <label><input type="radio" name="voice" value="gemini" checked> Gemini Live (uses the Gemini key)</label>
-        <label><input type="radio" name="voice" value="openai"> GPT-Live (needs an OpenAI key, billed per minute)</label>
-        <div class="field indent hidden" id="openai-field">
-          <label for="openai-key">OpenAI API key</label>
-          <input id="openai-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="openai-result">
-          <p id="openai-result" class="result" aria-live="polite"></p>
+    <fieldset id="start-set">
+      <legend>Starting point</legend>
+      <div class="preset-grid start-grid" id="start-grid"></div>
+      <p class="muted small">A starting point only fills in the choices below. Change any of them.</p>
+    </fieldset>
+
+    <fieldset id="voice-set">
+      <legend>Your voice: hears you and speaks</legend>
+      <div class="preset-grid voice-grid" id="voice-grid"></div>
+
+      <div class="field panel" id="gemini-field">
+        <label for="gemini-key">Gemini API key</label>
+        <div class="row">
+          <input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with AIza…)" aria-describedby="gemini-result">
+          <a class="button" id="get-key" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>Orchestrator (reads and acts on your agents)</legend>
-        <label><input type="radio" name="orch" value="gemini" checked> Gemini (uses the Gemini key)</label>
-        <label><input type="radio" name="orch" value="deepseek"> DeepSeek (paid per token)</label>
-        <label><input type="radio" name="orch" value="compat"> Any OpenAI-compatible endpoint (OpenRouter, Groq, Ollama, …)</label>
-        <div class="field indent hidden" id="deepseek-field">
-          <label for="deepseek-key">DeepSeek API key</label>
-          <input id="deepseek-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="deepseek-result">
-          <p id="deepseek-result" class="result" aria-live="polite"></p>
+        <p id="gemini-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="gemini-orch-only" class="muted small hidden">For the Gemini orchestrator below.</p>
+        <p id="gemini-not-needed" class="muted small hidden">Not needed with your choices: neither the voice nor the orchestrator uses it.</p>
+        <p id="gemini-result" class="result" aria-live="polite"></p>
+      </div>
+      <div class="field panel hidden" id="openai-field">
+        <label for="openai-key">OpenAI API key</label>
+        <input id="openai-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="openai-saved openai-price openai-result">
+        <p id="openai-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="openai-price" class="muted small">GPT-Live is billed per minute while a session is open. sheepdog opens it only for speech or a notice and closes it after 45 s of quiet.</p>
+        <p id="openai-result" class="result" aria-live="polite"></p>
+      </div>
+      <p id="vertex-voice-wait" class="muted small hidden">Fill in the Google Cloud block below. Once it checks out, you can pick the model and the voice here.</p>
+
+      <div class="panel hidden" id="voice-pick">
+        <p id="voice-line" class="talk-line" role="status" aria-live="polite"></p>
+        <div class="pick-row">
+          <div class="field">
+            <label for="voice-model">Model</label>
+            <select id="voice-model" aria-describedby="voice-models-status"></select>
+          </div>
+          <div class="field">
+            <label for="voice-name">Voice</label>
+            <select id="voice-name"></select>
+          </div>
         </div>
-        <div class="field indent hidden" id="compat-field">
+        <p id="voice-models-status" class="result" role="status" aria-live="polite"></p>
+      </div>
+    </fieldset>
+
+    <fieldset id="orch-set">
+      <legend>Your orchestrator: reads your agents and acts</legend>
+      <div class="preset-grid" id="preset-grid"></div>
+
+      <div class="field panel hidden" id="anthropic-field">
+        <label for="anthropic-key">Anthropic API key</label>
+        <div class="row">
+          <input id="anthropic-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key (starts with sk-ant-…)" aria-describedby="anthropic-saved anthropic-result">
+          <a class="button" id="anthropic-get-key" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a>
+        </div>
+        <p id="anthropic-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="anthropic-result" class="result" aria-live="polite"></p>
+        <label for="anthropic-model">Model</label>
+        <div class="row">
+          <input id="anthropic-model" type="text" list="anthropic-models" autocomplete="off" spellcheck="false" aria-describedby="anthropic-models-status">
+          <button type="button" id="anthropic-find">Find models</button>
+        </div>
+        <datalist id="anthropic-models"></datalist>
+        <select id="anthropic-model-pick" class="hidden" aria-label="Anthropic models this key can use"></select>
+        <p id="anthropic-models-status" class="result" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button type="button" id="anthropic-probe" aria-describedby="anthropic-probe-note anthropic-probe-result">Test tool calling</button>
+        </div>
+        <p id="anthropic-probe-note" class="muted small">Anthropic is paid per token. The test sends one small request, which is billed. Nothing is sent until you press the button.</p>
+        <p id="anthropic-probe-result" class="result" role="status" aria-live="polite"></p>
+      </div>
+      <div class="field panel hidden" id="gemini-orch-field">
+        <label for="gemini-model">Model</label>
+        <input id="gemini-model" type="text" list="gemini-models" autocomplete="off" spellcheck="false" aria-describedby="gemini-models-status gemini-model-note">
+        <datalist id="gemini-models"></datalist>
+        <select id="gemini-model-pick" class="hidden" aria-label="Gemini models this key can use"></select>
+        <p id="gemini-models-status" class="result" role="status" aria-live="polite"></p>
+        <p id="gemini-model-note" class="muted small">Google's list does not say which models call tools; these are its text models. Typing a name works too.</p>
+      </div>
+      <div class="field panel hidden" id="deepseek-field">
+        <label for="deepseek-key">DeepSeek API key</label>
+        <input id="deepseek-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="deepseek-saved deepseek-result">
+        <p id="deepseek-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
+        <p id="deepseek-result" class="result" aria-live="polite"></p>
+      </div>
+      <div class="field panel hidden" id="vertex-orch-field">
+        <label for="vertex-model">Model</label>
+        <input id="vertex-model" type="text" list="vertex-models" autocomplete="off" spellcheck="false" aria-describedby="vertex-model-note">
+        <datalist id="vertex-models"></datalist>
+        <p id="vertex-model-note" class="muted small">Vertex AI does not list its models for an API key, so these are the ones we checked on Vertex. All of them call tools, so there is no tool-calling test here. The key and project go in the Google Cloud block below.</p>
+      </div>
+      <div class="field panel hidden" id="compat-field">
+        <p id="preset-intro" class="small"></p>
+        <p id="local-status" class="result" role="status" aria-live="polite"></p>
+        <label class="check hidden" id="reuse-field"><input type="checkbox" id="openai-reuse"> Use the same OpenAI key (also used for the voice)</label>
+        <div id="compat-other" class="field">
           <label for="compat-name">Name</label>
-          <input id="compat-name" type="text" placeholder="openrouter" autocomplete="off">
+          <input id="compat-name" type="text" placeholder="groq" autocomplete="off">
           <label for="compat-base">Base URL</label>
-          <input id="compat-base" type="url" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
-          <label for="compat-model">Model (must support tool calling)</label>
-          <input id="compat-model" type="text" autocomplete="off">
-          <label for="compat-key">API key (empty for a local server)</label>
-          <input id="compat-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="compat-result">
+          <input id="compat-base" type="url" placeholder="https://api.groq.com/openai/v1" autocomplete="off">
+        </div>
+        <div id="compat-key-field" class="field">
+          <label for="compat-key" id="compat-key-label">API key (empty for a local server)</label>
+          <input id="compat-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="compat-key-saved compat-result">
+          <p id="compat-key-saved" class="muted small hidden">A key is saved. Paste a new one only to replace it.</p>
           <p id="compat-result" class="result" aria-live="polite"></p>
         </div>
-      </fieldset>
-      <p class="small">Which model does what, and what it costs: <a id="models-doc" href="#" target="_blank" rel="noopener">docs/models.md</a>.</p>
-    </details>
+        <label for="compat-model">Model (must support tool calling)</label>
+        <div class="row">
+          <input id="compat-model" type="text" list="compat-models" autocomplete="off" spellcheck="false" aria-describedby="compat-models-status">
+          <button type="button" id="find-models">Find models</button>
+        </div>
+        <datalist id="compat-models"></datalist>
+        <select id="compat-model-pick" class="hidden" aria-label="Models found"></select>
+        <p id="compat-models-status" class="result" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button type="button" id="probe-tools" disabled aria-describedby="probe-note probe-result">Test tool calling</button>
+        </div>
+        <p id="probe-note" class="muted small">Sends one small request to the endpoint, which may be billed. Nothing is sent until you press the button.</p>
+        <p id="probe-result" class="result" role="status" aria-live="polite"></p>
+        <details id="compat-details">
+          <summary>Details</summary>
+          <p class="small">Base URL: <code id="compat-base-shown"></code></p>
+          <p class="small muted" id="compat-saved-as"></p>
+        </details>
+      </div>
+    </fieldset>
+
+    <fieldset id="vertex-block" class="hidden" aria-describedby="vertex-intro">
+      <legend>Google Cloud (Vertex AI)</legend>
+      <p id="vertex-intro" class="muted small">One key and project for both the voice and the orchestrator. Use an API key bound to a service account and restricted to the Vertex AI API. <a id="vertex-doc" href="#" target="_blank" rel="noopener">How to create it</a>.</p>
+      <div class="field">
+        <label for="vertex-key">Vertex AI API key</label>
+        <input id="vertex-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="vertex-saved vertex-result">
+        <p id="vertex-saved" class="muted small hidden"></p>
+        <label for="vertex-project">Project id</label>
+        <input id="vertex-project" type="text" autocomplete="off" spellcheck="false" placeholder="my-project-123" aria-describedby="vertex-result">
+        <div id="vertex-location-field" class="field hidden">
+          <label for="vertex-location">Location</label>
+          <input id="vertex-location" type="text" autocomplete="off" spellcheck="false" placeholder="us-central1" aria-describedby="vertex-location-note vertex-result">
+          <p id="vertex-location-note" class="muted small">For the voice only. gemini-3.8-live is served from us-central1 and the us multi-region, not from global.</p>
+        </div>
+        <p id="vertex-result" class="result" role="status" aria-live="polite"></p>
+      </div>
+    </fieldset>
+    <p class="small">Which model does what, and what it costs: <a id="models-doc" href="#" target="_blank" rel="noopener">docs/models.md</a>.</p>
+
+    <p class="summary" id="summary"></p>
 
     <div class="row actions">
       <button id="save-models" class="primary">Save and start the voice</button>
@@ -102,22 +208,31 @@
   <section class="card step" id="step-phone" aria-labelledby="h-phone">
     <h2 id="h-phone"><span class="num" aria-hidden="true">4</span> Pair your phone <span class="state" id="phone-state"></span></h2>
     <div id="phone-off">
-      <p>Optional. Turning phone access on lets the iOS app reach sheepdog on your network, protected by a long secret token.</p>
+      <p>Optional. Turning phone access on lets your phone reach sheepdog on your network, encrypted and only after you pair it here.</p>
       <div class="row actions"><button id="phone-enable" class="primary">Turn on phone access</button><span id="phone-msg" class="muted small" aria-live="polite"></span></div>
     </div>
     <div id="phone-on" class="hidden">
       <div class="pair">
-        <img id="qr" alt="Pairing code for the sheepdog iOS app" width="220" height="220">
+        <img id="qr" alt="Pairing code: scan it with the Sheepdog app or your phone's camera" width="220" height="220">
         <div>
-          <p>In the iOS app: Settings → <strong>Scan pairing code</strong>.</p>
+          <p>Scan it with the Sheepdog app, or with any phone's camera to use sheepdog in the browser.</p>
+          <p class="small"><span id="code-expiry" aria-live="polite"></span> <button id="new-code" class="link">New code</button></p>
           <p id="phone-connected" class="result" aria-live="polite">Waiting for the phone…</p>
           <p class="small"><span id="testflight"></span> <a id="ios-repo" href="#" target="_blank" rel="noopener">or build the app yourself</a>.</p>
           <p class="small muted" id="addresses"></p>
         </div>
       </div>
       <p id="remote-hint" class="hint small"></p>
+      <div class="shell-lan" id="shell-box">
+        <label class="check"><input type="checkbox" id="shell-on"> Shell from your phone</label>
+        <p class="small muted" id="shell-note" aria-live="polite"></p>
+      </div>
+      <h3 class="devices-h">Devices</h3>
+      <ul id="devices" class="devices" aria-label="Paired devices"></ul>
+      <p id="devices-empty" class="small muted">No devices yet. Scan the code above with the Sheepdog app or your phone's camera.</p>
       <div class="row actions">
-        <button id="new-token">New token</button>
+        <button id="disconnect-all">Disconnect all devices</button>
+        <button id="reset-pairing">Reset pairing</button>
         <button id="phone-disable">Turn phone access off</button>
         <span id="phone-msg2" class="muted small" aria-live="polite"></span>
       </div>
@@ -144,6 +259,7 @@
     <p class="small muted">The iOS app also has an offline demo that needs no computer: “Try the demo” on its first screen or in Settings.</p>
   </section>
 </main>
-<script src="/setup/setup.js"></script>
+<script type="module" src="/setup/setup.js"></script>
+<script type="module" src="/static/update-banner.js"></script>
 </body>
 </html>

@@ -3,144 +3,192 @@ import SwiftUI
 
 // The screens behind Settings' menu. Each one applies a change at once.
 
-/// Settings > Daemon: where it lives, the token, and one button that proves
-/// both. The token goes to the keychain; nothing else is a secret.
+/// Settings ▸ Connection: the paired computer (address, when it was
+/// paired, its key's pin), Test connection, Scan a new code and Remove. On
+/// the first run: pair by scanning, or try the demo.
 struct DaemonSettingsView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @Binding var address: String
-    @Binding var token: String
     let firstRun: Bool
-    /// Writes the fields (when valid and changed) and repoints the app.
-    let commit: () -> Void
-    /// Commits and closes Settings: offered on the first run, where this is
-    /// the only screen that matters.
+    /// Closes Settings (after a first pairing).
     let done: () -> Void
 
     @State private var probing = false
     @State private var probe: SessionViewModel.Probe?
-    @State private var scanning = false
-    @FocusState private var addressFocused: Bool
+    @State private var pairing: PairingStage?
+    @State private var confirmRemove = false
+    @State private var removing = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         Form {
-            if firstRun {
-                // At the accessibility text sizes the introduction fills
-                // two screens: the demo comes first so it is not buried.
+            if let computer = model.settings.computer {
+                pairedSections(computer)
+            } else if !model.settings.address.isEmpty {
+                // A loopback fixture (the tests): no pairing, no key.
+                Section {
+                    LabeledContent("Address", value: model.settings.address)
+                        .accessibilityIdentifier("settings.address")
+                    testButton
+                    probeResult
+                } footer: {
+                    Text("This computer, over loopback: no pairing needed.")
+                }
+                scanSection(title: "Scan a pairing code")
+            } else {
                 if dynamicTypeSize.isAccessibilitySize {
                     demoSection
                     introSection
                 } else {
                     introSection
-                    demoSection
                 }
-            }
-
-            Section {
-                Button {
-                    scanning = true
-                } label: {
-                    Label("Scan pairing code", systemImage: "qrcode.viewfinder")
-                }
-                .accessibilityIdentifier("settings.scan")
-                .disabled(probing)
-            } footer: {
-                Text("`sheepdog setup` (step 4) or `sheepdog pair` on your computer shows the code. It fills in the address and the token.")
-            }
-
-            Section {
-                LabeledContent("Address") {
-                    TextField("e.g. 192.168.1.20:7777", text: $address)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .multilineTextAlignment(.trailing)
-                        .focused($addressFocused)
-                        .submitLabel(.done)
-                        .onSubmit(commit)
-                        .accessibilityIdentifier("settings.address")
-                }
-                LabeledContent("Token") {
-                    SecureField("From the pairing code", text: $token)
-                        // Not a website password: this stops iOS offering
-                        // to save it to the user's passwords every time
-                        // Settings is closed.
-                        .textContentType(.oneTimeCode)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                        .submitLabel(.done)
-                        .onSubmit(commit)
-                        .accessibilityIdentifier("settings.token")
-                }
-                // Right under the fields, so the keyboard does not cover it.
-                Button {
-                    runProbe()
-                } label: {
-                    HStack {
-                        Text("Test connection")
-                        Spacer()
-                        if probing { ProgressView() }
-                    }
-                }
-                .accessibilityIdentifier("settings.test")
-                .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || probing)
-
-                if let probe {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label(probe.title, systemImage: probe.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(probe.ok ? Theme.done : Color(.systemRed))
-                        ForEach(probe.lines, id: \.self) { line in
-                            Text(LocalizedStringKey(line))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let help = probe.help {
-                            Link("How to fix this", destination: help)
-                                .font(.caption.weight(.semibold))
-                                .accessibilityIdentifier("settings.probe.help")
-                        }
-                    }
-                    .padding(.vertical, 2)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("settings.probe.result")
-                }
-            } footer: {
-                Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain. Changes apply when you leave this screen.")
+                scanSection(title: "Scan the pairing code")
+                if !dynamicTypeSize.isAccessibilitySize { demoSection }
             }
         }
-        .navigationTitle(firstRun ? "Welcome" : "Daemon")
+        .navigationTitle(firstRun ? "Welcome" : "Connection")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if firstRun {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", action: done)
-                        .accessibilityIdentifier("settings.done")
-                        .disabled(DaemonEndpoint(text: address) == nil)
+        .sheet(item: Binding(get: { pairing.map { PairingSheet(stage: $0) } }, set: { if $0 == nil { pairing = nil } })) { sheet in
+            PairingFlowView(stage: sheet.stage) {
+                if firstRun { done() }
+            }
+            .environmentObject(model)
+        }
+        .confirmationDialog("Remove \(model.settings.computer?.name ?? "this computer")?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                removing = true
+                Task {
+                    await model.removeComputer()
+                    removing = false
+                    probe = nil
                 }
             }
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .sheet(isPresented: $scanning) {
-            PairingScannerSheet { code in
-                scanning = false
-                usePairing(code)
-            }
+            .accessibilityIdentifier("settings.remove.confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The computer forgets this phone, and this phone forgets its key. To connect again, scan a new code.")
         }
         .onAppear {
-            // Why Settings was opened for the user: a refused token, a
-            // pairing code nothing answered.
             if let notice = model.daemonNotice {
                 probe = notice
                 model.daemonNotice = nil
             }
-            // No keyboard on the first run: it would cover the guidance
-            // and the demo. Later visits are for typing.
-            if address.isEmpty, !firstRun { addressFocused = true }
+            if let problem = model.daemonNoticeProblem {
+                model.daemonNoticeProblem = nil
+                pairing = .problem(problem)
+            }
         }
-        .onDisappear(perform: commit)
+        .onChange(of: model.daemonNoticeProblem) { _, problem in
+            guard let problem else { return }
+            model.daemonNoticeProblem = nil
+            pairing = .problem(problem)
+        }
+    }
+
+    @ViewBuilder
+    private func pairedSections(_ computer: PairedComputer) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(computer.name.isEmpty ? "Your computer" : computer.name)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text(model.settings.address)
+                    .font(.subheadline.monospaced())
+                    .foregroundStyle(Theme.muted)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("settings.address")
+                Text("Paired \(computer.pairedAt.formatted(date: .abbreviated, time: .omitted)) · cert \(computer.shortPin)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Paired \(computer.pairedAt.formatted(date: .long, time: .omitted)). Certificate \(computer.shortPin)")
+                    .accessibilityIdentifier("settings.pairedLine")
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+            testButton
+            probeResult
+        } footer: {
+            Text("Encrypted, and checked against this computer's key on every connection.")
+        }
+        Section {
+            Button {
+                pairing = PairingStage.start
+            } label: {
+                Label("Scan a new code", systemImage: "qrcode.viewfinder")
+            }
+            .tint(Theme.primaryText)
+            .accessibilityIdentifier("settings.scan")
+            Button(role: .destructive) {
+                confirmRemove = true
+            } label: {
+                HStack {
+                    Label("Remove", systemImage: "minus.circle")
+                    Spacer()
+                    if removing { ProgressView() }
+                }
+            }
+            .disabled(removing)
+            .accessibilityIdentifier("settings.remove")
+        }
+    }
+
+    private var testButton: some View {
+        Button {
+            probing = true
+            probe = nil
+            Task {
+                probe = await model.testConnection()
+                probing = false
+            }
+        } label: {
+            HStack {
+                Text("Test connection")
+                Spacer()
+                if probing { ProgressView() }
+            }
+        }
+        .tint(Theme.primaryText)
+        .accessibilityIdentifier("settings.test")
+        .disabled(probing)
+    }
+
+    @ViewBuilder
+    private var probeResult: some View {
+        if let probe {
+            VStack(alignment: .leading, spacing: 5) {
+                Label(probe.title, systemImage: probe.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(probe.ok ? Theme.done : Theme.danger)
+                ForEach(probe.lines, id: \.self) { line in
+                    Text(LocalizedStringKey(line))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let help = probe.help {
+                    Link("How to fix this", destination: help)
+                        .tint(Theme.primaryText)
+                        .font(.caption.weight(.semibold))
+                        .accessibilityIdentifier("settings.probe.help")
+                }
+            }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.probe.result")
+        }
+    }
+
+    private func scanSection(title: String) -> some View {
+        Section {
+            Button {
+                pairing = PairingStage.start
+            } label: {
+                Label(title, systemImage: "qrcode.viewfinder")
+            }
+            .tint(Theme.primaryText)
+            .accessibilityIdentifier("settings.scan")
+        } footer: {
+            Text("Open the setup page on your computer (`sheepdog setup`), or run `sheepdog pair`. Each code works once, for 10 minutes.")
+        }
     }
 
     private var introSection: some View {
@@ -157,6 +205,7 @@ struct DaemonSettingsView: View {
                     Label("How to set up sheepdog", systemImage: "arrow.up.right.square")
                         .font(.subheadline)
                 }
+                .tint(Theme.primaryText)
                 .accessibilityIdentifier("settings.firstRun.guide")
             }
             .padding(.vertical, 4)
@@ -172,6 +221,7 @@ struct DaemonSettingsView: View {
             } label: {
                 Label("Try the demo", systemImage: "play.circle.fill")
                     .labelStyle(.titleOnly)
+                    .foregroundStyle(Color("OnAccent"))
                     .font(.body.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -182,41 +232,7 @@ struct DaemonSettingsView: View {
             .listRowBackground(Color.clear)
             .accessibilityIdentifier("settings.firstRun.tryDemo")
         } footer: {
-            Text("No daemon yet? The demo runs scripted agents on this phone: no computer, no account, no network.")
-        }
-    }
-
-    /// Fills the fields from a scanned pairing code: the token, and the
-    /// first of its addresses that answers (LAN before Tailscale), then
-    /// tests the connection as the button does.
-    private func usePairing(_ code: String) {
-        guard let link = PairingLink(code) else {
-            probe = SessionViewModel.Probe(ok: false, title: "That is not a sheepdog pairing code.", lines: ["Run `sheepdog pair` on your computer and scan the code it shows."])
-            return
-        }
-        token = link.token
-        probing = true
-        probe = nil
-        Task {
-            let result = await model.resolvePairing(link)
-            address = result.address ?? link.addresses[0]
-            probing = false
-            guard result.address != nil else {
-                probe = result.probe
-                return
-            }
-            commit()
-            runProbe()
-        }
-    }
-
-    private func runProbe() {
-        probing = true
-        probe = nil
-        Task {
-            let result = await model.probe(address: address, token: token)
-            probe = result
-            probing = false
+            Text("No computer yet? The demo runs scripted agents on this phone: no computer, no account, no network.")
         }
     }
 }
@@ -383,6 +399,26 @@ struct AboutView: View {
     var body: some View {
         Form {
             Section {
+                VStack(spacing: 8) {
+                    Image("LogoColor")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 96, height: 96)
+                        .accessibilityHidden(true)
+                    Text("sheepdog for herdr")
+                        .font(.title3.weight(.semibold))
+                        .fontDesign(.rounded)
+                    Text(Bundle.appVersion)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("about.header")
+            }
+
+            Section {
                 LabeledContent("App", value: Bundle.appVersion)
                 LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
                 LabeledContent("Voice name", value: model.voiceName)
@@ -401,7 +437,7 @@ struct AboutView: View {
             } header: {
                 Text("Conversation")
             } footer: {
-                Text("The app keeps the last \(ConversationHistory.cacheCapacity) messages for each daemon so it opens on your conversation straight away, even offline. No token is stored with them.")
+                Text("The app keeps the last \(ConversationHistory.cacheCapacity) messages for each daemon so it opens on your conversation straight away, even offline. No keys are stored with them.")
             }
         }
         .navigationTitle("About")

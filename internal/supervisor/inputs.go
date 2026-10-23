@@ -56,7 +56,7 @@ const (
 	// InputVoice is the voice model's input transcription of the
 	// user's speech, fragments merged per user turn.
 	InputVoice InputKind = "voice"
-	// InputTyped is text the user typed (/api/inject/utterance, the
+	// InputTyped is text the user typed (/api/utterance, the
 	// /voice text box; the only input with --voice=off).
 	InputTyped InputKind = "typed"
 	// InputTap is a tap on one option of the pending question
@@ -93,7 +93,7 @@ type shepherdInput struct {
 	retried bool
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
-	// (echoOf, utterance.go). Empty for anything else.
+	// (echoCandidateLocked, echo.go). Empty for anything else.
 	saidBefore string
 }
 
@@ -542,11 +542,20 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // executor (the post-answer poll included), and the voice gets a silent
 // line saying what was tapped. id must name the open question, which
 // lives as long as its pane is blocked at that prompt (pending.go,
-// ExpirePending): anything else is ErrPendingGone.
+// ExpirePending): anything else is ErrPendingGone. It may be the
+// question the voice is on or any other open question (/api/state
+// questions); for the latter the screen is read again first, so the
+// keys never go into a question the tap was not about.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
-	p, has := s.store.Pending()
-	if !has || p.ID != id || p.Kind != state.PendingAnswerPrompt {
+	p, slot, has := s.questionByID(id)
+	if !has {
+		s.mu.Unlock()
+		return voice.ToolResult{}, ErrPendingGone
+	}
+	if !slot && !s.stillAskingLocked(ctx, p) {
+		s.dropQuestionLocked(p)
+		s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}

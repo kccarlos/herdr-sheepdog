@@ -2,8 +2,6 @@ package onboard
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -145,24 +143,6 @@ func EditEnvFile(path string, set map[string]string, del []string) error {
 	return os.Chmod(path, 0o600)
 }
 
-// NewToken returns a random web token: 32 bytes, base64url (43
-// characters).
-func NewToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// HasToken reports whether a web token exists anywhere the daemon reads
-// one: the process environment, the env file (env) or the config.
-// A token that exists is never replaced silently: the phone is paired
-// with it (`sheepdog init`, the setup page's "new token" is explicit).
-func HasToken(env map[string]string, cfg config.Config) bool {
-	return strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" || strings.TrimSpace(env["SHEEPDOG_WEB_TOKEN"]) != "" || cfg.Web.Token != ""
-}
-
 // WriteConfig writes a new config file: the commented template with the
 // chosen orchestrator (gemini, deepseek or compat) filled in, mode 0600.
 func WriteConfig(path, orch string, compat *config.OpenAICompat) error {
@@ -194,11 +174,117 @@ func CompatTOML(c config.OpenAICompat) string {
 	return fmt.Sprintf("[[brain.openai_compat]]\nname = %q\nbase_url = %q\napi_key_env = %q\nmodel = %q\n", c.Name, c.BaseURL, c.APIKeyEnv, c.Model)
 }
 
-// EnsureCompat makes the config at path define the OpenAI-compatible
-// provider c: a new config (the template, provider set to it) when there
-// is none, else its table appended when no provider of that name exists.
-// An existing table of that name is left as it is. The result must load.
-func EnsureCompat(path string, c config.OpenAICompat) error {
+// PhoneBind is the web.bind phone access sets: every address of this
+// computer (its LAN and Tailscale ones), TLS only and paired devices
+// only. web.bind is one address, so this is the narrowest setting that
+// covers both.
+const PhoneBind = "0.0.0.0"
+
+// SetPhoneAccess writes phone access to the env file: enable sets
+// SHEEPDOG_WEB_BIND to PhoneBind, off goes back to loopback.
+func SetPhoneAccess(envPath string, enable bool) error {
+	bind := config.DefaultWebBind
+	if enable {
+		bind = PhoneBind
+	}
+	return UpsertEnvFile(envPath, map[string]string{"SHEEPDOG_WEB_BIND": bind})
+}
+
+// SetVertexConfig writes project and, when not empty, location into the
+// config's [gemini.vertex] table (the key stays in the env file): a new
+// config from the template when there is none, the values set in place
+// (uncommented) when the table exists, else the table appended. The result
+// must load; otherwise the old file is restored.
+func SetVertexConfig(path, project, location string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err := WriteConfig(path, brain.ProviderGemini, nil); err != nil {
+			return err
+		}
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	set := [][2]string{{"project", project}}
+	if location != "" {
+		set = append(set, [2]string{"location", location})
+	}
+	body := setTOMLKeys(string(old), "gemini.vertex", set)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return err
+	}
+	if _, err := config.Load(path); err != nil {
+		_ = os.WriteFile(path, old, 0o600)
+		return fmt.Errorf("the config with the Vertex project does not load (restored it): %w", err)
+	}
+	return nil
+}
+
+// setTOMLKeys sets each key = "value" in table of the TOML text body:
+// replacing an uncommented assignment of that key inside the table, else
+// adding it right under the table header; a missing table is appended.
+func setTOMLKeys(body, table string, kv [][2]string) string {
+	lines := strings.Split(body, "\n")
+	header := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "["+table+"]" {
+			header = i
+			break
+		}
+	}
+	if header < 0 {
+		out := strings.TrimRight(body, "\n") + "\n\n[" + table + "]\n"
+		for _, p := range kv {
+			out += fmt.Sprintf("%s = %q\n", p[0], p[1])
+		}
+		return out
+	}
+	return strings.Join(setKeysAt(lines, header, kv), "\n")
+}
+
+// setKeysAt sets each key = "value" in the table whose header is
+// lines[header] (it ends at the next line starting with '['): an
+// uncommented assignment is replaced, a missing key is added right
+// under the header. Comments and other keys stay as they are.
+func setKeysAt(lines []string, header int, kv [][2]string) []string {
+	end := tableEnd(lines, header)
+	var add []string
+	for _, p := range kv {
+		line := fmt.Sprintf("%s = %q", p[0], p[1])
+		found := false
+		for i := header + 1; i < end; i++ {
+			t := strings.TrimSpace(lines[i])
+			if k, _, ok := strings.Cut(t, "="); ok && !strings.HasPrefix(t, "#") && strings.TrimSpace(k) == p[0] {
+				lines[i], found = line, true
+				break
+			}
+		}
+		if !found {
+			add = append(add, line)
+		}
+	}
+	out := append([]string{}, lines[:header+1]...)
+	out = append(out, add...)
+	return append(out, lines[header+1:]...)
+}
+
+// tableEnd is the index of the line after the table starting at header.
+func tableEnd(lines []string, header int) int {
+	for i := header + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "[") {
+			return i
+		}
+	}
+	return len(lines)
+}
+
+// UpsertCompat makes the config at path define the OpenAI-compatible
+// provider c with c's base_url, api_key_env and model: a new config (the
+// template, provider set to it) when there is none, the table appended
+// when no provider of that name exists, else those three keys set in
+// place in the existing table (its label and comments stay). The result
+// must load; otherwise the old file is restored.
+func UpsertCompat(path string, c config.OpenAICompat) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return WriteConfig(path, "compat", &c)
 	}
@@ -206,54 +292,49 @@ func EnsureCompat(path string, c config.OpenAICompat) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := cur.Brain.CompatProvider(c.Name); ok {
-		return nil
-	}
 	old, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	body := strings.TrimRight(string(old), "\n") + "\n\n" + CompatTOML(c)
+	var body string
+	if _, ok := cur.Brain.CompatProvider(c.Name); !ok {
+		body = strings.TrimRight(string(old), "\n") + "\n\n" + CompatTOML(c)
+	} else {
+		lines := strings.Split(string(old), "\n")
+		header := compatHeader(lines, c.Name)
+		if header < 0 {
+			return fmt.Errorf("cannot find the [[brain.openai_compat]] table named %q to update; edit it by hand", c.Name)
+		}
+		body = strings.Join(setKeysAt(lines, header, [][2]string{{"base_url", c.BaseURL}, {"api_key_env", c.APIKeyEnv}, {"model", c.Model}}), "\n")
+	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		return err
 	}
 	if _, err := config.Load(path); err != nil {
 		_ = os.WriteFile(path, old, 0o600)
-		return fmt.Errorf("the config with the new provider does not load (restored it): %w", err)
+		return fmt.Errorf("the config with the provider does not load (restored it): %w", err)
 	}
 	return nil
 }
 
-// PhoneBind is the web.bind phone access sets: every address of this
-// computer (its LAN and Tailscale ones), behind the web token. web.bind
-// is one address, so this is the narrowest setting that covers both.
-const PhoneBind = "0.0.0.0"
-
-// SetPhoneAccess writes phone access to the env file: enable sets
-// SHEEPDOG_WEB_BIND to PhoneBind (off: back to loopback) and creates a
-// token when none exists anywhere (HasToken); newToken replaces the
-// token, which a paired phone must then scan again. It reports whether
-// a token was written. cfg is the config in force (its token counts).
-func SetPhoneAccess(envPath string, cfg config.Config, enable, newToken bool) (bool, error) {
-	saved, err := ReadEnvFile(envPath)
-	if err != nil {
-		return false, err
-	}
-	set := map[string]string{"SHEEPDOG_WEB_BIND": config.DefaultWebBind}
-	if enable {
-		set["SHEEPDOG_WEB_BIND"] = PhoneBind
-	}
-	created := false
-	if newToken || (enable && !HasToken(saved, cfg)) {
-		if newToken && saved["SHEEPDOG_WEB_TOKEN"] == "" && strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != "" && os.Getenv("SHEEPDOG_WEB_TOKEN") == cfg.Web.Token {
-			return false, errors.New("the token comes from the environment variable SHEEPDOG_WEB_TOKEN, not the env file; change it there")
+// compatHeader is the line of the [[brain.openai_compat]] header whose
+// table has name = "<name>" (-1: none).
+func compatHeader(lines []string, name string) int {
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "[[brain.openai_compat]]" {
+			continue
 		}
-		tok, err := NewToken()
-		if err != nil {
-			return false, err
+		for j := i + 1; j < tableEnd(lines, i); j++ {
+			t := strings.TrimSpace(lines[j])
+			k, v, ok := strings.Cut(t, "=")
+			if !ok || strings.HasPrefix(t, "#") || strings.TrimSpace(k) != "name" {
+				continue
+			}
+			v, _, _ = strings.Cut(strings.TrimSpace(v), " #")
+			if strings.ToLower(strings.Trim(strings.TrimSpace(v), `"'`)) == name {
+				return i
+			}
 		}
-		set["SHEEPDOG_WEB_TOKEN"] = tok
-		created = true
 	}
-	return created, UpsertEnvFile(envPath, set)
+	return -1
 }

@@ -35,9 +35,13 @@ type Device struct {
 	// ContentKey is the phone's end-to-end key (base64 of 32 bytes): the
 	// relay path encrypts each notification with it. Generated at the
 	// first registration and handed to the app in the answer.
-	ContentKey   string    `json:"content_key,omitempty"`
-	Environment  string    `json:"environment"`
-	Name         string    `json:"device,omitempty"`
+	ContentKey  string `json:"content_key,omitempty"`
+	Environment string `json:"environment"`
+	Name        string `json:"device,omitempty"`
+	// DeviceID is the paired device (docs/dev/design/security.md) this
+	// registration belongs to: revoking it drops the registration, and a
+	// device has one registration at a time.
+	DeviceID     string    `json:"device_id,omitempty"`
 	RegisteredAt time.Time `json:"registered_at"`
 }
 
@@ -143,13 +147,20 @@ func loadDevices(path string) (*devices, error) {
 func (d *devices) put(dev Device) (Device, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if dev.DeviceID != "" {
+		for id, other := range d.m {
+			if other.DeviceID == dev.DeviceID && id != dev.id() {
+				delete(d.m, id)
+			}
+		}
+	}
 	old, had := d.m[dev.id()]
 	if had {
 		dev.ContentKey = old.ContentKey
 		if dev.RelayToken == "" && old.Environment == dev.Environment {
 			dev.RelayToken = old.RelayToken
 		}
-		if old.Environment == dev.Environment && old.Name == dev.Name && old.RelayToken == dev.RelayToken && old.ContentKey != "" {
+		if old.Environment == dev.Environment && old.Name == dev.Name && old.RelayToken == dev.RelayToken && old.DeviceID == dev.DeviceID && old.ContentKey != "" {
 			return old, nil
 		}
 	}
@@ -187,6 +198,28 @@ func (d *devices) remove(id string) (bool, error) {
 	}
 	delete(d.m, id)
 	return true, d.saveLocked()
+}
+
+// removeDevices drops every registration of the paired devices ids and
+// returns how many went.
+func (d *devices) removeDevices(ids []string) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	drop := map[string]bool{}
+	for _, id := range ids {
+		drop[id] = true
+	}
+	n := 0
+	for id, dev := range d.m {
+		if dev.DeviceID != "" && drop[dev.DeviceID] {
+			delete(d.m, id)
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, d.saveLocked()
 }
 
 // list returns the devices, oldest registration first.

@@ -1,0 +1,4 @@
+rejudged workday-scale-ten r1: fail
+judge claude sonnet: 1m3s, 14 calls
+-- spend judge    sonnet                   calls    14  in    284820  out    19378  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

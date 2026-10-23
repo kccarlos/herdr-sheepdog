@@ -12,11 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
 
 // statusReport is `sheepdog status --json`.
@@ -41,8 +43,50 @@ type statusReport struct {
 	// Phones is known only while the daemon runs.
 	Phones    *statusPhones    `json:"phones,omitempty"`
 	LastError *statusLastError `json:"last_error,omitempty"`
-	LogFile   string           `json:"log_file"`
-	DataDir   string           `json:"data_dir"`
+	// Update is the update notice: from the running daemon, else from the
+	// cache (omitted with update.check off).
+	Update *update.Status `json:"update,omitempty"`
+	// Keys says which env file the last daemon loaded its keys from
+	// (omitted when none was recorded).
+	Keys    *statusKeys `json:"keys,omitempty"`
+	LogFile string      `json:"log_file"`
+	DataDir string      `json:"data_dir"`
+}
+
+// statusKeys is the recorded env file (daemon.EnvRecord). Paths only.
+type statusKeys struct {
+	EnvFile string `json:"env_file"`
+	// Problem is set when the daemon had keys from that file and it is
+	// gone or unreadable.
+	Problem string `json:"problem,omitempty"`
+	// Advice is set when the file is not the default env file.
+	Advice string `json:"advice,omitempty"`
+}
+
+// keysStatus reads the record; nil when there is none.
+func keysStatus(dataDir string) *statusKeys {
+	rec := daemon.ReadEnvRecord(dataDir)
+	if rec.Path == "" {
+		return nil
+	}
+	k := &statusKeys{EnvFile: rec.Path}
+	f, err := os.Open(rec.Path)
+	if err != nil {
+		if rec.HadKeys {
+			k.Problem = "keys came from " + rec.Path + " last time; that file is gone or unreadable"
+		}
+		return k
+	}
+	_ = f.Close()
+	if rec.Path != configEnvPath() {
+		k.Advice = envFileAdvice(rec.Path)
+	}
+	return k
+}
+
+// envFileAdvice is the warning for keys kept outside the default env file.
+func envFileAdvice(path string) string {
+	return "keys come from " + path + ", not the default env file: copy it to " + config.DefaultEnvPath() + " (chmod 600)"
 }
 
 type statusVoice struct {
@@ -169,8 +213,9 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 				ClientConnected bool   `json:"client_connected"`
 				Problem         string `json:"problem"`
 			} `json:"voice"`
+			Update *update.Status `json:"update"`
 		}
-		if err := getJSON(ctx, r.URL, "/api/state", cfg.Web.Token, &st); err == nil {
+		if err := getJSON(ctx, r.URL, "/api/state", &st); err == nil {
 			r.Orchestrator = statusOrchestrator{Source: "daemon"}
 			if st.Brain != nil {
 				r.Orchestrator.Enabled, r.Orchestrator.Provider, r.Orchestrator.Model = true, st.Brain.Provider, st.Brain.Model
@@ -178,12 +223,25 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			var push struct {
 				Devices int `json:"devices"`
 			}
-			_ = getJSON(ctx, r.URL, "/api/push/status", cfg.Web.Token, &push)
+			_ = getJSON(ctx, r.URL, "/api/push/status", &push)
 			r.Phones = &statusPhones{PushDevices: push.Devices, VoiceClientConnected: st.Voice.ClientConnected}
 			r.Voice.Problem = st.Voice.Problem
+			r.Update = st.Update
 		}
 	}
+	if r.Update == nil && cfg.Update.Check {
+		c, _ := update.ReadCache(cfg.DataDir)
+		u := update.Compute(version, c, installHow())
+		if r.Running && r.Version != "" {
+			u.Current = r.Version
+		}
+		r.Update = &u
+	}
+	if !cfg.Update.Check && r.Update != nil && !r.Update.RestartPending {
+		r.Update = nil
+	}
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
+	r.Keys = keysStatus(cfg.DataDir)
 	return r
 }
 
@@ -213,6 +271,9 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 			row("pid", fmt.Sprint(r.PID))
 		}
 		row("version", r.Version)
+		if r.Version != "" && r.Version != r.CLIVersion {
+			row("", fmt.Sprintf("this sheepdog is %s: run `sheepdog restart` to use it", r.CLIVersion))
+		}
 		row("url", r.URL+"/voice")
 	} else {
 		fprintln(w, "sheepdog is not running (start it with: sheepdog start)")
@@ -250,6 +311,18 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 		}
 		row("phones", fmt.Sprintf("%d registered for push; %s", r.Phones.PushDevices, conn))
 	}
+	if k := r.Keys; k != nil {
+		switch {
+		case k.Problem != "":
+			row("keys", "NOT FOUND: "+k.Problem)
+			row("", "restore the file, or copy your keys to "+config.DefaultEnvPath()+" (chmod 600), or run `sheepdog setup`")
+		case k.Advice != "":
+			row("keys", "from "+k.EnvFile)
+			row("", "warning: "+k.Advice)
+		default:
+			row("keys", "from "+k.EnvFile)
+		}
+	}
 	if r.LastError != nil {
 		msg := r.LastError.What
 		if r.LastError.Message != "" {
@@ -259,6 +332,7 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 	} else {
 		row("last error", "none recorded")
 	}
+	printUpdate(row, r)
 	row("log", r.LogFile)
 	if !r.Running && fileSize(daemon.StdioFile(r.DataDir)) > 0 {
 		row("crash output", daemon.StdioFile(r.DataDir))
@@ -323,4 +397,29 @@ func lastErrorIn(path string, red *redact.Redactor) *statusLastError {
 		last = e
 	}
 	return last
+}
+
+// printUpdate adds the update lines: a newer release, and an upgrade that
+// is installed but not running yet.
+func printUpdate(row func(k, v string), r statusReport) {
+	u := r.Update
+	if u == nil {
+		return
+	}
+	if u.RestartPending {
+		to := ""
+		if u.RestartTo != "" {
+			to = " (" + u.RestartTo + ")"
+		}
+		msg := "update installed" + to + ", restart to finish: sheepdog restart"
+		if u.AutoRestart {
+			msg += " (or it restarts itself when idle)"
+		}
+		row("update", msg)
+		return
+	}
+	if u.Available {
+		row("update", fmt.Sprintf("%s is available (you have %s)", u.Latest, u.Current))
+		row("", "to update: "+u.How+", then sheepdog restart")
+	}
 }

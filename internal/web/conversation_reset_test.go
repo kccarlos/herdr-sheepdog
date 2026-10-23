@@ -84,15 +84,17 @@ func TestConversationResetBadVia(t *testing.T) {
 	}
 }
 
-// The endpoint is token-protected.
+// The endpoint needs a paired device.
 func TestConversationResetAuth(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: "s3cr3t"})
+	h := newHarness(t, harnessOpts{})
+	d := h.pairDevice()
+	h.asRemote()
 	req := h.authedRequest(http.MethodPost, "/api/conversation/reset", "", nil, map[string]string{"via": "app"})
 	if code, _ := h.do(req, nil); code != http.StatusUnauthorized {
-		t.Fatalf("no token: code = %d", code)
+		t.Fatalf("no ticket: code = %d", code)
 	}
-	req = h.authedRequest(http.MethodPost, "/api/conversation/reset", "s3cr3t", nil, map[string]string{"via": "app"})
+	req = h.authedRequest(http.MethodPost, "/api/conversation/reset", d.ticket, nil, map[string]string{"via": "app"})
 	if code, _ := h.do(req, nil); code != http.StatusOK {
-		t.Fatalf("with token: code = %d", code)
+		t.Fatalf("with a ticket: code = %d", code)
 	}
 }

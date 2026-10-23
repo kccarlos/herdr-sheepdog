@@ -20,10 +20,13 @@ docs/dev/research/live-resume-context-results/.
 ```sh
 set -a; . ./.env; set +a          # VERTEX_API_KEY, VERTEX_PROJECT
 go run ./cmd/livecanary -arm resume -out docs/dev/research/live-resume-context-results
+# AI Studio (GEMINI_API_KEY): text turns, see below
+go run ./cmd/livecanary -backend aistudio -text-turns -arm chain -chain-talk -chain-fill 0 -chain-n 3
 ```
 
 Flags: `-arm`, `-no-resume` (the same arm without the resume: the
 within-connection control), `-out DIR` (one dated JSONL per run),
+`-backend` (`vertex`, the default, or `aistudio`), `-text-turns`,
 `-model`, `-location`, `-transparent`, `-mic-minutes` (longmic),
 `-goaway-max`, `-fill-to` (goaway). Every line of the JSONL carries `t`
 (seconds), `kind` and `arm`; the last `summary` line has the recall
@@ -88,6 +91,28 @@ See the results note for the table. In short:
 - By design: silent context sent after the last handle is lost (the daemon
   re-sends it, #123) and compression drops the oldest content with or
   without a resume (`compress` against `compress -no-resume`: 1/9 both).
+
+## AI Studio (2026-10-20)
+
+On AI Studio the spoken clips do not work: the server's VAD answered only
+after the fourth clip and then not at all, and it never answered the
+canary's realtime text. `-text-turns` tells the same eight facts, and sends
+every probe and small-talk line, as completed `clientContent` text turns.
+A resume right after a close can be refused for a few seconds with
+"already connected to an existing client" (one connection per session);
+the canary retries for up to 40 s.
+
+`chain -chain-talk -chain-fill 0 -text-turns`, `gemini-3.8-live`:
+**chained resumes keep the whole session**. Three resumes in a row, each
+from the handle the previous resumed connection issued: 8/8, the prompt
+1,096 → 1,146 → 1,203 → 1,248 tokens (never the fall to the system prompt
+seen on Vertex). With `-chain-newfact -chain-n 4`: 11/11, the 8 first facts
+and one told on each resumed connection. With `-chain-n 2 -chain-wait 5m`
+the resumed connection stayed up 316 s and the next resume recalled 8/8.
+So the daemon resumes resumed
+sessions on AI Studio (`chainedResumesKeepContext` in
+`internal/voice/gemini/handle.go`); re-run this after a model or backend
+change, and if it fails, that function must return false again.
 
 ## Clips
 

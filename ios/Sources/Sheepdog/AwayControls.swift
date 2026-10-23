@@ -6,12 +6,19 @@ import SwiftUI
 /// Everything that lets the user run the voice session away from the
 /// screen: the Live Activity (lock screen and Dynamic Island) and the
 /// earbud remote with its Now Playing entry. Both follow one
-/// `VoiceActivityState` (SheepdogKit), live exactly as long as the voice
+/// `LiveActivityContent` (SheepdogKit), live exactly as long as the voice
 /// session does, and are fed from `SessionViewModel.publish()` and the
 /// daemon state. Their buttons come back as `AppRoute`s through `onRoute`.
 @MainActor
 final class AwayControls {
     var onRoute: (AppRoute) -> Void = { _ in }
+    /// The Live Activity's push token (hex) when iOS issues one, nil when
+    /// the activity ends: the daemon keeps the banner current with it
+    /// while the app is away.
+    var onActivityToken: (String?) -> Void {
+        get { activity.onPushToken }
+        set { activity.onPushToken = newValue }
+    }
 
     private let activity = VoiceLiveActivity()
     private let remote = EarbudRemote()
@@ -21,9 +28,15 @@ final class AwayControls {
     }
 
     /// nil: no session, so both go away at once.
-    func sync(_ state: VoiceActivityState?, voiceName: String) {
+    func sync(_ state: LiveActivityContent?, voiceName: String) {
         activity.sync(state, voiceName: voiceName)
         remote.sync(state, voiceName: voiceName)
+    }
+
+    /// The banner may show what the daemon pushed: the next sync writes
+    /// it again.
+    func forgetShownActivity() {
+        activity.forgetShown()
     }
 
     /// The app is being terminated: do not leave a banner behind.
@@ -36,13 +49,18 @@ final class AwayControls {
 /// The voice session's Live Activity: started when a session starts (the
 /// app is in the foreground then), updated locally while the app runs —
 /// the audio session keeps it running with the screen locked — and ended
-/// with immediate dismissal when the session ends. No push updates: the
-/// daemon is not involved.
+/// with immediate dismissal when the session ends. It is requested with a
+/// push token (`onPushToken`), which the app gives the daemon: once the
+/// app has been away for a while, the daemon pushes the updates
+/// (docs/dev/push.md "Live Activity updates").
 @MainActor
 final class VoiceLiveActivity {
-    private typealias Content = VoiceSessionAttributes.ContentState
+    private typealias Content = LiveActivityContent
+
+    var onPushToken: (String?) -> Void = { _ in }
 
     private var activity: Activity<VoiceSessionAttributes>?
+    private var tokenTask: Task<Void, Never>?
     private var content: Content?
     private var refreshTask: Task<Void, Never>?
     private var watchTask: Task<Void, Never>?
@@ -61,12 +79,11 @@ final class VoiceLiveActivity {
         }
     }
 
-    func sync(_ state: VoiceActivityState?, voiceName: String) {
-        guard let state else {
+    func sync(_ state: LiveActivityContent?, voiceName: String) {
+        guard let next = state else {
             end()
             return
         }
-        let next = Content(state)
         if let activity {
             guard next != content else { return }
             content = next
@@ -83,11 +100,12 @@ final class VoiceLiveActivity {
             let started = try Activity.request(
                 attributes: VoiceSessionAttributes(voiceName: voiceName),
                 content: Self.activityContent(next),
-                pushType: nil
+                pushType: .token
             )
             activity = started
             content = next
             watch(started)
+            watchToken(started)
             startRefreshing()
         } catch {
             // Not allowed right now (in the background, or too many
@@ -100,7 +118,9 @@ final class VoiceLiveActivity {
         dismissedByUser = false
         refreshTask?.cancel(); refreshTask = nil
         watchTask?.cancel(); watchTask = nil
+        tokenTask?.cancel(); tokenTask = nil
         guard let ending = activity else { return }
+        onPushToken(nil)
         let last = content.map { ActivityContent(state: $0, staleDate: nil) }
         activity = nil
         content = nil
@@ -118,7 +138,24 @@ final class VoiceLiveActivity {
                 self.content = nil
                 self.dismissedByUser = true
                 self.refreshTask?.cancel(); self.refreshTask = nil
+                self.tokenTask?.cancel(); self.tokenTask = nil
+                self.onPushToken(nil)
                 return
+            }
+        }
+    }
+
+    /// Drops the cached content, so the next sync updates the banner.
+    func forgetShown() {
+        if activity != nil { content = nil }
+    }
+
+    /// Hands every push token iOS issues for the activity to the daemon.
+    private func watchToken(_ watched: Activity<VoiceSessionAttributes>) {
+        tokenTask = Task { [weak self] in
+            for await token in watched.pushTokenUpdates {
+                guard let self, self.activity?.id == watched.id else { return }
+                self.onPushToken(PushToken.hex(token))
             }
         }
     }
@@ -129,29 +166,17 @@ final class VoiceLiveActivity {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(VoiceActivityState.refreshInterval * 1_000_000_000))
-                guard !Task.isCancelled, let self, let activity = self.activity, let content = self.content else { return }
+                try? await Task.sleep(nanoseconds: UInt64(LiveActivityContent.refreshInterval * 1_000_000_000))
+                guard !Task.isCancelled, let self, let activity = self.activity else { return }
+                // No cached content (forgetShown): the next sync writes it.
+                guard let content = self.content else { continue }
                 await activity.update(Self.activityContent(content))
             }
         }
     }
 
     private static func activityContent(_ state: Content) -> ActivityContent<Content> {
-        ActivityContent(state: state, staleDate: Date().addingTimeInterval(VoiceActivityState.staleAfter))
-    }
-}
-
-extension VoiceSessionAttributes.ContentState {
-    init(_ state: VoiceActivityState) {
-        self.init(
-            phase: state.phase.rawValue,
-            muted: state.muted,
-            waiting: state.waiting,
-            title: state.title,
-            waitingText: state.waitingText,
-            accessibilityLabel: state.accessibilityLabel,
-            compactAccessibilityLabel: state.compactAccessibilityLabel
-        )
+        ActivityContent(state: state, staleDate: Date().addingTimeInterval(LiveActivityContent.staleAfter))
     }
 }
 
@@ -167,7 +192,7 @@ final class EarbudRemote {
     private var targets: [(MPRemoteCommand, Any)] = []
     private var info: [String: Any] = [:]
 
-    func sync(_ state: VoiceActivityState?, voiceName: String) {
+    func sync(_ state: LiveActivityContent?, voiceName: String) {
         guard let state else {
             deactivate()
             return
@@ -175,7 +200,7 @@ final class EarbudRemote {
         if targets.isEmpty { activate() }
         var next: [String: Any] = [
             MPMediaItemPropertyTitle: voiceName,
-            MPMediaItemPropertyArtist: state.waitingText.map { "\(state.title) · \($0)" } ?? state.title,
+            MPMediaItemPropertyArtist: LiveActivityContent.waitingText(state.waiting).map { "\(state.title) · \($0)" } ?? state.title,
             MPNowPlayingInfoPropertyIsLiveStream: true,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyPlaybackRate: RemoteCommand.playbackRate(muted: state.muted),

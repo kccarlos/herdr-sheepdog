@@ -4,13 +4,18 @@
 <meta charset="utf-8">
 <title>sheepdog debug</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="/static/logo-solid.svg">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/shared.css">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/debug/style.css">
 </head>
 <body>
 <header>
-  <span class="logo"><img src="/static/logo-solid.svg" alt="" width="28" height="28"></span>
-  <h1>sheepdog <span class="muted">debug</span></h1>
+  <h1><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">debug</span></h1>
   <div id="voice-indicator" class="indicator" title="voice session">
     <span class="dot" id="voice-dot"></span>
     <span id="voice-text">voice: …</span>
@@ -44,15 +49,6 @@
   <a href="/voice">voice page</a>
 </header>
 
-<section class="card hidden" id="auth-gate">
-  <h2>Token required</h2>
-  <p class="muted small">This daemon requires a token (config <code>web.token</code>). Enter it once; the browser remembers it.</p>
-  <div class="row">
-    <input id="auth-token" type="password" placeholder="token" autocomplete="off">
-    <button id="auth-submit" class="primary">Unlock</button>
-  </div>
-  <p id="auth-error" class="error hidden"></p>
-</section>
 
 <nav class="tabs" id="tabs">
   <button data-tab="swimlane">Swimlane</button>

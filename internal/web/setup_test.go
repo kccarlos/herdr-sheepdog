@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -39,15 +41,14 @@ func fakeGemini(t *testing.T) string {
 
 type setupFixture struct {
 	h        *harness
+	sd       *SetupDeps
 	dir, env string
 	restarts chan string
 	demo     *fakeDemo
 }
 
-func newSetupFixture(t *testing.T, cfg config.Config, token string) *setupFixture {
+func newSetupFixture(t *testing.T, cfg config.Config) *setupFixture {
 	t.Helper()
-	t.Setenv("SHEEPDOG_WEB_TOKEN", "")
-	_ = os.Unsetenv("SHEEPDOG_WEB_TOKEN")
 	if cfg.Push.Mode == "" {
 		cfg.Push.Mode = "off" // never call the deployed relay from tests
 	}
@@ -62,7 +63,8 @@ func newSetupFixture(t *testing.T, cfg config.Config, token string) *setupFixtur
 		},
 		TailscaleCLI: func() bool { return false },
 	}
-	f.h = newHarness(t, harnessOpts{setup: sd, token: token, restart: func(r string) { f.restarts <- r }})
+	f.sd = sd
+	f.h = newHarness(t, harnessOpts{setup: sd, restart: func(r string) { f.restarts <- r }})
 	return f
 }
 
@@ -104,9 +106,9 @@ func (f *setupFixture) waitRestart(t *testing.T) string {
 
 // TestSetupIsLoopbackOnly: the page and its API answer only a loopback
 // client that names a loopback host, and a change only from this
-// origin as JSON; even with a token configured, the token is not needed.
+// origin as JSON; no device key is needed there.
 func TestSetupIsLoopbackOnly(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "a-token-of-thirty-two-characters!")
+	f := newSetupFixture(t, config.Default())
 	mux := f.h.srv.Handler()
 	do := func(method, path, remote, host string, hdr map[string]string) *httptest.ResponseRecorder {
 		var body io.Reader
@@ -115,6 +117,9 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 		}
 		r := httptest.NewRequest(method, path, body)
 		r.RemoteAddr, r.Host = remote, host
+		if !strings.HasPrefix(remote, "127.") && !strings.HasPrefix(remote, "[::1]") {
+			r.TLS = &tls.ConnectionState{} // another machine comes over TLS
+		}
 		for k, v := range hdr {
 			r.Header.Set(k, v)
 		}
@@ -130,13 +135,16 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 	}{
 		{"page from loopback", "GET", "/setup", "127.0.0.1:5000", "127.0.0.1:7777", nil, 200},
 		{"page from ::1 as localhost", "GET", "/setup/setup.js", "[::1]:5000", "localhost:7777", nil, 200},
-		{"state from loopback, no token", "GET", "/api/setup/state", "127.0.0.1:5000", "127.0.0.1:7777", nil, 200},
+		{"state from loopback, no device key", "GET", "/api/setup/state", "127.0.0.1:5000", "127.0.0.1:7777", nil, 200},
 		{"page from the LAN", "GET", "/setup", "192.168.1.50:5000", "192.168.1.20:7777", nil, 403},
 		{"api from the LAN", "GET", "/api/setup/state", "100.101.1.2:5000", "100.101.1.1:7777", nil, 403},
 		{"rebinding host name", "GET", "/api/setup/state", "127.0.0.1:5000", "evil.example:7777", nil, 403},
 		{"post from another origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}, 403},
 		{"form post", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "text/plain"}, 403},
 		{"post from this origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "http://127.0.0.1:7777"}, 200},
+		{"models from the LAN", "POST", "/api/setup/models", "192.168.1.50:5000", "192.168.1.20:7777", json, 403},
+		{"probe from the LAN", "POST", "/api/setup/probe", "192.168.1.50:5000", "192.168.1.20:7777", json, 403},
+		{"models from another origin", "POST", "/api/setup/models", "127.0.0.1:5000", "127.0.0.1:7777", map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}, 403},
 		{"post without origin", "POST", "/api/setup/demo", "127.0.0.1:5000", "127.0.0.1:7777", json, 200},
 	}
 	for _, c := range cases {
@@ -144,18 +152,18 @@ func TestSetupIsLoopbackOnly(t *testing.T) {
 		if w.Code != c.want {
 			t.Errorf("%s: %d, want %d (%s)", c.name, w.Code, c.want, w.Body.String())
 		}
-		if c.want == 403 && !strings.Contains(w.Body.String(), "The setup page only opens on the computer sheepdog runs on") {
+		if c.want == 403 && c.name != "rebinding host name" && !strings.Contains(c.name, "another origin") && !strings.Contains(w.Body.String(), "The setup page only opens on the computer sheepdog runs on") {
 			t.Errorf("%s: body %q", c.name, w.Body.String())
 		}
 	}
-	// The voice page's API still needs the token from the LAN.
+	// The voice page's API still needs a paired device from the LAN.
 	if w := do("GET", "/api/state", "192.168.1.50:5000", "192.168.1.20:7777", nil); w.Code != 401 {
-		t.Errorf("/api/state from the LAN without a token: %d", w.Code)
+		t.Errorf("/api/state from the LAN without a device: %d", w.Code)
 	}
 }
 
 func TestSetupKeysValidateSaveAndNeverEcho(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 
 	// A key that is needed and missing: nothing saved.
 	code, body := f.post(t, "/api/setup/keys", `{}`)
@@ -200,6 +208,12 @@ func TestSetupKeysValidateSaveAndNeverEcho(t *testing.T) {
 	if !strings.Contains(logged.String(), "web.setup_saved") || !strings.Contains(logged.String(), "GEMINI_API_KEY") {
 		t.Fatalf("the event log does not have the save (so the check below proves nothing): %d bytes", logged.Len())
 	}
+	// The cards, cost lines and summary template come from the daemon
+	// (onboard.Start), the table the terminal setup prints from too.
+	var served struct{ Start onboard.StartInfo }
+	if err := json.Unmarshal([]byte(state), &served); err != nil || !reflect.DeepEqual(served.Start, onboard.Start()) {
+		t.Errorf("state.start = %+v (%v)", served.Start.Cards, err)
+	}
 	if strings.Contains(state, goodKey) || strings.Contains(logged.String(), goodKey) || strings.Contains(logged.String(), bad) {
 		t.Error("a key reached the state or the event log")
 	}
@@ -220,7 +234,7 @@ func TestSetupKeysKeepsTheSavedKey(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
 	cfg.DeepSeek.APIKey = "sk-saved"
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	if err := onboard.UpsertEnvFile(f.env, map[string]string{"GEMINI_API_KEY": goodKey, "SHEEPDOG_BRAIN_PROVIDER": "deepseek", "SHEEPDOG_BRAIN_MODEL": "deepseek-flash", "OTHER": "kept"}); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +256,7 @@ func TestSetupKeysKeepsTheSavedKey(t *testing.T) {
 func TestSetupCompatAddsTheProvider(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gemini.APIKeys = []string{goodKey}
-	f := newSetupFixture(t, cfg, "")
+	f := newSetupFixture(t, cfg)
 	compat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":[{"id":"local-model"}]}`)
 	}))
@@ -264,64 +278,39 @@ func TestSetupCompatAddsTheProvider(t *testing.T) {
 	}
 }
 
-// TestSetupPhoneTokenRules: phone access binds every address and makes
-// a token only when none exists; an existing token is never replaced
-// unless "new token" is asked for; off goes back to loopback.
-func TestSetupPhoneTokenRules(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
-	if code, body := f.post(t, "/api/setup/phone", `{"enable":true}`); code != 200 || !strings.Contains(body, `"token_created": true`) {
+// TestSetupPhoneAccess: phone access binds every address; off goes back
+// to loopback. No secret is written: devices pair with a one-time code.
+func TestSetupPhoneAccess(t *testing.T) {
+	f := newSetupFixture(t, config.Default())
+	if code, body := f.post(t, "/api/setup/phone", `{"enable":true}`); code != 200 || strings.Contains(body, "token") {
 		t.Fatalf("enable: %d %s", code, body)
 	}
 	f.waitRestart(t)
 	env, _ := onboard.ReadEnvFile(f.env)
-	tok := env["SHEEPDOG_WEB_TOKEN"]
-	if env["SHEEPDOG_WEB_BIND"] != "0.0.0.0" || len(tok) < onboard.MinTokenLen {
-		t.Fatalf("bind %q token length %d", env["SHEEPDOG_WEB_BIND"], len(tok))
+	if env["SHEEPDOG_WEB_BIND"] != "0.0.0.0" || len(env) != 1 {
+		t.Fatalf("env = %v", keysOf(env))
 	}
-	// Again (setup run twice): the token stays.
-	if code, body := f.post(t, "/api/setup/phone", `{"enable":true}`); code != 200 || !strings.Contains(body, `"token_created": false`) {
-		t.Fatalf("enable again: %d %s", code, body)
-	}
-	env, _ = onboard.ReadEnvFile(f.env)
-	if env["SHEEPDOG_WEB_TOKEN"] != tok {
-		t.Fatal("the token was replaced silently")
-	}
-	// Explicit new token.
-	if code, body := f.post(t, "/api/setup/phone", `{"enable":true,"new_token":true}`); code != 200 || !strings.Contains(body, `"token_created": true`) {
-		t.Fatalf("new token: %d %s", code, body)
-	}
-	env, _ = onboard.ReadEnvFile(f.env)
-	if env["SHEEPDOG_WEB_TOKEN"] == tok {
-		t.Fatal("new token did not replace it")
-	}
-	// Off: loopback, the token kept.
 	if code, _ := f.post(t, "/api/setup/phone", `{"enable":false}`); code != 200 {
 		t.Fatal("off")
 	}
 	env, _ = onboard.ReadEnvFile(f.env)
-	if env["SHEEPDOG_WEB_BIND"] != "127.0.0.1" || env["SHEEPDOG_WEB_TOKEN"] == "" {
+	if env["SHEEPDOG_WEB_BIND"] != "127.0.0.1" {
 		t.Errorf("off: %v", keysOf(env))
-	}
-
-	// A token in the config counts: none is created beside it.
-	cfg := config.Default()
-	cfg.Web.Token = "a-config-token-of-thirty-two-chars"
-	g := newSetupFixture(t, cfg, "")
-	if code, body := g.post(t, "/api/setup/phone", `{"enable":true}`); code != 200 || !strings.Contains(body, `"token_created": false`) {
-		t.Fatalf("config token: %d %s", code, body)
 	}
 }
 
-// TestSetupPhoneConnected: an authorized request from another machine
+// TestSetupPhoneConnected: a paired device's request from another machine
 // shows as the phone connecting.
 func TestSetupPhoneConnected(t *testing.T) {
 	cfg := config.Default()
-	cfg.Web.Bind, cfg.Web.Token = "0.0.0.0", "a-token-of-thirty-two-characters!"
-	f := newSetupFixture(t, cfg, cfg.Web.Token)
+	cfg.Web.Bind = "0.0.0.0"
+	f := newSetupFixture(t, cfg)
+	d := f.h.pairDevice()
 	mux := f.h.srv.Handler()
 	r := httptest.NewRequest("GET", "/api/state", nil)
 	r.RemoteAddr = "192.168.1.77:4000"
-	r.Header.Set("Authorization", "Bearer "+cfg.Web.Token)
+	r.TLS = &tls.ConnectionState{}
+	r.Header.Set("Authorization", "Bearer "+ticketPrefix+d.ticket)
 	mux.ServeHTTP(httptest.NewRecorder(), r)
 	body := f.get(t, "/api/setup/state")
 	var st SetupState
@@ -331,14 +320,43 @@ func TestSetupPhoneConnected(t *testing.T) {
 	if !st.Phone.Enabled || !st.Phone.Connected || st.Phone.Remote != "192.168.1.77" {
 		t.Errorf("phone = %+v", st.Phone)
 	}
-	if strings.Contains(body, cfg.Web.Token) {
-		t.Error("the token is in the state")
+	if strings.Contains(body, d.ticket) {
+		t.Error("the ticket is in the state")
+	}
+}
+
+// TestSetupPhoneExplain: the state says which address the QR leads with.
+func TestSetupPhoneExplain(t *testing.T) {
+	cfg := config.Default()
+	cfg.Web.Bind = "0.0.0.0"
+	f := newSetupFixture(t, cfg)
+	old := pairSysAddrs
+	t.Cleanup(func() { pairSysAddrs = old })
+	if err := f.h.srv.Listen("0.0.0.0:0"); err != nil { // the daemon as phone access binds it
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		sys  []pair.IfaceAddr
+		want string
+	}{
+		{[]pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun3", IP: net.ParseIP("198.18.0.1")}}, "Uses your Wi-Fi address 192.168.1.20: the phone must be on the same Wi-Fi"},
+		{[]pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun5", IP: net.ParseIP("100.101.102.103")}}, "Uses your Tailscale address 100.101.102.103: works anywhere your phone is on Tailscale"},
+	} {
+		sys := c.sys
+		pairSysAddrs = func() ([]pair.IfaceAddr, error) { return sys, nil }
+		var st SetupState
+		if err := json.Unmarshal([]byte(f.get(t, "/api/setup/state")), &st); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(st.Phone.Explain, c.want) {
+			t.Errorf("explain = %q, want %q", st.Phone.Explain, c.want)
+		}
 	}
 }
 
 // TestSetupDemoRoutes: start, ping and stop go to the demo control.
 func TestSetupDemoRoutes(t *testing.T) {
-	f := newSetupFixture(t, config.Default(), "")
+	f := newSetupFixture(t, config.Default())
 	for _, a := range []string{"start", "ping", "stop"} {
 		if code, body := f.post(t, "/api/setup/demo", `{"action":"`+a+`"}`); code != 200 {
 			t.Fatalf("%s: %d %s", a, code, body)

@@ -294,7 +294,7 @@ type Reply struct {
 	// something to a worker or recorded something (prompt, send_keys,
 	// interrupt, investigate, promise, note): the supervisor keeps a late
 	// utterance reply that acted as silent context rather than dropping it
-	// (internal/supervisor/utterance.go).
+	// (internal/supervisor/reply.go).
 	Acted bool `json:"-"`
 	// ActedOn lists the panes the turn's actions went to, first first,
 	// each once (set by the orchestrator, never the model): a late reply is
@@ -311,6 +311,11 @@ type Reply struct {
 	// first, each once (set by the orchestrator): the voice is given their state
 	// as of the moment the answer reaches it.
 	Agents []string `json:"-"`
+	// Shown lists the titles of the cards the turn's show calls put on
+	// the user's screen (set by the orchestrator, never the model): the
+	// voice is told a card carries the detail, so it says the line and
+	// does not read the card out.
+	Shown []string `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the orchestrator

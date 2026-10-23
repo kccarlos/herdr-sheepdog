@@ -54,7 +54,7 @@ func fakeKeyAPI(t *testing.T) {
 func noOnboardKeys(t *testing.T) {
 	t.Helper()
 	noKeys(t)
-	for _, k := range []string{"GEMINI_API_KEY_4", "GEMINI_API_KEY_5", "GEMINI_API_KEY_6", "GEMINI_API_KEY_7", "GEMINI_API_KEY_8", "GEMINI_API_KEY_9", "OPENAI_API_KEY", "VERTEX_API_KEY", "VERTEX_PROJECT", "OPENROUTER_API_KEY", "SHEEPDOG_WEB_TOKEN"} {
+	for _, k := range []string{"GEMINI_API_KEY_4", "GEMINI_API_KEY_5", "GEMINI_API_KEY_6", "GEMINI_API_KEY_7", "GEMINI_API_KEY_8", "GEMINI_API_KEY_9", "OPENAI_API_KEY", "VERTEX_API_KEY", "VERTEX_PROJECT", "OPENROUTER_API_KEY"} {
 		t.Setenv(k, "")
 	}
 }
@@ -75,8 +75,8 @@ func mode(t *testing.T, path string) os.FileMode {
 	return st.Mode().Perm()
 }
 
-// A new setup: the key is validated, written 0600 with a fresh long
-// token, config.toml is written 0600 and loads; nothing prints the key.
+// A new setup: the key is validated and written 0600, config.toml is
+// written 0600 and loads; nothing prints the key.
 func TestInitNonInteractiveNew(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
@@ -91,11 +91,8 @@ func TestInitNonInteractiveNew(t *testing.T) {
 		t.Error("the key was printed")
 	}
 	env, err := onboard.ReadEnvFile(envPath)
-	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey || len(env["SHEEPDOG_WEB_TOKEN"]) < 40 {
+	if err != nil || env["GEMINI_API_KEY"] != initGeminiKey {
 		t.Fatalf("env file = %v (%v)", len(env), err)
-	}
-	if strings.Contains(out, env["SHEEPDOG_WEB_TOKEN"]) {
-		t.Error("the token was printed")
 	}
 	if mode(t, envPath) != 0o600 || mode(t, cfgPath) != 0o600 {
 		t.Errorf("modes %o %o", mode(t, envPath), mode(t, cfgPath))
@@ -118,7 +115,7 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(envPath, []byte("SHEEPDOG_WEB_TOKEN=phone-paired-token\n"), 0o600); err != nil {
+	if err := os.WriteFile(envPath, []byte("SHEEPDOG_COMPUTER_NAME=test-mac\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -131,32 +128,18 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, out)
 	}
-	if data, _ := os.ReadFile(cfgPath); string(data) != orig {
-		t.Errorf("config changed: %q", data)
-	}
-	if !strings.Contains(out, `[[brain.openai_compat]]`) || !strings.Contains(out, `provider = "openrouter"`) {
-		t.Errorf("no config hint: %s", out)
+	// The page's save: the provider entry is added to the existing
+	// config (its other settings stay), the choice goes to the env file.
+	data, _ := os.ReadFile(cfgPath)
+	if !strings.HasPrefix(string(data), orig) || !strings.Contains(string(data), `[[brain.openai_compat]]`) || !strings.Contains(string(data), `base_url = "https://example.invalid/api/v1"`) {
+		t.Errorf("config = %q", data)
 	}
 	env, _ := onboard.ReadEnvFile(envPath)
-	if env["SHEEPDOG_WEB_TOKEN"] != "phone-paired-token" || env["OPENROUTER_API_KEY"] != initCompatKey || env["GEMINI_API_KEY"] != initGeminiKey {
-		t.Errorf("env = token %q, keys set %v %v", env["SHEEPDOG_WEB_TOKEN"], env["OPENROUTER_API_KEY"] != "", env["GEMINI_API_KEY"] != "")
+	if env["SHEEPDOG_BRAIN_PROVIDER"] != "openrouter" || env["SHEEPDOG_BRAIN_MODEL"] != "vendor/model-a" {
+		t.Errorf("brain env = %q %q", env["SHEEPDOG_BRAIN_PROVIDER"], env["SHEEPDOG_BRAIN_MODEL"])
 	}
-}
-
-// A token in the environment counts as existing too: a new config does
-// not get a second one.
-func TestInitTokenInEnvironment(t *testing.T) {
-	fakeKeyAPI(t)
-	noOnboardKeys(t)
-	t.Setenv("GEMINI_API_KEY", initGeminiKey)
-	t.Setenv("SHEEPDOG_WEB_TOKEN", "from-the-environment")
-	dir := t.TempDir()
-	if code, out := runInitTest(t, "", "--non-interactive", "--config", filepath.Join(dir, "config.toml")); code != 0 {
-		t.Fatalf("code %d: %s", code, out)
-	}
-	env, _ := onboard.ReadEnvFile(filepath.Join(dir, ".env"))
-	if _, ok := env["SHEEPDOG_WEB_TOKEN"]; ok {
-		t.Error("a token was generated over the environment's")
+	if env["SHEEPDOG_COMPUTER_NAME"] != "test-mac" || env["OPENROUTER_API_KEY"] != initCompatKey || env["GEMINI_API_KEY"] != initGeminiKey {
+		t.Errorf("env = computer name %q, keys set %v %v", env["SHEEPDOG_COMPUTER_NAME"], env["OPENROUTER_API_KEY"] != "", env["GEMINI_API_KEY"] != "")
 	}
 }
 
@@ -178,15 +161,17 @@ func TestInitInvalidKeyWritesNothing(t *testing.T) {
 	}
 }
 
-// Interactive: pick the compat orchestrator from the menu, answer the
-// questions, retry a wrong key; the written config loads with the entry
-// as the provider and its model.
+// Interactive: Custom, Gemini voice, Other URL as the orchestrator;
+// answer the questions, retry a wrong key; the written config loads with
+// the entry as the provider and its model.
 func TestInitInteractiveCompat(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
-	stdin := strings.Join([]string{"3", "openrouter", "", "vendor/model-a", "AIza-wrong", initGeminiKey, initCompatKey}, "\n") + "\n"
+	// card Custom, voice Gemini, wrong key then the key, model and voice
+	// kept, orchestrator Other URL, name, base URL, key, model, no tool test.
+	stdin := strings.Join([]string{"4", "1", "AIza-wrong", initGeminiKey, "", "", "9", "openrouter", "", initCompatKey, "vendor/model-a", "n"}, "\n") + "\n"
 	code, out := runInitTest(t, stdin, "--config", cfgPath)
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, out)
@@ -195,13 +180,15 @@ func TestInitInteractiveCompat(t *testing.T) {
 		t.Error("a key was printed")
 	}
 	t.Setenv("OPENROUTER_API_KEY", initCompatKey)
+	t.Setenv("SHEEPDOG_BRAIN_PROVIDER", "openrouter")
+	t.Setenv("SHEEPDOG_BRAIN_MODEL", "vendor/model-a")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c, ok := cfg.Brain.CompatProvider("openrouter")
-	if !ok || cfg.Brain.Provider != "openrouter" || cfg.Brain.Model != "vendor/model-a" || c.BaseURL != "https://openrouter.ai/api/v1" || c.APIKey != initCompatKey {
-		t.Errorf("brain = %s/%s entry %+v", cfg.Brain.Provider, cfg.Brain.Model, c.BaseURL)
+	if !ok || c.BaseURL != "https://openrouter.ai/api/v1" || c.APIKey != initCompatKey {
+		t.Errorf("entry %+v", c.BaseURL)
 	}
 }
 

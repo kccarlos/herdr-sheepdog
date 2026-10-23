@@ -11,8 +11,8 @@ struct ConversationView: View {
     let voiceName: String
     var canLoadOlder = false
     var loadingOlder = false
-    /// The pending id the pinned approval card is showing, if any.
-    var activePendingID: String?
+    /// The questions floating above the capsule, still open.
+    var openPendingIDs: Set<String> = []
     /// Rows that fold to a one-line pointer while their question is
     /// pinned on the approval card (`QuestionFocus`).
     var pointerIDs: Set<String> = []
@@ -20,8 +20,12 @@ struct ConversationView: View {
     /// Changes when the user typed something: follow the conversation
     /// to its end even if it was scrolled up (the keyboard shrinks it).
     var followToken = 0
+    /// The empty conversation's example questions.
+    var ask: ((String) -> Void)?
 
     @State private var atBottom = true
+    /// The list's own height on screen.
+    @State private var visibleHeight: CGFloat = 1000
     @State private var lastSeenID: String?
     /// The "N updates" rows the user opened, by their id.
     @State private var openGroups: Set<String> = []
@@ -40,8 +44,8 @@ struct ConversationView: View {
                         }
                     }
                     if !hasContent {
-                        EmptyConversation(voiceName: voiceName)
-                            .padding(.top, 28)
+                        EmptyConversation(voiceName: voiceName, ask: ask)
+                            .padding(.top, 60)
                     }
                     // Runs of the daemon's pushes and notices fold into one
                     // "N updates" row; what was said stays in the open.
@@ -52,16 +56,16 @@ struct ConversationView: View {
                                 if pointerIDs.contains(row.id) {
                                     QuestionPointer(row: row)
                                 } else {
-                                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
                                 }
                             case let .updates(id, members):
                                 UpdatesGroup(
                                     rows: members,
                                     isOpen: openGroups.contains(id),
                                     voiceName: voiceName,
-                                    activePendingID: activePendingID
+                                    openPendingIDs: openPendingIDs
                                 ) {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                    withAnimation(Theme.ease) {
                                         if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
                                     }
                                 }
@@ -101,13 +105,19 @@ struct ConversationView: View {
                 .padding(.vertical, 12)
             }
             .defaultScrollAnchor(.bottom)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                let rounded = h.rounded()
+                if rounded != visibleHeight { visibleHeight = rounded }
+            }
             .refreshable {
                 // Pulling down at the top is "show me what came before".
                 guard canLoadOlder else { return }
                 await loadKeepingPosition(proxy)
             }
             .overlay(alignment: .bottom) {
-                if !atBottom, let newest = rows.last?.id, newest != lastSeenID {
+                // Not when the list is a sliver (keyboard and question up):
+                // the pill would sit on the agent strip.
+                if !atBottom, visibleHeight > 160, let newest = rows.last?.id, newest != lastSeenID {
                     Button {
                         withAnimation { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
                     } label: {
@@ -130,22 +140,22 @@ struct ConversationView: View {
             .onChange(of: rows.last) { _, newest in
                 guard atBottom else { return }
                 if let id = newest?.id, id != lastSeenID { lastSeenID = id }
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(Theme.ease) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
             .onChange(of: followToken) { _, _ in
                 atBottom = true
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(Theme.ease) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
-            .onChange(of: activePendingID) { _, _ in
+            .onChange(of: openPendingIDs) { _, _ in
                 // The pinned card appearing or leaving resizes the list:
                 // keep the newest message, the one it is about, in view.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 350_000_000)
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(Theme.ease) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                     }
                 }
@@ -200,7 +210,7 @@ private struct OlderButton: View {
 struct RowView: View {
     let row: TimelineRow
     let voiceName: String
-    let activePendingID: String?
+    let openPendingIDs: Set<String>
 
     var body: some View {
         switch row {
@@ -215,7 +225,9 @@ struct RowView: View {
             case .push:
                 SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), voiceName: voiceName)
             case .approval:
-                ApprovalItemCard(item: item, isPinned: item.pendingID != nil && item.pendingID == activePendingID)
+                ApprovalItemCard(item: item, isPinned: item.pendingID.map { openPendingIDs.contains($0) } ?? false)
+            case .card:
+                CardRow(card: item.card, text: item.text, at: item.card?.at ?? item.ts)
             case .notice, .unknown:
                 NoticeDivider(title: item.text)
             }
@@ -225,6 +237,8 @@ struct RowView: View {
             BrainReplyCard(reply: reply, compact: compact, voiceName: voiceName)
         case let .held(push):
             HeldPushCard(push: push)
+        case let .card(card):
+            CardRow(card: card, text: card.displayTitle, at: card.at ?? Date())
         }
     }
 }
@@ -235,8 +249,10 @@ struct UpdatesGroup: View {
     let rows: [TimelineRow]
     let isOpen: Bool
     let voiceName: String
-    let activePendingID: String?
+    let openPendingIDs: Set<String>
     let toggle: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var title: String { ConversationTimeline.updatesTitle(rows.count) }
     private var latest: String { rows.last.map(ConversationTimeline.updateText) ?? "" }
@@ -244,35 +260,38 @@ struct UpdatesGroup: View {
     var body: some View {
         VStack(spacing: 8) {
             Button(action: toggle) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "bell.badge")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.idle)
-                    VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "bell")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.muted)
+                        .padding(.top, 1)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(title)
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
+                            .contentTransition(.numericText())
+                            .animation(Theme.ease, value: rows.count)
                         if !isOpen, !latest.isEmpty {
                             Text(latest)
-                                .font(.footnote)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                                 .truncationMode(.tail)
                         }
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.muted)
                         .rotationEffect(.degrees(isOpen ? 180 : 0))
+                        .padding(.top, 3)
+                        .accessibilityHidden(true)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color(.separator), lineWidth: 0.5)
-                )
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .rowCard()
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -284,7 +303,7 @@ struct UpdatesGroup: View {
 
             if isOpen {
                 ForEach(rows) { row in
-                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
                 }
                 .transition(.opacity)
             }
@@ -308,6 +327,7 @@ struct BrainReplyCard: View {
             if !compact {
                 HStack(spacing: 6) {
                     Image(systemName: "brain")
+                        .accessibilityHidden(true)
                     Text("Orchestrator → \(voiceName)")
                     if reply.clarify { tag("asks you to say more") }
                 }
@@ -321,6 +341,7 @@ struct BrainReplyCard: View {
                 } else {
                     MarkdownText(reply.spoken)
                         .font(.callout)
+                        .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -342,22 +363,17 @@ struct BrainReplyCard: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } label: {
-                    Text(reply.detail != nil && !reply.pending ? "Detail" : "Raw")
-                        .font(.footnote.weight(.medium))
+                    Label(reply.detail != nil && !reply.pending ? (compact ? "Orchestrator detail" : "Detail") : "Raw", systemImage: "info.circle")
+                        .font(.footnote.weight(.semibold))
                 }
                 .tint(Theme.thinking)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, compact ? 6 : 10)
+        .padding(.horizontal, compact ? 6 : 12)
+        .padding(.vertical, compact ? 0 : 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Theme.thinking.opacity(compact ? 0.05 : 0.08))
-        )
-        .overlay(alignment: .leading) {
-            Rectangle().fill(Theme.thinking.opacity(0.6)).frame(width: 3).padding(.vertical, 8)
-        }
+        // Compact: a quiet line under the voice's own bubble, no frame.
+        .modifier(RowCard(enabled: !compact))
         .padding(.trailing, compact ? 44 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bubble.brain")
@@ -368,7 +384,7 @@ struct BrainReplyCard: View {
             .font(.caption2.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
-            .background(Theme.thinking.opacity(0.15), in: Capsule())
+            .background(Theme.thinkingSoft, in: Capsule())
     }
 }
 
@@ -388,10 +404,11 @@ struct FlowOptions: View {
     private var chips: some View {
         ForEach(Array(options.enumerated()), id: \.offset) { _, option in
             Text(option)
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color(.tertiarySystemFill), in: Capsule())
+                .font(.footnote)
+                .foregroundStyle(Theme.thinking)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Theme.thinkingSoft, in: Capsule())
         }
     }
 }
@@ -455,10 +472,8 @@ struct DayDivider: View {
     var body: some View {
         Text(ConversationTimeline.dayTitle(date))
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(Color(.tertiarySystemFill), in: Capsule())
+            .foregroundStyle(Theme.muted)
+            .padding(.vertical, 2)
             .frame(maxWidth: .infinity)
             .padding(.top, 6)
             .accessibilityAddTraits(.isHeader)
@@ -474,8 +489,8 @@ struct NoticeDivider: View {
         HStack(spacing: 10) {
             line
             Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.muted)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .layoutPriority(1)
@@ -488,8 +503,8 @@ struct NoticeDivider: View {
 
     private var line: some View {
         Rectangle()
-            .fill(Color(.separator))
-            .frame(height: 0.5)
+            .fill(Theme.line)
+            .frame(height: 1)
             .frame(maxWidth: .infinity)
     }
 }
@@ -505,32 +520,29 @@ struct ApprovalItemCard: View {
     private var confirmed: Bool { item.resolution == .confirmed }
     private var declined: Bool { confirmed && PendingOption(index: 0, label: item.answer ?? "").isNegative }
 
+    /// "search asked · 9:52".
+    private var asked: String {
+        let who = item.agent.map { "\($0) asked" } ?? "An agent asked"
+        return "\(who) · \(ConversationTimeline.defaultTimeFormatter.string(from: item.ts))"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "hand.raised.fill")
-                    .font(.caption)
-                    .foregroundStyle(outcome == nil && isPinned ? Theme.blocked : .secondary)
-                Text(item.agent.map { "\($0) asked" } ?? "An agent asked")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(asked)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.muted)
             Text(item.text)
                 .font(.callout)
+                .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             status
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(outcome == nil && isPinned ? Theme.blocked.opacity(0.10) : Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(outcome == nil && isPinned ? Theme.blocked.opacity(0.45) : .clear, lineWidth: 1)
-        )
+        .rowCard(border: outcome == nil && isPinned ? Theme.blocked : Theme.line)
+        // The floating question collapses into this row once settled.
+        .modifier(SettledMatch(id: outcome == nil ? nil : item.pendingID))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("bubble.approval")
     }
@@ -538,9 +550,10 @@ struct ApprovalItemCard: View {
     @ViewBuilder
     private var status: some View {
         if let outcome {
-            Label(outcome, systemImage: confirmed ? (declined ? "xmark.circle.fill" : "checkmark.circle.fill") : "clock.badge.xmark")
+            Label(outcome, systemImage: confirmed ? (declined ? "xmark" : "checkmark") : "clock.badge.xmark")
                 .font(.footnote.weight(confirmed ? .semibold : .regular))
-                .foregroundStyle(confirmed ? (declined ? Color(.systemRed) : Theme.done) : .secondary)
+                .foregroundStyle(confirmed ? (declined ? Theme.danger : Theme.done) : Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("approval.outcome")
         } else if isPinned {
             Label("Waiting for your answer — below", systemImage: "arrow.down.circle")
@@ -549,7 +562,7 @@ struct ApprovalItemCard: View {
         } else {
             Label("Not answered here", systemImage: "circle.dashed")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
         }
     }
 }
@@ -577,21 +590,28 @@ struct SpeechBubble: View {
     let voiceName: String
 
     var body: some View {
+        // The user's words on the right in a warm neutral, the voice's on
+        // the left on a card: the accent stays free for the question.
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 20,
+            bottomLeadingRadius: isShepherd ? 20 : 6,
+            bottomTrailingRadius: isShepherd ? 6 : 20,
+            topTrailingRadius: 20,
+            style: .continuous
+        )
         HStack {
-            if isShepherd { Spacer(minLength: 44) }
+            if isShepherd { Spacer(minLength: 56) }
             Text(text + (isFinal ? "" : " …"))
                 .font(.body)
+                .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    isShepherd ? Color.accentColor : Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .foregroundStyle(isShepherd ? Color.white : Color.primary)
-                .frame(maxWidth: 300, alignment: isShepherd ? .trailing : .leading)
-            if !isShepherd { Spacer(minLength: 44) }
+                .padding(.vertical, 9)
+                .background(shape.fill(isShepherd ? Theme.bubble : Theme.card))
+                .overlay { if !isShepherd { shape.strokeBorder(Theme.line, lineWidth: 1) } }
+                .opacity(isFinal ? 1 : 0.75)
+            if !isShepherd { Spacer(minLength: 40) }
         }
         // One element per bubble, read as a sentence: "You said, what's
         // going on." Keeping the words in the label (not the value) is what
@@ -619,23 +639,21 @@ struct SystemCard: View {
         }()
 
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isPush ? "bell.fill" : "info.circle")
-                .font(.footnote)
-                .foregroundStyle(Theme.idle)
-                .padding(.top, 2)
+            Image(systemName: isPush ? "bell" : "info.circle")
+                .font(.subheadline)
+                .foregroundStyle(Theme.muted)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
             Text(text)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.subheadline)
+                .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
+        .rowCard()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(isPush ? "\(voiceName) says" : "Notice"), \(text)")
         .accessibilityIdentifier(isPush ? "bubble.push" : "bubble.notice")
@@ -662,7 +680,7 @@ struct QuestionPointer: View {
             Image(systemName: "arrow.down.circle")
                 .foregroundStyle(Theme.blockedText)
             Text(text)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -677,21 +695,86 @@ struct QuestionPointer: View {
 
 struct EmptyConversation: View {
     let voiceName: String
+    /// Sends an example as if typed; nil when there is no daemon to ask.
+    var ask: ((String) -> Void)?
+
+    private static let examples = ["What's going on?", "Is anyone stuck?"]
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-            Text("Nothing said yet")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("Connect and talk to \(voiceName). What you say and what it answers shows up here.")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 12) {
+            MascotCard(name: "MascotListening", width: 150)
+                .frame(height: 167)
+            Text("Just talk")
+                .font(.title.weight(.bold))
+                .fontDesign(.rounded)
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 6)
+            Text("Ask what your agents are doing, or tell one what to do next.")
+                .font(.body)
+                .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
+                .fixedSize(horizontal: false, vertical: true)
+            if let ask {
+                OptionFlow(spacing: 8) {
+                    ForEach(Self.examples, id: \.self) { example in
+                        Button { ask(example) } label: {
+                            Text(example)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .background(Capsule().fill(Theme.card))
+                                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Asks \(voiceName)")
+                    }
+                }
+                .fixedSize()
+                .padding(.top, 6)
+                .accessibilityIdentifier("conversation.examples")
+            }
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("conversation.empty")
+    }
+}
+
+/// The conversation's card look (canvas): white on the warm surface, a
+/// hairline, radius 14. The border can carry a state (an open question's
+/// amber).
+struct RowCard: ViewModifier {
+    var enabled = true
+    var border: Color = Theme.line
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(border, lineWidth: 1))
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func rowCard(border: Color = Theme.line) -> some View {
+        modifier(RowCard(border: border))
+    }
+}
+
+/// `matchedInMotion` for a settled approval row with a question id.
+private struct SettledMatch: ViewModifier {
+    let id: String?
+
+    func body(content: Content) -> some View {
+        if let id {
+            content.matchedInMotion(id: id)
+        } else {
+            content
+        }
     }
 }

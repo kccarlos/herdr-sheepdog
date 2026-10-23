@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 
 	"google.golang.org/genai"
 )
@@ -44,25 +43,22 @@ var ErrClaudeUsageLimit = errors.New("claude cli: usage limit reached")
 type ClaudeCLI struct {
 	// Bin is the claude executable (default "claude" on PATH).
 	Bin string
-	// Dir is the working directory of each call; empty makes one empty
-	// temporary directory on first use (so no project CLAUDE.md loads).
+	// Dir is the working directory of each call; empty gives each call an
+	// empty temporary directory (so no project CLAUDE.md loads), removed
+	// when the call returns.
 	Dir string
-
-	mu sync.Mutex
 }
 
-func (c *ClaudeCLI) workDir() (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// workDir returns the call's working directory and its cleanup.
+func (c *ClaudeCLI) workDir() (string, func(), error) {
 	if c.Dir != "" {
-		return c.Dir, nil
+		return c.Dir, func() {}, nil
 	}
 	d, err := os.MkdirTemp("", "sheepdog-claude-judge-")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	c.Dir = d
-	return d, nil
+	return d, func() { _ = os.RemoveAll(d) }, nil
 }
 
 // cliResult is the part of `claude -p --output-format json` read here.
@@ -82,10 +78,11 @@ type cliResult struct {
 
 // Generate implements brain.Model.
 func (c *ClaudeCLI) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-	dir, err := c.workDir()
+	dir, cleanup, err := c.workDir()
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	args := []string{"-p", "--model", orDefault(model, DefaultClaudeModel), "--output-format", "json",
 		"--tools", "", "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--disable-slash-commands"}
 	if cfg != nil && cfg.SystemInstruction != nil {

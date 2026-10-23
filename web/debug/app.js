@@ -654,7 +654,7 @@ function setupInject() {
 
   const sendUtterance = (text) => {
     if (!text) return;
-    showResult('utt-result', post('/api/inject/utterance', { text }));
+    showResult('utt-result', post('/api/utterance', { text }));
   };
   $('utt-send').addEventListener('click', () => sendUtterance($('utt-text').value.trim()));
   $('utt-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendUtterance($('utt-text').value.trim()); });
@@ -722,7 +722,7 @@ function setupConversation() {
     const text = $('conv-text').value.trim();
     if (!text) return;
     $('conv-text').value = '';
-    showResult('conv-result', post('/api/inject/utterance', { text }));
+    showResult('conv-result', post('/api/utterance', { text }));
   };
   $('conv-send').addEventListener('click', sendChat);
   $('conv-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -839,7 +839,7 @@ function setupSupervisor() {
     const text = $('svp-text').value.trim();
     if (!text) return;
     $('svp-text').value = '';
-    showResult('svp-result', post('/api/inject/utterance', { text }));
+    showResult('svp-result', post('/api/utterance', { text }));
   };
   $('svp-send').addEventListener('click', sendChat);
   $('svp-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -902,7 +902,7 @@ function setupSwimlane() {
     const text = $('sw-text').value.trim();
     if (!text) return;
     $('sw-text').value = '';
-    showResult('sw-result', post('/api/inject/utterance', { text }));
+    showResult('sw-result', post('/api/utterance', { text }));
   };
   $('sw-send').addEventListener('click', sendChat);
   $('sw-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -968,19 +968,12 @@ function setupTabs() {
 
 // ---------------------------------------------------------------- auth
 
-// authGate probes an endpoint that needs the daemon's token (config
-// web.token) before anything else runs; see web/voice/app.js's copy of
-// this function for the full rationale (no token configured, or the
-// cookie an earlier POST /api/login left already covers it: the rest of
-// boot() proceeds; a 401 shows the inline prompt and hides the tabs
-// instead of wiring up controls that would only 401 themselves).
-// Submitting POSTs /api/login and reloads the page on success.
-// showPairing fetches the addresses and shows the pairing QR code (it
-// holds the token, so it is shown only on request and never cached).
+// showPairing shows a new one-time pairing code and its addresses (shown
+// only on request, never cached; /debug answers this computer only).
 async function showPairing() {
   const err = $('pair-error');
   try {
-    const { status, data: p } = await getJSON('/api/pair');
+    const { status, data: p } = await getJSON('/api/pair?new=1');
     if (status !== 200 || p.error) {
       err.textContent = p.error || `HTTP ${status}`;
       err.classList.remove('hidden');
@@ -996,9 +989,7 @@ async function showPairing() {
       li.textContent = `${a.kind}: ${a.url}`;
       ul.appendChild(li);
     }
-    $('pair-note').textContent = p.has_token
-      ? 'The code holds the web token: treat it like a password.'
-      : 'No web.token is set: anyone on these networks can use the daemon.';
+    $('pair-note').textContent = 'The code works once and expires at ' + new Date(p.expires).toLocaleTimeString() + '.';
     $('pair-body').classList.remove('hidden');
   } catch (e) {
     err.textContent = `pairing: ${e.message || e}`;
@@ -1006,41 +997,10 @@ async function showPairing() {
   }
 }
 
-async function authGate() {
-  let res;
-  try {
-    res = await fetch('/api/state', { cache: 'no-store' });
-  } catch (_) {
-    return true; // offline: let the rest of the page surface the error
-  }
-  if (res.status !== 401) return true;
-  $('auth-gate').classList.remove('hidden');
-  $('tabs').classList.add('hidden');
-  $('app-main').classList.add('hidden');
-  const submit = async () => {
-    const token = $('auth-token').value.trim();
-    if (!token) return;
-    $('auth-submit').disabled = true;
-    try {
-      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || `${r.status}`);
-      location.reload();
-    } catch (err) {
-      $('auth-error').textContent = `error: ${err.message}`;
-      $('auth-error').classList.remove('hidden');
-      $('auth-submit').disabled = false;
-    }
-  };
-  $('auth-submit').addEventListener('click', submit);
-  $('auth-token').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  return false;
-}
 
 // ------------------------------------------------------------------ main
 
 async function boot() {
-  if (!(await authGate())) return; // token prompt is up; the rest resumes after a reload
   setupTabs();
   setupEventControls();
   setupSettings();

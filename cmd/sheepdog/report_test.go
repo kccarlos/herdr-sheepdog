@@ -36,23 +36,18 @@ func TestReportNeverContainsSecrets(t *testing.T) {
 		"DEEPSEEK_API_KEY":   "sk-deepseekfake000000000004",
 		"OPENAI_API_KEY":     "sk-proj-openaifake0000000005",
 		"OPENROUTER_API_KEY": "sk-or-v1-openrouterfake000006",
-		"SHEEPDOG_WEB_TOKEN": "webtokenFAKEFAKEFAKEFAKE000007",
 	}
-	const fileToken = "configFileTokenFAKE0000000008"
 	dir := t.TempDir()
 	data := filepath.Join(dir, "data")
 	cfgPath := filepath.Join(dir, "config.toml")
 	envPath := filepath.Join(dir, ".env")
 	port := freePort(t)
-	cfgBody := fmt.Sprintf("data_dir = %q\n[web]\nport = %d\ntoken = %q\n[deepseek]\nbase_url = \"http://127.0.0.1:9\"\n[[brain.openai_compat]]\nname = \"openrouter\"\nbase_url = \"http://127.0.0.1:9/v1\"\napi_key_env = \"OPENROUTER_API_KEY\"\nmodel = \"x/y\"\n", data, port, fileToken)
+	cfgBody := fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n[deepseek]\nbase_url = \"http://127.0.0.1:9\"\n[[brain.openai_compat]]\nname = \"openrouter\"\nbase_url = \"http://127.0.0.1:9/v1\"\napi_key_env = \"OPENROUTER_API_KEY\"\nmodel = \"x/y\"\n", data, port)
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var env strings.Builder
 	for k, v := range secrets {
-		if k == "SHEEPDOG_WEB_TOKEN" {
-			continue // the file's token is the one in force
-		}
 		fmt.Fprintf(&env, "%s=%s\n", k, v)
 		t.Setenv(k, "") // a value already in the environment would win over the file
 		_ = os.Unsetenv(k)
@@ -69,7 +64,6 @@ func TestReportNeverContainsSecrets(t *testing.T) {
 	for k, v := range secrets {
 		fmt.Fprintf(&raw, "2026-10-14T00:00:00Z %s=%s GET /ws?token=%s\n", k, v, v)
 	}
-	fmt.Fprintf(&raw, "web token %s\n", fileToken)
 	_ = os.WriteFile(daemon.LogFile(data), []byte(raw.String()), 0o600)
 	_ = os.WriteFile(daemon.StdioFile(data), []byte("panic: key "+secrets["GEMINI_API_KEY"]+"\n"), 0o600)
 	ev := filepath.Join(data, "events", "2026-10-14.jsonl")
@@ -107,9 +101,6 @@ func TestReportNeverContainsSecrets(t *testing.T) {
 				t.Errorf("part of %s leaked into the report", k)
 			}
 		}
-		if strings.Contains(report, fileToken) {
-			t.Error("the config file's web.token leaked into the report")
-		}
 		for _, want := range []string{"## sheepdog diagnostic report", "### Versions", "### Doctor", "### Status", "### Runtime log", "names only): ", "OPENAI_API_KEY", "VERTEX_PROJECT", "[REDACTED]", "voice.connect_error"} {
 			if !strings.Contains(report, want) {
 				t.Errorf("report lacks %q", want)
@@ -140,7 +131,7 @@ func TestUpdate(t *testing.T) {
 	var status int
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/kccarlos/herdr-sheepdog/releases/latest" {
+		if r.URL.Path != "/repos/kccarlos/herdr-sheepdog/releases" {
 			http.NotFound(w, r)
 			return
 		}
@@ -151,6 +142,10 @@ func TestUpdate(t *testing.T) {
 	oldAPI, oldVersion, oldExe := releaseAPI, version, osExecutable
 	t.Cleanup(func() { releaseAPI, version, osExecutable = oldAPI, oldVersion, oldExe })
 	releaseAPI = srv.URL
+	cache := t.TempDir()
+	oldDir := updateDataDir
+	t.Cleanup(func() { updateDataDir = oldDir })
+	updateDataDir = func() string { return cache }
 	osExecutable = func() (string, error) { return "/opt/homebrew/Cellar/sheepdog/0.1.0/bin/sheepdog", nil }
 	version = "v0.1.0"
 
@@ -159,7 +154,7 @@ func TestUpdate(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "No published release found for kccarlos/herdr-sheepdog: the repository is private or has no release yet.") {
 		t.Errorf("no release: exit %d %q", code, out)
 	}
-	status, body = 200, `{"tag_name":"v0.2.0","html_url":"https://github.com/kccarlos/herdr-sheepdog/releases/tag/v0.2.0"}`
+	status, body = 200, `[{"tag_name":"ios-v9.0.0","html_url":"https://example/ios"},{"tag_name":"v0.2.0","html_url":"https://github.com/kccarlos/herdr-sheepdog/releases/tag/v0.2.0"}]`
 	code, out, _ = runCLI("update")
 	if code != 0 || !strings.Contains(out, "sheepdog v0.2.0 is available (you have v0.1.0)") || !strings.Contains(out, "brew upgrade sheepdog") {
 		t.Errorf("newer: exit %d %q", code, out)

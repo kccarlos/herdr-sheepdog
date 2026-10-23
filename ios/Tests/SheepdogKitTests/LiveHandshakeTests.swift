@@ -3,7 +3,7 @@ import XCTest
 
 /// The protocol handshake against a real daemon, new or old. Skipped unless
 /// `SHEEPDOG_LIVE_WS` names one (`127.0.0.1:7791`; pass it to xcodebuild as
-/// `TEST_RUNNER_SHEEPDOG_LIVE_WS=…`), so Xcode Cloud never runs it. A
+/// `TEST_RUNNER_SHEEPDOG_LIVE_WS=…`; ios.yml points it at its fixture daemon). A
 /// daemon whose `/api/hello` has `protocol` must answer `bot-ready`; one
 /// without it (from before the handshake) must leave the app at protocol 1
 /// with no error shown and the socket open.

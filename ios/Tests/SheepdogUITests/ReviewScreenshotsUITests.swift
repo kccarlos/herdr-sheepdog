@@ -41,7 +41,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState"]
         app.launch()
-        _ = app.textFields["settings.address"].waitForExistence(timeout: 10)
+        _ = app.buttons["settings.scan"].waitForExistence(timeout: 10)
         sleep(2)
         shot(app, "first-run")
     }
@@ -66,7 +66,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         post("/api/inject/state", ["pane_id": "p-busy", "state": "working"])
         post("/api/inject/blocked", ["pane_id": "p-idle", "alias": "web", "kind": "claude", "screen": "Idle"])
         post("/api/inject/state", ["pane_id": "p-idle", "state": "idle"])
-        post("/api/inject/utterance", ["text": "how is auth doing"])
+        post("/api/utterance", ["text": "how is auth doing"])
         post("/api/inject/blocked", ["pane_id": "p-auth", "alias": "auth", "kind": "codex", "screen": Self.longApproval])
         selectPane(app, "conversation")
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15))
@@ -74,15 +74,15 @@ final class ReviewScreenshotsUITests: XCTestCase {
         clearBanner(app)
         shot(app, "conversation-strip")
 
-        // The strip opens the agent window; its header has the question.
+        // The strip opens the agent window; its approval card is under the terminal.
         tapWhenReady(app.buttons["agent.chip.auth"], "the auth chip")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["approval.card"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "agent-window")
         tapWhenReady(app.navigationBars.buttons.firstMatch, "Back")
 
         // The chip's popover, with Health in it.
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         XCTAssertTrue(app.buttons["chip.address"].exists || app.descendants(matching: .any)["chip.address"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "chip-popover")
@@ -96,7 +96,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(app.navigationBars["Health"].buttons.firstMatch, "Back")
         tapWhenReady(app.buttons["Done"], "Done")
 
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "settings-menu")
@@ -148,7 +148,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(mic, "Unmute")
 
         // A worker asks, with a long command and long options.
-        post("/api/inject/utterance", ["text": "how is auth doing"])
+        post("/api/utterance", ["text": "how is auth doing"])
         post("/api/inject/blocked", ["pane_id": "p-auth", "alias": "auth", "kind": "codex", "screen": Self.longApproval])
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15))
         sleep(3)
@@ -177,7 +177,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         sleep(5)
 
         // Health: models read-only, grouped problems (connection chip > Health).
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         tapWhenReady(app.buttons["chip.health"], "Health")
         XCTAssertTrue(app.descendants(matching: .any)["health.version"].waitForExistence(timeout: 10))
         sleep(1)

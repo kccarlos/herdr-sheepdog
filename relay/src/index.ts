@@ -6,13 +6,15 @@
 import { sendAPNs, type APNsCredentials } from "./apns";
 import { b64Decode, isDeviceToken, isEnvironment, openToken, sealToken } from "./token";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 
 /** Request body caps (bytes). */
 export const MAX_REGISTER_BYTES = 1024;
 export const MAX_SEND_BYTES = 8 * 1024;
 /** The base64 ciphertext cap, so the whole APNs payload stays under Apple's 4096 bytes. */
 export const MAX_CIPHERTEXT = 3500;
+/** The Live Activity content state cap (its JSON), for the same reason. */
+export const MAX_CONTENT_STATE = 3500;
 
 export interface Env {
   // Secrets (wrangler secret put).
@@ -48,6 +50,8 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
       resp = request.method === "POST" ? await register(request, env) : json(405, { error: "method not allowed" });
     } else if (url.pathname === "/v1/send") {
       resp = request.method === "POST" ? await send(request, env, deps) : json(405, { error: "method not allowed" });
+    } else if (url.pathname === "/v1/activity") {
+      resp = request.method === "POST" ? await activity(request, env, deps) : json(405, { error: "method not allowed" });
     } else {
       resp = json(404, { error: "not found" });
     }
@@ -130,6 +134,67 @@ async function send(request: Request, env: Env, deps: Deps): Promise<Response> {
     deps.fetch,
     deps.now,
   );
+  return apnsAnswer(r);
+}
+
+/**
+ * POST /v1/activity: one Live Activity update (or end) for an activity
+ * push token the daemon registered like a device token. The content
+ * state passes through as given; the daemon seals everything but the
+ * voice's phase and the counts with the phone's key (the widget opens
+ * it), so the relay sees no agent name or question here either.
+ */
+async function activity(request: Request, env: Env, deps: Deps): Promise<Response> {
+  if (missingConfig(env).length > 0) return json(503, { error: "relay not configured" });
+  const body = await readJSON(request, MAX_SEND_BYTES);
+  if (body === TOO_LARGE) return json(413, { error: "body too large" });
+  if (!isObject(body)) return json(400, { error: "body must be a JSON object" });
+  if (typeof body.relay_token !== "string") return json(400, { error: "relay_token is required" });
+  const event = body.event === undefined ? "update" : body.event;
+  if (event !== "update" && event !== "end") return json(400, { error: 'event must be "update" or "end"' });
+  if (!isObject(body.content_state) || JSON.stringify(body.content_state).length > MAX_CONTENT_STATE) {
+    return json(400, { error: `content_state must be an object, at most ${MAX_CONTENT_STATE} bytes of JSON` });
+  }
+  for (const k of ["timestamp", "stale_date", "dismissal_date"] as const) {
+    const v = body[k];
+    if (v !== undefined && (typeof v !== "number" || !Number.isInteger(v) || v < 0)) {
+      return json(400, { error: `${k} must be a Unix time in seconds` });
+    }
+  }
+  const priority = body.priority === undefined ? 5 : body.priority;
+  if (priority !== 5 && priority !== 10) return json(400, { error: "priority must be 5 or 10" });
+
+  const claims = await openToken(env.RELAY_SECRET!, body.relay_token);
+  if (!claims) return json(401, { error: "bad relay_token" });
+  if (env.SEND_LIMITER && !(await env.SEND_LIMITER.limit({ key: `act:${await shortHash(claims.device_token)}` })).success) {
+    return json(429, { error: "rate limited" });
+  }
+
+  const aps: Record<string, unknown> = {
+    timestamp: (body.timestamp as number | undefined) ?? Math.floor(deps.now() / 1000),
+    event,
+    "content-state": body.content_state,
+  };
+  if (body.stale_date !== undefined) aps["stale-date"] = body.stale_date;
+  if (body.dismissal_date !== undefined) aps["dismissal-date"] = body.dismissal_date;
+  const creds: APNsCredentials = { key: env.APNS_KEY!, keyId: env.APNS_KEY_ID!, teamId: env.APNS_TEAM_ID! };
+  const r = await sendAPNs(
+    creds,
+    {
+      deviceToken: claims.device_token,
+      environment: claims.environment,
+      topic: `${env.APNS_TOPIC!}.push-type.liveactivity`,
+      pushType: "liveactivity",
+      priority,
+      body: JSON.stringify({ aps }),
+    },
+    deps.fetch,
+    deps.now,
+  );
+  return apnsAnswer(r);
+}
+
+function apnsAnswer(r: { status: number; reason: string }): Response {
   if (r.status === 200) return json(200, { ok: true });
   if (r.status === 410 || (r.status === 400 && (r.reason === "BadDeviceToken" || r.reason === "DeviceTokenNotForTopic"))) {
     return json(410, { error: "device token is no longer valid", reason: r.reason || "Unregistered" });

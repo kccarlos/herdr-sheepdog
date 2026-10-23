@@ -226,3 +226,35 @@ func TestAccountProblemWithBackup(t *testing.T) {
 		t.Errorf("brain.failover = %v", ev)
 	}
 }
+
+// The fix line of an orchestrator account problem names the variable the
+// provider's entry reads its key from (Config.KeyVars): the OpenAI
+// orchestrator's own OPENAI_ORCH_API_KEY, or OPENAI_API_KEY when it
+// reuses the voice's key. The voice's alert for openai is unchanged.
+func TestAccountFixNamesTheEntrysKeyVar(t *testing.T) {
+	err401 := &APIError{Provider: "openai", Status: 401, Message: "Incorrect API key provided"}
+	for _, c := range []struct{ keyVar, want string }{
+		{"OPENAI_ORCH_API_KEY", "OPENAI_ORCH_API_KEY"},
+		{"OPENAI_API_KEY", "OPENAI_API_KEY"},
+		{"", "OPENAI_API_KEY"},
+	} {
+		h := newHarness(t, failing(err401), func(cf *Config) {
+			cf.Provider, cf.Model = "openai", "gpt-9-mini"
+			if c.keyVar != "" {
+				cf.KeyVars = map[string]string{"openai": c.keyVar}
+			}
+		})
+		_, err := h.ask("how is auth?", "auth")
+		if !errors.Is(err, ErrFallback) {
+			t.Fatalf("%s: err = %v, want ErrFallback", c.keyVar, err)
+		}
+		h.brain.Quiesce()
+		a, ok := h.brain.AccountAlertFor(err)
+		if !ok || a.Problem != ProblemInvalidKey || !strings.Contains(a.Fix, "put a valid key in "+c.want+" ") {
+			t.Errorf("%q: alert = %+v, %v", c.keyVar, a.Fix, ok)
+		}
+	}
+	if v := NewAccountAlert(RoleVoice, "openai", ProblemInvalidKey, false); !strings.Contains(v.Fix, "OPENAI_API_KEY ") {
+		t.Errorf("voice fix = %q", v.Fix)
+	}
+}

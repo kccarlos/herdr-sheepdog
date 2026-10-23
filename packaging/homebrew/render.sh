@@ -4,10 +4,10 @@
 #   packaging/homebrew/render.sh v0.1.0 > /path/to/homebrew-tap/Formula/sheepdog.rb
 #
 # Reads the release's checksums.txt with `gh release download` (or
-# CHECKSUMS_FILE=<path> for a local copy). Run it only after
-# `make release-sign TAG=<tag>`, which replaces the darwin tarball and its
-# checksum. It writes nothing anywhere else and pushes nothing: committing
-# to kccarlos/homebrew-tap is a separate, manual step.
+# CHECKSUMS_FILE=<path> for a local copy). Run it only after the darwin
+# tarball is signed (release.yml's sign-macos job, or `make release-sign`),
+# which replaces it and its checksum. It writes nothing anywhere else and
+# pushes nothing: packaging/homebrew/tap-update.sh writes the tap.
 set -euo pipefail
 
 tag="${1:?usage: render.sh <tag, e.g. v0.1.0>}"
@@ -29,6 +29,6 @@ sum_for() {
 darwin="$(sum_for darwin_arm64)"
 linux="$(sum_for linux_amd64)"
 
-sed -e "s/@VERSION@/${tag#v}/g" -e "s/@TAG@/${tag}/g" \
+sed -e "s/@TAG@/${tag}/g" \
     -e "s/@SHA256_DARWIN_ARM64@/${darwin}/g" -e "s/@SHA256_LINUX_AMD64@/${linux}/g" \
     "$here/sheepdog.rb.tmpl"

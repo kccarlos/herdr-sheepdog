@@ -1,0 +1,15 @@
+[1/3] workday-explain-deep r1: fail (end_call, brain_fallback) ≈ $1.3751, total ≈ $1.375
+[2/3] workday-explain-deep r3: pass (end_call, ) ≈ $1.3996, total ≈ $2.775
+[3/3] workday-explain-deep r2: pass (end_call, ) ≈ $1.8293, total ≈ $4.604
+  fail    workday-explain-deep r1  end_call  13 turns  199.3s  brain_fallback         ≈ $1.3751
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  pass    workday-explain-deep r2  end_call  14 turns  303.9s                         ≈ $1.8293
+  pass    workday-explain-deep r3  end_call  15 turns  239.7s                         ≈ $1.3996
+-- 3 runs, spend ≈ $4.6040 (estimate at list prices) --
+reports: docs/dev/bench/results/2026-10-19-opus/opus-medium/workday-explain-deep/report.json, docs/dev/bench/results/2026-10-19-opus/opus-medium/workday-explain-deep/report.md
+== eval sim, repeat 3 ==
+  workday-explain-deep  runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  brain_fallback ×1
+  TOTAL                 runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  brain_fallback ×1
+-- spend brain    claude-opus-5-5          calls   107  in   2081752  out    30458  reasoning        0  ≈ $4.5722 --
+-- spend simuser  deepseek-flash           calls    42  in    103148  out     1344  reasoning        0  ≈ $0.0318 --
+-- spend total ≈ $4.6040 (estimate at list prices) --

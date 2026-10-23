@@ -232,15 +232,6 @@ func TestPortHeldByOlderSheepdog(t *testing.T) {
 
 // TestStartRefusesAWideBindWithoutAToken: the one setting start still
 // refuses (a missing key is setup mode, not an error).
-func TestStartRefusesAWideBindWithoutAToken(t *testing.T) {
-	cfg, _, _ := lifeSetup(t, "bind = \"0.0.0.0\"\n")
-	t.Setenv("SHEEPDOG_WEB_TOKEN", "")
-	code, _, errs := runCLI("start", "--config", cfg)
-	if code != 1 || !strings.Contains(errs, "sheepdog cannot start: web.token is required") || !strings.Contains(errs, "sheepdog setup") {
-		t.Errorf("exit %d %q", code, errs)
-	}
-}
-
 func TestOpen(t *testing.T) {
 	cfg, data, port := lifeSetup(t, "")
 	var opened []string
@@ -259,10 +250,6 @@ func TestOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/setup" {
-			http.NotFound(w, r)
-			return
-		}
 		_, _ = w.Write([]byte(`{"name":"sheepdog"}`))
 	})}
 	go func() { _ = srv.Serve(ln) }()
@@ -279,9 +266,6 @@ func TestOpen(t *testing.T) {
 	}
 	if code, _, _ := runCLI("open", "debug", "--config", cfg); code != 0 {
 		t.Errorf("debug: exit %d", code)
-	}
-	if code, _, errs := runCLI("open", "setup", "--config", cfg); code != 1 || !strings.Contains(errs, "no setup page yet") {
-		t.Errorf("setup: exit %d %q", code, errs)
 	}
 	if strings.Join(opened, " ") != base+"/voice "+base+"/debug" {
 		t.Errorf("opened %q", opened)

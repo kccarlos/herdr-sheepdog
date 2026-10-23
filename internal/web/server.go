@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -19,10 +20,12 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/feedback"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
@@ -52,8 +55,32 @@ type Supervisor interface {
 	// /api/agents/{pane_id}/screen and POST /api/agents/{pane_id}/input
 	// (docs/dev/ws-contract.md "Agent window: screen and input").
 	Screen(ctx context.Context, paneID string, lines int) (supervisor.Screen, error)
+	// ScreenANSI backs the coloured snapshot (?ansi=1, screen-subscribe):
+	// the visible screen with SGR colours, feature screen-ansi.
+	ScreenANSI(ctx context.Context, paneID string) (supervisor.Screen, error)
 	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
 	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
+}
+
+// AgentActions is the optional half of Supervisor behind the user's own
+// agent actions (agents_actions.go, feature agent-actions).
+type AgentActions interface {
+	UserNewAgent(ctx context.Context, req supervisor.NewAgentRequest) (supervisor.NewAgentResult, error)
+	Spaces(ctx context.Context) (supervisor.SpacesView, error)
+	NewSpace(ctx context.Context, dir, name, branch string) (string, string, error)
+	RenameSpace(ctx context.Context, id, name string) (string, error)
+	CloseSpace(ctx context.Context, id string) (string, error)
+	SpaceWorktrees(ctx context.Context, id string) (herdr.WorktreeList, error)
+	OpenWorktree(ctx context.Context, id, path, branch string) (string, error)
+	RemoveWorktree(ctx context.Context, id string, force bool) (string, error)
+	SpaceCommands(ctx context.Context, id string) ([]supervisor.WrapUp, error)
+	SaveCommand(ctx context.Context, id, cmdID, name, command string) (supervisor.WrapUp, error)
+	DeleteCommand(ctx context.Context, id, cmdID string) error
+	RunCommand(ctx context.Context, id, cmdID string) (string, error)
+	RunLine(ctx context.Context, id, name, command string) (string, error)
+	UserRename(ctx context.Context, paneID, name string) (string, error)
+	UserInterrupt(ctx context.Context, paneID string) (string, error)
+	UserClose(ctx context.Context, paneID string) (string, error)
 }
 
 // EventInjector is the Watcher's optional second input channel (POST
@@ -65,6 +92,8 @@ type EventInjector interface {
 // Deps are the components the server exposes. Log and Store are
 // required; the rest may be nil (the matching endpoints then answer 503).
 type Deps struct {
+	// Computer is this computer's id and name for GET /api/hello.
+	Computer identity.Computer
 	// Log is the event log the SSE endpoint tails.
 	Log *eventlog.Log
 	// Logger is where this package writes its own events (default Log;
@@ -129,6 +158,8 @@ type Deps struct {
 	// /api/state so the pages can label its side of the conversation.
 	VoiceName string
 	Version   string
+	// Update, when set, backs /api/state's update field.
+	Update func() update.Status
 	// ReloadPrompts, when set, backs POST /api/prompts/reload: it
 	// rescans the prompt override directory and returns the resulting
 	// file list for the response and the prompts.reloaded log line.
@@ -164,7 +195,7 @@ type Deps struct {
 	// ToolTimeout bounds one tool call or injected chain (default 90 s).
 	ToolTimeout time.Duration
 	// HandshakeTimeout is how long /ws waits for a client-ready before
-	// it treats the client as a legacy protocol-1 client (default 2 s;
+	// it refuses the client (default 10 s;
 	// docs/dev/ws-contract.md "Protocol version and handshake").
 	HandshakeTimeout time.Duration
 	// MinProtocol is the oldest /ws client protocol served (default
@@ -195,12 +226,27 @@ type Deps struct {
 	// changing the bind).
 	Restart func(reason string)
 
-	// Token, when non-empty, is the bearer token (config web.token) every
-	// request to /ws, /events and /api/* must present (docs/dev/ws-contract.md
-	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
-	// /events, or the sheepdog_token cookie POST /api/login sets. Empty
-	// means no auth: every route is public, as in v1.
-	Token string
+	// Term backs GET /term, the terminal socket of the app's live agent
+	// windows (docs/dev/term-contract.md), and the `term` feature; nil
+	// (herdr mock mode) serves neither.
+	Term *TermDeps
+	// Shell is config web.shell: paired devices may open the phone shell
+	// and send attachments (on by default; the setup page switches it).
+	Shell bool
+	// Advertise is config web.advertise: more host:port addresses the
+	// pairing code lists after the daemon's own (a router's port forward).
+	Advertise []string
+
+	// DataDir is the daemon's data directory; attachments are kept in its
+	// attachments/ folder. Empty answers the attachments route with 503.
+	DataDir string
+	// GitBin is the program the changes view runs (default "git").
+	GitBin string
+
+	// TLS is the daemon's key and self-signed certificate (tlsid.go),
+	// served on the same port as plain HTTP; nil makes a fresh one in
+	// memory (tests).
+	TLS *TLSIdentity
 }
 
 // Server is the HTTP server. Create with New, then Listen + Serve.
@@ -209,6 +255,27 @@ type Server struct {
 	log  logging.Logger
 	mux  *http.ServeMux
 	hub  *hub
+	term *termServer
+	// shellOn is config web.shell, live: the setup page switches it
+	// without a restart (shell.go). kindHook, when set, classifies a
+	// request's peer in place of remoteKind (tests).
+	shellOn  atomic.Bool
+	kindHook func(remote string) string
+
+	// devices, auth, enroll and live are device auth
+	// (docs/dev/design/security.md): the paired devices, open challenges
+	// and tickets, the one-time pairing code, and every long-lived
+	// connection by device.
+	devices *deviceStore
+	auth    *authState
+	enroll  enrollCodes
+	live    liveConns
+	// activityWatch backs the Live Activity pushes (activity.go).
+	activityWatch activityWatch
+	// limits rate-limits sign-in and pairing per source address; conns
+	// caps open non-loopback connections (limits.go).
+	limits *rateLimiter
+	conns  *capListener
 	// audio records the voice's output chunks for user.feedback
 	// snapshots (POST /api/feedback).
 	audio *feedback.AudioLog
@@ -243,7 +310,7 @@ func New(deps Deps) (*Server, error) {
 		deps.ToolTimeout = 90 * time.Second
 	}
 	if deps.HandshakeTimeout <= 0 {
-		deps.HandshakeTimeout = 2 * time.Second
+		deps.HandshakeTimeout = 10 * time.Second
 	}
 	if deps.MinProtocol <= 0 {
 		deps.MinProtocol = wsproto.MinProtocolVersion
@@ -275,85 +342,213 @@ func New(deps Deps) (*Server, error) {
 	if deps.Accounts == nil {
 		deps.Accounts = brain.NewAccountAlerts()
 	}
-	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
+	if deps.TLS == nil {
+		id, err := LoadTLSIdentity("", deps.Now)
+		if err != nil {
+			return nil, err
+		}
+		deps.TLS = id
+	}
+	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog(), limits: newRateLimiter()}
 	s.hub = newHub(s)
+	if ch, ok := s.cardHost(); ok {
+		ch.SetCardSink(cardSink{s.hub})
+	}
+	s.term = newTermServer(s, deps.Term)
+	s.shellOn.Store(deps.Shell)
+	devs, err := loadDeviceStore(deps.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	s.devices, s.auth = devs, newAuthState()
 	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err
 	}
+	s.pruneAttachments()
 	return s, nil
 }
 
+// access is who may use a route (docs/dev/design/security.md "Loopback-only
+// routes"). Every route is registered through routeTable with one, so a
+// new route without a rule cannot exist.
+type access int
+
+const (
+	// accessPublic: anyone who reaches the port (the pages and
+	// /api/hello).
+	accessPublic access = iota
+	// accessDevice: a paired device, or this computer itself.
+	accessDevice
+	// accessLoopback: this computer only (debug and internal routes).
+	accessLoopback
+	// accessSetup: this computer only, and a change only from this
+	// origin as JSON (the setup page, setup.go localOnly).
+	accessSetup
+)
+
+// route is one entry of the route table.
+type route struct {
+	pattern string
+	access  access
+	h       http.HandlerFunc
+}
+
 func (s *Server) routes() error {
-	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/voice", http.StatusFound)
-	})
-	for _, name := range []string{"voice", "debug", "static"} {
-		if err := s.static(name); err != nil {
-			return err
-		}
-	}
-	// GET /api/hello and POST /api/login stay public (docs/dev/ws-contract.md
-	// "Auth"): a client has to reach them to learn it found a sheepdog
-	// daemon and to trade a token for the cookie in the first place.
-	// Everything else that reads or acts on daemon state goes through
-	// s.authFunc. /ws and /events also accept ?token=: a browser cannot
-	// set a header on a WebSocket or EventSource request.
-	s.mux.HandleFunc("GET /api/hello", s.handleHello)
-	s.mux.HandleFunc("GET /api/pair", s.authFunc(s.handlePair, false))
-	s.mux.HandleFunc("GET /api/pair/qr.svg", s.authFunc(s.handlePairQR, false))
-	s.mux.HandleFunc("POST /api/login", s.handleLogin)
-	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
-	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
-	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
-	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
-	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
-	s.mux.HandleFunc("POST /api/agents/{pane_id}/input", s.authFunc(s.handleAgentInput, false))
-	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
-	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
-	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))
-	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
-	s.mux.HandleFunc("GET /api/voice/providers", s.authFunc(s.handleVoiceProviders, false))
-	s.mux.HandleFunc("PUT /api/voice/provider", s.authFunc(s.handleSetVoiceProvider, false))
-	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
-	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
-	s.mux.HandleFunc("POST /api/pending/cancel", s.authFunc(s.handleCancel, false))
-	s.mux.HandleFunc("POST /api/pending/answer", s.authFunc(s.handlePendingAnswer, false))
-	s.mux.HandleFunc("POST /api/inject/blocked", s.authFunc(s.handleInjectBlocked, false))
-	s.mux.HandleFunc("POST /api/inject/pane", s.authFunc(s.handleInjectPane, false))
-	s.mux.HandleFunc("POST /api/inject/done", s.authFunc(s.handleInjectDone, false))
-	s.mux.HandleFunc("POST /api/inject/state", s.authFunc(s.handleInjectState, false))
-	s.mux.HandleFunc("POST /api/inject/screen", s.authFunc(s.handleInjectScreen, false))
-	s.mux.HandleFunc("POST /api/inject/remove", s.authFunc(s.handleInjectRemove, false))
-	s.mux.HandleFunc("POST /api/inject/utterance", s.authFunc(s.handleUtterance, false))
-	s.mux.HandleFunc("POST /api/herdr/event", s.authFunc(s.handleHerdrEvent, false))
-	s.mux.HandleFunc("POST /api/prompts/reload", s.authFunc(s.handleReloadPrompts, false))
-	s.mux.HandleFunc("GET /api/brain/transcript", s.authFunc(s.handleBrainTranscript, false))
-	s.mux.HandleFunc("GET /api/brain/context", s.authFunc(s.handleBrainContext, false))
-	s.mux.HandleFunc("GET /api/brain/system_prompt", s.authFunc(s.handleBrainSystemPrompt, false))
-	s.mux.HandleFunc("GET /api/brain/models", s.authFunc(s.handleBrainModels, false))
-	s.mux.HandleFunc("PUT /api/brain/model", s.authFunc(s.handleSetBrainModel, false))
-	s.mux.HandleFunc("GET /api/context/brain", s.authFunc(s.handleContextBrain, false))
-	s.mux.HandleFunc("GET /api/context/voice", s.authFunc(s.handleContextVoice, false))
-	s.mux.HandleFunc("GET /api/context/timeline", s.authFunc(s.handleContextTimeline, false))
-	s.mux.HandleFunc("POST /api/push/register", s.authFunc(s.handlePushRegister, false))
-	s.mux.HandleFunc("DELETE /api/push/register", s.authFunc(s.handlePushUnregister, false))
-	s.mux.HandleFunc("GET /api/push/status", s.authFunc(s.handlePushStatus, false))
-	s.mux.HandleFunc("POST /api/feedback", s.authFunc(s.handleFeedback, false))
-	if err := s.setupRoutes(); err != nil {
+	table, err := s.routeTable()
+	if err != nil {
 		return err
 	}
-	if s.deps.DevTestdataDir != "" {
-		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
-			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
-		})
-		if s.deps.DevBrainDir != "" {
-			s.mux.HandleFunc("GET /testdata/brain/{name}", func(w http.ResponseWriter, r *http.Request) {
-				s.serveFixture(w, r, s.deps.DevBrainDir, ".jsonl", "application/x-ndjson")
-			})
-		}
+	for _, rt := range table {
+		s.mux.HandleFunc(rt.pattern, s.wrap(rt.access, rt.h))
 	}
 	return nil
+}
+
+// wrap puts the access check for a in front of h.
+func (s *Server) wrap(a access, h http.HandlerFunc) http.HandlerFunc {
+	switch a {
+	case accessDevice:
+		return s.authFunc(h)
+	case accessLoopback:
+		return s.loopbackOnly(h)
+	case accessSetup:
+		return s.localOnly(h)
+	}
+	return h
+}
+
+// loopbackOnly refuses any caller but this computer with 403
+// {"error":"loopback_only"} (the guard has already checked the Host).
+func (s *Server) loopbackOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.kindOf(r.RemoteAddr) != "loopback" {
+			s.log.Log(logSource, "web.loopback_only", "", map[string]any{"path": r.URL.Path, "remote": r.RemoteAddr})
+			writeError(w, http.StatusForbidden, "loopback_only")
+			return
+		}
+		h(w, r)
+	}
+}
+
+// routeTable is every route the daemon serves, with who may use it.
+func (s *Server) routeTable() ([]route, error) {
+	t := []route{
+		{"GET /{$}", accessPublic, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/voice", http.StatusFound)
+		}},
+	}
+	for _, p := range []struct {
+		name string
+		a    access
+	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}} {
+		pages, err := s.staticRoutes(p.name, p.a)
+		if err != nil {
+			return nil, err
+		}
+		t = append(t, pages...)
+	}
+	t = append(t,
+		// Public: a client has to reach /api/hello to learn it found a
+		// sheepdog daemon before it can authenticate at all.
+		route{"GET /api/hello", accessPublic, s.handleHello},
+		// Pairing and signing in: the one-time code and the device's
+		// signature are the credentials.
+		route{"GET /api/auth/challenge", accessPublic, s.handleChallenge},
+		route{"POST /api/auth/session", accessPublic, s.handleSession},
+		route{"POST /api/devices/enroll", accessPublic, s.handleEnroll},
+
+		// A paired device: the app and the voice page. /ws, /events and
+		// /term authenticate before the upgrade like any other request.
+		route{"GET /events", accessDevice, s.handleEvents},
+		route{"GET /ws", accessDevice, s.hub.handle},
+		route{"GET /term", accessDevice, s.handleTerm},
+		route{"GET /api/devices/self", accessDevice, s.handleDeviceSelf},
+		route{"DELETE /api/devices/self", accessDevice, s.handleDeviceUnpair},
+		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
+		route{"GET /api/state", accessDevice, s.handleState},
+		route{"GET /api/agents", accessDevice, s.handleAgents},
+		route{"GET /api/agents/{pane_id}/screen", accessDevice, s.handleAgentScreen},
+		route{"POST /api/agents/{pane_id}/input", accessDevice, s.handleAgentInput},
+		route{"GET /api/spaces", accessDevice, s.handleSpaces},
+		route{"POST /api/spaces", accessDevice, s.handleNewSpace},
+		route{"POST /api/spaces/{id}/rename", accessDevice, s.handleSpaceRename},
+		route{"POST /api/spaces/{id}/close", accessDevice, s.handleSpaceClose},
+		route{"GET /api/spaces/{id}/worktrees", accessDevice, s.handleSpaceWorktrees},
+		route{"POST /api/spaces/{id}/worktrees/open", accessDevice, s.handleWorktreeOpen},
+		route{"POST /api/spaces/{id}/worktree/remove", accessDevice, s.handleWorktreeRemove},
+		route{"GET /api/spaces/{id}/commands", accessDevice, s.handleSpaceCommands},
+		route{"POST /api/spaces/{id}/commands", accessDevice, s.handleSaveCommand},
+		route{"PUT /api/spaces/{id}/commands/{cid}", accessDevice, s.handleSaveCommand},
+		route{"DELETE /api/spaces/{id}/commands/{cid}", accessDevice, s.handleDeleteCommand},
+		route{"POST /api/spaces/{id}/commands/{cid}/run", accessDevice, s.handleRunCommand},
+		route{"POST /api/spaces/{id}/run", accessDevice, s.handleRunLine},
+		route{"POST /api/agents", accessDevice, s.handleNewAgent},
+		route{"POST /api/agents/{pane_id}/rename", accessDevice, s.handleAgentRename},
+		route{"POST /api/agents/{pane_id}/interrupt", accessDevice, s.handleAgentInterrupt},
+		route{"POST /api/agents/{pane_id}/close", accessDevice, s.handleAgentClose},
+		route{"POST /api/agents/{pane_id}/attachments", accessDevice, s.handleAttachment},
+		route{"GET /api/agents/{pane_id}/changes", accessDevice, s.handleChanges},
+		route{"GET /api/agents/{pane_id}/changes/{path...}", accessDevice, s.handleChangeDiff},
+		route{"GET /api/events", accessDevice, s.handleEventsTail},
+		route{"GET /api/conversation", accessDevice, s.handleConversation},
+		route{"POST /api/conversation/reset", accessDevice, s.handleConversationReset},
+		route{"POST /api/utterance", accessDevice, s.handleUtterance},
+		route{"GET /api/voice/providers", accessDevice, s.handleVoiceProviders},
+		route{"PUT /api/voice/provider", accessDevice, s.handleSetVoiceProvider},
+		route{"GET /api/brain/models", accessDevice, s.handleBrainModels},
+		route{"PUT /api/brain/model", accessDevice, s.handleSetBrainModel},
+		route{"GET /api/settings", accessDevice, s.handleGetSettings},
+		route{"PUT /api/settings", accessDevice, s.handlePutSettings},
+		route{"POST /api/pending/cancel", accessDevice, s.handleCancel},
+		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
+		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
+		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
+		route{"POST /api/push/activity", accessDevice, s.handlePushActivity},
+		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
+		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
+		route{"POST /api/feedback", accessDevice, s.handleFeedback},
+
+		// This computer only: pairing, debug and internal routes.
+		route{"GET /api/pair", accessLoopback, s.handlePair},
+		route{"GET /api/pair/qr.svg", accessLoopback, s.handlePairQR},
+		route{"GET /api/devices", accessLoopback, s.handleDevices},
+		route{"PATCH /api/devices/{id}", accessSetup, s.handleDeviceRename},
+		route{"DELETE /api/devices/{id}", accessSetup, s.handleDeviceRevoke},
+		route{"POST /api/devices/disconnect-all", accessSetup, s.handleDisconnectAll},
+		route{"POST /api/devices/reset-pairing", accessSetup, s.handleResetPairing},
+		route{"POST /api/inject/blocked", accessLoopback, s.handleInjectBlocked},
+		route{"POST /api/inject/pane", accessLoopback, s.handleInjectPane},
+		route{"POST /api/inject/done", accessLoopback, s.handleInjectDone},
+		route{"POST /api/inject/state", accessLoopback, s.handleInjectState},
+		route{"POST /api/inject/screen", accessLoopback, s.handleInjectScreen},
+		route{"POST /api/inject/remove", accessLoopback, s.handleInjectRemove},
+		route{"POST /api/herdr/event", accessLoopback, s.handleHerdrEvent},
+		route{"POST /api/prompts/reload", accessLoopback, s.handleReloadPrompts},
+		route{"GET /api/voice/system_prompt", accessLoopback, s.handleSystemPrompt},
+		route{"GET /api/brain/transcript", accessLoopback, s.handleBrainTranscript},
+		route{"GET /api/brain/context", accessLoopback, s.handleBrainContext},
+		route{"GET /api/brain/system_prompt", accessLoopback, s.handleBrainSystemPrompt},
+		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
+		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
+		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+	)
+	setup, err := s.setupRoutes()
+	if err != nil {
+		return nil, err
+	}
+	t = append(t, setup...)
+	if s.deps.DevTestdataDir != "" {
+		t = append(t, route{"GET /testdata/{name}", accessLoopback, func(w http.ResponseWriter, r *http.Request) {
+			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
+		}})
+		if s.deps.DevBrainDir != "" {
+			t = append(t, route{"GET /testdata/brain/{name}", accessLoopback, func(w http.ResponseWriter, r *http.Request) {
+				s.serveFixture(w, r, s.deps.DevBrainDir, ".jsonl", "application/x-ndjson")
+			}})
+		}
+	}
+	return t, nil
 }
 
 // serveFixture serves one fixture by base name from dir (dev mode only).
@@ -370,28 +565,25 @@ func (s *Server) serveFixture(w http.ResponseWriter, r *http.Request, dir, ext, 
 	http.ServeFile(w, r, filepath.Join(dir, name))
 }
 
-// static serves /<name> (index.html) and /<name>/* from the embedded FS.
-func (s *Server) static(name string) error {
-	return s.staticWrapped(name, func(h http.HandlerFunc) http.HandlerFunc { return h })
-}
-
-// staticWrapped is static with every request going through wrap.
-func (s *Server) staticWrapped(name string, wrap func(http.HandlerFunc) http.HandlerFunc) error {
+// staticRoutes serves /<name> (index.html) and /<name>/* from the
+// embedded FS, with access a.
+func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 	sub, err := fs.Sub(static.FS, name)
 	if err != nil {
-		return fmt.Errorf("web: embedded %s: %w", name, err)
+		return nil, fmt.Errorf("web: embedded %s: %w", name, err)
 	}
 	files := http.FileServerFS(sub)
 	serve := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}
-	s.mux.HandleFunc("GET /"+name, wrap(func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "/"
-		serve(w, r)
-	}))
-	s.mux.Handle("GET /"+name+"/", wrap(http.StripPrefix("/"+name, http.HandlerFunc(serve)).ServeHTTP))
-	return nil
+	return []route{
+		{"GET /" + name, a, func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = "/"
+			serve(w, r)
+		}},
+		{"GET /" + name + "/", a, http.StripPrefix("/"+name, http.HandlerFunc(serve)).ServeHTTP},
+	}, nil
 }
 
 // OnVoiceEvent forwards a voice session event to the connected browser
@@ -422,10 +614,26 @@ func (s *Server) Run(ctx context.Context) {
 
 // Listen binds addr (host:port; ":0" picks a free port). Addr() is valid
 // afterwards.
+//
+// A specific non-loopback address (web.bind set to one LAN IP) also gets a
+// loopback listener on the same port: plain HTTP is served to loopback
+// only, so the CLI (`status`, `open`, `pair`) and the setup page reach the
+// daemon at 127.0.0.1 whatever the bind.
 func (s *Server) Listen(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("web: listen %s: %w", addr, err)
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+			_, port, _ := net.SplitHostPort(ln.Addr().String())
+			lo, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", port))
+			if err != nil {
+				_ = ln.Close()
+				return fmt.Errorf("web: listen 127.0.0.1:%s next to %s: %w", port, addr, err)
+			}
+			ln = newMergedListener(ln, lo)
+		}
 	}
 	s.mu.Lock()
 	s.ln = ln
@@ -453,9 +661,17 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	if ln == nil {
 		return errors.New("web: Serve before Listen")
 	}
-	srv := &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
+	capped := &capListener{Listener: ln, max: maxRemoteConns, onRefuse: func(remote string) {
+		s.log.Log(logSource, "web.conn.refused", "", map[string]any{"remote": remote, "reason": "too_many_connections"})
+	}}
+	s.mu.Lock()
+	s.conns = capped
+	s.mu.Unlock()
+	sl := newSniffListener(capped, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
+	go func() { errc <- srv.Serve(sl) }()
+	go s.watchActivities(ctx)
 	select {
 	case err := <-errc:
 		return err
@@ -471,6 +687,9 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	}
 	return nil
 }
+
+// handler is the routed mux behind the guard (sniff.go).
+func (s *Server) handler() http.Handler { return s.guard(s.mux) }
 
 // writeJSON encodes v with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {

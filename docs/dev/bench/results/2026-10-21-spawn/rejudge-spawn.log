@@ -1,0 +1,22 @@
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-explain-deep r3: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-interruptions r3: fail
+rejudged workday-long-haul r1: fail
+sheepdog bench rejudge: workday-long-haul r2 answered: judge: claude cli: signal: killed: 
+sheepdog bench rejudge: workday-long-haul r3 answered: judge: context canceled
+sheepdog bench rejudge: workday-morning-standup r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-morning-standup r2 answered: judge: context canceled
+sheepdog bench rejudge: workday-morning-standup r3 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r3 answered: judge: context canceled
+sheepdog bench rejudge: workday-zh-evening r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-zh-evening r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r3 answered: judge: context canceled
+sheepdog bench rejudge: 11 runs not rejudged (run again to retry them)
+judge claude sonnet: 13m21s, 454 calls
+-- spend judge    sonnet                   calls   454  in   3273901  out   207013  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

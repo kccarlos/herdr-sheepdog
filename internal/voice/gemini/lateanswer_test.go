@@ -53,7 +53,7 @@ func TestLateAnswerOnDeadConnectionIsPushed(t *testing.T) {
 	if len(p) != 1 || p[0]["reason"] != "send_error" {
 		t.Errorf("voice.tool_result_pushed = %v", p)
 	}
-	push := h.log.payloads("voice.push")
+	push := h.pushesLogged(1)
 	if len(push) != 1 || push[0]["answers_utterance"] != "utt-1" || push[0]["call_id"] != "call_1" {
 		t.Errorf("voice.push = %v, want the answer tagged with its utterance and call", push)
 	}

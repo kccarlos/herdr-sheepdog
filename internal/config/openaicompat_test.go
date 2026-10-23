@@ -115,7 +115,7 @@ func TestOpenAICompatValidation(t *testing.T) {
 		{"duplicate", entry("or", "https://x.example/v1", "m") + entry("or", "https://y.example/v1", "m"), "duplicate"},
 		{"no scheme", entry("or", "openrouter.ai/api/v1", "m"), "http(s) URL"},
 		{"no model", entry("or", "https://x.example/v1", ""), "model must not be empty"},
-		{"unknown provider", "[brain]\nprovider = \"groq\"\n" + entry("or", "https://x.example/v1", "m"), "want one of gemini, deepseek, vertex, or"},
+		{"unknown provider", "[brain]\nprovider = \"groq\"\n" + entry("or", "https://x.example/v1", "m"), "want one of gemini, deepseek, vertex, anthropic, or"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(writeConfig(t, tc.body), noEnv)

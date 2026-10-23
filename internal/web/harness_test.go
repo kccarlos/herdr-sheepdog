@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -197,9 +199,8 @@ type harnessOpts struct {
 	// deepseek and an unavailable "openai" through Deps.BrainProviders.
 	brain     bool
 	providers bool
-	// token, when set, becomes Deps.Token (config web.token): every
-	// protected route then needs it.
-	token string
+	// shellOff turns the computer's shell switch off (web.shell).
+	shellOff bool
 	// switcher runs the fake session behind a voice.Switcher with a
 	// second fake provider "openai" (h.session2) and an unavailable
 	// "other", as Deps.Voice and Deps.VoiceSwitch.
@@ -220,6 +221,10 @@ type harnessOpts struct {
 	// setup serves the setup page (Deps.Setup); restart is Deps.Restart.
 	setup   *SetupDeps
 	restart func(string)
+	// term backs GET /term (Deps.Term).
+	term *TermDeps
+	// dataDir is Deps.DataDir (attachments).
+	dataDir string
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -273,10 +278,10 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
-		Setup: o.setup, Restart: o.restart}
+		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {
@@ -320,7 +325,14 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 			}
 		}()
 	}
-	hs := httptest.NewServer(srv.Handler())
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A client the test makes look remote (kindHook) comes over TLS,
+		// as every real one does.
+		if srv.kindHook != nil && srv.kindHook(r.RemoteAddr) != "loopback" && r.TLS == nil {
+			r.TLS = &tls.ConnectionState{}
+		}
+		srv.Handler().ServeHTTP(w, r)
+	}))
 	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, session2: session2, sw: sw, watcher: watcher, model: model, brain: b, cancel: cancel}
 	t.Cleanup(func() {
 		hs.Close()
@@ -401,9 +413,8 @@ func (h *harness) getJSON(path string, out any) int {
 	return resp.StatusCode
 }
 
-// authedRequest builds a GET or POST request against path, optionally
-// carrying a bearer token, a cookie, or a request body (POST only) — the
-// web.token auth tests exercise every combination.
+// authedRequest builds a request against path, optionally carrying a
+// session ticket (as the app sends it), cookies, or a JSON body.
 func (h *harness) authedRequest(method, path, bearer string, cookies []*http.Cookie, body any) *http.Request {
 	h.t.Helper()
 	var r *http.Request
@@ -421,7 +432,7 @@ func (h *harness) authedRequest(method, path, bearer string, cookies []*http.Coo
 		h.t.Fatalf("%s %s: %v", method, path, err)
 	}
 	if bearer != "" {
-		r.Header.Set("Authorization", "Bearer "+bearer)
+		r.Header.Set("Authorization", "Bearer "+ticketPrefix+bearer)
 	}
 	for _, c := range cookies {
 		r.AddCookie(c)

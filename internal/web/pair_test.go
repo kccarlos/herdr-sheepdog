@@ -2,7 +2,6 @@ package web
 
 import (
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -11,58 +10,76 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 )
 
-const pairToken = "pair-test-token-0123456789abcdef"
-
 // Without a reachable address /api/pair says why and the QR route
-// refuses; both are behind the token.
+// refuses; both answer this computer only.
 func TestPairLoopbackServer(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: pairToken})
-	if code, _ := h.do(h.authedRequest("GET", "/api/pair", "", nil, nil), nil); code != http.StatusUnauthorized {
-		t.Errorf("without the token: %d", code)
+	h := newHarness(t, harnessOpts{})
+	if err := h.srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
 	}
 	var resp PairResponse
-	if code, _ := h.do(h.authedRequest("GET", "/api/pair", pairToken, nil, nil), &resp); code != 200 || resp.Error == "" || !resp.HasToken {
+	if code := h.getJSON("/api/pair", &resp); code != 200 || resp.Error == "" || resp.Link != "" {
 		t.Errorf("/api/pair = %d %+v", code, resp)
 	}
-	if code, _ := h.do(h.authedRequest("GET", "/api/pair/qr.svg", pairToken, nil, nil), nil); code != http.StatusConflict {
+	if code, _ := h.do(h.authedRequest("GET", "/api/pair/qr.svg", "", nil, nil), nil); code != http.StatusConflict {
 		t.Errorf("qr without an address: %d", code)
 	}
-	if _, _, err := h.srv.pairingFor("127.0.0.1:7777"); !errors.Is(err, pair.ErrLoopback) {
+	if _, err := h.srv.pairAddresses("127.0.0.1:7777"); !errors.Is(err, pair.ErrLoopback) {
 		t.Errorf("loopback: %v", err)
+	}
+	h.asRemote()
+	if code := h.getJSON("/api/pair", nil); code != http.StatusForbidden {
+		t.Errorf("/api/pair from the network = %d", code)
 	}
 }
 
-// On every interface the code holds each LAN and Tailscale address and
-// the token; the JSON lists the addresses but never the token, and no
-// event carries it.
+// On every interface the link holds each Tailscale and LAN address, the
+// daemon id, name and pin and a one-time code; reading it again keeps the
+// code, ?new=1 replaces it; no event carries the code.
 func TestPairAllInterfaces(t *testing.T) {
 	old := pairSysAddrs
 	pairSysAddrs = func() ([]pair.IfaceAddr, error) {
 		return []pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}, {Iface: "utun4", IP: net.ParseIP("100.101.102.103")}}, nil
 	}
 	t.Cleanup(func() { pairSysAddrs = old })
-	h := newHarness(t, harnessOpts{token: pairToken})
-	addrs, link, err := h.srv.pairingFor("0.0.0.0:7777")
+	h := newHarness(t, harnessOpts{})
+	if err := h.srv.Listen("0.0.0.0:0"); err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(h.srv.Addr())
+	var resp PairResponse
+	if code := h.getJSON("/api/pair", &resp); code != 200 || resp.Link == "" || resp.Expires == nil {
+		t.Fatalf("/api/pair = %d %+v", code, resp)
+	}
+	in, err := pair.ParseLink(resp.Link)
 	if err != nil {
 		t.Fatal(err)
 	}
-	urls, tok, err := pair.Parse(link)
-	if err != nil || tok != pairToken || len(urls) != 2 || urls[0] != "http://192.168.1.20:7777" || urls[1] != "http://100.101.102.103:7777" || len(addrs) != 2 {
-		t.Errorf("link = %q %q %v", urls, tok, err)
+	if in.DaemonID != h.srv.deps.Computer.ID || in.Name != "Test Mac" || in.Pin != h.srv.deps.TLS.Pin() || in.Code == "" {
+		t.Errorf("link = %+v", in)
 	}
-	req := h.authedRequest("GET", "/api/pair", pairToken, nil, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	if len(in.Addresses) != 2 || pair.HostPort(in.Addresses[0].URL) != "100.101.102.103:"+port || pair.HostPort(in.Addresses[1].URL) != "192.168.1.20:"+port {
+		t.Errorf("addresses = %+v", in.Addresses)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if strings.Contains(string(body), pairToken) {
-		t.Errorf("/api/pair carries the token: %s", body)
+	if !strings.HasPrefix(resp.Link, "https://100.101.102.103:"+port+"/voice#pair=1&") {
+		t.Errorf("link = %s", resp.Link)
+	}
+	var again PairResponse
+	h.getJSON("/api/pair", &again)
+	if again.Link != resp.Link {
+		t.Error("reading the code again made a new one")
+	}
+	var fresh PairResponse
+	h.getJSON("/api/pair?new=1", &fresh)
+	next, _ := pair.ParseLink(fresh.Link)
+	if next.Code == in.Code {
+		t.Error("?new=1 kept the code")
 	}
 	for _, ev := range h.log.Tail(10000) {
-		if strings.Contains(string(ev.Payload), pairToken) {
-			t.Errorf("event %s carries the token", ev.Type)
+		for _, code := range []string{in.Code, next.Code} {
+			if strings.Contains(string(ev.Payload), code) {
+				t.Errorf("event %s carries the code", ev.Type)
+			}
 		}
 	}
 }

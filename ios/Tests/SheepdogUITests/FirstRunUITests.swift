@@ -59,12 +59,10 @@ final class FirstRunUITests: XCTestCase {
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
-        let result = app.descendants(matching: .any)["settings.probe.result"]
-        XCTAssertTrue(result.waitForExistence(timeout: 20), "a refused token opens Settings ▸ Daemon and says why")
-        let fix = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'sheepdog pair'")).firstMatch
-        XCTAssertTrue(fix.exists, "the fix: pair again")
-        XCTAssertTrue(app.descendants(matching: .any)["settings.probe.help"].exists)
-        XCTAssertTrue(app.buttons["settings.scan"].exists, "the scanner is right there")
+        let sheet = app.descendants(matching: .any)["pairing.scanAgain"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 20), "a refused phone opens \"Please scan again\"")
+        XCTAssertTrue(app.staticTexts["Please scan again"].exists)
+        XCTAssertTrue(app.buttons["pairing.primary"].exists, "the scanner is one tap away")
     }
 
     func testNotSheepdogSaysCheckTheAddress() throws {
@@ -75,7 +73,7 @@ final class FirstRunUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
         app.launch()
-        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapWhenReady(app.buttons["settings.daemon"], "Daemon")
         tapWhenReady(app.buttons["settings.test"], "Test connection")
         let result = app.descendants(matching: .any)["settings.probe.result"]
@@ -107,12 +105,7 @@ final class FirstRunUITests: XCTestCase {
                 break
             }
         }
-        let settings = app.buttons.matching(identifier: "toolbar.settings")
-        XCTAssertTrue(settings.firstMatch.waitForExistence(timeout: 10))
-        for i in 0 ..< settings.count where settings.element(boundBy: i).isHittable {
-            settings.element(boundBy: i).tap()
-            break
-        }
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.leaveDemo"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["settings.models"].exists)
         XCTAssertFalse(app.buttons["settings.notifications"].exists)

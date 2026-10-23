@@ -1,10 +1,13 @@
-# Xcode Cloud: tests on every PR, TestFlight on every tag
+# Xcode Cloud: TestFlight on every tag
 
-GitHub Actions does not build the app; all iOS builds and tests run on Xcode
-Cloud (macOS runners on GitHub Actions are too expensive).
-Apple's Xcode Cloud builds and tests every pull request and every push to
-`main` that changes `ios/`, and an `ios-v*` tag archives the app and puts it
-in TestFlight. The app lives in `ios/` of the sheepdog repository (until
+Xcode Cloud only archives the app and uploads it to TestFlight, on an
+`ios-v*` tag. **It runs no tests and builds no pull requests.** The tests,
+unit and UI, run on GitHub Actions: `.github/workflows/ios.yml` on a
+GitHub-hosted Mac, simulator only, no secrets, with fixture daemons built in
+the same job ([development.md](../../../docs/dev/development.md#cicd),
+[status.md](status.md#running-the-tests)). Until 2026-10-21 a **PR**
+workflow also tested every pull request here; it was removed when the tests
+moved to GitHub Actions. The app lives in `ios/` of the sheepdog repository (until
 2026-10-15 it was the separate `herdr-sheepdog-ios` repository; the switch
 of the workflows is in
 [xcode-cloud-monorepo.md](../../../docs/dev/xcode-cloud-monorepo.md), and the
@@ -19,9 +22,9 @@ built from tag `ios-v0.1.5` (`b414dda`, #41).
 | Team | the Account Holder, Team ID `GV776BZVA8`, Apple ID: the Account Holder's (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
-| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities, no App Group |
+| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`). Needs App Groups with `group.com.github.kccarlos.herdr-sheepdog-ios` assigned (the Live Activity reads the push content key) before the next archive |
 | Notification Service Extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.NotificationService` (`SheepdogNotificationService`: decrypts relay notifications). Resource `JTDHJGH486`, App Groups capability |
-| App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app and the Notification Service Extension: the push content key's keychain access group |
+| App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app, the Notification Service Extension and the widget extension: the push content key's keychain access group |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
@@ -45,7 +48,7 @@ Cloud](https://developer.apple.com/documentation/xcode/making-dependencies-avail
 The script:
 
 1. `cd "$CI_PRIMARY_REPOSITORY_PATH"`.
-2. On a tag build, checks that the tag is `v` + `MARKETING_VERSION` and
+2. On a tag build, checks that the tag is `ios-v` + `MARKETING_VERSION` and
    fails otherwise, so a mistyped tag cannot ship a build under the wrong
    version.
 3. Gets XcodeGen 2.46.0 from its GitHub release zip (checked against a
@@ -55,9 +58,13 @@ The script:
    installs whatever version is current.
 4. `xcodegen generate`, then checks that the shared `Sheepdog` scheme
    exists.
+5. Checks that `Package.resolved` is in the generated project (XcodeGen's
+   `postGenCommand` copies the committed `ios/Package.resolved` there;
+   Xcode Cloud does not resolve Swift packages without it), and trusts
+   package build-tool plugins (SwiftTerm has one), since nobody can click
+   Trust & Enable on Xcode Cloud ([architecture.md](architecture.md#the-terminal-surface)).
 
-It runs once per action (the Test and Archive actions each get a fresh
-machine).
+It runs once per action (the workflows have a single Archive action).
 
 **Build numbers.** Xcode Cloud numbers its builds 1, 2, 3, … per app, and
 when a build goes to TestFlight App Store Connect uses that number as the
@@ -96,9 +103,15 @@ app and signed with its own App ID,
 with `asc bundle-ids create` so the archive's automatic signing only has to
 make profiles. It has no entitlements: Live Activities need only
 `NSSupportsLiveActivities` in the app's Info.plist, and its App Intents run
-in the app's process. The PR workflow builds for the simulator, which does
-not sign, so the first tag archive after #37 (0.1.4 (48)) was the first real check of
-this, and it signed and exported with no change.
+in the app's process. Simulator builds do not sign, so the first tag archive after #37 (0.1.4 (48)) was the first real check of
+this, and it signed and exported with no change. Since the Live Activity's
+push updates (2026-10-22) it has one entitlement, the App Group, to read
+the push content key that opens a pushed update's sealed rows. **Before the
+next `ios-v*` archive:** `asc bundle-ids capabilities add --capability
+APP_GROUPS` on the widget's App ID, then assign
+`group.com.github.kccarlos.herdr-sheepdog-ios` to it (developer.apple.com ▸
+Identifiers ▸ the widget ▸ App Groups ▸ Configure, or a local `xcodebuild
+archive -allowProvisioningUpdates` as for the extension below).
 
 **The Notification Service Extension** (`SheepdogNotificationService`)
 decrypts relay notifications. Its App ID,
@@ -140,8 +153,8 @@ open Sheepdog.xcodeproj
    **Product** — `Integrate ▸ Xcode Cloud ▸ Create Workflow…` /
    `Manage Workflows…`.
 2. **Select a product**: choose **Sheepdog** (the app). Next.
-3. Xcode shows a default workflow. Leave it for now or edit it straight
-   into the **PR** workflow below (section 2). Next.
+3. Xcode shows a default workflow. Edit it into the **TestFlight**
+   workflow below (section 2), with no Test action. Next.
 4. **Grant access to your source code**: Xcode sees
    `github.com/kccarlos/herdr-sheepdog` and asks for access. Click
    **Grant Access**. The browser opens App Store Connect ▸ **Connect** ▸
@@ -165,22 +178,14 @@ in Xcode (Report navigator ▸ Cloud ▸ right-click **Sheepdog** ▸ Manage
 Workflows…) or on the web (App Store Connect ▸ the app ▸ Xcode Cloud ▸
 Manage Workflows).
 
-## 2. The three workflows
+## 2. The workflows
 
-### PR
-
-| Section | Setting |
-|---|---|
-| General | Name `PR`. Restrict editing: off. Repository: `kccarlos/herdr-sheepdog`. Project: `ios/Sheepdog.xcodeproj` |
-| Environment | Xcode version **Latest Release**, macOS version **Latest Release**. Clean: off |
-| Start Conditions | **Pull Request Changes**: source branch Any, target branch `main`, Files and Folders ▸ Start a build if any file changes in directory `ios`. Add a second one: **Branch Changes**: custom branch `main`, same Files and Folders rule. Leave "Auto-cancel builds" on |
-| Actions | **Test** ▸ Platform iOS, Scheme **Sheepdog**, Test Plan "Use Scheme Settings", Destination **iOS Simulator ▸ one recent iPhone (e.g. iPhone 17 Pro), Latest Release** |
-| Post-Actions | none |
-
-A Test action builds for testing before it tests, so a separate Build action
-would only spend minutes. One simulator instead of "Recommended iPhones"
-keeps each run to one device. Xcode Cloud reports the result on the pull
-request as a GitHub check.
+There are two, both archive-only. Neither has a Test action, and neither
+starts on a pull request or a branch push. Keep it that way: tests belong in
+`ios.yml`.
+(Checked with `asc xcode-cloud workflows` on 2026-10-21: **TestFlight**, tag
+prefix `ios-v`, one Archive action; **Internal TestFlight Build**, manual
+start only, one Archive action.)
 
 ### TestFlight
 
@@ -217,15 +222,12 @@ script.
 Expected, from this repository on a local Mac (Xcode 27, Apple silicon;
 Xcode Cloud machines are in the same range but a clean build every time):
 
-- **PR** (post-clone, build for testing, and the unit tests; the UI tests
-  and live-daemon tests skip): about 5–10 minutes. The tests themselves
-  take about 1.5 minutes.
 - **TestFlight** (post-clone + Release archive + signing + upload): about
   5–10 minutes, then App Store Connect processes the build for another
   5–30 minutes (not billed) before TestFlight offers it.
 
-So 25 hours is on the order of 150–300 runs a month. A PR that is pushed
-to five times costs five runs, plus one on merge.
+So 25 hours is on the order of 150–300 releases a month; pull requests cost
+nothing here, since their tests run on GitHub Actions.
 
 ## 4. TestFlight, once
 
@@ -242,9 +244,9 @@ to five times costs five runs, plus one on merge.
    the same Apple ID. When a build lands, TestFlight notifies and offers
    **Install**.
 
-Internal testers get builds without App Review, so the app's
-`NSAllowsArbitraryLoads` (plain HTTP to the daemon on your own network)
-needs no justification for this. External testers or the App Store would.
+Internal testers get builds without App Review. The app needs no ATS
+exception beyond `NSAllowsLocalNetworking`: every address but loopback is
+TLS, pinned to the daemon's certificate.
 
 ## 5. Releasing a build
 
@@ -282,6 +284,5 @@ and download the log artifacts (`~/.claude/skills/asc/SKILL.md`).
 | `No suitable application records were found` | no App Store Connect app record | create it (App Store Connect ▸ Apps ▸ + ▸ New App, the bundle ID above) |
 | Build sits at "Missing Compliance" | `ITSAppUsesNonExemptEncryption` missing from the built Info.plist | it is in `project.yml`; check it survived an edit |
 | The TestFlight post-action has no group to pick | no internal group yet | section 4, then edit the workflow |
-| Tests pass locally, fail on Xcode Cloud in the UI tests | a fixture daemon answered on 127.0.0.1:7799 locally | on Xcode Cloud they should skip; look for a test that does not call `XCTSkip` without a daemon |
 | "No source code repositories were found for this project" when connecting the repository | `origin` used the SSH host alias `git@github-kccarlos:…` (an `~/.ssh/config` `Host` alias for a multi-account setup); Xcode Cloud can't resolve it, and a git `url.<alias>.insteadOf` rewrite doesn't help — Xcode applies the remote URL as written | point `origin` at plain HTTPS: `git remote set-url origin https://github.com/kccarlos/herdr-sheepdog.git`, then `gh auth setup-git` (with `gh` logged in as `kccarlos`) so git's credential helper handles push/pull without the SSH alias |
 | Yellow warning in the workflow editor: "the scheme Sheepdog may only exist locally and may not be accessible to Xcode Cloud" | expected — `Sheepdog.xcodeproj` is gitignored, so Xcode Cloud can't see the scheme in the repository itself | ignore it; `ci_scripts/ci_post_clone.sh` generates the project (and the scheme with it) on the runner before the scheme is needed |

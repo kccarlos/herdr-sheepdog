@@ -38,9 +38,22 @@ public struct Hello: Codable, Equatable, Sendable {
     /// Absent on daemons from before the handshake: protocol 1.
     public var `protocol`: Int?
     public var minProtocol: Int?
+    /// This computer: its id (the daemon id the app keys everything by)
+    /// and its name (the daemon's `computer.name`).
+    public var computer: Computer?
+
+    public struct Computer: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case name, version, auth, ws, audio, `protocol`
+        case name, version, auth, ws, audio, `protocol`, computer
         case minProtocol = "min_protocol"
         case voiceName = "voice_name"
         case voiceProvider = "voice_provider"
@@ -76,16 +89,22 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         public var seenAt: Date?
         /// The question was answered (by tap, voice or the orchestrator).
         public var answered: Bool?
+        /// The option sheepdog sent, and how it came (`voice` or `tap`);
+        /// absent when the agent left the question some other way.
+        public var answer: String?
+        public var via: String?
 
         enum CodingKeys: String, CodingKey {
-            case question, answered
+            case question, answered, answer, via
             case seenAt = "seen_at"
         }
 
-        public init(question: String? = nil, seenAt: Date? = nil, answered: Bool? = nil) {
+        public init(question: String? = nil, seenAt: Date? = nil, answered: Bool? = nil, answer: String? = nil, via: String? = nil) {
             self.question = question
             self.seenAt = seenAt
             self.answered = answered
+            self.answer = answer
+            self.via = via
         }
     }
 
@@ -162,6 +181,12 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// The name the user hears (the daemon's spoken name); older
     /// daemons omit it.
     public var spoken: String?
+    /// The pane's working folder on the computer (where "Open shell here"
+    /// opens); older daemons omit it.
+    public var cwd: String?
+    /// The agent's own session title (Claude Code's, Codex's thread
+    /// name), when it has one.
+    public var title: String?
 
     public var id: String { paneID }
 
@@ -172,7 +197,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic, spoken
+        case alias, kind, name, state, journal, synthetic, spoken, cwd, title
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -196,7 +221,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         lastResult: Result? = nil,
         journal: [JournalEntry]? = nil,
         synthetic: Bool? = nil,
-        spoken: String? = nil
+        spoken: String? = nil,
+        cwd: String? = nil,
+        title: String? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -212,6 +239,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.journal = journal
         self.synthetic = synthetic
         self.spoken = spoken
+        self.cwd = cwd
+        self.title = title
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an
@@ -222,6 +251,23 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         if let r = lastResult?.spoken?.trimmed, !r.isEmpty { return r }
         if let t = currentTask?.trimmed, !t.isEmpty { return t }
         return nil
+    }
+
+    /// An Agents card's second line: what it works on now, else its last
+    /// task, else its own title (an agent started by hand has only that).
+    public var cardLine: String? {
+        for text in [currentTask, lastTask, title] {
+            if let t = text?.trimmed, !t.isEmpty { return t }
+        }
+        return nil
+    }
+
+    /// "Run the benchmark against staging? — Yes": the last question and
+    /// the answer chosen, once it was answered.
+    public var answeredQuestion: String? {
+        guard let block = lastBlock, block.answered == true, let q = block.question?.trimmed, !q.isEmpty else { return nil }
+        guard let answer = block.answer?.trimmed, !answer.isEmpty else { return q }
+        return "\(q) — \(answer)"
     }
 
     /// The newest journal entry that carries what the worker wrote for a
@@ -446,7 +492,7 @@ public enum ConversationResetAvailability: Equatable, Sendable {
     public var showsAction: Bool { self == .supported }
 }
 
-/// The reply to `POST /api/inject/utterance`: `{"ok":true,"via":"voice"}`
+/// The reply to `POST /api/utterance`: `{"ok":true,"via":"voice"}`
 /// with a voice session (the answer comes as speech), or the text router's
 /// tool response (`tool`, `spoken`, `via: "text_router"`) with
 /// `--voice=off`.
@@ -493,7 +539,11 @@ public struct DaemonState: Codable, Equatable, Sendable {
     }
 
     public var agents: [Agent]
+    /// The question the voice is on.
     public var pendingAction: PendingAction?
+    /// Every open question, oldest first: one per blocked agent whose
+    /// prompt was read, `pendingAction` among them.
+    public var questions: [PendingAction]?
     public var voice: VoiceInfo
     public var herdr: String?
     public var version: String?
@@ -507,18 +557,23 @@ public struct DaemonState: Codable, Equatable, Sendable {
     /// daemon's own start if there has not been one. Absent on a daemon
     /// that predates "New conversation".
     public var conversationStartedAt: Date?
+    /// The daemon's update notice; nil on a daemon too old to report one
+    /// or with `update.check` off.
+    public var update: UpdateInfo?
 
     enum CodingKeys: String, CodingKey {
-        case agents, voice, herdr, version, brain
+        case agents, voice, herdr, version, brain, update, questions
         case pendingAction = "pending_action"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil) {
+        self.update = update
         self.agents = agents
         self.pendingAction = pendingAction
+        self.questions = questions
         self.voice = voice
         self.herdr = herdr
         self.version = version
@@ -528,10 +583,106 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.conversationStartedAt = conversationStartedAt
     }
 
-    /// The question waiting on a given pane, if the pending action is one.
+    /// The open question of a pane: from `questions`, else the pending
+    /// action when it is that pane's.
+    public func question(for paneID: String) -> PendingAction? {
+        if let q = questions?.first(where: { $0.paneID == paneID }) { return q }
+        guard let p = pendingAction, p.paneID == paneID else { return nil }
+        return p
+    }
+
+    /// The question waiting on a given pane, if the pending action (the
+    /// question the voice is on) is that pane's.
     public func pendingQuestion(for paneID: String) -> String? {
         guard let p = pendingAction, p.paneID == paneID else { return nil }
         return p.question ?? p.spokenSummary
+    }
+}
+
+/// `/api/state`'s `update` (daemon docs/dev/update.md): whether a newer
+/// daemon release exists and whether one is installed but not running yet.
+/// Display only. The Go side omits the false and empty fields.
+public struct UpdateInfo: Codable, Equatable, Sendable {
+    public var current: String?
+    public var latest: String?
+    public var available: Bool
+    /// The upgrade command for the way the daemon was installed.
+    public var how: String?
+    /// The program on disk is newer than the one running.
+    public var restartPending: Bool
+    public var restartTo: String?
+    /// The daemon restarts itself into an installed update when idle.
+    public var autoRestart: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case current, latest, available, how
+        case restartPending = "restart_pending"
+        case restartTo = "restart_to"
+        case autoRestart = "auto_restart"
+    }
+
+    public init(current: String? = nil, latest: String? = nil, available: Bool = false, how: String? = nil, restartPending: Bool = false, restartTo: String? = nil, autoRestart: Bool = false) {
+        self.current = current
+        self.latest = latest
+        self.available = available
+        self.how = how
+        self.restartPending = restartPending
+        self.restartTo = restartTo
+        self.autoRestart = autoRestart
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        current = try c.decodeIfPresent(String.self, forKey: .current)
+        latest = try c.decodeIfPresent(String.self, forKey: .latest)
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        how = try c.decodeIfPresent(String.self, forKey: .how)
+        restartPending = try c.decodeIfPresent(Bool.self, forKey: .restartPending) ?? false
+        restartTo = try c.decodeIfPresent(String.self, forKey: .restartTo)
+        autoRestart = try c.decodeIfPresent(Bool.self, forKey: .autoRestart) ?? false
+    }
+
+    /// The one line Settings shows, or nil when there is nothing to say.
+    /// It says what the daemon will actually do: it never installs an
+    /// update itself, it only restarts into one that was installed
+    /// (`update.auto_restart`), and only while no one is using it.
+    public var notice: UpdateNotice? {
+        func trimmed(_ s: String?) -> String? {
+            guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+            return t
+        }
+        if restartPending {
+            let to = trimmed(restartTo).map { "sheepdog \($0)" } ?? "A new sheepdog"
+            if autoRestart {
+                return UpdateNotice(text: "\(to) is installed and restarts itself when no one is using it.", command: nil)
+            }
+            return UpdateNotice(text: "\(to) is installed. To finish, run this on your computer:", command: "sheepdog restart")
+        }
+        guard available, let latest = trimmed(latest) else { return nil }
+        let after = autoRestart ? "It then restarts itself when idle." : nil
+        if let how = trimmed(how) {
+            return UpdateNotice(text: "sheepdog \(latest) is available. To update, run this on your computer:", command: how, after: after)
+        }
+        return UpdateNotice(text: "sheepdog \(latest) is available. Update it on your computer.", command: nil, after: after)
+    }
+}
+
+/// What Settings shows for an update: a sentence, an optional command in
+/// monospace under it, and an optional sentence after the command.
+public struct UpdateNotice: Equatable, Sendable {
+    public var text: String
+    public var command: String?
+    public var after: String?
+
+    public init(text: String, command: String?, after: String? = nil) {
+        self.text = text
+        self.command = command
+        self.after = after
+    }
+
+    /// The whole notice as one sentence run, for VoiceOver.
+    public var spoken: String {
+        [text, command, after].compactMap { $0 }.joined(separator: " ")
     }
 }
 

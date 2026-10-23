@@ -114,6 +114,13 @@ type Block struct {
 	Question string    `json:"question"`
 	SeenAt   time.Time `json:"seen_at"`
 	Answered bool      `json:"answered"`
+	// Answer is the option the user chose when sheepdog sent the
+	// answer, and Via how it came: "voice" (the orchestrator or the
+	// voice fast path) or "tap" (the app, a push button). Both stay
+	// empty when the agent left the question some other way (answered
+	// at the computer, cancelled, exited).
+	Answer string `json:"answer,omitempty"`
+	Via    string `json:"via,omitempty"`
 }
 
 // Result is what the agent last finished, as the user heard it.
@@ -234,7 +241,10 @@ const (
 )
 
 // PendingAction is the single in-flight action awaiting confirmation or
-// cancellation (v1 rule: at most one at a time).
+// cancellation (v1 rule: at most one at a time): the question or
+// instruction the voice is on. Every open answer_prompt, this one
+// included, is also in Table.Questions, so the app can offer each
+// blocked agent's answers at once.
 type PendingAction struct {
 	ID            string      `json:"id"`
 	PaneID        string      `json:"pane_id"`
@@ -317,7 +327,12 @@ const MaxInvestigations = 20
 type Table struct {
 	Agents        map[string]*Agent `json:"agents"`
 	PendingAction *PendingAction    `json:"pending_action,omitempty"`
-	Session       Session           `json:"session"`
+	// Questions are the open answer_prompt questions by pane: one per
+	// blocked agent whose prompt was read, whether or not the voice is
+	// on it. A question leaves when it is answered, its pane leaves
+	// blocked or closes, or its prompt is gone from the screen.
+	Questions map[string]*PendingAction `json:"questions,omitempty"`
+	Session   Session                   `json:"session"`
 }
 
 func newTable() Table {
@@ -371,6 +386,13 @@ func (t Table) clone() Table {
 	if t.PendingAction != nil {
 		p := t.PendingAction.clone()
 		out.PendingAction = &p
+	}
+	if len(t.Questions) > 0 {
+		out.Questions = make(map[string]*PendingAction, len(t.Questions))
+		for k, q := range t.Questions {
+			c := q.clone()
+			out.Questions[k] = &c
+		}
 	}
 	out.Session.Notes = append([]Note(nil), t.Session.Notes...)
 	out.Session.Languages = append([]string(nil), t.Session.Languages...)

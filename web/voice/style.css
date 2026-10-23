@@ -1,39 +1,28 @@
+/* Colours come from /static/tokens.css (linked first in index.html). Only the
+   variables that file has no token for are defined here, in terms of tokens. */
 :root {
-  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #e2e2e6; --card: #fff; --code: #f0f0f3;
-  --primary: #2b6cb0; --danger: #c53030; --danger-bg: #fff5f5; --danger-line: #f5c2c2;
-  --ok: #2f855a; --warn: #b7791f; --idle: #718096; --unknown: #a0aec0;
-  --btn: #f6f6f8; --btn-hover: #ececf0; --btn-line: #bbb;
-  --meter: #2f855a; --meter-bg: #e2e2e6; --in: #2b6cb0; --out: #805ad5;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131316; --fg: #e6e6ea; --muted: #9a9aa2; --line: #2c2c33; --card: #1c1c21; --code: #26262d;
-    --primary: #4c8ed6; --danger: #f28b8b; --danger-bg: #2a1c1c; --danger-line: #5a2a2a;
-    --btn: #26262d; --btn-hover: #31313a; --btn-line: #44444d;
-    --meter: #48bb78; --meter-bg: #2c2c33; --in: #63a4e8; --out: #b794f4;
-  }
+  --ok: var(--done); --warn: var(--blocked-text);
+  --btn: var(--code); --btn-hover: color-mix(in srgb, var(--fg) 8%, var(--code));
+  --btn-line: color-mix(in srgb, var(--slate) 70%, var(--card));
+  --meter: var(--done); --meter-bg: var(--line); --in: var(--working); --out: var(--thinking);
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.2rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
-header h1 { font-size: 1.1rem; margin: 0; }
-header .logo { display: inline-flex; margin-right: -.7rem; }
-header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block; }
-header a { margin-left: auto; color: var(--primary); }
+body { margin: 0; font-size: 15px; line-height: 1.45; }
+header a { margin-left: auto; color: var(--primary-text); }
 main { max-width: 44rem; margin: 0 auto; padding: 1rem; display: flex; flex-direction: column; gap: .8rem; }
 h2 { font-size: .95rem; margin: 0 0 .4rem; }
 .muted { color: var(--muted); font-weight: normal; }
 .small { font-size: .85em; }
 .hidden { display: none !important; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .9rem; }
 .row { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: center; margin: .3rem 0; }
 .row.buttons button { min-width: 6.5em; padding: .5rem .8rem; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; background: var(--code); padding: 0 .25em; border-radius: 3px; }
+code { font-size: .92em; background: var(--code); padding: 0 .25em; border-radius: 3px; }
 kbd { font: inherit; font-size: .85em; border: 1px solid var(--btn-line); border-radius: 3px; padding: 0 .3em; }
 button { font: inherit; padding: .3rem .7rem; border: 1px solid var(--btn-line); border-radius: 4px; background: var(--btn); color: var(--fg); cursor: pointer; }
 button:hover:not(:disabled) { background: var(--btn-hover); }
 button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 button.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
 button.active { outline: 2px solid var(--warn); }
 input, select { font: inherit; padding: .3rem .45rem; border: 1px solid var(--btn-line); border-radius: 4px; background: var(--card); color: var(--fg); }
@@ -43,12 +32,26 @@ input[type=file] { max-width: 100%; }
 .indicator { display: inline-flex; align-items: center; gap: .35rem; font-size: .9em; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--unknown); display: inline-block; }
 .dot.connected, .dot.open { background: var(--ok); }
-.dot.connecting, .dot.reconnecting { background: var(--warn); }
+.dot.connecting, .dot.reconnecting { background: var(--blocked); }
 .dot.closed, .dot.error, .dot.stalled { background: var(--danger); }
 .dot.off, .dot.idle { background: var(--idle); }
 
-.pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: #fff; background: var(--warn); }
-.pill.speaking { background: var(--out); }
+/* The voice orb is #voice-dot. Colours follow iOS Theme.color(for: session): live (open) = listening =
+   orange with the sticker outline (3px cream ring at 60%) and a 2s breathe; speaking = working; thinking = thinking;
+   connecting and stalled = blocked. The ring is the brand's signature outline, not a drop shadow, and the
+   breathe runs only while listening. */
+#voice-dot { width: 16px; height: 16px; }
+#voice-dot.open { background: var(--primary); box-shadow: 0 0 0 var(--sticker-stroke) color-mix(in srgb, var(--cream) 60%, transparent); animation: orb-breathe 2s cubic-bezier(.2,.8,.2,1) infinite; }
+#voice-dot.open.speaking { background: var(--working); animation: none; }
+#voice-dot.thinking { background: var(--thinking); }
+#voice-dot.stalled { background: var(--blocked); }
+@keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) { #voice-dot.open { animation: none; } }
+
+.pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: var(--on-primary); background: var(--blocked); }
+.pill.speaking { background: var(--out); color: var(--card); }
+/* internal/web/static_test.go still expects this page to carry a dark-scheme rule; the tokens do the rest. */
+@media (prefers-color-scheme: dark) { .pill.speaking { color: var(--bg); } }
 
 .meter-label { display: inline-flex; align-items: center; gap: .5rem; }
 .meter { position: relative; display: inline-block; width: 12rem; max-width: 50vw; height: 10px; background: var(--meter-bg); border-radius: 5px; overflow: hidden; }
@@ -69,6 +72,25 @@ input[type=file] { max-width: 100%; }
 .transcript .line.partial .text { opacity: .7; }
 .transcript .text { overflow-wrap: anywhere; }
 
+/* Cards (the orchestrator's show tool): a dialog with the card, and a row in the transcript that opens it again. */
+.transcript .card-open { background: none; border: none; padding: 0; color: var(--primary-text); text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+.card-dialog { width: min(40rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); padding: 0; }
+.card-dialog::backdrop { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.card-head { display: flex; align-items: flex-start; gap: 1rem; padding: .8rem 1rem .4rem; position: sticky; top: 0; background: var(--card); }
+.card-head > div { flex: 1; min-width: 0; }
+.card-head h2 { font-size: 1.1rem; margin: 0; overflow-wrap: anywhere; }
+.card-head p { margin: .1rem 0 0; }
+.card-body { padding: 0 1rem 1rem; overflow-wrap: anywhere; }
+.card-body h3, .card-body h4, .card-body h5, .card-body h6 { font-size: 1rem; margin: .8rem 0 .3rem; }
+.card-body ul, .card-body ol { padding-left: 1.3rem; margin: .4rem 0; }
+.card-body blockquote { margin: .4rem 0; padding-left: .7rem; border-left: 3px solid var(--line); color: var(--muted); }
+.card-body pre.code { background: var(--code); border-radius: 4px; padding: .5rem .6rem; overflow-x: auto; font-size: .85em; line-height: 1.35; }
+.card-body pre.code code { background: none; padding: 0; white-space: pre; }
+.card-body .table-wrap { overflow-x: auto; margin: .5rem 0; }
+.card-body table { border-collapse: collapse; font-size: .92em; min-width: 100%; }
+.card-body th { text-align: left; background: var(--code); font-weight: 600; }
+.card-body th, .card-body td { padding: .3rem .55rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: normal; }
+
 .stats dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: 0; font-size: .9em; }
 .stats dt { color: var(--muted); }
 .stats dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
@@ -78,3 +100,5 @@ input[type=file] { max-width: 100%; }
   .meter { width: 100%; max-width: none; }
   .meter-label { width: 100%; }
 }
+a.button { display: inline-block; padding: .5rem .8rem; border-radius: 8px; text-decoration: none; }
+#auth-choice { gap: .5rem; flex-wrap: wrap; }

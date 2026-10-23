@@ -550,9 +550,6 @@ func TestBrainConfig(t *testing.T) {
 	if !strings.Contains(cfg.String(), "brain.model=env-model") || !strings.Contains(cfg.String(), "brain.utterance_timeout_s=9") {
 		t.Errorf("String() = %s", cfg.String())
 	}
-	if d := cfg.Deprecations(); len(d) != 0 {
-		t.Errorf("deprecations = %q", d)
-	}
 
 	for name, env := range map[string]map[string]string{
 		"enabled":   {"SHEEPDOG_BRAIN_ENABLED": "maybe"},
@@ -626,19 +623,19 @@ func TestDeepSeekConfig(t *testing.T) {
 	}
 }
 
-// TestWebBindAndToken covers the web.bind / web.token defaults, file and
-// env overrides, and IsLoopback's loopback/non-loopback classification
-// (app.Build's "web.token is required when web.bind is not loopback"
-// check depends on it).
-func TestWebBindAndToken(t *testing.T) {
+// TestWebBind covers the web.bind defaults, file and env overrides, the
+// shell switch and web.advertise, and IsLoopback's classification. An
+// old file with web.token or web.shell_lan still loads: the keys are
+// ignored.
+func TestWebBind(t *testing.T) {
 	def := Default()
-	if def.Web.Bind != "127.0.0.1" || def.Web.Token != "" || !def.Web.IsLoopback() {
+	if def.Web.Bind != "127.0.0.1" || !def.Web.Shell || !def.Web.IsLoopback() {
 		t.Errorf("defaults = %+v", def.Web)
 	}
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	body := "[web]\nbind = \"0.0.0.0\"\ntoken = \"file-token\"\n"
+	body := "[web]\nbind = \"0.0.0.0\"\ntoken = \"old-token\"\nshell_lan = true\nshell = false\nadvertise = [\"100.101.1.1:7777\"]\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -646,25 +643,22 @@ func TestWebBindAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Web.Bind != "0.0.0.0" || cfg.Web.Token != "file-token" || cfg.Web.IsLoopback() {
+	if cfg.Web.Bind != "0.0.0.0" || cfg.Web.Shell || cfg.Web.IsLoopback() || len(cfg.Web.Advertise) != 1 {
 		t.Errorf("file values = %+v", cfg.Web)
 	}
-	if s := cfg.String(); !strings.Contains(s, "web.token=set") || strings.Contains(s, "file-token") {
-		t.Errorf("String() leaks or misreports web.token: %s", s)
+	if s := cfg.String(); strings.Contains(s, "old-token") || !strings.Contains(s, "web.advertise=100.101.1.1:7777") {
+		t.Errorf("String() = %s", s)
 	}
 
-	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_BIND": "192.168.1.5", "SHEEPDOG_WEB_TOKEN": "env-token"}))
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_BIND": "192.168.1.5", "SHEEPDOG_WEB_SHELL": "true", "SHEEPDOG_WEB_ADVERTISE": "100.101.1.1:7777, router.example:8443"}))
 	if err != nil {
 		t.Fatalf("load with env: %v", err)
 	}
-	if cfg.Web.Bind != "192.168.1.5" || cfg.Web.Token != "env-token" || cfg.Web.IsLoopback() {
+	if cfg.Web.Bind != "192.168.1.5" || !cfg.Web.Shell || len(cfg.Web.Advertise) != 2 || cfg.Web.Advertise[1] != "router.example:8443" {
 		t.Errorf("env values = %+v", cfg.Web)
 	}
-
-	// An empty SHEEPDOG_WEB_TOKEN does not clear a file token (like
-	// DEEPSEEK_API_KEY).
-	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_TOKEN": ""})); err != nil || cfg.Web.Token != "file-token" {
-		t.Errorf("empty env token: %v %q", err, cfg.Web.Token)
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_SHELL": "maybe"})); err == nil {
+		t.Error("SHEEPDOG_WEB_SHELL=maybe loaded")
 	}
 
 	for _, bind := range []string{"127.0.0.1", "localhost", "::1"} {
@@ -676,61 +670,6 @@ func TestWebBindAndToken(t *testing.T) {
 		if w := (Web{Bind: bind}); w.IsLoopback() {
 			t.Errorf("IsLoopback(%q) = true, want false", bind)
 		}
-	}
-}
-
-// The keys renamed or dropped with the ask/propose request kinds: an old
-// file or environment still loads; a renamed key sets its new field
-// unless the new name is set too; each use is one deprecation note.
-func TestDeprecatedBrainKeys(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[brain]\nask_timeout_s = 8\npropose_timeout_s = 20\nenrich_timeout_s = 7\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := load(path, noEnv)
-	if err != nil {
-		t.Fatalf("an old config file no longer loads: %v", err)
-	}
-	if cfg.Brain.UtteranceTimeoutS != 20 || cfg.Brain.AnnounceTurnTimeoutS != 7 {
-		t.Errorf("aliases not applied: %+v", cfg.Brain)
-	}
-	d := cfg.Deprecations()
-	if len(d) != 3 || !strings.Contains(d[0], "brain.propose_timeout_s is deprecated: rename it to brain.utterance_timeout_s") ||
-		!strings.Contains(d[1], "brain.enrich_timeout_s is deprecated: rename it to brain.announce_turn_timeout_s") ||
-		!strings.Contains(d[2], "brain.ask_timeout_s is no longer used") {
-		t.Errorf("deprecations = %q", d)
-	}
-
-	// The new name wins over the old one in the same file.
-	body = "[brain]\npropose_timeout_s = 20\nutterance_timeout_s = 14\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if cfg, err = load(path, noEnv); err != nil || cfg.Brain.UtteranceTimeoutS != 14 || len(cfg.Deprecations()) != 1 || !strings.Contains(cfg.Deprecations()[0], "ignored") {
-		t.Errorf("new name should win: %+v %q %v", cfg.Brain, cfg.Deprecations(), err)
-	}
-	if err := os.WriteFile(path, []byte("[brain]\npropose_timeout_s = \"soon\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := load(path, noEnv); err == nil {
-		t.Error("a non-integer brain.propose_timeout_s was accepted")
-	}
-
-	// Environment: the old names are aliases too; the new one wins.
-	missing := filepath.Join(t.TempDir(), "missing.toml")
-	cfg, err = load(missing, envFrom(map[string]string{
-		"SHEEPDOG_BRAIN_ASK_TIMEOUT_S": "4", "SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S": "9", "SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S": "5",
-	}))
-	if err != nil || cfg.Brain.UtteranceTimeoutS != 9 || cfg.Brain.AnnounceTurnTimeoutS != 5 || len(cfg.Deprecations()) != 3 {
-		t.Errorf("env aliases: %+v %q %v", cfg.Brain, cfg.Deprecations(), err)
-	}
-	cfg, err = load(missing, envFrom(map[string]string{"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S": "9", "SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S": "11"}))
-	if err != nil || cfg.Brain.UtteranceTimeoutS != 11 {
-		t.Errorf("new env name should win: %+v %v", cfg.Brain, err)
-	}
-	if _, err := load(missing, envFrom(map[string]string{"SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S": "0"})); err == nil {
-		t.Error("SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S=0 was accepted")
 	}
 }
 

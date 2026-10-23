@@ -2,9 +2,12 @@ package supervisor
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -17,36 +20,44 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Starting a new agent by voice (docs/dev/roles.md "Starting an agent"): the
-// orchestrator's prompt tool with new_agent_dir. The judgement — which project
-// the user meant, which kind, whether to ask — is the orchestrator's; the daemon
-// gives it the candidate directories when a name does not resolve, and
-// holds the rails, which are about authorisation and runaways only:
+// Starting a new agent (docs/dev/roles.md "Starting an agent"), by voice
+// (the orchestrator's prompt tool with new_agent_dir) or by a tap on New
+// agent in the app (UserNewAgent). Both go through startAgent. The
+// judgement — which project the user meant, which kind, whether to ask —
+// is the orchestrator's; the daemon gives it the candidate directories
+// when a name does not resolve, and holds the rails, which are about
+// authorisation and runaways only:
 //
-//   - the user's own recent words must be behind it, not yet spent on
-//     another write (spawnRailLocked, the same fresh-input reading as the
-//     approval rail; one input starts one agent);
+//   - by voice, the user's own recent words must be behind it, not yet
+//     spent on another write (spawnRailLocked, the same fresh-input
+//     reading as the approval rail; one input starts one agent); a tap
+//     is the user's own and needs no words;
+//   - the kind is one of brain.SpawnKinds by voice, one of the installed
+//     kinds herdr supports by tap (InstalledKinds);
 //   - the directory must resolve, symlinks followed, inside a project
 //     root (supervisor.project_roots) or be an existing workspace's
 //     directory: never an arbitrary path;
-//   - at most spawnMax new agents per spawnWindow.
+//   - at most spawnMax new agents per spawnWindow, both paths counted.
 //
-// The agent is started by typing its command line into a new pane's
-// shell (herdr's agent.start needs a name, and a name the daemon chose
-// would be heard as the user's own: state.CEOName); herdr detects it like
-// any agent the user starts by hand, so it reaches the roster with a
-// spoken name and its first-run trust question becomes a normal pending
-// question. The first instruction, when there is one, follows once the
-// agent sits idle at its prompt.
+// The agent is started with herdr's agent.start in a new pane at its
+// shell prompt: herdr types the kind's own executable and reports when
+// the agent is detected and ready. agent.start needs a name; the daemon
+// gives a placeholder (state.LaunchNamePrefix) the store ignores, so the
+// agent gets its computed spoken name, and clears it once the launch is
+// done. A first-run trust question is a normal pending question. The
+// first instruction, when there is one, follows once the agent sits idle
+// at its prompt.
 
-// Spawner is a Herdr that can open workspaces and panes and type into a
-// pane's shell. A Herdr without it refuses new agents.
+// Spawner is a Herdr that can open workspaces and panes and start an
+// agent in one. A Herdr without it refuses new agents.
 type Spawner interface {
 	Snapshot(ctx context.Context) (herdr.Snapshot, error)
 	CreateWorkspace(ctx context.Context, cwd, label string) (herdr.PaneInfo, error)
 	SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error)
-	SendInput(ctx context.Context, paneID, text string, keys ...string) error
 	ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error)
+	StartAgent(ctx context.Context, paneID, name, kind string, args []string, timeout time.Duration) error
+	GetAgent(ctx context.Context, target string) (herdr.AgentInfo, error)
+	AgentKinds(ctx context.Context) ([]string, error)
 }
 
 var _ Spawner = (*herdr.Client)(nil)
@@ -62,35 +73,35 @@ var (
 	// spawnPoll is how often the start-up watch looks.
 	spawnPoll = time.Second
 	// spawnShellWait bounds the wait for a new pane's shell to be the
-	// pane's foreground process (and to have printed) before the command
-	// line is typed.
+	// pane's foreground process (and to have printed) before agent.start
+	// types into it.
 	spawnShellWait = 5 * time.Second
 	// spawnShellSettle is the pause once the shell is ready, for a prompt
 	// that is still being drawn.
 	spawnShellSettle = 200 * time.Millisecond
-	// spawnReadyWait is how long herdr may take to report the new agent
-	// before the orchestrator and the user are told it has not started, with the
-	// pane's last lines (the watch goes on). herdr sees a starting Claude
-	// or Codex within seconds, even at its trust question; a command
-	// line a shell prompt ate never starts (2026-10-04).
-	spawnReadyWait = 20 * time.Second
+	// spawnStartWait is herdr's agent.start timeout: how long the agent
+	// may take to be detected before herdr drops the launch and the
+	// start has failed. herdr sees a starting Claude or Codex within
+	// seconds, even at its trust question.
+	spawnStartWait = 60 * time.Second
 	// spawnFirstWait bounds the whole wait, from the start, for the
-	// agent to be recognised and sit idle (its trust question answered)
-	// before the first instruction goes; past it the instruction is
-	// dropped, logged and the orchestrator told.
+	// agent to sit idle (its trust question answered) before the first
+	// instruction goes; past it the instruction is dropped, logged and
+	// the orchestrator told.
 	spawnFirstWait = 10 * time.Minute
-	// spawnGoneCheck is how often a new agent herdr has not recognised
-	// is checked for a closed pane.
-	spawnGoneCheck = 15 * time.Second
 )
 
-// spawnScreenLines is how many of a not-ready agent's last pane lines
+// spawnScreenLines is how many of a not-started agent's last pane lines
 // the orchestrator is given.
 const spawnScreenLines = 15
 
 // spawnModel is the model names the command line accepts: letters,
-// digits and . _ : - only, so nothing reaches the shell but a word.
+// digits and . _ : - only, so nothing reaches the agent's argv but a word.
 var spawnModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+
+// lookPath finds an executable on the daemon's PATH (the PATH of the
+// shell that installed the service). A var so tests can fake it.
+var lookPath = exec.LookPath
 
 // spawnDir is one directory a new agent may start in.
 type spawnDir struct {
@@ -101,6 +112,313 @@ type spawnDir struct {
 	Pane string
 }
 
+// spawnStart is one new agent for startAgent.
+type spawnStart struct {
+	Kind string
+	// Model is the model flag, by voice only ("" for the CLI's default).
+	Model string
+	// Dir is a project's name or full path. The agent's pane is split
+	// from a workspace already there, unless NewSpace.
+	Dir string
+	// Space, instead of Dir, is the herdr workspace to start in (a pane
+	// split from one of its panes, in that pane's folder).
+	Space string
+	// NewSpace opens a new workspace in Dir even when one works there.
+	NewSpace bool
+	// Worktree, when set, is the branch of a fresh git worktree the
+	// agent starts in instead of the project folder.
+	Worktree string
+	// Text is the first instruction, sent once the agent is ready.
+	Text string
+	// Name is the agent's name, given once the launch is done in place
+	// of the placeholder ("" clears it: the agent keeps its computed
+	// spoken name).
+	Name string
+	// Via is who asked: "orchestrator" or "user" (a tap).
+	Via string
+	// Authorise, when set, runs under s.mu just before the rate cap is
+	// spent: it returns why the start is refused ("" to go on) and
+	// spends whatever authorised it. The orchestrator passes the words
+	// rail; a tap passes nil.
+	Authorise func() string
+}
+
+// started is a new agent's pane once agent.start has been asked.
+type started struct {
+	PaneID string
+	Dir    spawnDir
+	// Where is what the user hears for the place ("bench", "a new
+	// worktree fix-login of bench").
+	Where string
+	// Name is spawnStart.Name: the herdr name the placeholder becomes.
+	Name string
+}
+
+// startAgent is the one start path: it resolves the directory, takes a
+// slot of the rate cap (after Authorise, under the same lock), opens a
+// pane (a fresh worktree, a split of the project's workspace, or a new
+// workspace), waits for its shell and asks herdr to start the agent. It
+// returns once herdr has the launch; waitStarted tells how it went. The
+// caller has checked the kind, model, text and branch.
+func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, error) {
+	refuse := func(reason string, err error) (started, error) {
+		s.log.Log(logSource, "supervisor.spawn_refused", "", map[string]any{"reason": reason, "dir": req.Dir, "kind": req.Kind, "via": req.Via})
+		return started{}, err
+	}
+	sp, ok := s.herdr.(Spawner)
+	if !ok {
+		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
+	}
+	var wt WorktreeCreator
+	if req.Worktree != "" {
+		if wt, ok = s.herdr.(WorktreeCreator); !ok {
+			return refuse("no worktrees", errors.New("this herdr cannot make worktrees"))
+		}
+	}
+	snap, err := sp.Snapshot(ctx)
+	if err != nil {
+		return refuse("snapshot failed", fmt.Errorf("could not list herdr's workspaces: %w", err))
+	}
+	var dir spawnDir
+	var reason string
+	if req.Space != "" {
+		// An open workspace: its own folder, which the directory rail
+		// allows as it is.
+		if dir, err = spaceDir(snap, req.Space); err != nil {
+			return refuse("no such space", err)
+		}
+	} else {
+		dir, reason, err = resolveSpawnDir(req.Dir, s.spawnDirs(snap), s.cfg.ProjectRoots)
+		if err != nil {
+			return refuse(reason, err)
+		}
+		if req.NewSpace {
+			dir.Pane = ""
+		}
+	}
+	if req.Worktree != "" {
+		if why, err := worktreeRefusal(ctx, dir, req.Worktree); err != nil {
+			return refuse(why, err)
+		}
+	}
+	// What authorised the start and the slot are taken before anything
+	// opens, under one lock: two calls racing cannot both spend the
+	// same words or the last slot.
+	s.mu.Lock()
+	reason = ""
+	if req.Authorise != nil {
+		reason = req.Authorise()
+	}
+	if reason == "" {
+		reason = s.spawnRateLocked()
+		if reason == "" {
+			s.spawns = append(s.spawns, s.cfg.Now())
+		}
+	}
+	s.mu.Unlock()
+	if reason != "" {
+		return refuse(reason, fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason))
+	}
+
+	var pane herdr.PaneInfo
+	switch {
+	case wt != nil:
+		// worktree.create takes no env, so PaneEnv does not reach this
+		// shell; waitShell is the guard against a slow rc file.
+		pane, err = wt.CreateWorktree(ctx, dir.Path, req.Worktree, req.Worktree)
+	case dir.Pane != "":
+		pane, err = sp.SplitPane(ctx, dir.Pane, dir.Path)
+	default:
+		pane, err = sp.CreateWorkspace(ctx, dir.Path, dir.Name)
+	}
+	where := dir.Name
+	if req.Worktree != "" {
+		where = "a new worktree " + req.Worktree + " of " + dir.Name
+	}
+	if err != nil || pane.PaneID == "" {
+		if err == nil {
+			err = errors.New("herdr returned no pane")
+		}
+		s.log.Log(logSource, "supervisor.spawn_error", "", map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "pane", "worktree": req.Worktree != "", "via": req.Via, "error": err.Error()})
+		if req.Worktree != "" {
+			return started{}, fmt.Errorf("could not make a worktree %s in %s: %w", req.Worktree, dir.Name, err)
+		}
+		return started{}, fmt.Errorf("could not open a pane in %s: %w", dir.Name, err)
+	}
+	s.waitShell(ctx, sp, pane.PaneID)
+	if err := sp.StartAgent(ctx, pane.PaneID, launchName(), req.Kind, spawnArgs(req.Kind, req.Model), spawnStartWait); err != nil {
+		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": req.Via, "error": err.Error()})
+		return started{}, &StartError{PaneID: pane.PaneID, Reason: ReasonStartFailed, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
+	}
+	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
+	if req.Model != "" {
+		fields["model"] = req.Model
+	}
+	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, fields)
+	return started{PaneID: pane.PaneID, Dir: dir, Where: where, Name: req.Name}, nil
+}
+
+// spaceDir is the start place in workspace id: its first pane (split
+// from) and that pane's folder, named after the workspace.
+func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
+	label := snap.WorkspaceLabel(id)
+	var first herdr.PaneInfo
+	for _, p := range snap.Panes {
+		if p.WorkspaceID == id && (first.PaneID == "" || paneLess(p.PaneID, first.PaneID)) {
+			first = p
+		}
+	}
+	if first.PaneID == "" {
+		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
+	}
+	path := realDir(first.Cwd)
+	for _, w := range snap.Workspaces {
+		if w.WorkspaceID == id && w.Worktree != nil && w.Worktree.CheckoutPath != "" {
+			if p := realDir(w.Worktree.CheckoutPath); p != "" {
+				path = p
+			}
+		}
+	}
+	if path == "" {
+		return spawnDir{}, fmt.Errorf("the space %s has no folder", label)
+	}
+	if label == "" {
+		label = filepath.Base(path)
+	}
+	return spawnDir{Name: label, Path: path, Pane: first.PaneID}, nil
+}
+
+// StartError is a start that failed once its pane was open: the pane is
+// left at its shell prompt, so the user can open it and see why.
+type StartError struct {
+	PaneID string
+	// Reason is ReasonTimeout when herdr never reported the agent
+	// ready, else ReasonStartFailed.
+	Reason string
+	Err    error
+}
+
+func (e *StartError) Error() string { return e.Err.Error() }
+func (e *StartError) Unwrap() error { return e.Err }
+
+// The codes of a refused or failed start, for the app's own screens
+// (POST /api/agents "reason").
+const (
+	ReasonNotInstalled = "not_installed"
+	ReasonNotGit       = "not_git"
+	ReasonBranchExists = "branch_exists"
+	ReasonTimeout      = "timeout"
+	ReasonStartFailed  = "start_failed"
+)
+
+// ReasonError is a refused start with its code.
+type ReasonError struct {
+	Reason string
+	Err    error
+}
+
+func (e *ReasonError) Error() string { return e.Err.Error() }
+func (e *ReasonError) Unwrap() error { return e.Err }
+
+// worktreeRefusal says why dir cannot have a fresh worktree of branch
+// (with its reason code), or nil when it can.
+func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
+	g, isGit := gitInfo(dir.Path)
+	if !isGit {
+		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
+	}
+	if branchCheckedOut(ctx, g.root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	}
+	return "", nil
+}
+
+// branchCheckedOut reports whether branch (already checked by
+// validBranch) is checked out in one of the repository's worktrees, the
+// main checkout included: git cannot check it out a second time. An
+// existing branch checked out nowhere is fine, herdr's worktree.create
+// opens it.
+func branchCheckedOut(ctx context.Context, root, branch string) bool {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "branch refs/heads/"+branch {
+			return true
+		}
+	}
+	return false
+}
+
+// launchName is a fresh placeholder herdr name (state.LaunchNamePrefix).
+func launchName() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return state.LaunchNamePrefix + hex.EncodeToString(b)
+}
+
+// spawnArgs are the agent's arguments after its executable: the model
+// flag, when there is one. model matched spawnModel.
+func spawnArgs(kind, model string) []string {
+	switch {
+	case model == "":
+		return nil
+	case kind == brain.SpawnCodex:
+		return []string{"-m", model}
+	default:
+		return []string{"--model", model}
+	}
+}
+
+// startOutcome is how a launch went.
+type startOutcome struct {
+	// Blocked is true when the agent was detected at a question (its
+	// first-run trust question): started, and the question is pending.
+	Blocked bool
+	// Err is set when it did not start; Tail is then the pane's last
+	// lines ("" when the pane is gone).
+	Err  error
+	Tail string
+}
+
+// waitStarted follows a launch through herdr's agent.get until the
+// agent is ready (detected and no longer pending), detected at a
+// question, or the launch is dropped or times out.
+func (s *Supervisor) waitStarted(ctx context.Context, paneID string) startOutcome {
+	sp, ok := s.herdr.(Spawner)
+	if !ok {
+		return startOutcome{Err: errors.New("starting a new agent is not available here")}
+	}
+	deadline := time.Now().Add(spawnStartWait + 2*time.Second)
+	fail := func(why string) startOutcome {
+		tail, gone := s.spawnScreen(ctx, paneID)
+		if gone {
+			why = "its pane was closed"
+		}
+		return startOutcome{Err: errors.New(why), Tail: tail}
+	}
+	for {
+		info, err := sp.GetAgent(ctx, paneID)
+		switch {
+		case errors.Is(err, herdr.ErrAgentNotFound):
+			return fail(fmt.Sprintf("herdr did not see it running within %d s", int(spawnStartWait.Seconds())))
+		case err == nil && info.Status == herdr.StateBlocked:
+			return startOutcome{Blocked: true}
+		case err == nil && !info.LaunchPending && info.Agent != "" && info.Status != herdr.StateUnknown && info.Status != "":
+			return startOutcome{}
+		}
+		if time.Now().After(deadline) {
+			return fail(fmt.Sprintf("it was not ready after %d s", int(spawnStartWait.Seconds())))
+		}
+		select {
+		case <-ctx.Done():
+			return fail("the wait was cancelled")
+		case <-time.After(spawnPoll / 4):
+		}
+	}
+}
+
 // Spawn implements brain.Spawner.
 func (h brainHost) Spawn(ctx context.Context, req brain.SpawnRequest) (string, error) {
 	return h.s.spawn(ctx, req)
@@ -108,13 +426,15 @@ func (h brainHost) Spawn(ctx context.Context, req brain.SpawnRequest) (string, e
 
 var _ brain.Spawner = brainHost{}
 
+// spawn is the orchestrator's start: the words rail authorises it, and
+// it returns as soon as herdr has the launch; how it went reaches the
+// orchestrator (and, when it failed, the user) as a daemon fact.
 func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string, error) {
 	refuse := func(reason string, err error) (string, error) {
-		s.log.Log(logSource, "supervisor.spawn_refused", "", map[string]any{"reason": reason, "dir": req.Dir, "kind": req.Kind})
+		s.log.Log(logSource, "supervisor.spawn_refused", "", map[string]any{"reason": reason, "dir": req.Dir, "kind": req.Kind, "via": "orchestrator"})
 		return "", err
 	}
-	sp, ok := s.herdr.(Spawner)
-	if !ok {
+	if _, ok := s.herdr.(Spawner); !ok {
 		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
 	}
 	if req.Kind != brain.SpawnClaude && req.Kind != brain.SpawnCodex {
@@ -129,59 +449,26 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 	if reason != "" {
 		return refuse(reason, fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason))
 	}
-	snap, err := sp.Snapshot(ctx)
+	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Model: req.Model, Dir: req.Dir, Text: req.Text, Via: "orchestrator",
+		// The rail is read again under the lock, since the words may
+		// have answered a prompt while the directory was resolved.
+		Authorise: func() string {
+			if reason := s.spawnRailLocked(); reason != "" {
+				return reason
+			}
+			s.lastInputLocked().used = true
+			return ""
+		}})
 	if err != nil {
-		return refuse("snapshot failed", fmt.Errorf("could not list herdr's workspaces: %w", err))
+		return "", err
 	}
-	dirs := s.spawnDirs(snap)
-	dir, reason, err := resolveSpawnDir(req.Dir, dirs, s.cfg.ProjectRoots)
-	if err != nil {
-		return refuse(reason, err)
-	}
-	// The words and the slot are taken before anything opens, under the
-	// lock that checked them: two calls racing cannot both spend the same
-	// words or the last slot. The rail is read again, since the words may
-	// have answered a prompt while the directory was resolved.
-	s.mu.Lock()
-	reason = s.spawnRailLocked()
-	if reason == "" {
-		reason = s.spawnRateLocked()
-	}
-	if reason != "" {
-		s.mu.Unlock()
-		return refuse(reason, fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason))
-	}
-	s.lastInputLocked().used = true
-	s.spawns = append(s.spawns, s.cfg.Now())
-	s.mu.Unlock()
-
-	var pane herdr.PaneInfo
-	if dir.Pane != "" {
-		pane, err = sp.SplitPane(ctx, dir.Pane, dir.Path)
-	} else {
-		pane, err = sp.CreateWorkspace(ctx, dir.Path, dir.Name)
-	}
-	if err != nil || pane.PaneID == "" {
-		if err == nil {
-			err = errors.New("herdr returned no pane")
-		}
-		s.log.Log(logSource, "supervisor.spawn_error", "", map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "pane", "error": err.Error()})
-		return "", fmt.Errorf("could not open a pane in %s: %w", dir.Name, err)
-	}
-	s.waitShell(ctx, sp, pane.PaneID)
-	cmd := spawnCommand(req.Kind, req.Model)
-	if err := sp.SendInput(ctx, pane.PaneID, cmd, "enter"); err != nil {
-		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "error": err.Error()})
-		return "", fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), dir.Name, err)
-	}
-	s.log.Log(logSource, "supervisor.spawn", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "model": req.Model, "pane": pane.PaneID, "split": dir.Pane != "", "first_instruction": req.Text != ""})
 	if s.track() {
 		go func() {
 			defer s.replies.Done()
-			s.followSpawn(pane.PaneID, req.Kind, req.Text, dir.Name)
+			s.followStart(st, req.Kind, req.Text, true)
 		}()
 	}
-	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + dir.Name + "."
+	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + st.Dir.Name + "."
 	if req.Text != "" {
 		// Not "told it": the instruction is held (2026-10-03 live check,
 		// the orchestrator said "and told it to run the tests" before the trust
@@ -390,27 +677,13 @@ func inside(path, root string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-// spawnCommand is the new agent's command line: the CLI's canonical
-// executable, plus its model flag. kind is one of brain.SpawnKinds and
-// model matched spawnModel, so nothing else reaches the shell.
-func spawnCommand(kind, model string) string {
-	cmd := kind
-	if model == "" {
-		return cmd
-	}
-	if kind == brain.SpawnCodex {
-		return cmd + " -m " + model
-	}
-	return cmd + " --model " + model
-}
-
 // waitShell waits, up to spawnShellWait, until a new pane's shell is the
 // pane's foreground process (pane.process_info, the predicate herdr's own
-// CLI uses before `agent start`) and has printed something, then settles
-// briefly, so the command line is not typed into a shell still starting
-// (an rc-file child such as oh-my-zsh's update check holds the foreground
-// and eats keystrokes). A pane that cannot be inspected, or a shell not
-// ready by the deadline, is typed into anyway; the timeout is logged.
+// agent.start uses) and has printed something, then settles briefly, so
+// agent.start does not type into a shell still starting (an rc-file
+// child such as oh-my-zsh's update check holds the foreground and eats
+// keystrokes). A pane that cannot be inspected, or a shell not ready by
+// the deadline, is started in anyway; the timeout is logged.
 func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 	deadline := time.Now().Add(spawnShellWait)
 	for {
@@ -441,39 +714,50 @@ func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 	}
 }
 
-// followSpawn watches a new agent start: it waits for the watcher to put
-// it in the roster, then — when there is a first instruction — for it to
-// sit idle at its prompt (its trust question answered by the user through
-// the normal pending path), and sends the instruction through the
-// instruction send path (sendInstruction's menu guard included).
-//
-// An agent herdr has not recognised after spawnReadyWait is not given up
-// on (the user's phone session, 2026-10-04 04:59:57: the kvoice Claude
-// was dropped after 60 s with its instruction, most likely still at its
-// first-run question): the orchestrator is told, with the pane's last lines,
-// that the agent is not ready and the instruction is held, and the watch
-// goes on until spawnFirstWait or the pane closes. What the screen means
-// is the orchestrator's to read.
-func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
+// followStart watches a new agent after agent.start. By voice
+// (waitLaunch) it first follows the launch (waitStarted): a start that
+// failed is told to the orchestrator, with the pane's last lines, and
+// to the user as a daemon fact. Then, on both paths, it waits for the
+// watcher to put the agent in the roster and for it to sit idle at its
+// prompt (its trust question answered by the user through the normal
+// pending path), replaces the placeholder herdr name (with the user's
+// name for it, or nothing), and sends the first
+// instruction, when there is one, through the instruction send path
+// (sendInstruction's menu guard included).
+func (s *Supervisor) followStart(st started, kind, text string, waitLaunch bool) {
 	ctx := s.life
 	start := time.Now()
-	ready := start.Add(spawnReadyWait)
+	paneID := st.PaneID
+	if waitLaunch {
+		if out := s.waitStarted(ctx, paneID); out.Err != nil {
+			s.spawnFailed(st, kind, text, out)
+			return
+		}
+	}
 	first := start.Add(spawnFirstWait)
-	seen, late := false, false
-	var lastCheck time.Time
+	seen, named := false, true
+	renames := 0
 	for {
 		row, ok := s.store.Get(paneID)
-		if ok && row.State != herdr.StateUnknown && row.State != "" {
+		switch {
+		case ok && row.State != herdr.StateUnknown && row.State != "":
 			if !seen {
 				seen = true
 				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias), "waited_s": int(time.Since(start).Seconds())})
-				if late {
-					// The user was told it had not started: correct it.
-					s.pushTagged(paneID, fmt.Sprintf("The new %s%s is running now, %d s after its command was typed (herdr sees it as %s).", state.KindWord(kind), inDir(dirName), int(time.Since(start).Seconds()), row.State), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
+			}
+			if named && row.State != herdr.StateBlocked && renames < 5 {
+				// herdr refuses while the launch is pending; the next
+				// look tries again.
+				renames++
+				if r, can := s.herdr.(Renamer); !can || r.Rename(ctx, paneID, st.Name) == nil {
+					named = false
 				}
-				if text == "" {
+			}
+			if text == "" {
+				if !named || renames >= 5 {
 					return
 				}
+				break
 			}
 			if row.State == herdr.StateIdle || row.State == herdr.StateDone {
 				_, err := brainHost{s}.Prompt(ctx, paneID, text)
@@ -482,15 +766,13 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 					fields["error"] = err.Error()
 				}
 				s.log.Log(logSource, "supervisor.spawn_instruction", paneID, fields)
-				if late && err == nil {
-					s.tellBrain(fmt.Sprintf("the new %s (%s) is ready now; its held first instruction went to it: %q", state.KindWord(kind), s.sayOf(paneID), text))
-				}
 				return
 			}
+		case seen && !ok:
+			s.spawnGone(paneID, kind, text)
+			return
 		}
-		now := time.Now()
-		switch {
-		case now.After(first):
+		if time.Now().After(first) {
 			reason := "the agent never sat idle"
 			if !seen {
 				reason = "herdr never recognised the agent"
@@ -500,31 +782,6 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 				s.tellBrain(fmt.Sprintf("the new %s's first instruction was not sent: %s within %d minutes. The instruction was: %q", state.KindWord(kind), reason, int(spawnFirstWait.Minutes()), text))
 			}
 			return
-		case !seen && !late && now.After(ready):
-			late = true
-			tail, gone := s.spawnScreen(ctx, paneID)
-			s.log.Log(logSource, "supervisor.spawn_not_ready", paneID, map[string]any{"kind": kind, "waited_s": int(spawnReadyWait.Seconds()), "still_waiting": !gone, "first_instruction": text != ""})
-			if gone {
-				s.spawnGone(paneID, kind, text)
-				return
-			}
-			line := fmt.Sprintf("the new %s started %d s ago is not recognised by herdr as ready yet", state.KindWord(kind), int(spawnReadyWait.Seconds()))
-			if text != "" {
-				line += fmt.Sprintf("; its first instruction is held until it is ready (waiting up to %d minutes)", int(spawnFirstWait.Minutes()))
-			}
-			s.tellBrain(line + ". The last lines of its pane:\n" + tail)
-			// The user asked for it and must not think it is running: a
-			// daemon fact for the voice, with what the pane shows.
-			s.pushTagged("", spawnNotStartedLine(kind, dirName, tail), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
-			lastCheck = now
-		case !seen && late && now.Sub(lastCheck) >= spawnGoneCheck:
-			// herdr reports no agent, so only the pane says whether it
-			// still exists.
-			lastCheck = now
-			if _, gone := s.spawnScreen(ctx, paneID); gone {
-				s.spawnGone(paneID, kind, text)
-				return
-			}
 		}
 		select {
 		case <-ctx.Done():
@@ -532,6 +789,21 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 		case <-time.After(spawnPoll):
 		}
 	}
+}
+
+// spawnFailed tells the orchestrator and the user that a voice start
+// did not start: the user asked for it and must not think it is running.
+func (s *Supervisor) spawnFailed(st started, kind, text string, out startOutcome) {
+	s.log.Log(logSource, "supervisor.spawn_not_ready", st.PaneID, map[string]any{"kind": kind, "error": out.Err.Error(), "first_instruction": text != ""})
+	line := "the new " + state.KindWord(kind) + " in " + st.Where + " did not start: " + out.Err.Error()
+	if text != "" {
+		line += fmt.Sprintf("; its first instruction was not sent: %q", text)
+	}
+	if out.Tail != "" {
+		line += ". The last lines of its pane:\n" + out.Tail
+	}
+	s.tellBrain(line)
+	s.pushTagged("", spawnNotStartedLine(kind, st.Where, out.Err.Error(), out.Tail), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
 }
 
 // spawnScreen reads the last lines of a new agent's pane; gone is true
@@ -551,15 +823,13 @@ func (s *Supervisor) spawnScreen(ctx context.Context, paneID string) (tail strin
 	return text, false
 }
 
-// spawnGone ends a start-up watch whose pane closed before the agent was
-// recognised.
+// spawnGone ends a start-up watch whose pane closed before the first
+// instruction went.
 func (s *Supervisor) spawnGone(paneID, kind, text string) {
 	s.log.Log(logSource, "supervisor.spawn_instruction_dropped", paneID, map[string]any{"kind": kind, "text": text, "reason": "the pane closed"})
-	line := fmt.Sprintf("the new %s's pane was closed before it was ready", state.KindWord(kind))
 	if text != "" {
-		line += fmt.Sprintf("; its first instruction was not sent: %q", text)
+		s.tellBrain(fmt.Sprintf("the new %s's pane was closed before it was ready; its first instruction was not sent: %q", state.KindWord(kind), text))
 	}
-	s.tellBrain(line)
 }
 
 // tellBrain puts a fact the daemon saw into the orchestrator's transcript, for
@@ -571,14 +841,18 @@ func (s *Supervisor) tellBrain(line string) {
 }
 
 // spawnNotStartedLine is the daemon's fact for the user about a new agent
-// herdr does not see: what was started where, and the pane's last
+// that did not start: what was started where, and the pane's last
 // lines, for the voice to retell.
-func spawnNotStartedLine(kind, dirName, tail string) string {
+func spawnNotStartedLine(kind, where, reason, tail string) string {
+	line := fmt.Sprintf("The new %s%s has not started: %s.", state.KindWord(kind), inDir(where), reason)
+	if strings.TrimSpace(tail) == "" {
+		return line
+	}
 	lines := strings.Split(strings.TrimSpace(tail), "\n")
 	if len(lines) > spawnTellLines {
 		lines = lines[len(lines)-spawnTellLines:]
 	}
-	return fmt.Sprintf("The new %s%s has not started: %d s after its command was typed, herdr does not see it running. The last lines of its pane: %s", state.KindWord(kind), inDir(dirName), int(spawnReadyWait.Seconds()), strings.Join(lines, " / "))
+	return line + " The last lines of its pane: " + strings.Join(lines, " / ")
 }
 
 // inDir is " in <dir>", or "" without a directory name.

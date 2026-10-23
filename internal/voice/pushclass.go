@@ -1,5 +1,10 @@
 package voice
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Push arbitration shared by the providers' push queues
 // (docs/dev/timelines.md §4 (a)(b)(e), C29). The queue used to look at its
 // head only, so an urgent or owed line waited behind an idle line that
@@ -35,7 +40,20 @@ const (
 	// TagAgents: []string, the aliases an answer is about
 	// (brain.Reply.Agents).
 	TagAgents = "agents"
+	// TagOnScreen: []string, the titles of the cards the answer put on
+	// the user's screen (brain.Reply.Shown).
+	TagOnScreen = "on_screen"
 )
+
+// OnScreenLine tells the voice that a card is on the user's screen: say
+// the facts as one short sentence plus the gist, never the card itself.
+func OnScreenLine(titles []string) string {
+	q := make([]string, len(titles))
+	for i, t := range titles {
+		q[i] = strconv.Quote(t)
+	}
+	return "the user's screen now shows " + strings.Join(q, ", ") + " with the full detail: say the facts in one or two short sentences (that it is on the screen, and the gist), and do not read the card out or list what is on it"
+}
 
 // PushOwed reports whether tags mark a line the user is owed or must
 // hear now: an answer to their utterance, a kept or due promise, a

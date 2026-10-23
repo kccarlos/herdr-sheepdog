@@ -424,17 +424,62 @@ Barge-in sequence observed (client content sent while the model was counting):
   long session alternates: fresh, resume at the first GoAway (~9 min),
   fresh + re-seed at the second (~18 min). The canary's chain arm, which
   bypasses the daemon, still fails (re-run 2026-10-04: 0/8); run it after a
-  model or backend change to see whether the platform changed.
+  model or backend change to see whether the platform changed. **On AI
+  Studio chained resumes keep the whole session** (2026-10-20, chain arm
+  with `-text-turns`: 8/8 after three resumes, 11/11 with a fact per
+  connection, the prompt never shrank), so the rule applies to Vertex only
+  (`chainedResumesKeepContext`).
 
-### GoAway (not observed — the smoke test did not run for the ~10 min limit)
+### GoAway
 
 Type: `LiveServerGoAway{TimeLeft time.Duration}`; wire `{"goAway":{"timeLeft":"10s"}}`
-(protobuf Duration string; the SDK's `UnmarshalJSON` converts it). Flow:
-on `GoAway`, mark the session draining, finish the current turn if possible,
-open the new connection with the saved handle, swap the sender, close the old
-one. The connection limit is enforced per connection; the resumable *session*
+(protobuf Duration string; the SDK's `UnmarshalJSON` converts it). The
+connection limit is enforced per connection; the resumable *session*
 outlives it. `Receive()` returning a close error without a preceding `GoAway`
 is the "unexpected drop" case — reconnect the same way.
+
+**Observed on AI Studio (`gemini-3.8-live`, live daemon log 2026-10-12..20):**
+the GoAway comes about 58 minutes after a connection opens, with
+`timeLeft` 50 s; Vertex sent one about every 9 minutes. At the deadline the
+server closes with `1011 (internal server error): Deadline expired before
+operation could complete`. **AI Studio allows one connection per session:**
+a resume dialled while the old connection is still open is refused with
+`close 1008 (policy violation): BidiGenerateContent session is already
+connected to an existing client`. A scratch repro (2026-10-20, idle, no
+audio) confirmed it: the overlapping resume was refused, the same handle
+resumed in 537 ms right after closing the old connection, and a fresh
+(handle-less) dial next to an open connection was accepted. Vertex accepted
+the overlapping resume.
+
+Until 2026-10-20 this cost the context of every AI Studio session once an
+hour: the make-before-break resume was refused (`ERROR voice.connect_error`),
+the old connection ran to the deadline, and its 1011 dropped the handle
+(`voice.handle_dropped {reason: server_internal_error}`), so the next
+connection started fresh from the recap. Not one GoAway resumed on AI Studio
+in those nine days. The daemon now hands over (`internal/voice/gemini/handover.go`):
+it still tries make-before-break first; on that refusal it logs
+`voice.handover {step: refused}` (no error), closes the old connection at the
+next quiet moment (5 s before the deadline at the latest), and resumes with
+the same handle; audio in the gap of about half a second is buffered and
+replayed. A 1011 after a GoAway no longer drops the handle.
+
+**AI Studio ends a session 60 minutes after it opened**, resumed or not
+(live log 2026-10-20, 4 of 4 hours): about 3 minutes after the handover's
+resume the server closes the connection with `close 1008 (policy
+violation): Requested entity was not found`, 60:00 to 60:04 after the fresh
+connect, and a resume with the handle is refused `BidiGenerateContent
+session not found or expired` (2026-10-08..16, 8 of 8). The same 1008
+also ended fresh, never-resumed sessions 8 to 45 minutes in (2026-10-08..16,
+7 times): it means the server dropped the session, regularly at 60 minutes
+and sometimes earlier. So the handover at a GoAway near the hour buys only
+those 3 minutes. The daemon drops the handle on either
+error (`voice.handle_dropped {reason: session_expired}`) and reconnects
+fresh, refreshes an AI Studio session at a quiet moment after 54 minutes
+(`voice.session_refreshed {reason: max_age}`), and on a GoAway past that
+age opens a fresh session at once instead of resuming
+(`internal/voice/gemini/refresh.go`). A session on AI Studio therefore
+starts fresh, re-seeded, about every 54 minutes; the handover still serves
+a GoAway on a younger session.
 
 ### Context window compression (accepted, effect not observable in a short run)
 

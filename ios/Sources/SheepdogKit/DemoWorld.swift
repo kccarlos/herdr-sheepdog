@@ -24,6 +24,7 @@ public struct DemoWorld: Sendable {
         "Why did the migration fail?",
         "What is codex-payments asking?",
         "What did claude-auth do?",
+        "Show me the agents",
     ]
 
     public static let greeting = "This is the demo. Four scripted agents are working on a sample project, and I'll tell you when one finishes, fails or needs you. Nothing leaves this phone."
@@ -34,6 +35,9 @@ public struct DemoWorld: Sendable {
     public private(set) var history = ConversationHistory()
     /// Lines the voice should say, oldest first, until `takeLines()`.
     public private(set) var lines: [Line] = []
+    /// Cards to put on the screen (the `show` tool's), until `takeCards()`.
+    public private(set) var cards: [ScreenCard] = []
+    private var cardCount = 0
 
     private let start: Date
     private var now: Date
@@ -64,13 +68,13 @@ public struct DemoWorld: Sendable {
         self.now = now
         agents = [
             Agent(paneID: Self.authPane, alias: "claude-auth", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Fix the login redirect loop", spoken: "claude-auth"),
+                  currentTask: "Fix the login redirect loop", spoken: "claude-auth", cwd: "~/Documents/shop"),
             Agent(paneID: Self.paymentsPane, alias: "codex-payments", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments"),
+                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments", cwd: "~/Documents/shop"),
             Agent(paneID: Self.migrationPane, alias: "claude-migration", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration"),
+                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration", cwd: "~/Documents/shop"),
             Agent(paneID: Self.docsPane, alias: "codex-docs", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Update the install section of the README", spoken: "codex-docs"),
+                  currentTask: "Update the install section of the README", spoken: "codex-docs", cwd: "~/Documents/shop"),
         ]
         // The migration fails before the approval, so the status answer
         // after it has news (done, failed, still writing).
@@ -165,6 +169,8 @@ public struct DemoWorld: Sendable {
         let approved = option == 1
         update(action.paneID) { agent, at in
             agent.lastBlock?.answered = true
+            agent.lastBlock?.answer = chosen.label
+            agent.lastBlock?.via = via
             agent.stateSince = at
             agent.state = approved ? .working : .idle
             if !approved {
@@ -180,7 +186,7 @@ public struct DemoWorld: Sendable {
         return "Declined. codex-payments did not install the package and is waiting for new instructions."
     }
 
-    /// `POST /api/inject/utterance`: a question typed, tapped or said.
+    /// `POST /api/utterance`: a question typed, tapped or said.
     /// Logs it and the answer the way a real daemon logs a typed turn, and
     /// returns the answer.
     @discardableResult
@@ -203,6 +209,7 @@ public struct DemoWorld: Sendable {
         if let action = pending, has("decline", "deny", "reject") || q == "no" || q.hasPrefix("no,") || q.hasPrefix("no ") {
             return (try? answer(pendingID: action.id, option: 2, via: "brain")) ?? "There is nothing to decline right now."
         }
+        if has("show", "list", "table", "on my screen", "on the screen") { return showAgents() }
         if has("fail", "wrong", "error", "broke", "problem") { return failures(why: has("why")) }
         if has("ask", "need", "wait", "approv", "payment", "blocked") { return paymentsStatus }
         if has("auth", "login") { return detail(of: Self.authPane) }
@@ -265,6 +272,73 @@ public struct DemoWorld: Sendable {
         }
     }
 
+    // MARK: - Cards
+
+    /// "Show me the agents": a card with the agents as a table and what
+    /// needs the user as a list, and one spoken sentence with the gist.
+    private mutating func showAgents() -> String {
+        var rows: [String] = []
+        var next: [String] = []
+        var counts: [String: Int] = [:]
+        for agent in agents {
+            let failed = agent.lastResult?.spoken?.contains("failed") == true
+            let word: String
+            switch agent.state {
+            case .blocked: word = "Waiting for you"
+            case .working: word = "Working"
+            case .done: word = "Done"
+            default: word = failed ? "Failed" : "Idle"
+            }
+            counts[word, default: 0] += 1
+            rows.append("| \(agent.alias) | \(word) | \(Self.since(agent.stateSince, now: now)) |")
+            if agent.state == .blocked { next.append("**\(agent.alias)** wants to run `\(pending?.command ?? "a command")`") }
+            if failed { next.append("**\(agent.alias)** failed: the column `users.plan` already exists") }
+        }
+        var markdown = "| Agent | State | For |\n|---|---|---:|\n" + rows.joined(separator: "\n")
+        if !next.isEmpty {
+            markdown += "\n\n### Needs you\n" + next.map { "- \($0)" }.joined(separator: "\n")
+        } else {
+            markdown += "\n\nNothing needs you right now."
+        }
+        cardCount += 1
+        let card = ScreenCard(cardID: "demo-card-\(cardCount)", kind: .card, at: now, title: "Your agents", markdown: markdown)
+        show(card)
+        let gist = ["Done", "Working", "Waiting for you", "Failed", "Idle"].compactMap { word -> String? in
+            guard let n = counts[word] else { return nil }
+            return "\(n) \(word.lowercased())"
+        }
+        return "It's on your screen: " + gist.joined(separator: ", ") + "."
+    }
+
+    /// "now", "8 s", "1 min", "12 min", "2 h".
+    static func since(_ date: Date?, now: Date) -> String {
+        guard let date else { return "—" }
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 60 { return seconds < 1 ? "now" : "\(seconds) s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) min" }
+        return "\(minutes / 60) h"
+    }
+
+    /// Puts a card on the screen the way the daemon does: the card to
+    /// deliver, a `card.shown` event, and the conversation item with it.
+    mutating func show(_ card: ScreenCard) {
+        log(source: "supervisor", type: "card.shown", payload: [
+            "card_id": .string(card.cardID), "kind": .string(card.kind.rawValue), "agent": .string(card.agent ?? ""),
+        ])
+        if let event = events.last {
+            history.upsert(ConversationItem(id: Int64(clamping: event.seq), ts: now, kind: .card, text: card.title,
+                                            agent: card.agent, cardID: card.cardID, card: card))
+        }
+        cards.append(card)
+    }
+
+    /// Cards to show since the last call.
+    public mutating func takeCards() -> [ScreenCard] {
+        defer { cards.removeAll() }
+        return cards
+    }
+
     // MARK: - The agent window
 
     /// `GET /api/agents/{pane}/screen`: a few scripted terminal lines.
@@ -293,7 +367,7 @@ public struct DemoWorld: Sendable {
     // MARK: - Snapshots
 
     public var state: DaemonState {
-        DaemonState(agents: agents, pendingAction: pending,
+        DaemonState(agents: agents, pendingAction: pending, questions: pending.map { [$0] } ?? [],
                     voice: .init(mode: "demo", name: "Sheepdog", status: "connected", clientConnected: true),
                     herdr: "demo", version: "demo",
                     conversationStartedAt: start)

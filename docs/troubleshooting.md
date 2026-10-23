@@ -1,4 +1,6 @@
-# Troubleshooting
+# troubleshooting
+
+**Find the fix for what went wrong, and gather what a bug report needs.**
 
 Start with `sheepdog doctor`: one line per check, with the fix. Then
 `sheepdog status` and `sheepdog logs`. For a bug report, run
@@ -16,9 +18,9 @@ you changed `web.port`.
 | `plugin-fetch: warning: … is not on your PATH` | `~/.local/bin` is not on PATH. | Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile, or run the linked path it prints. |
 | `plugin-fetch: … exists and is not a link; left it alone` | You already have a `sheepdog` file there. | Run `<plugin dir>/bin/sheepdog` directly, or remove the file and reinstall. |
 | `port 7777 is in use by another program, so sheepdog cannot listen on http://127.0.0.1:7777.` followed by `Find it with: lsof -nP -iTCP:7777 -sTCP:LISTEN` | Another program has the port. | Stop it, or set `web.port` in `~/.config/sheepdog/config.toml`. `sheepdog setup` then ends with `The setup page needs the daemon. Fix the above, or set up in the terminal: sheepdog setup --terminal`. |
+| After a restart sheepdog asks for setup again (`no Gemini API key`), or `sheepdog status` says `keys came from … last time; that file is gone or unreadable` | The keys were in a `.env` in some working directory (or exported in a shell) and the restart did not find them. `sheepdog restart` and the restart after an upgrade now reuse the env file the last run loaded, but a file that was moved or deleted cannot be found. | Put the keys where every start finds them: `cp /path/to/.env ~/.config/sheepdog/.env && chmod 600 ~/.config/sheepdog/.env` (or `sheepdog setup`), then `sheepdog restart`. Keys only exported in a shell are not remembered: put them in that file. `sheepdog doctor` warns about keys outside it. |
 | `sheepdog is already running (pid N, http://127.0.0.1:7777)` | Not an error: one daemon at a time. | Use it: `sheepdog open`. `sheepdog restart` restarts it. |
 | `sheepdog is already running (http://…; no pid file: started by an older sheepdog or with another --data-dir)` | An older sheepdog holds the port and left no pid file. | `sheepdog status` shows `pid unknown`. `sheepdog stop` will not guess the pid (`a sheepdog is running at … but left no pid file`): Ctrl-C it where it was started, or find it with `lsof -nP -iTCP:7777 -sTCP:LISTEN`, then `sheepdog start`. |
-| `The running sheepdog (version …) is older and has no setup page.` | The daemon runs an old binary. | `sheepdog restart`. |
 | `sheepdog pair: the daemon listens on 127.0.0.1 only, so a phone cannot reach it: turn on phone access in step 4 of the setup page …` | Phone access is off (the default). | `sheepdog setup`, step 4 **Turn on phone access**, then `sheepdog pair`. |
 | `No browser here (SSH?): …` from `sheepdog open` | You are on SSH. | Run the printed `ssh -N -L …` on your own computer and open the URL there ([quick-start.md](quick-start.md#over-ssh-with-no-browser)). |
 | `The setup page only opens on the computer sheepdog runs on.` (HTTP 403) | You opened `/setup` from the LAN or Tailscale. | Open `http://127.0.0.1:7777/setup` on the computer. |

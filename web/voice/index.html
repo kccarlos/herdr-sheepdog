@@ -5,29 +5,29 @@
 <title>sheepdog voice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<link rel="icon" type="image/svg+xml" href="/static/logo-solid.svg">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/shared.css">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/voice/style.css">
 </head>
 <body>
 <header>
-  <picture class="logo">
-    <source srcset="/static/logo-transparent.svg" media="(prefers-color-scheme: dark)">
-    <img src="/static/logo-solid.svg" alt="" width="28" height="28">
-  </picture>
-  <h1>sheepdog <span class="muted">voice</span></h1>
+  <h1><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">voice</span></h1>
   <div class="indicator" title="WebSocket to the daemon"><span class="dot" id="ws-dot"></span><span id="ws-text">ws: idle</span></div>
   <div class="indicator" title="voice session in the daemon"><span class="dot" id="voice-dot"></span><span id="voice-text">voice: …</span></div>
   <a href="/debug">debug page</a>
 </header>
 
-<section class="card hidden" id="auth-gate">
-  <h2>Token required</h2>
-  <p class="muted small">This daemon requires a token (config <code>web.token</code>). Enter it once; the browser remembers it.</p>
-  <div class="row">
-    <input id="auth-token" type="password" placeholder="token" autocomplete="off">
-    <button id="auth-submit" class="primary">Unlock</button>
+<section class="card hidden" id="auth-gate" aria-live="polite">
+  <h2 id="auth-title">Pair this browser</h2>
+  <p id="auth-text" class="muted small"></p>
+  <div class="row hidden" id="auth-choice">
+    <a id="auth-app" class="button primary" href="#">Open in the Sheepdog app</a>
+    <button id="auth-browser">Use in this browser</button>
   </div>
-  <p id="auth-error" class="error hidden"></p>
 </section>
 
 <main id="app-main">
@@ -102,6 +102,18 @@
   <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
 </main>
 
+<dialog id="card-dialog" class="card-dialog" aria-labelledby="card-title">
+  <form method="dialog" class="card-head">
+    <div>
+      <h2 id="card-title">Card</h2>
+      <p id="card-meta" class="muted small"></p>
+    </div>
+    <button value="close" aria-label="Close the card">Done</button>
+  </form>
+  <div id="card-body" class="card-body"></div>
+</dialog>
+
 <script type="module" src="/voice/app.js"></script>
+<script type="module" src="/static/update-banner.js"></script>
 </body>
 </html>

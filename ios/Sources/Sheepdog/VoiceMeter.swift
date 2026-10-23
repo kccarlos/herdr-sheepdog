@@ -12,12 +12,22 @@ import SwiftUI
 final class VoiceMeter: ObservableObject {
     /// Input level, 0…1, for the orb's and the mic button's ring.
     @Published private(set) var micLevel: Float = 0
+    /// Output level, 0…1, while the voice speaks: the orb's waveform.
+    @Published private(set) var outputLevel: Float = 0
     @Published private(set) var metrics = AudioMetrics()
     @Published private(set) var gateDiagnostics = CaptureGate.Diagnostics()
 
     func setLevel(_ level: Float) {
         guard level != micLevel else { return }
         micLevel = level
+    }
+
+    func setOutputLevel(_ level: Float) {
+        // Steps of 5 %: the waveform needs no finer, and fewer changes
+        // mean fewer redraws.
+        let stepped = (level * 20).rounded() / 20
+        guard stepped != outputLevel else { return }
+        outputLevel = stepped
     }
 
     func setMetrics(_ next: AudioMetrics) {

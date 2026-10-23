@@ -1,18 +1,20 @@
 import XCTest
 @testable import SheepdogKit
 
-/// Talks to a real daemon on 127.0.0.1:7799 when one is running
-/// (`--brain=fake --herdr=mock --voice=off --dev`), and skips otherwise, so
-/// CI stays green without one. It is the only place the SSE stream is
-/// exercised end to end.
+/// Talks to a real daemon on 127.0.0.1:7799 (or `SHEEPDOG_FIXTURE_PORT`,
+/// passed as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT`) when one is running
+/// (`--brain=fake --herdr=mock --voice=off --dev`), and skips otherwise.
+/// ios.yml runs it against its fixture daemon. It is the only place the
+/// SSE stream is exercised end to end.
 final class LiveDaemonTests: XCTestCase {
-    private let endpoint = DaemonEndpoint(text: "127.0.0.1:7799")!
+    private let host = "127.0.0.1:" + (ProcessInfo.processInfo.environment["SHEEPDOG_FIXTURE_PORT"] ?? "7799")
+    private var endpoint: DaemonEndpoint { DaemonEndpoint(text: host)! }
 
     private func skipUnlessRunning() async throws {
         do {
             _ = try await DaemonClient(endpoint: endpoint).hello()
         } catch {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799")
+            throw XCTSkip("no sheepdog daemon on \(host)")
         }
     }
 
@@ -47,7 +49,7 @@ final class LiveDaemonTests: XCTestCase {
         // Give the stream a moment to attach before making something happen.
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
-        var request = URLRequest(url: endpoint.url(path: "/api/inject/utterance")!)
+        var request = URLRequest(url: endpoint.url(path: "/api/utterance")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["text": "what's going on"])

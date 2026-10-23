@@ -305,6 +305,10 @@ func catalogFromModels(raw []*genai.Model) []ModelInfo {
 	return out
 }
 
+// RecommendedModel reports whether a Gemini model id looks like a text
+// model the orchestrator can run (the setup page's Gemini model picker).
+func RecommendedModel(name string) bool { return recommended(name) }
+
 // recommended reports whether name looks like a text model the orchestrator can
 // run (ModelInfo.Recommended).
 func recommended(name string) bool {

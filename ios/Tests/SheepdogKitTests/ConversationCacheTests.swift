@@ -19,7 +19,7 @@ final class ConversationCacheTests: XCTestCase {
 
     func testRoundTripKeepsItemsPagingAndTheResumeID() throws {
         let cache = ConversationCache(directory: directory)
-        let endpoint = DaemonEndpoint(text: "192.168.1.20:7777", token: "s3cret")!
+        let endpoint = DaemonEndpoint(text: "192.168.1.20:7777")!
         let page = try DaemonClient.decoder.decode(ConversationPage.self, from: Data(Fixtures.conversationPage.utf8))
         var history = ConversationHistory()
         history.applyNewest(page)
@@ -52,7 +52,7 @@ final class ConversationCacheTests: XCTestCase {
 
     func testTheTokenNeverReachesTheFile() throws {
         let cache = ConversationCache(directory: directory)
-        let endpoint = DaemonEndpoint(text: "mac.local:7777", token: "tok-DO-NOT-STORE")!
+        let endpoint = DaemonEndpoint(text: "mac.local:7777")!
         try cache.save(ConversationSnapshot(endpoint: endpoint, history: ConversationHistory(items: [item(1)]), lastEventID: nil), for: endpoint)
         let text = try String(contentsOf: cache.fileURL(for: endpoint), encoding: .utf8)
         XCTAssertFalse(text.contains("tok-DO-NOT-STORE"))
@@ -60,8 +60,8 @@ final class ConversationCacheTests: XCTestCase {
     }
 
     func testKeyedByHostAndPortNotToken() {
-        let a = DaemonEndpoint(text: "192.168.1.20:7777", token: "one")!
-        let b = DaemonEndpoint(text: "http://192.168.1.20:7777", token: "two")!
+        let a = DaemonEndpoint(text: "192.168.1.20:7777")!
+        let b = DaemonEndpoint(text: "http://192.168.1.20:7777")!
         let c = DaemonEndpoint(text: "192.168.1.20:7799")!
         let v6 = DaemonEndpoint(text: "[fd7a::1]:7777")!
         XCTAssertEqual(ConversationCache.key(for: a), ConversationCache.key(for: b))

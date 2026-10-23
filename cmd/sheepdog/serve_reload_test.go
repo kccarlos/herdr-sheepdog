@@ -34,7 +34,6 @@ func TestServeSetupModeAndReload(t *testing.T) {
 	built := make(chan *app.App, 4)
 	serveBuilt = func(a *app.App) { built <- a }
 	t.Cleanup(func() { serveBuilt = nil })
-	t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_WEB_TOKEN") })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -80,17 +79,23 @@ func TestServeSetupModeAndReload(t *testing.T) {
 		t.Errorf("serve does not print the setup page:\n%s", stdout.String())
 	}
 
-	login := func(tok string) int {
-		resp, err := http.Post(base+"/api/login", "application/json", strings.NewReader(`{"token":"`+tok+`"}`))
+	name := func() string {
+		var h struct {
+			Computer struct {
+				Name string `json:"name"`
+			} `json:"computer"`
+		}
+		resp, err := http.Get(base + "/api/hello")
 		if err != nil {
 			t.Fatal(err)
 		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
+		defer func() { _ = resp.Body.Close() }()
+		_ = json.NewDecoder(resp.Body).Decode(&h)
+		return h.Computer.Name
 	}
-	tokA, tokB := strings.Repeat("a", 32), strings.Repeat("b", 32)
-	for _, tc := range []struct{ tok, other string }{{tokA, ""}, {tokB, tokA}} {
-		if err := os.WriteFile(envPath, []byte("SHEEPDOG_WEB_TOKEN="+tc.tok+"\n"), 0o600); err != nil {
+	tokA, tokB := "Studio A", "Studio B"
+	for _, want := range []string{tokA, tokB} {
+		if err := os.WriteFile(envPath, []byte("SHEEPDOG_COMPUTER_NAME="+want+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		a.RequestRestart("test")
@@ -98,22 +103,12 @@ func TestServeSetupModeAndReload(t *testing.T) {
 		if a.URL() != base {
 			t.Fatalf("reloaded on %s, want %s", a.URL(), base)
 		}
-		if code := login(tc.tok); code != http.StatusOK {
-			t.Errorf("login with the new token: %d", code)
-		}
-		if tc.other != "" {
-			if code := login(tc.other); code != http.StatusUnauthorized {
-				t.Errorf("login with the old token: %d, want 401", code)
-			}
+		if got := name(); got != want {
+			t.Errorf("after the reload the name is %q, want %q", got, want)
 		}
 	}
 	if !strings.Contains(stdout.String(), "sheepdog reloaded its settings") {
 		t.Errorf("no reload line:\n%s", stdout.String())
-	}
-	for _, s := range []string{tokA, tokB} {
-		if strings.Contains(stdout.String()+stderr.String(), s) {
-			t.Error("a token reached the output")
-		}
 	}
 	cancel()
 	if code := <-done; code != 0 {

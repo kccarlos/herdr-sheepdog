@@ -27,6 +27,7 @@ func Template() string {
 
 [herdr]
 # socket = %[5]q
+# bin = ""   # the herdr binary for the phone's terminal; empty finds it on PATH or in ~/.local/bin
 
 [state]
 # path = %[6]q
@@ -75,12 +76,25 @@ func Template() string {
 # thinking = %[34]t   # DeepSeek's thinking mode
 # reasoning_effort = %[35]q   # "low" | "high" | "max"; low fits the 8 s ask budget
 
+[anthropic]
+# The native Anthropic orchestrator provider, Claude (paid per token;
+# docs/models.md). api_key is normally left unset here:
+# ANTHROPIC_API_KEY is read from the environment instead. With a key,
+# anthropic appears in the /debug model picker whatever brain.provider
+# says; brain.provider = "anthropic" starts on claude-opus-5-5.
+# api_key = ""
+# base_url = %[53]q
+# effort = %[54]q   # utterance turns: "low" | "medium" | "high" | "xhigh" | "max"
+# event_effort = %[55]q   # event and announce turns
+# fallbacks = %[56]t   # server-side refusal fallbacks (fallbacks "default")
+
 [web]
-# bind = %[43]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
+# bind = %[43]q   # loopback only by default; a LAN or Tailscale address (or "0.0.0.0") lets paired devices in, over TLS
 # port = %[10]d
-# token = ""   # required once bind is not loopback: Authorization: Bearer, ?token= for /ws and /events, or POST /api/login sets a cookie
 # dev = false
 # dev_testdata_dir = ""   # default: testdata/audio relative to the working directory
+# shell = true   # paired devices may open the phone shell and send attachments; set on the setup page
+# advertise = []   # more host:port addresses for the pairing code, e.g. ["100.101.1.1:7777"] for a router's port forward
 
 [cli]
 # prefer = %[11]q   # "codex" | "claude" | "auto"
@@ -106,7 +120,7 @@ func Template() string {
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides
-# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]) | the name of a [[brain.openai_compat]] entry: the provider the brain starts on; the /debug picker switches at runtime
+# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]) | "anthropic" | the name of a [[brain.openai_compat]] entry: the provider the brain starts on; the /debug picker switches at runtime
 # model = %[22]q   # a function-calling model of that provider
 # max_steps = %[23]d   # model calls per turn before the daemon answers for itself
 # utterance_timeout_s = %[24]d   # budget of one turn over your relayed words (tools included)
@@ -154,6 +168,13 @@ func Template() string {
 # The event log, <data_dir>/events/YYYY-MM-DD.jsonl, holds transcripts of
 # what you said. Day files older than this are deleted at startup and daily.
 # retention_days = %[50]d   # 0 keeps them forever
+
+[update]
+# Once a day the daemon asks api.github.com for the latest release (one
+# request, nothing personal sent) and tells you when a newer one exists.
+# check = %[51]t
+# After an upgrade the daemon restarts itself when nobody is using it.
+# auto_restart = %[52]t
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -180,5 +201,7 @@ func Template() string {
 		d.Brain.ReplyWaitS,
 		d.Log.Level, d.Log.MaxSizeMB, d.Log.MaxFiles,
 		d.Events.RetentionDays,
+		d.Update.Check, d.Update.AutoRestart,
+		d.Anthropic.BaseURL, d.Anthropic.Effort, d.Anthropic.EventEffort, d.Anthropic.Fallbacks,
 	)
 }

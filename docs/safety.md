@@ -1,6 +1,6 @@
-# Safety
+# safety
 
-What sheepdog does on its own, and what it never does.
+**What sheepdog does on its own, and what it never does.**
 
 - **Approvals need your words.** A worker's approval prompt is answered only on
   your own recorded words (or a tap) in that turn, with a key from the prompt's

@@ -66,7 +66,6 @@ final class VoiceProvidersTests: XCTestCase {
         let request = try XCTUnwrap(StubProtocol.seen.first)
         XCTAssertEqual(request.httpMethod, "PUT")
         XCTAssertEqual(request.url?.path, "/api/voice/provider")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer t")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
         XCTAssertEqual(body["provider"] as? String, "openai")
     }
@@ -136,7 +135,7 @@ final class VoiceProvidersTests: XCTestCase {
 
     func testTalkModeDefaultsAndRoundTrip() {
         let defaults = UserDefaults(suiteName: "voice-settings-\(UUID().uuidString)")!
-        let store = SettingsStore(defaults: defaults, secrets: InMemorySecretStore())
+        let store = SettingsStore(defaults: defaults, credentials: DeviceCredentials(secrets: InMemorySecretStore()))
         XCTAssertEqual(store.talkMode, .openMic, "hold-to-talk is off by default")
         store.talkMode = .holdToTalk
         XCTAssertEqual(store.talkMode, .holdToTalk)

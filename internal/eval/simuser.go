@@ -375,6 +375,8 @@ func simUserContents(convo []SimLine) []*genai.Content {
 			add(genai.RoleUser, "Sheepdog (on its own): "+l.Text)
 		case "system":
 			add(genai.RoleUser, "["+l.Text+"]")
+		case "screen":
+			add(genai.RoleUser, "[On your phone screen, Sheepdog shows a card: "+l.Text+"]")
 		}
 	}
 	if out[len(out)-1].Role == genai.RoleModel {

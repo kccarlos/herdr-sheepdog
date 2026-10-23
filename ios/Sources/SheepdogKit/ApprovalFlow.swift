@@ -30,6 +30,11 @@ public struct ApprovalFlow: Equatable, Sendable {
         public var pending: PendingAction
         public var phase: Phase
 
+        public init(pending: PendingAction, phase: Phase = .open(error: nil)) {
+            self.pending = pending
+            self.phase = phase
+        }
+
         /// Buttons are live only while nothing else is in flight.
         public var acceptsTaps: Bool {
             if case .open = phase { return true }

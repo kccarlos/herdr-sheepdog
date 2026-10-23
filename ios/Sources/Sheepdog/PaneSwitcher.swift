@@ -7,7 +7,7 @@ enum MainPane: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Conversation / Flock. A segmented look, but built from buttons
+/// Conversation | Agents, the top bar's left half. A segmented look, but built from buttons
 /// so the Agents pane can carry an amber badge for the agents waiting on you
 /// (a segmented `Picker` draws its segments itself, in one colour); at the
 /// accessibility text sizes, where the segments no longer fit, a menu. Health
@@ -38,17 +38,18 @@ struct PaneSwitcher: View {
                     pane = option
                 } label: {
                     label(for: option)
-                        .font(.subheadline.weight(pane == option ? .semibold : .regular))
-                        .foregroundStyle(Color(.label))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .font(.subheadline.weight(pane == option ? .semibold : .medium))
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: 38)
                         .background {
                             if pane == option {
-                                Capsule()
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(Theme.selected)
+                                    .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
                             }
                         }
-                        .contentShape(Capsule())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(accessibilityLabel(for: option))
@@ -57,7 +58,7 @@ struct PaneSwitcher: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(Color(.tertiarySystemFill)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
     }
 
     private var menu: some View {
@@ -77,9 +78,10 @@ struct PaneSwitcher: View {
                     .font(.footnote.weight(.semibold))
             }
             .font(.headline)
-            .foregroundStyle(Color(.label))
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Capsule().fill(Color(.tertiarySystemFill)))
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
         }
         .accessibilityLabel("Show: \(accessibilityLabel(for: pane))")
     }
@@ -92,7 +94,9 @@ struct PaneSwitcher: View {
                 .minimumScaleFactor(0.8)
             switch option {
             case .flock where waiting > 0:
-                Badge(count: waiting, fill: Theme.blocked, text: Theme.onBlocked)
+                Badge(count: waiting, fill: .accentColor, text: Theme.onAccent)
+                    .contentTransition(.numericText())
+                    .animation(Theme.ease, value: waiting)
             default:
                 EmptyView()
             }

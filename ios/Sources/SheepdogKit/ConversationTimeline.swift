@@ -19,6 +19,9 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
     case brain(BrainActivity.Reply, compact: Bool)
     /// A push the voice is holding for a listener, or dropped.
     case held(BrainActivity.HeldPush)
+    /// A card the socket delivered this session that the history does not
+    /// have yet (a history card is an `.item` of kind `.card`).
+    case card(ScreenCard)
 
     public var id: String {
         switch self {
@@ -28,6 +31,7 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
         case let .live(bubble): return "live.\(bubble.id)"
         case let .brain(reply, _): return "brain.\(reply.id)"
         case let .held(push): return "held.\(push.id)"
+        case let .card(card): return "card.\(card.cardID)"
         }
     }
 
@@ -38,6 +42,7 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
         case let .live(bubble): return bubble.at
         case let .brain(reply, _): return reply.ts
         case let .held(push): return push.ts
+        case let .card(card): return card.at ?? .distantFuture
         }
     }
 }
@@ -49,6 +54,7 @@ public enum ConversationTimeline {
         history: [ConversationItem],
         live: [ConversationReducer.Bubble],
         activity: BrainActivity = BrainActivity(),
+        cards: [ScreenCard] = [],
         calendar: Calendar = .current,
         timeFormatter: DateFormatter = ConversationTimeline.defaultTimeFormatter
     ) -> [TimelineRow] {
@@ -70,7 +76,7 @@ public enum ConversationTimeline {
                 if let approval = previousApproval, approval.text.trimmed == item.text.trimmed { return }
                 merged.append(.item(item))
                 sawContent = true
-            case .shepherd, .dog, .approval:
+            case .shepherd, .dog, .approval, .card:
                 merged.append(.item(item))
                 sawContent = true
             }
@@ -90,6 +96,14 @@ public enum ConversationTimeline {
         }
 
         weave(activity, into: &merged)
+        // Live cards by time, after rows of the same moment; one the
+        // history already has is shown once, as its item.
+        let historyCards = Set(history.compactMap { $0.kind == .card ? $0.cardID : nil })
+        for card in cards where !historyCards.contains(card.cardID) {
+            let row = TimelineRow.card(card)
+            let at = merged.firstIndex { $0.date > row.date } ?? merged.endIndex
+            merged.insert(row, at: at)
+        }
 
         // Date dividers where the day changes (and above the first row).
         var out: [TimelineRow] = []
@@ -229,7 +243,7 @@ extension ConversationTimeline {
             switch item.kind {
             case .push: return !item.needsUser
             case .notice, .unknown: return !isBoundary(item)
-            case .shepherd, .dog, .approval: return false
+            case .shepherd, .dog, .approval, .card: return false
             }
         case let .live(bubble):
             switch bubble.kind {
@@ -237,7 +251,7 @@ extension ConversationTimeline {
             case let .push(needsUser): return !needsUser
             case .speech: return false
             }
-        case .day, .brain, .held:
+        case .day, .brain, .held, .card:
             return false
         }
     }

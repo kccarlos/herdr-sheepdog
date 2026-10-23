@@ -49,7 +49,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "                      codex-after-approval.screen.txt)")
 	fprintln(w, "  --transcript PATH   an orchestrator transcript (JSONL) to seed the run with")
 	fprintln(w, "  --say TEXT          a user utterance heard before the request (repeatable)")
-	fprintln(w, "  --provider ID       orchestrator provider: gemini | deepseek | vertex (default config brain.provider)")
+	fprintln(w, "  --provider ID       orchestrator provider: gemini | deepseek | anthropic | vertex (default config brain.provider)")
 	fprintln(w, "  --model NAME        orchestrator model (default config brain.model)")
 	fprintln(w, "  --thinking LEVEL    Gemini thinking level: minimal | low | medium | high (default low;")
 	fprintln(w, "                      DeepSeek's thinking comes from [deepseek])")
@@ -171,6 +171,9 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			// brain.model is another provider's; run the entry's own.
 			bcfg.Model = c.Model
 		}
+		if o.provider == brain.ProviderAnthropic && cfg.Brain.Provider != brain.ProviderAnthropic {
+			bcfg.Model = brain.DefaultAnthropicModel
+		}
 	}
 	if o.model != "" {
 		bcfg.Model = o.model
@@ -271,13 +274,15 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 			return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --fake)")
 		case brain.ProviderDeepSeek:
 			return nil, errors.New("no DeepSeek key (set DEEPSEEK_API_KEY or use --fake)")
+		case brain.ProviderAnthropic:
+			return nil, errors.New("no Anthropic key (set ANTHROPIC_API_KEY or use --fake)")
 		case brain.ProviderVertex:
 			return nil, fmt.Errorf("no Vertex AI credentials (set %s or use --fake)", app.VertexBrainMissing(cfg.Gemini.Vertex))
 		}
 		if o, ok := cfg.Brain.CompatProvider(provider); ok {
 			return nil, fmt.Errorf("no %s key (set %s or use --fake)", o.Name, o.APIKeyEnv)
 		}
-		names := []string{brain.ProviderGemini, brain.ProviderDeepSeek, brain.ProviderVertex}
+		names := []string{brain.ProviderGemini, brain.ProviderDeepSeek, brain.ProviderAnthropic, brain.ProviderVertex}
 		for _, o := range cfg.Brain.OpenAICompat {
 			names = append(names, o.Name)
 		}

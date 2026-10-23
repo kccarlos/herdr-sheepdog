@@ -8,7 +8,7 @@ import XCTest
 /// `scripts/fixture-daemon-restarter.sh` running on the Mac: the test asks
 /// for a restart by creating `/tmp/sd-bugs/control/restart`, and the script
 /// kills the daemon and starts it again 3 s later. Skipped without either.
-/// Not in CI.
+/// ios.yml runs it with the restarter in its own step.
 final class ReconnectUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
     private let control = URL(fileURLWithPath: Fixture.controlDir)
@@ -25,7 +25,10 @@ final class ReconnectUITests: XCTestCase {
 
     func testADaemonRestartReconnectsByItselfWithNoBanner() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice"]
+        // The one-time Voice Isolation tip is a banner too, and it comes the
+        // second time the voice listens, which is the reconnect: mark it as
+        // shown (an argument-domain default outlives the reset).
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-hint.micmode.shown", "YES"]
         app.launch()
 
         let status = app.staticTexts["controls.statusLine"]
@@ -44,8 +47,8 @@ final class ReconnectUITests: XCTestCase {
         XCTAssertFalse(banner.exists, "no banner for a restart shorter than the quiet period")
         // The event stream retries on its own 2 s timer, so the chip may
         // lag the socket by a moment.
-        let chip = app.buttons["chip.connection"]
-        XCTAssertTrue(waitFor(chip, label: "Connection: Connected", timeout: 10, noBanner: banner), "got \(chip.label)")
+        XCTAssertTrue(waitForMenuItem(app, menu: "voice.menu", item: "chip.connection", label: "Connection: Connected", timeout: 20))
+        XCTAssertFalse(banner.exists, "no banner")
     }
 
     // MARK: - Helpers

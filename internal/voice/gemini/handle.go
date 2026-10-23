@@ -47,13 +47,27 @@ import (
 // reason when a handle from a resumed connection is left out.
 const reasonResumedTwice = "resumed_twice"
 
+// reasonSessionExpired is the voice.handle_dropped reason when the
+// server ended the session (isSessionGone).
+const reasonSessionExpired = "session_expired"
+
+// chainedResumesKeepContext reports whether a handle from a resumed
+// connection restores the whole session on this backend, so the rule
+// above does not apply. AI Studio: yes (canary chain arm 2026-10-20,
+// 8 of 8 facts after three resumes in a row, the prompt never shrank;
+// docs/dev/research/live-resume-context-2026-10-04.md). The rule stays
+// for Vertex, where it was measured.
+func (s *Session) chainedResumesKeepContext() bool {
+	return s.cfg.Backend() == "aistudio"
+}
+
 // freshInsteadLocked drops a handle issued by a resumed connection, or
 // any handle while the live connection was itself opened by a resume, so
 // the dial that follows opens a fresh session, and returns the
 // voice.handle_dropped payload (nil when the handle is kept or there is
 // none). Caller holds s.mu.
 func (s *Session) freshInsteadLocked() map[string]any {
-	if s.handle == "" || (s.handleGen < 1 && s.resumeGen < 1) {
+	if s.handle == "" || (s.handleGen < 1 && s.resumeGen < 1) || s.chainedResumesKeepContext() {
 		return nil
 	}
 	p := map[string]any{"reason": reasonResumedTwice, "handle": handleTail(s.handle), "handle_generation": s.handleGen, "generation": s.resumeGen}

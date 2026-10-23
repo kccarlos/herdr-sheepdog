@@ -87,7 +87,7 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "demo.question.0")
         sleep(5)
         shot("07-demo-answer")
-        tapVisible(app, "toolbar.settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         sleep(1)
         shot("08-demo-settings")
     }
@@ -97,13 +97,12 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         app.launchArguments = ["-sheepdogResetState"]
         app.launch()
         dismissKeyboardTip(app)
-        app.open(URL(string: "sheepdog://pair?u=http%3A%2F%2F127.0.0.1%3A9&t=abc")!)
+        app.open(URL(string: "sheepdog://pair#pair=1&d=deadbeef&n=Studio&k=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&e=code&u=127.0.0.1%3A9")!)
         dismissAlerts()
-        let alert = app.alerts["Pair with 127.0.0.1?"]
-        if alert.waitForExistence(timeout: 10) {
+        if app.descendants(matching: .any)["pairing.confirm"].waitForExistence(timeout: 10) {
             shot("09-pair-confirm")
-            alert.buttons["Pair"].tap()
-            _ = app.descendants(matching: .any)["banner"].waitForExistence(timeout: 15)
+            app.buttons["pairing.primary"].tap()
+            _ = app.descendants(matching: .any)["pairing.failed"].waitForExistence(timeout: 15)
             sleep(1)
             shot("10-pair-unreachable")
         }
@@ -120,7 +119,7 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "main.pane.flock")
         sleep(2)
         shot("12-unreachable-agents")
-        tapVisible(app, "toolbar.settings")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         tapVisible(app, "settings.daemon")
         tapVisible(app, "settings.test")
         sleep(4)

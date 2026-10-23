@@ -26,6 +26,12 @@ type spawnWorld struct {
 	// fgBusy, while it returns true, makes pane.process_info report a
 	// child (not the shell) in the foreground.
 	fgBusy func() bool
+
+	mu sync.Mutex
+	// startAs is the state herdr detects a started agent at; noStart
+	// makes every launch fail.
+	startAs herdr.State
+	noStart bool
 }
 
 func shellInfo(busy func() bool) map[string]any {
@@ -81,9 +87,49 @@ func newSpawnWorldWith(t *testing.T, mk func(*testing.T, ...func(*Config)) *harn
 	h.srv.Handle("pane.process_info", func(p json.RawMessage) (any, error) {
 		return map[string]any{"type": "pane_process_info", "process_info": shellInfo(w.fgBusy)}, nil
 	})
-	h.srv.Handle("pane.send_input", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+	// agent.start: herdr detects the agent at w.startAs at once, or, with
+	// w.noStart, never (the launch is dropped: agent.get finds nothing).
+	w.startAs = herdr.StateIdle
+	h.srv.Handle("agent.start", func(p json.RawMessage) (any, error) {
+		var params struct {
+			Name   string `json:"name"`
+			Kind   string `json:"kind"`
+			PaneID string `json:"pane_id"`
+		}
+		_ = json.Unmarshal(p, &params)
+		w.mu.Lock()
+		noStart, as := w.noStart, w.startAs
+		w.mu.Unlock()
+		if !noStart {
+			h.srv.SetAgent(herdr.AgentInfo{PaneID: params.PaneID, WorkspaceID: "w20", Agent: params.Kind, Name: params.Name, Status: as})
+		}
+		return map[string]any{"type": "agent_started", "agent": map[string]any{"pane_id": params.PaneID, "agent_status": "unknown", "launch_pending": true}, "argv": []string{params.Kind}}, nil
+	})
+	h.srv.Handle("agent.rename", func(json.RawMessage) (any, error) {
+		return map[string]any{"type": "agent_info", "agent": map[string]any{}}, nil
+	})
+	h.srv.Handle("server.agent_manifests", func(json.RawMessage) (any, error) {
+		var ms []map[string]any
+		for _, k := range []string{"pi", "claude", "codex", "gemini", "agy", "opencode"} {
+			ms = append(ms, map[string]any{"agent": k, "source": "remote", "source_kind": "remote", "local_override_shadowing_remote": false})
+		}
+		return map[string]any{"type": "agent_manifest_status", "manifests": ms}, nil
+	})
+	// Installed here: claude, codex and agy (not pi, gemini or opencode).
+	oldLook := lookPath
+	lookPath = func(name string) (string, error) {
+		switch name {
+		case "claude", "codex", "agy":
+			return "/usr/local/bin/" + name, nil
+		}
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() { lookPath = oldLook })
 	return w
 }
+
+// startParams are the agent.start requests.
+func (w *spawnWorld) startParams() []map[string]any { return w.params("agent.start") }
 
 func (w *spawnWorld) spawn(req brain.SpawnRequest) (string, error) {
 	return w.sup.spawn(context.Background(), req)
@@ -125,9 +171,18 @@ func TestSpawnStartsAgentAndSendsFirstInstructionWhenReady(t *testing.T) {
 	if len(created) != 1 || created[0]["cwd"] != w.bench || created[0]["label"] != "bench" || created[0]["focus"] != false {
 		t.Fatalf("workspace.create = %v", created)
 	}
-	inputs := w.params("pane.send_input")
-	if len(inputs) != 1 || inputs[0]["pane_id"] != "w20:p1" || inputs[0]["text"] != "claude --model haiku" {
-		t.Fatalf("pane.send_input = %v", inputs)
+	starts := w.startParams()
+	if len(starts) != 1 || starts[0]["pane_id"] != "w20:p1" || starts[0]["kind"] != "claude" || starts[0]["timeout_ms"] != float64(60000) {
+		t.Fatalf("agent.start = %v", starts)
+	}
+	if args, _ := starts[0]["args"].([]any); len(args) != 2 || args[0] != "--model" || args[1] != "haiku" {
+		t.Errorf("agent.start args = %v", starts[0]["args"])
+	}
+	if name, _ := starts[0]["name"].(string); !state.IsLaunchName(name) {
+		t.Errorf("agent.start name = %q, want the placeholder", name)
+	}
+	if len(w.srv.RequestsFor("pane.send_input")) != 0 {
+		t.Error("the command line was typed into the shell")
 	}
 	ev := w.log.ofType("supervisor.spawn")
 	if len(ev) != 1 {
@@ -154,6 +209,27 @@ func TestSpawnStartsAgentAndSendsFirstInstructionWhenReady(t *testing.T) {
 		t.Errorf("first instruction = %v", got)
 	}
 	waitFor(t, func() bool { return w.log.count("supervisor.spawn_instruction") == 1 }, "supervisor.spawn_instruction")
+	// The placeholder name was cleared once the launch was done, and
+	// the agent never carried it.
+	renames := w.params("agent.rename")
+	if len(renames) != 1 || renames[0]["target"] != "w20:p1" || renames[0]["name"] != nil {
+		t.Errorf("agent.rename = %v", renames)
+	}
+	row, _ := w.store.Get("w20:p1")
+	if row.Name != "" || state.Say(row) != "Claude" {
+		t.Errorf("the new agent is %q (name %q), want Claude", state.Say(row), row.Name)
+	}
+}
+
+// The placeholder herdr name a start gives is never taken for the
+// user's name.
+func TestLaunchNameIsNotTheUsersName(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w20:p1", To: herdr.StateIdle, At: w.clock.Now(), Agent: "codex", Name: state.LaunchNamePrefix + "0a1b2c3d", WorkspaceID: "w20", WorkspaceLabel: "bench", Cwd: w.bench})
+	row, _ := w.store.Get("w20:p1")
+	if row.Name != "" || state.CEOName(row) != "" || state.Say(row) != "Codex" {
+		t.Errorf("row = name %q, said %q", row.Name, state.Say(row))
+	}
 }
 
 // A project that already has a workspace gets a new pane split from it,
@@ -173,8 +249,8 @@ func TestSpawnReusesExistingWorkspace(t *testing.T) {
 	if len(split) != 1 || split[0]["target_pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
 		t.Fatalf("pane.split = %v", split)
 	}
-	if in := w.params("pane.send_input"); len(in) != 1 || in[0]["text"] != "codex" {
-		t.Fatalf("pane.send_input = %v", in)
+	if in := w.startParams(); len(in) != 1 || in[0]["kind"] != "codex" || in[0]["args"] != nil {
+		t.Fatalf("agent.start = %v", in)
 	}
 }
 
@@ -263,7 +339,7 @@ func TestSpawnRailNeedsTheCEOsRecentWords(t *testing.T) {
 			if !errors.Is(err, brain.ErrNotPermitted) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want ErrNotPermitted with %q", err, c.want)
 			}
-			if n := len(w.srv.RequestsFor("workspace.create")) + len(w.srv.RequestsFor("pane.send_input")); n != 0 {
+			if n := len(w.srv.RequestsFor("workspace.create")) + len(w.srv.RequestsFor("agent.start")); n != 0 {
 				t.Errorf("herdr spawn calls = %d", n)
 			}
 			if w.log.count("supervisor.spawn_refused") != 1 {
@@ -391,93 +467,63 @@ func TestSpawnRefusesModelThatIsNotAName(t *testing.T) {
 	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude", Model: "haiku; rm -rf ~"}); err == nil {
 		t.Fatal("spawned with a shell command for a model")
 	}
-	if got := spawnCommand("codex", "gpt-5.5-mini"); got != "codex -m gpt-5.5-mini" {
-		t.Errorf("codex command = %q", got)
+	if got := spawnArgs("codex", "gpt-5.5-mini"); len(got) != 2 || got[0] != "-m" || got[1] != "gpt-5.5-mini" {
+		t.Errorf("codex args = %q", got)
 	}
 }
 
-// The user's phone session, 2026-10-04 04:58:57: a new Claude in kvoice
-// was not recognised by herdr within 60 s and supervisor.spawn_not_ready
-// dropped its first instruction. Now the orchestrator is told the agent is not
-// ready, with its pane's last lines (here Claude's folder-trust
-// question), the watch goes on, and the instruction goes once the agent
-// is recognised and idle.
-func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
-	oldReady, oldFirst := spawnReadyWait, spawnFirstWait
-	spawnReadyWait, spawnFirstWait = 60*time.Millisecond, 5*time.Second
-	t.Cleanup(func() { spawnReadyWait, spawnFirstWait = oldReady, oldFirst })
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It is still waiting at the trust question.", "")})
+// A voice start herdr drops (the agent never showed up, 2026-10-04: a
+// shell prompt ate the "c" of "claude" and nobody heard that it never
+// started) is told to the orchestrator with the pane's last lines, and to
+// the user as a daemon fact; the instruction is not kept.
+func TestSpawnThatDoesNotStartTellsTheBrainAndTheUser(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It did not start.", "")})
 	w := newSpawnWorldWith(t, func(t *testing.T, opts ...func(*Config)) *harness { return newBrainHarness(t, m, opts...) })
+	w.noStart = true
 	w.hear("在 kvoice 开一个新的 Claude, 让它解释一下这个项目")
+	w.srv.Handle("workspace.create", func(p json.RawMessage) (any, error) {
+		pane := herdr.PaneInfo{PaneID: "w20:p1", WorkspaceID: "w20", Cwd: w.bench, Status: herdr.StateUnknown}
+		w.srv.SetPane(pane)
+		w.srv.SetScreen(pane.PaneID, "bench ❯ laude\nzsh: command not found: laude")
+		return map[string]any{"type": "workspace_created", "root_pane": pane}, nil
+	})
 	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude", Text: "explain this project"}); err != nil {
 		t.Fatal(err)
 	}
-	w.srv.SetScreen("w20:p1", fixture(t, "claude-trust-dialog.screen.txt"))
 	waitFor(t, func() bool { return w.log.count("supervisor.spawn_not_ready") == 1 }, "supervisor.spawn_not_ready")
-	ev := w.log.ofType("supervisor.spawn_not_ready")[0].Payload.(map[string]any)
-	if ev["still_waiting"] != true {
-		t.Errorf("spawn_not_ready = %v", ev)
-	}
-	if n := w.log.count("supervisor.spawn_instruction_dropped"); n != 0 {
-		t.Fatalf("the instruction was dropped at the not-ready mark")
-	}
-	// The user is told too, through the voice: a daemon fact with the
-	// pane's last lines (2026-10-04, a shell prompt ate the "c" of
-	// "claude" and nobody heard that the agent never started).
 	waitFor(t, func() bool {
 		for _, p := range w.pusher.all() {
-			if strings.Contains(p.Text, "The new Claude in bench has not started") && strings.Contains(p.Text, "trust this folder") {
+			if strings.Contains(p.Text, "The new Claude in bench has not started: herdr did not see it running") && strings.Contains(p.Text, "command not found") {
 				return true
 			}
 		}
 		return false
 	}, "the user's spawn fact")
-
-	// The orchestrator's next turn has the fact and the screen.
 	w.say("怎么样了?")
 	calls := m.Calls()
 	if len(calls) == 0 {
 		t.Fatal("no brain turn")
 	}
 	text := calls[len(calls)-1].Text()
-	if !strings.Contains(text, "the new Claude started 0 s ago is not recognised by herdr as ready yet; its first instruction is held") || !strings.Contains(text, "trust this folder") {
+	if !strings.Contains(text, "the new Claude in bench did not start") || !strings.Contains(text, `its first instruction was not sent: "explain this project"`) || !strings.Contains(text, "command not found") {
 		t.Errorf("the brain was not told:\n%s", text)
 	}
-
-	// Recognised, the trust question answered, idle: the instruction
-	// goes, and the user, told it had not started, hears that it runs.
-	w.srv.SetScreen("w20:p1", "❯ ")
-	w.detect("w20:p1", "", herdr.StateIdle)
-	waitFor(t, func() bool { return len(w.promptRequests()) == 1 }, "the held first instruction")
-	waitFor(t, func() bool {
-		for _, p := range w.pusher.all() {
-			if strings.Contains(p.Text, "The new Claude in bench is running now") {
-				return true
-			}
-		}
-		return false
-	}, "the user's correction")
-	if got := w.promptRequests()[0]; got[0] != "w20:p1" || !strings.HasPrefix(got[1], "explain this project") {
-		t.Errorf("first instruction = %v", got)
+	if len(w.promptRequests()) != 0 {
+		t.Error("an instruction went to an agent that never started")
 	}
 }
 
-// A not-ready agent whose pane closes ends the watch: the instruction is
-// dropped as "the pane closed" (in the phone session the user closed the
-// pane by hand at 05:00:28), not kept for ten minutes.
-func TestSpawnNotReadyEndsWhenThePaneCloses(t *testing.T) {
-	oldReady, oldGone := spawnReadyWait, spawnGoneCheck
-	spawnReadyWait, spawnGoneCheck = 40*time.Millisecond, 20*time.Millisecond
-	t.Cleanup(func() { spawnReadyWait, spawnGoneCheck = oldReady, oldGone })
+// A new agent whose pane closes before it sat idle ends the watch: the
+// instruction is dropped as "the pane closed", not kept for ten minutes.
+func TestSpawnWatchEndsWhenThePaneCloses(t *testing.T) {
 	w := newSpawnWorld(t)
 	w.hear("open a Claude in bench and have it run the tests")
 	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude", Text: "run the tests"}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return w.log.count("supervisor.spawn_not_ready") == 1 }, "supervisor.spawn_not_ready")
-	w.srv.Handle("pane.read", func(json.RawMessage) (any, error) {
-		return nil, &herdr.Error{Code: "pane_not_found", Message: "pane w20:p1 not found"}
-	})
+	w.detect("w20:p1", "", herdr.StateBlocked)
+	waitFor(t, func() bool { return w.log.count("supervisor.spawn_ready") == 1 }, "supervisor.spawn_ready")
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w20:p1", From: herdr.StateBlocked, Closed: true, At: w.clock.Now()})
 	waitFor(t, func() bool { return w.log.count("supervisor.spawn_instruction_dropped") == 1 }, "supervisor.spawn_instruction_dropped")
 	if p := w.log.ofType("supervisor.spawn_instruction_dropped")[0].Payload.(map[string]any); p["reason"] != "the pane closed" {
 		t.Errorf("dropped = %v", p)
@@ -500,8 +546,8 @@ func TestSpawnWaitsForShellForeground(t *testing.T) {
 	if calls < 4 {
 		t.Errorf("process_info polled %d times, want >= 4", calls)
 	}
-	if n := len(w.srv.RequestsFor("pane.send_input")); n != 1 {
-		t.Errorf("send_input requests = %d, want 1", n)
+	if n := len(w.srv.RequestsFor("agent.start")); n != 1 {
+		t.Errorf("agent.start requests = %d, want 1", n)
 	}
 }
 
@@ -513,7 +559,7 @@ func TestSpawnShellTimeoutTypesAnyway(t *testing.T) {
 	if _, err := w.spawn(brain.SpawnRequest{Kind: brain.SpawnClaude, Dir: "app"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(w.srv.RequestsFor("pane.send_input")); n != 1 {
-		t.Errorf("send_input requests = %d, want 1", n)
+	if n := len(w.srv.RequestsFor("agent.start")); n != 1 {
+		t.Errorf("agent.start requests = %d, want 1", n)
 	}
 }

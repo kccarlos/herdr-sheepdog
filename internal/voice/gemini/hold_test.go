@@ -51,7 +51,7 @@ func TestPushHeldWhileNoClientAndReleasedOnAttach(t *testing.T) {
 	if _, ok := rel[0]["held_ms"]; !ok {
 		t.Errorf("voice.push_released lacks held_ms: %v", rel[0])
 	}
-	pushes := h.log.payloads("voice.push")
+	pushes := h.pushesLogged(2)
 	if len(pushes) != 2 || pushes[0]["scheduling_sent"] != "when_idle" || pushes[1]["scheduling_sent"] != "silent" {
 		t.Errorf("voice.push = %v, want the when_idle answer then the silent line", pushes)
 	}

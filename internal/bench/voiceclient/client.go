@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,8 +43,6 @@ import (
 type Options struct {
 	// BaseURL is the daemon, e.g. http://127.0.0.1:7790.
 	BaseURL string
-	// Token is web.token, if any.
-	Token string
 	// Client names this client in client-ready (default
 	// sheepdog-bench / tier2 / bench).
 	Client wsproto.ClientInfo
@@ -176,9 +173,6 @@ func Dial(ctx context.Context, o Options) (*Client, error) {
 // attach opens /ws and sends client-ready.
 func (c *Client) attach(ctx context.Context) error {
 	u := "ws" + strings.TrimPrefix(c.o.BaseURL, "http") + "/ws"
-	if c.o.Token != "" {
-		u += "?token=" + url.QueryEscape(c.o.Token)
-	}
 	conn, _, err := websocket.Dial(ctx, u, nil)
 	if err != nil {
 		return fmt.Errorf("voiceclient: dial /ws: %w", err)
@@ -788,9 +782,6 @@ func (c *Client) streamEvents(ready chan<- error) {
 	if err != nil {
 		ready <- err
 		return
-	}
-	if c.o.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.o.Token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

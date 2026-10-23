@@ -10,7 +10,28 @@ import UserNotifications
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         MainActor.assumeIsolated { PushCoordinator.shared.launched() }
+        Self.useRoundedNavigationTitles()
         return true
+    }
+
+    /// Brand type: navigation titles (large and inline) in SF Rounded; body
+    /// text everywhere stays the default SF. `.fontDesign` on a view does
+    /// not reach the bar's title, so it goes through the bar's attributes.
+    static func useRoundedNavigationTitles() {
+        func rounded(_ style: UIFont.TextStyle, _ weight: UIFont.Weight) -> UIFont {
+            let size = UIFont.preferredFont(forTextStyle: style).pointSize
+            let base = UIFont.systemFont(ofSize: size, weight: weight)
+            guard let design = base.fontDescriptor.withDesign(.rounded) else { return base }
+            return UIFont(descriptor: design, size: size)
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.largeTitleTextAttributes = [.font: rounded(.largeTitle, .bold)]
+        appearance.titleTextAttributes = [.font: rounded(.headline, .semibold)]
+        let bar = UINavigationBar.appearance()
+        bar.standardAppearance = appearance
+        bar.compactAppearance = appearance
+        bar.scrollEdgeAppearance = appearance
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
@@ -105,6 +126,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             await loadDaemonStatus()
             guard PushPolicy.shouldAskPermission(daemon: daemonStatus) else { return }
             defaults.set(true, forKey: Key.asked)
+            guard await model?.ask(.notifications) ?? true else { return }
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             await refreshAuthorization()
             if granted { UIApplication.shared.registerForRemoteNotifications() }

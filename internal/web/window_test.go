@@ -113,9 +113,11 @@ func TestAgentScreenEscapedPane(t *testing.T) {
 	}
 }
 
-// Both window routes need the token like every other /api route.
-func TestAgentWindowNeedsToken(t *testing.T) {
-	h := newHarness(t, harnessOpts{token: "s3cret"})
+// Both window routes need a paired device like every other /api route.
+func TestAgentWindowNeedsADevice(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	d := h.pairDevice()
+	h.asRemote()
 	for _, r := range []*http.Request{
 		h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), "", nil, nil),
 		h.authedRequest(http.MethodPost, windowPath("fake:1", "input"), "", nil, map[string]any{"keys": []string{"enter"}}),
@@ -125,7 +127,7 @@ func TestAgentWindowNeedsToken(t *testing.T) {
 			t.Errorf("%s %s = %d, want 401", r.Method, r.URL.Path, code)
 		}
 	}
-	if code, _ := h.do(h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), "s3cret", nil, nil), nil); code != http.StatusNotFound {
+	if code, _ := h.do(h.authedRequest(http.MethodGet, windowPath("fake:1", "screen"), d.ticket, nil, nil), nil); code != http.StatusNotFound {
 		t.Errorf("authed untracked = %d, want 404", code)
 	}
 }
@@ -167,10 +169,24 @@ func TestAgentInputPrompt(t *testing.T) {
 		"submit false": {"text": "x", "submit": false},
 		"both":         {"text": "x", "keys": []string{"enter"}},
 		"neither":      {},
-		"too long":     {"text": strings.Repeat("x", 4001)},
+		"too long":     {"text": strings.Repeat("x", 64<<10+1)},
 	} {
 		if code, body := h.postJSON(windowPath("fake:1", "input"), req, nil); code != http.StatusBadRequest {
 			t.Errorf("%s = %d %s, want 400", name, code, body)
+		}
+	}
+	// A long paste (up to 64 KB) reaches the agent whole; its current task
+	// and the orchestrator's note get the start.
+	long := strings.Repeat("log line\n", 7000)
+	if code, body := h.postJSON(windowPath("fake:1", "input"), map[string]any{"text": long}, nil); code != http.StatusOK {
+		t.Fatalf("long prompt = %d %s", code, body)
+	}
+	if row, _ := h.store.Get("fake:1"); len(row.CurrentTask) > 700 || !strings.Contains(row.CurrentTask, "bytes in all") {
+		t.Errorf("current task after a long prompt = %d bytes", len(row.CurrentTask))
+	}
+	for _, l := range brainLines(h) {
+		if len(l) > 1000 {
+			t.Errorf("orchestrator note of %d bytes", len(l))
 		}
 	}
 	if code, _ := h.postJSON(windowPath("nope:1", "input"), map[string]any{"text": "hi"}, nil); code != http.StatusNotFound {

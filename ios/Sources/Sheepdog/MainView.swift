@@ -1,225 +1,563 @@
 import SheepdogKit
 import SwiftUI
 
-/// One screen: the agents across the top, the conversation (or the Agents pane
-/// pane) in the middle, an optional text field, a status line and the
-/// compact voice bar (Mute, orb, End) at the bottom — everything in thumb
-/// reach.
+/// The app's one screen, per window. It picks the layout (the iPhone
+/// layout; on iPad at regular width the split view) and wraps it in what
+/// every layout shares: the session's sheets, its dialogs and its
+/// lifecycle (`SessionChrome`).
 struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @State private var started = false
-    @State private var confirmNewConversation = false
-    @State private var typing = false
-    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var ui = SceneUI()
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The question collapse, the window zoom and the capsule morph.
+    @Namespace private var motion
+
+    private var split: Bool { sizeClass == .regular }
+
+    /// The Conversation is in front, nothing over it.
+    private var voiceScreen: Bool {
+        split
+            ? ui.detail == .conversation && ui.detailPath.isEmpty
+            : model.pane == .conversation && model.navigationPath.isEmpty
+    }
+
+    var body: some View {
+        Group {
+            if split {
+                IPadRootView()
+            } else {
+                PhoneRootView()
+            }
+        }
+            .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen))
+            .onChange(of: model.windowRequest) { _, request in
+                guard let request else { return }
+                model.windowRequest = nil
+                open(request)
+            }
+            // Outside the chrome, so its sheets (New agent, Spaces) see them.
+            .environmentObject(ui)
+            .environment(\.motionNamespace, motion)
+            .environment(\.openAgentWindow, OpenWindowAction { open($0) })
+    }
+
+    /// The iPhone layout pushes a window on the main stack; the iPad
+    /// shows it in the detail.
+    private func open(_ request: WindowRequest) {
+        if split {
+            switch request {
+            case let .agent(paneID):
+                ui.detailPath = NavigationPath()
+                ui.show(paneID)
+            case let .newAgent(paneID):
+                // A new agent opens beside the current pane.
+                ui.detailPath = NavigationPath()
+                ui.beside(paneID)
+            case let .shell(cwd):
+                ui.detailPath.append(ShellRoute(cwd: cwd))
+            }
+            return
+        }
+        switch request {
+        case let .agent(paneID), let .newAgent(paneID):
+            model.navigationPath.append(AgentWindowRoute(paneID: paneID))
+        case let .shell(cwd):
+            model.navigationPath.append(ShellRoute(cwd: cwd))
+        }
+    }
+}
+
+/// The iPhone layout: the top bar (Conversation | Agents, + and ⋯), the
+/// agent strip, the conversation or the Agents pane, and the floating voice
+/// capsule over them, which turns into the composer — everything in thumb
+/// reach. iPad uses it too at compact width (Slide Over, a narrow split).
+struct PhoneRootView: View {
+    @EnvironmentObject private var model: SessionViewModel
+    @EnvironmentObject private var ui: SceneUI
+    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(\.sceneID) private var sceneID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionNamespace) private var motionNamespace
+    @Namespace private var fallbackNamespace
+
+    private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
     private var paneState: FlockPaneState {
         FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
     }
 
+    private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $model.navigationPath) {
             VStack(spacing: 0) {
                 if model.isDemo {
                     DemoHeader()
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 }
-                if let banner = model.banner {
-                    BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
-                        // Chrome stops growing at the largest non-
-                        // accessibility size: at AX5 a banner alone filled
-                        // the screen. The conversation keeps scaling.
-                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
 
-                PaneSwitcher(pane: $model.pane, waiting: model.flock.waitingCount)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                TopBar(
+                    pane: $model.pane,
+                    waiting: model.flock.waitingCount,
+                    newMenu: { menus.newMenu },
+                    moreMenu: { menus.moreMenu }
+                )
+
+                SessionBanners()
 
                 if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
+                    // One computer today: no chip names a computer.
                     AgentStrip(agents: model.flock.running, pending: model.pendingAction)
+                        // Chrome: the chips grow up to the first
+                        // accessibility size, then the strip stays one row.
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                        .padding(.bottom, 10)
+                        .padding(.bottom, 2)
                 }
 
-                Divider()
+                Rectangle().fill(Theme.line).frame(height: 1)
 
                 Group {
                     switch model.pane {
                     case .conversation:
-                        ConversationView(
-                            rows: model.rows,
-                            voiceName: model.voiceName,
-                            canLoadOlder: model.canLoadOlder,
-                            loadingOlder: model.loadingOlder,
-                            activePendingID: model.approval?.pending.id,
-                            pointerIDs: QuestionFocus.pointerRowIDs(rows: model.rows, pending: model.approval.flatMap { $0.isSettled ? nil : $0.pending }),
-                            loadOlder: { await model.loadOlder() },
-                            followToken: model.typedSent
-                        )
+                        ConversationPane()
                     case .flock where paneState != .content:
                         FlockUnavailableView(state: paneState)
                     case .flock:
-                        FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID) { index in
-                            model.answer(option: index)
-                        }
+                        FlockView(
+                            flock: model.flock,
+                            question: { model.questionCard(for: $0) },
+                            answer: { model.answer(question: $0, option: $1) },
+                            expanded: $model.expandedAgents,
+                            focusedPaneID: $model.focusedAgentPaneID,
+                            onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil,
+                            voiceQuestionID: model.approval?.pending.id
+                        )
                     }
                 }
                 .frame(maxHeight: .infinity)
-                // Mark this moment for debugging ("that paused"); only
-                // with a daemon that takes marks.
-                .overlay(alignment: .topTrailing) {
-                    if model.pane == .conversation, model.feedbackSupported {
-                        FeedbackButton { tag, note, at in
-                            model.markFeedback(tag, note: note, at: at)
-                        }
-                        .padding(.top, 8)
-                        .padding(.trailing, 10)
+            }
+            .background(Theme.surface)
+            // The question, the coach mark and the capsule float over the
+            // content, which scrolls under them.
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
+            .animation(Theme.ease, value: model.banner)
+            .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
+            .animation(Theme.ease, value: model.showMuteHint)
+            .animation(Theme.ease, value: model.showCoachMark)
+            .animation(Theme.ease, value: model.pane)
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationTitle(model.voiceName)
+            .navigationDestination(for: ShellRoute.self) { route in
+                ShellWindowView(route: route)
+            }
+            .navigationDestination(for: AgentWindowRoute.self) { route in
+                Group {
+                    if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
+                        AgentScreenView(agent: agent)
+                    } else {
+                        AgentGoneView()
                     }
                 }
-                .overlay(alignment: .top) {
-                    if let notice = model.feedbackNotice {
-                        FeedbackNoticeView(text: notice)
-                            .padding(.top, 8)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .animation(.easeInOut(duration: 0.2), value: model.feedbackNotice)
+                // The window zooms out of the chip or card it came from (a
+                // plain push under Reduce Motion, or with no source).
+                .modifier(WindowZoom(paneID: route.paneID, namespace: motion, reduceMotion: reduceMotion))
+            }
+        }
+    }
 
-                // On the Agents pane the question sits on its agent's card.
-                if model.pane != .flock, let card = model.approval {
-                    PinnedApprovalCard(card: card) { index in
-                        model.answer(option: index)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .id(card.pending.id)
-                    .onAppear {
-                        AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
-                    }
-                }
+    // MARK: - Bottom: the question, the coach mark, the capsule
 
+    private var bottomStack: some View {
+        VStack(spacing: 8) {
+            // Every open question floats above the capsule; on the Agents
+            // pane each sits on its agent's card instead.
+            let cards = model.pane != .flock ? model.floatingQuestions : []
+            if !cards.isEmpty {
+                FloatingQuestions(
+                    cards: cards,
+                    voiceQuestionID: model.approval?.pending.id,
+                    time: { question in
+                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
+                    },
+                    compact: ui.typing
+                ) { id, index in
+                    model.answer(question: id, option: index)
+                }
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if scenes.isOwner(sceneID) {
                 if model.showCoachMark {
                     CoachMarkView(text: VoiceBarModel.coachMark(voiceName: model.voiceName)) {
                         model.dismissCoachMark()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.horizontal, 4)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .onAppear {
                         AccessibilityNotification.Announcement(VoiceBarModel.coachMark(voiceName: model.voiceName)).post()
                     }
                 }
 
-                if typing {
-                    TypeBar(
-                        voiceName: model.voiceName,
-                        sending: model.sendingTyped,
-                        error: model.typedError,
-                        send: { await model.sendTyped($0) },
-                        close: {
-                            typing = false
-                            model.typedError = nil
-                        }
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                VoiceBarView(
-                    state: model.state,
-                    meter: model.meter,
-                    muted: model.isMuted,
-                    voiceName: model.voiceName,
-                    talkMode: model.talkMode,
-                    holding: model.holding,
-                    noSignal: model.noMicSignal,
-                    // The one-time Mute caption takes the status line's
-                    // place rather than a row of its own over the chat.
-                    statusText: model.showMuteHint ? model.muteCaption : model.statusLine,
-                    statusTint: model.noMicSignal || model.state == .noMicrophone ? Theme.blockedText : .secondary,
-                    typing: typing,
-                    canType: model.isConfigured,
-                    onConnect: { model.connect() },
-                    onStop: { model.stop() },
-                    onMute: {
-                        model.dismissCoachMark()
-                        model.toggleMute()
-                    },
-                    onEnd: { model.disconnect() },
-                    onResume: { model.resumeAudio() },
-                    onPress: { model.pressToTalk() },
-                    onRelease: { model.releaseToTalk() },
-                    onType: { withAnimation(.easeInOut(duration: 0.2)) { typing.toggle() } }
-                )
-                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-            }
-            .animation(.easeInOut(duration: 0.2), value: model.banner)
-            .animation(.spring(duration: 0.3), value: model.approval)
-            .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
-            .animation(.spring(duration: 0.35), value: model.showCoachMark)
-            .animation(.easeInOut(duration: 0.2), value: model.pane)
-            .navigationTitle(model.voiceName)
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: AgentWindowRoute.self) { route in
-                if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
-                    AgentScreenView(agent: agent)
-                } else {
-                    AgentGoneView()
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ConnectionChipView()
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if model.conversationResetSupported {
-                            Button {
-                                confirmNewConversation = true
-                            } label: {
-                                Label("New conversation", systemImage: "arrow.counterclockwise")
+                ZStack {
+                    if ui.typing {
+                        CapsuleComposer(
+                            voiceName: model.voiceName,
+                            sending: model.sendingTyped,
+                            error: model.typedError,
+                            send: { await model.sendTyped($0) },
+                            close: {
+                                withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = false }
+                                model.typedError = nil
                             }
-                            .accessibilityIdentifier("toolbar.newConversation")
-                        }
-                        // The orb stops the voice while it talks; this is the
-                        // same Stop, reachable whatever the orb is doing.
-                        Button {
-                            model.stop()
-                        } label: {
-                            Label("Stop \(model.voiceName)", systemImage: "stop.circle")
-                        }
-                        .disabled(!model.wantsConnection)
-                        .accessibilityIdentifier("toolbar.stop")
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) { typing = true }
-                        } label: {
-                            Label("Type instead", systemImage: "keyboard")
-                        }
-                        .disabled(!model.isConfigured)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                        )
+                        .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
+                        .transition(morph)
+                    } else {
+                        SessionCapsule(menus: menus)
+                            .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
+                            .transition(morph)
                     }
-                    .accessibilityLabel("More")
-                    .accessibilityIdentifier("toolbar.more")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        model.showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                    .accessibilityIdentifier("toolbar.settings")
+                // Grows with the text at every size; the capsule caps its own
+                // height and scrolls inside past it.
+            } else {
+                // Another window owns the voice: this one gets the mini
+                // capsule.
+                MiniCapsule(menus: menus)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+    }
+
+    /// The capsule turns into the composer and back: the shared frame
+    /// morphs (`MorphSurface`) while the two cross-fade.
+    private var morph: AnyTransition { .opacity }
+}
+
+/// The Conversation with the feedback flag and its notice: the same on
+/// iPhone and in the iPad detail.
+struct ConversationPane: View {
+    @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Rows that fold to a pointer while their question floats.
+    private var pointerIDs: Set<String> {
+        let open = model.openQuestionIDs
+        return QuestionOrder.pointerRowIDs(rows: model.rows, open: model.questions.filter { open.contains($0.id) })
+    }
+
+    var body: some View {
+        ConversationView(
+            rows: model.rows,
+            voiceName: model.voiceName,
+            canLoadOlder: model.canLoadOlder,
+            loadingOlder: model.loadingOlder,
+            openPendingIDs: model.openQuestionIDs,
+            pointerIDs: pointerIDs,
+            loadOlder: { await model.loadOlder() },
+            followToken: model.typedSent,
+            ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
+        )
+        // Mark this moment for debugging ("that paused"); only with a
+        // daemon that takes marks.
+        .overlay(alignment: .topTrailing) {
+            if model.feedbackSupported {
+                FeedbackButton { tag, note, at in
+                    model.markFeedback(tag, note: note, at: at)
+                }
+                .padding(.top, 8)
+                .padding(.trailing, 10)
+            }
+        }
+        .overlay(alignment: .top) {
+            if let notice = model.feedbackNotice {
+                FeedbackNoticeView(text: notice)
+                    .padding(.top, 8)
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(Theme.ease, value: model.feedbackNotice)
+    }
+}
+
+/// The error banner or the update notice, under the top bar.
+struct SessionBanners: View {
+    @EnvironmentObject private var model: SessionViewModel
+    /// The update notice the user put off ("Later"): hidden until the
+    /// daemon reports a different one. Settings keeps showing it.
+    @AppStorage("update.dismissedNotice") private var dismissedUpdate = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if let banner = model.banner {
+            BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
+                // Chrome stops growing at the largest non-accessibility
+                // size: at AX5 a banner alone filled the screen. The
+                // conversation keeps scaling.
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+        } else if let notice = model.update?.notice, notice.text != dismissedUpdate, !model.isDemo {
+            UpdateBanner(notice: notice) {
+                withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
+            }
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+        }
+    }
+}
+
+/// The full voice capsule, wired to the session.
+struct SessionCapsule: View {
+    let menus: SessionMenus
+    /// The keyboard button: the iPhone morphs the capsule into the
+    /// composer; the iPad focuses the Conversation's composer.
+    var onType: (() -> Void)?
+    @EnvironmentObject private var model: SessionViewModel
+    @EnvironmentObject private var ui: SceneUI
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VoiceCapsule(
+            state: model.state,
+            meter: model.meter,
+            muted: model.isMuted,
+            name: model.voiceName,
+            talkMode: model.talkMode,
+            holding: model.holding,
+            noSignal: model.noMicSignal,
+            // One accent per screen: any open question quiets the orb.
+            questionOpen: !model.openQuestionIDs.isEmpty,
+            // The one-time Mute caption takes the status line's place.
+            statusText: model.showMuteHint ? model.muteCaption : model.statusLine,
+            canType: model.isConfigured,
+            onConnect: { model.connect() },
+            onStop: { model.stop() },
+            onMute: {
+                model.dismissCoachMark()
+                model.toggleMute()
+            },
+            onResume: { model.resumeAudio() },
+            onPress: { model.pressToTalk() },
+            onRelease: { model.releaseToTalk() },
+            onType: {
+                if let onType {
+                    onType()
+                } else {
+                    withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true }
+                }
+            },
+            menu: { menus.voiceMenu }
+        )
+    }
+}
+
+// MARK: - Menus
+
+/// The session's menus, the same in every layout: the capsule's voice
+/// menu, `+` and `⋯`. A menu item that opens a session sheet asks for it
+/// in this window (`SceneCoordinator.request`).
+@MainActor
+struct SessionMenus {
+    let model: SessionViewModel
+    let ui: SceneUI
+    let scenes: SceneCoordinator
+    let sceneID: UUID?
+
+    private func here(_ open: () -> Void) {
+        scenes.request(from: sceneID)
+        open()
+    }
+
+    /// The capsule's menu. With one computer: this computer's connection,
+    /// Manage computers…, and End voice session. Talk to (the other
+    /// computers) arrives with several computers.
+    @ViewBuilder
+    var voiceMenu: some View {
+        Button {
+            ui.showsConnection = true
+        } label: {
+            Label {
+                Text(model.connectionChip.word)
+                Text(model.endpointDisplay)
+            } icon: {
+                Image(systemName: connectionSymbol)
+            }
+        }
+        .accessibilityLabel("Connection: \(model.connectionChip.word)")
+        .accessibilityIdentifier("chip.connection")
+        Button {
+            here { model.showSettings = true }
+        } label: {
+            Label("Manage computers…", systemImage: "desktopcomputer")
+        }
+        .accessibilityIdentifier("voice.manageComputers")
+        Divider()
+        if model.wantsConnection {
+            Button {
+                model.disconnect()
+            } label: {
+                Label {
+                    Text("End voice session")
+                    Text("Your agents keep working.")
+                } icon: {
+                    Image(systemName: "phone.down")
                 }
             }
+            .accessibilityIdentifier("controls.end")
+        } else {
+            Button {
+                model.connect()
+            } label: {
+                Label("Start voice session", systemImage: "waveform")
+            }
+            .disabled(!model.isConfigured)
+            .accessibilityIdentifier("voice.start")
+        }
+    }
+
+    private var connectionSymbol: String {
+        switch model.connectionChip.tint {
+        case .green: return "checkmark.circle"
+        case .amber: return "arrow.triangle.2.circlepath"
+        case .red: return "wifi.slash"
+        case .grey: return "circle.dashed"
+        }
+    }
+
+    /// `+`: make something on this computer.
+    @ViewBuilder
+    var newMenu: some View {
+        Button {
+            here { model.showsNewAgent = true }
+        } label: {
+            Label("New agent", systemImage: "plus.square")
+        }
+        .disabled(!model.agentActionsAvailable)
+        .accessibilityIdentifier("new.agent")
+        NewShellButton()
+    }
+
+    /// `⋯`: the session's rarer actions, then Settings.
+    @ViewBuilder
+    var moreMenu: some View {
+        if model.conversationResetSupported {
+            Button {
+                ui.confirmNewConversation = true
+            } label: {
+                Label("New conversation", systemImage: "arrow.counterclockwise")
+            }
+            .accessibilityIdentifier("toolbar.newConversation")
+        }
+        // The orb stops the voice while it talks; this is the same
+        // Stop, reachable whatever the orb is doing.
+        Button {
+            model.stop()
+        } label: {
+            Label("Stop \(model.voiceName)", systemImage: "stop.circle")
+        }
+        .disabled(!model.wantsConnection)
+        .accessibilityIdentifier("toolbar.stop")
+        Button {
+            model.disconnect()
+        } label: {
+            Label("End voice session", systemImage: "phone.down")
+        }
+        .disabled(!model.wantsConnection)
+        .accessibilityIdentifier("toolbar.end")
+        Divider()
+        Button {
+            here { model.showsSpaces = true }
+        } label: {
+            Label("Spaces", systemImage: "square.stack")
+        }
+        .disabled(!model.agentActionsAvailable)
+        .accessibilityIdentifier("toolbar.spaces")
+        Button {
+            here { model.showSettings = true }
+        } label: {
+            Label("Settings", systemImage: "gearshape")
+        }
+        .accessibilityIdentifier("toolbar.settings")
+    }
+}
+
+/// `+` ▸ New shell: opens in this layout's way (`openAgentWindow`).
+private struct NewShellButton: View {
+    @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.openAgentWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            openWindow(.shell(cwd: nil))
+        } label: {
+            if model.shellEntryShown {
+                Label("New shell", systemImage: "apple.terminal")
+            } else {
+                Label {
+                    Text("New shell")
+                    Text("The shell is off on this computer.")
+                } icon: {
+                    Image(systemName: "apple.terminal")
+                }
+            }
+        }
+        .disabled(!model.shellEntryShown)
+        .accessibilityIdentifier("new.shell")
+    }
+}
+
+// MARK: - What every layout shares
+
+/// The session's sheets, dialogs and lifecycle, around either layout.
+/// Session sheets show in one window only (`SceneCoordinator.presenter`);
+/// the audio owner reports the screen and runs the session's foreground
+/// and background.
+struct SessionChrome: ViewModifier {
+    @ObservedObject var ui: SceneUI
+    /// The layout shows the Conversation with nothing over it.
+    let voiceScreen: Bool
+
+    @EnvironmentObject private var model: SessionViewModel
+    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(\.sceneID) private var sceneID
+    @Environment(\.appPhase) private var appPhase
+    @Environment(\.splashShowing) private var splashShowing
+
+    private var presents: Bool { scenes.isPresenter(sceneID) }
+    private var owns: Bool { scenes.isOwner(sceneID) }
+
+    /// What the daemon is told for cards (`visibility`): the app is in
+    /// the foreground, and the voice screen is in front — the
+    /// conversation, nothing pushed, no sheet or cover over it. A card's
+    /// own sheet counts as the voice screen, so the next card can replace
+    /// it.
+    private var screenReport: ScreenReport {
+        let shown = voiceScreen
+            && !model.showSettings
+            && !model.demoActive
+            && model.screenCovers.isEmpty
+        return ScreenReport(visible: appPhase == .active, voiceScreen: shown)
+    }
+
+    private func gate(_ value: Bool, _ set: @escaping (Bool) -> Void) -> Binding<Bool> {
+        Binding(get: { value && presents }, set: set)
+    }
+
+    private func gate<Item>(_ value: Item?, _ set: @escaping (Item?) -> Void) -> Binding<Item?> {
+        Binding(get: { presents ? value : nil }, set: set)
+    }
+
+    func body(content: Content) -> some View {
+        content
             .confirmationDialog(
                 "Start a new conversation?",
-                isPresented: $confirmNewConversation,
+                isPresented: $ui.confirmNewConversation,
                 titleVisibility: .visible
             ) {
                 Button("Start fresh") { model.startNewConversation() }
@@ -227,39 +565,122 @@ struct MainView: View {
             } message: {
                 Text("Sheepdog and the orchestrator forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
-            // sheepdog://pair from the Camera app: ask before applying.
-            .alert(
-                model.pendingPairing?.confirmation(currentAddress: model.settings.address).title ?? "",
-                isPresented: Binding(
-                    get: { model.pendingPairing != nil },
-                    set: { if !$0, model.pendingPairing != nil { model.cancelPairing() } }
-                ),
-                presenting: model.pendingPairing
-            ) { _ in
-                Button("Pair") { model.confirmPairing() }
-                    .accessibilityIdentifier("pairing.confirm")
-                Button("Cancel", role: .cancel) { model.cancelPairing() }
-            } message: { link in
-                Text(link.confirmation(currentAddress: model.settings.address).message)
-            }
-            .sheet(isPresented: $model.showSettings) {
-                SettingsView(meter: model.meter)
+            // A pairing code from outside the app (asked about first), or
+            // "Please scan again".
+            .sheet(item: gate(model.pairingSheet) { model.pairingSheet = $0 }, onDismiss: {
+                if !model.isConfigured { model.showSettings = true }
+            }) { sheet in
+                PairingFlowView(stage: sheet.stage)
                     .environmentObject(model)
             }
-            .onAppear {
-                guard !started else { return }
-                started = true
-                model.start()
+            // Not while the splash is up: the first-run sheet waits for
+            // it to fade instead of sliding over it.
+            .sheet(isPresented: gate(model.showSettings && !splashShowing) { model.showSettings = $0 }) {
+                SettingsView(meter: model.meter)
+                    .environmentObject(model)
+                    // A form sheet on iPad; the iPhone ignores it.
+                    .presentationSizing(.form)
             }
-            .onChange(of: scenePhase) { _, phase in
+            .sheet(isPresented: gate(model.showsNewAgent) { model.showsNewAgent = $0 }) {
+                NewAgentSheet().presentationSizing(.form)
+            }
+            .sheet(isPresented: gate(model.showsSpaces) { model.showsSpaces = $0 }) {
+                SpacesSheet().presentationSizing(.form)
+            }
+            .fullScreenCover(item: gate(model.primer) { if $0 == nil, model.primer != nil { model.answerPrimer(false) } }) { primer in
+                PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
+            }
+            .sheet(isPresented: $ui.showsConnection) {
+                ConnectionDetailView(
+                    showSettings: {
+                        ui.showsConnection = false
+                        scenes.request(from: sceneID)
+                        model.showSettings = true
+                    },
+                    showModels: {
+                        ui.showsConnection = false
+                        scenes.request(from: sceneID)
+                        model.openModels()
+                    }
+                )
+                .environmentObject(model)
+                .coversVoiceScreen("connection")
+                // One detent: a multi-detent sheet over a Form hung the
+                // main thread ("onChange(of: Bool) … multiple times per
+                // frame") during manual testing.
+                .presentationDetents([.large])
+            }
+            .sheet(item: gate(model.presentedCard) { model.presentedCard = $0 }) { card in
+                CardSheet(card: card)
+                    .environmentObject(model)
+            }
+            .onChange(of: screenReport, initial: true) { _, report in
+                guard owns else { return }
+                model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen)
+            }
+            .onAppear { model.start() }
+            .onChange(of: appPhase) { _, phase in
+                guard owns else { return }
                 switch phase {
-                case .active where started: model.becameActive()
+                case .active: model.becameActive()
                 case .background: model.enteredBackground()
                 default: break
                 }
             }
-        }
+            .onChange(of: model.pane) { _, _ in model.warmUpTerm() }
+            .environment(\.openCard) { card in model.openCard(card) }
+            .environment(\.reportScreenCover) { name, covering in model.setScreenCover(name, covering) }
     }
+}
+
+/// The top bar (canvas "TopBar"): `Conversation | Agents` with the waiting
+/// badge, and the `+` and `⋯` menus in one pill. No title, no connection
+/// chip: the connection lives in the capsule.
+struct TopBar<NewMenu: View, MoreMenu: View>: View {
+    @Binding var pane: MainPane
+    let waiting: Int
+    @ViewBuilder let newMenu: () -> NewMenu
+    @ViewBuilder let moreMenu: () -> MoreMenu
+
+    var body: some View {
+        HStack(spacing: 8) {
+            PaneSwitcher(pane: $pane, waiting: waiting)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                Menu(content: newMenu) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("New")
+                .accessibilityIdentifier("toolbar.new")
+                Menu(content: moreMenu) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("More")
+                .accessibilityIdentifier("toolbar.more")
+            }
+            .foregroundStyle(Theme.ink)
+            .background(Capsule().fill(Theme.card))
+            .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+        }
+        // Chrome stops at the largest non-accessibility size.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+/// The screen as `visibility` reports it.
+private struct ScreenReport: Equatable {
+    var visible: Bool
+    var voiceScreen: Bool
 }
 
 /// The first-run coach mark: a bubble pointing down at the mic button.
@@ -315,191 +736,6 @@ private struct Triangle: Shape {
     }
 }
 
-/// Errors in plain words, with the one button that helps.
-struct BannerView: View {
-    let banner: SessionViewModel.Banner
-    let retry: () -> Void
-    let dismiss: () -> Void
-
-    private var tint: Color {
-        switch banner.tone {
-        case .error: return Color(.systemRed)
-        case .warning: return Theme.blocked
-        case .info: return Theme.working
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: banner.tone == .info ? "info.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(tint)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(banner.message)
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let hint = banner.hint {
-                    Text(LocalizedStringKey(hint))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 12) {
-                    if let retryTitle = banner.retryTitle {
-                        Button(retryTitle, action: retry)
-                            .font(.caption.weight(.semibold))
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                    if let help = banner.help {
-                        Link("How to fix this", destination: help)
-                            .font(.caption.weight(.semibold))
-                            .accessibilityIdentifier("banner.help")
-                    }
-                }
-                .padding(.top, 3)
-            }
-            Spacer(minLength: 0)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .padding(-12)
-            .accessibilityLabel("Dismiss")
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(tint.opacity(0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("banner")
-    }
-}
-
-/// Type instead of talking: one line to the daemon, as if spoken
-/// (`POST /api/inject/utterance`). What was typed shows up in the
-/// conversation like anything else the user said.
-struct TypeBar: View {
-    let voiceName: String
-    let sending: Bool
-    let error: String?
-    let send: (String) async -> Bool
-    let close: () -> Void
-
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    private var canSend: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                TextField("Say something to \(voiceName)…", text: $text, axis: .vertical)
-                    .lineLimit(1 ... 4)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.send)
-                    .focused($focused)
-                    .onSubmit(submit)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .accessibilityIdentifier("type.field")
-                Button(action: submit) {
-                    if sending {
-                        ProgressView().frame(width: 32, height: 32)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 30))
-                            .foregroundStyle(canSend ? Color.accentColor : Color(.tertiaryLabel))
-                    }
-                }
-                .disabled(!canSend)
-                .accessibilityLabel("Send")
-                .accessibilityIdentifier("type.send")
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Close the text field")
-            }
-            if let error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Color(.systemRed))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("type.error")
-            }
-        }
-        .onAppear { focused = true }
-    }
-
-    private func submit() {
-        guard canSend else { return }
-        let sent = text
-        Task {
-            if await send(sent) {
-                text = ""
-                // Keyboard down, so the answer has the room to show.
-                focused = false
-            }
-        }
-    }
-}
-
-/// The approval card pinned above the controls: its whole height when it
-/// fits in half the screen, else half the screen with the card scrolling
-/// inside — never squeezed by the conversation into one-line options.
-struct PinnedApprovalCard: View {
-    let card: ApprovalFlow.Card
-    let answer: (Int) -> Void
-
-    /// The card's own height, measured.
-    @State private var contentHeight: CGFloat = 0
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    /// Half the screen; a third at the accessibility text sizes, where the
-    /// header, the agent strip and the controls are tall too and a half-
-    /// screen card pushed the demo header up under the navigation bar.
-    private var maxHeight: CGFloat {
-        let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800
-        return screen * (dynamicTypeSize.isAccessibilitySize ? 0.3 : 0.5)
-    }
-
-    var body: some View {
-        ScrollView {
-            ApprovalCardView(card: card, answer: answer)
-                .padding(.vertical, 4)
-                .background(GeometryReader { proxy in
-                    Color.clear.preference(key: CardHeightKey.self, value: proxy.size.height)
-                })
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(contentHeight > maxHeight ? .visible : .hidden)
-        .frame(height: min(max(contentHeight, 1), maxHeight))
-        .onPreferenceChange(CardHeightKey.self) { height in
-            // Whole points only: a sub-point wobble must not relayout.
-            let rounded = height.rounded(.up)
-            if rounded != contentHeight { contentHeight = rounded }
-        }
-    }
-}
-
-private struct CardHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
 /// The offline demo's label, its way out, and the questions it understands
 /// (also by typing, and by voice where on-device recognition is available).
 struct DemoHeader: View {
@@ -510,14 +746,15 @@ struct DemoHeader: View {
             HStack(spacing: 8) {
                 Label("Demo", systemImage: "play.circle.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                Text("Scripted agents, on this phone only")
+                    .foregroundStyle(Theme.primaryText)
+                Text("Scripted agents, on this device only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Button("Leave") { model.leaveDemo() }
                     .font(.subheadline.weight(.medium))
+                    .tint(Theme.primaryText)
                     .accessibilityIdentifier("demo.leave")
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -527,6 +764,7 @@ struct DemoHeader: View {
                             .font(.footnote.weight(.medium))
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
+                            .tint(Theme.primaryText)
                             .disabled(model.sendingTyped)
                             .accessibilityIdentifier("demo.question.\(index)")
                     }
@@ -538,5 +776,37 @@ struct DemoHeader: View {
         .background(Color.accentColor.opacity(0.08))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("demo.header")
+    }
+}
+
+/// The capsule and the composer share one frame, so one morphs into the
+/// other (its size and corners) while their contents cross-fade. A fade
+/// only under Reduce Motion.
+private struct MorphSurface: ViewModifier {
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.matchedGeometryEffect(id: "capsule", in: namespace)
+        }
+    }
+}
+
+/// The agent window zooms out of its source (a plain push under Reduce
+/// Motion).
+private struct WindowZoom: ViewModifier {
+    let paneID: String
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.navigationTransition(.zoom(sourceID: "window." + paneID, in: namespace))
+        }
     }
 }

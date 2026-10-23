@@ -65,7 +65,7 @@ func (r *recorder) Log(source, typ, _ string, payload any) {
 
 // stepUsage reads a brain.step event's token counts.
 func stepUsage(m map[string]any) Usage {
-	return Usage{Calls: 1, In: toInt(m["prompt_tokens"]), Out: toInt(m["completion_tokens"]), Reasoning: toInt(m["reasoning_tokens"])}
+	return Usage{Calls: 1, In: toInt(m["prompt_tokens"]), Out: toInt(m["completion_tokens"]), Reasoning: toInt(m["reasoning_tokens"]), Cached: toInt(m["cache_hit_tokens"])}
 }
 
 func toInt(v any) int {

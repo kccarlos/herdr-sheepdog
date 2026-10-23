@@ -9,7 +9,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +35,6 @@ const (
 type Options struct {
 	// BaseURL is the daemon, e.g. http://127.0.0.1:7799.
 	BaseURL string
-	// Token is the web.token, if any.
-	Token string
 	// CacheDir holds the rendered speech.
 	CacheDir string
 	// FixtureDir is testdata/herdr (screen fixtures for inject_blocked).
@@ -198,6 +195,9 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	send := func(m wsproto.Message) error {
 		b, _ := m.Encode()
 		return conn.Write(ctx, websocket.MessageText, b)
+	}
+	if err := send(wsproto.ClientReady(wsproto.ProtocolVersion, wsproto.ClientInfo{Name: "sheepdog-audio-e2e", Version: "dev", Platform: "go"})); err != nil {
+		return res, err
 	}
 	if err := send(wsproto.Mute(false)); err != nil {
 		return res, err
@@ -587,9 +587,6 @@ func (g *gate) push(frame []int16) error {
 
 func dialWS(ctx context.Context, o Options) (*websocket.Conn, error) {
 	u := "ws" + strings.TrimPrefix(o.BaseURL, "http") + "/ws"
-	if o.Token != "" {
-		u += "?token=" + url.QueryEscape(o.Token)
-	}
 	conn, _, err := websocket.Dial(ctx, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial /ws: %w", err)
@@ -668,9 +665,6 @@ func streamEvents(ctx context.Context, o Options, rec *recorder, ready chan stru
 	if err != nil {
 		return
 	}
-	if o.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+o.Token)
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return
@@ -716,9 +710,6 @@ func setup(ctx context.Context, st Setup, o Options) error {
 		body, _ := json.Marshal(map[string]any{"pane_id": b.PaneID, "alias": b.Alias, "kind": b.Kind, "screen": string(screen)})
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+"/api/inject/blocked", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		if o.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+o.Token)
-		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err

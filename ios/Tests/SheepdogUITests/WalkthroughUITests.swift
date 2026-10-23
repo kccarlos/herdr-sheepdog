@@ -9,7 +9,6 @@ import XCTest
 /// Run it with `-scheme SheepdogUITests` while the daemon is up.
 final class WalkthroughUITests: XCTestCase {
     private let daemon = "http://\(Fixture.host)"
-    private let tokenDaemon = "http://\(Fixture.tokenHost)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -36,27 +35,28 @@ final class WalkthroughUITests: XCTestCase {
         // A previous run may have left a synthetic pane behind; the empty
         // The agent list has to be genuinely empty for the first screenshot.
         for pane in ["w1:p1", "w1:p2"] { _ = post("/api/inject/remove", ["pane_id": pane]) }
-        let app = launch()
+        let app0 = launch()
 
-        // 1. First launch: no address saved, so Settings opens itself.
-        let address = app.textFields["settings.address"]
-        XCTAssertTrue(address.waitForExistence(timeout: 10), "first launch should open Settings")
-        XCTAssertFalse(app.buttons["settings.done"].isEnabled, "there is nothing to close Settings on yet")
-        shot(app, "01-first-launch-settings")
+        // 1. First launch: nothing paired, so Settings opens itself on
+        //    the scanner (pairing is by code only; PairingLinkUITests).
+        XCTAssertTrue(app0.buttons["settings.scan"].waitForExistence(timeout: 10), "first launch should open Settings")
+        shot(app0, "01-first-launch-settings")
+        app0.terminate()
 
-        // 2. Type the daemon's address and prove it.
-        address.tap()
-        address.typeText(Fixture.host)
-        app.buttons["settings.test"].tap()
+        // 2. The loopback fixture (no pairing on this Mac itself): Test
+        //    connection proves it.
+        let app = launch(address: Fixture.host)
+        XCTAssertTrue(app.buttons["controls.orb"].waitForExistence(timeout: 10))
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
+        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Connection")
+        tapWhenReady(app.buttons["settings.test"], "Test connection")
         XCTAssertTrue(app.staticTexts["Connected to \(Fixture.host)"].waitForExistence(timeout: 15), "Test connection should report the hello payload")
         XCTAssertTrue(app.staticTexts["Voice name: Sheepdog"].exists)
-        XCTAssertTrue(app.staticTexts["Auth: open (loopback)"].exists)
-        XCTAssertTrue(app.staticTexts["Audio: 16000 Hz in / 24000 Hz out, pcm16le mono"].exists)
+        XCTAssertTrue(app.staticTexts["This computer (loopback)."].exists)
         shot(app, "02-settings-test-connection")
 
-        // 3. Done (there is no Save: the address applies as you leave the
-        //    screen): the main screen, not connected yet.
-        tapWhenReady(app.buttons["settings.done"], "Done")
+        // 3. Back to the main screen, not connected yet.
+        closeSettings(app)
         XCTAssertTrue(app.buttons["controls.orb"].waitForExistence(timeout: 10))
         // The daemon's history (if this one has any) now fills the
         // conversation; a fresh data dir leaves it empty.
@@ -64,7 +64,7 @@ final class WalkthroughUITests: XCTestCase {
         // The voice bar before Connect: Mute and End hidden, the orb is a
         // Connect button, and the top-left chip reads the daemon connection
         // itself (grey "Not connected"), never the voice state.
-        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Not connected")
+        XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Not connected")
         shot(app, "15-voicebar-not-connected")
 
         // 4. Connect. The daemon runs without a voice session and says so
@@ -76,11 +76,12 @@ final class WalkthroughUITests: XCTestCase {
 
         // The chip's own sheet: address, round trip, daemon/voice info,
         // Reconnect and Open Settings.
-        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
         XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["chip.openSettings"].exists)
+        for _ in 0 ..< 3 where !app.buttons["chip.openSettings"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["chip.openSettings"].waitForExistence(timeout: 5))
         shot(app, "17-voicebar-chip-popover")
         tapWhenReady(app.buttons["Done"], "Done")
 
@@ -95,14 +96,14 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(chip.waitForExistence(timeout: 15), "the chip should arrive over the event stream")
 
 
-        try inject("/api/inject/utterance", ["text": "what's going on"])
+        try inject("/api/utterance", ["text": "what's going on right now"])
         // Each bubble is one accessibility element, read as a sentence.
-        guard let said = bubble(app, "bubble.shepherd") else {
+        guard let said = bubble(app, "bubble.shepherd", label: { $0.hasSuffix("what's going on right now") }) else {
             shot(app, "debug-before-utterance")
             return XCTFail("the user's words belong in the conversation")
         }
-        XCTAssertTrue(said.label.hasSuffix("what's going on"), "got \(said.label)")
-        guard let answered = bubble(app, "bubble.sheepdog") else {
+        XCTAssertTrue(said.label.hasSuffix("what's going on right now"), "got \(said.label)")
+        guard let answered = bubble(app, "bubble.sheepdog", label: { $0.contains("auth") }) else {
             return XCTFail("and so does the daemon's answer")
         }
         XCTAssertTrue(answered.label.contains("auth"), "got \(answered.label)")
@@ -116,7 +117,7 @@ final class WalkthroughUITests: XCTestCase {
             XCTFail("tapping a chip should open the agent window")
         }
         XCTAssertTrue(app.descendants(matching: .any)["agentScreen.state"].waitForExistence(timeout: 5), "the window should show the state")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 5), "the window should show the open question")
+        XCTAssertTrue(app.descendants(matching: .any)["approval.card"].waitForExistence(timeout: 5), "the window should show the open question (the approval card)")
         shot(app, "05-agent-window")
         tapWhenReady(app.navigationBars["auth"].buttons.firstMatch, "Back")
 
@@ -142,69 +143,6 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(push.waitForExistence(timeout: 2), "a push belongs in the conversation as a system card")
         shot(app, "06-push")
 
-        // 8. Point it at a port with nothing behind it: a plain sentence,
-        //    not a raw error.
-        tapWhenReady(app.buttons["controls.end"], "Disconnect")
-        tapWhenReady(app.buttons["toolbar.settings"], "the settings button")
-        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Daemon")
-        let field = app.textFields["settings.address"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
-        field.press(forDuration: 1.1)
-        if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
-        field.typeText("127.0.0.1:7791")
-        closeSettings(app)
-        tapWhenReady(app.buttons["controls.orb"], "Connect")
-        XCTAssertTrue(app.staticTexts["Can't reach the daemon at 127.0.0.1:7791 — is it running?"].waitForExistence(timeout: 20))
-        shot(app, "07-error-banner")
-        // The failed attempt reads as red "Offline" on the chip — not the
-        // grey "Not connected" of a session that was never opened.
-        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Offline")
-        shot(app, "18-voicebar-offline")
-    }
-
-    /// The token path, against a second daemon started with
-    /// `SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_TOKEN=devtoken … --port 7798`.
-    func testTokenIsCheckedBeforeAnythingElse() throws {
-        try XCTSkipUnless(reachable(tokenDaemon), "no token daemon on \(Fixture.tokenHost)")
-        let app = launch()
-
-        let address = app.textFields["settings.address"]
-        XCTAssertTrue(address.waitForExistence(timeout: 10))
-        address.tap()
-        address.typeText(Fixture.tokenHost)
-
-        // A wrong token still passes /api/hello (it is public), so the probe
-        // has to go on to /api/state.
-        let token = app.secureTextFields["settings.token"]
-        token.tap()
-        token.typeText("wrong-token")
-        app.buttons["settings.test"].tap()
-        XCTAssertTrue(
-            app.staticTexts["\(Fixture.tokenHost) turned the token down. Check the token in Settings."].waitForExistence(timeout: 15),
-            "a wrong token must be named as such"
-        )
-        shot(app, "08-settings-wrong-token")
-
-        // The right one connects.
-        token.tap()
-        token.press(forDuration: 1.1)
-        if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
-        token.typeText("devtoken")
-        app.buttons["settings.test"].tap()
-        XCTAssertTrue(app.staticTexts["Token accepted."].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["Auth: token required"].exists)
-        shot(app, "09-settings-token-accepted")
-        tapWhenReady(app.buttons["settings.done"], "Done")
-        dismissPasswordPrompt(app)
-        if !app.buttons["controls.orb"].isHittable {
-            shot(app, "debug-after-token-save")
-        }
-        tapWhenReady(app.buttons["controls.orb"], "Connect")
-        if !app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15) {
-            shot(app, "debug-token-connect")
-            XCTFail("connecting with the right token should reach the daemon")
-        }
     }
 
     // MARK: - Helpers
@@ -213,7 +151,7 @@ final class WalkthroughUITests: XCTestCase {
     /// applies the address), then Done.
     private func closeSettings(_ app: XCUIApplication) {
         if !app.buttons["settings.done"].isHittable {
-            tapWhenReady(app.navigationBars["Daemon"].buttons.firstMatch, "Back to Settings")
+            tapWhenReady(app.navigationBars["Connection"].buttons.firstMatch, "Back to Settings")
         }
         tapWhenReady(app.buttons["settings.done"], "Done")
     }
@@ -251,21 +189,25 @@ final class WalkthroughUITests: XCTestCase {
     /// legitimately match more than one bubble (e.g. the orchestrator's own
     /// "dropping the earlier question" notice alongside the one this step
     /// is looking for), and either reads fine for what the caller checks.
-    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15) -> XCUIElement? {
+    /// The first bubble with this identifier whose label passes `label`.
+    /// The fixture daemon is shared by the whole suite, so earlier tests'
+    /// bubbles may already be in the history; look for this test's own.
+    private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15, label: (String) -> Bool = { _ in true }) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             for query in [app.otherElements, app.staticTexts, app.buttons] {
-                let first = query.matching(identifier: identifier).firstMatch
-                if first.exists { return first }
+                for element in query.matching(identifier: identifier).allElementsBoundByIndex where element.exists && label(element.label) {
+                    return element
+                }
             }
             usleep(250_000)
         } while Date() < deadline
         return nil
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(address: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"] + (address.map { ["-sheepdogAddress", $0] } ?? [])
         app.launch()
         return app
     }

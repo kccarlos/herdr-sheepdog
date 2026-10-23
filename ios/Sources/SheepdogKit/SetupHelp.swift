@@ -18,17 +18,17 @@ public enum SetupHelp {
     public static let requirement = "Sheepdog needs the sheepdog daemon running on your computer. Install it from the herdr plugin marketplace and run `sheepdog setup`: its last step shows a pairing code to scan."
 
     /// The plain fix for a daemon the phone cannot reach.
-    public static let unreachableFix = "Check that sheepdog is running on your computer (`sheepdog status`) and that this phone is on the same Wi-Fi, or on Tailscale with the same account."
-    /// The plain fix for a token the daemon turned down.
-    public static let tokenFix = "The token changed or was mistyped. Run `sheepdog pair` on your computer and scan the code again."
+    public static let unreachableFix = "Check that sheepdog is running on your computer (`sheepdog status`) and that this phone is on the same network as your computer (the same Wi-Fi, or a VPN such as Tailscale)."
+    /// The plain fix for a phone the daemon turned down.
+    public static let pairFix = "Run `sheepdog pair` on your computer, or open its setup page, and scan the new code."
     /// Something answered, but not sheepdog.
-    public static let notSheepdogFix = "Check the address: scan the code from `sheepdog pair` instead of typing it."
+    public static let notSheepdogFix = "Check the address: scan the code from `sheepdog pair` again."
 
     /// The page that explains the fix for this error, if one does.
     public static func helpURL(for error: DaemonError) -> URL? {
         switch error {
         case .unreachable, .unauthorized, .notSheepdog: return remoteAccessURL
-        case .http, .malformed, .pendingGone, .rejected: return nil
+        case .http, .malformed, .pendingGone, .rejected, .pairing: return nil
         }
     }
 }

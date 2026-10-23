@@ -93,6 +93,7 @@ type Sender struct {
 	relay   relayClient       // mode relay
 	reason  string            // why disabled
 	devs    *devices
+	acts    activities
 	client  *http.Client
 	baseURL map[string]string
 
@@ -139,8 +140,13 @@ func New(cfg Config, log logging.Logger) (*Sender, error) {
 	if err != nil {
 		return nil, err
 	}
+	actsPath := ""
+	if cfg.DataDir != "" {
+		actsPath = filepath.Join(cfg.DataDir, ActivitiesFile)
+	}
 	s := &Sender{cfg: cfg, log: log, devs: devs, client: client, seen: map[string]bool{},
 		baseURL: map[string]string{EnvProduction: cfg.ProductionURL, EnvSandbox: cfg.SandboxURL}}
+	s.acts.load(actsPath, cfg.Now())
 	switch cfg.Mode {
 	case ModeOff:
 		s.reason = "push.mode is off"
@@ -250,6 +256,7 @@ type Registration struct {
 	RelayToken  string // the relay's token for it (mode relay)
 	Environment string // EnvProduction or EnvSandbox (required with Token)
 	Name        string // the phone's name, for the logs
+	DeviceID    string // the paired device it belongs to ("" for this computer)
 }
 
 // Register stores a device by its device token (see RegisterDevice).
@@ -267,7 +274,7 @@ func (s *Sender) RegisterDevice(r Registration) (Device, error) {
 	if s == nil {
 		return Device{}, errors.New("push not available")
 	}
-	dev := Device{Name: strings.TrimSpace(r.Name), RegisteredAt: s.cfg.Now().UTC()}
+	dev := Device{Name: strings.TrimSpace(r.Name), DeviceID: r.DeviceID, RegisteredAt: s.cfg.Now().UTC()}
 	if r.Token != "" || r.RelayToken == "" {
 		tok, err := NormalizeToken(r.Token)
 		if err != nil {
@@ -324,6 +331,24 @@ func (s *Sender) Unregister(token string) error {
 	return nil
 }
 
+// ForgetDevices drops the registrations of revoked paired devices.
+func (s *Sender) ForgetDevices(ids []string) error {
+	if s == nil || len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		s.ForgetActivity(id)
+	}
+	n, err := s.devs.removeDevices(ids)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		s.log.Log(logSource, "push.unregistered", "", map[string]any{"reason": "device_revoked", "removed": n, "devices": s.devs.count()})
+	}
+	return nil
+}
+
 // Devices lists the registered devices.
 func (s *Sender) Devices() []Device {
 	if s == nil {
@@ -354,6 +379,15 @@ func (s *Sender) Notify(n Notification) {
 		s.mu.Unlock()
 	}
 	devs := s.devs.list()
+	if n.ExceptDevice != "" {
+		kept := devs[:0]
+		for _, d := range devs {
+			if d.DeviceID != n.ExceptDevice {
+				kept = append(kept, d)
+			}
+		}
+		devs = kept
+	}
 	if len(devs) == 0 {
 		return
 	}

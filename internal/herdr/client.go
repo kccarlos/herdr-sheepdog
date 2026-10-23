@@ -194,6 +194,22 @@ func (c *Client) Read(ctx context.Context, paneID string, source ReadSource, lin
 	return res.Read, err
 }
 
+// ReadANSI is Read with the colours kept (format ansi, strip_ansi off):
+// the lines as SGR-coloured text at the pane's width, for the app's
+// snapshot window when the live terminal is not available.
+func (c *Client) ReadANSI(ctx context.Context, paneID string, source ReadSource, lines int) (ReadResult, error) {
+	params := map[string]any{"pane_id": paneID, "source": string(source), "format": "ansi", "strip_ansi": false}
+	if lines > 0 {
+		params["lines"] = lines
+	}
+	var res struct {
+		Read ReadResult `json:"read"`
+	}
+	err := c.Call(ctx, "pane.read", params, &res)
+	c.log("herdr.read", paneID, map[string]any{"source": string(source), "lines": lines, "ansi": true, "bytes": len(res.Read.Text), "error": errString(err)})
+	return res.Read, err
+}
+
 // Prompt submits text + Enter to the agent in paneID as one submission
 // (`agent.prompt`). The server refuses with ErrAgentBlocked while an
 // approval/question UI is showing; answer those with SendKeys instead.
@@ -237,12 +253,142 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 	return res.Root, err
 }
 
+// CreateTab opens a new, unfocused tab in workspaceID whose shell starts
+// in cwd (`tab.create`) and returns its root pane.
+func (c *Client) CreateTab(ctx context.Context, workspaceID, cwd, label string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"workspace_id": workspaceID, "cwd": cwd, "focus": false, "env": PaneEnv}
+	if label != "" {
+		params["label"] = label
+	}
+	err := c.Call(ctx, "tab.create", params, &res)
+	c.log("herdr.tab_create", res.Root.PaneID, map[string]any{"workspace_id": workspaceID, "cwd": cwd, "label": label, "error": errString(err)})
+	return res.Root, err
+}
+
+// CreateWorktree makes a git worktree on a new branch of cwd's repository
+// and opens an unfocused workspace in it (`worktree.create`), returning
+// the workspace's root pane. herdr picks the checkout path.
+func (c *Client) CreateWorktree(ctx context.Context, cwd, branch, label string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"cwd": cwd, "branch": branch, "focus": false}
+	if label != "" {
+		params["label"] = label
+	}
+	err := c.Call(ctx, "worktree.create", params, &res)
+	c.log("herdr.worktree_create", res.Root.PaneID, map[string]any{"cwd": cwd, "branch": branch, "error": errString(err)})
+	return res.Root, err
+}
+
+// RenameWorkspace sets a workspace's label (`workspace.rename`).
+func (c *Client) RenameWorkspace(ctx context.Context, workspaceID, label string) error {
+	err := c.Call(ctx, "workspace.rename", map[string]any{"workspace_id": workspaceID, "label": label}, nil)
+	c.log("herdr.workspace_rename", "", map[string]any{"workspace_id": workspaceID, "label": label, "error": errString(err)})
+	return err
+}
+
+// CloseWorkspace closes a workspace and every pane in it
+// (`workspace.close`).
+func (c *Client) CloseWorkspace(ctx context.Context, workspaceID string) error {
+	err := c.Call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil)
+	c.log("herdr.workspace_close", "", map[string]any{"workspace_id": workspaceID, "error": errString(err)})
+	return err
+}
+
+// ListWorktrees lists the checkouts of the repository a workspace works
+// in (`worktree.list`).
+func (c *Client) ListWorktrees(ctx context.Context, workspaceID string) (WorktreeList, error) {
+	var res WorktreeList
+	err := c.Call(ctx, "worktree.list", map[string]any{"workspace_id": workspaceID}, &res)
+	return res, err
+}
+
+// OpenWorktree opens an unfocused workspace in an existing checkout of
+// the workspace's repository (`worktree.open`), by path or branch, and
+// returns its root pane (the open one when it is already open).
+func (c *Client) OpenWorktree(ctx context.Context, workspaceID, path, branch string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"workspace_id": workspaceID, "focus": false}
+	if path != "" {
+		params["path"] = path
+	}
+	if branch != "" {
+		params["branch"] = branch
+	}
+	err := c.Call(ctx, "worktree.open", params, &res)
+	c.log("herdr.worktree_open", res.Root.PaneID, map[string]any{"workspace_id": workspaceID, "path": path, "branch": branch, "error": errString(err)})
+	return res.Root, err
+}
+
+// RemoveWorktree removes the checkout a worktree workspace works in and
+// closes it (`worktree.remove`); force removes a checkout with changes.
+func (c *Client) RemoveWorktree(ctx context.Context, workspaceID string, force bool) error {
+	err := c.Call(ctx, "worktree.remove", map[string]any{"workspace_id": workspaceID, "force": force}, nil)
+	c.log("herdr.worktree_remove", "", map[string]any{"workspace_id": workspaceID, "force": force, "error": errString(err)})
+	return err
+}
+
 // PaneEnv is set in the shell of every pane the daemon opens for a new
-// agent (workspace.create, pane.split take an env map; neither takes a
-// command, so the agent is still typed at the shell prompt). It keeps
+// agent (workspace.create, pane.split take an env map; agent.start then
+// types the agent's executable at the shell prompt). It keeps
 // oh-my-zsh from asking to update at shell start: on 2026-10-04 that
 // prompt ate the "c" of "claude" on a voice spawn.
 var PaneEnv = map[string]string{"DISABLE_AUTO_UPDATE": "true"}
+
+// StartAgent starts a supported agent kind at the shell prompt of paneID
+// (`agent.start`). herdr answers at once with the launch pending, types
+// the kind's canonical executable plus args, and drops the launch when
+// the agent is not detected within timeout; GetAgent's LaunchPending and
+// status tell how it went. name must be a herdr agent name (lowercase,
+// digits, - and _, 1-32 characters).
+func (c *Client) StartAgent(ctx context.Context, paneID, name, kind string, args []string, timeout time.Duration) error {
+	params := map[string]any{"name": name, "kind": kind, "pane_id": paneID}
+	if len(args) > 0 {
+		params["args"] = args
+	}
+	if timeout > 0 {
+		params["timeout_ms"] = timeout.Milliseconds()
+	}
+	err := c.Call(ctx, "agent.start", params, nil)
+	c.log("herdr.agent_start", paneID, map[string]any{"kind": kind, "name": name, "args": args, "error": errString(err)})
+	return err
+}
+
+// GetAgent returns one agent by name or pane id (`agent.get`);
+// ErrAgentNotFound when there is none (a launch herdr dropped).
+func (c *Client) GetAgent(ctx context.Context, target string) (AgentInfo, error) {
+	var res struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	err := c.Call(ctx, "agent.get", map[string]any{"target": target}, &res)
+	return res.Agent, err
+}
+
+// AgentKinds lists the agent kinds herdr supports (`server.agent_manifests`):
+// the kinds `agent.start` accepts, each its canonical executable.
+func (c *Client) AgentKinds(ctx context.Context) ([]string, error) {
+	var res struct {
+		Manifests []struct {
+			Agent string `json:"agent"`
+		} `json:"manifests"`
+	}
+	if err := c.Call(ctx, "server.agent_manifests", map[string]any{}, &res); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(res.Manifests))
+	for _, m := range res.Manifests {
+		if m.Agent != "" {
+			out = append(out, m.Agent)
+		}
+	}
+	return out, nil
+}
 
 // SplitPane splits paneID to the right, unfocused, with a new shell in
 // cwd (`pane.split`), and returns the new pane. The pane to split goes

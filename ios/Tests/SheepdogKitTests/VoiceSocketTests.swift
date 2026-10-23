@@ -204,7 +204,7 @@ final class VoiceSocketTests: XCTestCase {
 /// A one-shot WebSocket server on loopback. It greets each client with a
 /// `status` (the socket reports "open" on the first message it receives,
 /// as it does against the daemon) and records the first text frame.
-private final class LocalWebSocketServer: @unchecked Sendable {
+final class LocalWebSocketServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "test.ws.server")
     private var connections: [NWConnection] = []

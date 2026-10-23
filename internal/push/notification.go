@@ -2,10 +2,11 @@ package push
 
 // The sheepdog.kind values.
 const (
-	KindApproval = "approval" // a pending answer-prompt action the app can answer
-	KindBlocked  = "blocked"  // an agent waiting at something with no answerable options
-	KindDone     = "done"     // a finish the user asked to hear about
-	KindIdle     = "idle"     // an idle the user asked to hear about
+	KindApproval     = "approval"      // a pending answer-prompt action the app can answer
+	KindBlocked      = "blocked"       // an agent waiting at something with no answerable options
+	KindDone         = "done"          // a finish the user asked to hear about
+	KindIdle         = "idle"          // an idle the user asked to hear about
+	KindDevicePaired = "device_paired" // a new device paired with this computer
 )
 
 // The aps.category values (the app registers matching
@@ -41,6 +42,9 @@ type Notification struct {
 	// active. Both go at priority 10: a kept promise is something the
 	// user asked to hear about, so it must not wait for power batching.
 	NeedsYou bool
+	// ExceptDevice skips the registrations of this paired device (the new
+	// one, for KindDevicePaired).
+	ExceptDevice string
 }
 
 // Key is the dedupe key: the event id, else the pending id, else none.
