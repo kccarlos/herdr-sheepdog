@@ -28,6 +28,10 @@ public final class DemoDaemon: @unchecked Sendable {
     /// no release to compare with, unless a recording sets one
     /// (`-sheepdogDemoUpdate`).
     public var update: UpdateInfo?
+    /// A recording (`-sheepdogDemoRecording`): a prompt sent to an agent is
+    /// answered as a daemon answers it ("Sent to claude-auth."), not with
+    /// "This is the demo".
+    public var recording = false
 
     private let lock = NSLock()
     private var world: DemoWorld
@@ -189,7 +193,12 @@ public final class DemoDaemon: @unchecked Sendable {
             if (object["text"] as? String)?.lowercased().contains("fail") == true {
                 return json(["error": "herdr never saw the agent running", "reason": "timeout", "pane_id": DemoWorld.authPane], status: 502)
             }
-            return json(["ok": true, "pane_id": "", "spoken": "This is the demo: its agents are scripted, so no agent was started."])
+            // Anything else starts a scripted agent, in the space it was
+            // asked for (or the folder's name).
+            let workspace = (object["space"] as? String).flatMap { id in spaces.spaces.first { $0.id == id }?.name }
+                ?? (object["dir"] as? String).map { ($0 as NSString).lastPathComponent } ?? "shop"
+            let started = world.startAgent(kind: object["kind"] as? String ?? "claude", workspace: workspace, text: object["text"] as? String)
+            return json(["ok": true, "pane_id": started.paneID, "spoken": started.spoken])
         default:
             let busy = world.agents.contains { $0.state == .working || $0.state == .blocked }
             if let reply = spaces.handle(method: method, path: path, body: object, busy: busy) {
@@ -209,6 +218,9 @@ public final class DemoDaemon: @unchecked Sendable {
                     return encoded(screen)
                 }
                 if parts.last == "input", method == "POST" {
+                    if recording, object["text"] != nil, let alias = world.agents.first(where: { $0.paneID == pane })?.alias {
+                        return json(["ok": true, "kind": "prompt", "spoken": "Sent to \(alias)."])
+                    }
                     return json(["ok": true, "kind": "prompt", "spoken": "This is the demo: its agents are scripted, so nothing was sent."])
                 }
                 if world.screen(paneID: pane) != nil, parts.count >= 2, parts[1] == "changes" || parts[1] == "attachments" {

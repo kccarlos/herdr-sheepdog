@@ -180,6 +180,11 @@ final class AgentWindowDemoUITests: XCTestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: startedOrClosed, object: nil)], timeout: 10)
         XCTAssertEqual(app.state, .runningForeground, "the app is still up")
         XCTAssertFalse(app.descendants(matching: .any)["newAgent.error"].exists, "the start failed")
+        // The demo starts a scripted agent, and its window opens.
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10), "the new agent's window")
+        XCTAssertTrue(app.staticTexts["claude-3"].waitForExistence(timeout: 5), "the new agent's name")
+        sleep(1)
+        shot("new-agent-started")
     }
 
     /// A folder that is not a repository has no worktree switch; a start
