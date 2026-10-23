@@ -21,36 +21,38 @@
 #   the comments); put a new class in the shortest shard.
 
 smoke    SheepdogKitTests                              # 212 (136 + a PairingE2ETests retry)
-smoke    SheepdogUITests/PairingLinkUITests            # 87
-smoke    SheepdogUITests/HistoryApprovalUITests        # 67
-smoke    SheepdogUITests/SettingsMenuUITests           # 60
-smoke    SheepdogUITests/ReconnectUITests              # 35
+smoke    SheepdogUITests/PairingLinkUITests            # 126
+smoke    SheepdogUITests/SettingsMenuUITests           # 63
+smoke    SheepdogUITests/HistoryApprovalUITests        # 48
+smoke    SheepdogUITests/ReconnectUITests              # 37
 smoke    SheepdogUITests/QuestionsUITests              # 16
 
-# iPad: about 260
+# iPad: about 367
 shard-1  SheepdogUITests/IPadUITests
 
-# about 592; the recording and screenshot classes skip themselves in CI
-shard-2  SheepdogUITests/AgentWindowDemoUITests        # 304
-shard-2  SheepdogUITests/ShellDemoUITests              # 137
-shard-2  SheepdogUITests/HealthUITests                 # 48
-shard-2  SheepdogUITests/FlockTypingUITests            # 40
-shard-2  SheepdogUITests/UpdateNoticeUITests           # 35
-shard-2  SheepdogUITests/FeedbackUITests               # 28
-shard-2  SheepdogUITests/AgentScreenUITests            # 2
-shard-2  SheepdogUITests/RedesignShotsUITests          # 1
-shard-2  SheepdogUITests/LaunchReviewScreenshotsUITests
-shard-2  SheepdogUITests/ReviewScreenshotsUITests
-shard-2  SheepdogUITests/LaunchRecordingUITests
-shard-2  SheepdogUITests/HeroRecordingUITests
-shard-2  SheepdogUITests/ReadmeRecordingUITests
+# about 495
+shard-2  SheepdogUITests/AgentWindowDemoUITests        # 371
+shard-2  SheepdogUITests/HealthUITests                 # 57
+shard-2  SheepdogUITests/FeedbackUITests               # 38
+shard-2  SheepdogUITests/UpdateNoticeUITests           # 29
 
-# about 565
-shard-3  SheepdogUITests/SpacesDemoUITests             # 97
-shard-3  SheepdogUITests/VoiceRobustnessUITests        # 94
-shard-3  SheepdogUITests/FirstRunUITests               # 87
-shard-3  SheepdogUITests/WalkthroughUITests            # 85
-shard-3  SheepdogUITests/ChangesDemoUITests            # 72
-shard-3  SheepdogUITests/CardsUITests                  # 62
-shard-3  SheepdogUITests/DemoUITests                   # 41
-shard-3  SheepdogUITests/NewConversationUITests        # 27
+# about 501
+shard-3  SheepdogUITests/SpacesDemoUITests             # 213
+shard-3  SheepdogUITests/ShellDemoUITests              # 113
+shard-3  SheepdogUITests/CardsUITests                  # 86
+shard-3  SheepdogUITests/FlockTypingUITests            # 48
+shard-3  SheepdogUITests/NewConversationUITests        # 41
+
+# about 474; the recording and screenshot classes skip themselves in CI
+shard-4  SheepdogUITests/VoiceRobustnessUITests        # 146
+shard-4  SheepdogUITests/FirstRunUITests               # 104
+shard-4  SheepdogUITests/WalkthroughUITests            # 101
+shard-4  SheepdogUITests/ChangesDemoUITests            # 77
+shard-4  SheepdogUITests/DemoUITests                   # 46
+shard-4  SheepdogUITests/AgentScreenUITests            # 2
+shard-4  SheepdogUITests/RedesignShotsUITests          # 1
+shard-4  SheepdogUITests/LaunchReviewScreenshotsUITests
+shard-4  SheepdogUITests/ReviewScreenshotsUITests
+shard-4  SheepdogUITests/LaunchRecordingUITests
+shard-4  SheepdogUITests/HeroRecordingUITests
+shard-4  SheepdogUITests/ReadmeRecordingUITests

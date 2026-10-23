@@ -113,7 +113,7 @@ paths a PR or push changes (`ios/scripts/ci-plan.sh tier`) and picks a tier:
 
 | Change | Mac jobs |
 |---|---|
-| A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and three shards, the full suite |
+| A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and four shards, the full suite |
 | A PR that changes only the daemon's API: `cmd/`, `internal/web/`, `internal/voice/wsproto/`, `internal/termproto/`, `testdata/protocol/`, `go.mod`, `go.sum` | smoke |
 | A push to `main` that changes any of the above | smoke |
 | Anything else (docs, other Go code, the web UI) | none |
@@ -122,7 +122,7 @@ Smoke is the unit tests (`SheepdogKitTests`, which include the protocol
 goldens) and the fixture-daemon UI tests closest to the API (pairing,
 history, settings, reconnect, questions), about ten minutes of tests; the
 shards split the other UI test classes, balanced by their CI durations:
-one runs `IPadUITests` on an iPad, two split the rest on an iPhone.
+one runs `IPadUITests` on an iPad, three split the rest on an iPhone.
 `ios/scripts/ci-shards.txt` lists which job runs which tests, and the
 `plan` job fails if a UI test class is in no job or a job mixes iPad and
 iPhone tests (`ci-plan.sh check`, tested by `ci-plan_test.sh`), so a new
@@ -138,7 +138,9 @@ Mac, one simulator) downloads it, boots its simulator, and runs
 checkout, Go or XcodeGen. A booting simulator slows everything else on the
 Mac badly (a download or the daemon's first launch takes minutes beside
 it), so it boots last; the boot is the biggest fixed cost of a test job
-(two to five minutes), which is why there are only four test jobs. Smoke
+(two to eight minutes), so a test job less saves Mac minutes and a test
+job more saves wall clock: five is where the slowest job, smoke or a
+shard, takes about as long as the others. Smoke
 and the shards run side by side and the first that fails cancels the
 rest (`fail-fast`); the shards do not wait for smoke, because that would
 add smoke's whole time to every run, and a compile error already stops
