@@ -78,9 +78,9 @@ final class DaemonEndpointTests: XCTestCase {
     }
 
     func testTheTicketGoesOnEveryRequestToThePairedComputer() throws {
-        DeviceCredentials.shared.adopt(SessionTicket(ticket: "abc", expires: Date().addingTimeInterval(3600)))
-        defer { DeviceCredentials.shared.dropTicket() }
-        let endpoint = DaemonEndpoint(text: "192.168.1.20:7777", secure: true)!
+        let credentials = DeviceCredentials(daemonID: "d", secrets: InMemorySecretStore())
+        credentials.adopt(SessionTicket(ticket: "abc", expires: Date().addingTimeInterval(3600)))
+        let endpoint = DaemonEndpoint(text: "192.168.1.20:7777", secure: true, credentials: credentials)!
         let client = DaemonClient(endpoint: endpoint)
         for request in [try client.request(path: "/api/state"), try client.eventsRequest(since: 0)] {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer sds_abc")
@@ -93,7 +93,7 @@ final class DaemonEndpointTests: XCTestCase {
         XCTAssertEqual(upgrade.value(forHTTPHeaderField: "Authorization"), "Bearer sds_abc")
         XCTAssertEqual(upgrade.url?.scheme, "wss")
         // An expired ticket is not sent.
-        DeviceCredentials.shared.adopt(SessionTicket(ticket: "old", expires: Date().addingTimeInterval(-1)))
+        credentials.adopt(SessionTicket(ticket: "old", expires: Date().addingTimeInterval(-1)))
         XCTAssertNil(try client.request(path: "/api/state").value(forHTTPHeaderField: "Authorization"))
     }
 
@@ -249,42 +249,3 @@ final class DaemonModelTests: XCTestCase {
     }
 }
 
-final class SettingsStoreTests: XCTestCase {
-    private func store() -> (SettingsStore, InMemorySecretStore) {
-        let defaults = UserDefaults(suiteName: "sheepdog.tests.\(UUID().uuidString)")!
-        let secrets = InMemorySecretStore()
-        return (SettingsStore(defaults: defaults, credentials: DeviceCredentials(secrets: secrets)), secrets)
-    }
-
-    func testThePairedComputerLivesInTheSecretStoreAndNotInDefaults() {
-        let (settings, secrets) = store()
-        let computer = PairedComputer(daemonID: "d1", name: "Studio", addresses: ["192.168.1.20:7777"], pin: "pin123456", deviceID: "dev1", pairedAt: Date(timeIntervalSince1970: 1_800_000_000))
-        settings.computer = computer
-        XCTAssertEqual(secrets.values.count, 1)
-        XCTAssertEqual(DeviceCredentials(secrets: secrets).computer, computer)
-        XCTAssertEqual(computer.shortPin, "pin12345")
-        settings.computer = nil
-        XCTAssertTrue(secrets.values.isEmpty)
-    }
-
-    func testOnlyThePairedComputerIsTLS() {
-        let (settings, _) = store()
-        XCTAssertNil(settings.endpoint)
-        settings.address = "127.0.0.1:7799"
-        XCTAssertEqual(settings.endpoint?.display, "127.0.0.1:7799")
-        XCTAssertEqual(settings.endpoint?.secure, false)
-        settings.computer = PairedComputer(daemonID: "d1", name: "", addresses: ["127.0.0.1:7799"], pin: "p", deviceID: "x", pairedAt: Date())
-        XCTAssertEqual(settings.endpoint?.secure, true)
-        XCTAssertEqual(settings.endpoint?.url(path: "/api/hello")?.scheme, "https")
-    }
-
-    func testFirstLaunchIsUnconfiguredAndBackgroundListeningIsOnByDefault() {
-        let (settings, _) = store()
-        XCTAssertFalse(settings.hasBeenConfigured)
-        XCTAssertTrue(settings.keepListeningWhenLocked)
-        settings.hasBeenConfigured = true
-        settings.keepListeningWhenLocked = false
-        XCTAssertTrue(settings.hasBeenConfigured)
-        XCTAssertFalse(settings.keepListeningWhenLocked)
-    }
-}

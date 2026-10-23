@@ -67,11 +67,12 @@ public struct ConversationCache: Sendable {
         return ConversationCache(directory: base.appendingPathComponent("Conversations", isDirectory: true))
     }
 
-    /// The file-name key for an endpoint: host and port, with anything that
-    /// is not a plain file-name character replaced. The token is not part
-    /// of it: the same daemon with a new token is the same conversation.
+    /// The file-name key for an endpoint: the computer's daemon id, so
+    /// another address of the same computer is the same conversation; for a
+    /// bare address (a loopback fixture), host and port. Anything that is
+    /// not a plain file-name character is replaced.
     public static func key(for endpoint: DaemonEndpoint) -> String {
-        let raw = "\(endpoint.host.lowercased())_\(endpoint.port)"
+        let raw = endpoint.computerID.map { "computer-\($0.lowercased())" } ?? "\(endpoint.host.lowercased())_\(endpoint.port)"
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-_")
         let scalars = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
         return String(scalars)

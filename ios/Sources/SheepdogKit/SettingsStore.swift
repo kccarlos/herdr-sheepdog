@@ -1,37 +1,47 @@
 import Foundation
 
-/// What the Settings sheet owns: where the daemon is, the paired computer
-/// (`DeviceCredentials`, in the keychain), and the switches.
+/// What Settings owns: the paired computers (`ComputerStore`) and the
+/// phone's own switches. The session talks to the current computer through
+/// `address`, `computer`, `credentials` and `endpoint`.
 public final class SettingsStore {
     private enum Key {
-        static let address = "daemon.address"
         static let keepListening = "daemon.keepListeningLocked"
         static let hasBeenConfigured = "daemon.configured"
         static let talkMode = "voice.talkMode"
     }
 
     private let defaults: UserDefaults
-    /// Where the paired computer's record lives: the shared keychain one,
-    /// or the demo's own (which must never touch the real one).
-    public let credentials: DeviceCredentials
+    /// The paired computers: the shared keychain ones, or the demo's own
+    /// (which must never touch the real ones).
+    public let computers: ComputerStore
 
-    public init(defaults: UserDefaults = .standard, credentials: DeviceCredentials = .shared) {
+    public init(defaults: UserDefaults = .standard, computers: ComputerStore = .shared) {
         self.defaults = defaults
-        self.credentials = credentials
+        self.computers = computers
     }
 
-    /// The address the app talks to (`host:port`): the paired computer's
-    /// address that answered, or a loopback fixture in the tests.
+    /// The address the app talks to (`host:port`): the current computer's
+    /// address in use, or a loopback fixture with no computer in the tests.
+    /// Setting it changes the current computer's address in use.
     public var address: String {
-        get { defaults.string(forKey: Key.address) ?? "" }
-        set { defaults.set(newValue, forKey: Key.address) }
+        get {
+            if let id = computers.currentID { return computers.address(for: id) }
+            return computers.looseAddress
+        }
+        set {
+            if let id = computers.currentID {
+                computers.setAddress(newValue, for: id)
+            } else {
+                computers.looseAddress = newValue
+            }
+        }
     }
 
-    /// The paired computer, nil before pairing.
-    public var computer: PairedComputer? {
-        get { credentials.computer }
-        set { credentials.computer = newValue }
-    }
+    /// The current computer, nil before pairing.
+    public var computer: PairedComputer? { computers.current }
+
+    /// The current computer's credentials, nil before pairing.
+    public var credentials: DeviceCredentials? { computers.currentID.map(computers.credentials(for:)) }
 
     /// Keep the audio session alive with the screen locked.
     public var keepListeningWhenLocked: Bool {
@@ -45,16 +55,17 @@ public final class SettingsStore {
         set { defaults.set(newValue.rawValue, forKey: Key.talkMode) }
     }
 
-    /// False until the user has saved an address once; the first launch
-    /// opens Settings on the strength of it.
+    /// False until the user has paired (or a test set an address); the
+    /// first launch opens Settings on the strength of it.
     public var hasBeenConfigured: Bool {
         get { defaults.bool(forKey: Key.hasBeenConfigured) }
         set { defaults.set(newValue, forKey: Key.hasBeenConfigured) }
     }
 
-    /// The endpoint, or nil while the address is empty or unparseable. The
-    /// paired computer's is TLS with a ticket.
+    /// The current computer's endpoint, or the loose address's, nil while
+    /// there is neither.
     public var endpoint: DaemonEndpoint? {
-        DaemonEndpoint(text: address, secure: computer != nil)
+        if let id = computers.currentID { return computers.endpoint(for: id) }
+        return DaemonEndpoint(text: computers.looseAddress)
     }
 }

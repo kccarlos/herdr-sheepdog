@@ -101,6 +101,19 @@ enum DebugLaunch {
         guard let i = arguments.firstIndex(of: "-sheepdogAddress"), i + 1 < arguments.count else { return nil }
         return arguments[i + 1]
     }
+    /// `-sheepdogComputers "Work Mac=127.0.0.1:7801;Home Mac=127.0.0.1:7802"`:
+    /// start with these loopback fixture daemons as paired computers (plain
+    /// HTTP, no pin), ids `fixture-1`, `fixture-2`, …, the first one
+    /// current. For the several-computers tests and screenshots.
+    static var computers: [PairedComputer]? {
+        guard let i = arguments.firstIndex(of: "-sheepdogComputers"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1].split(separator: ";").enumerated().compactMap { n, entry in
+            let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return nil }
+            return PairedComputer(daemonID: "fixture-\(n + 1)", name: parts[0], addresses: [parts[1]], pin: "",
+                                  deviceID: "", pairedAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(n)))
+        }
+    }
 }
 
 /// Drives the voice states without a live session or a microphone

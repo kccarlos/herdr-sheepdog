@@ -26,7 +26,7 @@ microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 │  PlaybackRatePolicy    VoiceBarModel         BrainActivity / DaemonHealth     │
 │  Metrics               ConnectionChip        Push / MarkdownRenderer          │
 │                        SessionPolicies       VoiceProviders                   │
-│                                              SettingsStore / SecretStore      │
+│                                              ComputerStore / SecretStore      │
 └───────────────────────────────────────────────────────────────────────────────┘
                                    │
                         sheepdog daemon on your Mac
@@ -123,9 +123,12 @@ any ──bot-ready below our minimum──────────────�
 
 Auth is the session ticket (`Authorization: Bearer sds_…`) on every request
 to the paired computer, **including the WebSocket upgrades**, so it never
-appears in a URL. `DeviceCredentials` (SheepdogKit) signs in with the device
-key, once for all callers, and every `URLSession` checks the computer's
-certificate by its pin (`PinnedTrustDelegate`); see
+appears in a URL. Each paired computer has its own `DeviceCredentials`
+(SheepdogKit, from `ComputerStore`), which signs in with the device key,
+once for all callers. A `DaemonEndpoint` names its computer's credentials,
+and every client and socket checks that computer's certificate by its pin
+(`EndpointTrust`, which follows the endpoint across `update(endpoint:)`,
+and `PinnedTrustDelegate`); see
 [security.md](../../../docs/dev/design/security.md) section 5.5. After a
 failed reconnect, `GET /api/state` (where a 401 is plain) tells whether the
 phone was revoked: that opens "Please scan again".
@@ -172,8 +175,9 @@ the id range its page covers. Live items newer than the page survive, and
 older pages come from `before=<next_before>`.
 
 `ConversationCache` writes the newest 300 items, `next_before` and the last
-event id to `Application Support/Conversations/<host>_<port>.json`, one file
-per daemon, excluded from backups. The token is in neither the file nor its
+event id to `Application Support/Conversations/computer-<daemon id>.json`,
+one file per computer whatever address reached it (`<host>_<port>.json`
+for a loopback fixture with no pairing), excluded from backups. The token is in neither the file nor its
 name. `ConversationTimeline.rows` builds the screen: history and live
 bubbles merged by time, date dividers, `notice` items as dividers, and
 duplicate copies of a pinned question folded to one-line pointers
@@ -952,6 +956,39 @@ the one real-time boundary is the explicit buffer copy in the tap.
 - **This phone:** Voice and Notifications.
 - **Help:** Diagnostics and About; then Try the demo.
 
+**The computers** (`ComputerStore`, SheepdogKit, `ComputerStoreTests`):
+
+- Each paired computer is keyed by its daemon id. Its record
+  (`PairedComputer`: name, the local name, addresses, pins, device id,
+  paired date) is one keychain item, `daemon.computer.<id>`. The order, the
+  current id and the address in use for each computer are in
+  `UserDefaults`.
+- A re-pair of a known id updates that computer in place; a new id is
+  added at the end.
+- The current computer is the one the user last picked, else the first.
+  The app never changes it on its own. Removing the current computer moves
+  the voice to the first one left.
+- `SettingsStore` keeps the phone's own switches and reaches the current
+  computer through `address`, `computer`, `credentials` and `endpoint`.
+- `SessionViewModel.switchComputer(to:)` sets the current id and runs
+  `endpointChanged()`'s "another daemon" path: the old voice session ends,
+  the new computer's conversation loads from its cache, and the voice
+  reconnects if it was running.
+- `showsComputerLabels` (more than one computer) is the one switch for
+  every computer label. Every such label's accessibility identifier starts
+  with `computerLabel.` (Talk to's with `voice.talkTo`), so
+  `ComputersUITests.testOneComputerLooksExactlyAsItAlwaysDid` catches any
+  label that shows with one computer.
+- **The update from one computer.** The app before several computers kept
+  one record (`daemon.computer`) and its address (`daemon.address`).
+  `ComputerStore.migrate` moves them once: that computer becomes the first
+  and current one, so an existing user stays paired. The device key was
+  already tagged by daemon id. The old conversation cache file is not
+  converted; the history comes back from the daemon.
+- `-sheepdogComputers "Work Mac=127.0.0.1:7801;Home Mac=…"` (DEBUG) starts
+  with loopback fixture daemons as computers (plain HTTP, no pin, ids
+  `fixture-1`, `fixture-2`, …).
+
 Nothing needs saving. Switches write when flipped; the address is written,
 and the app repointed, when you leave the Connection screen or tap Done.
 The first run opens on that screen ("Welcome") and cannot be closed until
@@ -973,7 +1010,9 @@ used", or "Please scan again" (`PairingProblem`). `PairingCode`
 link, or the `sheepdog://pair#…` hand-off the voice page offers.
 `SessionViewModel.pair` tries every address at once over TLS pinned to the
 code's pin, makes the device key, enrolls once (codes are one-time), signs
-in, and only then saves the computer and repoints the app. A link from
+in, and only then saves the computer. It repoints the app only for the
+first computer or a re-pair of the current one; another computer is added
+beside it. A link from
 outside the app opens the same sheet, asking "Pair with X?" first; nothing
 is contacted before Pair. Settings ▸ Connection shows the computer, "Paired
 <date> · cert <pin>", Test connection, Scan a new code and Remove (`DELETE

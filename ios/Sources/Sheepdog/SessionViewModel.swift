@@ -223,6 +223,22 @@ final class SessionViewModel: ObservableObject {
 
     var voiceName: String { hello?.displayName ?? "Sheepdog" }
 
+    /// How many computers are paired (`ComputerStore`).
+    @Published private(set) var computerCount = 0
+
+    /// The one switch for every computer label in the app (names, Talk to,
+    /// sections, ⌘K, VoiceOver): only once a second computer is paired.
+    /// With one computer the UI looks exactly as it always did.
+    var showsComputerLabels: Bool { computerCount > 1 }
+
+    /// The current computer's daemon id ("" for a bare address).
+    var currentComputerID: String { settings.computers.currentID ?? "" }
+
+    /// The current computer's name as the app shows it.
+    var currentComputerName: String {
+        settings.computer?.displayName ?? hello?.computer?.name ?? "Your computer"
+    }
+
     /// The line above the voice bar: what to do, not only what is happening.
     var statusLine: String {
         if demo != nil, state == .noMicrophone || state == .muted {
@@ -317,6 +333,7 @@ final class SessionViewModel: ObservableObject {
         self.socket = VoiceSocket(endpoint: endpoint)
         self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
         talkMode = settings.talkMode
+        computerCount = settings.computers.count
         if talkMode == .holdToTalk { audio.setManualGate(false) }
         #if DEBUG
         if DebugLaunch.resetHints || DebugLaunch.resetState {
@@ -2043,7 +2060,8 @@ final class SessionViewModel: ObservableObject {
     static func makeDemo() -> SessionViewModel {
         let suite = "sheepdog.demo"
         UserDefaults().removePersistentDomain(forName: suite)
-        let store = SettingsStore(defaults: UserDefaults(suiteName: suite) ?? .standard, credentials: DeviceCredentials(secrets: MemorySecretStore()))
+        let defaults = UserDefaults(suiteName: suite) ?? .standard
+        let store = SettingsStore(defaults: defaults, computers: ComputerStore(defaults: defaults, secrets: MemorySecretStore()))
         store.address = DemoDaemon.endpoint.display
         store.hasBeenConfigured = true
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SheepdogDemo-\(UUID().uuidString)", isDirectory: true)
@@ -2254,12 +2272,20 @@ final class SessionViewModel: ObservableObject {
                 addresses: [address] + code.addresses.filter { $0 != address },
                 pin: code.pin, deviceID: enrolled.deviceID, pairedAt: Date()
             )
-            settings.computer = computer
-            settings.address = address
+            let store = settings.computers
+            // The app never switches on its own: another computer is added
+            // beside the current one. The first one, or a re-pair of the
+            // current one, repoints the session.
+            let repoint = store.currentID == nil || store.currentID == computer.daemonID
+            store.save(computer, address: address)
             settings.hasBeenConfigured = true
-            _ = try await settings.credentials.ticket(base: base)
+            _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
             pairingProblem = nil
-            endpointChanged()
+            computersChanged()
+            if repoint {
+                store.currentID = computer.daemonID
+                endpointChanged()
+            }
             return .paired(computer)
         } catch let problem as PairingProblem {
             return .problem(problem)
@@ -2274,15 +2300,62 @@ final class SessionViewModel: ObservableObject {
     /// effort, `DELETE /api/devices/self`), then forgets the computer and
     /// this phone's key for it.
     func removeComputer() async {
-        if let endpoint = settings.endpoint, endpoint.secure, let base = endpoint.url(path: "/"),
-           let ticket = try? await settings.credentials.ticket(base: base) {
-            await DeviceAuth(base: base, session: DeviceCredentials.session(timeout: 4)).unpair(ticket: ticket)
+        guard let id = settings.computers.currentID else {
+            // A bare loopback address (the tests): forget it.
+            if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
+            settings.address = ""
+            settings.hasBeenConfigured = false
+            endpointChanged()
+            return
         }
-        if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
-        settings.credentials.forget()
-        settings.address = ""
-        settings.hasBeenConfigured = false
+        await removeComputer(id)
+    }
+
+    /// Removes one computer: the computer forgets this phone (best effort),
+    /// then the app forgets it, its key and its conversation. Removing the
+    /// current one moves the voice to the first one left; removing the last
+    /// one goes back to the first run.
+    func removeComputer(_ id: String) async {
+        let store = settings.computers
+        let wasCurrent = store.currentID == id
+        if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
+           let credentials = endpoint.credentials,
+           let ticket = try? await credentials.ticket(base: base) {
+            await DeviceAuth(base: base, session: credentials.session(timeout: 4)).unpair(ticket: ticket)
+        }
+        if let endpoint = store.endpoint(for: id) { cache.clear(for: endpoint) }
+        store.remove(id)
+        if store.count == 0 { settings.hasBeenConfigured = false }
+        computersChanged()
+        if wasCurrent {
+            if core.connection.wantsConnection { disconnect() }
+            endpointChanged()
+            if store.count == 0 { showFirstRunIfNeeded() }
+        }
+    }
+
+    /// Makes another computer the current one: the voice session ends
+    /// cleanly and, if it was running, connects to the new computer; its
+    /// conversation replaces the old one's (app-redesign.md section 4).
+    func switchComputer(to id: String) {
+        let store = settings.computers
+        guard store.currentID != id, store.computer(id) != nil else { return }
+        store.currentID = id
+        computersChanged()
         endpointChanged()
+    }
+
+    /// The list of computers changed (paired, removed, renamed, moved).
+    func computersChanged() {
+        computerCount = settings.computers.count
+        objectWillChange.send()
+    }
+
+    /// Back to the first-run screen once no computer is left.
+    private func showFirstRunIfNeeded() {
+        guard !isConfigured else { return }
+        hello = nil
+        showSettings = true
     }
 
     /// The scan-again screen a refusal opens, from Settings or the main
@@ -2348,7 +2421,7 @@ extension SessionViewModel {
             return problem.message
         case let .success(address):
             if let problem = await checkAddress(address) { return problem }
-            settings.credentials.addAddress(address)
+            settings.credentials?.addAddress(address)
             switchAddress(address)
             return nil
         }
@@ -2365,14 +2438,14 @@ extension SessionViewModel {
     /// Forgets an address that is not in use.
     func removeAddress(_ address: String) {
         guard address != settings.address else { return }
-        settings.credentials.removeAddress(address)
+        settings.credentials?.removeAddress(address)
         objectWillChange.send()
     }
 
     /// Nil when address answers over TLS with the computer's key (the
     /// pinned session: the pin is the check, never the address).
     private func checkAddress(_ address: String) async -> String? {
-        guard let endpoint = DaemonEndpoint(text: address, secure: true) else { return ComputerAddress.Problem.unreadable.message }
+        guard let endpoint = DaemonEndpoint(text: address, secure: true, credentials: settings.credentials) else { return ComputerAddress.Problem.unreadable.message }
         do {
             _ = try await DaemonClient(endpoint: endpoint).hello()
             return nil

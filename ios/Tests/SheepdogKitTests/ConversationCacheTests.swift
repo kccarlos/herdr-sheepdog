@@ -71,6 +71,17 @@ final class ConversationCacheTests: XCTestCase {
         XCTAssertEqual(ConversationCache.key(for: DaemonEndpoint(text: "Mac.Local")!), "mac.local_7777")
     }
 
+    func testAPairedComputerIsKeyedByItsIDOnEveryAddress() {
+        let work = DeviceCredentials(daemonID: "Abc123", secrets: InMemorySecretStore())
+        let home = DeviceCredentials(daemonID: "def456", secrets: InMemorySecretStore())
+        let lan = DaemonEndpoint(text: "192.168.1.20:7777", secure: true, credentials: work)!
+        let forwarded = DaemonEndpoint(text: "203.0.113.9:443", secure: true, credentials: work)!
+        let other = DaemonEndpoint(text: "192.168.1.20:7777", secure: true, credentials: home)!
+        XCTAssertEqual(ConversationCache.key(for: lan), "computer-abc123")
+        XCTAssertEqual(ConversationCache.key(for: lan), ConversationCache.key(for: forwarded), "another address, the same conversation")
+        XCTAssertNotEqual(ConversationCache.key(for: lan), ConversationCache.key(for: other), "another computer at the same address")
+    }
+
     func testEachDaemonHasItsOwnConversation() throws {
         let cache = ConversationCache(directory: directory)
         let home = DaemonEndpoint(text: "192.168.1.20:7777")!

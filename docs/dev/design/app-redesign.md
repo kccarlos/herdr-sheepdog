@@ -728,6 +728,9 @@ old route or shape.
   computers, `{id, name, addresses, pin, device key tag, paired date}`
   ([security.md](security.md)). There is no migration: the old saved
   daemon and token are dropped, and the user pairs again.
+  **As built (phase 11):** the one exception is the paired computer from
+  the device-key app, which moves into the store once so its user stays
+  paired (ios/docs/dev/architecture.md, "Settings").
 - **`SessionViewModel` splits in two:**
   - a `ComputerSession` per computer: DaemonClient, `/events`, Agents
     state, approvals, conversation cache and health;

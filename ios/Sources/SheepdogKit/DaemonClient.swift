@@ -15,16 +15,27 @@ public struct DaemonEndpoint: Equatable, Sendable {
     /// Host or IP, without a scheme.
     public var host: String
     public var port: Int
+    /// The paired computer behind the address: its pins, its ticket and its
+    /// id (`ComputerStore`). Nil for a bare address.
+    public var credentials: DeviceCredentials?
 
-    public init(host: String, port: Int = 7777, secure: Bool = false) {
+    public init(host: String, port: Int = 7777, secure: Bool = false, credentials: DeviceCredentials? = nil) {
         self.host = host
         self.port = port
         self.secure = secure
+        self.credentials = credentials
+    }
+
+    /// The computer's daemon id, nil for a bare address.
+    public var computerID: String? { credentials?.daemonID }
+
+    public static func == (lhs: DaemonEndpoint, rhs: DaemonEndpoint) -> Bool {
+        lhs.host == rhs.host && lhs.port == rhs.port && lhs.secure == rhs.secure && lhs.credentials === rhs.credentials
     }
 
     /// Parses an address: `192.168.1.20:7777`, `http://mac.local:7777`,
-    /// `[fd00::1]:7777`. `secure` is whether it is the paired computer.
-    public init?(text: String, defaultPort: Int = 7777, secure: Bool = false) {
+    /// `[fd00::1]:7777`. `secure` is whether it is a paired computer.
+    public init?(text: String, defaultPort: Int = 7777, secure: Bool = false, credentials: DeviceCredentials? = nil) {
         var s = text.trimmed
         guard !s.isEmpty else { return nil }
         if s.lowercased().hasPrefix("https://") {
@@ -50,9 +61,10 @@ public struct DaemonEndpoint: Equatable, Sendable {
         self.host = s
         self.port = port
         self.secure = secure
+        self.credentials = credentials
     }
 
-    /// TLS, pinned, with a ticket: the paired computer.
+    /// TLS, pinned, with a ticket: a paired computer.
     public var secure = false
 
     public var scheme: String { secure ? "https" : "http" }
@@ -89,7 +101,7 @@ public struct DaemonEndpoint: Equatable, Sendable {
     /// Sets the current ticket on a request built synchronously (the `/ws`
     /// and `/term` upgrades); `DaemonClient` signs in when there is none.
     public func authorize(_ request: inout URLRequest) {
-        guard secure, let header = DeviceCredentials.shared.header() else { return }
+        guard secure, let header = credentials?.header() else { return }
         request.setValue(header, forHTTPHeaderField: "Authorization")
     }
 
@@ -193,25 +205,30 @@ public final class DaemonClient: @unchecked Sendable {
     /// silently stops seeing pushes.
     public static let eventKeepalive: TimeInterval = 15
 
+    /// The pins of the endpoint's computer, followed across `update`.
+    private let trust: EndpointTrust
+
     public init(endpoint: DaemonEndpoint, session: URLSession? = nil) {
         self.endpoint = endpoint
+        trust = EndpointTrust(endpoint.credentials)
         if let session {
             self.session = session
             self.streamSession = session
         } else {
-            self.session = DeviceCredentials.session(timeout: 8)
+            self.session = trust.session(configuration: DeviceCredentials.ephemeral(timeout: 8))
 
             let stream = URLSessionConfiguration.ephemeral
             stream.timeoutIntervalForRequest = DaemonClient.eventKeepalive * 4
             stream.timeoutIntervalForResource = 24 * 60 * 60
             stream.waitsForConnectivity = false
             stream.shouldUseExtendedBackgroundIdleMode = true
-            self.streamSession = DeviceCredentials.session(configuration: stream)
+            self.streamSession = trust.session(configuration: stream)
         }
     }
 
     public func update(endpoint: DaemonEndpoint) {
         self.endpoint = endpoint
+        trust.follow(endpoint.credentials)
     }
 
     public func request(path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil) throws -> URLRequest {
@@ -486,7 +503,7 @@ public final class DaemonClient: @unchecked Sendable {
         let first = try await send(request)
         guard let reason = Self.refusal(first) else { return first }
         if let problem = PairingProblem(reason: reason) { throw DaemonError.pairing(problem) }
-        DeviceCredentials.shared.dropTicket()
+        endpoint.credentials?.dropTicket()
         try await authorize(&request)
         let second = try await send(request)
         if let reason = Self.refusal(second), let problem = PairingProblem(reason: reason) { throw DaemonError.pairing(problem) }
@@ -497,13 +514,14 @@ public final class DaemonClient: @unchecked Sendable {
     /// when there is none.
     func authorize(_ request: inout URLRequest) async throws {
         guard endpoint.secure, let base = endpoint.url(path: "/") else { return }
+        guard let credentials = endpoint.credentials else { throw DaemonError.pairing(.noKey) }
         do {
-            let ticket = try await DeviceCredentials.shared.ticket(base: base)
+            let ticket = try await credentials.ticket(base: base)
             request.setValue(ticket.header, forHTTPHeaderField: "Authorization")
         } catch let problem as PairingProblem {
             throw DaemonError.pairing(problem)
         } catch let error as URLError {
-            throw Self.translate(error, endpoint: endpoint)
+            throw translate(error)
         }
     }
 
@@ -511,16 +529,20 @@ public final class DaemonClient: @unchecked Sendable {
         do {
             return try await session.data(for: request)
         } catch let error as URLError {
-            throw Self.translate(error, endpoint: endpoint)
+            throw translate(error)
         }
     }
 
-    /// A transport error in the app's words; a key that matches no pin is
-    /// "scan again", not "unreachable".
-    public static func translate(_ error: URLError, endpoint: DaemonEndpoint) -> DaemonError {
-        if endpoint.secure, DeviceCredentials.trust.sawMismatch,
+    /// A transport error in the app's words; a key that matches no pin
+    /// (here or in the sign-in) is "scan again", not "unreachable".
+    func translate(_ error: URLError) -> DaemonError {
+        Self.translate(error, endpoint: endpoint, sawMismatch: trust.delegate.sawMismatch || endpoint.credentials?.trust.sawMismatch == true)
+    }
+
+    public static func translate(_ error: URLError, endpoint: DaemonEndpoint, sawMismatch: Bool) -> DaemonError {
+        if endpoint.secure, sawMismatch,
            [.cancelled, .serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot].contains(error.code) {
-            return .pairing(PairingProblem.forPinMismatch(certExpires: DeviceCredentials.shared.computer?.certExpires))
+            return .pairing(PairingProblem.forPinMismatch(certExpires: endpoint.credentials?.computer?.certExpires))
         }
         return .unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(error))
     }
@@ -590,7 +612,7 @@ public final class DaemonClient: @unchecked Sendable {
                     do {
                         (bytes, response) = try await self.streamSession.bytes(for: request)
                     } catch let error as URLError {
-                        throw Self.translate(error, endpoint: self.endpoint)
+                        throw self.translate(error)
                     }
                     if let http = response as? HTTPURLResponse, http.statusCode == 401 {
                         let body = try? await bytes.reduce(into: Data()) { $0.append($1) }
@@ -598,7 +620,7 @@ public final class DaemonClient: @unchecked Sendable {
                             throw DaemonError.pairing(problem)
                         }
                         // An expired ticket: the next attempt signs in again.
-                        DeviceCredentials.shared.dropTicket()
+                        self.endpoint.credentials?.dropTicket()
                         throw DaemonError.unauthorized(endpoint: self.endpoint.display)
                     }
                     onOpen?()
