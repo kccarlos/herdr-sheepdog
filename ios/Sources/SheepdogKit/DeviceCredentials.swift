@@ -117,6 +117,22 @@ public final class DeviceCredentials: @unchecked Sendable {
         }
     }
 
+    /// Adds an address the user typed (Settings ▸ Connection ▸ Addresses),
+    /// after it answered with the computer's key.
+    public func addAddress(_ address: String) {
+        update { c in
+            if !c.addresses.contains(address) { c.addresses.append(address) }
+        }
+    }
+
+    /// Forgets one address; the last one stays.
+    public func removeAddress(_ address: String) {
+        update { c in
+            guard c.addresses.count > 1 else { return }
+            c.addresses.removeAll { $0 == address }
+        }
+    }
+
     /// The pins a server's key may match: the paired computer's current and
     /// next one. Read at every TLS handshake.
     public var pins: [String] {

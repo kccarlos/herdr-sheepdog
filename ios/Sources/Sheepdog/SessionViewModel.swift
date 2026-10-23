@@ -2324,6 +2324,68 @@ final class SessionViewModel: ObservableObject {
     }
 }
 
+// MARK: - Addresses (Settings ▸ Connection ▸ Addresses)
+
+extension SessionViewModel {
+    /// The paired computer's addresses and the one in use.
+    var addressSnapshot: (addresses: [String], current: String) {
+        (settings.computer?.addresses ?? [], settings.address)
+    }
+
+    /// Checks a typed address by the computer's pin and, when it answers
+    /// with the computer's key, keeps it and switches to it (a router's
+    /// port forward). Nil on success, else the reason in plain words.
+    func addAddress(_ text: String) async -> String? {
+        guard let computer = settings.computer else { return "Scan the pairing code on your computer first." }
+        switch ComputerAddress.normalize(text, known: computer.addresses) {
+        case let .failure(problem):
+            return problem.message
+        case let .success(address):
+            if let problem = await checkAddress(address) { return problem }
+            settings.credentials.addAddress(address)
+            switchAddress(address)
+            return nil
+        }
+    }
+
+    /// Checks one of the computer's addresses and switches to it.
+    func useAddress(_ address: String) async -> String? {
+        guard address != settings.address else { return nil }
+        if let problem = await checkAddress(address) { return problem }
+        switchAddress(address)
+        return nil
+    }
+
+    /// Forgets an address that is not in use.
+    func removeAddress(_ address: String) {
+        guard address != settings.address else { return }
+        settings.credentials.removeAddress(address)
+        objectWillChange.send()
+    }
+
+    /// Nil when address answers over TLS with the computer's key (the
+    /// pinned session: the pin is the check, never the address).
+    private func checkAddress(_ address: String) async -> String? {
+        guard let endpoint = DaemonEndpoint(text: address, secure: true) else { return ComputerAddress.Problem.unreadable.message }
+        do {
+            _ = try await DaemonClient(endpoint: endpoint).hello()
+            return nil
+        } catch DaemonError.pairing(.pinMismatch), DaemonError.pairing(.renewedWhileAway) {
+            return "Something answered at \(address), but not with this computer's key, so the app did not use it."
+        } catch let error as DaemonError {
+            return error.message
+        } catch {
+            return "Could not reach \(address). \(SetupHelp.unreachableFix)"
+        }
+    }
+
+    private func switchAddress(_ address: String) {
+        settings.address = address
+        objectWillChange.send()
+        endpointChanged()
+    }
+}
+
 /// Counts pin mismatches across the parallel address probes.
 private final class MismatchCounter: @unchecked Sendable {
     private let lock = NSLock()
