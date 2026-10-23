@@ -169,6 +169,12 @@ There are two `/events` pitfalls that any client of this daemon will hit:
    is an inactivity timeout, and the 8 s value used for the JSON endpoints
    would kill the stream between the daemon's 15 s keepalives. The stream
    session allows 60 s.
+3. **`URLSession.bytes(for:)` asks only the task-level auth challenge.**
+   `PinnedTrustDelegate` answers both the session-level and the task-level
+   method. With the session-level one alone, the pin was never checked for
+   `/events`, the system rejected the self-signed certificate (-1202), and
+   the stream never opened on a paired phone. `EventsTLSE2ETests` opens
+   `/events` over pinned TLS against the pair fixture daemon.
 
 ## History and the cache
 
@@ -950,9 +956,9 @@ and the status wraps to two lines at the accessibility sizes.
   (Settings ▸ Microphone) turns the orb into a push-to-talk button and
   hides Mute.
 
-The **connection** (`ConnectionChip`) reflects only the daemon connection
-(the `/ws` socket, the `/events` stream and the token), never the voice
-state: "Connected", "Connecting…", "Reconnecting…", "Offline", "Token
+The **connection** (`ConnectionChip`) says whether the phone can talk to
+the daemon (the `/ws` socket and the token), never the voice state, and
+never the `/events` stream, which Health shows as "Live updates": "Connected", "Connecting…", "Reconnecting…", "Offline", "Token
 refused" or "Not connected". It is the first row of the voice menu, which
 opens `ConnectionDetailView`: the address, a timed round trip, the daemon's
 version, the voice provider and model, the orchestrator, Health, and

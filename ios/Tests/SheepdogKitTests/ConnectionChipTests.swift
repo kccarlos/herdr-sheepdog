@@ -20,20 +20,31 @@ final class ConnectionChipTests: XCTestCase {
         XCTAssertEqual(ConnectionChip(.init(tokenRefused: true, updateNeeded: true)).status, .tokenRefused)
     }
 
-    func testBothUpIsConnected() {
+    func testSocketOpenIsConnected() {
         let chip = ConnectionChip(.init(socket: .open, events: .open))
         XCTAssertEqual(chip.status, .connected)
         XCTAssertEqual(chip.word, "Connected")
         XCTAssertEqual(chip.tint, .green)
     }
 
+    /// Decision 5 (docs/dev/design/ios-state-architecture.md): the chip
+    /// means "can talk to the computer"; `/events` shows only in Health.
+    func testTheEventsStreamNeverChangesTheChip() {
+        for events: State in [.idle, .connecting, .open, .reconnecting] {
+            for dropped in [false, true] {
+                let chip = ConnectionChip(.init(socket: .open, events: events, dropped: dropped))
+                XCTAssertEqual(chip.status, .connected, "events \(events) dropped \(dropped)")
+                XCTAssertEqual(chip.liveUpdates, events)
+            }
+        }
+        XCTAssertEqual(ConnectionChip(.init(socket: .open, events: .reconnecting)).liveUpdatesWord, "Reconnecting…")
+        XCTAssertEqual(ConnectionChip(.init(socket: .open, events: .idle)).liveUpdatesWord, "Off")
+    }
+
     func testTheFirstConnectReadsAsConnectingWithASpinner() {
-        let combos: [(State, State)] = [
-            (.connecting, .idle), (.idle, .connecting), (.open, .connecting), (.connecting, .connecting),
-        ]
-        for (socket, events) in combos {
-            let chip = ConnectionChip(.init(socket: socket, events: events))
-            XCTAssertEqual(chip.status, .connecting, "socket \(socket) events \(events)")
+        for events: State in [.idle, .connecting] {
+            let chip = ConnectionChip(.init(socket: .connecting, events: events))
+            XCTAssertEqual(chip.status, .connecting, "events \(events)")
             XCTAssertEqual(chip.word, "Connecting…")
             XCTAssertEqual(chip.tint, .amber)
             XCTAssertTrue(chip.isBusy)
@@ -41,14 +52,9 @@ final class ConnectionChipTests: XCTestCase {
     }
 
     func testADropReadsAsReconnectingEvenWhenTheRetryIsConnectingAgain() {
-        let combos: [(State, State)] = [
-            (.reconnecting, .open), (.open, .reconnecting), (.reconnecting, .reconnecting),
-            // The retry loops re-send "connecting" after a drop.
-            (.open, .connecting), (.connecting, .connecting),
-        ]
-        for (socket, events) in combos {
-            let chip = ConnectionChip(.init(socket: socket, events: events, dropped: true))
-            XCTAssertEqual(chip.status, .reconnecting, "socket \(socket) events \(events)")
+        for socket: State in [.reconnecting, .connecting] {
+            let chip = ConnectionChip(.init(socket: socket, events: .open, dropped: true))
+            XCTAssertEqual(chip.status, .reconnecting, "socket \(socket)")
             XCTAssertEqual(chip.word, "Reconnecting…")
             XCTAssertEqual(chip.tint, .amber)
             XCTAssertTrue(chip.isBusy)
@@ -62,15 +68,6 @@ final class ConnectionChipTests: XCTestCase {
         XCTAssertFalse(ConnectionChip(.init(failed: true)).isBusy)
         XCTAssertFalse(ConnectionChip(.init(tokenRefused: true)).isBusy)
         XCTAssertFalse(ConnectionChip(.init(socket: .open, events: .open)).isBusy)
-    }
-
-    func testSocketOpenWithEventsStillIdleIsNotYetConnected() {
-        // The socket can open a beat before the events stream has said
-        // anything; that is not "connected" until both are up, but it is
-        // not "connecting" either unless something is actually in flight —
-        // it settles to not-connected rather than falsely claiming green.
-        let chip = ConnectionChip(.init(socket: .open, events: .idle))
-        XCTAssertEqual(chip.status, .notConnected)
     }
 
     func testAFailedAttemptIsOfflineEvenThoughNothingIsRetrying() {
@@ -104,16 +101,11 @@ final class ConnectionChipTests: XCTestCase {
         for socket in states {
             for events in states {
                 let chip = ConnectionChip(.init(socket: socket, events: events))
-                let anyReconnecting = [socket, events].contains(.reconnecting)
-                let anyConnecting = [socket, events].contains(.connecting)
-                if anyReconnecting {
-                    XCTAssertEqual(chip.status, .reconnecting, "socket \(socket) events \(events)")
-                } else if anyConnecting {
-                    XCTAssertEqual(chip.status, .connecting, "socket \(socket) events \(events)")
-                } else if socket == .open, events == .open {
-                    XCTAssertEqual(chip.status, .connected, "socket \(socket) events \(events)")
-                } else {
-                    XCTAssertEqual(chip.status, .notConnected, "socket \(socket) events \(events)")
+                switch socket {
+                case .reconnecting: XCTAssertEqual(chip.status, .reconnecting, "socket \(socket) events \(events)")
+                case .connecting: XCTAssertEqual(chip.status, .connecting, "socket \(socket) events \(events)")
+                case .open: XCTAssertEqual(chip.status, .connected, "socket \(socket) events \(events)")
+                case .idle: XCTAssertEqual(chip.status, .notConnected, "socket \(socket) events \(events)")
                 }
             }
         }

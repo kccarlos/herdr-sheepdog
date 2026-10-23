@@ -1,8 +1,9 @@
 import Foundation
 
-/// What the top-left chip shows: the health of the connection to the
-/// daemon itself — the `/ws` socket, the `/events` stream, and whether the
-/// token was accepted — never the *voice* state. Those are different
+/// What the top-left chip shows: whether the phone can talk to the
+/// daemon — the `/ws` socket and whether the token was accepted — never
+/// the *voice* state. The `/events` stream rides along as `liveUpdates`
+/// for Health only. Those are different
 /// questions ("is the phone talking to the Mac at all" vs. "can the voice
 /// hear me right now"), and conflating them is what made the old dot read
 /// grey (disconnected-looking) while happily connected and just quiet.
@@ -87,21 +88,40 @@ public struct ConnectionChip: Equatable, Sendable {
     /// The whole rule, most urgent first: a refused token outranks a plain
     /// failure, which outranks "still connecting", which outranks the two
     /// steady states.
+    ///
+    /// The status means "can this phone talk to the computer", so it
+    /// follows `/ws` alone (docs/dev/design/ios-state-architecture.md,
+    /// decision 5). `/events` is kept as `liveUpdates`, which only Health
+    /// shows: a stream that is reconnecting never turns the chip amber
+    /// while the voice works.
     public init(_ inputs: Inputs) {
+        liveUpdates = inputs.events
         if inputs.tokenRefused {
             status = .tokenRefused
         } else if inputs.updateNeeded {
             status = .updateNeeded
         } else if inputs.failed {
             status = .offline
-        } else if inputs.socket == .connecting || inputs.socket == .reconnecting
-            || inputs.events == .connecting || inputs.events == .reconnecting {
-            let retrying = inputs.dropped || inputs.socket == .reconnecting || inputs.events == .reconnecting
+        } else if inputs.socket == .connecting || inputs.socket == .reconnecting {
+            let retrying = inputs.dropped || inputs.socket == .reconnecting
             status = retrying ? .reconnecting : .connecting
-        } else if inputs.socket == .open, inputs.events == .open {
+        } else if inputs.socket == .open {
             status = .connected
         } else {
             status = .notConnected
+        }
+    }
+
+    /// The `/events` stream (Health ▸ Live updates).
+    public var liveUpdates: SocketLife = .idle
+
+    /// "Connected", "Connecting…", "Reconnecting…", "Off".
+    public var liveUpdatesWord: String {
+        switch liveUpdates {
+        case .open: return "Connected"
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .idle: return "Off"
         }
     }
 }

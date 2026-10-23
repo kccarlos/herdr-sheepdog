@@ -26,7 +26,7 @@ public struct SessionCore: Equatable, Sendable {
         /// True from Connect until End (or a failure that ends the session).
         public var wantsConnection = false
         public var socket: SocketLife = .idle
-        /// The `/events` stream's own life, for the connection chip.
+        /// The `/events` stream's own life, shown in Health (not the chip).
         public var events: SocketLife = .idle
         /// A connection attempt ended in a failure that will not retry by
         /// itself; cleared on the next attempt or once the socket opens.
@@ -243,8 +243,8 @@ public struct SessionCore: Equatable, Sendable {
         case let .eventsChanged(life):
             // A stream task cancelled by End or a failure can still report
             // from its `catch`; without a session the stream is idle.
+            // Health only: the chip follows /ws (ConnectionChip).
             connection.events = connection.wantsConnection ? life : .idle
-            if life == .reconnecting, connection.wantsConnection { connection.dropped = true }
 
         case .socketOpened:
             connection.socket = .open
