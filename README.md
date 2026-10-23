@@ -27,7 +27,7 @@
 
 **Hands-free, from anywhere. Hear who's stuck, approve with a word, ask what broke.**
 
-[![Watch the launch video (52 s)](assets/readme/launch-poster.png)](assets/readme/launch.mp4)
+https://github.com/user-attachments/assets/92408cc3-a54c-49e2-881e-ca51d034318c
 
 - **a voice-first agent harness** — a realtime voice model and a stateful orchestrator that reads your agents, wired together with rails in code (approvals only on your words) and tuned by evals, not prompt tricks. [how it works →](docs/dev/design-overview.md)
 - **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. Real-time voice by the latest Gemini 3.8 Live or GPT-Live. [quick start →](docs/quick-start.md)
