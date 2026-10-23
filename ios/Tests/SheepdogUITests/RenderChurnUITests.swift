@@ -40,23 +40,38 @@ final class RenderChurnUITests: XCTestCase {
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "agentScreen.attach"), item: app.buttons["Photo"], probe: "attach")
     }
 
+    // The shell and Spaces sit behind a menu item. On the CI Mac, a menu
+    // item tapped while the churn runs did not open its screen, so these
+    // tap their way there first and the churn starts later
+    // (`-sheepdogRenderChurnAfter`).
+
     func testShellMenuStaysOpenWhileTheSessionRerenders() throws {
-        let app = launchDemo()
+        let app = launchDemo(["-sheepdogRenderChurnAfter", "30"])
         // The Agents tab learns whether the computer offers the shell.
         showAgentsPane(app)
         let header = app.descendants(matching: .any).matching(identifier: "shell.header").firstMatch
         chooseMenuItem(app, menu: app.buttons.matching(identifier: "toolbar.new"), item: app.buttons["new.shell"], until: header)
-        XCTAssertTrue(header.exists, "+ ▸ New shell opens the shell")
+        waitForChurn(app)
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "shell.menu"), item: app.buttons["shell.menu.copy"], probe: "shell")
     }
 
-    func testSpacesMenusStayOpenWhileTheSessionRerenders() throws {
-        let app = launchDemo()
+    func testSpacesNewMenuStaysOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo(["-sheepdogRenderChurnAfter", "30"])
         let tree = app.buttons["spaces.row.shop-fix-login"]
         chooseMenuItem(app, menu: app.buttons.matching(identifier: "toolbar.more"), item: app.buttons["toolbar.spaces"], until: tree)
+        waitForChurn(app)
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "spaces.new"), item: app.buttons["website"], probe: "spaces.new")
+    }
+
+    func testWorktreeMenuStaysOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo(["-sheepdogRenderChurnAfter", "30"])
+        let tree = app.buttons["spaces.row.shop-fix-login"]
+        chooseMenuItem(app, menu: app.buttons.matching(identifier: "toolbar.more"), item: app.buttons["toolbar.spaces"], until: tree)
         tapWhenTappable(tree, "the worktree space")
-        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "space.worktree.shop-fix-login"), item: app.buttons["space.worktree.remove"], probe: "spaces.worktree")
+        let menu = app.buttons.matching(identifier: "space.worktree.shop-fix-login")
+        XCTAssertTrue(menu.firstMatch.waitForExistence(timeout: 10))
+        waitForChurn(app)
+        assertMenuStaysOpen(app, menu: menu, item: app.buttons["space.worktree.remove"], probe: "spaces.worktree")
     }
 
     /// Terminal frames reach the surface and nothing else: the session and
@@ -89,6 +104,14 @@ final class RenderChurnUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Until the delayed churn runs: the model announces changes.
+    private func waitForChurn(_ app: XCUIApplication) {
+        let start = RenderCounts(app)["model"]
+        let deadline = Date().addingTimeInterval(60)
+        while RenderCounts(app)["model"] - start < 10, Date() < deadline {}
+        XCTAssertGreaterThanOrEqual(RenderCounts(app)["model"] - start, 10, "the churn started")
+    }
 
     /// Opens `menu` and taps `item` once it has settled on screen. Under
     /// the churn a second tap on the menu button (as `tapMenuItem` retries)

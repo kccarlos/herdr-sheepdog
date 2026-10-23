@@ -353,6 +353,7 @@ final class SessionViewModel: ObservableObject {
         }
         if DebugLaunch.renderChurn {
             Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(DebugLaunch.renderChurnDelay))
                 while self != nil {
                     self?.objectWillChange.send()
                     try? await Task.sleep(nanoseconds: 100_000_000)

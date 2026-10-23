@@ -51,7 +51,13 @@ enum DebugLaunch {
     /// UI test catches a view whose identity changes on every re-render (a
     /// sheet that closes and reopens forever) and a menu that flickers or
     /// closes while open.
-    static var renderChurn: Bool { arguments.contains("-sheepdogRenderChurn") }
+    static var renderChurn: Bool { arguments.contains("-sheepdogRenderChurn") || renderChurnDelay > 0 }
+    /// `-sheepdogRenderChurnAfter <seconds>`: the same churn, starting that
+    /// long after launch, so a UI test can first tap its way to a screen.
+    static var renderChurnDelay: Double {
+        guard let i = arguments.firstIndex(of: "-sheepdogRenderChurnAfter"), i + 1 < arguments.count else { return 0 }
+        return Double(arguments[i + 1]) ?? 0
+    }
     /// `-sheepdogFrameChurn`: the demo's terminal moves a working agent's
     /// status line twenty times a second instead of once, so a UI test can
     /// count what re-renders per frame.

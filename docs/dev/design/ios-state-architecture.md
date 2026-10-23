@@ -986,7 +986,7 @@ Order and dependencies:
     Settings) stay `@State`.
   - **Tests:** `PairingLinkUITests.testPairingLinkOverSettingsIsQueuedNotDropped`
     (animations on, re-render churn), next to #402's Add a computer test.
-- **Phase 2 (done).** The fan-out and the fast streams.
+- **Phase 2 (done, #407).** The fan-out and the fast streams.
   - **Assign only on change:** `refreshState`/`apply` (`pendingAction`,
     the approval card, `questionPhases`, `brain`, the provider and model,
     `update`, `polledReachability`) and every `ComputerSession` property,
@@ -1034,7 +1034,11 @@ Order and dependencies:
     - the model still re-renders every observer on any real change, such
       as transcripts while the voice talks (phase 8);
     - the conversation's and the Agents page's own views;
-    - the side effect in `termAvailability`'s getter (phase 4b).
+    - the side effect in `termAvailability`'s getter (phase 4b);
+    - on the CI Mac, a menu *item* tapped during the 10 Hz churn did not
+      open its screen (locally it did). The tests that need one tap their
+      way there before the churn starts (`-sheepdogRenderChurnAfter`);
+      worth a look once the model is split (phase 8).
 
 - **Phase 3, the pure part (done).** The machine is in Kit, not yet
   wired. It is named `ComputerLink`, because a public `Link` would clash
