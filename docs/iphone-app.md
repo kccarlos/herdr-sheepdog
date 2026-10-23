@@ -43,6 +43,19 @@ Connection shows the address, the date you paired and the start of the
 certificate's fingerprint, with **Test connection**, **Scan a new code** and
 **Remove** (the computer forgets this phone too).
 
+**Addresses** lists the computer's addresses from the code, with the one in
+use checked; tap another to switch. If you reach the computer through a
+router's port forward, tap **Add address** and type the router's address and
+port (for example `100.101.1.1:7777`), or put it in `web.advertise` on the
+computer ([remote-access.md](remote-access.md#through-a-router)). The app
+keeps an address only after it answers with this computer's certificate. Use
+an IP address, not a `.ts.net` name.
+
+The certificate renews itself every year. The app learns the next one in
+advance, so nothing changes for you; only a phone that was not used for the
+whole month before the renewal says the computer "renewed its security
+certificate while this phone was away" and asks you to scan again.
+
 If the app says **Please scan again**, the phone was removed on the
 computer, or the computer's certificate changed (sheepdog reinstalled, or
 **Reset pairing**). Show a new code and scan it. If you did neither, do not
