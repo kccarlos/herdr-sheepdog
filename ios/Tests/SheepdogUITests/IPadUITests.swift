@@ -24,7 +24,9 @@ final class IPadUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        let header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
+        if !header { shot("launch-failed") }
+        XCTAssertTrue(header)
         return app
     }
 
@@ -109,5 +111,90 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(element(app, "mini.capsule").exists)
         sleep(2)
         shot("portrait-agent")
+    }
+
+    /// Two agents side by side: the split menu puts one beside the other,
+    /// each pane has its own keys and composer and ✕, and a sidebar row
+    /// dragged onto the detail replaces the pane that is not focused.
+    func testTwoPanesSideBySide() throws {
+        let app = launchDemo()
+        let auth = element(app, "sidebar.agent.claude-auth")
+        XCTAssertTrue(auth.waitForExistence(timeout: 10))
+        auth.tap()
+        let split = element(app, "pane.split")
+        XCTAssertTrue(split.waitForExistence(timeout: 10))
+        split.tap()
+        let migration = app.collectionViews.buttons["claude-migration"].firstMatch
+        XCTAssertTrue(migration.waitForExistence(timeout: 5))
+        migration.tap()
+        let terminals = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
+        let two = NSPredicate(format: "count == 2")
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(element(app, "panes.divider").exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "pane.close").count, 2)
+        sleep(2)
+        shot("split")
+
+        // Drag codex-docs onto the detail: it replaces the pane not focused
+        // (claude-auth; the new one is focused).
+        // Drop it on the pane it replaces, slowly, and hold there before
+        // lifting: a quick drag that lifts at once can leave the drop
+        // session hanging on a slow simulator (the drop target stays up and
+        // nothing lands).
+        let docs = element(app, "sidebar.agent.codex-docs")
+        let target = terminals.element(boundBy: 0)
+        docs.press(forDuration: 1.2, thenDragTo: target, withVelocity: .slow, thenHoldForDuration: 1.0)
+        let docsHeader = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'codex-docs'")).firstMatch
+        XCTAssertTrue(docsHeader.waitForExistence(timeout: 20), "the dropped agent is on screen")
+        XCTAssertTrue(element(app, "panes.dropTarget").waitForNonExistence(timeout: 10), "the drop target is gone after the drop")
+        // A working agent's terminal keeps the tree busy, so a snapshot can
+        // take seconds on a CI runner: give the counts room.
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 30)
+
+        app.descendants(matching: .any).matching(identifier: "pane.close").firstMatch.tap()
+        let one = NSPredicate(format: "count == 1")
+        expectation(for: one, evaluatedWith: terminals)
+        waitForExpectations(timeout: 30)
+
+        XCUIDevice.shared.orientation = .portrait
+        let splitButton = element(app, "pane.split")
+        let hittable = NSPredicate(format: "exists == true AND hittable == true")
+        expectation(for: hittable, evaluatedWith: splitButton)
+        waitForExpectations(timeout: 15)
+        splitButton.tap()
+        let payments = app.collectionViews.buttons["codex-payments"].firstMatch
+        expectation(for: hittable, evaluatedWith: payments)
+        waitForExpectations(timeout: 15)
+        payments.tap()
+        expectation(for: two, evaluatedWith: terminals)
+        waitForExpectations(timeout: 30)
+        sleep(2)
+        shot("split-portrait")
+    }
+
+    /// ⋯ ▸ Open in New Window gives the agent a window of its own, with the
+    /// mini capsule.
+    func testOpenInNewWindow() throws {
+        let app = launchDemo()
+        let auth = element(app, "sidebar.agent.claude-auth")
+        XCTAssertTrue(auth.waitForExistence(timeout: 10))
+        auth.tap()
+        let menu = element(app, "agentScreen.menu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let item = element(app, "agentScreen.menu.newWindow")
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        XCTAssertTrue(element(app, "mini.capsule").waitForExistence(timeout: 10), "the new window has the mini capsule")
+        sleep(2)
+        shot("new-window")
+        // Close it, so the next launch does not restore it.
+        element(app, "agentScreen.menu").tap()
+        let close = element(app, "agentWindow.closeWindow")
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10), "back to the main window")
     }
 }

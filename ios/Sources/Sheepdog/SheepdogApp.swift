@@ -14,6 +14,12 @@ struct SheepdogApp: App {
     /// all of them have.
     @Environment(\.scenePhase) private var appPhase
 
+    init() {
+        #if DEBUG
+        _ = DebugLaunch.launchedAt
+        #endif
+    }
+
     /// The UI walkthrough that drives this app against a `--voice=off`
     /// daemon starts from a clean slate, so a run never depends on what the
     /// last one saved. Debug builds only.
@@ -62,6 +68,14 @@ struct SheepdogApp: App {
             #else
             MainSceneRoot { mainView }
             #endif
+        }
+
+        // iPad: an agent in a window of its own (Open in New Window, or a
+        // sidebar row dragged out). It shows the mini capsule.
+        WindowGroup("Agent", id: "agent", for: AgentWindowRoute.self) { $route in
+            AgentWindowScene(route: route)
+                .environmentObject(model)
+                .environment(\.appPhase, appPhase)
         }
     }
 
@@ -149,6 +163,11 @@ struct DemoShell: View {
     var body: some View {
         MainView()
             .environmentObject(demo)
-            .onAppear { demo.onLeaveDemo = close }
+            .onAppear {
+                demo.onLeaveDemo = close
+                // An agent window opened from the demo shows its agents.
+                SceneCoordinator.shared.demoModel = demo
+            }
+            .onDisappear { SceneCoordinator.shared.demoModel = nil }
     }
 }

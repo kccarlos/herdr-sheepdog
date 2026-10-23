@@ -6,6 +6,17 @@ enum IPadDetail: Hashable {
     case conversation
     case allAgents
     case agent(String)
+    /// Two agents side by side (stacked in portrait).
+    case pair(String, String)
+
+    /// The agents on screen, in pane order.
+    var panes: [String] {
+        switch self {
+        case let .agent(id): return [id]
+        case let .pair(a, b): return [a, b]
+        case .conversation, .allAgents: return []
+        }
+    }
 }
 
 /// The iPad layout at regular width (docs/dev/design/app-redesign.md
@@ -205,10 +216,14 @@ struct IPadSidebar: View {
     }
 
     private func agentRow(_ agent: Agent) -> some View {
-        let selected = ui.detail == .agent(agent.paneID)
+        let selected = ui.detail.panes.contains(agent.paneID)
         let blocked = agent.state == .blocked
         return Button {
-            select(.agent(agent.paneID))
+            withAnimation(Theme.ease) {
+                ui.show(agent.paneID)
+                ui.detailPath = NavigationPath()
+                if portrait { ui.columns = .detailOnly }
+            }
         } label: {
             HStack(spacing: 10) {
                 Circle().fill(Theme.color(for: agent.state)).frame(width: 8, height: 8)
@@ -245,6 +260,15 @@ struct IPadSidebar: View {
         .accessibilityLabel("\(agent.alias), \(blocked ? "waiting on you" : Theme.word(for: agent.state))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("sidebar.agent.\(agent.alias)")
+        // Drag it beside the current pane, or out of the app for a window
+        // of its own.
+        .draggable(AgentWindowRoute(paneID: agent.paneID)) {
+            Label(agent.alias, systemImage: "terminal")
+                .font(.body.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Theme.card))
+        }
     }
 
     /// No agent to list: why, in one line, with the one action that helps.
@@ -350,17 +374,8 @@ struct IPadDetailView: View {
                 IPadConversationDetail(leading: leading)
             case .allAgents:
                 AllAgentsView(leading: leading)
-            case let .agent(paneID):
-                if let agent = model.flock.all.first(where: { $0.paneID == paneID }) {
-                    AgentScreenView(agent: agent, pane: PaneChrome(
-                        leading: leading,
-                        onGone: { ui.detail = .conversation },
-                        onSwitch: { ui.detail = .agent($0) }
-                    ))
-                    .id(paneID)
-                } else {
-                    IPadAgentGone(leading: leading)
-                }
+            case .agent, .pair:
+                AgentPanes(panes: ui.detail.panes, leading: leading)
             }
         }
         .background(Theme.surface)
@@ -567,9 +582,9 @@ struct IPadComposer: View {
 }
 
 /// The selected agent is gone (its pane closed).
-private struct IPadAgentGone: View {
+struct IPadAgentGone: View {
     let leading: AnyView?
-    @EnvironmentObject private var ui: SceneUI
+    let back: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -583,7 +598,7 @@ private struct IPadAgentGone: View {
             } description: {
                 Text("Its pane closed or herdr no longer reports it.")
             } actions: {
-                Button("Back to the conversation") { ui.detail = .conversation }
+                Button("Close") { back() }
                     .accessibilityIdentifier("agentGone.back")
             }
             .frame(maxHeight: .infinity)

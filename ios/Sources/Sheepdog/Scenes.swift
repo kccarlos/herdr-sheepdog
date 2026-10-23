@@ -23,6 +23,9 @@ final class SceneCoordinator: ObservableObject {
     @Published private(set) var scenes: [UUID] = []
     /// The window that last asked for a session sheet.
     @Published private(set) var requester: UUID?
+    /// The offline demo's view model while it is open: an agent window
+    /// opened from it shows the demo's agents.
+    @Published var demoModel: SessionViewModel?
 
     var owner: UUID? { scenes.first }
     var presenter: UUID? { requester ?? owner }
@@ -72,6 +75,66 @@ final class SceneUI: ObservableObject {
     @Published var detailPath = NavigationPath()
     /// Bumped to focus the Conversation's composer (the capsule's keyboard).
     @Published var focusComposer = 0
+    /// Of two panes, the one keys and ⌘ shortcuts act on.
+    @Published var focusedPane = 0
+    /// The first of two panes' share of the room.
+    @Published var splitFraction: CGFloat = 0.5
+
+    /// A sidebar row: focus the agent if it is on screen, else show it in
+    /// the focused pane.
+    func show(_ id: String) {
+        let panes = detail.panes
+        if let index = panes.firstIndex(of: id) {
+            focusedPane = index
+        } else if panes.count == 2 {
+            replace(pane: focusedPane, with: id)
+        } else {
+            detail = .agent(id)
+            focusedPane = 0
+        }
+    }
+
+    /// Beside the current pane (a new agent, a drop, the split menu). Of
+    /// two, the one not focused makes way. Never the same agent twice.
+    func beside(_ id: String) {
+        let panes = detail.panes
+        if let index = panes.firstIndex(of: id) {
+            focusedPane = index
+            return
+        }
+        switch panes.count {
+        case 1:
+            detail = .pair(panes[0], id)
+            focusedPane = 1
+        case 2:
+            let other = focusedPane == 0 ? 1 : 0
+            replace(pane: other, with: id)
+            focusedPane = other
+        default:
+            detail = .agent(id)
+            focusedPane = 0
+        }
+    }
+
+    func replace(pane index: Int, with id: String) {
+        var panes = detail.panes
+        guard panes.indices.contains(index), !panes.contains(id) else {
+            if let at = panes.firstIndex(of: id) { focusedPane = at }
+            return
+        }
+        panes[index] = id
+        detail = panes.count == 2 ? .pair(panes[0], panes[1]) : .agent(panes[0])
+    }
+
+    /// A pane's ✕, or its agent ended: the other one stays; with none
+    /// left, the Conversation.
+    func close(pane index: Int) {
+        var panes = detail.panes
+        guard panes.indices.contains(index) else { return }
+        panes.remove(at: index)
+        detail = panes.first.map { .agent($0) } ?? .conversation
+        focusedPane = 0
+    }
 }
 
 /// Where an agent's or a shell's window opens.

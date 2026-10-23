@@ -6,7 +6,7 @@ import UIKit
 /// Pushed from an Agents card or the agent strip: what an agent's
 /// navigation route carries. Only the pane id, so the window always shows
 /// the agent's current row.
-struct AgentWindowRoute: Hashable {
+struct AgentWindowRoute: Hashable, Codable {
     let paneID: String
 }
 
@@ -41,8 +41,9 @@ struct PaneChrome {
     var leading: AnyView?
     /// The pane's ✕ (only when there are two).
     var onClose: (() -> Void)?
-    /// "Show another agent beside this one".
-    var onSplit: (() -> Void)?
+    /// "Show another agent beside this one": the agents it offers.
+    var splitCandidates: [Agent] = []
+    var onSplit: ((String) -> Void)?
     /// The focused pane of two: a 3 pt ink line on top.
     var focused = false
     /// The window ended (closed, gone): what Back does.
@@ -147,6 +148,7 @@ private struct AgentWindowView: View {
         .onAppear {
             window.surface.apply(theme: theme)
             window.attach(model: model)
+            window.onActivity = pane?.onInteract
         }
         .onDisappear { window.detach() }
         .sheet(isPresented: $showChanges) {
@@ -307,8 +309,26 @@ private struct AgentWindowView: View {
                 if let onClose = pane.onClose {
                     paneButton("xmark", label: "Close this pane", id: "pane.close", weight: .semibold, color: Theme.muted, action: onClose)
                 }
-                if let onSplit = pane.onSplit {
-                    paneButton("rectangle.split.2x1", label: "Show another agent beside this one", id: "pane.split", action: onSplit)
+                if let onSplit = pane.onSplit, !pane.splitCandidates.isEmpty {
+                    Menu {
+                        Section("Show beside \(name)") {
+                            ForEach(pane.splitCandidates) { other in
+                                Button {
+                                    onSplit(other.paneID)
+                                } label: {
+                                    Label(other.alias, systemImage: other.state == .blocked ? "hand.raised" : "terminal")
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "rectangle.split.2x1")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .accessibilityLabel("Show another agent beside this one")
+                    .accessibilityIdentifier("pane.split")
                 }
                 Menu { menuItems } label: {
                     Image(systemName: "ellipsis")
@@ -623,6 +643,8 @@ final class AgentWindowController: ObservableObject {
     @Published var typing = false
 
     weak var model: SessionViewModel?
+    /// A tap, a key or a prompt in this window (iPad: focuses its pane).
+    var onActivity: (() -> Void)?
     private var channel: Int?
     private var snapshotTask: Task<Void, Never>?
     private var pushes: AnyCancellable?
@@ -699,6 +721,7 @@ final class AgentWindowController: ObservableObject {
     /// A key-bar key: raw bytes on a live channel, else the daemon's
     /// allow-listed keys.
     func send(key: AgentKey) {
+        onActivity?()
         if state.takesRawInput {
             sendRaw(key.bytes)
             Haptics.tap()
@@ -720,6 +743,7 @@ final class AgentWindowController: ObservableObject {
     /// The composer: always `POST /input` (it guarantees submission and
     /// tells the orchestrator). True when sent.
     func sendPrompt(_ text: String) async -> Bool {
+        onActivity?()
         guard canOperate, let model else { return false }
         run(mutate { $0.willSendInput() })
         beginSend()
@@ -735,6 +759,7 @@ final class AgentWindowController: ObservableObject {
     }
 
     func sendRaw(_ bytes: [UInt8]) {
+        onActivity?()
         guard state.takesRawInput, let channel, let hub = model?.termHub else { return }
         run(mutate { $0.willSendInput() })
         hub.send(input: bytes, ch: channel)
@@ -780,6 +805,7 @@ final class AgentWindowController: ObservableObject {
     private func dragged(lines: Int) { run(mutate { $0.dragged(lines: lines) }) }
 
     private func tapped(col: Int, row: Int) {
+        onActivity?()
         guard state.takesRawInput, let channel else { return }
         model?.termHub.click(ch: channel, col: col, row: row)
     }

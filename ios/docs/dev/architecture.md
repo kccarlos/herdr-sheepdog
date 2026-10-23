@@ -359,6 +359,26 @@ section 6.
     Close instead of a pop). A shell pushes on the detail's own stack.
   - With the sidebar not beside the detail, the detail's header carries
     Show sidebar and the `MiniCapsule`, so one capsule is on screen.
+- **Two panes** (`AgentPanes.swift`): `IPadDetail.pair` puts two agents
+  side by side in landscape and stacks them in portrait, each with its own
+  question, keys and composer. `SceneUI` holds the rules: a sidebar row
+  focuses its agent or replaces the focused pane (`show`); a new agent, a
+  drop or the pane's split menu goes beside the current pane, and of two
+  the unfocused one makes way (`beside`); the same agent is never in both.
+  The focused pane gets a 3 pt ink line; a tap, a key or a prompt in a pane
+  focuses it (`AgentWindowController.onActivity`, since the terminal view
+  takes the touches). `PaneDivider` drags between 30 and 70 %, and is
+  adjustable with VoiceOver.
+- **Dragging** a sidebar row carries an `AgentWindowRoute` (Transferable,
+  the exported type `com.github.kccarlos.herdr-sheepdog-ios.agent` in
+  project.yml). Over the detail a dashed drop target shows where it lands.
+- **Open in New Window** (pane ⋯, only with `supportsMultipleWindows`)
+  opens the `agent` `WindowGroup` with that route: `AgentWindowScene`, the
+  pane alone with the mini capsule and ⋯ ▸ Close Window. It never
+  registers with `SceneCoordinator`. While the demo is open it shows the
+  demo's view model (`SceneCoordinator.demoModel`).
+- New agent, Spaces and Settings are form sheets on iPad
+  (`presentationSizing(.form)`); Start is ⌘↩ (`keyboardShortcut`).
 - **Opening a window** goes through one seam: `\.openAgentWindow`
   (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
   pushes on `navigationPath`. Requests from the session itself (a card's
