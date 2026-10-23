@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -23,6 +24,15 @@ import (
 // (docs/dev/design/security.md "The daemon's identity").
 const CertLifetime = 365 * 24 * time.Hour
 
+// The certificate rotates on its own (docs/dev/design/security.md
+// "Certificate rotation"): RotateLead before it expires the daemon makes
+// the next key and announces its pin (SessionResponse.NextPin); RotateSwitch
+// before it expires it serves the next key.
+const (
+	RotateLead   = 37 * 24 * time.Hour
+	RotateSwitch = 7 * 24 * time.Hour
+)
+
 // TLSIdentity is the daemon's TLS key and self-signed certificate, kept
 // in <data_dir>/tls/ (key.pem, cert.pem; the directory 0700, the files
 // 0600). The app pins the certificate's key by its fingerprint (Pin),
@@ -33,7 +43,7 @@ type TLSIdentity struct {
 
 	mu   sync.RWMutex
 	cur  *certPair
-	next *certPair // made ahead of a rotation (rotation.go)
+	next *certPair // made RotateLead before expiry (Maintain)
 }
 
 // certPair is one key and its certificate.
@@ -68,7 +78,16 @@ func LoadTLSIdentity(dataDir string, now func() time.Time) (*TLSIdentity, error)
 		return nil, fmt.Errorf("tls: %w", err)
 	}
 	cur, err := readCertPair(id.dir, "key.pem", "cert.pem")
+	next, nextErr := readCertPair(id.dir, "next_key.pem", "next_cert.pem")
 	switch {
+	case err != nil && nextErr == nil && !errors.Is(err, os.ErrNotExist):
+		// A crash in the middle of a switch (Maintain writes cert.pem,
+		// then key.pem, then removes next_*): finish it.
+		if err := writeCertPair(id.dir, "key.pem", "cert.pem", next); err != nil {
+			return nil, err
+		}
+		cur, next = next, nil
+		id.removeNext()
 	case errors.Is(err, os.ErrNotExist):
 		if cur, err = newCertPair(now()); err != nil {
 			return nil, err
@@ -79,11 +98,102 @@ func LoadTLSIdentity(dataDir string, now func() time.Time) (*TLSIdentity, error)
 	case err != nil:
 		return nil, err
 	}
-	id.cur = cur
-	if next, err := readCertPair(id.dir, "next_key.pem", "next_cert.pem"); err == nil {
-		id.next = next
+	if next != nil && next.pin == cur.pin {
+		// The switch wrote key.pem and cert.pem but did not get to
+		// removing next_*.
+		next = nil
+		id.removeNext()
 	}
+	id.cur, id.next = cur, next
 	return id, nil
+}
+
+// Rotation is what one Maintain call did, for the web.tls.rotate event.
+type Rotation struct {
+	// Phase is "" (nothing to do), "next" (the next key was made) or
+	// "switch" (the next key is now served).
+	Phase  string
+	OldPin string
+	NewPin string
+}
+
+// Maintain rotates the certificate when it is due: at expiry − RotateLead
+// it makes the next key (next_key.pem, next_cert.pem), at expiry −
+// RotateSwitch it serves it. A daemon that was off through the whole
+// window makes the next key and switches at once, so it never serves a
+// certificate that is about to expire. The server calls it when it starts
+// and every hour.
+func (t *TLSIdentity) Maintain() (Rotation, error) {
+	now := t.now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switchAt := t.cur.expires.Add(-RotateSwitch)
+	if now.Before(t.cur.expires.Add(-RotateLead)) {
+		return Rotation{}, nil
+	}
+	var r Rotation
+	if t.next == nil {
+		next, err := newCertPair(now)
+		if err != nil {
+			return Rotation{}, err
+		}
+		if t.dir != "" {
+			if err := writeCertPair(t.dir, "next_key.pem", "next_cert.pem", next); err != nil {
+				return Rotation{}, err
+			}
+		}
+		t.next = next
+		r = Rotation{Phase: "next", OldPin: t.cur.pin, NewPin: next.pin}
+	}
+	if now.Before(switchAt) {
+		return r, nil
+	}
+	if t.dir != "" {
+		if err := writeCertPair(t.dir, "key.pem", "cert.pem", t.next); err != nil {
+			return r, err
+		}
+		t.removeNext()
+	}
+	r = Rotation{Phase: "switch", OldPin: t.cur.pin, NewPin: t.next.pin}
+	t.cur, t.next = t.next, nil
+	return r, nil
+}
+
+// tlsCheck is how often the server calls Maintain.
+const tlsCheck = time.Hour
+
+// watchTLS rotates the certificate when it is due, until ctx ends.
+func (s *Server) watchTLS(ctx context.Context) {
+	t := time.NewTicker(tlsCheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.maintainTLS()
+		}
+	}
+}
+
+// maintainTLS is one Maintain call, logged as web.tls.rotate. New
+// connections get the new key at once; open ones keep the key they
+// shook hands with.
+func (s *Server) maintainTLS() {
+	r, err := s.deps.TLS.Maintain()
+	if err != nil {
+		s.log.Log(logSource, "web.tls.rotate_failed", "", map[string]any{"error": err.Error()})
+		return
+	}
+	if r.Phase == "" {
+		return
+	}
+	s.log.Log(logSource, "web.tls.rotate", "", map[string]any{"phase": r.Phase, "old_pin": r.OldPin, "new_pin": r.NewPin, "expires": s.deps.TLS.Expires().UTC()})
+}
+
+func (t *TLSIdentity) removeNext() {
+	_ = os.Remove(filepath.Join(t.dir, "next_key.pem"))
+	_ = os.Remove(filepath.Join(t.dir, "next_cert.pem"))
 }
 
 // Pin is base64url(SHA-256(SubjectPublicKeyInfo)) of the key being
@@ -123,8 +233,7 @@ func (t *TLSIdentity) Reset() error {
 		if err := writeCertPair(t.dir, "key.pem", "cert.pem", p); err != nil {
 			return err
 		}
-		_ = os.Remove(filepath.Join(t.dir, "next_key.pem"))
-		_ = os.Remove(filepath.Join(t.dir, "next_cert.pem"))
+		t.removeNext()
 	}
 	t.mu.Lock()
 	t.cur, t.next = p, nil

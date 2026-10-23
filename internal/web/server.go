@@ -668,10 +668,12 @@ func (s *Server) Serve(ctx context.Context, drain time.Duration) error {
 	s.mu.Lock()
 	s.conns = capped
 	s.mu.Unlock()
+	s.maintainTLS()
 	sl := newSniffListener(capped, s.deps.TLS.TLSConfig(), sniffTimeout)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(sl) }()
 	go s.watchActivities(ctx)
+	go s.watchTLS(ctx)
 	select {
 	case err := <-errc:
 		return err

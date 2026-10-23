@@ -720,9 +720,14 @@ Every device holds its own P-256 key; there is no shared secret
    A browser signs an empty pin line. The signature may be ASN.1 DER
    (Security framework) or `r‖s` (WebCrypto), in any base64 alphabet.
 3. `POST /api/auth/session {"device_id","nonce","time","signature","client":"app"|"browser"}`
-   → `200 {"ticket":"…","expires_in":43200,"device":{"id","name"},"next_pin":"…"?}`;
-   a browser also gets the cookie. `next_pin` appears while the daemon is
-   about to replace its certificate. Refused with `401 {"error":"unauthorized","reason":…}`:
+   → `200 {"ticket":"…","expires_in":43200,"device":{"id","name"},"cert_expires":"2027-10-21T00:00:00Z","next_pin":"…"?}`;
+   a browser also gets the cookie. `cert_expires` is when the served
+   certificate expires. `next_pin` appears from 37 days before that, when
+   the daemon has made its next key; 7 days before it the daemon serves
+   that key, and the session then accepts a signature over the new pin
+   only (or the empty browser pin). An app keeps both pins, accepts either
+   in the TLS handshake and signs with the one the server's key matched
+   ([security design §4.4](design/security.md#44-certificate-rotation)). Refused with `401 {"error":"unauthorized","reason":…}`:
    `bad_nonce`, `bad_time` (more than 5 minutes off), `bad_signature`,
    `unknown_device`, `device_revoked`. Logged as `web.device.session
    {device_id, remote_kind}` or `web.device.auth_failed {reason, remote,
