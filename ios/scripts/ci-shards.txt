@@ -30,29 +30,27 @@ smoke    SheepdogUITests/QuestionsUITests              # 16
 # iPad: about 260
 shard-1  SheepdogUITests/IPadUITests
 
-# about 387
+# about 592; the recording and screenshot classes skip themselves in CI
 shard-2  SheepdogUITests/AgentWindowDemoUITests        # 304
+shard-2  SheepdogUITests/ShellDemoUITests              # 137
 shard-2  SheepdogUITests/HealthUITests                 # 48
+shard-2  SheepdogUITests/FlockTypingUITests            # 40
 shard-2  SheepdogUITests/UpdateNoticeUITests           # 35
+shard-2  SheepdogUITests/FeedbackUITests               # 28
+shard-2  SheepdogUITests/AgentScreenUITests            # 2
+shard-2  SheepdogUITests/RedesignShotsUITests          # 1
+shard-2  SheepdogUITests/LaunchReviewScreenshotsUITests
+shard-2  SheepdogUITests/ReviewScreenshotsUITests
+shard-2  SheepdogUITests/LaunchRecordingUITests
+shard-2  SheepdogUITests/HeroRecordingUITests
+shard-2  SheepdogUITests/ReadmeRecordingUITests
 
-# about 371; the recording and screenshot classes skip themselves in CI
-shard-3  SheepdogUITests/ShellDemoUITests              # 137
+# about 565
+shard-3  SheepdogUITests/SpacesDemoUITests             # 97
 shard-3  SheepdogUITests/VoiceRobustnessUITests        # 94
+shard-3  SheepdogUITests/FirstRunUITests               # 87
+shard-3  SheepdogUITests/WalkthroughUITests            # 85
 shard-3  SheepdogUITests/ChangesDemoUITests            # 72
-shard-3  SheepdogUITests/FlockTypingUITests            # 40
-shard-3  SheepdogUITests/FeedbackUITests               # 28
-shard-3  SheepdogUITests/AgentScreenUITests            # 2
-shard-3  SheepdogUITests/RedesignShotsUITests          # 1
-shard-3  SheepdogUITests/LaunchReviewScreenshotsUITests
-shard-3  SheepdogUITests/ReviewScreenshotsUITests
-shard-3  SheepdogUITests/LaunchRecordingUITests
-shard-3  SheepdogUITests/HeroRecordingUITests
-shard-3  SheepdogUITests/ReadmeRecordingUITests
-
-# about 399
-shard-4  SheepdogUITests/SpacesDemoUITests             # 97
-shard-4  SheepdogUITests/FirstRunUITests               # 87
-shard-4  SheepdogUITests/WalkthroughUITests            # 85
-shard-4  SheepdogUITests/CardsUITests                  # 62
-shard-4  SheepdogUITests/DemoUITests                   # 41
-shard-4  SheepdogUITests/NewConversationUITests        # 27
+shard-3  SheepdogUITests/CardsUITests                  # 62
+shard-3  SheepdogUITests/DemoUITests                   # 41
+shard-3  SheepdogUITests/NewConversationUITests        # 27

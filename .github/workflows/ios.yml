@@ -238,8 +238,27 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
-      # Boots first, so the boot runs while the build downloads.
-      - name: Pick the simulator and start booting it
+      - name: Download the build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.BUILD_ARTIFACT }}
+          path: ${{ runner.temp }}
+
+      # Into the workspace, where the build job's checkout was.
+      - name: Unpack the build
+        run: |
+          echo "build downloaded $(date +%s)" >> "$TIMINGS"
+          mkdir -p "$RESULTS"
+          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
+          xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
+          echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
+          echo "build unpacked $(date +%s)" >> "$TIMINGS"
+
+      # A booting simulator slows everything else on the Mac to a crawl
+      # (a 52 MB download took 3 to 7 minutes beside it), so it boots
+      # after the download.
+      - name: Pick the simulator and boot it
         id: sim
         run: |
           # The newest iPhone on the image, but not a foldable one (iPhone
@@ -271,23 +290,6 @@ jobs:
           xcrun simctl boot "$udid" || true
           echo "boot started $(date +%s)" >> "$TIMINGS"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
-
-      - name: Download the build
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.BUILD_ARTIFACT }}
-          path: ${{ runner.temp }}
-
-      # Into the workspace, where the build job's checkout was.
-      - name: Unpack the build
-        run: |
-          echo "build downloaded $(date +%s)" >> "$TIMINGS"
-          mkdir -p "$RESULTS"
-          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
-          rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
-          xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
-          echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
-          echo "build unpacked $(date +%s)" >> "$TIMINGS"
 
       - name: Wait for the simulator
         run: |
