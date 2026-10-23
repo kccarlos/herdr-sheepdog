@@ -44,16 +44,22 @@ public final class DemoTermTransport: TermTransport {
         var history: [String] = []
     }
 
+    /// How often a working agent's status line moves: a second, or much
+    /// faster for the UI test that streams frames (`-sheepdogFrameChurn`).
+    private let tickInterval: TimeInterval
+
     /// `screen` reads an agent's scripted screen (`DemoDaemon.agentScreen`).
-    public init(behavior: Behavior = .normal, screen: @escaping (String) -> AgentScreen?) {
+    public init(behavior: Behavior = .normal, tickInterval: TimeInterval = 1, screen: @escaping (String) -> AgentScreen?) {
         self.behavior = behavior
+        self.tickInterval = tickInterval
         self.screen = screen
     }
 
     public func start() {
+        let nanoseconds = UInt64(tickInterval * 1_000_000_000)
         ticker = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
                 self?.tick()
             }
         }
@@ -214,7 +220,7 @@ public final class DemoTermTransport: TermTransport {
         if c.shellCwd != nil {
             body = shellLines(c)
         } else if let agent = screen(c.paneID) {
-            body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: Self.tickNow)
+            body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: tickNow)
         } else {
             return
         }
@@ -236,14 +242,14 @@ public final class DemoTermTransport: TermTransport {
         emit(TermFrame(ch: ch, seq: c.seq, cols: c.cols, rows: c.rows, full: true, bytes: bytes))
     }
 
-    private static var tickNow: Int { Int(Date().timeIntervalSince1970) }
+    private var tickNow: Int { Int(Date().timeIntervalSince1970 / tickInterval) }
 
     /// A diff with the rows that changed (the spinner), or a full frame
     /// when the script moved on.
     private func tick() {
         for ch in channels.keys.sorted() {
             guard var c = channels[ch], c.shellCwd == nil, let agent = screen(c.paneID) else { continue }
-            let body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: Self.tickNow)
+            let body = DemoTerminalScreen.lines(for: agent, cols: c.cols, rows: c.rows, typed: c.typed, tick: tickNow)
             let changed = body.indices.filter { $0 >= c.lastBody.count || body[$0] != c.lastBody[$0] }
             guard !changed.isEmpty else { continue }
             if changed.count > 2 || body.count != c.lastBody.count {

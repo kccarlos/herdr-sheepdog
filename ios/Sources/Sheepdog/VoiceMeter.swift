@@ -3,19 +3,24 @@ import SwiftUI
 
 /// The numbers that change 10–25 times a second while the microphone or the
 /// player is running: the input level ring, the audio metrics and the
-/// voice-detection diagnostics. Split out of `SessionViewModel` so that only
-/// the views that actually draw them (the voice bar's orb and mic ring, and
-/// Settings ▸ About / Voice detection) re-render on every tick — `MainView`
-/// and `ConversationView` read neither this object nor its properties, so
-/// they stay quiet while a session just sits there listening.
+/// voice-detection diagnostics. Split out of `SessionViewModel` and
+/// observed per property (`@Observable`), so only the views that read a
+/// level re-render on its ticks: the orb (`MeteredOrb`) and the mic ring
+/// (`MeteredMicButton`) for the levels, Health and Diagnostics for the
+/// metrics. The capsule, its menu and the rest of the app read none of
+/// them, so they stay quiet while a session sits there listening.
+///
+/// High-frequency (10–25 Hz): `micLevel` and `outputLevel`'s only readers
+/// are `MeteredMicButton` and `MeteredOrb`.
 @MainActor
-final class VoiceMeter: ObservableObject {
+@Observable
+final class VoiceMeter {
     /// Input level, 0…1, for the orb's and the mic button's ring.
-    @Published private(set) var micLevel: Float = 0
+    private(set) var micLevel: Float = 0
     /// Output level, 0…1, while the voice speaks: the orb's waveform.
-    @Published private(set) var outputLevel: Float = 0
-    @Published private(set) var metrics = AudioMetrics()
-    @Published private(set) var gateDiagnostics = CaptureGate.Diagnostics()
+    private(set) var outputLevel: Float = 0
+    private(set) var metrics = AudioMetrics()
+    private(set) var gateDiagnostics = CaptureGate.Diagnostics()
 
     func setLevel(_ level: Float) {
         guard level != micLevel else { return }

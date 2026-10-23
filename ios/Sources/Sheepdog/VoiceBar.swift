@@ -10,9 +10,11 @@ import SwiftUI
 /// status wraps to two lines at the accessibility sizes). It is Liquid
 /// Glass, or a solid card under Reduce Transparency. The look comes from
 /// `CapsuleMode`; what the orb does from `VoiceBarModel`.
-struct VoiceCapsule<VoiceMenu: View>: View {
+struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     let state: SessionState
-    @ObservedObject var meter: VoiceMeter
+    /// Read only by the orb and the mic ring (`MeteredOrb`,
+    /// `MeteredMicButton`): the capsule does not re-render per level tick.
+    let meter: VoiceMeter
     let muted: Bool
     let name: String
     var talkMode: TalkMode = .openMic
@@ -29,8 +31,11 @@ struct VoiceCapsule<VoiceMenu: View>: View {
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
     var onType: () -> Void = {}
-    /// The voice menu's items.
-    @ViewBuilder let menu: () -> VoiceMenu
+    /// What the voice menu shows, and its items drawn from it: the menu
+    /// re-renders only when this (or the name and status) changes
+    /// (`StableMenu`).
+    let menuValue: MenuValue
+    @ViewBuilder let menu: (MenuValue) -> VoiceMenu
 
     @ScaledMetric(relativeTo: .subheadline) private var scaledHeight: CGFloat = 60
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -74,7 +79,12 @@ struct VoiceCapsule<VoiceMenu: View>: View {
             // The status is drawn over the menu button rather than inside
             // it, so VoiceOver (and the UI tests) read it as its own text;
             // touches pass through it to the menu.
-            Menu(content: menu) { nameAndStatus(showsName: true) }
+            stableMenu(
+                CapsuleMenuLabel(items: menuValue, name: name, status: statusText, mode: mode, noSignal: noSignal, size: dynamicTypeSize),
+                probe: "voice",
+                content: { menu($0.items) },
+                label: { _ in nameAndStatus(showsName: true) }
+            )
                 .menuOrder(.fixed)
                 .overlay { nameAndStatus(showsName: false).allowsHitTesting(false) }
                 .accessibilityLabel("Voice: \(name)")
@@ -100,7 +110,7 @@ struct VoiceCapsule<VoiceMenu: View>: View {
     @ViewBuilder
     private var micSlot: some View {
         let visible = mode.showsMic && model.muteAvailability != .hidden
-        CapsuleMicButton(muted: muted, level: meter.micLevel, noSignal: noSignal, enabled: model.muteAvailability == .enabled, action: onMute)
+        MeteredMicButton(meter: meter, muted: muted, noSignal: noSignal, enabled: model.muteAvailability == .enabled, action: onMute)
             .opacity(visible ? (mode.micDimmed ? 0.35 : 1) : 0)
             .allowsHitTesting(visible && model.muteAvailability == .enabled)
             .accessibilityHidden(!visible)
@@ -112,12 +122,12 @@ struct VoiceCapsule<VoiceMenu: View>: View {
     @ViewBuilder
     private var orb: some View {
         if model.orbAction == .holdToTalk {
-            CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
+            MeteredOrb(meter: meter, mode: mode)
                 .holdToTalk(holding: holding, onPress: onPress, onRelease: onRelease)
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
+                MeteredOrb(meter: meter, mode: mode)
             }
             // Disabled while it has nothing to do, but never dimmed: the
             // orb's colour is the state.
@@ -240,6 +250,42 @@ extension View {
 
 /// The capsule's orb, 44 pt: colour, glyph and badge per `CapsuleMode`.
 /// The listening orb breathes (1 to 1.04, 2 s) unless Reduce Motion is on.
+/// What the capsule's menu button shows, with the menu's own value: the
+/// label's inputs (`StableMenu`).
+struct CapsuleMenuLabel<Items: Equatable>: Equatable {
+    var items: Items
+    var name: String
+    var status: String
+    var mode: CapsuleMode
+    var noSignal: Bool
+    var size: DynamicTypeSize
+}
+
+/// The orb, reading the voice's output level itself: the one view that
+/// re-renders on each level tick.
+struct MeteredOrb: View {
+    let meter: VoiceMeter
+    let mode: CapsuleMode
+    var size: CGFloat = 44
+
+    var body: some View {
+        CapsuleOrb(mode: mode, size: size, outputLevel: meter.outputLevel)
+    }
+}
+
+/// The mic button, reading the input level itself (its ring).
+struct MeteredMicButton: View {
+    let meter: VoiceMeter
+    let muted: Bool
+    var noSignal = false
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        CapsuleMicButton(muted: muted, level: meter.micLevel, noSignal: noSignal, enabled: enabled, action: action)
+    }
+}
+
 struct CapsuleOrb: View {
     let mode: CapsuleMode
     var size: CGFloat = 44

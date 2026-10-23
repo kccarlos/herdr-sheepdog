@@ -30,7 +30,7 @@ struct MiniCapsule: View {
     var body: some View {
         HStack(spacing: 6) {
             Button(action: tapOrb) {
-                CapsuleOrb(mode: mode, size: 30, outputLevel: model.meter.outputLevel)
+                MeteredOrb(meter: model.meter, mode: mode, size: 30)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
@@ -39,19 +39,21 @@ struct MiniCapsule: View {
             .padding(.vertical, -3)
             .accessibilityLabel(orbLabel)
             .accessibilityIdentifier("mini.orb")
-            Menu {
-                menus.voiceMenu
-            } label: {
+            stableMenu(
+                MiniMenuLabel(items: menus.voiceValue, name: model.capsuleName, status: model.statusLine),
+                probe: "mini",
+                content: { menus.voiceItems($0.items) }
+            ) { label in
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 3) {
-                        Text(model.capsuleName)
+                        Text(label.name)
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.ink)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(Theme.ink)
                     }
-                    Text(model.statusLine)
+                    Text(label.status)
                         .font(.caption2)
                         .foregroundStyle(Theme.muted)
                 }
@@ -99,4 +101,12 @@ struct MiniCapsule: View {
         default: return model.state.accessibilityLabel(voiceName: model.voiceName)
         }
     }
+}
+
+/// The mini capsule's menu button: what it shows, with the menu's value
+/// (`StableMenu`).
+struct MiniMenuLabel: Equatable {
+    var items: SessionMenus.VoiceValue
+    var name: String
+    var status: String
 }

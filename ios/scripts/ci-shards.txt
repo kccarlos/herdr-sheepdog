@@ -29,12 +29,14 @@ smoke    SheepdogUITests/QuestionsUITests              # 16
 
 # iPad: about 367
 shard-1  SheepdogUITests/IPadUITests
+shard-1  SheepdogUITests/IPadRenderChurnUITests
 
 # about 495
 shard-2  SheepdogUITests/AgentWindowDemoUITests        # 371
 shard-2  SheepdogUITests/HealthUITests                 # 57
 shard-2  SheepdogUITests/FeedbackUITests               # 38
 shard-2  SheepdogUITests/UpdateNoticeUITests           # 29
+shard-2  SheepdogUITests/RenderChurnUITests
 
 # about 501
 shard-3  SheepdogUITests/SpacesDemoUITests             # 213

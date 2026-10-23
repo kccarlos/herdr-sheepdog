@@ -119,8 +119,7 @@ struct PhoneRootView: View {
                 TopBar(
                     pane: $model.pane,
                     waiting: model.waitingEverywhere,
-                    newMenu: { menus.newMenu },
-                    moreMenu: { menus.moreMenu }
+                    menus: menus
                 )
 
                 SessionBanners()
@@ -380,7 +379,8 @@ struct SessionCapsule: View {
                     withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true }
                 }
             },
-            menu: { menus.voiceMenu }
+            menuValue: menus.voiceValue,
+            menu: { menus.voiceItems($0) }
         )
     }
 }
@@ -402,42 +402,75 @@ struct SessionMenus {
         open()
     }
 
-    /// The capsule's menu. With one computer: this computer's connection,
-    /// Manage computers…, and End voice session. Talk to (the other
-    /// computers) arrives with several computers.
+    /// What the capsule's menu shows. With one computer: this computer's
+    /// connection, Manage computers… and End voice session. Talk to (the
+    /// other computers) arrives with several computers.
+    struct VoiceValue: Equatable {
+        struct Computer: Equatable, Identifiable {
+            var id: String
+            var name: String
+            var isCurrent: Bool
+            var offline: Bool
+            var summary: String
+        }
+
+        var connectionWord: String
+        var endpoint: String
+        var connectionSymbol: String
+        /// Empty with one computer.
+        var computers: [Computer]
+        var wantsConnection: Bool
+        var isConfigured: Bool
+    }
+
+    var voiceValue: VoiceValue {
+        VoiceValue(
+            connectionWord: model.connectionChip.word,
+            endpoint: model.endpointDisplay,
+            connectionSymbol: connectionSymbol,
+            computers: model.showsComputerLabels ? model.computerSnapshots.map { computer in
+                let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                return .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: offline, summary: computer.summary())
+            } : [],
+            wantsConnection: model.wantsConnection,
+            isConfigured: model.isConfigured
+        )
+    }
+
+    /// The capsule's menu items, drawn from `voiceValue` only, so an open
+    /// menu stays still while the session re-renders (`StableMenu`).
     @ViewBuilder
-    var voiceMenu: some View {
+    func voiceItems(_ value: VoiceValue) -> some View {
         Button {
             here { model.presentation.present(.connection) }
         } label: {
             Label {
-                Text(model.connectionChip.word)
-                Text(model.endpointDisplay)
+                Text(value.connectionWord)
+                Text(value.endpoint)
             } icon: {
-                Image(systemName: connectionSymbol)
+                Image(systemName: value.connectionSymbol)
             }
         }
-        .accessibilityLabel("Connection: \(model.connectionChip.word)")
+        .accessibilityLabel("Connection: \(value.connectionWord)")
         .accessibilityIdentifier("chip.connection")
-        if model.showsComputerLabels {
+        if !value.computers.isEmpty {
             // Talk to: every computer, the current one checked; one that
             // does not answer is disabled with its last-seen time.
             Divider()
             Group {
-                ForEach(model.computerSnapshots) { computer in
-                    let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                ForEach(value.computers) { computer in
                     Button {
                         model.talk(to: computer.id)
                     } label: {
                         Label {
                             Text(computer.isCurrent ? computer.name : "Talk to \(computer.name)")
-                            Text(computer.isCurrent ? "Talking here · \(computer.summary())" : computer.summary())
+                            Text(computer.isCurrent ? "Talking here · \(computer.summary)" : computer.summary)
                         } icon: {
-                            Image(systemName: computer.isCurrent ? "checkmark" : (offline ? "wifi.slash" : "desktopcomputer"))
+                            Image(systemName: computer.isCurrent ? "checkmark" : (computer.offline ? "wifi.slash" : "desktopcomputer"))
                         }
                     }
-                    .disabled(offline && !computer.isCurrent)
-                    .accessibilityLabel(computer.isCurrent ? "\(computer.name), talking here, \(computer.summary())" : "Talk to \(computer.name), \(computer.summary())")
+                    .disabled(computer.offline && !computer.isCurrent)
+                    .accessibilityLabel(computer.isCurrent ? "\(computer.name), talking here, \(computer.summary)" : "Talk to \(computer.name), \(computer.summary)")
                     .accessibilityIdentifier("voice.talkTo.\(computer.id)")
                 }
             }
@@ -449,7 +482,7 @@ struct SessionMenus {
         }
         .accessibilityIdentifier("voice.manageComputers")
         Divider()
-        if model.wantsConnection {
+        if value.wantsConnection {
             Button {
                 model.disconnect()
             } label: {
@@ -467,7 +500,7 @@ struct SessionMenus {
             } label: {
                 Label("Start voice session", systemImage: "waveform")
             }
-            .disabled(!model.isConfigured)
+            .disabled(!value.isConfigured)
             .accessibilityIdentifier("voice.start")
         }
     }
@@ -481,23 +514,42 @@ struct SessionMenus {
         }
     }
 
+    /// What `+` and `⋯` show.
+    struct BarValue: Equatable {
+        var actionsAvailable: Bool
+        var shellShown: Bool
+        var resetSupported: Bool
+        var voiceName: String
+        var wantsConnection: Bool
+    }
+
+    var barValue: BarValue {
+        BarValue(
+            actionsAvailable: model.agentActionsAvailable,
+            shellShown: model.shellEntryShown,
+            resetSupported: model.conversationResetSupported,
+            voiceName: model.voiceName,
+            wantsConnection: model.wantsConnection
+        )
+    }
+
     /// `+`: make something on this computer.
     @ViewBuilder
-    var newMenu: some View {
+    func newItems(_ value: BarValue) -> some View {
         Button {
             here { model.presentation.present(.newAgent) }
         } label: {
             Label("New agent", systemImage: "plus.square")
         }
-        .disabled(!model.agentActionsAvailable)
+        .disabled(!value.actionsAvailable)
         .accessibilityIdentifier("new.agent")
-        NewShellButton()
+        NewShellButton(shown: value.shellShown)
     }
 
     /// `⋯`: the session's rarer actions, then Settings.
     @ViewBuilder
-    var moreMenu: some View {
-        if model.conversationResetSupported {
+    func moreItems(_ value: BarValue) -> some View {
+        if value.resetSupported {
             Button {
                 ui.confirmNewConversation = true
             } label: {
@@ -510,16 +562,16 @@ struct SessionMenus {
         Button {
             model.stop()
         } label: {
-            Label("Stop \(model.voiceName)", systemImage: "stop.circle")
+            Label("Stop \(value.voiceName)", systemImage: "stop.circle")
         }
-        .disabled(!model.wantsConnection)
+        .disabled(!value.wantsConnection)
         .accessibilityIdentifier("toolbar.stop")
         Button {
             model.disconnect()
         } label: {
             Label("End voice session", systemImage: "phone.down")
         }
-        .disabled(!model.wantsConnection)
+        .disabled(!value.wantsConnection)
         .accessibilityIdentifier("toolbar.end")
         Divider()
         Button {
@@ -527,7 +579,7 @@ struct SessionMenus {
         } label: {
             Label("Spaces", systemImage: "square.stack")
         }
-        .disabled(!model.agentActionsAvailable)
+        .disabled(!value.actionsAvailable)
         .accessibilityIdentifier("toolbar.spaces")
         Button {
             here { model.presentation.present(.settings) }
@@ -540,14 +592,15 @@ struct SessionMenus {
 
 /// `+` ▸ New shell: opens in this layout's way (`openAgentWindow`).
 private struct NewShellButton: View {
-    @EnvironmentObject private var model: SessionViewModel
+    /// The daemon offers the shell (`shellEntryShown`).
+    let shown: Bool
     @Environment(\.openAgentWindow) private var openWindow
 
     var body: some View {
         Button {
             openWindow(.shell(cwd: nil))
         } label: {
-            if model.shellEntryShown {
+            if shown {
                 Label("New shell", systemImage: "apple.terminal")
             } else {
                 Label {
@@ -558,7 +611,7 @@ private struct NewShellButton: View {
                 }
             }
         }
-        .disabled(!model.shellEntryShown)
+        .disabled(!shown)
         .accessibilityIdentifier("new.shell")
     }
 }
@@ -701,6 +754,10 @@ struct SessionChrome: ViewModifier {
             }
             .onChange(of: model.pane) { _, _ in model.warmUpTerm() }
             .environment(\.openCard) { card in model.openCard(card) }
+            #if DEBUG
+            // Over the layout and any pushed window (the demo's too).
+            .overlay(alignment: .topLeading) { RenderProbeReadout() }
+            #endif
             .environment(\.reportScreenCover) { name, covering in model.setScreenCover(name, covering) }
     }
 }
@@ -708,11 +765,10 @@ struct SessionChrome: ViewModifier {
 /// The top bar (canvas "TopBar"): `Conversation | Agents` with the waiting
 /// badge, and the `+` and `⋯` menus in one pill. No title, no connection
 /// chip: the connection lives in the capsule.
-struct TopBar<NewMenu: View, MoreMenu: View>: View {
+struct TopBar: View {
     @Binding var pane: MainPane
     let waiting: Int
-    @ViewBuilder let newMenu: () -> NewMenu
-    @ViewBuilder let moreMenu: () -> MoreMenu
+    let menus: SessionMenus
 
     var body: some View {
         HStack(spacing: 8) {
@@ -720,7 +776,9 @@ struct TopBar<NewMenu: View, MoreMenu: View>: View {
                 .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 0)
             HStack(spacing: 0) {
-                Menu(content: newMenu) {
+                // From values only (`StableMenu`): an open menu stays
+                // still while the session re-renders.
+                stableMenu(menus.barValue, probe: "new", content: { menus.newItems($0) }) { _ in
                     Image(systemName: "plus")
                         .font(.system(size: 17, weight: .semibold))
                         .frame(width: 44, height: 44)
@@ -728,7 +786,7 @@ struct TopBar<NewMenu: View, MoreMenu: View>: View {
                 }
                 .accessibilityLabel("New")
                 .accessibilityIdentifier("toolbar.new")
-                Menu(content: moreMenu) {
+                stableMenu(menus.barValue, probe: "more", content: { menus.moreItems($0) }) { _ in
                     Image(systemName: "ellipsis")
                         .font(.system(size: 17, weight: .semibold))
                         .frame(width: 44, height: 44)

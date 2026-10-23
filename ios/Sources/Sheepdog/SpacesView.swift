@@ -32,13 +32,13 @@ struct SpacesSheet: View {
                     }
                     if case let .loaded(view) = load, !view.folders.isEmpty {
                         ToolbarItem(placement: .topBarLeading) {
-                            Menu {
+                            stableMenu(view.folders, probe: "spaces.new") { folders in
                                 Section("New space in") {
-                                    ForEach(view.folders, id: \.path) { folder in
+                                    ForEach(folders, id: \.path) { folder in
                                         Button(folder.name) { Task { await newSpace(folder) } }
                                     }
                                 }
-                            } label: {
+                            } label: { _ in
                                 Image(systemName: "plus")
                             }
                             .accessibilityLabel("New space")
@@ -435,21 +435,21 @@ struct SpaceDetailView: View {
                     let canOpen = tree.openWorkspaceID == nil
                     let canRemove = tree.path == space.path && tree.isLinkedWorktree
                     if canOpen || canRemove {
-                    Menu {
-                        if canOpen {
+                    stableMenu(WorktreeMenuValue(canOpen: canOpen, canRemove: canRemove), probe: "spaces.worktree") { value in
+                        if value.canOpen {
                             Button {
                                 Task { await act { _ = try await $0.openWorktree(space: space.id, path: tree.path) } }
                             } label: {
                                 Label("Open as a space", systemImage: "square.stack")
                             }
                         }
-                        if canRemove {
+                        if value.canRemove {
                             Button(role: .destructive) { confirmRemove = true } label: {
                                 Label("Remove worktree", systemImage: "trash")
                             }
                             .accessibilityIdentifier("space.worktree.remove")
                         }
-                    } label: {
+                    } label: { _ in
                         Image(systemName: "ellipsis")
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
@@ -538,3 +538,8 @@ struct SpaceDetailView: View {
     }
 }
 
+/// What a worktree's ⋯ menu offers (`StableMenu`).
+private struct WorktreeMenuValue: Equatable {
+    var canOpen: Bool
+    var canRemove: Bool
+}

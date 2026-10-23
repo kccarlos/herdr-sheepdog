@@ -582,6 +582,7 @@ their dialogs). `KeyEncoding` (Kit) holds every key's bytes, the one-shot
 
 ```
 AgentScreenView ── AgentWindowView (one per pane; ⋯ ▸ Switch agent swaps it)
+      │            └── AgentWindowContent (values only: AgentWindowInputs)
       │                 header (name, state chip, ⋯) · NoticeBar · TerminalHost
       │                 · PinnedApprovalCard · key bar · composer
 AgentWindowController (@MainActor) ── AgentWindowState (Kit, pure)
@@ -593,6 +594,18 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
 - **`AgentWindowState`** (SheepdogKit, `AgentWindowTests`) decides
   everything; the controller feeds it events and runs the commands it
   returns (`open`, `close`, `startSnapshot`, `stopSnapshot`, `scroll`).
+- **Frames stay out of the views.** A `/term` frame goes from the socket
+  to the surface; a `/ws` `screen` push goes through `ScreenStreamRouter`
+  (Kit) straight to the controller of the window showing that pane. No
+  published property carries either. The controller publishes only slow
+  state (phase, notice, sending, typing, `hasScreen`,
+  `snapshotUsable`); the visible text for VoiceOver and Copy is read at
+  most twice a second and set on the terminal view directly.
+  `AgentWindowView` observes the session and hands `AgentWindowContent`
+  plain values (`AgentWindowInputs`), so a session change that leaves
+  them equal re-renders nothing in the window; the shell window's content
+  observes only its controller. The header and the ⋯ menu are `Equatable`
+  views of values.
 - **Which path.** `TermAvailability` comes from `bot-ready`'s `term`
   feature. Without a voice session the window uses the features this daemon
   listed last time, else tries `/term` anyway (`unknown`). `no` (a daemon
@@ -1018,6 +1031,34 @@ it at once. Mute is not an orb state while the voice is speaking or thinking.
 Instead the orb wears a small red mic badge. `capturing` is derived from
 the same value: the microphone runs only in states where something can
 hear it.
+
+## Re-renders
+
+The session view model is still one `ObservableObject` (until phase 8 of
+docs/dev/design/ios-state-architecture.md), so anything it announces
+re-renders every view that observes it. The rules that keep that cheap:
+
+- **Assign only on change.** A poll or a refresh assigns a published
+  property only when the value differs (`SessionViewModel.assign`,
+  `ComputerSession.set`); an equal value still announces a change. Each
+  other computer's changes are forwarded to the model, so an unchanged
+  5 s poll must announce nothing.
+- **High-frequency values have one reader.** Terminal frames: the surface
+  (above). Audio levels: `VoiceMeter` is `@Observable`, and only
+  `MeteredOrb` and `MeteredMicButton` read `micLevel` and `outputLevel`, so
+  the capsule and its menu do not re-render per level tick. Anything that
+  changes more than twice a second names its only reader in a comment.
+- **Menus are drawn from values.** Every menu that stays on screen while
+  the session changes is a `StableMenu` (or an `Equatable` view like
+  `AgentWindowMenu`): it re-renders only when what it shows changes, so an
+  open menu does not flicker or close. `SessionMenus` builds the voice,
+  `+` and `⋯` menus from `voiceValue` and `barValue`.
+- **Tests.** `RenderChurnUITests` and `IPadRenderChurnUITests` open each
+  menu under `-sheepdogRenderChurn` (the model announces a change ten
+  times a second) and check it stays open and is not drawn again;
+  `testTerminalFramesReRenderOnlyTheSurface` streams frames
+  (`-sheepdogFrameChurn`) and counts announcements with
+  `-sheepdogCountRenders` (`RenderProbe`).
 
 ## Concurrency
 

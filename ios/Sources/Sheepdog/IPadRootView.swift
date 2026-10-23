@@ -133,10 +133,12 @@ struct IPadSidebar: View {
                 .fontDesign(.rounded)
                 .foregroundStyle(Theme.ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Menu { menus.newMenu } label: { headerGlyph("plus") }
+            // From values only (`StableMenu`): an open menu stays still
+            // while the session re-renders.
+            stableMenu(menus.barValue, probe: "new", content: { menus.newItems($0) }) { _ in headerGlyph("plus") }
                 .accessibilityLabel("New")
                 .accessibilityIdentifier("toolbar.new")
-            Menu { menus.moreMenu } label: { headerGlyph("ellipsis") }
+            stableMenu(menus.barValue, probe: "more", content: { menus.moreItems($0) }) { _ in headerGlyph("ellipsis") }
                 .accessibilityLabel("More")
                 .accessibilityIdentifier("toolbar.more")
             Button {

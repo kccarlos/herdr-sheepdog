@@ -89,7 +89,8 @@ struct AgentPanes: View {
                     }
                     .accessibilityIdentifier("agentScreen.menu.newWindow")
                 ) : nil,
-                onInteract: two ? { if ui.focusedPane != index { ui.focusedPane = index } } : nil
+                onInteract: two ? { if ui.focusedPane != index { ui.focusedPane = index } } : nil,
+                index: index
             ))
             .id(id)
         } else {

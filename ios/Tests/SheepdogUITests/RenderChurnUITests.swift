@@ -1,0 +1,160 @@
+import XCTest
+
+/// Menus and windows that must stay still while the app re-renders around
+/// them (docs/dev/design/ios-state-architecture.md, 3.7 and phase 2).
+///
+/// `-sheepdogRenderChurn` makes the session view models announce a change
+/// ten times a second, as a live voice session does; `-sheepdogFrameChurn`
+/// moves the demo terminal's status line twenty times a second. With
+/// `-sheepdogCountRenders` the app counts change announcements, terminal
+/// frames and menu body evaluations in a hidden element
+/// (`RenderCounts`). Each menu test opens a menu under churn and checks
+/// that it stays open with the same items, and that its body was not
+/// evaluated again.
+final class RenderChurnUITests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    /// The offline demo, paused at its opening (nothing finishes or asks).
+    private func launchDemo(_ extra: [String] = ["-sheepdogRenderChurn"]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoPaused",
+                               "-sheepdogOpenDemo", "-sheepdogCountRenders"] + extra
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        return app
+    }
+
+    func testMainScreenMenusStayOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo()
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "voice.menu"), item: app.buttons["voice.manageComputers"], probe: "voice")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "toolbar.new"), item: app.buttons["new.agent"], probe: "new")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "toolbar.more"), item: app.buttons["toolbar.settings"], probe: "more")
+    }
+
+    func testAgentWindowMenusStayOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo()
+        openWindow(app, "claude-auth")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "agentScreen.menu"), item: app.buttons["agentScreen.menu.copy"], probe: "agent")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "agentScreen.attach"), item: app.buttons["Photo"], probe: "attach")
+    }
+
+    func testShellMenuStaysOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo()
+        tapMenuItem(app, menu: "toolbar.new", item: "new.shell", until: app.buttons["shell.menu"])
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "shell.menu"), item: app.buttons["shell.menu.copy"], probe: "shell")
+    }
+
+    func testSpacesMenusStayOpenWhileTheSessionRerenders() throws {
+        let app = launchDemo()
+        let tree = app.buttons["spaces.row.shop-fix-login"]
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces", until: tree)
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "spaces.new"), item: app.buttons["website"], probe: "spaces.new")
+        tapWhenTappable(tree, "the worktree space")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "space.worktree.shop-fix-login"), item: app.buttons["space.worktree.remove"], probe: "spaces.worktree")
+    }
+
+    /// Terminal frames reach the surface and nothing else: the session and
+    /// the window's observable state stay quiet, so the header, the ⋯ menu
+    /// and the composer do not re-render per frame.
+    func testTerminalFramesReRenderOnlyTheSurface() throws {
+        let app = launchDemo(["-sheepdogFrameChurn"])
+        openWindow(app, "claude-auth")
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        // Past the first frames (the window going live, the first text).
+        sleep(2)
+        let before = RenderCounts(app)
+        sleep(4)
+        let after = RenderCounts(app)
+        let frames = after["frames"] - before["frames"]
+        let window = after["window"] - before["window"]
+        let model = after["model"] - before["model"]
+        let header = after["header"] - before["header"]
+        let menu = after["menu.agent"] - before["menu.agent"]
+        print("render counts over 4 s: frames \(frames), window \(window), model \(model), header \(header), menu \(menu); before: \(before.text); after: \(after.text)")
+        XCTAssertGreaterThanOrEqual(frames, 20, "the demo streams frames (\(after.text))")
+        XCTAssertLessThanOrEqual(window, 2, "the window's observable state stays quiet per frame (\(frames) frames)")
+        XCTAssertLessThanOrEqual(model, 2, "the session stays quiet per frame (\(frames) frames)")
+        XCTAssertLessThanOrEqual(header, 1, "the header does not re-render per frame")
+        XCTAssertLessThanOrEqual(menu, 1, "the ⋯ menu does not re-render per frame")
+        // VoiceOver's copy of the screen still follows, at most twice a second.
+        expectation(for: NSPredicate(format: "value CONTAINS 'scripted session'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 10)
+    }
+
+    // MARK: - Helpers
+
+    private func openWindow(_ app: XCUIApplication, _ alias: String) {
+        showAgentsPane(app)
+        let open = app.buttons.matching(identifier: "flock.agent.\(alias).window")
+        XCTAssertTrue(open.firstMatch.waitForExistence(timeout: 10))
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            for i in 0 ..< open.count where open.element(boundBy: i).isTappable {
+                open.element(boundBy: i).tap()
+                XCTAssertTrue(app.buttons["agentScreen.menu"].waitForExistence(timeout: 10), "\(alias)'s window")
+                return
+            }
+            usleep(200_000)
+        } while Date() < deadline
+        XCTFail("no visible window button for \(alias)")
+    }
+}
+
+/// The app's render counts (`RenderProbe`, `-sheepdogCountRenders`).
+struct RenderCounts {
+    let text: String
+    private let counts: [String: Int]
+
+    init(_ app: XCUIApplication) {
+        // The readout refreshes twice a second.
+        usleep(600_000)
+        let element = app.descendants(matching: .any)["debug.renders"].firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "the render counts (-sheepdogCountRenders)")
+        text = element.label
+        var counts: [String: Int] = [:]
+        for pair in text.split(separator: " ") {
+            let kv = pair.split(separator: "=")
+            if kv.count == 2, let n = Int(kv[1]) { counts[String(kv[0])] = n }
+        }
+        self.counts = counts
+    }
+
+    subscript(_ name: String) -> Int { counts[name] ?? 0 }
+}
+
+extension XCTestCase {
+    /// Opens `menu`, then for two seconds of churn checks that `item` stays
+    /// on screen and the menu (`StableMenu` probe `probe`) was not drawn
+    /// again: an open menu rebuilt under the user's finger flickers or
+    /// closes.
+    func assertMenuStaysOpen(_ app: XCUIApplication, menu: XCUIElementQuery, item: XCUIElement, probe: String,
+                             file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(menu.firstMatch.waitForExistence(timeout: 10), "\(probe): the menu button", file: file, line: line)
+        var opened = false
+        let deadline = Date().addingTimeInterval(15)
+        repeat {
+            // The one on screen (the demo keeps the real screen's copy).
+            for i in 0 ..< menu.count where menu.element(boundBy: i).isTappable {
+                menu.element(boundBy: i).tap()
+                break
+            }
+            opened = item.waitForExistence(timeout: 3)
+        } while !opened && Date() < deadline
+        if !opened { print("menu \(probe) did not open:\n\(app.debugDescription)") }
+        XCTAssertTrue(opened, "\(probe): the menu opens under churn", file: file, line: line)
+        let label = item.label
+        let before = RenderCounts(app)
+        for i in 0 ..< 10 {
+            usleep(200_000)
+            XCTAssertTrue(item.exists, "\(probe): the menu is still open after \(i * 200 + 200) ms", file: file, line: line)
+            XCTAssertEqual(item.label, label, "\(probe): the item did not change", file: file, line: line)
+        }
+        let after = RenderCounts(app)
+        let drawn = after["menu.\(probe)"] - before["menu.\(probe)"]
+        XCTAssertLessThanOrEqual(drawn, 1, "\(probe): the open menu was drawn \(drawn) more times (\(after.text))", file: file, line: line)
+        closeMenu(app, item: item.identifier.isEmpty ? nil : item.identifier)
+    }
+}

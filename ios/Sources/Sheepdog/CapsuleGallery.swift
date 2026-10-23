@@ -6,7 +6,7 @@ import SwiftUI
 /// redesign screenshots and a quick look in light, dark and the large text
 /// sizes. Debug builds only.
 struct CapsuleGallery: View {
-    @StateObject private var meter = VoiceMeter()
+    @State private var meter = VoiceMeter()
 
     private struct Tile: Identifiable {
         let title: String
@@ -57,7 +57,8 @@ struct CapsuleGallery: View {
                         talkMode: tile.talkMode, holding: tile.holding, questionOpen: tile.question,
                         statusText: tile.status,
                         onConnect: {}, onStop: {}, onMute: {},
-                        menu: { Button("End voice session") {} }
+                        menuValue: 0,
+                        menu: { _ in Button("End voice session") {} }
                     )
                 }
             }
