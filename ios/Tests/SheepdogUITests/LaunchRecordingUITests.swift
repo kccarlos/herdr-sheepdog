@@ -9,12 +9,14 @@ import XCTest
 ///
 /// Unlike HeroRecordingUITests it never locks the phone: on the iOS 27
 /// simulator a lock and unlock leaves the display frozen for `simctl io
-/// recordVideo` (every frame after it is the same one). The lock screen is
-/// shot separately.
+/// recordVideo` (every frame after it is the same one).
 ///
-/// The take: "Try the demo" → codex-payments' approval card → Approve →
-/// "What's going on?" → the answer → "Why did the migration fail?" → the
-/// answer → the Agents pane.
+/// The take (docs/dev/launch-video.md), silent (the video's voices are
+/// added in the edit), in two launches:
+///   1. the demo paused (`-sheepdogDemoPaused`, so every agent stays at
+///      work): the Agents page → claude-auth's window → Changes → a diff;
+///   2. the demo running: codex-payments' question → Approve → "What's
+///      going on?" → "Show me the agents" and its card.
 final class LaunchRecordingUITests: XCTestCase {
     private var marksPath: String?
 
@@ -84,74 +86,87 @@ final class LaunchRecordingUITests: XCTestCase {
         XCTAssertGreaterThan(answered, 0, "no permission question appeared")
     }
 
+    /// The first-run coach mark would cover the bottom of every shot.
+    private func dismissCoachMark(_ app: XCUIApplication) {
+        let gotIt = app.buttons["controls.coachMark.dismiss"].firstMatch
+        if gotIt.waitForExistence(timeout: 3) { gotIt.tap() }
+    }
+
     func testRecordLaunchVideo() throws {
         let app = XCUIApplication()
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        // Warm-up, cut from the video: open the demo once and answer the
-        // speech-recognition question, so the take shows no alert.
-        app.launchArguments = ["-sheepdogResetState"]
+        // 1. Four agents at work, one window, its changes.
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogDemoPaused"]
         app.launch()
-        let tryDemo = app.buttons["settings.firstRun.tryDemo"]
-        XCTAssertTrue(tryDemo.waitForExistence(timeout: 20))
-        tryDemo.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        for _ in 0 ..< 2 {
-            let alert = springboard.alerts.firstMatch
-            guard alert.waitForExistence(timeout: 4) else { break }
-            for title in ["Allow", "OK"] where alert.buttons[title].exists {
-                alert.buttons[title].tap()
-                break
-            }
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        dismissCoachMark(app)
+        showAgentsPane(app)
+        mark("agents")
+        Thread.sleep(forTimeInterval: 4)
+        mark("tap_window")
+        tapVisible(app.buttons, "flock.agent.claude-auth.window")
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
+        mark("terminal")
+        Thread.sleep(forTimeInterval: 5)
+        mark("tap_menu")
+        tapVisible(app.buttons, "agentScreen.menu")
+        Thread.sleep(forTimeInterval: 1.2)
+        mark("tap_changes")
+        tapVisible(app.buttons, "agentScreen.menu.changes")
+        let file = app.buttons["changes.file.internal/auth/token.go"]
+        // On a busy Mac the first tap can land while the menu still opens.
+        if !file.waitForExistence(timeout: 5), app.buttons["agentScreen.menu.changes"].isHittable {
+            app.buttons["agentScreen.menu.changes"].tap()
         }
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        mark("changes")
+        Thread.sleep(forTimeInterval: 3)
+        mark("tap_file")
+        file.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["diff.lines"].waitForExistence(timeout: 10))
+        mark("diff")
+        Thread.sleep(forTimeInterval: 5)
+        mark("part1_end")
         app.terminate()
 
-        // The take. The demo's clock starts with the launch: claude-migration
-        // fails at 12 s, codex-payments asks at 16 s, codex-docs finishes at 36 s.
+        // 2. The script running. Its clock starts with the launch:
+        // claude-auth finishes at 8 s, claude-migration fails at 12 s,
+        // codex-payments asks at 16 s.
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
         app.launch()
-        let started = Date()
         mark("launched")
-        XCTAssertTrue(tryDemo.waitForExistence(timeout: 20))
-        if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
-            app.typeText("\n")
-            _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 3)
-        }
-        mark("tap_demo")
-        tryDemo.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        mark("demo_open")
-
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        dismissCoachMark(app)
         let approve = app.buttons.matching(identifier: "approval.option.1").firstMatch
-        XCTAssertTrue(approve.waitForExistence(timeout: 40), "codex-payments' card")
-        mark("approval")
-        Thread.sleep(forTimeInterval: 2)
+        XCTAssertTrue(approve.waitForExistence(timeout: 40), "codex-payments' question")
+        mark("ask")
+        Thread.sleep(forTimeInterval: 4)
         mark("tap_approve")
         tapVisible(app.buttons, "approval.option.1")
-        XCTAssertTrue(app.descendants(matching: .any)["approval.answered"].waitForExistence(timeout: 10))
+        let approved = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved'")).firstMatch
+        XCTAssertTrue(approved.waitForExistence(timeout: 10))
         mark("approved")
-        Thread.sleep(forTimeInterval: 2.5)
+        Thread.sleep(forTimeInterval: 3)
 
         mark("tap_status")
         tapVisible(app.buttons, "demo.question.0")
-        let status = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'claude-auth is done, claude-migration failed'")).firstMatch
+        let status = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'codex-docs is still writing'")).firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 10))
         mark("status")
-        Thread.sleep(forTimeInterval: 3)
+        Thread.sleep(forTimeInterval: 5)
 
-        mark("tap_failed")
-        tapVisible(app.buttons, "demo.question.1")
-        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'The column already existed'")).firstMatch
-        XCTAssertTrue(answer.waitForExistence(timeout: 10))
-        mark("answer")
-        Thread.sleep(forTimeInterval: 3)
-
-        // Where everyone is now (codex-docs finishes at 36 s).
-        let wait = 38 - Date().timeIntervalSince(started)
-        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-        mark("tap_agents")
-        tapVisible(app.buttons, "main.pane.flock")
-        mark("agents")
-        Thread.sleep(forTimeInterval: 4)
+        // "Show me the agents" is the last suggestion: scroll the row to it.
+        let chips = app.buttons.matching(identifier: "demo.question.0")
+        for i in 0 ..< chips.count where chips.element(boundBy: i).isHittable {
+            chips.element(boundBy: i).swipeLeft()
+            break
+        }
+        Thread.sleep(forTimeInterval: 1)
+        mark("tap_card")
+        tapVisible(app.buttons, "demo.question.4")
+        XCTAssertTrue(app.descendants(matching: .any)["card.title"].waitForExistence(timeout: 10))
+        mark("card")
+        Thread.sleep(forTimeInterval: 6)
         mark("end")
     }
 }

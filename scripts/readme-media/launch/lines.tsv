@@ -1,7 +1,6 @@
-# id	role	text (the iOS demo world exact lines, DemoWorld.swift)
+# id	role	text: the iOS demo world's exact lines (DemoWorld.swift), as the take shows them
 s_ask	sheepdog	codex-payments wants to run npm install p-retry. Approve?
-u_approve	you	Approve.
 u_status	you	What's going on?
 s_status	sheepdog	claude-auth is done, claude-migration failed, codex-docs is still writing.
-u_failed	you	Why did the migration fail?
-s_failed	sheepdog	The column already existed. It rolled back, nothing changed.
+u_card	you	Show me the agents.
+s_card	sheepdog	It's on your screen: 3 done, 1 failed.

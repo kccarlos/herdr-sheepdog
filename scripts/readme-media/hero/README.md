@@ -39,8 +39,9 @@ caption is a PNG).
   carry a "demo agents" badge.
 - **The voices** are text-to-speech of the demo world's exact lines
   (`lines.tsv`, from the iOS repo's `DemoWorld.swift`): Gemini TTS on
-  Vertex AI (voice Kore for Sheepdog, Puck for you) with the
-  `[gemini.vertex]` key from the sheepdog config, or macOS `say`
+  Vertex AI (voice Kore for Sheepdog, Puck for you) with
+  `VERTEX_API_KEY` and `VERTEX_PROJECT` from the environment (for example
+  `op run --env-file=.env -- …`), or macOS `say`
   (`TTS_SAY=1`, or when there is no key). The demo mode on a phone reads
   the same lines with the on-device voice. The questions are asked by
   tapping the suggestion buttons; the voice clips stand in for saying them

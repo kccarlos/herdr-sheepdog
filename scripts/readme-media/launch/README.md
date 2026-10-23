@@ -1,43 +1,50 @@
 # Launch media
 
-`assets/readme/launch.mp4` (1920x1080, 36 s, H.264 + AAC), `launch-vertical.mp4`
-(1080x1920), `launch-poster.png` (the README's poster, a play icon over the
-first strong frame) and `assets/readme/install.gif` (800 px, about 18 s).
+`assets/readme/launch.mp4` (1920x1080, H.264 + AAC), `launch-vertical.mp4`
+(1080x1920), `launch-poster.png` (the title lockup with a play button) and
+`assets/readme/install.gif` (800 px, about 18 s). The storyboard is
+[docs/dev/launch-video.md](../../../docs/dev/launch-video.md); this cut is its
+synthetic version, made from the parts the offline demo can show honestly.
 
 ## Video
 
 ```sh
-scripts/readme-media/launch/make.sh
+SIM=<udid of an existing iPhone simulator> op run --env-file=.env -- scripts/readme-media/launch/make.sh
 STEPS=compose WORK=<dir from the last run> scripts/readme-media/launch/make.sh   # re-cut only
 ```
 
-`IOS_REPO` (default: `ios/` of this repository) needs `HeroRecordingUITests` and `LaunchRecordingUITests`. Needs Xcode, xcodegen, Go, ffmpeg and uv.
+Needs Xcode, xcodegen, Go, ffmpeg and uv. `phone.sh` never creates a
+simulator: pass an existing one that is shut down or free.
 
 What is real:
 
+- **Phone**: the real app in the iOS Simulator, offline demo, dark mode,
+  driven by `LaunchRecordingUITests` and filmed with `simctl io recordVideo`.
+  Two launches: the demo paused (`-sheepdogDemoPaused`, so all four agents
+  stay at work) for the Agents page, claude-auth's window and its Changes
+  and diff; then the demo running for codex-payments' question, Approve,
+  "What's going on?" and the "Your agents" card. `marks.txt` holds the
+  test's steps; `compose.py` cuts the scenes by them.
 - **Voices**: Gemini TTS on Vertex AI (`lines.tsv`, the demo world's exact
-  lines; Puck is you, Kore is sheepdog) through `hero/tts.go`. No Gemini Live
-  session, no music. The only other sound is a two-tone chime made with
-  ffmpeg's sine source.
-- **Captions and waveform**: drawn by `compose.py` from the clips. The bars
-  are the clip's own loudness; the words are lit across the loud part of the
-  clip in proportion to their letters (not recognised from the audio).
-- **Phone**: the real app in the iOS Simulator, offline demo ("demo agents").
-  The lock screen is two simulator screenshots with the daemon's own push
-  payload (`hero/payload.go`); the app is `LaunchRecordingUITests` filmed with
-  `simctl io recordVideo`. Cuts and holds are in `phone-map.json` (output
-  second to video second). The notification reads "codex-payments wants to run
-  npm install p-retry. Approve?" because that is what the daemon sends.
-- **Live Activity**: not shown. A headless simulator does not draw it on the
-  lock screen (`-sheepdogDemoLiveActivity` only feeds the app's own state).
+  lines as the take shows them; Puck is you, Kore is sheepdog) through
+  `hero/tts.go`, with `VERTEX_API_KEY` and `VERTEX_PROJECT` from the
+  environment. A rendered line is cached and never requested again; with
+  `-strict` a failed line stops the run instead of falling back to `say`.
+  The only other sound is a two-tone chime made with ffmpeg's sine source.
+- **Everything else** is drawn by `compose.py` in the brand
+  ([docs/dev/brand.md](../../../docs/dev/brand.md)): the title, captions, speaker
+  labels, the setup steps and the end card, in Outfit and Inter from
+  `web/static/fonts`. There is no waveform: the voices are TTS, so nothing
+  imitates a live session, and a footnote says so.
 
-Simulator notes (iOS 27): after a lock and unlock the display stays frozen
-for the recorder, so the app is filmed in a separate, never-locked pass
-(`phone.sh`). A new simulator never asks for notification permission with the
-fixture daemon, so use one cloned from a simulator that has it, and empty its
-delivered notifications (`Library/UserNotificationsUI/NotificationListPersistentState.json`
-sections and the folders in `Library/UserNotifications/`, with the simulator
-shut down) for a lock screen with no stacked old notifications.
+Not shown, because the demo cannot do them honestly: the lock-screen
+notification and the Live Activity (a real device), sending a prompt or a
+photo, starting an agent and the shell (a real daemon; the demo answers
+"This is the demo"). The storyboard lists the demo changes that would make
+them filmable.
+
+Simulator note (iOS 27): after a lock and unlock the display stays frozen
+for the recorder, so the take never locks the phone.
 
 ## install.gif
 
