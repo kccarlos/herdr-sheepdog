@@ -93,20 +93,25 @@ public final class VoiceSocket {
     private var pingSentAt: Date?
     private var generation = 0
 
+    /// The pins of the endpoint's computer, followed across `update`.
+    private let trust: EndpointTrust
+
     public init(endpoint: DaemonEndpoint, session: URLSession? = nil) {
         self.endpoint = endpoint
+        trust = EndpointTrust(endpoint.credentials)
         if let session {
             self.session = session
         } else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 60
             config.shouldUseExtendedBackgroundIdleMode = true
-            self.session = DeviceCredentials.session(configuration: config)
+            self.session = trust.session(configuration: config)
         }
     }
 
     public func update(endpoint: DaemonEndpoint) {
         self.endpoint = endpoint
+        trust.follow(endpoint.credentials)
     }
 
     // MARK: - Lifecycle

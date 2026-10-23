@@ -118,15 +118,19 @@ public final class TermSocket {
                 now: @escaping () -> Date = Date.init) {
         self.endpoint = endpoint
         self.now = now
+        trust = EndpointTrust(endpoint.credentials)
         if let makeTransport {
             self.makeTransport = makeTransport
         } else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 60
-            let session = DeviceCredentials.session(configuration: config)
+            let session = trust.session(configuration: config)
             self.makeTransport = { URLSessionTermTransport(request: $0, session: session) }
         }
     }
+
+    /// The pins of the endpoint's computer, followed across `update`.
+    private let trust: EndpointTrust
 
     /// `ws(s)://host:port/term`.
     public static func url(for endpoint: DaemonEndpoint) -> URL? {
@@ -138,6 +142,7 @@ public final class TermSocket {
 
     public func update(endpoint: DaemonEndpoint) {
         self.endpoint = endpoint
+        trust.follow(endpoint.credentials)
     }
 
     // MARK: - Connection

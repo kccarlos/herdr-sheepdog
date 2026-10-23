@@ -49,6 +49,7 @@ shard-4  SheepdogUITests/FirstRunUITests               # 104
 shard-4  SheepdogUITests/WalkthroughUITests            # 101
 shard-4  SheepdogUITests/ChangesDemoUITests            # 77
 shard-4  SheepdogUITests/DemoUITests                   # 46
+shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2
 shard-4  SheepdogUITests/RedesignShotsUITests          # 1
 shard-4  SheepdogUITests/LaunchReviewScreenshotsUITests

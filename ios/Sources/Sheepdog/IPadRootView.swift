@@ -91,7 +91,7 @@ struct IPadSidebar: View {
 
     private var sections: SidebarSections {
         // One computer for now: its name is the voice's.
-        SidebarSections(computers: [.computer(id: "current", name: model.voiceName, agents: model.flock.all)])
+        SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)])
     }
 
     private var paneState: FlockPaneState {

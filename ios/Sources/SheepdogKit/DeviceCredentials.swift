@@ -1,16 +1,18 @@
 import Foundation
 import Security
 
-/// The computer this phone is paired with (docs/dev/design/security.md
-/// "Key storage"): what the pairing code said, plus the device id the
-/// computer gave this phone. Kept in the keychain as one record; the key
-/// itself is `DeviceKey` (tagged with the daemon id).
+/// A computer this phone is paired with (docs/dev/design/security.md "Key
+/// storage"): what the pairing code said, plus the device id the computer
+/// gave this phone. Kept in the keychain as one record per computer
+/// (`ComputerStore`); the key itself is `DeviceKey` (tagged with the daemon
+/// id).
 public struct PairedComputer: Codable, Equatable, Sendable {
     public var daemonID: String
     public var name: String
     /// `host:port` addresses from the code, in its order.
     public var addresses: [String]
     /// The TLS key's pin, and the next one during a certificate renewal.
+    /// Empty only for a loopback fixture in the tests (`isLoopbackFixture`).
     public var pin: String
     public var nextPin: String?
     public var deviceID: String
@@ -20,8 +22,12 @@ public struct PairedComputer: Codable, Equatable, Sendable {
     /// switch: it tells a missed rotation from an interception
     /// (`PairingProblem.forPinMismatch`).
     public var certExpires: Date?
+    /// The name the user gave it on this phone (Settings ▸ Computers), nil
+    /// for the daemon's own. Never sent to the computer.
+    public var localName: String?
 
-    public init(daemonID: String, name: String, addresses: [String], pin: String, nextPin: String? = nil, deviceID: String, pairedAt: Date, certExpires: Date? = nil) {
+    public init(daemonID: String, name: String, addresses: [String], pin: String, nextPin: String? = nil, deviceID: String,
+                pairedAt: Date, certExpires: Date? = nil, localName: String? = nil) {
         self.daemonID = daemonID
         self.name = name
         self.addresses = addresses
@@ -30,24 +36,43 @@ public struct PairedComputer: Codable, Equatable, Sendable {
         self.deviceID = deviceID
         self.pairedAt = pairedAt
         self.certExpires = certExpires
+        self.localName = localName
     }
 
     /// The pin as Settings shows it: its first 8 characters.
     public var shortPin: String { String(pin.prefix(8)) }
+
+    /// What the app calls it: the local name, else the daemon's, else a
+    /// plain stand-in.
+    public var displayName: String {
+        for candidate in [localName, name] {
+            if let s = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        }
+        return "Your computer"
+    }
+
+    /// Plain HTTP on loopback with no pin: a fixture daemon in the tests
+    /// (`-sheepdogComputers`). Pairing never makes one.
+    public var isLoopbackFixture: Bool { pin.isEmpty }
 }
 
-/// The one place the app keeps what it needs to talk to a paired computer:
-/// the record, the pins every `URLSession` checks, and the session ticket
-/// every request carries. Shared by the whole process (the view model, push
+/// The one place the app keeps what it needs to talk to one paired
+/// computer: the record, the pins its `URLSession`s check, and the session
+/// ticket its requests carry. `ComputerStore` hands out one instance per
+/// computer, shared by the whole process (the view model, push
 /// registration, notification actions, App Intents), so a ticket is signed
-/// for once and parallel refusals never each sign in again.
+/// for once and parallel refusals never each sign in again. Every
+/// `DaemonEndpoint` to a paired computer names its instance.
 public final class DeviceCredentials: @unchecked Sendable {
-    public static let shared = DeviceCredentials(secrets: KeychainSecretStore(accessibleAfterFirstUnlock: true))
-
     /// Refresh a ticket this long before it expires.
     static let refreshMargin: TimeInterval = 30 * 60
-    private static let account = "daemon.computer"
 
+    /// The keychain account of one computer's record.
+    public static func account(for daemonID: String) -> String { "daemon.computer.\(daemonID)" }
+
+    /// The computer this instance is for.
+    public let daemonID: String
+    private let account: String
     private let secrets: SecretStore
     private let lock = NSLock()
     private let updating = NSLock()
@@ -56,11 +81,16 @@ public final class DeviceCredentials: @unchecked Sendable {
     private var ticket: SessionTicket?
     private var signing: Task<SessionTicket, Error>?
 
-    public init(secrets: SecretStore) {
+    public init(daemonID: String, secrets: SecretStore) {
+        self.daemonID = daemonID
+        self.account = Self.account(for: daemonID)
         self.secrets = secrets
+        let me = WeakCredentials()
+        trust = PinnedTrustDelegate(pins: { me.value?.pins ?? [] }, onMatch: { me.value?.served(pin: $0) })
+        me.value = self
     }
 
-    /// The paired computer, nil before the first pairing (or after Remove).
+    /// The computer's record, nil before it is paired (or after Remove).
     /// Setting it drops the ticket.
     public var computer: PairedComputer? {
         get {
@@ -68,13 +98,13 @@ public final class DeviceCredentials: @unchecked Sendable {
             defer { lock.unlock() }
             if !loaded {
                 loaded = true
-                cached = secrets.secret(for: Self.account).flatMap { try? JSONDecoder().decode(PairedComputer.self, from: Data($0.utf8)) }
+                cached = secrets.secret(for: account).flatMap { try? JSONDecoder().decode(PairedComputer.self, from: Data($0.utf8)) }
             }
             return cached
         }
         set {
             let text = newValue.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
-            secrets.setSecret(text, for: Self.account)
+            secrets.setSecret(text, for: account)
             lock.lock()
             loaded = true
             cached = newValue
@@ -86,10 +116,10 @@ public final class DeviceCredentials: @unchecked Sendable {
     }
 
     /// Saves an updated record of the same computer without dropping the
-    /// ticket (a new next pin, the certificate's expiry, a switch).
-    /// It never cancels a sign-in in flight: the TLS delegate calls it in
-    /// the middle of one (`served(pin:)`).
-    private func update(_ change: (inout PairedComputer) -> Void) {
+    /// ticket (a new next pin, the certificate's expiry, a switch, a local
+    /// name). It never cancels a sign-in in flight: the TLS delegate calls
+    /// it in the middle of one (`served(pin:)`).
+    public func update(_ change: (inout PairedComputer) -> Void) {
         updating.lock()
         defer { updating.unlock() }
         guard var updated = computer else { return }
@@ -97,7 +127,7 @@ public final class DeviceCredentials: @unchecked Sendable {
         change(&updated)
         guard updated != before else { return }
         let text = (try? JSONEncoder().encode(updated)).flatMap { String(data: $0, encoding: .utf8) }
-        secrets.setSecret(text, for: Self.account)
+        secrets.setSecret(text, for: account)
         lock.lock()
         loaded = true
         cached = updated
@@ -133,8 +163,8 @@ public final class DeviceCredentials: @unchecked Sendable {
         }
     }
 
-    /// The pins a server's key may match: the paired computer's current and
-    /// next one. Read at every TLS handshake.
+    /// The pins a server's key may match: the computer's current and next
+    /// one. Read at every TLS handshake.
     public var pins: [String] {
         guard let computer else { return [] }
         return [computer.pin, computer.nextPin].compactMap { $0 }.filter { !$0.isEmpty }
@@ -163,8 +193,8 @@ public final class DeviceCredentials: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// A ticket for the paired computer, signing in at `base` when there is
-    /// none or it is about to expire. Concurrent callers share one sign-in.
+    /// A ticket for the computer, signing in at `base` when there is none
+    /// or it is about to expire. Concurrent callers share one sign-in.
     public func ticket(base: URL, now: Date = Date()) async throws -> SessionTicket {
         guard let computer else { throw PairingProblem.noKey }
         let task: Task<SessionTicket, Error>
@@ -178,7 +208,7 @@ public final class DeviceCredentials: @unchecked Sendable {
         } else {
             task = Task {
                 guard let key = DeviceKey.load(daemonID: computer.daemonID) else { throw PairingProblem.noKey }
-                let auth = DeviceAuth(base: base, session: DeviceCredentials.session(timeout: 8))
+                let auth = DeviceAuth(base: base, session: self.session(timeout: 8))
                 // Read after the challenge's handshake, which may have
                 // switched to the next pin.
                 return try await auth.signIn(daemonID: computer.daemonID, pins: { [weak self] in self?.pins ?? [computer.pin] },
@@ -209,28 +239,33 @@ public final class DeviceCredentials: @unchecked Sendable {
 
     /// Forgets the computer and this phone's key for it (Remove).
     public func forget() {
-        if let computer { DeviceKey.delete(daemonID: computer.daemonID) }
+        DeviceKey.delete(daemonID: daemonID)
         self.computer = nil
     }
 
     // MARK: - Pinned sessions
 
-    /// The delegate behind every app session: a server must offer a key
-    /// that matches one of the paired computer's pins. Plain HTTP to
+    /// The delegate behind this computer's sessions: a server must offer a
+    /// key that matches one of its pins. Its own, so a mismatch on another
+    /// computer never makes this one ask for a new scan. Plain HTTP to
     /// loopback (the fixture daemons) never reaches it.
-    public static let trust = PinnedTrustDelegate(pins: { DeviceCredentials.shared.pins },
-                                                  onMatch: { DeviceCredentials.shared.served(pin: $0) })
-
-    /// A pinned session with the given configuration.
-    public static func session(configuration: URLSessionConfiguration) -> URLSession {
-        URLSession(configuration: configuration, delegate: trust, delegateQueue: nil)
-    }
+    public let trust: PinnedTrustDelegate
 
     /// A pinned ephemeral session with a request timeout.
-    public static func session(timeout: TimeInterval) -> URLSession {
+    public func session(timeout: TimeInterval) -> URLSession {
+        URLSession(configuration: Self.ephemeral(timeout: timeout), delegate: trust, delegateQueue: nil)
+    }
+
+    /// An ephemeral configuration with a request timeout.
+    public static func ephemeral(timeout: TimeInterval) -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
         config.waitsForConnectivity = false
-        return session(configuration: config)
+        return config
     }
+}
+
+/// The trust delegate's way back to its credentials, without a cycle.
+private final class WeakCredentials: @unchecked Sendable {
+    weak var value: DeviceCredentials?
 }

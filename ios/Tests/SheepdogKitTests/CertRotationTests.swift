@@ -19,7 +19,7 @@ final class CertRotationTests: XCTestCase {
 
     func testTheNextPinTakesOverAndTheTicketStays() {
         let secrets = InMemorySecretStore()
-        let creds = DeviceCredentials(secrets: secrets)
+        let creds = DeviceCredentials(daemonID: "d", secrets: secrets)
         paired(creds)
         creds.adopt(SessionTicket(ticket: "t", expires: Date().addingTimeInterval(3600)))
         XCTAssertEqual(creds.pins, ["old", "new"])
@@ -34,7 +34,7 @@ final class CertRotationTests: XCTestCase {
         XCTAssertNil(creds.computer?.certExpires, "the new certificate's expiry comes with the next sign-in")
         XCTAssertEqual(creds.pins, ["new"])
         XCTAssertEqual(creds.header(), "Bearer sds_t", "the switch keeps the ticket")
-        XCTAssertEqual(DeviceCredentials(secrets: secrets).computer?.pin, "new", "saved")
+        XCTAssertEqual(DeviceCredentials(daemonID: "d", secrets: secrets).computer?.pin, "new", "saved")
 
         creds.served(pin: "someone-else") // never trusted, never adopted
         XCTAssertEqual(creds.computer?.pin, "new")

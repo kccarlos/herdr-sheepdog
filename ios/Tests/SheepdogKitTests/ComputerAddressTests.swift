@@ -28,13 +28,13 @@ final class ComputerAddressTests: XCTestCase {
 
     func testTheRecordKeepsAddedAddressesAndTheLastOne() {
         let secrets = InMemorySecretStore()
-        let creds = DeviceCredentials(secrets: secrets)
+        let creds = DeviceCredentials(daemonID: "d", secrets: secrets)
         creds.computer = PairedComputer(daemonID: "d", name: "Studio", addresses: ["192.168.1.20:7777"], pin: "p", deviceID: "dev", pairedAt: Date())
         creds.adopt(SessionTicket(ticket: "t", expires: Date().addingTimeInterval(3600)))
         creds.addAddress("100.101.1.1:7777")
         creds.addAddress("100.101.1.1:7777")
         XCTAssertEqual(creds.computer?.addresses, ["192.168.1.20:7777", "100.101.1.1:7777"])
-        XCTAssertEqual(DeviceCredentials(secrets: secrets).computer?.addresses.count, 2, "saved")
+        XCTAssertEqual(DeviceCredentials(daemonID: "d", secrets: secrets).computer?.addresses.count, 2, "saved")
         XCTAssertEqual(creds.header(), "Bearer sds_t", "adding an address keeps the ticket")
         creds.removeAddress("192.168.1.20:7777")
         XCTAssertEqual(creds.computer?.addresses, ["100.101.1.1:7777"])

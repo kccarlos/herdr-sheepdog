@@ -27,8 +27,7 @@ struct SheepdogApp: App {
         let store = SettingsStore()
         #if DEBUG
         if DebugLaunch.resetState {
-            store.address = ""
-            store.credentials.forget()
+            store.computers.removeAll()
             store.hasBeenConfigured = false
             store.keepListeningWhenLocked = true
             // A test that tried Hold to talk must not leave it on for the
@@ -40,6 +39,12 @@ struct SheepdogApp: App {
         }
         if let address = DebugLaunch.address {
             store.address = address
+            store.hasBeenConfigured = true
+        }
+        if let computers = DebugLaunch.computers, !computers.isEmpty {
+            store.computers.removeAll()
+            for computer in computers { store.computers.save(computer, address: computer.addresses[0]) }
+            store.computers.currentID = computers[0].daemonID
             store.hasBeenConfigured = true
         }
         #endif

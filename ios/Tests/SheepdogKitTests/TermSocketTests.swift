@@ -86,8 +86,6 @@ final class TermSocketTests: XCTestCase {
     // MARK: - Connection
 
     func testHelloFirstWithTheTicketOnTheUpgrade() throws {
-        DeviceCredentials.shared.adopt(SessionTicket(ticket: "s3cret", expires: Date().addingTimeInterval(3600)))
-        defer { DeviceCredentials.shared.dropTicket() }
         let rig = Rig(token: "s3cret")
         rig.socket.connect()
         let t = try XCTUnwrap(rig.last)
@@ -334,7 +332,9 @@ private final class Rig {
 
     init(token: String = "", now: @escaping () -> Date = Date.init) {
         weak var weakSelf: Rig?
-        socket = TermSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 7777, secure: !token.isEmpty),
+        let credentials = DeviceCredentials(daemonID: "d", secrets: InMemorySecretStore())
+        if !token.isEmpty { credentials.adopt(SessionTicket(ticket: token, expires: Date().addingTimeInterval(3600))) }
+        socket = TermSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 7777, secure: !token.isEmpty, credentials: credentials),
                             makeTransport: { request in
                                 let t = FakeTermTransport(request: request)
                                 weakSelf?.transports.append(t)

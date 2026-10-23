@@ -493,10 +493,12 @@ this.
 
 The app keeps one record per paired computer in the keychain (daemon id,
 name, addresses, pin, next pin, device id, paired date) and the key in
-the Secure Enclave (`DeviceKey`, a software key on the Simulator). One
-process-wide `DeviceCredentials` holds the pins every `URLSession` checks
-(`PinnedTrustDelegate`: HTTP, `/events`, `/ws`, `/term`, push, intents)
-and the ticket; sign-in is single-flight, refreshed 30 minutes before
+the Secure Enclave (`DeviceKey`, a software key on the Simulator). Each
+computer has one process-wide `DeviceCredentials` (from `ComputerStore`)
+that holds its pins and its ticket. Every `DaemonEndpoint` names its
+computer's, and every `URLSession` checks that computer's pins
+(`PinnedTrustDelegate`: HTTP, `/events`, `/ws`, `/term`, push, intents),
+so a mismatch on one computer never marks another. Sign-in is single-flight, refreshed 30 minutes before
 expiry and once more on `401 no_session`/`session_expired`. `401
 device_revoked`/`unknown_device` and a key that matches no pin open
 "Please scan again". The ATS setting is `NSAllowsArbitraryLoads`

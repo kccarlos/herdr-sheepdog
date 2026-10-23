@@ -67,11 +67,9 @@ final class PairingE2ETests: XCTestCase {
         }
 
         // The paired computer: every request is pinned TLS with a ticket.
-        let credentials = DeviceCredentials.shared
-        let saved = credentials.computer
-        defer { credentials.computer = saved }
+        let credentials = DeviceCredentials(daemonID: code.daemonID, secrets: InMemorySecretStore())
         credentials.computer = PairedComputer(daemonID: code.daemonID, name: code.name, addresses: [address], pin: code.pin, deviceID: enrolled.deviceID, pairedAt: Date())
-        let endpoint = try XCTUnwrap(DaemonEndpoint(text: address, secure: true))
+        let endpoint = try XCTUnwrap(DaemonEndpoint(text: address, secure: true, credentials: credentials))
         let client = DaemonClient(endpoint: endpoint)
         _ = try await client.state()
         let header = try XCTUnwrap(credentials.header())
@@ -85,7 +83,7 @@ final class PairingE2ETests: XCTestCase {
         // The /ws upgrade over the pinned session, with the ticket.
         var upgrade = URLRequest(url: try XCTUnwrap(endpoint.webSocketURL))
         endpoint.authorize(&upgrade)
-        let ws = DeviceCredentials.session(timeout: 8).webSocketTask(with: upgrade)
+        let ws = credentials.session(timeout: 8).webSocketTask(with: upgrade)
         ws.resume()
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             ws.sendPing { error in

@@ -54,7 +54,7 @@ struct MainView: View {
             toggleMute: VoiceBarModel(state: model.state, talkMode: model.talkMode).muteAvailability == .enabled
                 ? { model.toggleMute() } : nil,
             muted: model.isMuted,
-            agents: SidebarSections(computers: [.computer(id: "current", name: model.voiceName, agents: model.flock.all)]).agents,
+            agents: SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]).agents,
             openAgent: { open(.agent($0)) }
         )
     }

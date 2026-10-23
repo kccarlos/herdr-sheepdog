@@ -135,7 +135,7 @@ final class VoiceProvidersTests: XCTestCase {
 
     func testTalkModeDefaultsAndRoundTrip() {
         let defaults = UserDefaults(suiteName: "voice-settings-\(UUID().uuidString)")!
-        let store = SettingsStore(defaults: defaults, credentials: DeviceCredentials(secrets: InMemorySecretStore()))
+        let store = SettingsStore(defaults: defaults, computers: ComputerStore(defaults: defaults, secrets: InMemorySecretStore()))
         XCTAssertEqual(store.talkMode, .openMic, "hold-to-talk is off by default")
         store.talkMode = .holdToTalk
         XCTAssertEqual(store.talkMode, .holdToTalk)

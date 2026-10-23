@@ -43,6 +43,39 @@ public enum SPKIPin {
     }
 }
 
+/// The pins of whichever computer an endpoint names, read at every
+/// handshake: a client or socket repointed to another computer
+/// (`update(endpoint:)`) checks that computer's key, and a mismatch here
+/// never touches another computer's state.
+public final class EndpointTrust: @unchecked Sendable {
+    private final class Box: @unchecked Sendable {
+        let lock = NSLock()
+        var credentials: DeviceCredentials?
+        func get() -> DeviceCredentials? { lock.lock(); defer { lock.unlock() }; return credentials }
+    }
+
+    private let box: Box
+    public let delegate: PinnedTrustDelegate
+
+    public init(_ credentials: DeviceCredentials?) {
+        let box = Box()
+        box.credentials = credentials
+        self.box = box
+        delegate = PinnedTrustDelegate(pins: { box.get()?.pins ?? [] }, onMatch: { box.get()?.served(pin: $0) })
+    }
+
+    public func follow(_ credentials: DeviceCredentials?) {
+        box.lock.lock()
+        box.credentials = credentials
+        box.lock.unlock()
+    }
+
+    /// A session with this trust.
+    public func session(configuration: URLSessionConfiguration) -> URLSession {
+        URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    }
+}
+
 /// A `URLSession` delegate that accepts a server only when its key matches
 /// one of the pins (the current one, and the next one during a certificate
 /// renewal). Plain HTTP to loopback (the fixture daemons) never reaches it.
