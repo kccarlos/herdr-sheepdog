@@ -36,6 +36,8 @@ struct HealthView: View {
     private var daemonSection: some View {
         Section("Daemon") {
             LabeledContent("Connection", value: model.connectionChip.word)
+            LabeledContent("Live updates", value: model.connectionChip.liveUpdatesWord)
+                .accessibilityIdentifier("health.liveUpdates")
             LabeledContent("Address", value: model.endpointDisplay)
             LabeledContent("Version", value: model.daemonVersion ?? "—")
                 .accessibilityIdentifier("health.version")
