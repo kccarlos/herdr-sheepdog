@@ -964,6 +964,29 @@ Order and dependencies:
 
 **Progress.**
 
+- **Phase 1 (done).** `Presentation` (app) and `PresentationQueue` (Kit,
+  pure, `PresentationQueueTests` with seeded interleavings) replace the
+  model's `showSettings`, `pairingSheet`, `presentedCard`,
+  `showsNewAgent`, `showsSpaces`, `primer` and `demoActive`, the scene's
+  `showsConnection` and the separate demo cover. `SessionChrome` binds one
+  `.sheet(item:)` and one `.fullScreenCover(item:)` to the coordinator.
+  - **Ids:** from content (`settings`, `card.<id>`,
+    `pairing.confirm.<daemon>.<code>`). `Banner` and `PairingSheet` lost
+    their `UUID()`.
+  - **No sleeps:** the 700 ms and 400 ms waits in `open(url:)`,
+    `openDemo`, the first-run return, `openAgentWindow`, Spaces and New
+    agent became `presentInstead` and `dismiss(then: .openWindow)`, run
+    from the sheet's `onDismiss`. The scroll, splash and copy-feedback
+    timers stay: they order no presentation.
+  - **One coordinator for the app, not per scene:** it shows in the
+    presenter window only (`SceneCoordinator`), which gives the same
+    guarantee (two windows never show the same sheet) for less code. A
+    window request after a dismissal also opens in the presenter only.
+    Sheets local to one screen (Changes, More keys, Add a computer inside
+    Settings) stay `@State`.
+  - **Tests:** `PairingLinkUITests.testPairingLinkOverSettingsIsQueuedNotDropped`
+    (animations on, re-render churn), next to #402's Add a computer test.
+
 - **Phase 3, the pure part (done).** The machine is in Kit, not yet
   wired. It is named `ComputerLink`, because a public `Link` would clash
   with SwiftUI's `Link` view in every app file. The pure decisions of

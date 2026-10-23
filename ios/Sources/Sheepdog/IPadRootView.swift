@@ -343,7 +343,7 @@ struct IPadSidebar: View {
                 if model.agentActionsAvailable {
                     Button("New agent") {
                         scenes.request(from: sceneID)
-                        model.showsNewAgent = true
+                        model.presentation.present(.newAgent)
                     }
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.primaryText)
@@ -357,7 +357,7 @@ struct IPadSidebar: View {
                         model.connect()
                     } else {
                         scenes.request(from: sceneID)
-                        model.showSettings = true
+                        model.presentation.present(.settings)
                     }
                 }
                 .fontWeight(.semibold)

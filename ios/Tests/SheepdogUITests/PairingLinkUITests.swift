@@ -45,6 +45,27 @@ final class PairingLinkUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "declining returns to the first-run Settings")
     }
 
+    /// The same, with animations on and the session re-rendering ten times
+    /// a second: Settings slides away, then the question shows (queued
+    /// until Settings reported its dismissal, not after a guessed delay),
+    /// stays up, and declining brings Settings back.
+    func testPairingLinkOverSettingsIsQueuedNotDropped() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogRenderChurn"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "first run opens Settings")
+
+        open(deadLink, in: app)
+        let confirm = app.descendants(matching: .any)["pairing.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "the question shows after Settings closed")
+        for i in 0 ..< 10 {
+            usleep(200_000)
+            XCTAssertTrue(confirm.exists, "the question is still up after \(i * 200 + 200) ms")
+        }
+        app.buttons["pairing.secondary"].tap()
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "declining returns to the first-run Settings")
+    }
+
     func testPairReportsAnUnreachableCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations"]

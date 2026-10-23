@@ -24,7 +24,7 @@ struct FlockUnavailableView: View {
             case .empty:
                 ScrollView {
                     VStack(spacing: 4) {
-                        NoAgentsView(onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil)
+                        NoAgentsView(onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil)
                         Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Theme.muted)

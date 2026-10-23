@@ -33,7 +33,8 @@ struct MainView: View {
         }
             .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen))
             .onChange(of: model.windowRequest) { _, request in
-                guard let request else { return }
+                // The window that showed the sheet opens it, once.
+                guard let request, scenes.isPresenter(sceneID) else { return }
                 model.windowRequest = nil
                 open(request)
             }
@@ -49,7 +50,7 @@ struct MainView: View {
         SessionCommands(
             newAgent: model.agentActionsAvailable ? {
                 scenes.request(from: sceneID)
-                model.showsNewAgent = true
+                model.presentation.present(.newAgent)
             } : nil,
             toggleMute: VoiceBarModel(state: model.state, talkMode: model.talkMode).muteAvailability == .enabled
                 ? { model.toggleMute() } : nil,
@@ -149,7 +150,7 @@ struct PhoneRootView: View {
                             answer: { model.answer(question: $0, option: $1) },
                             expanded: $model.expandedAgents,
                             focusedPaneID: $model.focusedAgentPaneID,
-                            onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil,
+                            onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
                             voiceQuestionID: model.approval?.pending.id,
                             others: model.otherSnapshots,
                             currentName: model.currentComputerName,
@@ -407,7 +408,7 @@ struct SessionMenus {
     @ViewBuilder
     var voiceMenu: some View {
         Button {
-            ui.showsConnection = true
+            here { model.presentation.present(.connection) }
         } label: {
             Label {
                 Text(model.connectionChip.word)
@@ -442,7 +443,7 @@ struct SessionMenus {
             }
         }
         Button {
-            here { model.showSettings = true }
+            here { model.presentation.present(.settings) }
         } label: {
             Label("Manage computers…", systemImage: "desktopcomputer")
         }
@@ -484,7 +485,7 @@ struct SessionMenus {
     @ViewBuilder
     var newMenu: some View {
         Button {
-            here { model.showsNewAgent = true }
+            here { model.presentation.present(.newAgent) }
         } label: {
             Label("New agent", systemImage: "plus.square")
         }
@@ -522,14 +523,14 @@ struct SessionMenus {
         .accessibilityIdentifier("toolbar.end")
         Divider()
         Button {
-            here { model.showsSpaces = true }
+            here { model.presentation.present(.spaces) }
         } label: {
             Label("Spaces", systemImage: "square.stack")
         }
         .disabled(!model.agentActionsAvailable)
         .accessibilityIdentifier("toolbar.spaces")
         Button {
-            here { model.showSettings = true }
+            here { model.presentation.present(.settings) }
         } label: {
             Label("Settings", systemImage: "gearshape")
         }
@@ -595,12 +596,71 @@ struct SessionChrome: ViewModifier {
         return ScreenReport(visible: appPhase == .active, voiceScreen: shown)
     }
 
-    private func gate(_ value: Bool, _ set: @escaping (Bool) -> Void) -> Binding<Bool> {
-        Binding(get: { value && presents }, set: set)
+    private var presentation: PresentationCoordinator { model.presentation }
+
+    /// The coordinator's item for this window: only the presenter shows
+    /// it, and Settings waits for the splash to fade instead of sliding
+    /// over it. A swipe or an in-sheet Done is a dismissal intent.
+    private func binding(covers: Bool) -> Binding<Presentation?> {
+        Binding(
+            get: {
+                guard presents, let item = presentation.current, item.isCover == covers else { return nil }
+                if item == .settings, splashShowing { return nil }
+                return item
+            },
+            set: { value in
+                if value == nil, let item = presentation.current, item.isCover == covers {
+                    presentation.dismiss(item)
+                }
+            }
+        )
     }
 
-    private func gate<Item>(_ value: Item?, _ set: @escaping (Item?) -> Void) -> Binding<Item?> {
-        Binding(get: { presents ? value : nil }, set: set)
+    @ViewBuilder
+    private func presented(_ item: Presentation) -> some View {
+        switch item {
+        case .settings:
+            SettingsView(meter: model.meter)
+                .environmentObject(model)
+                // A form sheet on iPad; the iPhone ignores it.
+                .presentationSizing(.form)
+        case let .pairing(stage):
+            // A pairing code from outside the app (asked about first), or
+            // "Please scan again".
+            PairingFlowView(stage: stage)
+                .environmentObject(model)
+        case let .card(card):
+            CardSheet(card: card)
+                .environmentObject(model)
+        case .newAgent:
+            NewAgentSheet().presentationSizing(.form)
+        case .spaces:
+            SpacesSheet().presentationSizing(.form)
+        case .connection:
+            ConnectionDetailView(
+                showSettings: {
+                    scenes.request(from: sceneID)
+                    presentation.presentInstead(.settings)
+                },
+                showModels: {
+                    scenes.request(from: sceneID)
+                    model.settingsRoute = .models
+                    presentation.presentInstead(.settings)
+                }
+            )
+            .environmentObject(model)
+            .coversVoiceScreen("connection")
+            // One detent: a multi-detent sheet over a Form hung the
+            // main thread ("onChange(of: Bool) … multiple times per
+            // frame") during manual testing.
+            .presentationDetents([.large])
+        case let .primer(primer):
+            PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
+        case .demo:
+            // The offline demo: a second view model on a scripted daemon
+            // inside the app, over the real one.
+            DemoShell(close: { model.demoClosed() })
+        }
     }
 
     func body(content: Content) -> some View {
@@ -615,54 +675,16 @@ struct SessionChrome: ViewModifier {
             } message: {
                 Text("Sheepdog and the orchestrator forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
-            // A pairing code from outside the app (asked about first), or
-            // "Please scan again".
-            .sheet(item: gate(model.pairingSheet) { model.pairingSheet = $0 }, onDismiss: {
-                if !model.isConfigured { model.showSettings = true }
-            }) { sheet in
-                PairingFlowView(stage: sheet.stage)
-                    .environmentObject(model)
+            // Every session sheet and cover, one at a time
+            // (`PresentationCoordinator`): the next one shows once this
+            // one has finished closing.
+            .sheet(item: binding(covers: false), onDismiss: { presentation.didDismiss() }) { item in
+                presented(item)
+                    .onAppear { presentation.appeared(item) }
             }
-            // Not while the splash is up: the first-run sheet waits for
-            // it to fade instead of sliding over it.
-            .sheet(isPresented: gate(model.showSettings && !splashShowing) { model.showSettings = $0 }) {
-                SettingsView(meter: model.meter)
-                    .environmentObject(model)
-                    // A form sheet on iPad; the iPhone ignores it.
-                    .presentationSizing(.form)
-            }
-            .sheet(isPresented: gate(model.showsNewAgent) { model.showsNewAgent = $0 }) {
-                NewAgentSheet().presentationSizing(.form)
-            }
-            .sheet(isPresented: gate(model.showsSpaces) { model.showsSpaces = $0 }) {
-                SpacesSheet().presentationSizing(.form)
-            }
-            .fullScreenCover(item: gate(model.primer) { if $0 == nil, model.primer != nil { model.answerPrimer(false) } }) { primer in
-                PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
-            }
-            .sheet(isPresented: $ui.showsConnection) {
-                ConnectionDetailView(
-                    showSettings: {
-                        ui.showsConnection = false
-                        scenes.request(from: sceneID)
-                        model.showSettings = true
-                    },
-                    showModels: {
-                        ui.showsConnection = false
-                        scenes.request(from: sceneID)
-                        model.openModels()
-                    }
-                )
-                .environmentObject(model)
-                .coversVoiceScreen("connection")
-                // One detent: a multi-detent sheet over a Form hung the
-                // main thread ("onChange(of: Bool) … multiple times per
-                // frame") during manual testing.
-                .presentationDetents([.large])
-            }
-            .sheet(item: gate(model.presentedCard) { model.presentedCard = $0 }) { card in
-                CardSheet(card: card)
-                    .environmentObject(model)
+            .fullScreenCover(item: binding(covers: true), onDismiss: { presentation.didDismiss() }) { item in
+                presented(item)
+                    .onAppear { presentation.appeared(item) }
             }
             .onChange(of: screenReport, initial: true) { _, report in
                 guard owns else { return }

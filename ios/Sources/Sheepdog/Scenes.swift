@@ -64,7 +64,6 @@ final class SceneCoordinator: ObservableObject {
 @MainActor
 final class SceneUI: ObservableObject {
     @Published var confirmNewConversation = false
-    @Published var showsConnection = false
     /// The capsule turned into the composer.
     @Published var typing = false
 
