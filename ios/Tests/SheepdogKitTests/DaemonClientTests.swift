@@ -28,8 +28,47 @@ final class DaemonEndpointTests: XCTestCase {
     }
 
     func testAnIPv6LiteralIsBracketedInTheURL() {
-        let endpoint = DaemonEndpoint(text: "[fd7a::1]:7777")!
-        XCTAssertEqual(endpoint.webSocketURL?.absoluteString, "ws://[fd7a::1]:7777/ws")
+        let endpoint = DaemonEndpoint(text: "[fd7a::1]:7777", secure: true)!
+        XCTAssertEqual(endpoint.webSocketURL?.absoluteString, "wss://[fd7a::1]:7777/ws")
+        XCTAssertEqual(DaemonEndpoint(text: "[::1]:7799")!.webSocketURL?.absoluteString, "ws://[::1]:7799/ws")
+    }
+
+    // ATS is off (it cannot express a pin), so the app itself refuses plain
+    // HTTP to anything but this device.
+    func testPlainHTTPGoesToLoopbackOnly() {
+        for host in ["127.0.0.1", "127.1.2.3", "localhost", "LocalHost", "localhost.", "::1", "[::1]", "0:0:0:0:0:0:0:1"] {
+            XCTAssertTrue(DaemonEndpoint.isLoopback(host), host)
+            let endpoint = DaemonEndpoint(host: host, port: 7799)
+            XCTAssertTrue(endpoint.allowsConnection, host)
+            XCTAssertEqual(endpoint.url(path: "/api/hello")?.scheme, "http", host)
+        }
+        for host in ["192.168.1.20", "100.64.0.2", "10.0.0.1", "mac.local", "mac.example.ts.net", "fd7a::1",
+                     "128.0.0.1", "127.0.0.1.nip.io", "localhost.example", "::ffff:127.0.0.1", "0.0.0.0", "::", ""] {
+            XCTAssertFalse(DaemonEndpoint.isLoopback(host), host)
+            let plain = DaemonEndpoint(host: host, port: 7777)
+            XCTAssertFalse(plain.allowsConnection, host)
+            XCTAssertNil(plain.url(path: "/api/hello"), host)
+            XCTAssertNil(plain.url(percentEncodedPath: "/api/panes/a%2Fb"), host)
+            XCTAssertNil(plain.webSocketURL, host)
+            // The same address is fine once it is the paired computer (pinned TLS).
+            let paired = DaemonEndpoint(host: host.isEmpty ? "mac.local" : host, port: 7777, secure: true)
+            XCTAssertEqual(paired.url(path: "/api/hello")?.scheme, "https", host)
+            XCTAssertEqual(paired.webSocketURL?.scheme, "wss", host)
+        }
+    }
+
+    func testTheOfflineDemoNeverLeavesTheApp() {
+        XCTAssertTrue(DemoDaemon.endpoint.allowsConnection)
+        XCTAssertFalse(DaemonEndpoint(host: "demo.sheepdog.invalid.example.com").allowsConnection)
+    }
+
+    func testTheClientRefusesAPlainRemoteAddress() {
+        let client = DaemonClient(endpoint: DaemonEndpoint(text: "http://192.168.1.20:7777")!)
+        for build in [{ try client.request(path: "/api/state") }, { try client.eventsRequest(since: 0) }] {
+            XCTAssertThrowsError(try build()) { error in
+                XCTAssertEqual(error as? DaemonError, .pairing(.notPaired))
+            }
+        }
     }
 
     func testThePairedComputerIsTLS() {

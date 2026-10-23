@@ -75,8 +75,9 @@ final class TermSocketTests: XCTestCase {
     }
 
     func testTheURLIsTermOnTheSameAddress() {
-        XCTAssertEqual(TermSocket.url(for: DaemonEndpoint(host: "192.168.1.20", port: 7777))?.absoluteString, "ws://192.168.1.20:7777/term")
-        XCTAssertEqual(TermSocket.url(for: DaemonEndpoint(host: "fd7a:115c:a1e0::1", port: 7777))?.absoluteString, "ws://[fd7a:115c:a1e0::1]:7777/term")
+        XCTAssertEqual(TermSocket.url(for: DaemonEndpoint(host: "127.0.0.1", port: 7777))?.absoluteString, "ws://127.0.0.1:7777/term")
+        XCTAssertEqual(TermSocket.url(for: DaemonEndpoint(host: "fd7a:115c:a1e0::1", port: 7777, secure: true))?.absoluteString, "wss://[fd7a:115c:a1e0::1]:7777/term")
+        XCTAssertNil(TermSocket.url(for: DaemonEndpoint(host: "192.168.1.20", port: 7777)), "no plain ws off this device")
         var secure = DaemonEndpoint(host: "mac.example.ts.net", port: 443)
         secure.secure = true
         XCTAssertEqual(TermSocket.url(for: secure)?.absoluteString, "wss://mac.example.ts.net:443/term")

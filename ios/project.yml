@@ -320,8 +320,8 @@ schemes:
   #
   # Test runs the unit suite and the UI tests. The UI tests that need a
   # fixture daemon skip themselves when none answers on 127.0.0.1:7799;
-  # .github/workflows/ios.yml starts the fixture daemons and runs them all
-  # (docs/dev/status.md). Xcode Cloud only archives this scheme.
+  # .github/workflows/ios.yml starts the fixture daemons and runs them all,
+  # split by scripts/ci-shards.txt (docs/dev/status.md). Xcode Cloud only archives this scheme.
   Sheepdog:
     build:
       targets:

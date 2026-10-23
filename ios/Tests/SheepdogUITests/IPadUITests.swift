@@ -89,13 +89,14 @@ final class IPadUITests: XCTestCase {
         element(app, "allAgents.filter.working").tap()
         XCTAssertFalse(element(app, "flock.agent.docs").waitForExistence(timeout: 2), "a finished agent is not working")
         element(app, "allAgents.filter.waiting").tap()
-        // The demo's agents are not waiting at the start.
-        if element(app, "allAgents.empty").waitForExistence(timeout: 3) {
-            sleep(1)
-            shot("all-agents-waiting-empty")
-            element(app, "allAgents.showAll").tap()
-            XCTAssertTrue(element(app, "flock.agent.docs").waitForExistence(timeout: 5))
-        }
+        // The demo's codex-payments asks a question 16 s in (DemoWorld) and
+        // waits until it is answered. Before that the filter may show the
+        // empty state for a moment; how long depends on the Mac's speed, so
+        // wait for the state that lasts: only the waiting agent.
+        XCTAssertTrue(element(app, "flock.agent.codex-payments").waitForExistence(timeout: 20), "the waiting agent")
+        XCTAssertFalse(element(app, "flock.agent.docs").exists, "a finished agent is not waiting")
+        sleep(1)
+        shot("all-agents-waiting")
         element(app, "allAgents.filter.all").tap()
         XCTAssertTrue(element(app, "flock.agent.claude-auth").waitForExistence(timeout: 5))
     }

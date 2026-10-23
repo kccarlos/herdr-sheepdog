@@ -191,7 +191,13 @@ the QR once more.
   `/term` are pinned too.
 - The pin is checked during the TLS handshake, before any request. A
   wrong pin sends nothing: no hello, no ticket, no audio.
-- The app refuses `http://` to any non-loopback address. It keeps the
+- The app refuses `http://` and `ws://` to any non-loopback address
+  (`localhost`, `127.0.0.0/8`, `::1`, written as literals), in code: a
+  `DaemonEndpoint` that is not the paired computer and not loopback builds
+  no URL, so `DaemonClient`, `/ws` and `/term` cannot send a byte in plain
+  text, and the app shows "Please scan again" (`PairingProblem.notPaired`).
+  Only the fixture daemons in the tests use plain HTTP, on loopback. That
+  code check replaces ATS, which is off: the app keeps the
   ATS exception `NSAllowsArbitraryLoads`, because ATS cannot express a
   pin: even after the delegate accepts the pinned key, ATS runs its own
   system trust check and fails a self-signed certificate on a Tailscale
@@ -476,8 +482,8 @@ and the ticket; sign-in is single-flight, refreshed 30 minutes before
 expiry and once more on `401 no_session`/`session_expired`. `401
 device_revoked`/`unknown_device` and a key that matches no pin open
 "Please scan again". The ATS setting is `NSAllowsArbitraryLoads`
-(see section 4: ATS would otherwise reject the pinned self-signed
-certificate). `PairingE2ETests` and `PairingLinkUITests.testPairingWalkthrough`
+(see section 3: ATS would otherwise reject the pinned self-signed
+certificate), so `DaemonEndpoint` refuses plain HTTP off loopback in code. `PairingE2ETests` and `PairingLinkUITests.testPairingWalkthrough`
 run the whole path against the pair fixture daemon.
 
 ## 6. Key storage
@@ -729,6 +735,13 @@ runs Tailscale. Either:
 - The device key is checked by signature, not by source address.
 - Nothing depends on the network kind: there is no Tailscale identity
   check and the shell switch is per computer.
+- Whatever source address the router leaves, it is not loopback, so the
+  connection gets TLS and device auth and never a loopback-only route.
+  `TestPortForwardGetsTLSAndDeviceAuth` (`internal/web/portforward_test.go`)
+  serves the daemon behind a listener that reports a public source
+  address, as a port forward does, and checks plain HTTP (426), a wrong
+  pin, no ticket (401), every loopback-only and setup route with a ticket
+  (403), then enroll, sign-in, `/ws`, `/term` and a shell.
 
 **The address.** Subnet routing ((a), (c)) needs nothing: the QR's LAN
 address already works away from home. A port forward (b) needs the
@@ -901,7 +914,7 @@ Every question the proposal left open is now decided (2026-10-21):
 1. **Face ID.** Not done, in either variant.
 2. **How long old apps keep working.** Not at all: there is no
    compatibility, no migration and no shared token. The app keeps the ATS
-   exception (see section 4).
+   exception and refuses plain HTTP off loopback in code (see section 3).
 3. **Public `*.ts.net` certificates.** A setup-page switch, off by
    default, whose copy says the machine name gets logged publicly.
 4. **Other users on the same tailnet.** No Tailscale identity check. A
