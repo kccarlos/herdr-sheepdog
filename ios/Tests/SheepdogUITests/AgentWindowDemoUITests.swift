@@ -28,7 +28,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         // demo's cover still animating, slower on a CI Mac): keep looking.
         let deadline = Date().addingTimeInterval(10)
         repeat {
-            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isTappable {
                 matches.element(boundBy: i).tap()
                 return
             }
@@ -40,7 +40,7 @@ final class AgentWindowDemoUITests: XCTestCase {
     /// Launches the demo and opens `alias`'s window.
     private func openWindow(_ alias: String, term: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         if let term { app.launchArguments += ["-sheepdogDemoTerm", term] }
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
@@ -86,43 +86,40 @@ final class AgentWindowDemoUITests: XCTestCase {
         shot("composer")
 
         let field = app.textFields["agentScreen.field"]
-        field.tap()
-        field.typeText("Run the integration tests and summarise what fails")
+        tapWhenTappable(field, "the composer")
+        typeWhenFocused(field, "Run the integration tests and summarise what fails")
         XCTAssertTrue(app.buttons["agentScreen.send"].isEnabled)
         shot("composer-active")
-        app.buttons["agentScreen.key.more"].tap()
+        tapWhenTappable(app.buttons["agentScreen.key.more"], "More keys")
 
         let done = app.buttons["moreKeys.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["moreKeys.ctrl"].exists, "live: the modifiers")
         sleep(1)
         shot("more-keys")
-        for _ in 0 ..< 4 where !app.staticTexts["moreKeys.snippets.empty"].isHittable { app.swipeUp() }
+        for _ in 0 ..< 4 where !app.staticTexts["moreKeys.snippets.empty"].isTappable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["moreKeys.snippets.empty"].waitForExistence(timeout: 5))
         shot("more-keys-snippets")
-        done.tap()
+        tapWhenTappable(done, "Done")
 
-        app.buttons["agentScreen.key.typing"].tap()
+        tapWhenTappable(app.buttons["agentScreen.key.typing"], "Typing")
         XCTAssertTrue(app.staticTexts["agentScreen.typingHint"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["agentScreen.key.ctrl"].exists, "⌃C becomes the ⌃ latch")
         sleep(1)
         shot("typing")
-        app.buttons["agentScreen.key.typing"].tap()
+        tapWhenTappable(app.buttons["agentScreen.key.typing"], "Typing off")
         XCTAssertTrue(field.waitForExistence(timeout: 5), "the composer comes back")
 
         // The ⋯ menu's actions, each asking first.
-        app.buttons["agentScreen.menu"].tap()
+        tapWhenTappable(app.buttons["agentScreen.menu"], "the window menu")
         XCTAssertTrue(app.buttons["agentScreen.menu.rename"].waitForExistence(timeout: 5))
         sleep(1)
         shot("actions-menu")
-        app.buttons["agentScreen.menu.close"].tap()
-        XCTAssertTrue(app.buttons["agentScreen.close.confirm"].waitForExistence(timeout: 5))
+        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.close", until: app.buttons["agentScreen.close.confirm"])
         sleep(1)
         shot("close-confirm")
-        app.buttons["Cancel"].firstMatch.tap()
-        app.buttons["agentScreen.menu"].tap()
-        app.buttons["agentScreen.menu.rename"].tap()
-        XCTAssertTrue(app.alerts.textFields.firstMatch.waitForExistence(timeout: 5))
+        tapWhenTappable(app.buttons["Cancel"].firstMatch, "Cancel")
+        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.rename", until: app.alerts.textFields.firstMatch)
         sleep(1)
         shot("rename")
         app.buttons["Cancel"].firstMatch.tap()
@@ -145,7 +142,7 @@ final class AgentWindowDemoUITests: XCTestCase {
     /// New agent from the Agents tab.
     func testNewAgentSheet() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
@@ -186,7 +183,7 @@ final class AgentWindowDemoUITests: XCTestCase {
     /// that times out says so and offers its pane.
     func testNewAgentFailureStates() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
@@ -211,7 +208,7 @@ final class AgentWindowDemoUITests: XCTestCase {
     /// with no worktree switch and no claim about git.
     func testNewAgentInAnotherFolder() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
         openNewAgent(app)

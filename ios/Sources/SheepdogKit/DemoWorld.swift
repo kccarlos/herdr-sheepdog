@@ -347,6 +347,10 @@ public struct DemoWorld: Sendable {
         let task = agent.currentTask ?? agent.lastTask ?? ""
         var text = "> \(task)\n\n"
         switch (agent.paneID, agent.state) {
+        case (Self.migrationPane, .working):
+            // The same command before and after it fails (12 s in), so the
+            // window reads the same whenever it opens.
+            text += "$ make migrate-staging\nApplying 0042_add_user_plan…\n"
         case (_, .working):
             text += "● Reading the code…\n● Editing files…\n"
         case (Self.paymentsPane, .blocked):

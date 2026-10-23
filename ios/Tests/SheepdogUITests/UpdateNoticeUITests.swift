@@ -19,7 +19,7 @@ final class UpdateNoticeUITests: XCTestCase {
         defer { stub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", host]
         app.launch()
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
 
@@ -44,7 +44,7 @@ final class UpdateNoticeUITests: XCTestCase {
         defer { stub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", host]
         app.launch()
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))

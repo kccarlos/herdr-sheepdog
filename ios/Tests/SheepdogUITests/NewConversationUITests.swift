@@ -18,7 +18,7 @@ final class NewConversationUITests: XCTestCase {
 
     func testNewConversationMenuDialogAndDivider() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         // Scrollback to keep and see a divider land under: an utterance
         // logged on the daemon ahead of time, so it is already on the
         // newest `/api/conversation` page the app fetches at launch —
@@ -57,7 +57,7 @@ final class NewConversationUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 

@@ -29,7 +29,7 @@ final class FlockTypingUITests: XCTestCase {
     func testFlockPaneAnswersInlineAndTypedInputReachesTheDaemon() throws {
         _ = try? postJSON("\(daemon)/api/inject/remove", ["pane_id": "p-flock"])
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         app.launch()
 
         // Connect, then a worker asks.
@@ -79,7 +79,7 @@ final class FlockTypingUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 

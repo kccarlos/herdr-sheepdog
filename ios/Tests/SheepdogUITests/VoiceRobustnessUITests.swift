@@ -20,7 +20,7 @@ final class VoiceRobustnessUITests: XCTestCase {
 
     func testVoiceRobustnessScreens() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders", "-sheepdogResetHints"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders", "-sheepdogResetHints"]
         app.launch()
 
         // Connect: the first time the voice listens, the coach mark.
@@ -78,7 +78,7 @@ final class VoiceRobustnessUITests: XCTestCase {
         tapWhenReady(app.navigationBars["Voice"].buttons.firstMatch, "Back to Settings")
         tapWhenReady(app.buttons["settings.done"], "Done")
         XCTAssertTrue(app.staticTexts["Hold the orb to talk"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["controls.mute"].isHittable, "no mute in hold-to-talk")
+        XCTAssertFalse(app.buttons["controls.mute"].isTappable, "no mute in hold-to-talk")
         shot(app, "24-hold-to-talk")
 
         // Hold the orb: the gate opens for as long as the thumb is down.
@@ -95,8 +95,9 @@ final class VoiceRobustnessUITests: XCTestCase {
         tapWhenReady(app.buttons["settings.done"], "Done")
 
         // The connection sheet names the voice provider.
-        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
-        XCTAssertTrue(app.descendants(matching: .any)["chip.voiceProvider"].waitForExistence(timeout: 10))
+        let provider = app.descendants(matching: .any)["chip.voiceProvider"]
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection", until: provider)
+        XCTAssertTrue(provider.waitForExistence(timeout: 10))
         sleep(1)
         shot(app, "25-chip-voice-provider")
     }
@@ -106,7 +107,7 @@ final class VoiceRobustnessUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 

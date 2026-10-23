@@ -17,12 +17,11 @@ final class SpacesDemoUITests: XCTestCase {
 
     func testSpacesListDetailAndWorktreeRemoval() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
-        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces")
         let shop = app.buttons["spaces.row.shop"]
-        XCTAssertTrue(shop.waitForExistence(timeout: 10), "the scripted agents' space")
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces", until: shop)
         XCTAssertTrue(app.buttons["spaces.row.shop-fix-login"].exists, "the worktree space")
         sleep(1)
         shot("spaces")
@@ -61,21 +60,18 @@ final class SpacesDemoUITests: XCTestCase {
     /// Wrap up: run a line once without saving it, and edit a saved one.
     func testRunACommandAndEditASavedOne() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
-        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces")
         let shop = app.buttons["spaces.row.shop"]
-        XCTAssertTrue(shop.waitForExistence(timeout: 10))
-        shop.tap()
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces", until: shop)
+        tapWhenTappable(shop, "the shop space")
 
         scrollToVisible(app, app.buttons["space.command.runOnce"]).tap()
-        let line = app.textFields["space.command.line"]
-        XCTAssertTrue(line.waitForExistence(timeout: 5))
-        line.typeText("make lint")
+        typeWhenFocused(app.textFields["space.command.line"], "make lint")
         sleep(1)
         shot("run-command")
-        app.buttons["space.command.save"].tap()
+        tapWhenTappable(app.buttons["space.command.save"], "Run")
         let ok = app.alerts.buttons["OK"]
         XCTAssertTrue(ok.waitForExistence(timeout: 10), "it says where the line runs")
         ok.tap()
@@ -86,12 +82,12 @@ final class SpacesDemoUITests: XCTestCase {
         lint.press(forDuration: 1.2)
         let edit = app.buttons["space.command.edit"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
-        edit.tap()
+        tapWhenTappable(edit, "Edit")
         let name = app.textFields["space.command.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         XCTAssertEqual(name.value as? String, "Lint")
-        name.tap()
-        name.typeText(" all")
+        tapWhenTappable(name, "the name field")
+        typeWhenFocused(name, " all")
         sleep(1)
         shot("edit-command")
         app.buttons["space.command.save"].tap()

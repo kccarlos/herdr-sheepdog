@@ -356,7 +356,7 @@ struct CapsuleOrb: View {
     }
 
     private func animate() {
-        guard !reduceMotion else {
+        guard !reduceMotion, !debugNoAnimations else {
             breathe = false
             spin = false
             return

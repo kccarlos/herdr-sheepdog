@@ -10,7 +10,8 @@ name: iOS
 #
 # plan (Linux) picks the tier and the test jobs, build (one Mac) builds the
 # app, its tests and the daemon once, and each test job (one Mac and one
-# simulator each) runs its share of the tests from that build. The tiers,
+# simulator each) runs its share of the tests from that build. The test
+# jobs start with the build and boot their simulator meanwhile. The tiers,
 # the job graph and why it looks like this are in docs/dev/development.md
 # (CI/CD); the jobs and their tests come from ios/scripts/ci-shards.txt.
 # The workflow starts on every PR, so ios-summary always reports and can be
@@ -38,6 +39,8 @@ env:
   # (an artifact keeps neither the execute bits nor the symlinks the app
   # and test bundles need).
   BUILD_ARTIFACT: ios-build.tar.zst
+  # Uploaded by build when it fails, so the test jobs stop waiting.
+  BUILD_FAILED: ios-build-failed.txt
 
 jobs:
   plan:
@@ -208,8 +211,26 @@ jobs:
           path: ${{ runner.temp }}/results
           retention-days: 7
 
+      # The test jobs wait for the build's artifact; this one tells them
+      # it is not coming, so they stop at once.
+      - name: Tell the test jobs the build failed
+        if: failure() || cancelled()
+        run: echo "$GITHUB_JOB failed" > "$RUNNER_TEMP/$BUILD_FAILED"
+
+      - name: Upload the build failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/${{ env.BUILD_FAILED }}
+          archive: false
+          retention-days: 1
+
+  # Starts with build, not after it: the simulator boots (2 to 8 minutes)
+  # while the app builds (about 3), and the job takes the build once the
+  # simulator is up.
   tests:
-    needs: [plan, build]
+    needs: plan
+    if: needs.plan.outputs.tier != 'none'
     name: tests (${{ matrix.name }})
     runs-on: xcode-27
     timeout-minutes: 45
@@ -238,56 +259,6 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
-      - name: Download the build
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.BUILD_ARTIFACT }}
-          path: ${{ runner.temp }}
-
-      # Into the workspace, where the build job's checkout was.
-      - name: Unpack the build
-        run: |
-          echo "build downloaded $(date +%s)" >> "$TIMINGS"
-          mkdir -p "$RESULTS"
-          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
-          rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
-          xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
-          echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
-          echo "build unpacked $(date +%s)" >> "$TIMINGS"
-
-      # Two free ports for the main (--voice=off) and the pair daemon, and
-      # a control directory for scripts/fixture-daemon-restarter.sh. The
-      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift). Every
-      # iPhone job starts them (a test that needs a daemon skips without
-      # one), before the boot: beside a booting simulator, macOS takes
-      # minutes to clear the new daemon binary's first launch.
-      - name: Start the fixture daemons
-        id: fixture
-        if: env.DEVICE == 'iphone'
-        run: |
-          read -r port pair_port < <(python3 -c '
-          import socket
-          socks = [socket.socket() for _ in range(2)]
-          for s in socks: s.bind(("127.0.0.1", 0))
-          print(*[s.getsockname()[1] for s in socks])
-          ')
-          {
-            echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
-            echo "SHEEPDOG_FIXTURE_PORT=$port"
-            echo "SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
-            echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
-            echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
-            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
-            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
-            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
-          } >> "$GITHUB_ENV"
-          SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
-            SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
-            ios/scripts/fixture-daemons.sh start
-
-      # A booting simulator slows everything else on the Mac to a crawl
-      # (a 52 MB download took 3 to 7 minutes beside it), so it boots
-      # after the download and the fixture daemons.
       - name: Pick the simulator and boot it
         id: sim
         run: |
@@ -329,11 +300,93 @@ jobs:
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
           echo "simulator booted $(date +%s)" >> "$TIMINGS"
 
-      # A hosted Mac is slow enough that a UI tap now and then lands while
-      # an animation runs and is lost, a different test each run; a test
-      # that fails is run again (up to 3 times) and the job fails only if
-      # it never passes. The retries show in the log as repeated
-      # "Test Case ... failed" lines above the final pass.
+      # The build job's artifact, polled through the same runtime API (and
+      # job token) actions/download-artifact uses, no repository token. A booting
+      # simulator slows everything else on the Mac to a crawl (a 52 MB
+      # download took 3 to 7 minutes beside it, the daemon's first launch
+      # up to 4.5), so the download and the fixture daemons wait for the
+      # boot to finish.
+      - name: Wait for the build
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const token = process.env.ACTIONS_RUNTIME_TOKEN
+            const results = process.env.ACTIONS_RESULTS_URL
+            if (!token || !results) throw new Error('no Actions runtime token in this step')
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+            const scope = String(claims.scp).split(' ').find(s => s.startsWith('Actions.Results:'))
+            if (!scope) throw new Error('the runtime token has no Actions.Results scope')
+            const [, run, job] = scope.split(':')
+            const url = new URL(results).origin + '/twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts'
+            const want = process.env.BUILD_ARTIFACT, failed = process.env.BUILD_FAILED
+            const deadline = Date.now() + 25 * 60 * 1000
+            for (;;) {
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ workflow_run_backend_id: run, workflow_job_run_backend_id: job }),
+              })
+              if (!response.ok) throw new Error(`ListArtifacts: ${response.status} ${await response.text()}`)
+              const names = ((await response.json()).artifacts || []).map(a => a.name)
+              if (names.includes(want)) break
+              if (names.includes(failed)) throw new Error('the build job failed; see its log')
+              if (Date.now() > deadline) throw new Error(`no ${want} after 25 minutes`)
+              await new Promise(resolve => setTimeout(resolve, 5000))
+            }
+            require('fs').appendFileSync(process.env.TIMINGS, `build ready ${Math.floor(Date.now() / 1000)}\n`)
+            core.info(`${want} is ready`)
+
+      - name: Download the build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.BUILD_ARTIFACT }}
+          path: ${{ runner.temp }}
+
+      # Into the workspace, where the build job's checkout was.
+      - name: Unpack the build
+        run: |
+          echo "build downloaded $(date +%s)" >> "$TIMINGS"
+          mkdir -p "$RESULTS"
+          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
+          xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
+          echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
+          echo "build unpacked $(date +%s)" >> "$TIMINGS"
+
+      # Two free ports for the main (--voice=off) and the pair daemon, and
+      # a control directory for scripts/fixture-daemon-restarter.sh. The
+      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift). Every
+      # iPhone job starts them (a test that needs a daemon skips without
+      # one).
+      - name: Start the fixture daemons
+        id: fixture
+        if: env.DEVICE == 'iphone'
+        run: |
+          read -r port pair_port < <(python3 -c '
+          import socket
+          socks = [socket.socket() for _ in range(2)]
+          for s in socks: s.bind(("127.0.0.1", 0))
+          print(*[s.getsockname()[1] for s in socks])
+          ')
+          {
+            echo "SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE"
+            echo "SHEEPDOG_FIXTURE_PORT=$port"
+            echo "SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
+            echo "SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture"
+            echo "SHEEPDOG_CONTROL_DIR=$RUNNER_TEMP/fixture-control"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PORT=$port"
+            echo "TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port"
+            echo "TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:$port"
+          } >> "$GITHUB_ENV"
+          SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
+            SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
+            ios/scripts/fixture-daemons.sh start
+
+      # A test that fails is run once more and the job fails only if it
+      # fails twice. The tap-flow UI tests run without animations
+      # (-sheepdogNoAnimations), so a tap no longer lands on a moving
+      # sheet; a test that needed the second run is listed in the job
+      # summary and as a warning (scripts/ci-test-summary.sh).
 
       # The job's unit and UI tests on the iPhone, but the two that need a
       # fresh restart or the restarter (below). The recordings and
@@ -349,7 +402,7 @@ jobs:
             -xctestrun "$XCTESTRUN" \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
+            -retry-tests-on-failure -test-iterations 2 \
             $IPHONE_TESTS \
             -resultBundlePath "$RESULTS/Tests.xcresult" \
             > "$RESULTS/tests.log" 2>&1 || status=$?
@@ -368,7 +421,7 @@ jobs:
             -xctestrun "$XCTESTRUN" \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
+            -retry-tests-on-failure -test-iterations 2 \
             -only-testing:SheepdogUITests/HistoryApprovalUITests \
             -resultBundlePath "$RESULTS/HistoryApproval.xcresult" \
             > "$RESULTS/history.log" 2>&1 || status=$?
@@ -387,7 +440,7 @@ jobs:
             -xctestrun "$XCTESTRUN" \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
+            -retry-tests-on-failure -test-iterations 2 \
             -only-testing:SheepdogUITests/ReconnectUITests \
             -resultBundlePath "$RESULTS/Reconnect.xcresult" \
             > "$RESULTS/reconnect.log" 2>&1 || status=$?
@@ -405,7 +458,7 @@ jobs:
             -xctestrun "$XCTESTRUN" \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
+            -retry-tests-on-failure -test-iterations 2 \
             $IPAD_TESTS \
             -resultBundlePath "$RESULTS/IPad.xcresult" \
             > "$RESULTS/ipad.log" 2>&1 || status=$?

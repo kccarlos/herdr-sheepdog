@@ -76,7 +76,7 @@ final class WalkthroughUITests: XCTestCase {
 
         // The chip's own sheet: address, round trip, daemon/voice info,
         // Reconnect and Open Settings.
-        tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
+        tapMenuItem(app, menu: "voice.menu", item: "chip.connection", until: app.navigationBars["Connection"])
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
         XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
@@ -150,7 +150,7 @@ final class WalkthroughUITests: XCTestCase {
     /// Leaves Settings from the Daemon screen: back to the menu (which
     /// applies the address), then Done.
     private func closeSettings(_ app: XCUIApplication) {
-        if !app.buttons["settings.done"].isHittable {
+        if !app.buttons["settings.done"].isTappable {
             tapWhenReady(app.navigationBars["Connection"].buttons.firstMatch, "Back to Settings")
         }
         tapWhenReady(app.buttons["settings.done"], "Done")
@@ -161,8 +161,8 @@ final class WalkthroughUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
-        XCTAssertTrue(element.isHittable, "\(what) never became tappable", file: file, line: line)
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
+        XCTAssertTrue(element.isTappable, "\(what) never became tappable", file: file, line: line)
         element.tap()
     }
 
@@ -174,7 +174,7 @@ final class WalkthroughUITests: XCTestCase {
         // Poking the app lets the interruption monitor run.
         app.tap()
         usleep(400_000)
-        guard !app.buttons["controls.orb"].isHittable else { return }
+        guard !app.buttons["controls.orb"].isTappable else { return }
         // Last resort: the dialog's "Not Now" sits at a fixed place, and a
         // coordinate tap hits whatever is topmost on screen.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.315, dy: 0.625)).tap()
@@ -207,7 +207,7 @@ final class WalkthroughUITests: XCTestCase {
 
     private func launch(address: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"] + (address.map { ["-sheepdogAddress", $0] } ?? [])
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogShowStreamErrors"] + (address.map { ["-sheepdogAddress", $0] } ?? [])
         app.launch()
         return app
     }

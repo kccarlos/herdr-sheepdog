@@ -22,7 +22,7 @@ final class IPadUITests: XCTestCase {
 
     private func launchDemo(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
         app.launch()
         let header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
         if !header { shot("launch-failed") }
@@ -152,14 +152,9 @@ final class IPadUITests: XCTestCase {
     func testTwoPanesSideBySide() throws {
         let app = launchDemo()
         let auth = element(app, "sidebar.agent.claude-auth")
-        XCTAssertTrue(auth.waitForExistence(timeout: 10))
-        auth.tap()
-        let split = element(app, "pane.split")
-        XCTAssertTrue(split.waitForExistence(timeout: 10))
-        split.tap()
-        let migration = app.collectionViews.buttons["claude-migration"].firstMatch
-        XCTAssertTrue(migration.waitForExistence(timeout: 5))
-        migration.tap()
+        tapWhenTappable(auth, "claude-auth in the sidebar")
+        tapWhenTappable(element(app, "pane.split"), "Split")
+        tapWhenTappable(app.collectionViews.buttons["claude-migration"].firstMatch, "claude-migration in the picker")
         let terminals = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
         let two = NSPredicate(format: "count == 2")
         expectation(for: two, evaluatedWith: terminals)
@@ -245,10 +240,12 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 10), "⌘1 works from the terminal too")
 
         app.typeKey("m", modifierFlags: [.command, .shift])
-        let status = app.staticTexts["controls.statusLine"].firstMatch
+        // Any status line that says so: the real main view stays under the
+        // demo's cover with its own (unmuted) one, and `firstMatch` was
+        // sometimes that one.
         let muted = NSPredicate(format: "label CONTAINS[c] 'muted' OR label CONTAINS[c] 'mic off'")
-        expectation(for: muted, evaluatedWith: status)
-        waitForExpectations(timeout: 10)
+        let mutedStatus = app.staticTexts.matching(identifier: "controls.statusLine").matching(muted).firstMatch
+        XCTAssertTrue(mutedStatus.waitForExistence(timeout: 10), "⌘⇧M mutes")
         app.typeKey("m", modifierFlags: [.command, .shift])
 
         app.typeKey("n", modifierFlags: .command)
@@ -269,7 +266,7 @@ final class IPadUITests: XCTestCase {
         defer { workStub.stop(); homeStub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
         app.launch()
         XCTAssertTrue(element(app, "computerLabel.sidebar.fixture-1").waitForExistence(timeout: 15), "the current computer's row")
         XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-2").waitForExistence(timeout: 15), "Talk to Home Mac")

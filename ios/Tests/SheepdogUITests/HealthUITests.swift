@@ -16,7 +16,7 @@ final class HealthUITests: XCTestCase {
 
     func testHealthFromTheChipShowsTheDaemonAndChangesChattiness() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
@@ -35,7 +35,7 @@ final class HealthUITests: XCTestCase {
         let list = app.collectionViews["health.list"].exists ? app.collectionViews["health.list"] : app.collectionViews.firstMatch
         let chattiness = app.segmentedControls["health.chattiness"]
         // A short drag, not a swipe: a swipe flings the shorter list past it.
-        for _ in 0 ..< 4 where !(chattiness.exists && chattiness.isHittable) {
+        for _ in 0 ..< 4 where !(chattiness.exists && chattiness.isTappable) {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
             from.press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
         }
@@ -61,7 +61,7 @@ final class HealthUITests: XCTestCase {
         list.swipeDown()
         list.swipeDown()
         let change = app.buttons["health.changeModels"]
-        for _ in 0 ..< 6 where !(change.exists && change.isHittable) {
+        for _ in 0 ..< 6 where !(change.exists && change.isTappable) {
             list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
                 .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
         }
@@ -91,7 +91,7 @@ final class HealthUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 
