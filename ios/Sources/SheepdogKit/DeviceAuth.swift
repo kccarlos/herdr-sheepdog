@@ -16,6 +16,9 @@ public enum PairingProblem: Error, Equatable, Sendable {
     case codeUsed
     /// No key in the keychain for this computer (a restored phone).
     case noKey
+    /// A plain-HTTP address that is not this device: the app talks only to
+    /// a paired computer, over pinned TLS (`DaemonEndpoint.allowsConnection`).
+    case notPaired
 
     public var title: String {
         switch self {
@@ -38,6 +41,8 @@ public enum PairingProblem: Error, Equatable, Sendable {
             return "Show a new code on your computer and scan it. Each code works once, for 10 minutes."
         case .noKey:
             return "This is a new phone to your computer. Scan the pairing code again."
+        case .notPaired:
+            return "This address isn't paired. Open sheepdog's setup page on your computer and scan its pairing code."
         }
     }
 

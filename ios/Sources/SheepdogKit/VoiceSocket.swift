@@ -125,7 +125,10 @@ public final class VoiceSocket {
 
     private func open() {
         guard let url = endpoint.webSocketURL else {
-            onEvent?(.failed(.malformed("the address \(endpoint.display) is not a URL"), retrying: false))
+            let error: DaemonError = endpoint.allowsConnection
+                ? .malformed("the address \(endpoint.display) is not a URL")
+                : .pairing(.notPaired)
+            onEvent?(.failed(error, retrying: false))
             return
         }
         teardown(code: .goingAway, reason: "reopening")
