@@ -201,6 +201,7 @@ func (s *Server) setupRoutes() ([]route, error) {
 		"POST /api/setup/service":          s.handleSetupService,
 		"POST /api/setup/phone":            s.handleSetupPhone,
 		"POST /api/setup/shell":            s.handleSetupShell,
+		"POST /api/setup/tailscale_https":  s.handleSetupTailscaleHTTPS,
 		"GET /api/setup/qr.svg":            s.handleSetupQR,
 		"POST /api/setup/demo":             s.handleSetupDemo,
 	}
@@ -324,6 +325,12 @@ type SetupPhone struct {
 	Remote      string     `json:"remote,omitempty"`
 	// Shell is web.shell: paired devices may open the phone shell.
 	Shell bool `json:"shell"`
+	// TailscaleHTTPS is web.tailscale_https; TailscaleName the *.ts.net
+	// name served with a real certificate, TailscaleError why there is
+	// none although the switch is on.
+	TailscaleHTTPS bool   `json:"tailscale_https"`
+	TailscaleName  string `json:"tailscale_name,omitempty"`
+	TailscaleError string `json:"tailscale_error,omitempty"`
 }
 
 func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
@@ -507,6 +514,10 @@ func (s *Server) setupPhone() SetupPhone {
 	if at, remote := s.phones.last(); !at.IsZero() && s.deps.Now().Sub(at) < phoneSeenFresh {
 		t := at.UTC()
 		p.Connected, p.ConnectedAt, p.Remote = true, &t, remote
+	}
+	if p.TailscaleHTTPS = s.tsOn.Load(); p.TailscaleHTTPS {
+		p.TailscaleName, _ = s.deps.TLS.Tailscale()
+		p.TailscaleError, _ = s.tsErr.Load().(string)
 	}
 	return p
 }

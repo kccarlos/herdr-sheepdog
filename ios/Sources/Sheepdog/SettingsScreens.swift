@@ -104,6 +104,13 @@ struct DaemonSettingsView: View {
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
+            NavigationLink {
+                AddressesView(snapshot: { model.addressSnapshot }, add: { await model.addAddress($0) },
+                              use: { await model.useAddress($0) }, remove: { model.removeAddress($0) })
+            } label: {
+                LabeledContent("Addresses", value: "\(computer.addresses.count)")
+            }
+            .accessibilityIdentifier("settings.addresses")
             testButton
             probeResult
         } footer: {

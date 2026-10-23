@@ -46,6 +46,18 @@ public enum PairingProblem: Error, Equatable, Sendable {
         }
     }
 
+    /// A key that matches no pin: "renewed while away" once the computer
+    /// may have switched to its next key (from 7 days before the served
+    /// certificate expires, docs/dev/design/security.md "Certificate
+    /// rotation"), else the interception warning.
+    public static func forPinMismatch(certExpires: Date?, now: Date = Date()) -> PairingProblem {
+        guard let certExpires, now >= certExpires.addingTimeInterval(-certificateSwitchLead) else { return .pinMismatch }
+        return .renewedWhileAway
+    }
+
+    /// How long before its expiry the daemon serves its next key.
+    public static let certificateSwitchLead: TimeInterval = 7 * 24 * 60 * 60
+
     /// The problem a `401` reason names, nil for one signing again fixes.
     public init?(reason: String) {
         switch reason {
@@ -60,14 +72,18 @@ public enum PairingProblem: Error, Equatable, Sendable {
 public struct SessionTicket: Equatable, Sendable {
     public var ticket: String
     public var expires: Date
+    /// The computer's next pin, during a certificate rotation.
     public var nextPin: String?
+    /// When the served certificate expires (`cert_expires`).
+    public var certExpires: Date?
 
     public var header: String { "Bearer sds_\(ticket)" }
 
-    public init(ticket: String, expires: Date, nextPin: String? = nil) {
+    public init(ticket: String, expires: Date, nextPin: String? = nil, certExpires: Date? = nil) {
         self.ticket = ticket
         self.expires = expires
         self.nextPin = nextPin
+        self.certExpires = certExpires
     }
 }
 
@@ -103,22 +119,41 @@ public struct DeviceAuth: Sendable {
     /// Signs a challenge with key and returns a ticket. A refusal that
     /// needs a new scan throws its `PairingProblem`.
     public func signIn(daemonID: String, pin: String, deviceID: String, key: SecKey, now: Date = Date()) async throws -> SessionTicket {
-        let (chData, chStatus) = try await send("/api/auth/challenge", method: "GET", body: nil)
-        guard chStatus == 200,
-              let ch = try JSONSerialization.jsonObject(with: chData) as? [String: Any],
-              let nonce = ch["nonce"] as? String
-        else { throw DaemonError.malformed("the sign-in challenge") }
-        let unix = Int64(now.timeIntervalSince1970)
-        let sig = try DeviceKey.sign(key, SignedText.session(daemonID: daemonID, pin: pin, deviceID: deviceID, nonce: nonce, unix: unix))
-        let body = try JSONSerialization.data(withJSONObject: ["device_id": deviceID, "nonce": nonce, "time": unix, "signature": sig.base64EncodedString(), "client": "app"] as [String: Any])
-        let (data, status) = try await send("/api/auth/session", method: "POST", body: body)
-        let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard status == 200, let ticket = obj["ticket"] as? String else {
-            if let problem = PairingProblem(reason: obj["reason"] as? String ?? "") { throw problem }
-            throw DaemonError.rejected(status: status, message: obj["error"] as? String ?? "")
+        try await signIn(daemonID: daemonID, pins: { [pin] }, deviceID: deviceID, key: key, now: now)
+    }
+
+    /// Signs in with the first of `pins`, read after the challenge's TLS
+    /// handshake (which may have promoted the next pin, `PinnedTrustDelegate`
+    /// `onMatch`). On `bad_signature` it signs once more with the other
+    /// trusted pin, on a new challenge: a connection kept from before the
+    /// computer switched keys can sign over the wrong one.
+    public func signIn(daemonID: String, pins: @Sendable () -> [String], deviceID: String, key: SecKey, now: Date = Date()) async throws -> SessionTicket {
+        var tried: [String] = []
+        while true {
+            let (chData, chStatus) = try await send("/api/auth/challenge", method: "GET", body: nil)
+            guard chStatus == 200,
+                  let ch = try JSONSerialization.jsonObject(with: chData) as? [String: Any],
+                  let nonce = ch["nonce"] as? String
+            else { throw DaemonError.malformed("the sign-in challenge") }
+            guard let pin = pins().first(where: { !$0.isEmpty && !tried.contains($0) }) else {
+                throw PairingProblem.pinMismatch
+            }
+            tried.append(pin)
+            let unix = Int64(now.timeIntervalSince1970)
+            let sig = try DeviceKey.sign(key, SignedText.session(daemonID: daemonID, pin: pin, deviceID: deviceID, nonce: nonce, unix: unix))
+            let body = try JSONSerialization.data(withJSONObject: ["device_id": deviceID, "nonce": nonce, "time": unix, "signature": sig.base64EncodedString(), "client": "app"] as [String: Any])
+            let (data, status) = try await send("/api/auth/session", method: "POST", body: body)
+            let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            guard status == 200, let ticket = obj["ticket"] as? String else {
+                let reason = obj["reason"] as? String ?? ""
+                if let problem = PairingProblem(reason: reason) { throw problem }
+                if reason == "bad_signature", pins().contains(where: { !$0.isEmpty && !tried.contains($0) }) { continue }
+                throw DaemonError.rejected(status: status, message: obj["error"] as? String ?? "")
+            }
+            let life = obj["expires_in"] as? Double ?? 43_200
+            let certExpires = (obj["cert_expires"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+            return SessionTicket(ticket: ticket, expires: now.addingTimeInterval(life), nextPin: obj["next_pin"] as? String, certExpires: certExpires)
         }
-        let life = obj["expires_in"] as? Double ?? 43_200
-        return SessionTicket(ticket: ticket, expires: now.addingTimeInterval(life), nextPin: obj["next_pin"] as? String)
     }
 
     /// `DELETE /api/devices/self`, best effort (Remove in Settings).
