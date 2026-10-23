@@ -1,11 +1,13 @@
 //go:build ignore
 
-// tts.go renders the hero video's voice lines to 24 kHz mono WAV files:
-// Gemini TTS on Vertex AI with the [gemini.vertex] key and project from
-// the sheepdog config (never printed), or macOS `say` when there is no
-// key or -say is set. A line already rendered (its WAV exists) is kept.
+// tts.go renders the hero and launch videos' voice lines to 24 kHz mono
+// WAV files: Gemini TTS on Vertex AI with VERTEX_API_KEY and
+// VERTEX_PROJECT from the environment (never printed; for example
+// `op run --env-file=.env -- go run …`), or macOS `say` when there is no
+// key or -say is set. A line already rendered (its WAV exists) is kept, so
+// each line costs one request.
 //
-//	go run scripts/readme-media/hero/tts.go -lines lines.tsv -out DIR [-say]
+//	go run scripts/readme-media/hero/tts.go -lines lines.tsv -out DIR [-say] [-strict]
 //
 // lines.tsv: id<TAB>role<TAB>text, role "sheepdog" or "you".
 package main
@@ -25,7 +27,6 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
-	"github.com/kccarlos/herdr-sheepdog/internal/config"
 )
 
 const rate = 24000
@@ -43,6 +44,7 @@ func main() {
 	lines := flag.String("lines", "", "lines.tsv")
 	out := flag.String("out", "", "output directory")
 	useSay := flag.Bool("say", false, "render with macOS say only")
+	strict := flag.Bool("strict", false, "fail instead of falling back to say, so a failed line is retried next run")
 	model := flag.String("model", "gemini-2.5-flash-tts", "Gemini TTS model")
 	flag.Parse()
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -50,11 +52,14 @@ func main() {
 	}
 	var m brain.Model
 	if !*useSay {
-		cfg, err := config.Load(config.DefaultPath())
-		if err == nil && cfg.Gemini.Vertex.APIKey != "" {
-			m, err = brain.NewVertexModel(cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, nil)
+		var err error
+		if key := os.Getenv("VERTEX_API_KEY"); key != "" {
+			m, err = brain.NewVertexModel(key, os.Getenv("VERTEX_PROJECT"), nil)
 		}
 		if m == nil {
+			if *strict {
+				fail(fmt.Errorf("no Vertex key (VERTEX_API_KEY) %v", err))
+			}
 			fmt.Fprintln(os.Stderr, "tts: no Vertex key, using say", err)
 		}
 	}
@@ -78,6 +83,9 @@ func main() {
 		if m != nil {
 			pcm, err = gemini(m, *model, role, text)
 			if err != nil {
+				if *strict {
+					fail(fmt.Errorf("%s: gemini failed: %v", id, err))
+				}
 				fmt.Fprintf(os.Stderr, "tts: %s: gemini failed (%v), using say\n", id, err)
 			}
 		}

@@ -2099,6 +2099,7 @@ final class SessionViewModel: ObservableObject {
         #if DEBUG
         let start = Date()
         let demo = DebugLaunch.demoPaused ? DemoDaemon(clock: { start }) : DemoDaemon()
+        demo.update = DebugLaunch.demoUpdate
         #else
         let demo = DemoDaemon()
         #endif

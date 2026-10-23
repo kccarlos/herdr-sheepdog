@@ -52,6 +52,13 @@ enum DebugLaunch {
     /// still moving in and was lost. The recordings and screenshots keep
     /// the motion.
     static var noAnimations: Bool { arguments.contains("-sheepdogNoAnimations") }
+    /// `-sheepdogDemoUpdate`: the demo's daemon reports a newer release,
+    /// so the update notice can be filmed without an older daemon
+    /// (docs/dev/launch-video.md, shot 10b).
+    static var demoUpdate: UpdateInfo? {
+        guard arguments.contains("-sheepdogDemoUpdate") else { return nil }
+        return UpdateInfo(current: "v0.1.16", latest: "v0.1.17", available: true, how: "brew upgrade sheepdog", autoRestart: true)
+    }
     /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
     static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last

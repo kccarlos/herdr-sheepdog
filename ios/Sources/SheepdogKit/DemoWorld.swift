@@ -68,13 +68,13 @@ public struct DemoWorld: Sendable {
         self.now = now
         agents = [
             Agent(paneID: Self.authPane, alias: "claude-auth", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Fix the login redirect loop", spoken: "claude-auth", cwd: "~/Documents/shop"),
+                  currentTask: "Fix the login redirect loop", spoken: "claude-auth", cwd: "~/code/shop"),
             Agent(paneID: Self.paymentsPane, alias: "codex-payments", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments", cwd: "~/Documents/shop"),
+                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments", cwd: "~/code/shop"),
             Agent(paneID: Self.migrationPane, alias: "claude-migration", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration", cwd: "~/Documents/shop"),
+                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration", cwd: "~/code/shop"),
             Agent(paneID: Self.docsPane, alias: "codex-docs", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Update the install section of the README", spoken: "codex-docs", cwd: "~/Documents/shop"),
+                  currentTask: "Update the install section of the README", spoken: "codex-docs", cwd: "~/code/shop"),
         ]
         // The migration fails before the approval, so the status answer
         // after it has news (done, failed, still writing).

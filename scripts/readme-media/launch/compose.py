@@ -1,79 +1,77 @@
-"""The launch video: voice first, the phone as the proof.
+"""The launch video (docs/dev/launch-video.md), cut from the iOS demo take.
 
 usage: compose.py WORK OUT_DIR
 
-WORK holds what make.sh made: tts/*.wav (the voice lines), phone/ (the
-iOS demo take from phone.sh: lock1.png, cfr.mp4) and
-logo.png. Writes OUT_DIR/launch.mp4 (1920x1080), launch-vertical.mp4
-(1080x1920) and launch-poster.png.
+WORK holds what make.sh made:
+  tts/<id>.wav    the voice lines (lines.tsv, Gemini TTS)
+  phone/cfr.mp4   the take (phone.sh), 30 fps
+  phone/marks.txt <step> <unix s> lines from LaunchRecordingUITests
+  phone/rec.t0    the unix time of the take's first frame
+Writes OUT_DIR/launch.mp4 (1920x1080), launch-vertical.mp4 (1080x1920)
+and launch-poster.png.
 
-Everything on screen is drawn here, frame by frame, from the audio:
-  - the waveform is the voice clip's own loudness, scrolling outward from
-    the middle;
-  - the words are lit in order across the part of the clip that is
-    loud (karaoke): the timing is spread over the letters, not read from a
-    speech recogniser;
-  - captions are burned in, so it works muted.
-No chat bubbles, no typing dots.
+The brand (docs/dev/brand.md): ink background, cream type, slate for
+secondary lines, Outfit for titles and Inter for captions (both from
+web/static/fonts), the colour logo, and orange only for the one command on
+the end card. The voices are TTS, so nothing here looks like a live
+session: no waveform, a speaker label, and a footnote that says so.
 """
-import array, json, math, os, subprocess, sys, wave
+import json, math, os, subprocess, sys, wave
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 WORK = os.path.abspath(sys.argv[1])
 OUT = os.path.abspath(sys.argv[2])
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "../../.."))
 PHONE = os.path.join(WORK, "phone")
 TTS = os.path.join(WORK, "tts")
-CACHE = os.path.join(WORK, "launch")
+CACHE = os.path.join(WORK, "compose")
 os.makedirs(CACHE, exist_ok=True)
 FPS = 30
 
-# --- the cut ---------------------------------------------------------------
-# (id, who, shown text, start in the video in s). The audio files are
-# tts/<id>.wav; the shown text is what is spoken, as written.
-LINES = [
-    ("s_ask", "sheepdog", "codex-payments wants to run npm install p-retry. Approve?", 3.3),
-    ("u_approve", "you", "Approve.", 8.7),
-    ("u_status", "you", "What's going on?", 11.6),
-    ("s_status", "sheepdog", "claude-auth is done, claude-migration failed, codex-docs is still writing.", 13.5),
-    ("u_failed", "you", "Why did the migration fail?", 19.9),
-    ("s_failed", "sheepdog", "The column already existed. It rolled back, nothing changed.", 22.5),
-]
-HOOK_END = 3.0      # the hook headline, then the voices
-APP_AT = 5.2        # the phone leaves the lock screen
-AGENTS_AT = 27.2    # the app's agent list beat
-CAPTION_AT = 28.0   # "the app shows the same agents"
-END_AT = 30.4       # the end card
-LENGTH = 36.0
-# The phone video's moments, in seconds into cfr2.mp4: (out time, video time).
-# Filled from the take's scene changes by phone_map() below.
-
-# --- look ------------------------------------------------------------------
-BG_TOP, BG_BOT = (20, 28, 44), (9, 13, 22)
-INK = (244, 246, 250)
-DIM = (96, 108, 130)
-YOU = (255, 196, 84)      # warm: your voice
-DOG = (92, 214, 196)      # cool: sheepdog
-SF = "/System/Library/Fonts/SFNS.ttf"
-MONO = "/System/Library/Fonts/Menlo.ttc"
-EMOJI = "/System/Library/Fonts/Apple Color Emoji.ttc"
+# --- brand -----------------------------------------------------------------
+BG = (0x16, 0x18, 0x1C)
+CARD = (0x1F, 0x21, 0x26)
+CREAM = (0xF5, 0xF2, 0xEA)
+SLATE = (0x8E, 0x92, 0x9A)
+ORANGE = (0xF3, 0x9C, 0x1F)
+EDGE = (0x2C, 0x2F, 0x35)
+MONO = "/System/Library/Fonts/SFNSMono.ttf"
+if not os.path.exists(MONO):
+    MONO = "/System/Library/Fonts/Menlo.ttc"
 
 
-def font(px, weight=b"Semibold"):
-    f = ImageFont.truetype(SF, px)
+def ttf(name):
+    """web/static/fonts/<name>-latin-wght-normal.woff2 as a TTF in CACHE."""
+    out = os.path.join(CACHE, name + ".ttf")
+    if not os.path.exists(out):
+        from fontTools.ttLib import TTFont
+        f = TTFont(os.path.join(REPO, "web/static/fonts", name + "-latin-wght-normal.woff2"))
+        f.flavor = None
+        f.save(out)
+    return out
+
+
+OUTFIT, INTER = ttf("outfit"), ttf("inter")
+
+
+def font(path, px, weight):
+    f = ImageFont.truetype(path, px)
     try:
-        f.set_variation_by_name(weight)
+        f.set_variation_by_axes([weight])
     except Exception:
         pass
     return f
 
 
-def run(*a, **k):
-    return subprocess.run(a, check=True, **k)
-
-
-def lerp(a, b, x):
-    return a + (b - a) * x
+def mono(px):
+    f = ImageFont.truetype(MONO, px)
+    try:
+        f.set_variation_by_name(b"Medium")
+    except Exception:
+        pass
+    return f
 
 
 def clamp(x, lo=0.0, hi=1.0):
@@ -81,411 +79,462 @@ def clamp(x, lo=0.0, hi=1.0):
 
 
 def ease(x):
+    # cubic-bezier(.2,.8,.2,1) is close to an ease-out; this is smooth both ways.
     x = clamp(x)
-    return x * x * (3 - 2 * x)
+    return 1 - (1 - x) ** 3
 
 
-def mix(c1, c2, x):
-    return tuple(int(lerp(a, b, clamp(x))) for a, b in zip(c1, c2))
+def fade(t, t0, t1, d=0.2):
+    """1 inside [t0, t1], easing in and out over d seconds."""
+    return ease((t - t0) / d) * (1 - ease((t - (t1 - d)) / d))
 
 
-# --- audio analysis --------------------------------------------------------
-def read_wav(path):
+def run(*a):
+    subprocess.run(a, check=True)
+
+
+# --- the take --------------------------------------------------------------
+T0 = float(open(os.path.join(PHONE, "rec.t0")).read())
+MARKS = {}
+for line in open(os.path.join(PHONE, "marks.txt")):
+    k, v = line.split()
+    MARKS[k] = float(v) - T0
+
+
+def m(name, off=0.0):
+    return MARKS[name] + off
+
+
+# Scenes: (kind, length, data). Phone scenes play the take at 1x from
+# `from` and hold its frame at `to`. Lines: (id, who, text, at), `at` in
+# seconds into the scene.
+SCENES = [
+    ("title", 4.2, {}),
+    ("phone", 5.0, {"from": m("agents", -0.2), "to": m("tap_window", -0.2),
+                    "caption": "Four agents at work.\nYou go for a walk."}),
+    ("phone", 7.0, {"from": m("ask", -1.2), "to": m("tap_approve", -0.1),
+                    "caption": "An agent is blocked.\nYou hear it first.", "chime": 0.3,
+                    "lines": [("s_ask", "sheepdog", "codex-payments wants to run npm install p-retry. Approve?", 1.0)]}),
+    ("phone", 3.6, {"from": m("tap_approve", -0.4), "to": m("approved", 1.6),
+                    "caption": "Approve with a tap,\nor just say it."}),
+    ("phone", 8.2, {"from": m("tap_status", -0.6), "to": m("status", 5.0),
+                    "caption": "Ask what's going on.",
+                    "lines": [("u_status", "you", "What's going on?", 0.2),
+                              ("s_status", "sheepdog", "claude-auth is done, claude-migration failed, codex-docs is still writing.",
+                               m("status") - m("tap_status", -0.6) + 0.1)]}),
+    ("phone", 9.4, {"from": m("tap_card", -0.8), "to": m("end"),
+                    "caption": "Ask to see it,\nand it's on your screen.",
+                    "lines": [("u_card", "you", "Show me the agents.", 0.0),
+                              ("s_card", "sheepdog", "It's on your screen: 3 done, 1 failed.",
+                               m("card") - m("tap_card", -0.8) + 0.3)]}),
+    ("phone", 5.6, {"from": m("terminal", -0.8), "to": m("tap_menu", -0.1),
+                    "caption": "The agent's live terminal,\non your phone."}),
+    ("phone", None, {"clips": [(m("tap_menu", -0.3), m("tap_menu", 1.6)),
+                               (m("changes", -0.3), m("tap_file", 0.1)),
+                               (m("diff", -0.6), m("diff", 3.8))],
+                     "caption": "Read the diff\nbefore you say yes."}),
+    ("setup", 7.0, {}),
+    ("end", 6.5, {}),
+]
+for k, s in enumerate(SCENES):
+    if s[0] == "phone" and "clips" not in s[2]:
+        s[2]["clips"] = [(s[2]["from"], s[2]["to"])]
+    if s[1] is None:
+        SCENES[k] = (s[0], round(sum(b - a for a, b in s[2]["clips"]), 2), s[2])
+STARTS, acc = [], 0.0
+for s in SCENES:
+    STARTS.append(acc)
+    acc += s[1]
+LENGTH = round(acc, 2)
+XF = 0.2  # the cross-fade between scenes
+
+
+def wav_len(path):
     with wave.open(path) as w:
-        n, rate = w.getnframes(), w.getframerate()
-        a = array.array("h")
-        a.frombytes(w.readframes(n))
-    return a, rate
+        return w.getnframes() / w.getframerate()
 
 
-class Clip:
-    """A voice clip: its loudness at FPS, and where speech starts and ends."""
-
-    def __init__(self, id, who, text, at):
-        self.id, self.who, self.text, self.at = id, who, text, at
-        a, rate = read_wav(os.path.join(TTS, id + ".wav"))
-        self.dur = len(a) / rate
-        hop = rate // FPS
-        env = []
-        for i in range(0, len(a) - hop + 1, hop):
-            seg = a[i:i + hop]
-            env.append(math.sqrt(sum(x * x for x in seg) / len(seg)) / 32768)
-        peak = max(env) or 1
-        self.env = [min(1.0, e / peak) for e in env]
-        loud = [i for i, e in enumerate(self.env) if e > 0.06]
-        self.s0 = loud[0] / FPS
-        self.s1 = (loud[-1] + 1) / FPS
-        self.words = self.timings()
-
-    def timings(self):
-        words = self.text.split()
-        w = [len(x.strip(".,?!")) + (4 if x[-1] in ",.?" else 0) for x in words]
-        tot = sum(w)
-        out, acc = [], 0
-        for word, wt in zip(words, w):
-            out.append((word, self.s0 + (self.s1 - self.s0) * acc / tot))
-            acc += wt
-        return out
-
-    def level(self, t):
-        """Loudness 0..1 at t seconds into the clip."""
-        x = t * FPS
-        i = int(math.floor(x))
-        if i < 0 or i >= len(self.env) - 1:
-            return 0.0
-        f = x - i
-        return lerp(self.env[i], self.env[i + 1], f)
+LINES = []  # (id, who, text, start in the video, length)
+for (kind, length, d), st in zip(SCENES, STARTS):
+    for id, who, text, at in d.get("lines", []):
+        n = wav_len(os.path.join(TTS, id + ".wav"))
+        LINES.append((id, who, text, st + at, n))
+        print(f"{id}: {st + at:.1f}-{st + at + n:.1f} s (scene ends {st + length:.1f})", file=sys.stderr)
+        assert st + at + n <= st + length + 0.6, f"{id} runs past its scene"
+print(f"length {LENGTH:.1f} s", file=sys.stderr)
 
 
-clips = [Clip(*l) for l in LINES]
-for c in clips:
-    print(f"{c.id}: {c.at:.1f} s, speech {c.at + c.s0:.1f}-{c.at + c.s1:.1f}", file=sys.stderr)
-    assert c.at + c.s1 < END_AT
+# --- phone frames ----------------------------------------------------------
+class Phone:
+    """The take scaled for one layout: frames on disk, a bezel, a mask."""
 
+    def __init__(self, sh):
+        src = json.loads(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                         "stream=width,height", "-of", "json", os.path.join(PHONE, "cfr.mp4")],
+                                        capture_output=True, check=True).stdout)["streams"][0]
+        self.sh = sh
+        self.sw = int(round(sh * src["width"] / src["height"] / 2)) * 2
+        self.dir = os.path.join(CACHE, f"pf{sh}")
+        if not os.path.exists(os.path.join(self.dir, "done")):
+            os.makedirs(self.dir, exist_ok=True)
+            run("ffmpeg", "-loglevel", "error", "-y", "-i", os.path.join(PHONE, "cfr.mp4"),
+                "-vf", f"fps={FPS},scale={self.sw}:{self.sh}:flags=lanczos", "-q:v", "2", os.path.join(self.dir, "%05d.jpg"))
+            open(os.path.join(self.dir, "done"), "w").close()
+        self.count = len([f for f in os.listdir(self.dir) if f.endswith(".jpg")])
+        r = int(self.sw * 0.13)
+        self.mask = rounded_mask(self.sw, self.sh, r)
+        self.bz = max(8, int(sh * 0.012))
+        b = self.bz
+        self.bezel = Image.new("RGBA", (self.sw + 2 * b, self.sh + 2 * b), (0, 0, 0, 0))
+        ImageDraw.Draw(self.bezel).rounded_rectangle((0, 0, self.sw + 2 * b - 1, self.sh + 2 * b - 1), r + b,
+                                                     fill=(0x0E, 0x0F, 0x12, 255), outline=EDGE + (255,), width=2)
+        sh_ = Image.new("RGBA", (self.sw + 2 * b + 120, self.sh + 2 * b + 120), (0, 0, 0, 0))
+        ImageDraw.Draw(sh_).rounded_rectangle((60, 76, 60 + self.sw + 2 * b, 76 + self.sh + 2 * b), r + b, fill=(0, 0, 0, 130))
+        self.shadow = sh_.filter(ImageFilter.GaussianBlur(26))
+        self._cache = {}
 
-# --- the phone -------------------------------------------------------------
-SW, SH = 460, 1000     # screen
-V0 = 48.0              # the phone take is cut from this second of cfr.mp4
-BEZEL = 12
+    def frame(self, v):
+        i = clamp(int(round(v * FPS)) + 1, 1, self.count)
+        if i not in self._cache:
+            if len(self._cache) > 40:
+                self._cache.clear()
+            im = Image.open(os.path.join(self.dir, f"{int(i):05d}.jpg")).convert("RGBA")
+            im.putalpha(self.mask)
+            self._cache[i] = im
+        return self._cache[i]
 
-
-def prep_phone():
-    d = os.path.join(CACHE, "pf")
-    marker = os.path.join(d, "done")
-    if not os.path.exists(marker):
-        os.makedirs(d, exist_ok=True)
-        run("ffmpeg", "-loglevel", "error", "-y", "-ss", str(V0), "-i", os.path.join(PHONE, "cfr.mp4"), "-t", "28",
-            "-vf", f"fps={FPS},scale={SW}:{SH}:flags=lanczos", "-q:v", "3", os.path.join(d, "%04d.jpg"))
-        for n in ("lock1",):
-            Image.open(os.path.join(PHONE, n + ".png")).convert("RGB").resize((SW, SH), Image.LANCZOS).save(os.path.join(d, n + ".png"))
-        open(marker, "w").close()
-    return d
-
-
-PF = prep_phone()
-_cache = {}
-
-
-def phone_frame(v):
-    """Video frame at video time v (s)."""
-    i = max(1, int(round((v - V0) * FPS)) + 1)
-    p = os.path.join(PF, f"{i:04d}.jpg")
-    while not os.path.exists(p) and i > 1:
-        i -= 1
-        p = os.path.join(PF, f"{i:04d}.jpg")
-    if p not in _cache:
-        if len(_cache) > 60:
-            _cache.clear()
-        _cache[p] = Image.open(p).convert("RGB")
-    return _cache[p]
-
-
-LOCK1 = Image.open(os.path.join(PF, "lock1.png")).convert("RGB")
-
-
-def load_map():
-    """out time -> video time anchors (from scenes.json, made by phone_map)."""
-    return json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "phone-map.json")))
-
-
-MAP = load_map()  # list of [out_t, video_t]; between anchors the video plays at 1x or holds
-
-
-def video_time(t):
-    a = MAP
-    if t <= a[0][0]:
-        return a[0][1]
-    for (t0, v0), (t1, v1) in zip(a, a[1:]):
-        if t0 <= t < t1:
-            return lerp(v0, v1, (t - t0) / (t1 - t0))
-    return a[-1][1]
-
-
-def phone_image(t):
-    if t < APP_AT - 0.35:
-        return LOCK1
-    v = phone_frame(video_time(t))
-    if t < APP_AT:
-        return Image.blend(LOCK1, v, ease((t - (APP_AT - 0.35)) / 0.35))
-    return v
-
-
-# --- drawing ---------------------------------------------------------------
-def gradient(w, h):
-    g = Image.new("RGB", (1, h))
-    for y in range(h):
-        g.putpixel((0, y), mix(BG_TOP, BG_BOT, y / h))
-    return g.resize((w, h))
+    def draw(self, im, xy, v, alpha=1.0):
+        x, y = xy
+        layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        layer.alpha_composite(self.shadow, (x - 60, y - 60))
+        layer.alpha_composite(self.bezel, (x, y))
+        if v is not None:
+            layer.alpha_composite(self.frame(v), (x + self.bz, y + self.bz))
+        blend(im, layer, alpha)
 
 
 def rounded_mask(w, h, r):
-    m = Image.new("L", (w * 2, h * 2), 0)
-    ImageDraw.Draw(m).rounded_rectangle((0, 0, w * 2 - 1, h * 2 - 1), r * 2, fill=255)
-    return m.resize((w, h), Image.LANCZOS)
+    mk = Image.new("L", (w * 2, h * 2), 0)
+    ImageDraw.Draw(mk).rounded_rectangle((0, 0, w * 2 - 1, h * 2 - 1), r * 2, fill=255)
+    return mk.resize((w, h), Image.LANCZOS)
 
 
-SCREEN_MASK = rounded_mask(SW, SH, 56)
-BEZEL_IMG = Image.new("RGBA", (SW + 2 * BEZEL, SH + 2 * BEZEL), (0, 0, 0, 0))
-ImageDraw.Draw(BEZEL_IMG).rounded_rectangle((0, 0, SW + 2 * BEZEL - 1, SH + 2 * BEZEL - 1), 68, fill=(34, 38, 48, 255), outline=(70, 76, 92, 255), width=2)
+def blend(im, layer, a):
+    if a <= 0.004:
+        return
+    if a < 0.996:
+        layer.putalpha(ImageChops.multiply(layer.getchannel("A"), Image.new("L", im.size, int(255 * a))))
+    im.alpha_composite(layer)
 
 
-def emoji(ch, px):
-    f = ImageFont.truetype(EMOJI, 160)
-    im = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
-    ImageDraw.Draw(im).text((0, 0), ch, font=f, embedded_color=True)
-    im = im.crop(im.getbbox())
-    h = px
-    return im.resize((int(im.width * h / im.height), h), Image.LANCZOS)
-
-
-EMOJI_MIC, EMOJI_SPK = {}, {}
+LOGO_SRC = Image.open(os.path.join(REPO, "assets/brand/logo/sheepdog-sticker-transparent-1024.png")).convert("RGBA")
 
 
 def logo(px):
-    return Image.open(os.path.join(WORK, "logo.png")).convert("RGBA").resize((px, px), Image.LANCZOS)
+    return LOGO_SRC.resize((px, int(px * LOGO_SRC.height / LOGO_SRC.width)), Image.LANCZOS)
 
 
+# --- layouts ---------------------------------------------------------------
 class Layout:
-    def __init__(self, W, H, portrait):
-        self.W, self.H, self.portrait = W, H, portrait
-        if portrait:
-            self.phone_xy = ((W - SW - 2 * BEZEL) // 2, 56)
-            self.px0, self.pw = 80, W - 160
-            self.hook_y, self.label_y, self.wave_cy, self.text_y = 1210, 1160, 1330, 1450
-            self.f_label, self.f_text, self.f_head, self.f_small = font(58), font(64, b"Medium"), font(88, b"Bold"), font(32, b"Medium")
-            self.wave_bars, self.wave_h = 40, 150
-            self.cmd = font(34, b"Medium")
+    def __init__(self, W, H):
+        self.W, self.H = W, H
+        self.portrait = H > W
+        if self.portrait:
+            self.phone = Phone(880)
+            self.phone_xy = ((W - self.phone.sw) // 2 - self.phone.bz, 140)
+            self.tx, self.tw = 90, W - 180
+            self.cap_y = 140 + 880 + 2 * self.phone.bz + 56
+            self.f_cap = font(OUTFIT, 62, 600)
+            self.f_line = font(INTER, 40, 500)
+            self.f_label = font(INTER, 26, 600)
+            self.f_foot = font(INTER, 24, 400)
+            self.f_mark = font(OUTFIT, 40, 600)
+            self.mark_xy = (90, 52)
+            self.logo_small = logo(64)
         else:
-            self.phone_xy = (150, (H - SH - 2 * BEZEL) // 2)
-            self.px0, self.pw = 800, 1000
-            self.hook_y, self.label_y, self.wave_cy, self.text_y = 380, 300, 470, 610
-            self.f_label, self.f_text, self.f_head, self.f_small = font(64), font(72, b"Medium"), font(104, b"Bold"), font(32, b"Medium")
-            self.wave_bars, self.wave_h = 52, 170
-            self.cmd = font(44, b"Medium")
-        self.bg = gradient(W, H)
-        self.logo = logo(84 if not portrait else 70)
+            self.phone = Phone(930)
+            self.phone_xy = (1250, (H - 930) // 2 - self.phone.bz - 6)
+            self.tx, self.tw = 150, 880
+            self.cap_y = 330
+            self.f_cap = font(OUTFIT, 72, 600)
+            self.f_line = font(INTER, 42, 500)
+            self.f_label = font(INTER, 26, 600)
+            self.f_foot = font(INTER, 24, 400)
+            self.f_mark = font(OUTFIT, 40, 600)
+            self.mark_xy = (150, 84)
+            self.logo_small = logo(64)
+        s = 1.0 if not self.portrait else 0.95
+        self.f_title = font(OUTFIT, int(132 * s), 700)
+        self.f_tag = font(INTER, int(46 * s), 500)
+        self.f_head = font(OUTFIT, int(64 * s), 600)
+        self.f_step = font(OUTFIT, int(34 * s), 600)
+        self.f_cmd = mono(int(40 * s) if not self.portrait else 34)
+        self.f_end_cmd = mono(54 if not self.portrait else 44)
+        self.f_small = font(INTER, 32 if not self.portrait else 36, 500)
+        self.logo_big = logo(300 if not self.portrait else 360)
+        self.bg = Image.new("RGBA", (W, H), BG + (255,))
 
 
-def wrap(text_words, fnt, maxw, draw):
-    lines, cur = [], []
-    for w in text_words:
-        t = " ".join(cur + [w])
-        if cur and draw.textlength(t, font=fnt) > maxw:
+def wrap(text, fnt, maxw, d):
+    """Words into lines no wider than maxw; a newline in text always breaks."""
+    if "\n" in text:
+        return [l for part in text.split("\n") for l in wrap(part, fnt, maxw, d)]
+    lines, cur = [], ""
+    for w in text.split():
+        t = (cur + " " + w).strip()
+        if cur and d.textlength(t, font=fnt) > maxw:
             lines.append(cur)
-            cur = [w]
+            cur = w
         else:
-            cur.append(w)
+            cur = t
     if cur:
         lines.append(cur)
     return lines
 
 
-def draw_waveform(im, L, who, clip, tc, active, fade):
-    """Bars scroll outward from the middle with the voice's loudness."""
-    d = ImageDraw.Draw(im, "RGBA")
-    col = YOU if who == "you" else DOG
-    n, hmax = L.wave_bars, L.wave_h
-    gap = 6
-    bw = (L.pw - gap * (n - 1)) / n
-    cy = L.wave_cy
-    for k in range(n):
-        side = abs(k - (n - 1) / 2)
-        lv = clip.level(tc - side * 0.035) if active else 0.0
-        # a little shape so quiet parts still breathe, and the centre is tallest
-        h = 8 + hmax * (lv ** 0.8) * (1 - 0.35 * side / (n / 2))
-        x = L.px0 + k * (bw + gap)
-        a = int(255 * fade * (1.0 if active else 0.25))
-        d.rounded_rectangle((x, cy - h / 2, x + bw, cy + h / 2), bw / 2, fill=col + (a,))
-
-
-def draw_voice_ui(im, L, t):
-    d = ImageDraw.Draw(im, "RGBA")
-    # the active clip (or the last one, dimmed, between turns)
-    cur = None
-    for c in clips:
-        if t >= c.at - 0.15:
-            cur = c
-    if cur is None:
-        return
-    tc = t - cur.at
-    active = cur.s0 - 0.05 <= tc <= cur.s1 + 0.12
-    # fade the whole block in at the start of a clip and out when the next begins
-    fin = ease((t - (cur.at - 0.15)) / 0.25)
-    nxt = [c for c in clips if c.at > cur.at]
-    fout = 1.0
-    if nxt:
-        fout = 1 - ease((t - (nxt[0].at - 0.45)) / 0.3)
-    # a long silence after the clip: let the text rest, then clear
-    hold_end = cur.at + cur.s1 + (0.6 if cur is clips[-1] else 1.6)
-    if not nxt or nxt[0].at > hold_end + 0.5:
-        fout = min(fout, 1 - ease((t - hold_end) / 0.5))
-    a = fin * fout
-    if a <= 0.01:
-        return
-    col = YOU if cur.who == "you" else DOG
-    # speaker label: emoji + name
-    key = (cur.who, L.W)
-    em = emoji("\U0001F399" if cur.who == "you" else "\U0001F50A", 62 if not L.portrait else 52)
-    name = "You" if cur.who == "you" else "sheepdog"
-    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    ld = ImageDraw.Draw(layer)
-    layer.paste(em, (L.px0, L.label_y), em)
-    ld.text((L.px0 + em.width + 22, L.label_y - 4), name, font=L.f_label, fill=col + (255,))
-    # the waveform and the words
-    draw_waveform(layer, L, cur.who, cur, tc, active, 1.0)
-    words = [w for w, _ in cur.words]
-    lines = wrap(words, L.f_text, L.pw, ld)
-    lh = int(L.f_text.size * 1.28)
-    i = 0
-    for r, line in enumerate(lines):
-        x, y = L.px0, L.text_y + r * lh
-        for w in line:
-            start = cur.words[i][1]
-            lit = ease((tc - start) / 0.12)
-            c = mix(DIM, INK, lit)
-            ld.text((x, y), w, font=L.f_text, fill=c + (255,))
-            x += ld.textlength(w + " ", font=L.f_text)
-            i += 1
-    if a < 1:
-        layer.putalpha(ImageChops.multiply(layer.getchannel("A"), Image.new("L", im.size, int(255 * a))))
-    im.alpha_composite(layer)
-
-
-def draw_phone(im, L, t):
-    x, y = L.phone_xy
-    shadow = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).rounded_rectangle((x - 4, y + 14, x + SW + 2 * BEZEL + 4, y + SH + 2 * BEZEL + 22), 76, fill=(0, 0, 0, 120))
-    im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(18)))
-    im.alpha_composite(BEZEL_IMG, (x, y))
-    screen = phone_image(t).convert("RGBA")
-    screen.putalpha(SCREEN_MASK)
-    im.alpha_composite(screen, (x + BEZEL, y + BEZEL))
-
-
 def centered(d, text, fnt, cx, y, fill):
-    w = d.textlength(text, font=fnt)
-    d.text((cx - w / 2, y), text, font=fnt, fill=fill)
+    d.text((cx - d.textlength(text, font=fnt) / 2, y), text, font=fnt, fill=fill)
 
 
-def draw_hook(im, L, t):
-    if t > HOOK_END + 0.4:
-        return
-    a = ease(t / 0.5) * (1 - ease((t - HOOK_END) / 0.4))
+# --- scenes ----------------------------------------------------------------
+def scene_at(t):
+    for i in range(len(SCENES) - 1, -1, -1):
+        if t >= STARTS[i]:
+            return i
+    return 0
+
+
+def draw_brandmark(im, L, a):
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    words = "Manage your Herdr agents by voice.".split()
-    lines = wrap(words, L.f_head, L.pw, d)
-    y = L.hook_y
-    for line in lines:
-        d.text((L.px0, y), " ".join(line), font=L.f_head, fill=INK + (255,))
-        y += int(L.f_head.size * 1.14)
-    d.text((L.px0, y + 24), "Hands-free, from your phone.", font=L.f_label, fill=DOG + (255,))
-    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), Image.new("L", im.size, int(255 * a))))
-    im.alpha_composite(layer)
+    x, y = L.mark_xy
+    layer.alpha_composite(L.logo_small, (x, y))
+    d.text((x + L.logo_small.width + 16, y + L.logo_small.height / 2), "sheepdog", font=L.f_mark, fill=CREAM + (255,), anchor="lm")
+    blend(im, layer, a)
 
 
-def draw_chrome(im, L, t):
-    """Logo + name, and the 'demo agents' note while the demo world shows."""
-    d = ImageDraw.Draw(im, "RGBA")
-    x = L.px0
-    y = 70 if not L.portrait else 1030
-    if not L.portrait:
-        im.alpha_composite(L.logo, (x, y))
-        d.text((x + L.logo.width + 18, y + 18), "sheepdog", font=L.f_label, fill=INK + (230,))
-    if APP_AT - 1 < t < END_AT:
-        a = int(255 * ease((t - APP_AT + 1) / 0.5) * (1 - ease((t - END_AT + 0.4) / 0.4)))
-        txt = "demo agents: scripted, on this phone"
-        fy = L.H - 90 if not L.portrait else L.H - 120
-        d.text((L.px0, fy), txt, font=L.f_small, fill=DIM + (a,))
-
-
-def draw_agents_caption(im, L, t):
-    if not (CAPTION_AT - 0.2 < t < END_AT):
-        return
-    a = ease((t - CAPTION_AT) / 0.4) * (1 - ease((t - END_AT + 0.5) / 0.4))
+def draw_caption(im, L, text, a):
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    d.text((L.px0, L.text_y - 60 if not L.portrait else L.text_y - 30), "The app shows the same agents.", font=L.f_text, fill=INK + (255,))
-    d.text((L.px0, (L.text_y - 60 if not L.portrait else L.text_y - 30) + int(L.f_text.size * 1.4)), "Your hands never have to.", font=L.f_text, fill=DOG + (255,))
-    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), Image.new("L", im.size, int(255 * a))))
-    im.alpha_composite(layer)
+    y = L.cap_y
+    for line in wrap(text, L.f_cap, L.tw, d):
+        if L.portrait:
+            centered(d, line, L.f_cap, L.W / 2, y, CREAM + (255,))
+        else:
+            d.text((L.tx, y), line, font=L.f_cap, fill=CREAM + (255,))
+        y += int(L.f_cap.size * 1.18)
+    blend(im, layer, a)
+    return y
 
 
-def draw_end(im, L, t):
-    if t < END_AT - 0.4:
-        return
-    a = ease((t - END_AT + 0.4) / 0.6)
-    layer = Image.new("RGBA", im.size, BG_BOT + (255,))
-    layer.paste(L.bg, (0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    cx = L.W // 2
-    big = logo(200 if not L.portrait else 190)
-    y = 150 if not L.portrait else 330
-    layer.alpha_composite(big, (cx - big.width // 2, y))
-    y += big.height + 40
-    head = L.f_head
-    words = "Manage your Herdr agents by voice.".split()
-    for line in wrap(words, head, L.W - 200 if not L.portrait else L.W - 140, d):
-        centered(d, " ".join(line), head, cx, y, INK + (255,))
-        y += int(head.size * 1.16)
-    y += 50
+def draw_line(im, L, y, who, text, a):
+    """A speaker label and the spoken words in an ink pill."""
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    label = "YOU" if who == "you" else "VOICE"
+    pad = 28
+    lines = wrap(text, L.f_line, L.tw - 2 * pad, d)
+    lh = int(L.f_line.size * 1.32)
+    w = max(d.textlength(l, font=L.f_line) for l in lines) + 2 * pad
+    h = len(lines) * lh + 2 * pad - (lh - L.f_line.size) + 46
+    x = L.tx if not L.portrait else (L.W - w) / 2
+    d.rounded_rectangle((x, y, x + w, y + h), 14, fill=CARD + (235,))
+    d.text((x + pad, y + pad - 4), label, font=L.f_label, fill=SLATE + (255,))
+    ty = y + pad + 42
+    for l in lines:
+        d.text((x + pad, ty), l, font=L.f_line, fill=CREAM + (255,))
+        ty += lh
+    blend(im, layer, a)
 
-    def cmdbox(text, y, label=None):
-        w = d.textlength(text, font=L.cmd)
-        pad = 34
-        bx0, bx1 = cx - w / 2 - pad, cx + w / 2 + pad
-        d.rounded_rectangle((bx0, y, bx1, y + L.cmd.size + 2 * 22), 18, fill=(255, 255, 255, 22), outline=(255, 255, 255, 60), width=2)
-        centered(d, text, L.cmd, cx, y + 20, DOG + (255,))
-        return y + L.cmd.size + 2 * 22 + 26
 
-    y = cmdbox("herdr plugin install kccarlos/herdr-sheepdog", y)
-    centered(d, "then", L.f_small, cx, y - 8, DIM + (255,))
+def draw_footnote(im, L, a):
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    text = "The iPhone app's offline demo, in the iOS Simulator. Voices are text-to-speech."
+    if L.portrait:
+        for i, l in enumerate(wrap(text, L.f_foot, L.W - 200, d)):
+            centered(d, l, L.f_foot, L.W / 2, L.H - 110 + i * 34, SLATE + (255,))
+    else:
+        d.text((L.tx, L.H - 92), text, font=L.f_foot, fill=SLATE + (255,))
+    blend(im, layer, a)
+
+
+def draw_phone_scene(im, L, i, t, a, pa):
+    kind, length, d = SCENES[i]
+    tl = t - STARTS[i]
+    # the clips back to back with hard cuts; the last one holds its frame
+    v = None
+    for a0, a1 in d["clips"]:
+        if tl <= a1 - a0:
+            v = a0 + tl
+            break
+        tl -= a1 - a0
+    if v is None:
+        v = d["clips"][-1][1]
+    L.phone.draw(im, L.phone_xy, v, pa)
+    y = draw_caption(im, L, d["caption"], a)
+    for id, who, text, at in d.get("lines", []):
+        n = wav_len(os.path.join(TTS, id + ".wav"))
+        st = STARTS[i] + at
+        nxt = [x for x in d["lines"] if x[3] > at]
+        end = STARTS[i] + (nxt[0][3] - 0.1 if nxt else length)
+        la = fade(t, st - 0.15, end) * a
+        if la > 0:
+            draw_line(im, L, y + 40, who, text, la)
+
+
+def draw_title(im, L, t, a):
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    lg = L.logo_big
+    total = lg.height + 40 + L.f_title.size + 40 + L.f_tag.size
+    y = (L.H - total) / 2 - 20
+    layer.alpha_composite(lg, (int((L.W - lg.width) / 2), int(y)))
+    y += lg.height + 40
+    centered(d, "sheepdog", L.f_title, L.W / 2, y - 18, CREAM + (255,))
+    y += L.f_title.size + 40
+    tag = "Manage your Herdr agents by voice."
+    if L.portrait:
+        for l in wrap(tag, L.f_tag, L.W - 160, d):
+            centered(d, l, L.f_tag, L.W / 2, y, CREAM + (255,))
+            y += int(L.f_tag.size * 1.3)
+    else:
+        centered(d, tag, L.f_tag, L.W / 2, y, CREAM + (255,))
+    blend(im, layer, a)
+
+
+def cmd_pill(d, L, x, y, text, color, w=None, fnt=None):
+    fnt = fnt or L.f_cmd
+    pad_x, pad_y = 30, 20
+    tw = d.textlength(text, font=fnt)
+    w = w or tw + 2 * pad_x
+    h = fnt.size + 2 * pad_y
+    d.rounded_rectangle((x, y, x + w, y + h), 14, fill=CARD + (255,), outline=EDGE + (255,), width=2)
+    d.text((x + pad_x, y + h / 2), text, font=fnt, fill=color + (255,), anchor="lm")
+    return h
+
+
+def draw_setup(im, L, t, a):
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    steps = [
+        ("1", "Install the herdr plugin", "herdr plugin install kccarlos/herdr-sheepdog"),
+        ("2", "Run the setup wizard", "sheepdog setup"),
+        ("3", "Pair the iPhone app: scan the code", "sheepdog pair"),
+    ]
+    cmdw = max(d.textlength(c, font=L.f_cmd) for _, _, c in steps) + 60
+    x = (L.W - cmdw) / 2
+    gap = 46 if not L.portrait else 64
+    block = L.f_head.size + 70 + 3 * (L.f_step.size + 14 + L.f_cmd.size + 40) + 2 * gap
+    y = (L.H - block) / 2
+    centered(d, "Install. Run setup. Scan the code.", L.f_head, L.W / 2, y, CREAM + (255,)) if not L.portrait else None
+    if L.portrait:
+        for l in ["Install. Run setup.", "Scan the code."]:
+            centered(d, l, L.f_head, L.W / 2, y, CREAM + (255,))
+            y += int(L.f_head.size * 1.2)
+        y += 50
+    else:
+        y += L.f_head.size + 70
+    for k, (n, label, c) in enumerate(steps):
+        st = STARTS[scene_at(t)] + 0.25 + 0.35 * k
+        sa = ease((t - st) / 0.3)
+        if sa <= 0:
+            continue
+        sl = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sl)
+        sd.text((x, y), f"{n}  ", font=L.f_step, fill=SLATE + (255,))
+        nx = x + sd.textlength(f"{n}   ", font=L.f_step)
+        sd.text((nx, y), label, font=L.f_step, fill=CREAM + (255,))
+        cmd_pill(sd, L, x, y + L.f_step.size + 14, c, CREAM, cmdw)
+        blend(layer, sl, sa)
+        y += L.f_step.size + 14 + L.f_cmd.size + 40 + gap
+    blend(im, layer, a)
+
+
+def draw_end(im, L, t, a):
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    lg = logo(200 if not L.portrait else 280)
+    y = 110 if not L.portrait else 330
+    layer.alpha_composite(lg, (int((L.W - lg.width) / 2), y))
+    y += lg.height + 28
+    centered(d, "sheepdog", L.f_title, L.W / 2, y - 18, CREAM + (255,))
+    y += L.f_title.size + 24
+    tag = "Manage your Herdr agents by voice."
+    for l in (wrap(tag, L.f_tag, L.W - 160, d) if L.portrait else [tag]):
+        centered(d, l, L.f_tag, L.W / 2, y, CREAM + (255,))
+        y += int(L.f_tag.size * 1.3)
     y += 44
-    y = cmdbox("sheepdog setup", y)
-    centered(d, "github.com/kccarlos/herdr-sheepdog", L.f_label if L.portrait else L.f_small, cx, y + 20, INK + (200,))
-    centered(d, "demo agents in this video are scripted", L.f_small, cx, L.H - 90, DIM + (255,))
-    layer.putalpha(Image.new("L", im.size, int(255 * a)))
-    im.alpha_composite(layer)
+    cmd = "brew install kccarlos/tap/sheepdog"
+    # about 1/20 of the frame height, as wide as the frame allows
+    w = d.textlength(cmd, font=L.f_end_cmd) + 60
+    h = cmd_pill(d, L, (L.W - w) / 2, y, cmd, ORANGE, fnt=L.f_end_cmd)
+    y += h + 26
+    centered(d, "or: herdr plugin install kccarlos/herdr-sheepdog", L.f_small, L.W / 2, y, SLATE + (255,))
+    y += int(L.f_small.size * 1.9)
+    centered(d, "iPhone app: testflight.apple.com/join/bjCaFYgK", L.f_small, L.W / 2, y, CREAM + (255,))
+    y += int(L.f_small.size * 1.5)
+    centered(d, "github.com/kccarlos/herdr-sheepdog", L.f_small, L.W / 2, y, CREAM + (255,))
+    blend(im, layer, a)
 
 
 def render(L, t):
-    im = L.bg.convert("RGBA")
-    draw_phone(im, L, t)
-    draw_chrome(im, L, t)
-    draw_hook(im, L, t)
-    draw_voice_ui(im, L, t)
-    draw_agents_caption(im, L, t)
-    draw_end(im, L, t)
+    """One scene at a time: what changes fades out, then the next fades in
+    (XF each), so two captions never overlap. The phone, the brand mark and
+    the footnote stay put across the phone scenes."""
+    im = L.bg.copy()
+    i = scene_at(t)
+    kind, length, d = SCENES[i]
+    st, en = STARTS[i], STARTS[i] + length
+    a = fade(t, st, en, XF)
+    if i == 0:
+        a = ease(t / 0.5) * (1 - ease((t - (en - XF)) / XF))
+    if i == len(SCENES) - 1:
+        a = ease((t - st) / XF)
+    ph = [k for k, s in enumerate(SCENES) if s[0] == "phone"]
+    p0, p1 = STARTS[ph[0]], STARTS[ph[-1]] + SCENES[ph[-1]][1]
+    pa = fade(t, p0, p1, 2 * XF)
+    if kind == "phone":
+        draw_phone_scene(im, L, i, t, a, pa)
+        draw_brandmark(im, L, pa)
+        draw_footnote(im, L, pa)
+    elif kind == "title":
+        draw_title(im, L, t, a)
+    elif kind == "setup":
+        draw_setup(im, L, t, a)
+    elif kind == "end":
+        draw_end(im, L, t, a)
     return im.convert("RGB")
 
 
 # --- audio -----------------------------------------------------------------
 def make_audio(path):
     ins, fl = [], []
-    for k, c in enumerate(clips):
-        ins += ["-i", os.path.join(TTS, c.id + ".wav")]
-        ms = int(c.at * 1000)
-        gain = 1.0 if c.who == "sheepdog" else 0.95
-        fl.append(f"[{k}:a]aresample=48000,volume={gain},adelay={ms}|{ms}[a{k}]")
-    # a notification chime at the first frame (generated tones, no music)
+    for k, (id, who, text, st, n) in enumerate(LINES):
+        ins += ["-i", os.path.join(TTS, id + ".wav")]
+        ms = int(st * 1000)
+        fl.append(f"[{k}:a]aresample=48000,volume={1.0 if who == 'sheepdog' else 0.95},adelay={ms}|{ms}[a{k}]")
+    # the "needs you" chime: two generated tones, no music
+    chime = [STARTS[i] + s[2]["chime"] for i, s in enumerate(SCENES) if s[2].get("chime") is not None][0]
     ins += ["-f", "lavfi", "-t", "1.2", "-i", "sine=frequency=1318:sample_rate=48000",
             "-f", "lavfi", "-t", "1.2", "-i", "sine=frequency=1760:sample_rate=48000"]
-    k = len(clips)
-    fl.append(f"[{k}:a]afade=t=out:st=0.0:d=0.5,volume=0.25,adelay=300|300[c1]")
-    fl.append(f"[{k+1}:a]afade=t=out:st=0.0:d=0.7,volume=0.2,adelay=560|560[c2]")
-    names = "".join(f"[a{i}]" for i in range(len(clips))) + "[c1][c2]"
-    fl.append(f"{names}amix=inputs={len(clips)+2}:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=9,"
-              f"apad=whole_dur={LENGTH},atrim=0:{LENGTH},afade=t=out:st={LENGTH-1.2}:d=1.2[out]")
+    k = len(LINES)
+    c1, c2 = int(chime * 1000), int((chime + 0.26) * 1000)
+    fl.append(f"[{k}:a]afade=t=out:st=0.0:d=0.5,volume=0.25,adelay={c1}|{c1}[c1]")
+    fl.append(f"[{k + 1}:a]afade=t=out:st=0.0:d=0.7,volume=0.2,adelay={c2}|{c2}[c2]")
+    names = "".join(f"[a{i}]" for i in range(len(LINES))) + "[c1][c2]"
+    fl.append(f"{names}amix=inputs={len(LINES) + 2}:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=9,"
+              f"apad=whole_dur={LENGTH},atrim=0:{LENGTH}[out]")
     run("ffmpeg", "-loglevel", "error", "-y", *ins, "-filter_complex", ";".join(fl), "-map", "[out]",
-        "-c:a", "pcm_s16le", path)
+        "-ar", "48000", "-c:a", "pcm_s16le", path)
 
 
-def encode(L, name, audio):
+def encode(L, name, audio, crf):
     out = os.path.join(OUT, name)
     p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{L.W}x{L.H}",
-                          "-r", str(FPS), "-i", "-", "-i", audio, "-c:v", "libx264", "-preset", "slow", "-crf", "21",
-                          "-pix_fmt", "yuv420p", "-profile:v", "high", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-                          "-t", str(LENGTH), out], stdin=subprocess.PIPE)
+                          "-r", str(FPS), "-i", "-", "-i", audio, "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+                          "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-c:a", "aac", "-b:a", "96k",
+                          "-movflags", "+faststart", "-t", str(LENGTH), out], stdin=subprocess.PIPE)
     for f in range(int(LENGTH * FPS)):
         p.stdin.write(render(L, f / FPS).tobytes())
     p.stdin.close()
@@ -495,29 +544,31 @@ def encode(L, name, audio):
 
 
 def poster(L, t):
-    """The first strong frame (the headline over the lock screen) with a play icon."""
+    """The title lockup with a play button."""
     im = render(L, t).convert("RGBA")
     d = ImageDraw.Draw(im, "RGBA")
-    cx, cy, r = L.px0 + 90, 845, 78
-    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    ld = ImageDraw.Draw(layer)
-    ld.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255, 235))
-    ld.polygon([(cx - 22, cy - 38), (cx - 22, cy + 38), (cx + 42, cy)], fill=(20, 28, 44, 255))
-    im.alpha_composite(layer.filter(ImageFilter.GaussianBlur(0.6)))
-    ld2 = ImageDraw.Draw(im, "RGBA")
-    ld2.text((cx + r + 30, cy - 22), "Play with sound", font=L.f_label, fill=INK + (240,))
+    cx, cy, r = L.W - 170, L.H - 150, 62
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=CREAM + (240,))
+    d.polygon([(cx - 18, cy - 30), (cx - 18, cy + 30), (cx + 34, cy)], fill=BG + (255,))
+    f = font(INTER, 30, 500)
+    d.text((cx - r - 24, cy), "Play with sound", font=f, fill=SLATE + (255,), anchor="rm")
     im.convert("RGB").resize((1600, 900), Image.LANCZOS).save(os.path.join(OUT, "launch-poster.png"), optimize=True)
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
+    land, port = Layout(1920, 1080), Layout(1080, 1920)
+    if os.environ.get("FRAMES"):
+        # FRAMES="1.0,9.5": stills for checking, no video
+        for t in os.environ["FRAMES"].split(","):
+            for L, tag in ((land, "h"), (port, "v")):
+                render(L, float(t)).save(os.path.join(OUT, f"frame-{tag}-{float(t):05.1f}.png"))
+        sys.exit(0)
     audio = os.path.join(CACHE, "audio.wav")
     make_audio(audio)
-    land, port = Layout(1920, 1080, False), Layout(1080, 1920, True)
-    poster_t = float(os.environ.get("POSTER_T", "3.6"))
+    poster(land, 2.6)
     if os.environ.get("ONLY") == "poster":
-        poster(land, poster_t)
         sys.exit(0)
-    encode(land, "launch.mp4", audio)
-    encode(port, "launch-vertical.mp4", audio)
-    poster(land, poster_t)
+    encode(land, "launch.mp4", audio, int(os.environ.get("CRF", "24")))
+    if os.environ.get("ONLY") != "landscape":
+        encode(port, "launch-vertical.mp4", audio, int(os.environ.get("CRF", "24")))

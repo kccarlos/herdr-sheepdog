@@ -327,7 +327,7 @@ struct SessionBanners: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
                 .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-        } else if let notice = model.update?.notice, notice.text != dismissedUpdate, !model.isDemo {
+        } else if let notice = model.update?.notice, notice.text != dismissedUpdate {
             UpdateBanner(notice: notice) {
                 withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
             }

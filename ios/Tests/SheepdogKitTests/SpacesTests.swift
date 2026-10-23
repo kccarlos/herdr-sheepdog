@@ -43,7 +43,7 @@ final class SpacesTests: XCTestCase {
         XCTAssertEqual(demo.handle(method: "POST", path: "/api/spaces/w1/rename", body: ["name": "store"], busy: false)?.status, 200)
         XCTAssertEqual(demo.handle(method: "POST", path: "/api/spaces/w1/commands", body: ["name": "Build", "command": "make"], busy: false)?.status, 200)
         XCTAssertEqual(demo.spaces[0].commands.map(\.name), ["Run tests", "Lint", "Build"])
-        XCTAssertEqual(demo.handle(method: "POST", path: "/api/spaces", body: ["dir": "/Users/you/code/website"], busy: false)?.status, 200)
+        XCTAssertEqual(demo.handle(method: "POST", path: "/api/spaces", body: ["dir": "/Users/demo/code/website"], busy: false)?.status, 200)
         XCTAssertEqual(demo.spaces.map(\.name), ["store", "website"])
         XCTAssertNil(demo.handle(method: "GET", path: "/api/state", body: [:], busy: false), "not a space route")
         // The view decodes as the app reads it.

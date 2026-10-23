@@ -218,7 +218,7 @@ final class AgentWindowDemoUITests: XCTestCase {
         field.typeText("packages")
         XCTAssertTrue(app.descendants(matching: .any)["newAgent.folderPathError"].waitForExistence(timeout: 5), "not a full path")
         XCTAssertFalse(app.buttons["newAgent.folderNext"].isEnabled)
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/you/code/shop/packages/api")
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "/Users/demo/code/shop/packages/api")
         shot("new-agent-folder")
         scrollToVisible(app, app.buttons["newAgent.folderNext"]).tap()
         XCTAssertTrue(app.buttons["newAgent.start"].waitForExistence(timeout: 10), "Which agent, with Start")
