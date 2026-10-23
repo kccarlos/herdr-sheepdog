@@ -113,10 +113,11 @@ xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17'
 The unit suite (`SheepdogKitTests`) has about 650 tests. `LiveDaemonTests` and
 the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
-**In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) a smoke job
-and four shards split the suite; which changes run which jobs is in
-[development.md](../../../docs/dev/development.md#cicd). Each job builds
-the daemon, starts both fixture daemons on free ports with
+**In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) one build job
+builds the app and the daemon, and a smoke job and four shards split the
+suite; which changes run which jobs is in
+[development.md](../../../docs/dev/development.md#cicd). Each test job
+starts both fixture daemons on free ports with
 `scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
 the main daemon, so the history has a restart divider), and passes the
 ports as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT` and

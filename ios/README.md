@@ -68,7 +68,8 @@ itself, click Trust & Enable once instead. Most UI tests need a fixture
 daemon and skip themselves when there is none
 ([docs/dev/status.md](docs/dev/status.md#running-the-tests));
 `.github/workflows/ios.yml` runs the whole suite, fixture daemons included,
-on every PR that touches the app or the daemon's API.
+on every PR that touches the app, and its smoke tests on every PR that
+touches the daemon's API.
 
 ## Developer docs
 

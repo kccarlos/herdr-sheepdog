@@ -177,11 +177,13 @@ jobs:
           exit "$status"
 
       # Build/Products holds the .app, the test bundles and the .xctestrun
-      # (whose paths are relative to it); bin/sheepdog is the daemon.
+      # (whose paths are relative to it); bin/sheepdog is the daemon and
+      # ios/scripts has the fixture daemon and summary scripts, so a test
+      # job needs no checkout.
       - name: Pack the build
         run: |
           start=$(date +%s)
-          tar -cf - -C "$DERIVED/Build" Products -C "$GITHUB_WORKSPACE" bin \
+          tar -cf - -C "$DERIVED/Build" Products -C "$GITHUB_WORKSPACE" bin ios/scripts \
             | zstd -T0 -3 -q -o "$RUNNER_TEMP/$BUILD_ARTIFACT"
           ls "$DERIVED"/Build/Products/*.xctestrun
           echo "products $(du -sh "$DERIVED/Build/Products" | cut -f1), packed $(du -h "$RUNNER_TEMP/$BUILD_ARTIFACT" | cut -f1) in $(( $(date +%s) - start )) s" \
@@ -223,7 +225,6 @@ jobs:
       - name: Set the paths
         run: |
           {
-            echo "BUILD=$RUNNER_TEMP/build"
             echo "RESULTS=$RUNNER_TEMP/results"
             echo "TIMINGS=$RUNNER_TEMP/timings"
           } >> "$GITHUB_ENV"
@@ -234,8 +235,7 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
-      # Boots first, so the boot runs while the checkout and the build
-      # download do.
+      # Boots first, so the boot runs while the build downloads.
       - name: Pick the simulator and start booting it
         id: sim
         run: |
@@ -269,22 +269,21 @@ jobs:
           echo "boot started $(date +%s)" >> "$TIMINGS"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
-      # The scripts (fixture daemons, test summary); the build has the rest.
-      - uses: actions/checkout@v7
-
       - name: Download the build
         uses: actions/download-artifact@v8
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: ${{ runner.temp }}
 
+      # Into the workspace, where a checkout would be: Products, bin and
+      # ios/scripts.
       - name: Unpack the build
         run: |
-          mkdir -p "$BUILD" "$RESULTS"
-          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$BUILD"
-          mv "$BUILD/bin" "$GITHUB_WORKSPACE/bin"
+          echo "build downloaded $(date +%s)" >> "$TIMINGS"
+          mkdir -p "$RESULTS"
+          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
           rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
-          xctestrun=$(ls "$BUILD"/Products/*.xctestrun)
+          xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
           echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
           echo "build unpacked $(date +%s)" >> "$TIMINGS"
 
@@ -415,7 +414,7 @@ jobs:
         run: |
           echo "tests done $(date +%s)" >> "$TIMINGS"
           first=$(grep -h -m1 -oE "Test Suite '(Selected|All) tests' started at [0-9-]+ [0-9:]+" "$RESULTS"/*.log 2>/dev/null \
-            | head -n 1 | sed -E 's/.* at //') || true
+            | sed -E 's/.* at //' | sort | head -n 1) || true
           if [ -n "$first" ]; then
             echo "first test $(date -j -u -f '%Y-%m-%d %H:%M:%S' "$first" +%s)" >> "$TIMINGS"
           fi
