@@ -148,7 +148,7 @@ fi
 
 # The matrix: in the full tier the smoke method is left to the job that
 # runs its whole class, the iPad classes go to the iPad, the two special
-# classes become flags.
+# classes become flags, and the iPad job (else the first) builds.
 cat > "$work/shards" <<'EOF'
 smoke    SheepdogKitTests
 smoke    SheepdogUITests/HistoryApprovalUITests
@@ -157,12 +157,18 @@ shard-1  SheepdogUITests/IPadUITests
 shard-2  SheepdogUITests/ReconnectUITests
 shard-2  SheepdogUITests/CardsUITests
 EOF
-want_full='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"","history":true,"reconnect":false},{"name":"shard-1","iphone":"","ipad":"-only-testing:SheepdogUITests/IPadUITests","history":false,"reconnect":false},{"name":"shard-2","iphone":"-only-testing:SheepdogUITests/CardsUITests","ipad":"","history":false,"reconnect":true}]}'
-want_smoke='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests -only-testing:SheepdogUITests/CardsUITests/testCards","ipad":"","history":true,"reconnect":false}]}'
+want_full='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"","history":true,"reconnect":false,"build":false},{"name":"shard-1","iphone":"","ipad":"-only-testing:SheepdogUITests/IPadUITests","history":false,"reconnect":false,"build":true},{"name":"shard-2","iphone":"-only-testing:SheepdogUITests/CardsUITests","ipad":"","history":false,"reconnect":true,"build":false}]}'
+want_smoke='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests -only-testing:SheepdogUITests/CardsUITests/testCards","ipad":"","history":true,"reconnect":false,"build":true}]}'
 got="$(bash "$plan" matrix full "$work/shards")"
 if [[ "$got" == "$want_full" ]]; then ok "matrix full"; else bad "matrix full"; echo "     got  $got"; echo "     want $want_full"; fi
 got="$(bash "$plan" matrix smoke "$work/shards")"
 if [[ "$got" == "$want_smoke" ]]; then ok "matrix smoke"; else bad "matrix smoke"; echo "     got  $got"; echo "     want $want_smoke"; fi
+
+# The real list: one builder per tier.
+for t in full smoke; do
+  n="$(bash "$plan" matrix "$t" | grep -o '"build":true' | wc -l | tr -d ' ')"
+  if [[ "$n" == 1 ]]; then ok "one builder in the real $t matrix"; else bad "the real $t matrix has $n builders"; fi
+done
 
 if (( fails )); then echo "ci-plan_test: $fails failed"; exit 1; fi
 echo "ci-plan_test: ok"

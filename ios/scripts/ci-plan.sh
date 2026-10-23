@@ -7,7 +7,10 @@
 #       fails unless every UI test class is in exactly one job and no job
 #       mixes iPad and iPhone tests
 #   scripts/ci-plan.sh matrix <full|smoke> [shards]
-#       prints the jobs as a GitHub Actions matrix (JSON)
+#       prints the jobs as a GitHub Actions matrix (JSON). Exactly one job
+#       has "build": true and builds the app for the others: the iPad job
+#       (its tests are short and its boot long, so the build hides in the
+#       boot), or the first job when the tier has no iPad job.
 #
 # Tests: bash scripts/ci-plan_test.sh
 set -euo pipefail
@@ -114,11 +117,13 @@ matrix() {
         dev = (cl ~ /^IPad/) ? "ipad" : "iphone"
         add(dev, j, "-only-testing:" eid[i])
       }
+      builder = order[1]
+      for (o = jobs; o >= 1; o--) if (ipad[order[o]] != "") builder = order[o]
       printf "{\"include\":["
       for (o = 1; o <= jobs; o++) {
         j = order[o]
-        printf "%s{\"name\":\"%s\",\"iphone\":\"%s\",\"ipad\":\"%s\",\"history\":%s,\"reconnect\":%s}", \
-          (o > 1 ? "," : ""), j, iphone[j], ipad[j], (history[j] ? "true" : "false"), (reconnect[j] ? "true" : "false")
+        printf "%s{\"name\":\"%s\",\"iphone\":\"%s\",\"ipad\":\"%s\",\"history\":%s,\"reconnect\":%s,\"build\":%s}", \
+          (o > 1 ? "," : ""), j, iphone[j], ipad[j], (history[j] ? "true" : "false"), (reconnect[j] ? "true" : "false"), (j == builder ? "true" : "false")
       }
       print "]}"
     }

@@ -13,7 +13,7 @@
 # SHEEPDOG_FIXTURE_PORT (default 7799). The pair daemon
 # (SHEEPDOG_FIXTURE_PAIR_PORT, default 7798) listens on every address and
 # lists 127.0.0.1 in its pairing code (web.advertise), so a test can pair by
-# code over TLS on this Mac. Data, state, logs, an empty config and the
+# code over TLS on this Mac. Data, state, logs, the config and the
 # daemons' HOME go under SHEEPDOG_FIXTURE_DATA (default /tmp/sd-bugs), so
 # they never read this Mac's ~/.config/sheepdog (config, prompts) or its
 # herdr socket. Pass the same ports to the tests as
@@ -31,11 +31,13 @@ BIN="$REPO/bin/sheepdog"
 # Every per-user default (prompts.dir, herdr.socket, the project roots)
 # resolves under this HOME instead of the real one.
 FIXTURE_HOME="$DATA/home"
-CONFIG="$DATA/config.toml" # empty: the defaults, under FIXTURE_HOME
+# The defaults, under FIXTURE_HOME, but no update check and no restart
+# into a rebuilt bin/sheepdog in the middle of a test run.
+CONFIG="$DATA/config.toml"
 
 [ -x "$BIN" ] || { echo "fixture-daemons: no $BIN; run make build" >&2; exit 2; }
 mkdir -p "$DATA/pair" "$FIXTURE_HOME"
-[ -e "$CONFIG" ] || printf '' > "$CONFIG"
+printf '[update]\ncheck = false\nauto_restart = false\n' > "$CONFIG"
 
 # wait_up <port>: until /api/hello answers (it is public).
 wait_up() {

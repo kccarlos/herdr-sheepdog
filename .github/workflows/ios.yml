@@ -8,10 +8,10 @@ name: iOS
 # Xcode Cloud only archives and uploads TestFlight builds on ios-v* tags; it
 # runs no tests (ios/docs/dev/xcode-cloud.md).
 #
-# plan (Linux) picks the tier and the test jobs, build (one Mac) builds the
-# app, its tests and the daemon once, and each test job (one Mac and one
-# simulator each) runs its share of the tests from that build. The test
-# jobs start with the build and boot their simulator meanwhile. The tiers,
+# plan (Linux) picks the tier and the test jobs; each test job (one Mac and
+# one simulator) runs its share of the tests. One of them ("build" in the
+# matrix) builds the app, its tests and the daemon once and hands them to
+# the others, which boot their simulator meanwhile. The tiers,
 # the job graph and why it looks like this are in docs/dev/development.md
 # (CI/CD); the jobs and their tests come from ios/scripts/ci-shards.txt.
 # The workflow starts on every PR, so ios-summary always reports and can be
@@ -39,7 +39,8 @@ env:
   # (an artifact keeps neither the execute bits nor the symlinks the app
   # and test bundles need).
   BUILD_ARTIFACT: ios-build.tar.zst
-  # Uploaded by build when it fails, so the test jobs stop waiting.
+  # Uploaded by the building job when the build fails, so the others stop
+  # waiting for it.
   BUILD_FAILED: ios-build-failed.txt
 
 jobs:
@@ -90,150 +91,22 @@ jobs:
           fi
           echo "::notice::iOS tier: $tier"
 
-  # Builds the app and its test bundles for the simulator (arm64 only, no
-  # index store) and the daemon for the fixture daemons, once, and hands
-  # them to the test jobs as an artifact kept for a day.
-  build:
+  # Five Mac jobs at most: GitHub runs five macOS jobs of an account at
+  # once, and a separate build job beside five test jobs could wait for a
+  # slot while the test jobs wait for it. So one test job builds (the one
+  # ci-plan.sh marks "build": the iPad job, whose short tests and long boot
+  # hide the build, or smoke alone in the smoke tier), and the others boot
+  # their simulator (2 to 8 minutes) while it builds (about 3).
+  tests:
     needs: plan
     if: needs.plan.outputs.tier != 'none'
+    name: tests (${{ matrix.name }})
     # The xcode-27 image (macOS with Xcode 27.x) has the Xcode the app is
     # developed with; macos-26 stops at Xcode 26.x. Its simulators run iOS
     # 27.0, above the app's iOS 26 deployment target.
     # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
     runs-on: xcode-27
-    timeout-minutes: 40
-    env:
-      XCODEGEN_VERSION: 2.46.0
-      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
-    steps:
-      - uses: actions/checkout@v7
-
-      # Build outputs live in the runner's temp directory (the runner
-      # context is not available in a job's env).
-      - name: Set the paths
-        run: |
-          {
-            echo "DERIVED=$RUNNER_TEMP/DerivedData"
-            echo "SPM=$RUNNER_TEMP/spm"
-            echo "RESULTS=$RUNNER_TEMP/results"
-          } >> "$GITHUB_ENV"
-
-      - name: Select Xcode 27.1
-        run: |
-          sudo xcode-select -s /Applications/Xcode_27.1.app
-          xcodebuild -version
-
-      # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
-      # checkout's daemon, so an API change that breaks the app fails the
-      # tests.
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build the daemon
-        run: make build
-
-      # The same pinned XcodeGen as ci_scripts/ci_post_clone.sh (Xcode Cloud).
-      - name: Install XcodeGen
-        run: |
-          zip="$RUNNER_TEMP/xcodegen.zip"
-          curl -fsSL --retry 3 -o "$zip" \
-            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
-          echo "$XCODEGEN_SHA256  $zip" | shasum -a 256 -c -
-          unzip -q "$zip" -d "$RUNNER_TEMP/xcodegen"
-          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
-
-      - name: Generate the project
-        working-directory: ios
-        run: |
-          xcodegen --version
-          xcodegen generate --spec project.yml
-
-      - name: Cache Swift packages
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/spm
-          key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
-
-      # For any simulator, so no simulator boots here; arm64 only (the
-      # hosted Macs are Apple silicon), without the index store nobody reads.
-      - name: Build for testing
-        working-directory: ios
-        run: |
-          mkdir -p "$RESULTS"
-          status=0
-          xcodebuild build-for-testing \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$DERIVED" \
-            -clonedSourcePackagesDirPath "$SPM" \
-            -disableAutomaticPackageResolution \
-            -skipPackagePluginValidation \
-            ARCHS=arm64 \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            > "$RESULTS/build.log" 2>&1 || status=$?
-          grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
-          if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
-          exit "$status"
-
-      # Build/Products holds the .app, the test bundles and the .xctestrun
-      # (whose paths are relative to it); bin/sheepdog is the daemon,
-      # ios/scripts has the fixture daemon and summary scripts, and some
-      # tests read testdata/protocol and ios/Tests at their #filePath (the
-      # same workspace path on every runner), so a test job needs no
-      # checkout.
-      - name: Pack the build
-        run: |
-          start=$(date +%s)
-          tar -cf - -C "$DERIVED/Build" Products \
-            -C "$GITHUB_WORKSPACE" bin ios/scripts ios/Tests testdata/protocol \
-            | zstd -T0 -3 -q -o "$RUNNER_TEMP/$BUILD_ARTIFACT"
-          ls "$DERIVED"/Build/Products/*.xctestrun
-          echo "products $(du -sh "$DERIVED/Build/Products" | cut -f1), packed $(du -h "$RUNNER_TEMP/$BUILD_ARTIFACT" | cut -f1) in $(( $(date +%s) - start )) s" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the build
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ runner.temp }}/${{ env.BUILD_ARTIFACT }}
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload the build log
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-build-log
-          path: ${{ runner.temp }}/results
-          retention-days: 7
-
-      # The test jobs wait for the build's artifact; this one tells them
-      # it is not coming, so they stop at once.
-      - name: Tell the test jobs the build failed
-        if: failure() || cancelled()
-        run: echo "$GITHUB_JOB failed" > "$RUNNER_TEMP/$BUILD_FAILED"
-
-      - name: Upload the build failure
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ runner.temp }}/${{ env.BUILD_FAILED }}
-          archive: false
-          retention-days: 1
-
-  # Starts with build, not after it: the simulator boots (2 to 8 minutes)
-  # while the app builds (about 3), and the job takes the build once the
-  # simulator is up.
-  tests:
-    needs: plan
-    if: needs.plan.outputs.tier != 'none'
-    name: tests (${{ matrix.name }})
-    runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 50
     strategy:
       # Smoke and the shards run side by side; the first job that fails
       # cancels the others (a red smoke stops the shards).
@@ -245,19 +118,69 @@ jobs:
       # One simulator per job: an iPad job runs only iPad tests
       # (ci-plan.sh check).
       DEVICE: ${{ matrix.ipad != '' && 'ipad' || 'iphone' }}
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
     steps:
+      # Build outputs live in the runner's temp directory (the runner
+      # context is not available in a job's env).
       - name: Set the paths
         run: |
           {
+            echo "DERIVED=$RUNNER_TEMP/DerivedData"
+            echo "SPM=$RUNNER_TEMP/spm"
             echo "RESULTS=$RUNNER_TEMP/results"
             echo "TIMINGS=$RUNNER_TEMP/timings"
           } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/results"
           echo "job start $(date +%s)" > "$RUNNER_TEMP/timings"
 
       - name: Select Xcode 27.1
         run: |
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
+
+      # The building job: the checkout, the daemon and the project, before
+      # its simulator boots.
+      - uses: actions/checkout@v7
+        if: matrix.build
+
+      # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
+      # checkout's daemon, so an API change that breaks the app fails the
+      # tests.
+      - uses: actions/setup-go@v7
+        if: matrix.build
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the daemon
+        if: matrix.build
+        run: make build
+
+      # The same pinned XcodeGen as ci_scripts/ci_post_clone.sh (Xcode Cloud).
+      - name: Install XcodeGen
+        if: matrix.build
+        run: |
+          zip="$RUNNER_TEMP/xcodegen.zip"
+          curl -fsSL --retry 3 -o "$zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $zip" | shasum -a 256 -c -
+          unzip -q "$zip" -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate the project
+        if: matrix.build
+        working-directory: ios
+        run: |
+          xcodegen --version
+          xcodegen generate --spec project.yml
+
+      - name: Cache Swift packages
+        if: matrix.build
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/spm
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
       - name: Pick the simulator and boot it
         id: sim
@@ -292,6 +215,76 @@ jobs:
           echo "boot started $(date +%s)" >> "$TIMINGS"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
+      # For any simulator; arm64 only (the hosted Macs are Apple silicon),
+      # without the index store nobody reads. One simulator booting beside
+      # it costs the build little (#380).
+      - name: Build for testing
+        if: matrix.build
+        working-directory: ios
+        run: |
+          status=0
+          xcodebuild build-for-testing \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED" \
+            -clonedSourcePackagesDirPath "$SPM" \
+            -disableAutomaticPackageResolution \
+            -skipPackagePluginValidation \
+            ARCHS=arm64 \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            > "$RESULTS/build.log" 2>&1 || status=$?
+          grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
+          if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
+          echo "build done $(date +%s)" >> "$TIMINGS"
+          exit "$status"
+
+      # Build/Products holds the .app, the test bundles and the .xctestrun
+      # (whose paths are relative to it); bin/sheepdog is the daemon,
+      # ios/scripts has the fixture daemon and summary scripts, and some
+      # tests read testdata/protocol and ios/Tests at their #filePath (the
+      # same workspace path on every runner), so the other jobs need no
+      # checkout. An artifact keeps neither execute bits nor symlinks,
+      # hence the tar.
+      - name: Pack the build
+        if: matrix.build
+        run: |
+          start=$(date +%s)
+          tar -cf - -C "$DERIVED/Build" Products \
+            -C "$GITHUB_WORKSPACE" bin ios/scripts ios/Tests testdata/protocol \
+            | zstd -T0 -3 -q -o "$RUNNER_TEMP/$BUILD_ARTIFACT"
+          echo "XCTESTRUN=$(ls "$DERIVED"/Build/Products/*.xctestrun)" >> "$GITHUB_ENV"
+          echo "products $(du -sh "$DERIVED/Build/Products" | cut -f1), packed $(du -h "$RUNNER_TEMP/$BUILD_ARTIFACT" | cut -f1) in $(( $(date +%s) - start )) s" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the build
+        id: upload
+        if: matrix.build
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/${{ env.BUILD_ARTIFACT }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Note the upload
+        if: matrix.build
+        run: echo "build uploaded $(date +%s)" >> "$TIMINGS"
+
+      # Tells the other jobs the build is not coming, so they stop at once.
+      - name: Tell the other jobs the build failed
+        if: (failure() || cancelled()) && matrix.build && steps.upload.outcome != 'success'
+        run: echo "the build failed" > "$RUNNER_TEMP/$BUILD_FAILED"
+
+      - name: Upload the build failure
+        if: (failure() || cancelled()) && matrix.build && steps.upload.outcome != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/${{ env.BUILD_FAILED }}
+          archive: false
+          retention-days: 1
+
       - name: Wait for the simulator
         id: wait
         run: |
@@ -300,13 +293,14 @@ jobs:
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
           echo "simulator booted $(date +%s)" >> "$TIMINGS"
 
-      # The build job's artifact, polled through the same runtime API (and
-      # job token) actions/download-artifact uses, no repository token. A booting
-      # simulator slows everything else on the Mac to a crawl (a 52 MB
-      # download took 3 to 7 minutes beside it, the daemon's first launch
-      # up to 4.5), so the download and the fixture daemons wait for the
-      # boot to finish.
+      # The other jobs: the building job's artifact, polled through the
+      # Actions runtime API with the job token actions/download-artifact
+      # itself uses, no repository token. A booting simulator slows
+      # everything else on the Mac to a crawl (a 52 MB download took 3 to 7
+      # minutes beside it, the daemon's first launch up to 4.5), so the
+      # download and the fixture daemons wait for the boot to finish.
       - name: Wait for the build
+        if: ${{ !matrix.build }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -329,7 +323,7 @@ jobs:
               if (!response.ok) throw new Error(`ListArtifacts: ${response.status} ${await response.text()}`)
               const names = ((await response.json()).artifacts || []).map(a => a.name)
               if (names.includes(want)) break
-              if (names.includes(failed)) throw new Error('the build job failed; see its log')
+              if (names.includes(failed)) throw new Error('the building job failed; see its log')
               if (Date.now() > deadline) throw new Error(`no ${want} after 25 minutes`)
               await new Promise(resolve => setTimeout(resolve, 5000))
             }
@@ -337,16 +331,17 @@ jobs:
             core.info(`${want} is ready`)
 
       - name: Download the build
+        if: ${{ !matrix.build }}
         uses: actions/download-artifact@v8
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: ${{ runner.temp }}
 
-      # Into the workspace, where the build job's checkout was.
+      # Into the workspace, where the building job's checkout is.
       - name: Unpack the build
+        if: ${{ !matrix.build }}
         run: |
           echo "build downloaded $(date +%s)" >> "$TIMINGS"
-          mkdir -p "$RESULTS"
           zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$GITHUB_WORKSPACE"
           rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
           xctestrun=$(ls "$GITHUB_WORKSPACE"/Products/*.xctestrun)
@@ -381,6 +376,7 @@ jobs:
           SHEEPDOG_DAEMON_REPO=$GITHUB_WORKSPACE SHEEPDOG_FIXTURE_PORT=$port \
             SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
             ios/scripts/fixture-daemons.sh start
+          echo "fixture daemons up $(date +%s)" >> "$TIMINGS"
 
       # A test that fails is run once more and the job fails only if it
       # fails twice. The tap-flow UI tests run without animations
@@ -465,7 +461,7 @@ jobs:
           sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
 
       - name: Stop the fixture daemons
-        if: always()
+        if: always() && env.SHEEPDOG_FIXTURE_DATA != ''
         run: ios/scripts/fixture-daemons.sh stop || true
 
       # When the simulator was ready and the first test started, in seconds
@@ -492,30 +488,29 @@ jobs:
             ${{ runner.temp }}/restarter.log
           retention-days: 7
 
-  # The one check to require on main: green when the tier's build and test
-  # jobs passed, or when the tier is none and no Mac job ran.
+  # The one check to require on main: green when the tier's test jobs (the
+  # build among them) passed, or when the tier is none and no Mac job ran.
   summary:
     name: ios-summary
-    needs: [plan, build, tests]
+    needs: [plan, tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check the plan, the build and the tests
+      - name: Check the plan and the tests
         env:
           PLAN: ${{ needs.plan.result }}
           TIER: ${{ needs.plan.outputs.tier }}
-          BUILD: ${{ needs.build.result }}
           TESTS: ${{ needs.tests.result }}
         run: |
-          echo "plan: $PLAN, tier: $TIER, build: $BUILD, tests: $TESTS"
+          echo "plan: $PLAN, tier: $TIER, tests: $TESTS"
           if [ "$PLAN" != success ]; then echo "::error::the plan job did not succeed"; exit 1; fi
           case "$TIER" in
             none) want=skipped ;;
             full|smoke) want=success ;;
             *) echo "::error::unknown tier '$TIER'"; exit 1 ;;
           esac
-          if [ "$BUILD" != "$want" ] || [ "$TESTS" != "$want" ]; then
-            echo "::error::tier $TIER wants the build and the tests $want, got $BUILD and $TESTS"
+          if [ "$TESTS" != "$want" ]; then
+            echo "::error::tier $TIER wants the tests $want, got $TESTS"
             exit 1
           fi
