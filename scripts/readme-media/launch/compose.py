@@ -14,9 +14,16 @@ The brand (docs/dev/brand.md): ink background, cream type, slate for
 secondary lines, Outfit for titles and Inter for captions (both from
 web/static/fonts), the colour logo, and orange only for the one command on
 the end card. The voices are TTS, so nothing here looks like a live
-session: no waveform, a speaker label, and a footnote that says so.
+session: a speaker label and a footnote that says so. The one thing that
+moves with the sound is the waveform: when someone speaks, bars scroll out
+from the middle with the loudness of that line's own WAV (RMS per frame), so
+the picture is driven by the audio, not by an animation.
+
+The devices scene (terminal, diff, Agents by computer) uses a phone shot from
+the take for the terminal and the diff, and a screenshot of the Agents page
+grouped by computer (agents-by-computer-dark.png beside this file).
 """
-import json, math, os, subprocess, sys, wave
+import array, json, math, os, subprocess, sys, wave
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
@@ -112,11 +119,16 @@ SCENES = [
     ("title", 4.2, {}),
     ("phone", 5.0, {"from": m("agents", -0.2), "to": m("tap_window", -0.2),
                     "caption": "Four agents at work.\nYou go for a walk."}),
-    ("phone", 7.0, {"from": m("ask", -1.2), "to": m("tap_approve", -0.1),
+    ("phone", 7.0, {"from": m("ask", -1.2), "to": m("tap_approve", -0.8),
                     "caption": "An agent is blocked.\nYou hear it first.", "chime": 0.3,
                     "lines": [("s_ask", "sheepdog", "codex-payments wants to run npm install p-retry. Approve?", 1.0)]}),
-    ("phone", 3.6, {"from": m("tap_approve", -0.4), "to": m("approved", 1.6),
-                    "caption": "Approve with a tap,\nor just say it."}),
+    # the clips skip the take's tap and the card's slide, so only the settled
+    # result shows; `voice` rewrites its "by tap" to "by voice" (retouch_by_voice)
+    ("phone", 5.4, {"clips": [(m("tap_approve", -0.8), m("tap_approve", 0.6)), (m("approved", -0.4), m("approved", 2.8))],
+                    "voice": m("approved", -0.4),
+                    "caption": "Approve with a tap,\nor just say it.",
+                    "lines": [("u_yes", "you", "Yes, go ahead.", 0.2),
+                              ("s_ok", "sheepdog", "Approved. Installing it now.", 2.1)]}),
     ("phone", 8.2, {"from": m("tap_status", -0.6), "to": m("status", 5.0),
                     "caption": "Ask what's going on.",
                     "lines": [("u_status", "you", "What's going on?", 0.2),
@@ -127,13 +139,7 @@ SCENES = [
                     "lines": [("u_card", "you", "Show me the agents.", 0.0),
                               ("s_card", "sheepdog", "It's on your screen: 3 done, 1 failed.",
                                m("card") - m("tap_card", -0.8) + 0.3)]}),
-    ("phone", 5.6, {"from": m("terminal", -0.8), "to": m("tap_menu", -0.1),
-                    "caption": "The agent's live terminal,\non your phone."}),
-    ("phone", None, {"clips": [(m("tap_menu", -0.3), m("tap_menu", 1.6)),
-                               (m("changes", -0.3), m("tap_file", 0.1)),
-                               (m("diff", -0.6), m("diff", 3.8))],
-                     "caption": "Read the diff\nbefore you say yes."}),
-    ("setup", 7.0, {}),
+    ("devices", 6.4, {"caption": "Everything, on your phone."}),
     ("end", 6.5, {}),
 ]
 for k, s in enumerate(SCENES):
@@ -152,6 +158,42 @@ XF = 0.2  # the cross-fade between scenes
 def wav_len(path):
     with wave.open(path) as w:
         return w.getnframes() / w.getframerate()
+
+
+class Env:
+    """A line's loudness per video frame, from its own WAV: RMS of each
+    1/FPS slice, scaled so the loudest slice is 1, and where speech starts
+    and ends (the slices above a small floor)."""
+
+    def __init__(self, path):
+        with wave.open(path) as w:
+            rate, n = w.getframerate(), w.getnframes()
+            a = array.array("h")
+            a.frombytes(w.readframes(n))
+        hop = rate // FPS
+        env = [math.sqrt(sum(x * x for x in a[i:i + hop]) / hop) / 32768 for i in range(0, len(a) - hop + 1, hop)]
+        peak = max(env) or 1
+        self.env = [e / peak for e in env]
+        loud = [i for i, e in enumerate(self.env) if e > 0.06]
+        self.s0, self.s1 = loud[0] / FPS, (loud[-1] + 1) / FPS
+
+    def level(self, t):
+        """Loudness 0..1 at t seconds into the line, interpolated."""
+        x = t * FPS
+        i = int(math.floor(x))
+        if i < 0 or i >= len(self.env) - 1:
+            return 0.0
+        f = x - i
+        return self.env[i] * (1 - f) + self.env[i + 1] * f
+
+
+ENVS = {}
+
+
+def env(id):
+    if id not in ENVS:
+        ENVS[id] = Env(os.path.join(TTS, id + ".wav"))
+    return ENVS[id]
 
 
 LINES = []  # (id, who, text, start in the video, length)
@@ -181,6 +223,11 @@ class Phone:
                 "-vf", f"fps={FPS},scale={self.sw}:{self.sh}:flags=lanczos", "-q:v", "2", os.path.join(self.dir, "%05d.jpg"))
             open(os.path.join(self.dir, "done"), "w").close()
         self.count = len([f for f in os.listdir(self.dir) if f.endswith(".jpg")])
+        self.chrome()
+
+    def chrome(self):
+        """The bezel, its shadow and the screen mask for self.sw x self.sh."""
+        sh = self.sh
         r = int(self.sw * 0.13)
         self.mask = rounded_mask(self.sw, self.sh, r)
         self.bz = max(8, int(sh * 0.012))
@@ -203,14 +250,50 @@ class Phone:
             self._cache[i] = im
         return self._cache[i]
 
+    retouch = False
+
+    def retouch_by_voice(self, im):
+        """The settled card says "You approved ... by tap". When the user said
+        it, the daemon's log says by voice, so repaint that last word: same
+        row colour, same green, same type, in the take's own coordinates
+        (1320 px wide; x 745..862, baseline row 2228..2268)."""
+        sx = self.sw / 1320
+        im = im.copy()
+        px = im.getpixel((int(900 * sx), int(2250 * sx)))
+        green = max((im.getpixel((int(x * sx), int(2248 * sx))) for x in range(100, 130)), key=lambda c: c[1] - c[0])
+        d = ImageDraw.Draw(im)
+        d.rectangle((int(738 * sx), int(2226 * sx), int(905 * sx), int(2272 * sx)), fill=px)
+        f = font(INTER, int(round(40 * sx * 1.0)), 600)
+        d.text((int(745 * sx), int(2248 * sx)), "by voice", font=f, fill=green, anchor="lm")
+        return im
+
     def draw(self, im, xy, v, alpha=1.0):
         x, y = xy
         layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
         layer.alpha_composite(self.shadow, (x - 60, y - 60))
         layer.alpha_composite(self.bezel, (x, y))
         if v is not None:
-            layer.alpha_composite(self.frame(v), (x + self.bz, y + self.bz))
+            fr = self.frame(v)
+            if self.retouch:
+                fr = self.retouch_by_voice(fr)
+            layer.alpha_composite(fr, (x + self.bz, y + self.bz))
         blend(im, layer, alpha)
+
+
+class DevicePhone(Phone):
+    """A phone showing given PIL images: a still, or a short list of frames
+    played from their start (the last one holds)."""
+
+    def __init__(self, sh, frames):
+        self.sh = sh
+        self.sw = int(round(sh * frames[0].width / frames[0].height / 2)) * 2
+        self.frames = [f.convert("RGB").resize((self.sw, sh), Image.LANCZOS).convert("RGBA") for f in frames]
+        for f in self.frames:
+            f.putalpha(rounded_mask(self.sw, sh, int(self.sw * 0.13)))
+        self.chrome()
+
+    def frame(self, v):
+        return self.frames[int(clamp(round(v * FPS), 0, len(self.frames) - 1))]
 
 
 def rounded_mask(w, h, r):
@@ -225,6 +308,24 @@ def blend(im, layer, a):
     if a < 0.996:
         layer.putalpha(ImageChops.multiply(layer.getchannel("A"), Image.new("L", im.size, int(255 * a))))
     im.alpha_composite(layer)
+
+
+def take_frames(t0, t1):
+    """The take's frames from t0 to t1 s (1/FPS apart) as PIL images."""
+    d = os.path.join(CACHE, f"take-{t0:.2f}-{t1:.2f}")
+    if not os.path.exists(os.path.join(d, "done")):
+        os.makedirs(d, exist_ok=True)
+        run("ffmpeg", "-loglevel", "error", "-y", "-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", os.path.join(PHONE, "cfr.mp4"),
+            "-vf", f"fps={FPS},scale=660:-1", "-q:v", "2", os.path.join(d, "%04d.jpg"))
+        open(os.path.join(d, "done"), "w").close()
+    return [Image.open(os.path.join(d, f)).convert("RGB") for f in sorted(os.listdir(d)) if f.endswith(".jpg")]
+
+
+def agents_shot():
+    """agents-by-computer-dark.png: the app's Agents page grouped by computer
+    (a simulator screenshot with two computers, one offline), 660 px wide,
+    with the take's 9:41 status bar pasted over its clock (README.md)."""
+    return Image.open(os.path.join(HERE, "agents-by-computer-dark.png")).convert("RGB")
 
 
 LOGO_SRC = Image.open(os.path.join(REPO, "assets/brand/logo/sheepdog-sticker-transparent-1024.png")).convert("RGBA")
@@ -327,20 +428,41 @@ def draw_caption(im, L, text, a):
     return y
 
 
-def draw_line(im, L, y, who, text, a):
-    """A speaker label and the spoken words in an ink pill."""
+def draw_wave(d, x, y, w, h, who, e, tc, a):
+    """Bars scroll outward from the middle, each showing the line's loudness
+    a few frames earlier the farther it is from the centre. While nobody is
+    speaking the bars rest as dots. The speaker in orange is you (the
+    product listening); the voice is cream."""
+    col = ORANGE if who == "you" else CREAM
+    active = e.s0 - 0.05 <= tc <= e.s1 + 0.1
+    bw, gap = 8, 7
+    n = int((w + gap) // (bw + gap)) | 1  # odd, so one bar is the centre
+    x0 = x + (w - (n * bw + (n - 1) * gap)) / 2
+    for k in range(n):
+        side = abs(k - (n - 1) / 2)
+        lv = e.level(tc - side * 0.03) if active else 0.0
+        bh = bw + (h - bw) * (lv ** 0.7) * (1 - 0.3 * side / (n / 2))
+        bx = x0 + k * (bw + gap)
+        al = int(255 * a * (1.0 if active else 0.35))
+        d.rounded_rectangle((bx, y + h / 2 - bh / 2, bx + bw, y + h / 2 + bh / 2), bw / 2, fill=col + (al,))
+
+
+def draw_line(im, L, y, who, text, a, e, tc):
+    """A speaker label, its waveform and the spoken words in an ink pill."""
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     label = "YOU" if who == "you" else "VOICE"
     pad = 28
     lines = wrap(text, L.f_line, L.tw - 2 * pad, d)
     lh = int(L.f_line.size * 1.32)
-    w = max(d.textlength(l, font=L.f_line) for l in lines) + 2 * pad
-    h = len(lines) * lh + 2 * pad - (lh - L.f_line.size) + 46
-    x = L.tx if not L.portrait else (L.W - w) / 2
+    w = L.tw if not L.portrait else L.tw
+    wave_h = 84 if not L.portrait else 72
+    h = len(lines) * lh + 2 * pad - (lh - L.f_line.size) + 46 + wave_h + 22
+    x = L.tx
     d.rounded_rectangle((x, y, x + w, y + h), 14, fill=CARD + (235,))
     d.text((x + pad, y + pad - 4), label, font=L.f_label, fill=SLATE + (255,))
-    ty = y + pad + 42
+    draw_wave(d, x + pad, y + pad + 40, w - 2 * pad, wave_h, who, e, tc, 1.0)
+    ty = y + pad + 42 + wave_h + 22
     for l in lines:
         d.text((x + pad, ty), l, font=L.f_line, fill=CREAM + (255,))
         ty += lh
@@ -371,6 +493,7 @@ def draw_phone_scene(im, L, i, t, a, pa):
         tl -= a1 - a0
     if v is None:
         v = d["clips"][-1][1]
+    L.phone.retouch = d.get("voice") is not None and v >= d["voice"]
     L.phone.draw(im, L.phone_xy, v, pa)
     y = draw_caption(im, L, d["caption"], a)
     for id, who, text, at in d.get("lines", []):
@@ -380,7 +503,41 @@ def draw_phone_scene(im, L, i, t, a, pa):
         end = STARTS[i] + (nxt[0][3] - 0.1 if nxt else length)
         la = fade(t, st - 0.15, end) * a
         if la > 0:
-            draw_line(im, L, y + 40, who, text, la)
+            draw_line(im, L, y + 40, who, text, la, env(id), t - st)
+
+
+def draw_devices(im, L, t, a):
+    """Three phones side by side: the live terminal (the take, playing), the
+    diff and the Agents page grouped by computer."""
+    tl = t - STARTS[scene_at(t)]
+    if not hasattr(L, "dev"):
+        sh = 660 if L.portrait else 700
+        term = take_frames(m("terminal", 0.2), m("tap_menu", -0.1))
+        diff = take_frames(m("diff", 1.0), m("diff", 1.1))
+        L.dev = [DevicePhone(sh, term), DevicePhone(sh, diff), DevicePhone(sh, [agents_shot()])]
+    names = ["Live terminal", "The diff", "Every computer"]
+    gap = 44 if not L.portrait else 20
+    pw = L.dev[0].sw + 2 * L.dev[0].bz
+    total = 3 * pw + 2 * gap
+    x0 = (L.W - total) / 2
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    capy = 96 if not L.portrait else (L.H - 900) // 2
+    for line in wrap(SCENES[scene_at(t)][2]["caption"], L.f_cap, L.W - 160, d):
+        centered(d, line, L.f_cap, L.W / 2, capy, CREAM + (255,))
+        capy += int(L.f_cap.size * 1.18)
+    blend(im, layer, a)
+    top = capy + (90 if not L.portrait else 130)
+    for k, ph in enumerate(L.dev):
+        st = 0.3 + 0.25 * k
+        pa = ease((tl - st) / 0.35) * a
+        x = int(x0 + k * (pw + gap))
+        rise = int(24 * (1 - ease((tl - st) / 0.5)))
+        lay = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        ld = ImageDraw.Draw(lay)
+        centered(ld, names[k], L.f_label, x + pw / 2, top - 52 + rise, SLATE + (255,))
+        blend(im, lay, pa)
+        ph.draw(im, (x, top + rise), max(0.0, tl - st), pa)
 
 
 def draw_title(im, L, t, a):
@@ -414,43 +571,6 @@ def cmd_pill(d, L, x, y, text, color, w=None, fnt=None):
     return h
 
 
-def draw_setup(im, L, t, a):
-    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    steps = [
-        ("1", "Install the herdr plugin", "herdr plugin install kccarlos/herdr-sheepdog"),
-        ("2", "Run the setup wizard", "sheepdog setup"),
-        ("3", "Pair the iPhone app: scan the code", "sheepdog pair"),
-    ]
-    cmdw = max(d.textlength(c, font=L.f_cmd) for _, _, c in steps) + 60
-    x = (L.W - cmdw) / 2
-    gap = 46 if not L.portrait else 64
-    block = L.f_head.size + 70 + 3 * (L.f_step.size + 14 + L.f_cmd.size + 40) + 2 * gap
-    y = (L.H - block) / 2
-    centered(d, "Install. Run setup. Scan the code.", L.f_head, L.W / 2, y, CREAM + (255,)) if not L.portrait else None
-    if L.portrait:
-        for l in ["Install. Run setup.", "Scan the code."]:
-            centered(d, l, L.f_head, L.W / 2, y, CREAM + (255,))
-            y += int(L.f_head.size * 1.2)
-        y += 50
-    else:
-        y += L.f_head.size + 70
-    for k, (n, label, c) in enumerate(steps):
-        st = STARTS[scene_at(t)] + 0.25 + 0.35 * k
-        sa = ease((t - st) / 0.3)
-        if sa <= 0:
-            continue
-        sl = Image.new("RGBA", im.size, (0, 0, 0, 0))
-        sd = ImageDraw.Draw(sl)
-        sd.text((x, y), f"{n}  ", font=L.f_step, fill=SLATE + (255,))
-        nx = x + sd.textlength(f"{n}   ", font=L.f_step)
-        sd.text((nx, y), label, font=L.f_step, fill=CREAM + (255,))
-        cmd_pill(sd, L, x, y + L.f_step.size + 14, c, CREAM, cmdw)
-        blend(layer, sl, sa)
-        y += L.f_step.size + 14 + L.f_cmd.size + 40 + gap
-    blend(im, layer, a)
-
-
 def draw_end(im, L, t, a):
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
@@ -465,13 +585,14 @@ def draw_end(im, L, t, a):
         centered(d, l, L.f_tag, L.W / 2, y, CREAM + (255,))
         y += int(L.f_tag.size * 1.3)
     y += 44
-    cmd = "brew install kccarlos/tap/sheepdog"
-    # about 1/20 of the frame height, as wide as the frame allows
-    w = d.textlength(cmd, font=L.f_end_cmd) + 60
-    h = cmd_pill(d, L, (L.W - w) / 2, y, cmd, ORANGE, fnt=L.f_end_cmd)
+    cmd = "herdr plugin install kccarlos/herdr-sheepdog"  # the README's command
+    fnt = L.f_end_cmd
+    while d.textlength(cmd, font=fnt) + 60 > L.W - 100:  # as wide as the frame allows
+        fnt = mono(fnt.size - 2)
+    w = d.textlength(cmd, font=fnt) + 60
+    h = cmd_pill(d, L, (L.W - w) / 2, y, cmd, ORANGE, fnt=fnt)
     y += h + 26
-    centered(d, "or: herdr plugin install kccarlos/herdr-sheepdog", L.f_small, L.W / 2, y, SLATE + (255,))
-    y += int(L.f_small.size * 1.9)
+    y += int(L.f_small.size * 1.2)
     centered(d, "iPhone app: testflight.apple.com/join/bjCaFYgK", L.f_small, L.W / 2, y, CREAM + (255,))
     y += int(L.f_small.size * 1.5)
     centered(d, "github.com/kccarlos/herdr-sheepdog", L.f_small, L.W / 2, y, CREAM + (255,))
@@ -500,8 +621,8 @@ def render(L, t):
         draw_footnote(im, L, pa)
     elif kind == "title":
         draw_title(im, L, t, a)
-    elif kind == "setup":
-        draw_setup(im, L, t, a)
+    elif kind == "devices":
+        draw_devices(im, L, t, a)
     elif kind == "end":
         draw_end(im, L, t, a)
     return im.convert("RGB")

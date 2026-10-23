@@ -21,8 +21,8 @@ What is real:
 - **Phone**: the real app in the iOS Simulator, offline demo, dark mode,
   driven by `LaunchRecordingUITests` and filmed with `simctl io recordVideo`.
   Two launches: the demo paused (`-sheepdogDemoPaused`, so all four agents
-  stay at work) for the Agents page, claude-auth's window and its Changes
-  and diff; then the demo running for codex-payments' question, Approve,
+  stay at work) for the Agents page, claude-auth's live terminal and its
+  diff; then the demo running for codex-payments' question, Approve,
   "What's going on?" and the "Your agents" card. `marks.txt` holds the
   test's steps; `compose.py` cuts the scenes by them.
 - **Voices**: Gemini TTS on Vertex AI (`lines.tsv`, the demo world's exact
@@ -30,12 +30,32 @@ What is real:
   `hero/tts.go`, with `VERTEX_API_KEY` and `VERTEX_PROJECT` from the
   environment. A rendered line is cached and never requested again; with
   `-strict` a failed line stops the run instead of falling back to `say`.
-  The only other sound is a two-tone chime made with ffmpeg's sine source.
+  Two lines are not in the demo: the spoken approval, "Yes, go ahead." and
+  "Approved. Installing it now." (`u_yes`, `s_ok`). The take shows the
+  approval as a tap, so `compose.py` skips the tap and repaints the settled
+  card's "by tap" as "by voice", which is what the app logs for a spoken
+  approval. The only other sound is a two-tone chime made with ffmpeg's sine source.
+- **Devices scene**: three phones side by side, the live terminal (the take,
+  playing), the diff (a frame of the take) and the Agents page grouped by
+  computer. The last is `agents-by-computer-dark.png`, a simulator
+  screenshot of the app with two computers paired and one offline (660 px
+  wide), with the take's 9:41 status bar pasted over its clock. Replace it
+  with a fresh screenshot of the same page when the page changes.
+- **Waveform**: when someone speaks, a bar waveform fills the speaker's
+  pill, orange for you (the product listening) and cream for the voice. It
+  is drawn from the audio: `compose.py` reads each line's WAV, takes the RMS
+  of every 1/30 s slice, scales the loudest to 1, and draws 51 or so bars
+  from the middle outward, each bar showing the loudness a few frames
+  earlier the farther it is from the centre (so it scrolls outward). Between
+  turns the bars rest as dots. Nothing else is animated to the sound.
 - **Everything else** is drawn by `compose.py` in the brand
-  ([docs/dev/brand.md](../../../docs/dev/brand.md)): the title, captions, speaker
-  labels, the setup steps and the end card, in Outfit and Inter from
-  `web/static/fonts`. There is no waveform: the voices are TTS, so nothing
-  imitates a live session, and a footnote says so.
+  ([docs/dev/brand.md](../../../docs/dev/brand.md)): the title, captions,
+  speaker labels, the devices scene and the end card (one orange command,
+  `herdr plugin install kccarlos/herdr-sheepdog`), in Outfit and Inter from
+  `web/static/fonts`. A footnote says the voices are text-to-speech.
+
+Scenes (52 s): title 4.2, Agents 5.0, blocked 7.0, approve by voice 5.4,
+"What's going on?" 8.2, "Show me the agents" 9.4, devices 6.4, end card 6.5.
 
 Not shown, because the demo cannot do them honestly: the lock-screen
 notification and the Live Activity (a real device), sending a prompt or a

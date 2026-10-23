@@ -19,16 +19,16 @@ against the app, not against this page, and drop a shot rather than fake it.
 ## The video we have now
 
 The README plays a GitHub user-attachment of the first launch video (36 s, old brand). The
-repository's `assets/readme/launch.mp4` (66 s, 1920×1080), `launch-vertical.mp4` (1080×1920) and
+repository's `assets/readme/launch.mp4` (52 s, 1920×1080), `launch-vertical.mp4` (1080×1920) and
 `launch-poster.png` are the synthetic re-make of this storyboard, in the new brand. How it is made
 is in [scripts/readme-media/launch/README.md](../../scripts/readme-media/launch/README.md). In
 short:
 
 - **Synthetic, not filmed.**
   - The phone is the iOS Simulator running the offline demo in dark mode, driven by `LaunchRecordingUITests` and filmed with `simctl io recordVideo`.
-  - The voices are Gemini TTS lines (`lines.tsv`; Puck plays the user and Kore plays the voice), not a live voice session. There is no waveform, and a footnote says the voices are text-to-speech.
-  - `compose.py` draws the title, captions, setup steps and end card in the brand (ink, cream, one orange command; Outfit and Inter).
-- **What it shows** (shots 2, 4 in-app, 5, 6, 7, 12 and 13): the title lockup; four agents at work; codex-payments' question with the chime and the voice; Approve; "What's going on?"; "Show me the agents" and its card; claude-auth's live terminal; Changes and a diff; the three setup commands; the end card.
+  - The voices are Gemini TTS lines (`lines.tsv`; Puck plays the user and Kore plays the voice), not a live voice session. A footnote says so. When someone speaks, a waveform drawn from that line's own audio (its real loudness) shows it is voice.
+  - `compose.py` draws the title, captions, waveform, devices scene and end card in the brand (ink, cream, one orange command; Outfit and Inter).
+- **What it shows** (shots 2, 4 in-app, 5, 6, 7, 12 and 13): the title lockup; four agents at work; codex-payments' question with the chime and the voice; approving by voice; "What's going on?"; "Show me the agents" and its card; one scene with the live terminal, a diff and the Agents page grouped by computer; the end card with the plugin install command.
 - **What it leaves out**, because the demo cannot show it honestly: the lock screen and the Live Activity (a real device), and the attachment, New agent, the shell and the update notice (a real daemon, or the demo changes in [section 5](#5-what-to-prepare-and-what-would-need-code)). The README link still points at the old attachment; replacing it is the owner's call.
 
 ## 1. Goal, audience, length
@@ -55,7 +55,7 @@ all from the phone. Then show that setup is three commands and a QR code.
 the voice's reply from a real voice session (Gemini Live or GPT-Live, with DeepSeek as the
 orchestrator). The real model words things its own way. Keep the take and change the caption to
 match it. Never dub. If a shot has to be built from the demo or TTS, the edit must not pass it off
-as a live session: no live-session waveform over a TTS line.
+as a live session: a waveform may follow the TTS audio's real loudness, but nothing may imitate a live session.
 
 ## 2. Storyboard
 
