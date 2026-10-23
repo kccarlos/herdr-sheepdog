@@ -2,8 +2,8 @@
 
 Xcode Cloud only archives the app and uploads it to TestFlight, on an
 `ios-v*` tag. **It runs no tests and builds no pull requests.** The tests,
-unit and UI, run on GitHub Actions: `.github/workflows/ios.yml` on a
-GitHub-hosted Mac, simulator only, no secrets, with fixture daemons built in
+unit and UI, run on GitHub Actions: `.github/workflows/ios.yml` on
+GitHub-hosted Macs, simulator only, no secrets, with fixture daemons built in
 the same job ([development.md](../../../docs/dev/development.md#cicd),
 [status.md](status.md#running-the-tests)). Until 2026-10-21 a **PR**
 workflow also tested every pull request here; it was removed when the tests

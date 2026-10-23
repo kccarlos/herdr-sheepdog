@@ -106,22 +106,40 @@ GitHub Actions runs Linux jobs, on self-hosted runners in Cloud Run
 worker pools ([infra/ci-runners](../../infra/ci-runners/README.md); repo variable
 `CI_RUNNER=ubuntu-latest` switches back to GitHub-hosted): vet, test, lint, web
 tests, the offline eval, the policy guard and the cross-compile on every PR, and the
-Ubuntu release on `v*` tags. The one exception is `ios.yml`, which runs the iPhone app's whole test
-suite on a GitHub-hosted Mac (free for a public repository; the `xcode-27`
-image, Xcode 27.1 picked with `xcode-select`) for PRs and pushes to `main`
-that touch `ios/`, `cmd/`, `internal/web/` or `go.mod`. It builds the
-daemon with Go in the same job and starts two fixture daemons on free ports
+Ubuntu release on `v*` tags. The one exception is `ios.yml`, which runs the iPhone app's tests
+on GitHub-hosted Macs (free for a public repository; the `xcode-27`
+image, Xcode 27.1 picked with `xcode-select`). A Linux `plan` job reads the
+paths a PR or push changes (`ios/scripts/ci-plan.sh tier`) and picks a tier:
+
+| Change | Mac jobs |
+|---|---|
+| A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and four shards, the full suite |
+| A PR that changes only the daemon's API: `cmd/`, `internal/web/`, `internal/voice/wsproto/`, `internal/termproto/`, `testdata/protocol/`, `go.mod`, `go.sum` | smoke |
+| A push to `main` that changes any of the above | smoke |
+| Anything else (docs, other Go code, the web UI) | none |
+
+Smoke is the unit tests (`SheepdogKitTests`, which include the protocol
+goldens), the first-run, settings, pairing, questions, history, agent
+window and reconnect UI tests, and one iPad test; the shards split the
+other UI test classes, balanced by their CI durations.
+`ios/scripts/ci-shards.txt` lists which job runs which tests, and the
+`plan` job fails if a UI test class is in no job (`ci-plan.sh check`,
+tested by `ci-plan_test.sh`), so a new class cannot be skipped silently.
+Smoke and the shards run side by side, one Mac each, and the first that
+fails cancels the rest (`fail-fast`). Each job builds the app and the
+daemon itself (the build hides the simulator's boot) and starts two
+fixture daemons on free ports
 (`ios/scripts/fixture-daemons.sh`, `--brain=fake --herdr=mock --voice=off`,
-temp data dirs), then runs the unit tests (`SheepdogKitTests`) and the UI
-tests (`SheepdogUITests`) against them; `HistoryApprovalUITests` runs after
+temp data dirs) for its tests; `HistoryApprovalUITests` runs after
 a fresh daemon restart, and `ReconnectUITests` with
-`ios/scripts/fixture-daemon-restarter.sh` running. Only the opt-in
+`ios/scripts/fixture-daemon-restarter.sh` running. `IPadUITests` runs on an
+iPad simulator, the rest on the newest iPhone that is not a foldable. Only the opt-in
 recording and screenshot tests skip. A failing test is retried up to
 three times (`-retry-tests-on-failure`): on the hosted Mac a tap now and
 then lands during an animation and is lost, a different test each run, so
 the job fails only when a test never passes; look for repeated
 `Test Case … failed` lines in a green run's log to find flaky tests. It builds for the simulator only and
-uses no secrets; it is not a required check (see below). Archives, signing
+uses no secrets. Archives, signing
 and TestFlight stay on Xcode Cloud, which runs no tests, and no signing
 certificate or App Store Connect key for the app goes into GitHub. The other exception
 is `release.yml`'s `sign-macos` job, which signs and notarizes the daemon's
@@ -134,12 +152,11 @@ appears anywhere else, including a `release.yml` job without
 `environment: release`, if `release.yml` reads a secret other than
 `GITHUB_TOKEN` outside such a job, or if `ios.yml` reads any secret.
 
-`ios.yml` is not a required check because of its `paths:` filter: on a PR
-that touches none of those paths it never starts, and a required check that
-never starts blocks the merge. Making it required means giving it the same
-`changes` gate as `ci.yml` first (the job always starts and skips its steps
-when nothing relevant changed), then adding the `tests` check of the `iOS`
-workflow to the branch protection of `main`.
+`ios.yml` starts on every PR (no `paths:` filter), so its `ios-summary`
+job always reports: it passes when the tier's Mac jobs passed, or when the
+tier is none and none ran, and fails otherwise. It is the one iOS check to
+require in the branch protection of `main`; the per-job `tests (…)` checks
+come and go with the tier and must not be required.
 
 The iPhone app lives in [`ios/`](../../ios/README.md); Xcode Cloud only
 archives its TestFlight builds ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`

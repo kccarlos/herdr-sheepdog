@@ -113,15 +113,21 @@ xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17'
 The unit suite (`SheepdogKitTests`) has 437 tests. `LiveDaemonTests` and
 the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
-**In CI** (`.github/workflows/ios.yml`, a GitHub-hosted Mac) the job builds
+**In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) a smoke job
+and four shards split the suite; which changes run which jobs is in
+[development.md](../../../docs/dev/development.md#cicd). Each job builds
 the daemon, starts both fixture daemons on free ports with
 `scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
 the main daemon, so the history has a restart divider), and passes the
 ports as `TEST_RUNNER_SHEEPDOG_FIXTURE_PORT` and
-`TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT`. It runs the unit suite and the UI
-tests, then `HistoryApprovalUITests` after `scripts/fixture-daemons.sh
-restart`, then `ReconnectUITests` with `scripts/fixture-daemon-restarter.sh`
-running. Only the opt-in recording and screenshot tests skip there.
+`TEST_RUNNER_SHEEPDOG_FIXTURE_PAIR_PORT`. Smoke runs
+`HistoryApprovalUITests` after `scripts/fixture-daemons.sh restart` and
+`ReconnectUITests` with `scripts/fixture-daemon-restarter.sh` running. Only
+the opt-in recording and screenshot tests skip there.
+
+**A new UI test class** goes into [`scripts/ci-shards.txt`](../../scripts/ci-shards.txt),
+in the shortest shard (the plan job fails until it is listed); run
+`bash scripts/ci-plan_test.sh` to check.
 
 To run the UI tests for real on your Mac, start the two fixture daemons
 from the daemon repository root (`..` from `ios/`). Neither needs a model

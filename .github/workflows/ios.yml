@@ -1,43 +1,28 @@
 name: iOS
 
-# The iPhone app's (ios/) whole test suite on a GitHub-hosted Mac: the unit
-# tests (SheepdogKitTests) and the UI tests (SheepdogUITests), the UI tests
+# The iPhone app's (ios/) tests on GitHub-hosted Macs: the unit tests
+# (SheepdogKitTests) and the UI tests (SheepdogUITests), the UI tests
 # against fixture daemons built from this checkout. It builds for the
 # simulator only, so it needs no signing certificate, no App Store Connect
 # key and no secret of any kind (scripts/workflow-policy.sh checks that).
 # Xcode Cloud only archives and uploads TestFlight builds on ios-v* tags; it
 # runs no tests (ios/docs/dev/xcode-cloud.md).
 #
-# Not a required check yet: it runs only when ios/ or the daemon's API
-# changes, and a required check that never starts blocks the merge
-# (docs/dev/development.md, CI/CD).
+# Tiers (docs/dev/development.md, CI/CD): the plan job reads the changed
+# paths (ios/scripts/ci-plan.sh tier) and starts
+#   full   smoke and the four shards, for a PR that changes the app or this
+#          workflow (and for a manual run);
+#   smoke  smoke only, for a PR that changes the daemon's API, and for every
+#          push to main that changes either;
+#   none   no Mac at all (docs-only and other changes).
+# The jobs and their tests come from ios/scripts/ci-shards.txt. The workflow
+# starts on every PR, so ios-summary always reports and can be the one
+# required check.
 
 on:
   pull_request:
-    paths:
-      - 'ios/**'
-      - 'cmd/**'
-      - 'internal/web/**'
-      - 'internal/voice/wsproto/**'
-      - 'internal/termproto/**'
-      - 'testdata/protocol/**'
-      - 'docs/dev/*-contract.md'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ios.yml'
   push:
     branches: [main]
-    paths:
-      - 'ios/**'
-      - 'cmd/**'
-      - 'internal/web/**'
-      - 'internal/voice/wsproto/**'
-      - 'internal/termproto/**'
-      - 'testdata/protocol/**'
-      - 'docs/dev/*-contract.md'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ios.yml'
   workflow_dispatch:
 
 permissions:
@@ -48,17 +33,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.plan.outputs.tier }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      # On a PR the checkout is the merge commit; its first parent is the
+      # base branch, so HEAD^1..HEAD is what the PR changes.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: The plan script's tests
+        run: bash ios/scripts/ci-plan_test.sh
+
+      # Fails when a UI test class is in no job of ci-shards.txt.
+      - name: Every UI test class is in a job
+        run: bash ios/scripts/ci-plan.sh check
+
+      - name: Pick the tier
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            workflow_dispatch) tier=full ;;
+            pull_request) tier=$(git diff --name-only HEAD^1 HEAD | bash ios/scripts/ci-plan.sh tier) ;;
+            push)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] \
+                || ! git fetch -q --depth=1 origin "$BEFORE"; then
+                tier=smoke
+              else
+                tier=$(git diff --name-only "$BEFORE" HEAD | bash ios/scripts/ci-plan.sh tier)
+              fi
+              # Main gets smoke only: the full suite ran on the PR.
+              if [ "$tier" = full ]; then tier=smoke; fi
+              ;;
+            *) tier=none ;;
+          esac
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+          if [ "$tier" != none ]; then
+            echo "matrix=$(bash ios/scripts/ci-plan.sh matrix "$tier")" >> "$GITHUB_OUTPUT"
+          fi
+          echo "::notice::iOS tier: $tier"
+
   tests:
+    needs: plan
+    if: needs.plan.outputs.tier != 'none'
+    name: tests (${{ matrix.name }})
     # The xcode-27 image (macOS with Xcode 27.x) has the Xcode the app is
     # developed with; macos-26 stops at Xcode 26.x. Its simulators run iOS
     # 27.0, above the app's iOS 26 deployment target.
     # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
     runs-on: xcode-27
     timeout-minutes: 60
+    strategy:
+      # Smoke and the shards run side by side; the first job that fails
+      # cancels the others (a red smoke stops the shards). Each job builds
+      # the app itself: the build hides the simulator's boot, which costs
+      # five minutes when it is not hidden.
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
       BUNDLE_ID: com.github.kccarlos.herdr-sheepdog-ios
+      IPHONE_TESTS: ${{ matrix.iphone }}
+      IPAD_TESTS: ${{ matrix.ipad }}
+      WANT_IPHONE: ${{ matrix.iphone != '' || matrix.history || matrix.reconnect }}
+      WANT_IPAD: ${{ matrix.ipad != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -76,6 +122,49 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
+
+      # The simulators boot while the app builds (a few minutes each on a
+      # cold runner). A job with iPhone and iPad tests (smoke) boots both,
+      # runs the iPad tests first and then shuts the iPad down.
+      - name: Pick the simulators and start booting them
+        id: sim
+        run: |
+          # The newest iPhone on the image, but not a foldable one (iPhone
+          # Duo): unfolded it has regular width, which gets the iPad layout,
+          # and the iPhone tests test the iPhone layout. The newest iPad Pro
+          # 13" (any iPad if there is none) for IPadUITests.
+          picked=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devs = json.load(sys.stdin)["devices"]
+          def newest(ok):
+              best = None
+              for runtime, items in devs.items():
+                  if "iOS" not in runtime:
+                      continue
+                  ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
+                  for d in items:
+                      if ok(d["name"]) and (best is None or ver > best[0]):
+                          best = (ver, d["udid"], d["name"], runtime)
+              return best
+          iphone = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
+          ipad = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
+          for key, best in (("iphone", iphone), ("ipad", ipad)):
+              if best is None:
+                  sys.exit("no %s simulator available" % key)
+              print("%s=%s" % (key, best[1]))
+              print(key, best[2], best[3], file=sys.stderr)
+          ')
+          iphone=$(echo "$picked" | sed -n 's/^iphone=//p')
+          ipad=$(echo "$picked" | sed -n 's/^ipad=//p')
+          # The build is for one simulator; its products run on the other.
+          build=$ipad
+          if [ "$WANT_IPHONE" = true ]; then build=$iphone; xcrun simctl boot "$iphone" || true; fi
+          if [ "$WANT_IPAD" = true ]; then xcrun simctl boot "$ipad" || true; fi
+          {
+            echo "iphone=$iphone"
+            echo "ipad=$ipad"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
 
       # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
       # checkout's daemon, so an API change that breaks the app fails here.
@@ -109,36 +198,6 @@ jobs:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
-      - name: Pick a simulator and start booting it
-        id: sim
-        run: |
-          # The newest available iPhone simulator on the image, but not a
-          # foldable one (iPhone Duo): unfolded it has regular width, which
-          # gets the iPad layout, and this suite tests the iPhone layout
-          # (the iPad step below tests the other).
-          udid=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
-          devs = json.load(sys.stdin)["devices"]
-          best = None
-          for runtime, items in devs.items():
-              if "iOS" not in runtime:
-                  continue
-              ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
-              for d in items:
-                  name = d["name"]
-                  if not name.startswith("iPhone") or "Duo" in name or "Fold" in name:
-                      continue
-                  if best is None or ver > best[0]:
-                      best = (ver, d["udid"], name, runtime)
-          if best is None:
-              sys.exit("no iPhone simulator available")
-          print(best[1])
-          print(best[2], best[3], file=sys.stderr)
-          ')
-          echo "udid=$udid" >> "$GITHUB_OUTPUT"
-          # Boots while the app builds (a few minutes on a cold runner).
-          xcrun simctl boot "$udid" || true
-
       - name: Build for testing
         id: build
         working-directory: ios
@@ -149,7 +208,7 @@ jobs:
             -project Sheepdog.xcodeproj \
             -scheme Sheepdog \
             -configuration Debug \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -destination "id=${{ steps.sim.outputs.build }}" \
             -derivedDataPath "$DERIVED" \
             -clonedSourcePackagesDirPath "$SPM" \
             -disableAutomaticPackageResolution \
@@ -159,15 +218,19 @@ jobs:
           if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
           exit "$status"
 
-      - name: Wait for the simulator
+      - name: Wait for the simulators
         run: |
-          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
           # The app asks for the microphone when the session starts.
-          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
+          for want in "$WANT_IPHONE:${{ steps.sim.outputs.iphone }}" "$WANT_IPAD:${{ steps.sim.outputs.ipad }}"; do
+            [ "${want%%:*}" = true ] || continue
+            xcrun simctl bootstatus "${want#*:}" -b
+            xcrun simctl privacy "${want#*:}" grant microphone "$BUNDLE_ID"
+          done
 
       # Two free ports for the main (--voice=off) and the pair daemon, and
       # a control directory for scripts/fixture-daemon-restarter.sh. The
-      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift).
+      # TEST_RUNNER_ prefix hands them to the UI tests (Fixture.swift). Every
+      # job starts them: a test that needs a daemon skips without one.
       - name: Start the fixture daemons
         id: fixture
         run: |
@@ -191,27 +254,50 @@ jobs:
             SHEEPDOG_FIXTURE_PAIR_PORT=$pair_port SHEEPDOG_FIXTURE_DATA=$RUNNER_TEMP/fixture \
             ios/scripts/fixture-daemons.sh start
 
-      # Everything but the two tests that need a fresh restart or the
-      # restarter: the unit suite and the other UI tests. The recordings and
-      # screenshot tests skip themselves (they need SHEEPDOG_SHOTS and the
-      # like). A hosted Mac is slow enough that a UI tap now and then lands
-      # while an animation runs and is lost, a different test each run; a
-      # test that fails is run again (up to 3 times) and the job fails only
-      # if it never passes. The retries show in the log as repeated
+      # A hosted Mac is slow enough that a UI tap now and then lands while
+      # an animation runs and is lost, a different test each run; a test
+      # that fails is run again (up to 3 times) and the job fails only if
+      # it never passes. The retries show in the log as repeated
       # "Test Case ... failed" lines above the final pass.
-      - name: Unit and UI tests
+
+      # The iPad layout (IPadUITests, offline demo, no daemon).
+      - name: UI tests - iPad
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.ipad != '' }}
         working-directory: ios
         run: |
           status=0
+          # shellcheck disable=SC2086 # IPAD_TESTS is a list of arguments
           xcodebuild test-without-building \
             -project Sheepdog.xcodeproj \
             -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -destination "id=${{ steps.sim.outputs.ipad }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
-            -skip-testing:SheepdogUITests/HistoryApprovalUITests \
-            -skip-testing:SheepdogUITests/ReconnectUITests \
+            $IPAD_TESTS \
+            -resultBundlePath "$RESULTS/IPad.xcresult" \
+            > "$RESULTS/ipad.log" 2>&1 || status=$?
+          xcrun simctl shutdown "${{ steps.sim.outputs.ipad }}" || true
+          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
+
+      # The job's unit and UI tests on the iPhone, but the two that need a
+      # fresh restart or the restarter (below). The recordings and
+      # screenshot tests skip themselves (they need SHEEPDOG_SHOTS and the
+      # like).
+      - name: Unit and UI tests - iPhone
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.iphone != '' }}
+        working-directory: ios
+        run: |
+          status=0
+          # shellcheck disable=SC2086 # IPHONE_TESTS is a list of arguments
+          xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            $IPHONE_TESTS \
             -resultBundlePath "$RESULTS/Tests.xcresult" \
             > "$RESULTS/tests.log" 2>&1 || status=$?
           sh scripts/ci-test-summary.sh "$RESULTS/tests.log" "$status"
@@ -220,7 +306,7 @@ jobs:
       # just before it (the other UI tests add conversation after the seeded
       # restart).
       - name: UI test - history and approval
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.history }}
         working-directory: ios
         run: |
           ./scripts/fixture-daemons.sh restart
@@ -228,7 +314,7 @@ jobs:
           xcodebuild test-without-building \
             -project Sheepdog.xcodeproj \
             -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
@@ -239,7 +325,7 @@ jobs:
 
       # The restarter kills and restarts the main daemon when the test asks.
       - name: UI test - reconnect after a daemon restart
-        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.reconnect }}
         working-directory: ios
         run: |
           mkdir -p "$SHEEPDOG_CONTROL_DIR"
@@ -249,7 +335,7 @@ jobs:
           TEST_RUNNER_SHEEPDOG_CONTROL_DIR="$SHEEPDOG_CONTROL_DIR" xcodebuild test-without-building \
             -project Sheepdog.xcodeproj \
             -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
             -derivedDataPath "$DERIVED" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
@@ -259,51 +345,6 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
           sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
 
-      # The iPad layout (IPadUITests, offline demo, no daemon) on an iPad
-      # simulator, from the same build. Only these tests: the rest of the
-      # suite already ran on the iPhone above, and running it all twice
-      # would double the job's time.
-      - name: UI tests - iPad
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        working-directory: ios
-        run: |
-          xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" || true
-          ipad=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
-          devs = json.load(sys.stdin)["devices"]
-          best = None
-          for runtime, items in devs.items():
-              if "iOS" not in runtime:
-                  continue
-              ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
-              for d in items:
-                  if d["name"].startswith("iPad Pro 13") and (best is None or ver > best[0]):
-                      best = (ver, d["udid"], d["name"], runtime)
-          if best is None:
-              for runtime, items in devs.items():
-                  for d in items:
-                      if "iOS" in runtime and d["name"].startswith("iPad") and best is None:
-                          best = ((), d["udid"], d["name"], runtime)
-          if best is None:
-              sys.exit("no iPad simulator available")
-          print(best[1])
-          print(best[2], best[3], file=sys.stderr)
-          ')
-          xcrun simctl boot "$ipad" || true
-          xcrun simctl bootstatus "$ipad" -b
-          status=0
-          xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=$ipad" \
-            -derivedDataPath "$DERIVED" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
-            -only-testing:SheepdogUITests/IPadUITests \
-            -resultBundlePath "$RESULTS/IPad.xcresult" \
-            > "$RESULTS/ipad.log" 2>&1 || status=$?
-          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
-
       - name: Stop the fixture daemons
         if: always()
         run: ios/scripts/fixture-daemons.sh stop || true
@@ -312,9 +353,36 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-results
+          name: ios-test-results-${{ matrix.name }}
           path: |
             ${{ runner.temp }}/results
             ${{ runner.temp }}/fixture/**/*.log
             ${{ runner.temp }}/restarter.log
           retention-days: 7
+
+  # The one check to require on main: green when the tier's jobs passed,
+  # or when the tier is none and no Mac job ran.
+  summary:
+    name: ios-summary
+    needs: [plan, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the plan and the tests
+        env:
+          PLAN: ${{ needs.plan.result }}
+          TIER: ${{ needs.plan.outputs.tier }}
+          TESTS: ${{ needs.tests.result }}
+        run: |
+          echo "plan: $PLAN, tier: $TIER, tests: $TESTS"
+          if [ "$PLAN" != success ]; then echo "::error::the plan job did not succeed"; exit 1; fi
+          case "$TIER" in
+            none) want=skipped ;;
+            full|smoke) want=success ;;
+            *) echo "::error::unknown tier '$TIER'"; exit 1 ;;
+          esac
+          if [ "$TESTS" != "$want" ]; then
+            echo "::error::tier $TIER wants the tests $want, got $TESTS"
+            exit 1
+          fi
