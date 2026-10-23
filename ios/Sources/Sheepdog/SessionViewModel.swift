@@ -2224,6 +2224,7 @@ final class SessionViewModel: ObservableObject {
                 let (_, response) = try await session.data(from: url)
                 return (response as? HTTPURLResponse)?.statusCode == 200
             } catch {
+                SheepdogLog.session.error("pair probe \(address, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 if trust.sawMismatch { mismatches.add() }
                 return false
             }
