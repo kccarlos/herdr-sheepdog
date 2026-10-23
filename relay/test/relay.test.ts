@@ -81,14 +81,14 @@ describe("health", () => {
     const r = await SELF.fetch("https://relay.test/v1/health");
     expect(r.status).toBe(200);
     const j = (await r.json()) as { ok: boolean; version: string };
-    expect(j.version).toBe("1.0.0");
+    expect(j.version).toBe("1.1.0");
     // The test bindings carry no APNS_KEY, so the relay is not fully configured.
     expect(j.ok).toBe(false);
   });
 
   it("is ok with every secret set", async () => {
     const r = await handle(new Request("https://relay.test/v1/health"), fullEnv(), deps(fakeAPNs().fetch));
-    expect(await r.json()).toEqual({ ok: true, version: "1.0.0" });
+    expect(await r.json()).toEqual({ ok: true, version: "1.1.0" });
   });
 
   it("404s an unknown path and 405s a GET register", async () => {
@@ -232,6 +232,87 @@ describe("send", () => {
     const tok = await register(e);
     const r = await handle(post("/v1/send", { relay_token: tok, payload }), fullEnv({ APNS_KEY: undefined }), deps(fakeAPNs().fetch));
     expect(r.status).toBe(503);
+  });
+});
+
+describe("activity", () => {
+  const state = { phase: "away", waiting: 2, working: 1, done: 0, sealed: { c: btoa("rows"), n: btoa("123456789012") } };
+
+  it("sends a Live Activity update with the content state as given", async () => {
+    const e = fullEnv();
+    const tok = await register(e);
+    const apns = fakeAPNs();
+    const r = await handle(post("/v1/activity", { relay_token: tok, content_state: state, timestamp: 1_800_000_000, stale_date: 1_800_000_900 }), e, deps(apns.fetch));
+    expect(r.status).toBe(200);
+    const c = apns.calls[0];
+    expect(c.url).toBe(`https://api.push.apple.com/3/device/${DEVICE}`);
+    expect(c.headers["apns-topic"]).toBe(`${TOPIC}.push-type.liveactivity`);
+    expect(c.headers["apns-push-type"]).toBe("liveactivity");
+    expect(c.headers["apns-priority"]).toBe("5");
+    expect(c.body).toEqual({
+      aps: { timestamp: 1_800_000_000, event: "update", "content-state": state, "stale-date": 1_800_000_900 },
+    });
+  });
+
+  it("ends with a dismissal date, at priority 10, and fills in the timestamp", async () => {
+    const e = fullEnv();
+    const tok = await register(e, "sandbox");
+    const apns = fakeAPNs();
+    const now = 1_800_000_123_456;
+    const r = await handle(post("/v1/activity", { relay_token: tok, event: "end", content_state: state, dismissal_date: 1, priority: 10 }), e, deps(apns.fetch, () => now));
+    expect(r.status).toBe(200);
+    expect(apns.calls[0].url).toBe(`https://api.sandbox.push.apple.com/3/device/${DEVICE}`);
+    expect(apns.calls[0].headers["apns-priority"]).toBe("10");
+    expect(apns.calls[0].body.aps).toMatchObject({ event: "end", timestamp: 1_800_000_123, "dismissal-date": 1 });
+  });
+
+  it("takes an activity token longer than a device token", async () => {
+    const e = fullEnv();
+    const long = "b2".repeat(160);
+    const reg = await handle(post("/v1/register", { device_token: long, environment: "production", bundle_id: TOPIC }), e, deps(fakeAPNs().fetch));
+    expect(reg.status).toBe(200);
+    const { relay_token } = (await reg.json()) as { relay_token: string };
+    const apns = fakeAPNs();
+    const r = await handle(post("/v1/activity", { relay_token, content_state: state }), e, deps(apns.fetch));
+    expect(r.status).toBe(200);
+    expect(apns.calls[0].url).toBe(`https://api.push.apple.com/3/device/${long}`);
+    const tooLong = await handle(post("/v1/register", { device_token: "b2".repeat(201), environment: "production", bundle_id: TOPIC }), e, deps(fakeAPNs().fetch));
+    expect(tooLong.status).toBe(400);
+  });
+
+  it("maps a gone activity token to 410", async () => {
+    const e = fullEnv();
+    const tok = await register(e);
+    const r = await handle(post("/v1/activity", { relay_token: tok, content_state: state }), e, deps(fakeAPNs({ status: 410, reason: "Unregistered" }).fetch));
+    expect(r.status).toBe(410);
+  });
+
+  it("refuses a bad token with 401", async () => {
+    const other = await sealToken("another-secret", { v: 1, device_token: DEVICE, environment: "production", issued_at: 1 });
+    const apns = fakeAPNs();
+    const r = await handle(post("/v1/activity", { relay_token: other, content_state: state }), fullEnv(), deps(apns.fetch));
+    expect(r.status).toBe(401);
+    expect(apns.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ["no relay_token", { content_state: state }],
+    ["no content state", { relay_token: "x" }],
+    ["a list as content state", { relay_token: "x", content_state: [1] }],
+    ["a huge content state", { relay_token: "x", content_state: { pad: "x".repeat(3600) } }],
+    ["a bad event", { relay_token: "x", content_state: state, event: "start" }],
+    ["a bad stale date", { relay_token: "x", content_state: state, stale_date: "soon" }],
+    ["a bad priority", { relay_token: "x", content_state: state, priority: 1 }],
+  ])("rejects %s with 400", async (_name, body) => {
+    const r = await handle(post("/v1/activity", body), fullEnv(), deps(fakeAPNs().fetch));
+    expect(r.status).toBe(400);
+  });
+
+  it("is rate limited per activity token", async () => {
+    const e = fullEnv({ SEND_LIMITER: { limit: async () => ({ success: false }) } });
+    const tok = await register(e);
+    const r = await handle(post("/v1/activity", { relay_token: tok, content_state: state }), e, deps(fakeAPNs().fetch));
+    expect(r.status).toBe(429);
   });
 });
 

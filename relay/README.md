@@ -17,7 +17,10 @@ own relay is in [`../docs/iphone-app.md`](../docs/iphone-app.md).
   `blocked`, …), which picks the notification's category and urgency.
 - The daemon's IP address.
 
-It never sees a title, an agent name, a sentence or a pending prompt. It
+It never sees a title, an agent name, a sentence or a pending prompt.
+For a Live Activity update it sees the voice's phase and how many agents
+are waiting, working and done; the daemon seals the agents' names and
+questions with the phone's key like a notification. It
 keeps no database and no KV store, and logs only the route and the
 status code of each request.
 
@@ -27,9 +30,10 @@ All bodies are JSON.
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /v1/health` | — | `200 {"ok":bool,"version":"1.0.0"}`. `ok` is false while a secret is missing. |
+| `GET /v1/health` | — | `200 {"ok":bool,"version":"1.1.0"}`. `ok` is false while a secret is missing. |
 | `POST /v1/register` | `{"device_token":"<hex>","environment":"production"\|"sandbox","bundle_id":"<the app's bundle id>"}` | `200 {"relay_token":"…"}`. `400` for a bad token or environment, or a `bundle_id` other than `APNS_TOPIC`; `413` over 1 KiB; `429` over 10 a minute from one IP. |
 | `POST /v1/send` | `{"relay_token":"…","payload":{"ciphertext":"<base64>","nonce":"<base64, 12 bytes>","kind":"approval"?,"collapse_id":"…"?},"priority":10?}` | `200 {"ok":true}`; `410 {"error","reason"}` when APNs says the device token is gone (`Unregistered`, `BadDeviceToken`, `DeviceTokenNotForTopic`): drop the relay token; `502 {"error","status","reason"}` for any other APNs refusal; `401` for a relay token this relay did not issue or that was altered; `400` for a malformed body; `413` over 8 KiB; `429` over 20 a minute for one device. |
+| `POST /v1/activity` | `{"relay_token":"…","content_state":{…},"event":"update"\|"end"?,"timestamp":<unix s>?,"stale_date":<unix s>?,"dismissal_date":<unix s>?,"priority":5\|10?}` | A Live Activity update for an activity push token (registered with `/v1/register` like a device token): `apns-push-type: liveactivity`, topic `<APNS_TOPIC>.push-type.liveactivity`, `aps {timestamp, event, content-state, stale-date, dismissal-date}`. Priority defaults to 5. Answers as `/v1/send` does; `400` for a content state that is not an object or over 3500 bytes of JSON; the `429` limit counts per activity token. |
 
 A relay token is `base64url(0x01 || iv || AES-256-GCM(SHA-256(RELAY_SECRET), {"v":1,"device_token","environment","issued_at"}))`.
 Changing `RELAY_SECRET` invalidates every relay token; daemons that still
