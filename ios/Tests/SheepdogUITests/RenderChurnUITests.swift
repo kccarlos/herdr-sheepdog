@@ -42,14 +42,18 @@ final class RenderChurnUITests: XCTestCase {
 
     func testShellMenuStaysOpenWhileTheSessionRerenders() throws {
         let app = launchDemo()
-        tapMenuItem(app, menu: "toolbar.new", item: "new.shell", until: app.buttons["shell.menu"])
+        // The Agents tab learns whether the computer offers the shell.
+        showAgentsPane(app)
+        let header = app.descendants(matching: .any).matching(identifier: "shell.header").firstMatch
+        chooseMenuItem(app, menu: app.buttons.matching(identifier: "toolbar.new"), item: app.buttons["new.shell"], until: header)
+        XCTAssertTrue(header.exists, "+ ▸ New shell opens the shell")
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "shell.menu"), item: app.buttons["shell.menu.copy"], probe: "shell")
     }
 
     func testSpacesMenusStayOpenWhileTheSessionRerenders() throws {
         let app = launchDemo()
         let tree = app.buttons["spaces.row.shop-fix-login"]
-        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces", until: tree)
+        chooseMenuItem(app, menu: app.buttons.matching(identifier: "toolbar.more"), item: app.buttons["toolbar.spaces"], until: tree)
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "spaces.new"), item: app.buttons["website"], probe: "spaces.new")
         tapWhenTappable(tree, "the worktree space")
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "space.worktree.shop-fix-login"), item: app.buttons["space.worktree.remove"], probe: "spaces.worktree")
@@ -85,6 +89,29 @@ final class RenderChurnUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Opens `menu` and taps `item` once it has settled on screen. Under
+    /// the churn a second tap on the menu button (as `tapMenuItem` retries)
+    /// closes the menu again, so the button is tapped only while the item
+    /// is not there.
+    private func chooseMenuItem(_ app: XCUIApplication, menu: XCUIElementQuery, item: XCUIElement, until: XCUIElement) {
+        let deadline = Date().addingTimeInterval(40)
+        while !until.exists, Date() < deadline {
+            if !item.exists {
+                for i in 0 ..< menu.count where menu.element(boundBy: i).isTappable {
+                    menu.element(boundBy: i).tap()
+                    break
+                }
+                _ = item.waitForExistence(timeout: 4)
+            }
+            sleep(1)
+            if let frame = try? item.snapshot().frame, frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty {
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            }
+            _ = until.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(until.exists, "\(item) opened \(until)")
+    }
 
     private func openWindow(_ app: XCUIApplication, _ alias: String) {
         showAgentsPane(app)
