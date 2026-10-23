@@ -162,11 +162,14 @@ struct AgentCard: View {
     let question: ApprovalFlow.Card?
     var primary = true
     var voiceQuestion = true
+    /// iPad: the expanded card also lists up to 3 earlier messages.
+    var showsEarlier = false
     @Binding var expanded: Bool
     let answer: (String, Int) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openAgentWindow) private var openWindow
 
     private var waiting: Bool { question != nil }
     private var showsDetails: Bool { !waiting && expanded }
@@ -210,6 +213,8 @@ struct AgentCard: View {
             RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: waiting && primary ? 1.5 : 1)
         )
+        // The window zooms out of the whole card.
+        .zoomSource(agent.paneID)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flock.agent.\(agent.alias)")
     }
@@ -275,6 +280,8 @@ struct AgentCard: View {
 
     private var dot: some View {
         Circle().fill(tint).frame(width: 8, height: 8)
+            .doneFlash(agent.state)
+            .animation(Theme.ease, value: agent.state)
             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
     }
 
@@ -303,6 +310,7 @@ struct AgentCard: View {
                 .font(.footnote.weight(waiting ? .semibold : .medium))
                 .foregroundStyle(Theme.textColor(for: agent.state))
                 .contentTransition(.numericText())
+                .animation(Theme.ease, value: since)
                 .lineLimit(1)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).state")
         }
@@ -310,7 +318,9 @@ struct AgentCard: View {
 
     /// The round window button: opens the agent's live terminal.
     private var windowButton: some View {
-        NavigationLink(value: AgentWindowRoute(paneID: agent.paneID)) {
+        Button {
+            openWindow(.agent(agent.paneID))
+        } label: {
             Image(systemName: "apple.terminal")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Theme.ink)
@@ -319,6 +329,7 @@ struct AgentCard: View {
                 .overlay(Circle().strokeBorder(Theme.line, lineWidth: 1))
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
+                .hoverEffect()
         }
         .buttonStyle(.plain)
         .padding(.top, -6)
@@ -352,6 +363,7 @@ struct AgentCard: View {
                 }
             }
             journal
+            if showsEarlier { earlier }
             if let answered = agent.answeredQuestion {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Last question (answered)")
@@ -423,6 +435,34 @@ struct AgentCard: View {
                 .font(.footnote)
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// iPad: the worker's messages before the newest, newest first, one
+    /// line each.
+    @ViewBuilder
+    private var earlier: some View {
+        let entries = agent.earlierWorkerMessages()
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Earlier")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.muted)
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text([entry.at?.formatted(date: .omitted, time: .shortened), entry.event?.trimmedOrNil].compactMap { $0 }.joined(separator: " · "))
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize()
+                        Text(entry.lastAssistant?.trimmedOrNil ?? "")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.ink)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .accessibilityIdentifier("flock.agent.\(agent.alias).earlier")
         }
     }
 

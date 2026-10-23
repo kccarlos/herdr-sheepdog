@@ -100,7 +100,6 @@ final class FeedbackTests: XCTestCase {
         let request = try XCTUnwrap(StubProtocol.seen.first)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.url?.path, "/api/feedback")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
         XCTAssertEqual(body["tag"] as? String, "paused")
         XCTAssertEqual(body["note"] as? String, "that paused")

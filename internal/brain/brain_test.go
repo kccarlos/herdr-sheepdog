@@ -911,8 +911,13 @@ func TestQueuedEventTurnGetsItsFullBudget(t *testing.T) {
 		}
 	}
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("first", "")}, braintest.Step{FnCtx: step})
+	// The user turn's budget, which also bounds the event turn's wait, is
+	// not what is under test, so it is well above the 350 ms the user
+	// turn holds the lock: it runs on the wall clock from before the
+	// event turn queues, and at 400 ms a slow runner spent the last
+	// ~50 ms getting to the release and timed the user turn out.
 	h := newHarness(t, m, func(c *Config) {
-		c.AnnounceTurnTimeout, c.UtteranceTimeout, c.FinalGrace = 300*time.Millisecond, 400*time.Millisecond, -1
+		c.AnnounceTurnTimeout, c.UtteranceTimeout, c.FinalGrace = 300*time.Millisecond, 2*time.Second, -1
 	})
 	ceo := make(chan error, 1)
 	go func() {
@@ -934,7 +939,7 @@ func TestQueuedEventTurnGetsItsFullBudget(t *testing.T) {
 	}()
 	waitQueued(t, h.brain, 1)
 	// Queued for 350 ms, longer than its own 300 ms budget but within
-	// the user turn's 400 ms; its step then takes 150 ms.
+	// the user turn's 2 s; its step then takes 150 ms.
 	time.Sleep(350 * time.Millisecond)
 	close(release)
 	if err := <-ceo; err != nil {
@@ -1220,13 +1225,19 @@ func TestCloseEndsATurnInFlight(t *testing.T) {
 	if err := h.brain.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// Busy reads the turn's own counter, which Turn drops before it
+	// returns; the send on done comes after that, in this test's
+	// goroutine, so it cannot tell whether Close waited.
+	if h.brain.Busy() {
+		t.Fatal("Close returned before the turn in flight ended")
+	}
 	select {
 	case err := <-done:
 		if !errors.Is(err, ErrFallback) {
 			t.Errorf("turn in flight = %v, want a fallback", err)
 		}
-	default:
-		t.Fatal("Close returned before the turn in flight ended")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn in flight never returned")
 	}
 	if _, err := h.ask("and now?", "auth"); !errors.Is(err, ErrClosed) || !errors.Is(err, ErrFallback) {
 		t.Errorf("turn after Close = %v, want ErrClosed (a fallback)", err)

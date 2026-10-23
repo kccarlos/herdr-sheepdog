@@ -5,7 +5,8 @@
 **Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for
-notifications, if you set up push). It needs iOS 26 or newer.
+notifications, if you set up push). It needs iOS 26 or newer, and runs on
+iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 
 ## Install
 
@@ -23,18 +24,29 @@ setup.
 
 ## Pair
 
-1. On the computer: `sheepdog setup`, step 4 (**Turn on phone access**), or
-   later `sheepdog pair`.
-2. In the app: ⋯ ▸ Settings, your computer's row (Connection), **Scan pairing code**. (Or point the iPhone
-   Camera at the code and open the `sheepdog://pair` link; the app asks
-   "Pair with <host>?" first.)
-3. Allow the microphone and notifications. Tap the orb to connect.
+1. On the computer: open the setup page (`sheepdog setup`), or run
+   `sheepdog pair`. It shows a pairing code. Each code works once, for 10
+   minutes.
+2. In the app: **Scan the pairing code** on the first screen (later:
+   ⋯ ▸ Settings, your computer's row, **Scan a new code**). The app asks
+   for the camera first.
+3. The app checks the computer's key against the code, makes this phone's
+   own key and shows **Paired with <computer>**. Every other paired device
+   is told that a new one was added.
+4. Allow the microphone and notifications. Tap the orb to connect.
    Notifications reach you even with the app closed: see
    [Notifications](#notifications).
 
-Prefer typing: `sheepdog serve` prints a `lan url` line; enter its host and
-port (for example `<lan-address>:7777`, no scheme) and the token in Settings,
-then **Test connection**.
+The connection is encrypted, and the app checks the computer's certificate
+on every connection. There is no address to type and no password. Settings ▸
+Connection shows the address, the date you paired and the start of the
+certificate's fingerprint, with **Test connection**, **Scan a new code** and
+**Remove** (the computer forgets this phone too).
+
+If the app says **Please scan again**, the phone was removed on the
+computer, or the computer's certificate changed (sheepdog reinstalled, or
+**Reset pairing**). Show a new code and scan it. If you did neither, do not
+continue on that network.
 
 On the same Wi-Fi this just works. Away from home, see
 [remote-access.md](remote-access.md) (Tailscale, then pair again).
@@ -184,6 +196,36 @@ On the same Wi-Fi this just works. Away from home, see
   microphone; next track stops what is in flight.
 - **Siri, Shortcuts, Action Button.** "Talk to Sheepdog" starts a session.
 
+## On iPad
+
+The same app, with the room an iPad has. In Slide Over or a narrow split
+it looks exactly like the iPhone app.
+
+- **Sidebar:** Conversation, All agents (with how many are waiting), then
+  your agents under their spaces. A waiting agent shows a hand and
+  "waiting"; the others show how long they have been in their state. The
+  voice capsule sits at the foot of the sidebar.
+- **Detail:** an agent's window (terminal, its question above the keys,
+  the keys and a composer), the Conversation in a centred column with its
+  own composer, or **All agents**: every agent as a card in two columns,
+  with the filters All, Waiting and Working, and Expand all. Expanded
+  cards also list up to three earlier messages.
+- **Portrait:** the sidebar hides; tap the sidebar button to slide it
+  over. The header then carries a small capsule: tap its orb to mute or
+  unmute, its name for the voice menu.
+- **Two agents side by side:** tap the split button in an agent's header
+  and pick another agent, or drag an agent from the sidebar onto the
+  window. In portrait the two stack. Each has its own question, keys and
+  composer; the one you used last has a dark line on top. Drag the line
+  between them to share the room; ✕ closes one. A new agent opens beside
+  the one you are looking at.
+- **Several windows:** an agent's ⋯ ▸ **Open in New Window** gives it a
+  window of its own (Split View, Stage Manager). There is still one voice
+  session: the first window has the full capsule, the others a small one.
+- **Keyboard:** ⌘N new agent, ⌘1 to ⌘9 jump to the agents in sidebar
+  order, ⌘⇧M mute or unmute, and ⌘↩ starts the agent in New agent. Hold ⌘
+  to see the list.
+
 ## Notifications
 
 When an agent needs you, the daemon sends a time-sensitive notification through
@@ -222,8 +264,9 @@ in [dev/push.md](dev/push.md).
 
 | Symptom | Fix |
 |---|---|
-| Camera refuses to scan | Allow Camera in iOS Settings, or type the host and token. |
-| Offline or Token refused | [remote-access.md](remote-access.md). |
+| Camera refuses to scan | Allow Camera for Sheepdog in iOS Settings (the app has an **Open Settings** button). |
+| This code has expired or was used | Show a new code on the computer and scan it. |
+| Offline, or Please scan again | [remote-access.md](remote-access.md). |
 | No sound from the voice | Check the daemon: `sheepdog status` shows "NOT connected" with the reason ([troubleshooting.md](troubleshooting.md)). |
 | Local network prompt dismissed | iOS Settings, Sheepdog, Local Network on. |
 | App talks but agents are empty | herdr is not running or not reachable: `sheepdog doctor`. |

@@ -191,9 +191,14 @@ the QR once more.
   `/term` are pinned too.
 - The pin is checked during the TLS handshake, before any request. A
   wrong pin sends nothing: no hello, no ticket, no audio.
-- The app refuses `http://` to any non-loopback address. The ATS
-  exception (`NSAllowsArbitraryLoads`) is removed in the same release
-  that adds pinning; nothing needs plain HTTP any more.
+- The app refuses `http://` to any non-loopback address. It keeps the
+  ATS exception `NSAllowsArbitraryLoads`, because ATS cannot express a
+  pin: even after the delegate accepts the pinned key, ATS runs its own
+  system trust check and fails a self-signed certificate on a Tailscale
+  or LAN address (`NSURLErrorDomain -1200`, "ATS failed system trust"),
+  and exception domains cannot name IP addresses. The pin is the check.
+  `NSAllowsLocalNetworking` must stay unset: when present, iOS ignores
+  `NSAllowsArbitraryLoads`.
 
 ---
 
@@ -450,6 +455,30 @@ the herdr hooks and the CLI.
 everywhere.
 
 ---
+
+### 5.4 Intended exception: the model picker
+
+`GET /api/brain/models` and `PUT /api/brain/model` stay open to paired
+devices (with a ticket), not loopback-only like the other `/api/brain/*`
+debug routes, because the app's Settings ▸ Models screen uses them. They
+change which model the orchestrator uses, nothing else; a device that can
+already steer agents gains nothing from them. The route table test pins
+this.
+
+### 5.5 The app side (phase 4)
+
+The app keeps one record per paired computer in the keychain (daemon id,
+name, addresses, pin, next pin, device id, paired date) and the key in
+the Secure Enclave (`DeviceKey`, a software key on the Simulator). One
+process-wide `DeviceCredentials` holds the pins every `URLSession` checks
+(`PinnedTrustDelegate`: HTTP, `/events`, `/ws`, `/term`, push, intents)
+and the ticket; sign-in is single-flight, refreshed 30 minutes before
+expiry and once more on `401 no_session`/`session_expired`. `401
+device_revoked`/`unknown_device` and a key that matches no pin open
+"Please scan again". The ATS setting is `NSAllowsArbitraryLoads`
+(see section 4: ATS would otherwise reject the pinned self-signed
+certificate). `PairingE2ETests` and `PairingLinkUITests.testPairingWalkthrough`
+run the whole path against the pair fixture daemon.
 
 ## 6. Key storage
 
@@ -718,9 +747,10 @@ router's address, which the daemon cannot know. Both ways are offered:
 ### 14.1 Phase 0 spikes (facts this doc cannot settle from here)
 
 1. **ATS and a self-signed pin.** Does `URLSession` with ATS on accept a
-   self-signed P-256 certificate when our delegate accepts the trust? Does
-   `URLSessionWebSocketTask`? Test on a device against an IP address,
-   over Wi-Fi and over Tailscale.
+   self-signed P-256 certificate when our delegate accepts the trust?
+   **No** (found on iOS 26 over Tailscale, 2026-10-22): ATS still fails
+   system trust, so the app keeps `NSAllowsArbitraryLoads`.
+   `AppTransportSecurityTests` guards the setting.
 2. **Browser secure context.** Is a page on a self-signed certificate the
    user accepted a secure context, so `crypto.subtle` works? Check Safari,
    Chrome (desktop and Android) and Firefox. Does a non-extractable
@@ -870,8 +900,8 @@ Every question the proposal left open is now decided (2026-10-21):
 
 1. **Face ID.** Not done, in either variant.
 2. **How long old apps keep working.** Not at all: there is no
-   compatibility, no migration and no shared token. The ATS exception goes
-   in phase 4.
+   compatibility, no migration and no shared token. The app keeps the ATS
+   exception (see section 4).
 3. **Public `*.ts.net` certificates.** A setup-page switch, off by
    default, whose copy says the machine name gets logged publicly.
 4. **Other users on the same tailnet.** No Tailscale identity check. A

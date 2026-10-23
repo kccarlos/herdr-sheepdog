@@ -36,6 +36,15 @@ struct CapsuleGallery: View {
     ]
 
     var body: some View {
+        // `-sheepdogCapsuleGallery banners`: the banners instead.
+        if ProcessInfo.processInfo.arguments.contains("banners") {
+            BannerGallery()
+        } else {
+            capsules
+        }
+    }
+
+    private var capsules: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(tiles) { tile in
@@ -53,6 +62,29 @@ struct CapsuleGallery: View {
                 }
             }
             .padding(12)
+        }
+        .background(Theme.surface)
+        .accessibilityIdentifier("capsule.gallery")
+    }
+}
+
+/// The error banners and the update notice on one screen, for screenshots.
+private struct BannerGallery: View {
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                BannerView(banner: .init(tone: .error, message: "Can't reach your computer.",
+                                         hint: "Is the Mac awake and sheepdog running? The phone and the computer need the same network, or a VPN between them.",
+                                         retryTitle: "Try again", help: URL(string: "https://example.com")), retry: {}, dismiss: {})
+                BannerView(banner: .init(tone: .warning, message: "This app needs a newer sheepdog.",
+                                         hint: "Run `sheepdog update` on your computer.", retryTitle: nil), retry: {}, dismiss: {})
+                BannerView(banner: .init(tone: .error, message: "The voice provider refused the session.",
+                                         hint: "Its key may be out of quota. Typing still works.", retryTitle: "Try again"), retry: {}, dismiss: {})
+                BannerView(banner: .init(tone: .warning, message: "Couldn't send your answer.",
+                                         hint: "The question is still open; tap an option again.", retryTitle: nil), retry: {}, dismiss: {})
+                UpdateBanner(notice: UpdateInfo(current: "0.9.1", latest: "0.9.2", available: true, how: "brew upgrade sheepdog").notice!, dismiss: {})
+            }
+            .padding(16)
         }
         .background(Theme.surface)
         .accessibilityIdentifier("capsule.gallery")

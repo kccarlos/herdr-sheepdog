@@ -13,15 +13,20 @@ struct FloatingQuestions: View {
     var voiceQuestionID: String?
     /// "4 min": how long its agent has waited.
     var time: (PendingAction) -> String? = { _ in nil }
+    /// The composer and keyboard are up: a lower cap, so some of the
+    /// conversation stays in view.
+    var compact = false
     let answer: (String, Int) -> Void
 
     @State private var contentHeight: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Half the screen; a little less at the accessibility sizes, where
     /// the capsule above the home indicator is taller too.
     private var maxHeight: CGFloat {
         let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800
+        if compact { return screen * 0.22 }
         return screen * (dynamicTypeSize.isAccessibilitySize ? 0.38 : 0.5)
     }
 
@@ -36,6 +41,10 @@ struct FloatingQuestions: View {
                         meta: meta(card, index: index),
                         answer: { answer(card.pending.id, $0) }
                     )
+                    // Rises from the capsule; collapses into its settled
+                    // row in the conversation when answered.
+                    .matchedInMotion(id: card.pending.id)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .onAppear {
                         AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
                     }

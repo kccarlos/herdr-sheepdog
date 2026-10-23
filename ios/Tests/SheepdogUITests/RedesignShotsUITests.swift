@@ -120,6 +120,15 @@ final class RedesignShotsUITests: XCTestCase {
         shot("conversation-top")
     }
 
+    func testBanners() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery", "banners"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("banners")
+    }
+
     /// A ScreenCard's sheet, then its row and a question asked by tap.
     func testCardSheetAndRows() throws {
         let app = launchDemo(["-sheepdogDemoCard"])
@@ -197,7 +206,8 @@ final class RedesignShotsUITests: XCTestCase {
 
     /// Closes an open menu by tapping the top of the screen.
     func dismissMenu(_ app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        // A tap at the left edge, halfway down: outside every menu.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)).tap()
         sleep(2)
     }
 

@@ -50,7 +50,7 @@ struct ShellWindowView: View {
             if !endedEmpty { controls }
         }
         .background(background.ignoresSafeArea())
-        .animation(.easeInOut(duration: 0.2), value: state.notice)
+        .animation(Theme.ease, value: state.notice)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(background, for: .navigationBar)

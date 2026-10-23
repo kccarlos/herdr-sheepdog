@@ -72,13 +72,16 @@ type Server struct {
 type Handler func(params json.RawMessage) (result any, err error)
 
 // New starts a server on a fresh socket under a short temp dir (macOS
-// limits sun_path to 104 bytes) and stops it when the test ends.
+// limits sun_path to 104 bytes, and t.TempDir's path is longer) and
+// stops it and removes the dir when the test ends.
 func New(t testing.TB) *Server {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "hdt")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Removed even when Listen below fails (a TMPDIR too long for a socket).
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	s := &Server{
 		Path:       filepath.Join(dir, "h.sock"),
 		dir:        dir,

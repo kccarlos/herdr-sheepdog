@@ -35,27 +35,28 @@ final class WalkthroughUITests: XCTestCase {
         // A previous run may have left a synthetic pane behind; the empty
         // The agent list has to be genuinely empty for the first screenshot.
         for pane in ["w1:p1", "w1:p2"] { _ = post("/api/inject/remove", ["pane_id": pane]) }
-        let app = launch()
+        let app0 = launch()
 
-        // 1. First launch: no address saved, so Settings opens itself.
-        let address = app.textFields["settings.address"]
-        XCTAssertTrue(address.waitForExistence(timeout: 10), "first launch should open Settings")
-        XCTAssertFalse(app.buttons["settings.done"].isEnabled, "there is nothing to close Settings on yet")
-        shot(app, "01-first-launch-settings")
+        // 1. First launch: nothing paired, so Settings opens itself on
+        //    the scanner (pairing is by code only; PairingLinkUITests).
+        XCTAssertTrue(app0.buttons["settings.scan"].waitForExistence(timeout: 10), "first launch should open Settings")
+        shot(app0, "01-first-launch-settings")
+        app0.terminate()
 
-        // 2. Type the daemon's address and prove it.
-        address.tap()
-        address.typeText(Fixture.host)
-        app.buttons["settings.test"].tap()
+        // 2. The loopback fixture (no pairing on this Mac itself): Test
+        //    connection proves it.
+        let app = launch(address: Fixture.host)
+        XCTAssertTrue(app.buttons["controls.orb"].waitForExistence(timeout: 10))
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
+        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Connection")
+        tapWhenReady(app.buttons["settings.test"], "Test connection")
         XCTAssertTrue(app.staticTexts["Connected to \(Fixture.host)"].waitForExistence(timeout: 15), "Test connection should report the hello payload")
         XCTAssertTrue(app.staticTexts["Voice name: Sheepdog"].exists)
-        XCTAssertTrue(app.staticTexts["Auth: open (loopback)"].exists)
-        XCTAssertTrue(app.staticTexts["Audio: 16000 Hz in / 24000 Hz out, pcm16le mono"].exists)
+        XCTAssertTrue(app.staticTexts["This computer (loopback)."].exists)
         shot(app, "02-settings-test-connection")
 
-        // 3. Done (there is no Save: the address applies as you leave the
-        //    screen): the main screen, not connected yet.
-        tapWhenReady(app.buttons["settings.done"], "Done")
+        // 3. Back to the main screen, not connected yet.
+        closeSettings(app)
         XCTAssertTrue(app.buttons["controls.orb"].waitForExistence(timeout: 10))
         // The daemon's history (if this one has any) now fills the
         // conversation; a fresh data dir leaves it empty.
@@ -142,25 +143,6 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(push.waitForExistence(timeout: 2), "a push belongs in the conversation as a system card")
         shot(app, "06-push")
 
-        // 8. Point it at a port with nothing behind it: a plain sentence,
-        //    not a raw error.
-        tapMenuItem(app, menu: "voice.menu", item: "controls.end")
-        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
-        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Daemon")
-        let field = app.textFields["settings.address"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
-        field.press(forDuration: 1.1)
-        if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
-        field.typeText("127.0.0.1:7791")
-        closeSettings(app)
-        tapWhenReady(app.buttons["controls.orb"], "Connect")
-        XCTAssertTrue(app.staticTexts["Can't reach the daemon at 127.0.0.1:7791 — is it running?"].waitForExistence(timeout: 20))
-        shot(app, "07-error-banner")
-        // The failed attempt reads as red "Offline" on the chip — not the
-        // grey "Not connected" of a session that was never opened.
-        XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Offline")
-        shot(app, "18-voicebar-offline")
     }
 
     // MARK: - Helpers
@@ -223,9 +205,9 @@ final class WalkthroughUITests: XCTestCase {
         return nil
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(address: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"] + (address.map { ["-sheepdogAddress", $0] } ?? [])
         app.launch()
         return app
     }
