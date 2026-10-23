@@ -240,10 +240,10 @@ class Layout:
         self.W, self.H = W, H
         self.portrait = H > W
         if self.portrait:
-            self.phone = Phone(1020)
+            self.phone = Phone(880)
             self.phone_xy = ((W - self.phone.sw) // 2 - self.phone.bz, 140)
             self.tx, self.tw = 90, W - 180
-            self.cap_y = 140 + 1020 + 2 * self.phone.bz + 64
+            self.cap_y = 140 + 880 + 2 * self.phone.bz + 56
             self.f_cap = font(OUTFIT, 62, 600)
             self.f_line = font(INTER, 40, 500)
             self.f_label = font(INTER, 26, 600)
@@ -269,6 +269,7 @@ class Layout:
         self.f_head = font(OUTFIT, int(64 * s), 600)
         self.f_step = font(OUTFIT, int(34 * s), 600)
         self.f_cmd = mono(int(40 * s) if not self.portrait else 34)
+        self.f_end_cmd = mono(54 if not self.portrait else 44)
         self.f_small = font(INTER, 32 if not self.portrait else 36, 500)
         self.logo_big = logo(300 if not self.portrait else 360)
         self.bg = Image.new("RGBA", (W, H), BG + (255,))
@@ -330,7 +331,7 @@ def draw_line(im, L, y, who, text, a):
     """A speaker label and the spoken words in an ink pill."""
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    label = "YOU" if who == "you" else "SHEEPDOG"
+    label = "YOU" if who == "you" else "VOICE"
     pad = 28
     lines = wrap(text, L.f_line, L.tw - 2 * pad, d)
     lh = int(L.f_line.size * 1.32)
@@ -402,13 +403,14 @@ def draw_title(im, L, t, a):
     blend(im, layer, a)
 
 
-def cmd_pill(d, L, x, y, text, color, w=None):
+def cmd_pill(d, L, x, y, text, color, w=None, fnt=None):
+    fnt = fnt or L.f_cmd
     pad_x, pad_y = 30, 20
-    tw = d.textlength(text, font=L.f_cmd)
+    tw = d.textlength(text, font=fnt)
     w = w or tw + 2 * pad_x
-    h = L.f_cmd.size + 2 * pad_y
+    h = fnt.size + 2 * pad_y
     d.rounded_rectangle((x, y, x + w, y + h), 14, fill=CARD + (255,), outline=EDGE + (255,), width=2)
-    d.text((x + pad_x, y + h / 2), text, font=L.f_cmd, fill=color + (255,), anchor="lm")
+    d.text((x + pad_x, y + h / 2), text, font=fnt, fill=color + (255,), anchor="lm")
     return h
 
 
@@ -464,8 +466,9 @@ def draw_end(im, L, t, a):
         y += int(L.f_tag.size * 1.3)
     y += 44
     cmd = "brew install kccarlos/tap/sheepdog"
-    w = d.textlength(cmd, font=L.f_cmd) + 60
-    h = cmd_pill(d, L, (L.W - w) / 2, y, cmd, ORANGE)
+    # about 1/20 of the frame height, as wide as the frame allows
+    w = d.textlength(cmd, font=L.f_end_cmd) + 60
+    h = cmd_pill(d, L, (L.W - w) / 2, y, cmd, ORANGE, fnt=L.f_end_cmd)
     y += h + 26
     centered(d, "or: herdr plugin install kccarlos/herdr-sheepdog", L.f_small, L.W / 2, y, SLATE + (255,))
     y += int(L.f_small.size * 1.9)

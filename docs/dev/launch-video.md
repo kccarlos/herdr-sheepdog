@@ -1,7 +1,7 @@
 # Launch video: script and storyboard
 
-The plan for re-recording sheepdog's launch video, for the owner's review. Nothing here is
-recorded yet. It replaces the storyboard that was in [launch-kit.md](launch-kit.md), which still
+The plan for re-recording sheepdog's launch video, for the owner's review. Its synthetic cut is
+made (see [The video we have now](#the-video-we-have-now)); a filmed cut is not. It replaces the storyboard that was in [launch-kit.md](launch-kit.md), which still
 holds the launch posts.
 
 > **Decision (2026-10-21): we make it ourselves, synthetic, as the old one was, after the
