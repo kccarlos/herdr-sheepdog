@@ -6,6 +6,8 @@ import SwiftUI
 /// Settings does.
 enum SettingsPage: Hashable {
     case daemon, voice, models, languages, notifications, diagnostics, about
+    /// One computer's page (several computers only).
+    case computer(String)
 }
 
 /// Settings: a short list of sections, each one screen deep.
@@ -23,6 +25,8 @@ struct SettingsView: View {
     /// No daemon saved yet: Settings opens on the Daemon screen and cannot
     /// be closed until an address is in.
     @State private var firstRun = false
+    /// Add a computer: the pairing sheet for another computer's code.
+    @State private var addingComputer: PairingStage?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -54,12 +58,15 @@ struct SettingsView: View {
                         }
                     }
                     // The computer: with one computer, one row and what
-                    // belongs to it. With several, this becomes the list
-                    // of computers, each with its own page.
+                    // belongs to it. With several, the list of computers,
+                    // each with its own page.
+                    if model.showsComputerLabels {
+                        computersSection
+                    } else {
                     Section {
                         NavigationLink(value: SettingsPage.daemon) {
                             ComputerRow(
-                                name: model.hello?.computer?.name ?? "Your computer",
+                                name: model.isConfigured ? model.currentComputerName : "Your computer",
                                 status: computerStatus,
                                 tint: computerTint
                             )
@@ -77,12 +84,16 @@ struct SettingsView: View {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
                         }
+                        if model.settings.computers.count == 1 {
+                            addComputerButton
+                        }
                     } header: {
                         Text("Computer")
                     } footer: {
                         if model.shellOffered == false {
                             Text(PhoneShell.offExplanation)
                         }
+                    }
                     }
                 }
 
@@ -125,7 +136,12 @@ struct SettingsView: View {
                 case .notifications: NotificationsView()
                 case .diagnostics: DiagnosticsView(meter: meter)
                 case .about: AboutView()
+                case let .computer(id): ComputerSettingsView(id: id, done: done)
                 }
+            }
+            .sheet(item: Binding(get: { addingComputer.map { PairingSheet(stage: $0) } }, set: { if $0 == nil { addingComputer = nil } })) { sheet in
+                PairingFlowView(stage: sheet.stage)
+                    .environmentObject(model)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -148,6 +164,49 @@ struct SettingsView: View {
             }
         }
         .interactiveDismissDisabled(firstRun && !model.isConfigured)
+    }
+
+    /// Several computers: each with its status, the current one first in
+    /// what it says ("Talking here"), and Add a computer.
+    private var computersSection: some View {
+        Section {
+            ForEach(model.computerSnapshots) { computer in
+                NavigationLink(value: SettingsPage.computer(computer.id)) {
+                    ComputerRow(
+                        name: computer.name,
+                        status: computer.isCurrent ? computerStatus : computer.summary(),
+                        tint: computer.isCurrent ? computerTint : tint(computer.reachability)
+                    )
+                }
+                .accessibilityIdentifier("computerLabel.settings.\(computer.id)")
+            }
+            addComputerButton
+        } header: {
+            Text("Computers")
+        } footer: {
+            if model.shellOffered == false {
+                Text(PhoneShell.offExplanation)
+            }
+        }
+    }
+
+    private var addComputerButton: some View {
+        Button {
+            addingComputer = PairingStage.start
+        } label: {
+            Label("Add a computer", systemImage: "plus.circle")
+        }
+        .tint(Theme.primaryText)
+        .accessibilityHint("Scans the pairing code of another computer")
+        .accessibilityIdentifier("settings.addComputer")
+    }
+
+    private func tint(_ reachability: Reachability) -> Color {
+        switch reachability {
+        case .online: return Theme.done
+        case .connecting: return Theme.unknown
+        case .offline: return Theme.danger
+        }
     }
 
     /// "Talking here · address" while the voice runs, "Connected ·

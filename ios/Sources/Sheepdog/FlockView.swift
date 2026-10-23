@@ -21,16 +21,39 @@ struct FlockView: View {
     /// The voice's own question: its buttons keep the `approval.*` names.
     var voiceQuestionID: String?
 
+    /// Several computers only: the other computers, each a section after
+    /// this one's (app-redesign.md 5.2). Empty with one computer, and then
+    /// the page is one list as it always was.
+    var others: [ComputerSnapshot] = []
+    /// The current computer's name, for its section header.
+    var currentName = ""
+    /// Another computer's question on an agent's card: (computer, pane).
+    var remoteCard: (String, String) -> ApprovalFlow.Card? = { _, _ in nil }
+    var talkTo: (String) -> Void = { _ in }
+    var retry: (String) -> Void = { _ in }
+
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
+
+    private var sectioned: Bool { !others.isEmpty }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    if sectioned {
+                        ComputerSectionHeader(id: "current", name: currentName, detail: "You're talking here", talkTo: nil)
+                    }
                     if flock.running.isEmpty {
-                        NoAgentsView(onNewAgent: onNewAgent)
-                            .padding(.top, 40)
+                        if sectioned {
+                            Text("No agents running here.")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.muted)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        } else {
+                            NoAgentsView(onNewAgent: onNewAgent)
+                                .padding(.top, 40)
+                        }
                     }
                     ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
                         card(agent, primary: isFirstQuestion(agent))
@@ -42,6 +65,9 @@ struct FlockView: View {
                                 card(agent, primary: false)
                             }
                         }
+                    }
+                    ForEach(others) { computer in
+                        otherSection(computer)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -75,6 +101,39 @@ struct FlockView: View {
             answer: answer
         )
         .id(agent.paneID)
+    }
+
+    /// Another computer: its header with Talk to, then its running agents
+    /// (blocked first) with their questions, or one dashed row when it does
+    /// not answer. Its last-known agents are not shown as if they were live.
+    @ViewBuilder
+    private func otherSection(_ computer: ComputerSnapshot) -> some View {
+        let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+        ComputerSectionHeader(id: computer.id, name: computer.name, detail: offline ? nil : computer.summary(),
+                              talkTo: offline ? nil : { talkTo(computer.id) })
+            .padding(.top, 14)
+        if offline {
+            OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { retry(computer.id) }
+        } else {
+            let running = Flock(computer.agents).running
+            ForEach(running, id: \.paneID) { agent in
+                AgentCard(
+                    agent: agent,
+                    question: remoteCard(computer.id, agent.paneID),
+                    primary: false,
+                    voiceQuestion: false,
+                    showsWindowButton: false,
+                    expanded: Binding(
+                        get: { expanded.contains("\(computer.id)|\(agent.paneID)") },
+                        set: { open in
+                            let key = "\(computer.id)|\(agent.paneID)"
+                            if open { expanded.insert(key) } else { expanded.remove(key) }
+                        }
+                    ),
+                    answer: answer
+                )
+            }
+        }
     }
 
     private var notRunningRow: some View {
@@ -164,6 +223,8 @@ struct AgentCard: View {
     var voiceQuestion = true
     /// iPad: the expanded card also lists up to 3 earlier messages.
     var showsEarlier = false
+    /// Another computer's agent has no window here (Talk to that computer).
+    var showsWindowButton = true
     @Binding var expanded: Bool
     let answer: (String, Int) -> Void
 
@@ -189,7 +250,7 @@ struct AgentCard: View {
                 .accessibilityHint(waiting ? "" : (expanded ? "Hides the details" : "Shows the details"))
                 .accessibilityAddTraits(waiting ? [] : .isButton)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).toggle")
-                windowButton
+                if showsWindowButton { windowButton }
             }
             if let question {
                 ApprovalCardView(

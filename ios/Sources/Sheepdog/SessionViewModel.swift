@@ -231,6 +231,13 @@ final class SessionViewModel: ObservableObject {
     /// With one computer the UI looks exactly as it always did.
     var showsComputerLabels: Bool { computerCount > 1 }
 
+    /// The other paired computers (`SessionViewModel+Computers.swift`).
+    @Published var others: [ComputerSession] = []
+    var otherSinks: [String: AnyCancellable] = [:]
+    /// Whether the current computer answered its last `/api/state`.
+    @Published var currentReachability: Reachability = .connecting
+    var currentLastSeen: Date?
+
     /// The current computer's daemon id ("" for a bare address).
     var currentComputerID: String { settings.computers.currentID ?? "" }
 
@@ -367,6 +374,7 @@ final class SessionViewModel: ObservableObject {
         // "Talk to Sheepdog") runs now.
         SheepdogIntentBridge.install { [weak self] url in self?.open(url: url) }
         syncAway()
+        rebuildOthers()
         if !isConfigured || !settings.hasBeenConfigured {
             // A cold launch from the Camera app's pairing link asks about
             // the link instead (and reopens Settings if declined).
@@ -427,6 +435,10 @@ final class SessionViewModel: ObservableObject {
         hello = nil
         if !sameDaemon {
             // Another daemon, another conversation.
+            currentReachability = .connecting
+            currentLastSeen = nil
+            agents = []
+            questions = []
             reducer.clear()
             activity.clear()
             cardInbox.clear()
@@ -993,6 +1005,8 @@ final class SessionViewModel: ObservableObject {
                 muted: isMuted,
                 agents: agents,
                 questions: questions,
+                computer: showsComputerLabels ? currentComputerName : nil,
+                others: otherSnapshots,
                 suspendedInBackground: core.suspension.backgroundSuspended
             )
             : nil
@@ -1055,10 +1069,15 @@ final class SessionViewModel: ObservableObject {
             case let .openAgent(id):
                 // What a tap on an agent's notification does.
                 PushCoordinator.shared.focus(paneID: id)
-            case let .openWindow(id, _):
-                // A Live Activity row. One computer for now: the
-                // computer id is for when there are several.
-                openAgentWindow(paneID: id)
+            case let .openWindow(id, computer):
+                // A Live Activity row. Another computer's agent shows on
+                // the Agents page, with Talk to; the app never switches on
+                // its own.
+                if let computer, computer != currentComputerID, session(computer) != nil {
+                    pane = .flock
+                } else {
+                    openAgentWindow(paneID: id)
+                }
             }
         }
     }
@@ -1249,10 +1268,13 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil else { return false }
         do {
             apply(try await client.state())
+            currentLastSeen = Date()
+            if currentReachability != .online { currentReachability = .online }
             if hello == nil { hello = try? await client.hello() }
             if !quiet { banner = nil }
             return true
         } catch let error as DaemonError {
+            currentReachability = .offline(since: currentLastSeen)
             // A loud refresh that fails ends the session, as a failed
             // Connect would.
             if !quiet { send(.probeFailed(error)) }
@@ -1925,9 +1947,13 @@ final class SessionViewModel: ObservableObject {
             return card.pending
         }
         let list = QuestionOrder.floating(open: open, voice: settledVoice, voiceSettled: settledVoice != nil)
-        return list.map { question in
+        let local = list.map { question in
             if let approval, approval.pending.id == question.id { return approval }
             return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+        }
+        // Then the other computers' questions, oldest first.
+        return local + remoteQuestions.map { remote in
+            ApprovalFlow.Card(pending: remote.namespaced, phase: session(remote.computerID)?.phase(remote.pending.id) ?? .open(error: nil))
         }
     }
 
@@ -1942,6 +1968,11 @@ final class SessionViewModel: ObservableObject {
     /// goes through the approval flow, any other straight to
     /// `POST /api/pending/answer` with its id.
     func answer(question id: String, option index: Int) {
+        if let remote = RemoteQuestion.parse(id) {
+            // Another computer's: answered through its own daemon.
+            session(remote.computer)?.answer(question: remote.question, option: index)
+            return
+        }
         if approval?.pending.id == id {
             answer(option: index)
             return
@@ -2318,6 +2349,7 @@ final class SessionViewModel: ObservableObject {
     func removeComputer(_ id: String) async {
         let store = settings.computers
         let wasCurrent = store.currentID == id
+        await PushCoordinator.shared.unregister(computer: id)
         if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
            let credentials = endpoint.credentials,
            let ticket = try? await credentials.ticket(base: base) {
@@ -2343,11 +2375,19 @@ final class SessionViewModel: ObservableObject {
         store.currentID = id
         computersChanged()
         endpointChanged()
+        // A divider marks whom the conversation is with now.
+        reducer.apply(.notice("Talking to \(currentComputerName)"))
+        conversationChanged(save: false)
+        AccessibilityNotification.Announcement("Talking to \(currentComputerName)").post()
     }
 
     /// The list of computers changed (paired, removed, renamed, moved).
     func computersChanged() {
         computerCount = settings.computers.count
+        rebuildOthers()
+        // Every computer gets this phone's push token, and the extension
+        // the names it labels alerts with.
+        if demo == nil { PushCoordinator.shared.endpointChanged(from: nil) }
         objectWillChange.send()
     }
 

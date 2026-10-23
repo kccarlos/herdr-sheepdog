@@ -54,6 +54,13 @@ public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
         }
     }
 
+    /// "Last seen 9:12." for an offline computer that answered before, nil
+    /// otherwise.
+    public func lastSeen(now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard case let .offline(since?) = reachability else { return nil }
+        return "Last seen \(Self.time(since, now: now, calendar: calendar))."
+    }
+
     /// "9:12" today, else "Mon 9:12".
     static func time(_ date: Date, now: Date, calendar: Calendar) -> String {
         let f = DateFormatter()

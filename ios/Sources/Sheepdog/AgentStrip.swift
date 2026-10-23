@@ -15,9 +15,13 @@ struct AgentStrip: View {
     /// no chip ever names one.
     var computers = 1
     var computerOf: (Agent) -> String? = { _ in nil }
+    /// Blocked agents on other computers, with the computer's name; a tap
+    /// shows them on the Agents page.
+    var elsewhere: [(agent: Agent, computer: String)] = []
+    var showElsewhere: () -> Void = {}
 
     var body: some View {
-        if agents.isEmpty {
+        if agents.isEmpty && elsewhere.isEmpty {
             EmptyFlock()
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -38,6 +42,18 @@ struct AgentStrip: View {
                         .buttonStyle(ChipButtonStyle())
                         .zoomSource(agent.paneID)
                         .accessibilityIdentifier("agent.chip.\(agent.alias)")
+                    }
+                    ForEach(Array(elsewhere.enumerated()), id: \.offset) { _, item in
+                        Button(action: showElsewhere) {
+                            AgentChip(
+                                agent: item.agent,
+                                subtitle: item.agent.chipSubtitle(pending: nil),
+                                computer: AgentStripLabel.computer(state: item.agent.state, agentComputer: item.computer, pairedComputers: computers)
+                            )
+                        }
+                        .buttonStyle(ChipButtonStyle())
+                        .accessibilityHint("Shows it on the Agents page")
+                        .accessibilityIdentifier("computerLabel.chip.\(item.agent.alias)")
                     }
                 }
                 .padding(.horizontal, 16)

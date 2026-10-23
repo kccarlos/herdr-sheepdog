@@ -35,9 +35,9 @@ struct AllAgentsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if paneState != .content {
+            if paneState != .content, model.otherSnapshots.isEmpty {
                 FlockUnavailableView(state: paneState)
-            } else if shown.isEmpty {
+            } else if shown.isEmpty, model.otherSnapshots.isEmpty {
                 ContentUnavailableView {
                     Label(filter.emptyText, systemImage: filter == .waiting ? "hand.raised" : "square.grid.2x2")
                 } actions: {
@@ -144,40 +144,64 @@ struct AllAgentsView: View {
     @ViewBuilder
     private var grid: some View {
         ScrollView {
-            // Two columns of independent heights (no row gaps), one at the
-            // accessibility sizes.
-            if dynamicTypeSize.isAccessibilitySize {
-                column(shown)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 14)
-            } else {
-                let (left, right) = AgentFilter.columns(shown)
-                HStack(alignment: .top, spacing: 14) {
-                    column(left)
-                    column(right)
+            VStack(alignment: .leading, spacing: 14) {
+                let others = model.otherSnapshots
+                if !others.isEmpty {
+                    ComputerSectionHeader(id: "current", name: model.currentComputerName, detail: "You're talking here", talkTo: nil)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
+                columns(shown, computer: nil)
+                // Several computers: one section per other computer.
+                ForEach(others) { computer in
+                    let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                    ComputerSectionHeader(id: computer.id, name: computer.name, detail: offline ? nil : computer.summary(),
+                                          talkTo: offline ? nil : { model.talk(to: computer.id) })
+                        .padding(.top, 10)
+                    if offline {
+                        OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
+                    } else {
+                        columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
+                    }
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
         }
         .accessibilityIdentifier("allAgents.grid")
     }
 
-    private func column(_ agents: [Agent]) -> some View {
-        let first = shown.first { model.questionCard(for: $0.paneID) != nil }?.paneID
+    /// Two columns of independent heights (no row gaps), one at the
+    /// accessibility sizes.
+    @ViewBuilder
+    private func columns(_ agents: [Agent], computer: String?) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            column(agents, computer: computer)
+        } else {
+            let (left, right) = AgentFilter.columns(agents)
+            HStack(alignment: .top, spacing: 14) {
+                column(left, computer: computer)
+                column(right, computer: computer)
+            }
+        }
+    }
+
+    /// `computer` is another computer's id, nil for the current one's.
+    private func column(_ agents: [Agent], computer: String?) -> some View {
+        let first = computer == nil ? shown.first { model.questionCard(for: $0.paneID) != nil }?.paneID : nil
         return LazyVStack(spacing: 12) {
             ForEach(agents) { agent in
-                let question = model.questionCard(for: agent.paneID)
+                let question = computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID)
+                let key = computer.map { "\($0)|\(agent.paneID)" } ?? agent.paneID
                 AgentCard(
                     agent: agent,
                     question: question,
                     primary: agent.paneID == first,
-                    voiceQuestion: question?.pending.id == model.approval?.pending.id,
+                    voiceQuestion: computer == nil && question?.pending.id == model.approval?.pending.id,
                     showsEarlier: true,
+                    showsWindowButton: computer == nil,
                     expanded: Binding(
-                        get: { model.expandedAgents.contains(agent.paneID) },
+                        get: { model.expandedAgents.contains(key) },
                         set: { open in
-                            if open { model.expandedAgents.insert(agent.paneID) } else { model.expandedAgents.remove(agent.paneID) }
+                            if open { model.expandedAgents.insert(key) } else { model.expandedAgents.remove(key) }
                         }
                     ),
                     answer: { model.answer(question: $0, option: $1) }

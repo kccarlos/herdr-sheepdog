@@ -45,6 +45,9 @@ type Notification struct {
 	// ExceptDevice skips the registrations of this paired device (the new
 	// one, for KindDevicePaired).
 	ExceptDevice string
+	// Computer is the daemon id (sheepdog.computer), filled in by the
+	// Sender from Config.ComputerID.
+	Computer string
 }
 
 // Key is the dedupe key: the event id, else the pending id, else none.
@@ -105,6 +108,9 @@ func (n Notification) Payload() map[string]any {
 	}
 	if len(n.Options) > 0 {
 		sd["options"] = n.Options
+	}
+	if n.Computer != "" {
+		sd["computer"] = n.Computer
 	}
 	return map[string]any{"aps": aps, "sheepdog": sd}
 }

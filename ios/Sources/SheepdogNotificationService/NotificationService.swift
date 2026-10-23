@@ -18,7 +18,8 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         self.contentHandler = contentHandler
         original = content
-        let result = PushE2E.rewrite(content, key: PushContentKeyStore().key())
+        // Each paired computer has its own key; the sender's opens it.
+        let result = PushE2E.rewrite(content, keys: PushContentKeyStore().allKeys(), names: PushComputerNames.read())
         deliver(result)
     }
 

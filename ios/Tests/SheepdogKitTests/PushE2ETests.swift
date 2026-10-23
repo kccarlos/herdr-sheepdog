@@ -1,3 +1,4 @@
+import CryptoKit
 @testable import SheepdogKit
 import UserNotifications
 import XCTest
@@ -84,6 +85,32 @@ final class PushE2ETests: XCTestCase {
         let answer = try XCTUnwrap(PushActions.answer(actionIdentifier: PushActions.approve, payload: payload))
         XCTAssertEqual(answer.pendingID, "ap-tm9bu0-1")
         XCTAssertEqual(answer.option.index, 1)
+    }
+
+    /// Several computers: each has its own key; the sender's opens it, and
+    /// its name becomes the subtitle only when several are paired.
+    func testEveryComputersKeyIsTriedAndTheSenderIsNamed() throws {
+        let homeKey = SymmetricKey(size: .bits256)
+        let plain = try JSONSerialization.data(withJSONObject: [
+            "aps": ["alert": ["title": "writer", "body": "writer asks to publish."], "category": "APPROVAL"],
+            "sheepdog": ["kind": "approval", "pane_id": "h1:p1", "computer": "home-id", "pending_id": "q1",
+                         "options": [["index": 1, "label": "Yes"]]],
+        ])
+        let box = try AES.GCM.seal(plain, using: homeKey)
+        let content = UNMutableNotificationContent()
+        content.title = "Sheepdog"
+        content.userInfo = ["e2e": ["c": (box.ciphertext + box.tag).base64EncodedString(),
+                                    "n": Data(box.nonce).base64EncodedString()]]
+        let homeData = homeKey.withUnsafeBytes { Data($0) }
+        let names = ["work-id": "Work Mac", "home-id": "Home Mac"]
+
+        let shown = PushE2E.rewrite(content, keys: [Vector.keyData, homeData], names: names)
+        XCTAssertEqual(shown.title, "writer")
+        XCTAssertEqual(shown.subtitle, "Home Mac")
+        XCTAssertEqual(PushPayload(userInfo: shown.userInfo)?.computer, "home-id", "the answer goes to the computer that asked")
+
+        XCTAssertEqual(PushE2E.rewrite(content, keys: [homeData], names: ["home-id": "Home Mac"]).subtitle, "", "one computer: no name")
+        XCTAssertEqual(PushE2E.rewrite(content, keys: [Vector.keyData]).body, PushE2E.fallbackBody, "no matching key")
     }
 
     func testFailureShowsTheNeutralLineAndNeverRawData() {

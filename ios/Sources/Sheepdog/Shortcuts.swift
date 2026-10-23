@@ -9,10 +9,12 @@ struct SessionCommands {
     /// The agents ⌘1…9 jump to, in sidebar order.
     var agents: [Agent] = []
     var openAgent: (String) -> Void = { _ in }
+    /// ⌘K: talk to the next computer; nil with one computer.
+    var talkToNext: (() -> Void)?
 }
 
-/// ⌘N new agent, ⌘⇧M mute, ⌘1…9 jump to an agent. (⌘K, Talk to, comes
-/// with several computers: with one there is nothing to switch to.)
+/// ⌘N new agent, ⌘⇧M mute, ⌘1…9 jump to an agent, and ⌘K (Talk to the next
+/// computer) only with several computers: with one there is nothing to switch to.
 ///
 /// Invisible buttons in the window itself rather than app `Commands`: the
 /// offline demo is a cover with its own session, and a window's own
@@ -29,6 +31,10 @@ struct KeyboardShortcuts: View {
             Button(commands.muted ? "Unmute" : "Mute") { commands.toggleMute?() }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(commands.toggleMute == nil)
+            if let talkToNext = commands.talkToNext {
+                Button("Talk to the Next Computer", action: talkToNext)
+                    .keyboardShortcut("k", modifiers: .command)
+            }
             ForEach(Array(commands.agents.prefix(9).enumerated()), id: \.element.paneID) { index, agent in
                 Button(agent.alias) { commands.openAgent(agent.paneID) }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)

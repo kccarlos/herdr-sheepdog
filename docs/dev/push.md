@@ -176,7 +176,8 @@ an event already notified is not sent again.
     "agent": "auth",
     "pending_id": "ap-tm9bu0-1",
     "event_id": "evt-12",
-    "options": [{"index": 1, "label": "Yes, proceed"}, {"index": 2, "label": "No"}]
+    "options": [{"index": 1, "label": "Yes, proceed"}, {"index": 2, "label": "No"}],
+    "computer": "q9V2xk3m7RtLwB8nYc1d0A"
   }
 }
 ```
@@ -196,6 +197,9 @@ an event already notified is not sent again.
 - `sheepdog.pending_id` and `sheepdog.options` are present only for an
   approval; `sheepdog.event_id` when the supervisor minted one (with the
   orchestrator on).
+- `sheepdog.computer` is this daemon's id (`tls/daemon_id`), so an app
+  paired with several computers knows which one an alert is from, answers
+  it there, and adds the computer's name to the title.
 
 Headers: `apns-push-type: alert`, `apns-topic: <topic>`,
 `apns-priority: 10` for every alert (a kept promise was asked for, so it is not left to power batching),
