@@ -193,7 +193,7 @@ jobs:
           xcodegen generate --spec project.yml
 
       - name: Cache Swift packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
@@ -351,7 +351,7 @@ jobs:
 
       - name: Upload the test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ios-test-results-${{ matrix.name }}
           path: |
