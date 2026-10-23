@@ -84,7 +84,13 @@ public final class EndpointTrust: @unchecked Sendable {
 /// Each accepted handshake reports the pin it matched (`onMatch`), so the
 /// app notices the computer switched to its next key
 /// (`DeviceCredentials.served(pin:)`) before it signs in with a pin.
-public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+///
+/// It answers the challenge at the task level too: `URLSession.bytes(for:)`
+/// (the `/events` stream) asks only `urlSession(_:task:didReceive:…)`.
+/// With the session-level method alone the system's default trust judged
+/// the self-signed certificate (-1202), `/events` never opened over TLS,
+/// and the chip said "Reconnecting…" for good while `/ws` worked.
+public final class PinnedTrustDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let pins: @Sendable () -> [String]
     private let onMatch: (@Sendable (String) -> Void)?
     private let lock = NSLock()
@@ -107,6 +113,22 @@ public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked
         _ session: URLSession,
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        answer(challenge, completionHandler)
+    }
+
+    public func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        answer(challenge, completionHandler)
+    }
+
+    private func answer(
+        _ challenge: URLAuthenticationChallenge,
+        _ completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust
