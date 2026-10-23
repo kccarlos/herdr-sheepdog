@@ -368,9 +368,13 @@ public struct PendingAction: Codable, Equatable, Sendable {
     public var summary: String?
     /// The command the prompt is about, when it shows one.
     public var command: String?
+    /// When the question opened (`created_at`): orders questions from several
+    /// computers by age.
+    public var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, question, options, agent, summary, command
+        case createdAt = "created_at"
         case paneID = "pane_id"
         case spokenSummary = "spoken_summary"
     }
@@ -384,7 +388,8 @@ public struct PendingAction: Codable, Equatable, Sendable {
         options: [PendingOption]? = nil,
         agent: String? = nil,
         summary: String? = nil,
-        command: String? = nil
+        command: String? = nil,
+        createdAt: Date? = nil
     ) {
         self.id = id
         self.paneID = paneID
@@ -395,6 +400,7 @@ public struct PendingAction: Codable, Equatable, Sendable {
         self.agent = agent
         self.summary = summary
         self.command = command
+        self.createdAt = createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -408,6 +414,7 @@ public struct PendingAction: Codable, Equatable, Sendable {
         options = PendingOption.normalised(try? c.decodeIfPresent([PendingOption].self, forKey: .options))
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? nil
         command = try c.decodeIfPresent(String.self, forKey: .command)
     }
 
