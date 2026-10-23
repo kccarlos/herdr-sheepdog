@@ -153,7 +153,7 @@ English into the README cut; ship the Chinese as a subtitle file or a separate e
 - **Caption (terminal):** "The agent's live terminal, on your phone." / 「agent 的实时终端，就在手机上。」
 - **Caption (diff):** "Read the diff before you say yes." / 「先看 diff，再点头。」
 - **You:** none. **Voice:** none.
-- **Source:** the offline demo covers the window, the key bar and Changes/diff (`DemoChanges`). The demo's paths read `/Users/demo/code/app`; see [Product changes](#product-changes-that-would-help-filming).
+- **Source:** the offline demo covers the window, the key bar and Changes/diff (`DemoChanges`), with the same `/Users/demo/code/shop` paths as the real shoot.
 
 **8. Prompt with a screenshot (0:42–0:48)**
 
@@ -182,7 +182,7 @@ A three-beat montage, about 2 s each, with one caption each.
   - **Source:** a real daemon (the shell is on by default once the security work lands). The demo's shell prints "demo: nothing runs here", so don't use it on camera.
 - **10b.** Settings, the top line: "sheepdog vX.Y.Z is available. To update, run this on your computer: `brew upgrade sheepdog`".
   - **Caption:** "It tells you when there's an update." / 「有新版本，它会告诉你。」
-  - **Source:** this line shows only when the daemon knows of a newer release. Either film it through `UpdateNoticeUITests`' stub daemon in the simulator, or film just after a release with an older daemon. A demo flag is in [Product changes](#product-changes-that-would-help-filming).
+  - **Source:** this line shows only when the daemon knows of a newer release: film the offline demo with `-sheepdogDemoUpdate` in the simulator, or film just after a release with an older daemon.
 - **10c (optional).** The Live Activity on the lock screen with Mute and End.
   - **Caption:** "Mute from your earbuds." / 「耳机上一键静音。」
   - **Source:** real device only.
@@ -315,11 +315,11 @@ for some final shots.
 | 5. Live Activity | no (the simulator does not draw it) | yes, on a device |
 | 6. Card "Your agents" | yes (`-sheepdogDemoCard`) | or real |
 | 7. Live terminal and key bar | yes | or real |
-| 7. Changes and diff | yes, but the path reads `/Users/demo/code/app` | or real |
+| 7. Changes and diff | yes | or real |
 | 8. Attach and send a prompt | no (it says "This is the demo") | yes |
 | 9. New agent | no (it says "no agent was started") | yes |
 | 10a. Shell | no (it says "demo: nothing runs here") | yes |
-| 10b. Update notice | no | an older daemon, or the stub daemon in `UpdateNoticeUITests` |
+| 10b. Update notice | yes (`-sheepdogDemoUpdate`) | or an older daemon |
 | 11, 12 | | real herdr, real setup |
 
 ## 4. Editing notes
@@ -377,18 +377,14 @@ link in the README.
 
 ### Product changes that would help filming
 
-None of these is built. Each one is small, and each one only matters if the shot cannot be
+Items 1, 5 and 7 are built; the rest are not. Each one is small, and each one only matters if the shot cannot be
 filmed on a real daemon.
 
-1. **Demo update notice.** A launch argument (for example `-sheepdogDemoUpdate`) under which the demo's `/api/state` reports an available update, so shot 10b can be filmed without an older daemon or the UI test's stub.
+1. **Demo update notice.** Done: under `-sheepdogDemoUpdate` (debug builds) the demo's `/api/state` reports sheepdog v0.1.17 as available, so the main screen shows the update notice and shot 10b can be filmed offline.
 2. **Demo new agent.** In the demo, Start would add a scripted, working agent to the list, instead of answering "no agent was started". This makes shot 9 filmable offline.
 3. **Demo sends without the "This is the demo" replies.** The composer, attachments and agent actions would answer as a real daemon does, behind a recording-only flag. This covers shot 8.
 4. **A demo shell with a few scripted commands** (`git log --oneline -3`, `git status`, `make test`) instead of "demo: nothing runs here". This covers shot 10a.
-5. **Consistent demo paths.**
-   - The demo's Changes say `/Users/demo/code/app` on branch `fix-login`.
-   - Its New agent projects are `sheepdog-bench`, `website` and `notes` under `/Users/you/code`.
-   - Its agents are in workspace `shop`.
-   - One fake project (`shop` under `/Users/demo/code`) would let demo and real shots cut together.
+5. **Consistent demo paths.** Done: the demo's agents, Changes and New agent folders all use `shop` under `/Users/demo/code` (agents in `~/code/shop`, Changes on branch `fix-login`), the same paths as the `demo` macOS user above.
 6. **More demo cards.** Today the demo only answers "Show me the agents". A "show me what claude-auth changed" card would back shot 6 with something closer to the diff.
 7. **The recording pipeline (scripts and a test, not the app).** Done: `LaunchRecordingUITests`, `phone.sh`, `compose.py` and `lines.tsv` make the synthetic cut described in [The video we have now](#the-video-we-have-now).
 8. **(Optional) A local notification in the demo** with the daemon's push text, to rehearse shot 3 on a phone without a daemon. Filming shot 3 still needs a real device, because a locked simulator stops the recorder.

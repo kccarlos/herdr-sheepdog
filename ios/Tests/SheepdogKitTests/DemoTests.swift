@@ -124,6 +124,23 @@ final class DemoDaemonTests: XCTestCase {
         super.tearDown()
     }
 
+    func testUpdateOnlyWhenARecordingSetsOne() async throws {
+        let plain = try await client.state()
+        XCTAssertNil(plain.update, "a demo daemon has no release to compare with")
+        daemon.update = UpdateInfo(current: "v0.1.16", latest: "v0.1.17", available: true, how: "brew upgrade sheepdog")
+        let state = try await client.state()
+        XCTAssertEqual(state.update?.latest, "v0.1.17")
+        XCTAssertEqual(state.update?.notice?.command, "brew upgrade sheepdog")
+    }
+
+    func testOneProjectPath() async throws {
+        // Demo and real shots cut together: every path is shop under /Users/demo/code.
+        let state = try await client.state()
+        XCTAssertTrue(state.agents.allSatisfy { $0.cwd == "~/code/shop" })
+        let changes = try await client.agentChanges(paneID: DemoWorld.authPane)
+        XCTAssertEqual(changes?.root, "/Users/demo/code/shop")
+    }
+
     func testRoundTrip() async throws {
         let hello = try await client.hello()
         XCTAssertEqual(hello.version, "demo")
