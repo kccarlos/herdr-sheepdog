@@ -177,13 +177,16 @@ jobs:
           exit "$status"
 
       # Build/Products holds the .app, the test bundles and the .xctestrun
-      # (whose paths are relative to it); bin/sheepdog is the daemon and
-      # ios/scripts has the fixture daemon and summary scripts, so a test
-      # job needs no checkout.
+      # (whose paths are relative to it); bin/sheepdog is the daemon,
+      # ios/scripts has the fixture daemon and summary scripts, and some
+      # tests read testdata/protocol and ios/Tests at their #filePath (the
+      # same workspace path on every runner), so a test job needs no
+      # checkout.
       - name: Pack the build
         run: |
           start=$(date +%s)
-          tar -cf - -C "$DERIVED/Build" Products -C "$GITHUB_WORKSPACE" bin ios/scripts \
+          tar -cf - -C "$DERIVED/Build" Products \
+            -C "$GITHUB_WORKSPACE" bin ios/scripts ios/Tests testdata/protocol \
             | zstd -T0 -3 -q -o "$RUNNER_TEMP/$BUILD_ARTIFACT"
           ls "$DERIVED"/Build/Products/*.xctestrun
           echo "products $(du -sh "$DERIVED/Build/Products" | cut -f1), packed $(du -h "$RUNNER_TEMP/$BUILD_ARTIFACT" | cut -f1) in $(( $(date +%s) - start )) s" \
@@ -275,8 +278,7 @@ jobs:
           name: ${{ env.BUILD_ARTIFACT }}
           path: ${{ runner.temp }}
 
-      # Into the workspace, where a checkout would be: Products, bin and
-      # ios/scripts.
+      # Into the workspace, where the build job's checkout was.
       - name: Unpack the build
         run: |
           echo "build downloaded $(date +%s)" >> "$TIMINGS"
