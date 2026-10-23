@@ -169,7 +169,10 @@ public final class TermSocket {
     private func start() {
         teardown()
         guard let url = Self.url(for: endpoint) else {
-            onEvent?(.error(ch: nil, message: "the address \(endpoint.display) is not a URL"))
+            let message = endpoint.allowsConnection
+                ? "the address \(endpoint.display) is not a URL"
+                : PairingProblem.notPaired.message
+            onEvent?(.error(ch: nil, message: message))
             userClosed = true
             state = .idle
             return
