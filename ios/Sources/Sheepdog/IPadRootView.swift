@@ -114,6 +114,10 @@ struct IPadSidebar: View {
             .scrollBounceBehavior(.basedOnSize)
             foot
         }
+        // The sidebar is a 390 pt column: it grows up to the largest
+        // non-accessibility size, as the iPhone's chrome does; the detail
+        // keeps scaling.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Theme.fill.ignoresSafeArea())
     }
 
@@ -151,6 +155,7 @@ struct IPadSidebar: View {
             .foregroundStyle(Theme.ink)
             .frame(width: 44, height: 44)
             .contentShape(Circle())
+            .hoverEffect()
     }
 
     // MARK: Rows
@@ -178,7 +183,9 @@ struct IPadSidebar: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? Theme.line : .clear))
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -231,8 +238,7 @@ struct IPadSidebar: View {
                 Text(agent.alias)
                     .font(.body.weight(selected ? .semibold : .regular))
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if blocked {
                     Image(systemName: "hand.raised")
@@ -253,7 +259,9 @@ struct IPadSidebar: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? Theme.line : .clear))
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
