@@ -235,7 +235,10 @@ final class SessionViewModel: ObservableObject {
     @Published var others: [ComputerSession] = []
     var otherSinks: [String: AnyCancellable] = [:]
     /// Whether the current computer answered its last `/api/state`.
-    @Published var currentReachability: Reachability = .connecting
+    /// The current computer as the last `/api/state` poll found it; what
+    /// the app shows comes from `Reachability.current`, which prefers the
+    /// session's own connection.
+    @Published var polledReachability: Reachability = .connecting
     var currentLastSeen: Date?
 
     /// The current computer's daemon id ("" for a bare address).
@@ -348,6 +351,16 @@ final class SessionViewModel: ObservableObject {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
+        if DebugLaunch.renderChurn {
+            Task { @MainActor [weak self] in
+                // Only under Settings: the main screen's menus need an
+                // idle app for the test to open them.
+                while self != nil {
+                    if self?.showSettings == true { self?.objectWillChange.send() }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+        }
         #endif
         wire()
         away.onRoute = { [weak self] route in self?.handle(route: route) }
@@ -435,7 +448,7 @@ final class SessionViewModel: ObservableObject {
         hello = nil
         if !sameDaemon {
             // Another daemon, another conversation.
-            currentReachability = .connecting
+            polledReachability = .connecting
             currentLastSeen = nil
             agents = []
             questions = []
@@ -1111,6 +1124,9 @@ final class SessionViewModel: ObservableObject {
                         self.handle(event: output)
                     }
                 } catch {
+                    // A stream that End or a restart cancelled: its error
+                    // must not mark the new stream "reconnecting".
+                    if Task.isCancelled { return }
                     SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
                     if case let DaemonError.pairing(problem) = error {
                         // A revoked phone does not fix itself by retrying.
@@ -1269,12 +1285,12 @@ final class SessionViewModel: ObservableObject {
         do {
             apply(try await client.state())
             currentLastSeen = Date()
-            if currentReachability != .online { currentReachability = .online }
+            if polledReachability != .online { polledReachability = .online }
             if hello == nil { hello = try? await client.hello() }
             if !quiet { banner = nil }
             return true
         } catch let error as DaemonError {
-            currentReachability = .offline(since: currentLastSeen)
+            polledReachability = .offline(since: currentLastSeen)
             // A loud refresh that fails ends the session, as a failed
             // Connect would.
             if !quiet { send(.probeFailed(error)) }
@@ -2513,8 +2529,10 @@ private final class MismatchCounter: @unchecked Sendable {
     var count: Int { lock.lock(); defer { lock.unlock() }; return n }
 }
 
-/// The pairing sheet on the main screen: a code from outside the app, or a
-/// refusal that needs a new scan.
+/// A pairing sheet: a code from outside the app, a refusal that needs a new
+/// scan, or Add a computer. Store it and present the stored value: its id
+/// is minted once, so a wrapper built in a binding's getter would be a new
+/// sheet on every re-render, and SwiftUI would dismiss and re-present it.
 struct PairingSheet: Identifiable {
     let id = UUID()
     var stage: PairingStage

@@ -206,6 +206,8 @@ public struct AgentWindowState: Equatable, Sendable {
         }
         if mode == .observe {
             phase = .observing
+            // Frames again: the connection is back.
+            if notice == .reconnecting { notice = nil }
         } else {
             phase = .live
             notice = nil

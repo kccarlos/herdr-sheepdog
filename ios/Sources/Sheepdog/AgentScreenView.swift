@@ -118,7 +118,7 @@ private struct AgentWindowView: View {
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .principal) { header }
-                    ToolbarItem(placement: .topBarTrailing) { menu }
+                    ToolbarItem(placement: .topBarTrailing) { menu(.toolbar) }
                 }
         }
     }
@@ -222,72 +222,37 @@ private struct AgentWindowView: View {
         .accessibilityIdentifier("agentScreen.header")
     }
 
-    private var menu: some View {
-        Menu {
-            menuItems
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .accessibilityLabel("More")
-        }
-        .accessibilityIdentifier("agentScreen.menu")
+    /// The ⋯ menu, from values only: it stays still while the screen
+    /// streams (`AgentWindowMenu`).
+    private func menu(_ style: AgentWindowMenu.Style) -> some View {
+        let cwd = live.cwd ?? ""
+        return AgentWindowMenu(
+            style: style,
+            observing: state.phase == .observing,
+            shellCwd: model.shellEntryShown && !cwd.isEmpty ? cwd : nil,
+            canResetTextSize: window.fontSize != SwiftTermSurface.defaultFontSize,
+            actionsAvailable: model.agentActionsAvailable,
+            working: live.state == .working,
+            others: model.flock.running.filter { $0.paneID != agent.paneID }
+                .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
+            extra: pane?.extraMenu,
+            perform: perform
+        )
+        .equatable()
     }
 
-    @ViewBuilder
-    private var menuItems: some View {
-            if let extra = pane?.extraMenu { extra }
-            if state.phase == .observing {
-                Button {
-                    confirmTakeover = true
-                } label: {
-                    Label("Take over", systemImage: "hand.raised")
-                }
-                .accessibilityIdentifier("agentScreen.menu.takeover")
-            }
-            Button {
-                UIPasteboard.general.string = window.surface.snapshotText()
-                Haptics.tap()
-            } label: {
-                Label("Copy screen", systemImage: "doc.on.doc")
-            }
-            .accessibilityIdentifier("agentScreen.menu.copy")
-            Button {
-                showChanges = true
-            } label: {
-                Label("Changes", systemImage: "plusminus")
-            }
-            .accessibilityIdentifier("agentScreen.menu.changes")
-            if model.shellEntryShown, let cwd = live.cwd, !cwd.isEmpty {
-                Button {
-                    openWindow(.shell(cwd: cwd))
-                } label: {
-                    Label("Open shell here", systemImage: "apple.terminal")
-                }
-                .accessibilityIdentifier("agentScreen.menu.shell")
-            }
-            Button {
-                window.resetFontSize()
-            } label: {
-                Label("Reset text size", systemImage: "textformat.size")
-            }
-            .disabled(window.fontSize == SwiftTermSurface.defaultFontSize)
-            .accessibilityIdentifier("agentScreen.menu.textSize")
-            if model.agentActionsAvailable {
-                AgentActionItems(working: live.state == .working) { action = $0 }
-            }
-            let others = model.flock.running.filter { $0.paneID != agent.paneID }
-            if !others.isEmpty {
-                Menu {
-                    ForEach(others, id: \.paneID) { other in
-                        Button {
-                            onSwitch(other.paneID)
-                        } label: {
-                            Label(other.displayName, systemImage: other.state == .blocked ? "hand.raised.fill" : "terminal")
-                        }
-                    }
-                } label: {
-                    Label("Switch agent", systemImage: "rectangle.stack")
-                }
-            }
+    private func perform(_ item: AgentWindowMenu.Item) {
+        switch item {
+        case .takeOver: confirmTakeover = true
+        case .copy:
+            UIPasteboard.general.string = window.surface.snapshotText()
+            Haptics.tap()
+        case .changes: showChanges = true
+        case let .shell(cwd): openWindow(.shell(cwd: cwd))
+        case .resetTextSize: window.resetFontSize()
+        case let .action(action): self.action = action
+        case let .switchTo(id): onSwitch(id)
+        }
     }
 
     // MARK: - Pane header (iPad)
@@ -347,16 +312,7 @@ private struct AgentWindowView: View {
                     .accessibilityLabel("Show another agent beside this one")
                     .accessibilityIdentifier("pane.split")
                 }
-                Menu { menuItems } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                        .hoverEffect()
-                }
-                .accessibilityLabel("Agent actions")
-                .accessibilityIdentifier("agentScreen.menu")
+                menu(.pane)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }

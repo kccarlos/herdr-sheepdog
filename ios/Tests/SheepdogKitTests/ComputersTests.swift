@@ -15,6 +15,23 @@ final class ComputersTests: XCTestCase {
         Agent(paneID: "p-\(alias)", alias: alias, state: state)
     }
 
+    /// The current computer's status comes from the session's connection
+    /// while one runs: a voice that works is never shown as "Connecting…"
+    /// or offline because a separate poll said so.
+    func testTheCurrentComputerFollowsTheSession() {
+        let seen = Date(timeIntervalSince1970: 1_000)
+        let stalePoll = Reachability.offline(since: seen)
+        XCTAssertEqual(Reachability.current(chip: .connected, polled: .connecting, lastSeen: nil), .online)
+        XCTAssertEqual(Reachability.current(chip: .connected, polled: stalePoll, lastSeen: seen), .online)
+        XCTAssertEqual(Reachability.current(chip: .reconnecting, polled: .online, lastSeen: seen), .connecting)
+        XCTAssertEqual(Reachability.current(chip: .connecting, polled: .online, lastSeen: seen), .connecting)
+        XCTAssertEqual(Reachability.current(chip: .offline, polled: .online, lastSeen: seen), .offline(since: seen))
+        // No session: the last poll is all there is.
+        XCTAssertEqual(Reachability.current(chip: .notConnected, polled: .online, lastSeen: seen), .online)
+        XCTAssertEqual(Reachability.current(chip: .notConnected, polled: stalePoll, lastSeen: seen), stalePoll)
+        XCTAssertEqual(Reachability.current(chip: .tokenRefused, polled: .online, lastSeen: seen), .online)
+    }
+
     func testTheSummaryLine() {
         let now = ISO8601DateFormatter().date(from: "2026-10-23T12:00:00Z")!
         var c = ComputerSnapshot(id: "h", name: "Home Mac", isCurrent: false, reachability: .online,

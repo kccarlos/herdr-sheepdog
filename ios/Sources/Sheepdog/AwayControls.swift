@@ -63,6 +63,8 @@ final class VoiceLiveActivity {
     private var tokenTask: Task<Void, Never>?
     private var content: Content?
     private var refreshTask: Task<Void, Never>?
+    /// The last update sent; the next waits for it.
+    private var updating: Task<Void, Never>?
     private var watchTask: Task<Void, Never>?
     /// The user swiped the banner away during this session: leave it
     /// gone until the next one.
@@ -88,7 +90,14 @@ final class VoiceLiveActivity {
             guard next != content else { return }
             content = next
             let update = Self.activityContent(next)
-            Task { await activity.update(update) }
+            // One update at a time, in order: two unordered tasks could
+            // land "Reconnecting…" after "Listening", and the banner kept
+            // it until the next change.
+            let previous = updating
+            updating = Task {
+                await previous?.value
+                await activity.update(update)
+            }
         } else if !dismissedByUser {
             start(next, voiceName: voiceName)
         }
@@ -124,7 +133,12 @@ final class VoiceLiveActivity {
         let last = content.map { ActivityContent(state: $0, staleDate: nil) }
         activity = nil
         content = nil
-        Task { await ending.end(last, dismissalPolicy: .immediate) }
+        let previous = updating
+        updating = nil
+        Task {
+            await previous?.value
+            await ending.end(last, dismissalPolicy: .immediate)
+        }
     }
 
     /// The system ends an activity on its own (the user swiped it

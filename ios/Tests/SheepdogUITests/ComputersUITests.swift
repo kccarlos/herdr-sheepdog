@@ -124,6 +124,38 @@ final class ComputersUITests: XCTestCase {
         closeMenu(app, item: "voice.manageComputers")
     }
 
+    /// Settings ▸ Add a computer while the session view model re-renders
+    /// ten times a second (as during a live voice session): the scan sheet
+    /// opens once and stays. It used to close and reopen on every
+    /// re-render, because its identity was minted in the binding's getter.
+    func testAddComputerSheetStaysWhileTheSessionRerenders() throws {
+        let stub = try StubDaemon(.daemon(update: nil))
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)", "-sheepdogRenderChurn"]
+        app.launch()
+
+        tapMenuItem(app, menu: "voice.menu", item: "voice.manageComputers")
+        let add = app.buttons["settings.addComputer"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), "Settings ▸ Add a computer")
+        add.tap()
+
+        let sheet = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pairing.'")).firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "the scan sheet opens")
+        let id = sheet.identifier
+        // Stays up, the same screen, for several seconds of re-renders.
+        let done = app.buttons["settings.done"]
+        for i in 0 ..< 40 {
+            usleep(200_000)
+            let current = app.descendants(matching: .any).matching(identifier: id).firstMatch
+            XCTAssertTrue(current.exists, "the scan sheet is still up after \(i * 200 + 200) ms")
+            XCTAssertFalse(done.isHittable, "Settings stays covered after \(i * 200 + 200) ms")
+        }
+        shot(app, "add-computer")
+    }
+
     /// The first button whose label starts with `prefix`.
     private func starting(_ app: XCUIApplication, _ prefix: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
