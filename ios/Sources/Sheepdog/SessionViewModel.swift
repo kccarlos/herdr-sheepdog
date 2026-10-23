@@ -24,7 +24,9 @@ enum SettingsRoute: Hashable {
 final class SessionViewModel: ObservableObject {
     struct Banner: Identifiable, Equatable {
         enum Tone { case error, warning, info }
-        let id = UUID()
+        /// From what it says: the same banner raised again is the same
+        /// banner, not a new one sliding in.
+        var id: String { "\(tone).\(message)" }
         var tone: Tone = .error
         var message: String
         var hint: String?
@@ -73,12 +75,12 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var questionPhases: [String: ApprovalFlow.Phase] = [:]
     /// Agents cards the user opened, by pane id; kept for the session.
     @Published var expandedAgents: Set<String> = []
-    /// The New agent sheet (`+`, and the Agents page's empty state).
-    @Published var showsNewAgent = false
-    /// ⋯ ▸ Spaces.
-    @Published var showsSpaces = false
-    /// The screen before a system permission prompt, while it waits.
-    @Published private(set) var primer: PermissionPrimer?
+    /// Every sheet and cover over the main screen: Settings, New agent,
+    /// Spaces, a card, the pairing flow, the primers, the demo
+    /// (`PresentationCoordinator`).
+    let presentation = PresentationCoordinator()
+    /// The permission primer on screen, while it waits for its answer.
+    private var primer: PermissionPrimer?
     private var primerAnswer: CheckedContinuation<Bool, Never>?
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
     /// engine's jitter-buffer profile explicitly when it changes, rather
@@ -110,7 +112,7 @@ final class SessionViewModel: ObservableObject {
     /// Cards (feature `cards`): the card open as a sheet, the main
     /// screen's navigation (a card's "Open window" pushes onto it), the
     /// `visibility` reports and the cards this phone got.
-    @Published var presentedCard: ScreenCard?
+    var presentedCard: ScreenCard? { presentation.card }
     @Published var navigationPath = NavigationPath()
     private var cardVisibility = CardVisibility()
     private var cardInbox = CardInbox()
@@ -181,11 +183,8 @@ final class SessionViewModel: ObservableObject {
     /// `/api/state`'s update notice (Settings shows one line for it); nil
     /// on a daemon too old to report one.
     @Published private(set) var update: UpdateInfo?
-    @Published var showSettings = false
-    /// The pairing sheet on the main screen: a `sheepdog://pair#…` code
-    /// from outside the app (asked about first; nothing is contacted before
-    /// the user says yes), or "Please scan again".
-    @Published var pairingSheet: PairingSheet?
+    /// Settings is the presentation on screen.
+    var showSettings: Bool { presentation.isShowing(.settings) }
     /// Why the app must scan again, while it must.
     @Published private(set) var pairingProblem: PairingProblem?
     /// The same, for Settings ▸ Connection when it is open.
@@ -202,7 +201,7 @@ final class SessionViewModel: ObservableObject {
     /// Health's "Change in Settings ›": Settings, pushed to Models.
     func openModels() {
         settingsRoute = .models
-        showSettings = true
+        presentation.present(.settings)
     }
 
     /// "Gemini · gemini-3.5-flash": the orchestrator as the catalog names it, else
@@ -363,6 +362,12 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         wire()
+        presentation.onFollowup = { [weak self] followup in
+            switch followup {
+            case let .openWindow(request): self?.windowRequest = request
+            }
+        }
+        presentation.onClosed = { [weak self] closed in self?.presentationClosed(closed) }
         away.onRoute = { [weak self] route in self?.handle(route: route) }
         away.onActivityToken = { [weak self] token in self?.sendActivityToken(token) }
         // The last conversation, at once: before the network, or without it.
@@ -391,7 +396,7 @@ final class SessionViewModel: ObservableObject {
         if !isConfigured || !settings.hasBeenConfigured {
             // A cold launch from the Camera app's pairing link asks about
             // the link instead (and reopens Settings if declined).
-            if pairingSheet == nil { showSettings = true }
+            if presentation.current == nil { presentation.present(.settings) }
         } else {
             Task {
                 await refreshState(quiet: true)
@@ -481,7 +486,7 @@ final class SessionViewModel: ObservableObject {
 
     func connect() {
         guard let endpoint = settings.endpoint else {
-            showSettings = true
+            presentation.present(.settings)
             return
         }
         client.update(endpoint: endpoint)
@@ -525,15 +530,24 @@ final class SessionViewModel: ObservableObject {
         #if DEBUG
         if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPrimers { return true }
         #endif
-        primerAnswer?.resume(returning: false)
+        // A primer still waiting is answered "not now" and closed.
+        if let waiting = self.primer { answerPrimer(false, closing: waiting) }
         return await withCheckedContinuation { continuation in
             primerAnswer = continuation
             self.primer = primer
+            presentation.present(.primer(primer))
         }
     }
 
+    /// The primer's answer: once, and its cover closes.
     func answerPrimer(_ yes: Bool) {
-        primer = nil
+        guard let primer else { return }
+        answerPrimer(yes, closing: primer)
+    }
+
+    private func answerPrimer(_ yes: Bool, closing primer: PermissionPrimer) {
+        self.primer = nil
+        presentation.dismiss(.primer(primer))
         primerAnswer?.resume(returning: yes)
         primerAnswer = nil
     }
@@ -1045,18 +1059,9 @@ final class SessionViewModel: ObservableObject {
     func open(url: URL) {
         guard demo == nil else { return }
         if let code = PairingCode(url.absoluteString) {
-            // Close Settings first so the question is on top.
-            guard showSettings else {
-                pairingSheet = PairingSheet(stage: .confirm(code))
-                return
-            }
-            showSettings = false
-            Task {
-                // A sheet asked for while another is still sliding away is
-                // dropped.
-                try? await Task.sleep(for: .milliseconds(700))
-                pairingSheet = PairingSheet(stage: .confirm(code))
-            }
+            // Whatever is up (Settings) closes first, so the question is
+            // on top.
+            presentation.presentInstead(.pairing(.confirm(code)))
             return
         }
         guard let route = AppRoute(url: url) else {
@@ -1845,7 +1850,9 @@ final class SessionViewModel: ObservableObject {
         guard arrival != .duplicate else { return }
         conversationChanged()
         if arrival == .open {
-            presentedCard = cardInbox.card(id: card.cardID) ?? card
+            let shown = Presentation.card(cardInbox.card(id: card.cardID) ?? card)
+            // A newer card replaces the card on screen.
+            if presentedCard != nil { presentation.replace(shown) } else { presentation.present(shown) }
             Haptics.tap()
             AccessibilityNotification.Announcement("On your screen: \(card.displayTitle)").post()
         }
@@ -1853,9 +1860,24 @@ final class SessionViewModel: ObservableObject {
         scheduleHistorySync()
     }
 
+    /// A sheet or cover finished closing.
+    private func presentationClosed(_ closed: Presentation) {
+        switch closed {
+        case .pairing:
+            // Declined a pairing link with nothing paired: back to the
+            // first-run screen.
+            if !isConfigured { presentation.present(.settings) }
+        case let .primer(kind) where primer == kind:
+            // Closed without an answer: "not now".
+            answerPrimer(false)
+        default:
+            break
+        }
+    }
+
     /// A card row was tapped.
     func openCard(_ card: ScreenCard) {
-        presentedCard = card
+        presentation.present(.card(card))
     }
 
     /// An agent's window the session asked for (a card's Open window, a
@@ -1866,13 +1888,8 @@ final class SessionViewModel: ObservableObject {
     /// A card's "Open window": close the sheet, then open the agent's
     /// window (a push made under a sheet that is closing is lost).
     func openAgentWindow(paneID: String) {
-        let wasOpen = presentedCard != nil
-        presentedCard = nil
         pane = .conversation
-        Task { @MainActor in
-            if wasOpen { try? await Task.sleep(for: .milliseconds(400)) }
-            windowRequest = .agent(paneID)
-        }
+        presentation.dismiss(then: .openWindow(.agent(paneID)))
     }
 
     // MARK: - Feedback marks
@@ -2096,8 +2113,8 @@ final class SessionViewModel: ObservableObject {
     let demo: DemoDaemon?
     var isDemo: Bool { demo != nil }
     private var demoVoice: DemoVoice?
-    /// Asked of the real view model: show the demo (`SheepdogApp`).
-    @Published var demoActive = false
+    /// The real view model shows the demo (`Presentation.demo`).
+    var demoActive: Bool { presentation.isShowing(.demo) }
     /// Set on the demo's view model: leave it.
     var onLeaveDemo: () -> Void = {}
 
@@ -2125,33 +2142,16 @@ final class SessionViewModel: ObservableObject {
 
     /// The first-run screen's and Settings' "Try the demo".
     func openDemo() {
-        guard demo == nil, !demoActive else { return }
-        guard showSettings else {
-            demoActive = true
-            return
-        }
-        showSettings = false
-        Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            demoActive = true
-        }
-    }
-
-    /// Back to the first-run Settings once a sheet over it closed (a sheet
-    /// asked for while another closes is dropped).
-    private func reopenFirstRunSettings() {
-        guard !isConfigured || !settings.hasBeenConfigured else { return }
-        Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            showSettings = true
-        }
+        guard demo == nil else { return }
+        // Settings (the first-run screen) closes first.
+        presentation.presentInstead(.demo)
     }
 
     /// The demo was closed: back to the real app, and to the first-run
-    /// Settings if no daemon is saved yet.
+    /// Settings (once the demo's cover is gone) if no daemon is saved yet.
     func demoClosed() {
-        demoActive = false
-        reopenFirstRunSettings()
+        presentation.dismiss(.demo)
+        if !isConfigured || !settings.hasBeenConfigured { presentation.present(.settings) }
     }
 
     /// Leave the demo (its header and its Settings).
@@ -2413,7 +2413,7 @@ final class SessionViewModel: ObservableObject {
     private func showFirstRunIfNeeded() {
         guard !isConfigured else { return }
         hello = nil
-        showSettings = true
+        presentation.present(.settings)
     }
 
     /// The scan-again screen a refusal opens, from Settings or the main
@@ -2424,7 +2424,7 @@ final class SessionViewModel: ObservableObject {
             daemonNoticeProblem = problem
             return
         }
-        pairingSheet = PairingSheet(stage: .problem(problem))
+        presentation.present(.pairing(.problem(problem)))
     }
 
     // MARK: - Test connection (Settings)
@@ -2531,13 +2531,12 @@ private final class MismatchCounter: @unchecked Sendable {
     var count: Int { lock.lock(); defer { lock.unlock() }; return n }
 }
 
-/// A pairing sheet: a code from outside the app, a refusal that needs a new
-/// scan, or Add a computer. Store it and present the stored value: its id
-/// is minted once, so a wrapper built in a binding's getter would be a new
-/// sheet on every re-render, and SwiftUI would dismiss and re-present it.
+/// A pairing sheet inside Settings (Add a computer, Scan a new code). Its
+/// id is where it started (`PairingStage.id`), so building it again is
+/// the same sheet: a re-render cannot dismiss and re-present it.
 struct PairingSheet: Identifiable {
-    let id = UUID()
     var stage: PairingStage
+    var id: String { stage.presentationID }
 }
 
 extension SessionViewModel.Banner {

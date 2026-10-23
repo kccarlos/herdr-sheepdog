@@ -338,6 +338,19 @@ section 6.
     Spaces, a card, pairing, the primers, the demo): the window whose menu
     asked (`SessionMenus` calls `request(from:)`), else the owner.
     Otherwise every window would open the same sheet.
+  - **One sheet at a time** (`Presentation.swift`). Every session sheet and
+    cover is a `Presentation` case whose `id` comes from what it shows
+    (`settings`, `card.<id>`, `pairing.confirm.<daemon>.<code>`), never
+    `UUID()`, and `SessionViewModel.presentation`
+    (`PresentationCoordinator`, over Kit's pure `PresentationQueue`) owns
+    which one is up. Code asks with an intent (`present`,
+    `presentInstead`, `dismiss`); a request while another is up waits in
+    the queue, and the next shows from the sheet's `onDismiss`, never after
+    a guessed delay. Work that must wait for a clear screen (open an
+    agent's window after a card or Spaces closes) is `dismiss(then:)`.
+    Sheets local to one screen (Changes, More keys, Add a computer inside
+    Settings) stay `@State`, with ids from their content too
+    (`PairingSheet.id`).
   - every other window shows the **mini capsule** (`MiniCapsule`): a 30 pt
     orb (Mute while listening, else the big orb's action) and the voice
     menu.

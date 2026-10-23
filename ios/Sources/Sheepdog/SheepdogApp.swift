@@ -145,26 +145,6 @@ struct SheepdogApp: App {
             .onAppear { PushCoordinator.shared.model = model }
             // sheepdog://talk, sheepdog://agent/<pane id> (AppRoute).
             .onOpenURL { url in model.open(url: url) }
-            // The offline demo (Settings ▸ Try the demo): a second view
-            // model on a scripted daemon inside the app, over the real one.
-            .modifier(DemoCover(model: model))
-    }
-}
-
-/// The demo opens in one window: the one that asked for it, else the
-/// audio owner.
-private struct DemoCover: ViewModifier {
-    @ObservedObject var model: SessionViewModel
-    @ObservedObject private var scenes = SceneCoordinator.shared
-    @Environment(\.sceneID) private var sceneID
-
-    func body(content: Content) -> some View {
-        content.fullScreenCover(isPresented: Binding(
-            get: { model.demoActive && scenes.isPresenter(sceneID) },
-            set: { model.demoActive = $0 }
-        )) {
-            DemoShell(close: { model.demoClosed() })
-        }
     }
 }
 

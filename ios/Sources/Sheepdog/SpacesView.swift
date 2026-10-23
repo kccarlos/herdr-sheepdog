@@ -7,7 +7,6 @@ import SwiftUI
 struct SpacesSheet: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openAgentWindow) private var openAgentWindow
 
     enum Load: Equatable {
         case loading
@@ -135,12 +134,10 @@ struct SpacesSheet: View {
         }
     }
 
+    /// Spaces closes, then the window opens (a push made under a closing
+    /// sheet is lost).
     private func openWindow(_ paneID: String) {
-        dismiss()
-        Task {
-            try? await Task.sleep(for: .milliseconds(400))
-            openAgentWindow(.agent(paneID))
-        }
+        model.presentation.dismiss(then: .openWindow(.agent(paneID)))
     }
 
     private func askClose(_ space: SpacesView.Space) {

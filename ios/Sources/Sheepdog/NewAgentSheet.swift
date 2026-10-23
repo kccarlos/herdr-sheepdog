@@ -15,7 +15,6 @@ import SwiftUI
 struct NewAgentSheet: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openAgentWindow) private var openWindow
 
     private enum Load: Equatable {
         case loading
@@ -44,12 +43,12 @@ struct NewAgentSheet: View {
                 .navigationDestination(for: NewAgentOptions.Project.self) { project in
                     if case let .loaded(view) = load {
                         NewAgentKindStep(project: project, spaces: view) { paneID in
-                            dismiss()
+                            // The sheet closes, then the agent's window
+                            // opens (a push under a closing sheet is lost).
                             if let paneID {
-                                Task {
-                                    try? await Task.sleep(for: .milliseconds(400))
-                                    openWindow(.newAgent(paneID))
-                                }
+                                model.presentation.dismiss(then: .openWindow(.newAgent(paneID)))
+                            } else {
+                                dismiss()
                             }
                         }
                     }
