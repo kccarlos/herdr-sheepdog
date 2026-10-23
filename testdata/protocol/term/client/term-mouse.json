@@ -1,0 +1,8 @@
+{
+  "type": "term-mouse",
+  "ch": 1,
+  "action": "up",
+  "button": "left",
+  "col": 12,
+  "row": 5
+}

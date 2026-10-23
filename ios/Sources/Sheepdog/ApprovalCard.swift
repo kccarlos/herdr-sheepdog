@@ -16,6 +16,8 @@ struct ApprovalCardView: View {
     /// Identifier prefix: `approval` for the voice's question, else
     /// `question.<alias>`.
     var idPrefix = "approval"
+    /// The header's right side: "4 min · 1 of 2".
+    var meta: String?
     let answer: (Int) -> Void
 
     @State private var commandExpanded = false
@@ -35,7 +37,7 @@ struct ApprovalCardView: View {
                 // Up to three lines, never cut in the middle (where the
                 // dangerous part of a command usually is); a tap shows all.
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { commandExpanded.toggle() }
+                    withAnimation(Theme.ease) { commandExpanded.toggle() }
                 } label: {
                     Text(command)
                         .font(.subheadline.monospaced())
@@ -47,7 +49,7 @@ struct ApprovalCardView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                        .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Command: \(command)")
@@ -56,15 +58,17 @@ struct ApprovalCardView: View {
             }
             phaseView
         }
-        .padding(12)
+        .padding(.horizontal, embedded ? 12 : 14)
+        .padding(.top, 12)
+        .padding(.bottom, embedded ? 12 : 14)
         .background(
-            RoundedRectangle(cornerRadius: embedded ? 12 : Theme.Radius.card, style: .continuous)
-                .fill(Theme.accentSoft)
-                .shadow(color: .black.opacity(embedded ? 0 : 0.12), radius: 12, y: 6)
+            RoundedRectangle(cornerRadius: embedded ? 12 : Theme.Radius.large, style: .continuous)
+                .fill(embedded ? Theme.accentSoft : Theme.card)
+                .shadow(color: .black.opacity(embedded ? 0 : 0.12), radius: 12, y: 8)
         )
         .overlay {
             if !embedded {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                     .strokeBorder(borderTint, lineWidth: primary ? 1.5 : 1)
             }
         }
@@ -76,22 +80,43 @@ struct ApprovalCardView: View {
         switch card.phase {
         case .answered: return Theme.done
         case .gone: return Theme.line
-        case .open, .sending: return primary ? Color.accentColor : Theme.blocked
+        case .open, .sending: return primary ? Theme.blocked : Theme.line
         }
     }
 
+    /// The canvas header: a state dot, who asks, and how long ago (and
+    /// "1 of 2" with several). It wraps at the accessibility sizes.
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "hand.raised.fill")
-                .foregroundStyle(Theme.blocked)
-                .accessibilityHidden(true)
-            Text(card.isSettled ? "\(agent) asked" : "\(agent) needs your answer")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.blockedText)
-            Spacer(minLength: 0)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 7) { headerName; Spacer(minLength: 8); headerMeta }
+            VStack(alignment: .leading, spacing: 2) { headerName; headerMeta }
         }
-        .accessibilityElement(children: .combine)
+        .font(.footnote)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(card.isSettled ? "\(agent) asked" : "\(agent) needs your answer" + (meta.map { ", \($0)" } ?? ""))
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private var headerName: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(card.isSettled ? Theme.done : Theme.blocked)
+                .frame(width: 7, height: 7)
+            Text(agent)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var headerMeta: some View {
+        if let meta {
+            Text(meta)
+                .foregroundStyle(Theme.muted)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(Theme.ease, value: meta)
+        }
     }
 
     @ViewBuilder

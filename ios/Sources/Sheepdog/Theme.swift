@@ -41,6 +41,8 @@ enum Theme {
     static let card = Color("Card")
     /// Code blocks, wells and quiet fills.
     static let fill = Color("Fill")
+    /// The user's own bubbles: a warm neutral, never the accent.
+    static let bubble = Color("Bubble")
     /// Hairlines and card borders.
     static let line = Color("Line")
     /// Secondary words.

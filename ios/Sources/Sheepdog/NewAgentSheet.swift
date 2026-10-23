@@ -15,6 +15,7 @@ import SwiftUI
 struct NewAgentSheet: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openAgentWindow) private var openWindow
 
     private enum Load: Equatable {
         case loading
@@ -23,7 +24,12 @@ struct NewAgentSheet: View {
     }
 
     @State private var load: Load = .loading
-    @State private var path: [NewAgentOptions.Project] = []
+    /// One column for the row icons, growing with the text.
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 26
+    @State private var path = NavigationPath()
+
+    /// "Choose another folder…": a path typed in, inside the project roots.
+    private struct ChooseFolderRoute: Hashable {}
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -42,10 +48,15 @@ struct NewAgentSheet: View {
                             if let paneID {
                                 Task {
                                     try? await Task.sleep(for: .milliseconds(400))
-                                    model.navigationPath.append(AgentWindowRoute(paneID: paneID))
+                                    openWindow(.newAgent(paneID))
                                 }
                             }
                         }
+                    }
+                }
+                .navigationDestination(for: ChooseFolderRoute.self) { _ in
+                    if case let .loaded(view) = load {
+                        ChooseFolderStep(spaces: view) { path.append($0) }
                     }
                 }
         }
@@ -110,29 +121,45 @@ struct NewAgentSheet: View {
                     }
                 }
             }
-            if !folders.isEmpty {
-                Section {
-                    ForEach(folders) { project in
-                        NavigationLink(value: project) {
-                            placeRow(project, detail: (project.path as NSString).abbreviatingWithTildeInPath)
-                        }
-                        .accessibilityIdentifier("newAgent.folder.\(project.name)")
+            Section {
+                ForEach(folders) { project in
+                    NavigationLink(value: project) {
+                        placeRow(project, detail: (project.path as NSString).abbreviatingWithTildeInPath)
                     }
-                } header: {
-                    Text("New space")
-                } footer: {
-                    Text("Folders under your project roots that have no space yet. Picking one makes a space there.")
+                    .accessibilityIdentifier("newAgent.folder.\(project.name)")
                 }
+                NavigationLink(value: ChooseFolderRoute()) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Image(systemName: "folder.badge.plus")
+                            .foregroundStyle(Theme.muted)
+                            .frame(width: 24)
+                            .accessibilityHidden(true)
+                        Text("Choose another folder…")
+                            .font(.body)
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("newAgent.chooseFolder")
+            } header: {
+                Text("New space")
+            } footer: {
+                Text(folders.isEmpty
+                     ? "Any folder inside your project roots."
+                     : "Folders under your project roots that have no space yet. Picking one makes a space there.")
             }
         }
         .accessibilityIdentifier("newAgent.where")
     }
 
     private func placeRow(_ project: NewAgentOptions.Project, detail: String) -> some View {
-        HStack(spacing: 12) {
+        // The icon sits on the name's line at every text size, not in the
+        // middle of a tall, wrapped row.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: project.open ? "square.stack" : "folder")
+                .font(.body)
                 .foregroundStyle(Theme.muted)
-                .frame(width: 24)
+                .frame(width: iconWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
@@ -254,7 +281,7 @@ private struct NewAgentKindStep: View {
                         Text(hint)
                     }
                 }
-            } else if project.git == false {
+            } else if project.git == false, !NewAgentOptions.isTyped(project, in: spaces) {
                 Section {
                     Label("\(project.name) isn't a git repository, so the agent works in the folder itself.", systemImage: "info.circle")
                         .font(.footnote)
@@ -392,6 +419,8 @@ private struct NewAgentKindStep: View {
         }
         .buttonStyle(.plain)
         .disabled(!canStart)
+        // A hardware keyboard: ⌘↩ starts.
+        .keyboardShortcut(.return, modifiers: .command)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.bar)
@@ -423,5 +452,86 @@ private struct NewAgentKindStep: View {
                 Haptics.answerFailed()
             }
         }
+    }
+}
+
+/// "Choose another folder…": any folder inside the project roots, by its
+/// path on the computer. The roots are shown so the path is easy to
+/// start; the daemon refuses a folder outside them and the kind step
+/// shows its reason.
+private struct ChooseFolderStep: View {
+    let spaces: SpacesView
+    let choose: (NewAgentOptions.Project) -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    private var roots: [String] { NewAgentOptions.roots(spaces) }
+    private var choice: NewAgentOptions.Project? { NewAgentOptions.typedFolder(text, in: spaces) }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("/Users/you/code/webapp", text: $text)
+                    .font(.body.monospaced())
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .submitLabel(.next)
+                    .focused($focused)
+                    .onSubmit(next)
+                    .accessibilityLabel("Folder path on your computer")
+                    .accessibilityIdentifier("newAgent.folderPath")
+            } header: {
+                Text("Folder on your computer")
+            } footer: {
+                if !text.isEmpty, choice == nil {
+                    Label("Type the full path, starting with / or ~/.", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(Theme.danger)
+                        .accessibilityIdentifier("newAgent.folderPathError")
+                } else {
+                    Text("It must be inside your project roots (supervisor.project_roots in sheepdog's config).")
+                }
+            }
+            if !roots.isEmpty {
+                Section("Project roots") {
+                    ForEach(roots, id: \.self) { root in
+                        Button {
+                            text = root + "/"
+                            focused = true
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Image(systemName: "folder")
+                                    .foregroundStyle(Theme.muted)
+                                    .frame(width: 24)
+                                    .accessibilityHidden(true)
+                                Text(root)
+                                    .font(.callout.monospaced())
+                                    .foregroundStyle(Theme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(minHeight: 44)
+                        }
+                        .accessibilityHint("Starts the path here")
+                    }
+                }
+            }
+            Section {
+                Button("Next", action: next)
+                    .buttonStyle(PillButtonStyle(prominent: true))
+                    .disabled(choice == nil)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    .accessibilityIdentifier("newAgent.folderNext")
+            }
+        }
+        .navigationTitle("Another folder")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { focused = true }
+    }
+
+    private func next() {
+        guard let choice else { return }
+        choose(choice)
     }
 }

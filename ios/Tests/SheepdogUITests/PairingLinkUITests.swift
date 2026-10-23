@@ -1,20 +1,17 @@
 import XCTest
 
-/// `sheepdog://pair` opened from outside the app, as the Camera app does
-/// after scanning `sheepdog pair`'s code. Needs no daemon: the code points
-/// at a closed loopback port, so the app asks, then reports that nothing
-/// answered and saves nothing.
+/// Pairing by code (docs/dev/ws-contract.md "Pairing"). The Simulator has
+/// no camera, so the tests open the code the way the voice page hands it
+/// to the app (`sheepdog://pair#…`): the app asks first, then pairs. The
+/// first two need no daemon (the code points at a closed port); the
+/// walkthrough pairs with the pair fixture daemon over pinned TLS, with a
+/// fresh one-time code from its loopback `/api/pair?new=1`.
 final class PairingLinkUITests: XCTestCase {
-    private let link = URL(string: "sheepdog://pair?u=http%3A%2F%2F127.0.0.1%3A9&t=abc")!
+    private let deadLink = URL(string: "sheepdog://pair#pair=1&d=deadbeef&n=Studio&k=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&e=code&u=127.0.0.1%3A9")!
 
-    /// Opens the link the way another app does; iOS asks "Open in
-    /// Sheepdog?" first.
-    /// Opens the pairing link and taps the system's "Open" prompt if it
-    /// comes. On a slow Mac the prompt can come late, or a link opened while
-    /// the app is still starting can be dropped, so wait for either the
-    /// prompt or the app's alert and open the link once more if neither
-    /// came.
-    private func openLink(in app: XCUIApplication) {
+    /// Opens the link the way another app does, tapping iOS's "Open in
+    /// Sheepdog?" if it comes; once more if neither it nor the sheet came.
+    private func open(_ link: URL, in app: XCUIApplication) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let open = springboard.buttons["Open"]
         for _ in 0 ..< 2 {
@@ -25,7 +22,7 @@ final class PairingLinkUITests: XCTestCase {
                     open.tap()
                     return
                 }
-                if app.alerts.firstMatch.exists { return }
+                if app.descendants(matching: .any)["pairing.confirm"].exists { return }
                 usleep(250_000)
             } while Date() < deadline
         }
@@ -39,30 +36,82 @@ final class PairingLinkUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState"]
         app.launch()
-        XCTAssertTrue(app.textFields["settings.address"].waitForExistence(timeout: 10), "first run opens Settings")
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "first run opens Settings")
 
-        openLink(in: app)
-        let alert = app.alerts["Pair with 127.0.0.1?"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 10))
-        alert.buttons["Cancel"].tap()
-        XCTAssertTrue(app.textFields["settings.address"].waitForExistence(timeout: 10), "declining returns to the first-run Settings")
+        open(deadLink, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["pairing.confirm"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Pair with Studio?"].exists)
+        app.buttons["pairing.secondary"].tap()
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "declining returns to the first-run Settings")
     }
 
     func testPairReportsAnUnreachableCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState"]
         app.launch()
-        XCTAssertTrue(app.textFields["settings.address"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10))
 
-        openLink(in: app)
-        let alert = app.alerts["Pair with 127.0.0.1?"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 10))
-        alert.buttons["Pair"].tap()
-        // The failure is shown where the fix is: back on the first-run
-        // Daemon screen (a banner alone would sit under that sheet).
-        let result = app.descendants(matching: .any)["settings.probe.result"]
-        XCTAssertTrue(result.waitForExistence(timeout: 20), "the unreachable code is reported on the Daemon screen")
-        XCTAssertTrue(app.staticTexts["None of the code's addresses answered."].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["settings.probe.help"].exists)
+        open(deadLink, in: app)
+        XCTAssertTrue(app.buttons["pairing.primary"].waitForExistence(timeout: 10))
+        app.buttons["pairing.primary"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["pairing.failed"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["None of the code's addresses answered"].exists)
+        XCTAssertTrue(app.buttons["pairing.primary"].exists, "Scan again")
+    }
+
+    /// Scan → enroll → a TLS-pinned session → Settings shows the pairing →
+    /// Remove. The code is one-time, so each run asks for a new one.
+    func testPairingWalkthrough() throws {
+        let link = try freshLink()
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10))
+
+        open(link, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["pairing.confirm"].waitForExistence(timeout: 10))
+        app.buttons["pairing.primary"].tap()
+        let paired = app.descendants(matching: .any)["pairing.paired"]
+        XCTAssertTrue(paired.waitForExistence(timeout: 30), "enrolled and signed in")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Paired with'")).firstMatch.exists)
+        app.buttons["pairing.primary"].tap()
+
+        // Settings ▸ Connection: the address, the date and the pin.
+        tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
+        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Connection")
+        let line = app.descendants(matching: .any)["settings.pairedLine"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10))
+        app.buttons["settings.test"].tap()
+        XCTAssertTrue(app.staticTexts["Encrypted, key checked."].waitForExistence(timeout: 20), "Test connection goes over pinned TLS with a ticket")
+
+        // Remove: the computer forgets this phone; back to the first run.
+        app.buttons["settings.remove"].tap()
+        tapWhenReady(app.buttons["settings.remove.confirm"].firstMatch, "Remove")
+        XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.descendants(matching: .any)["settings.pairedLine"].exists)
+    }
+
+    private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, !(element.exists && element.isHittable) { usleep(200_000) }
+        XCTAssertTrue(element.exists, "\(what) never appeared")
+        element.tap()
+    }
+
+    /// A new pairing code from the pair fixture's loopback-only route, as
+    /// the `sheepdog://pair#…` form the voice page hands to the app.
+    private func freshLink() throws -> URL {
+        let url = URL(string: "http://\(Fixture.pairHost)/api/pair?new=1")!
+        var body: Data?
+        let done = expectation(description: "pair code")
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            body = data
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        guard let body, let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let link = object["link"] as? String, let hash = link.firstIndex(of: "#")
+        else { throw XCTSkip("no pair fixture daemon on \(Fixture.pairHost)") }
+        return try XCTUnwrap(URL(string: "sheepdog://pair" + link[hash...]))
     }
 }

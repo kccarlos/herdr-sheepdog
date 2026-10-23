@@ -112,6 +112,43 @@ public struct NewAgentOptions: Codable, Equatable, Sendable {
     public func kindName(_ kind: String) -> String {
         kindNames[kind] ?? kind
     }
+
+    /// The project roots as far as the app can tell: the folders that
+    /// hold the free project folders (`GET /api/spaces` lists the folders
+    /// directly inside each root), tilde-abbreviated, in order.
+    public static func roots(_ view: SpacesView) -> [String] {
+        var out: [String] = []
+        for folder in view.folders {
+            let parent = (folder.path as NSString).deletingLastPathComponent
+            guard !parent.isEmpty, !out.contains(parent) else { continue }
+            out.append(parent)
+        }
+        return out
+    }
+
+    /// "Choose another folder…": a typed path becomes a project, or nil
+    /// when it cannot be one. It must be a full path (`/…` or `~/…`) with
+    /// no `..`; the daemon still checks that it lies inside a project
+    /// root and says so if not. A path that names a listed space or folder
+    /// is that one.
+    public static func typedFolder(_ text: String, in view: SpacesView) -> Project? {
+        var path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        guard path.hasPrefix("/") || path.hasPrefix("~/"), !path.split(separator: "/").contains("..") else { return nil }
+        let name = (path as NSString).lastPathComponent
+        guard !name.isEmpty, name != "~", name != "/" else { return nil }
+        let options = NewAgentOptions(spaces: view)
+        if let known = options.projects.first(where: { $0.path == path || ($0.path as NSString).abbreviatingWithTildeInPath == path }) {
+            return known
+        }
+        return Project(name: name, path: path)
+    }
+
+    /// A folder the user typed: the app does not know whether it is a git
+    /// repository, so it neither offers a worktree nor says it is not one.
+    public static func isTyped(_ project: Project, in view: SpacesView) -> Bool {
+        project.space == nil && !view.folders.contains { $0.path == project.path }
+    }
 }
 
 /// The reply to an action: the line to show, and a new agent's pane.

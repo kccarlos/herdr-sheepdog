@@ -38,7 +38,7 @@ struct TerminalComposer<Leading: View>: View {
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             button
         }
-        .animation(.easeInOut(duration: 0.15), value: focused.wrappedValue)
+        .animation(Theme.ease, value: focused.wrappedValue)
     }
 
     @ViewBuilder private var button: some View {

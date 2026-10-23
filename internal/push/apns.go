@@ -93,6 +93,7 @@ type Sender struct {
 	relay   relayClient       // mode relay
 	reason  string            // why disabled
 	devs    *devices
+	acts    activities
 	client  *http.Client
 	baseURL map[string]string
 
@@ -139,8 +140,13 @@ func New(cfg Config, log logging.Logger) (*Sender, error) {
 	if err != nil {
 		return nil, err
 	}
+	actsPath := ""
+	if cfg.DataDir != "" {
+		actsPath = filepath.Join(cfg.DataDir, ActivitiesFile)
+	}
 	s := &Sender{cfg: cfg, log: log, devs: devs, client: client, seen: map[string]bool{},
 		baseURL: map[string]string{EnvProduction: cfg.ProductionURL, EnvSandbox: cfg.SandboxURL}}
+	s.acts.load(actsPath, cfg.Now())
 	switch cfg.Mode {
 	case ModeOff:
 		s.reason = "push.mode is off"
@@ -329,6 +335,9 @@ func (s *Sender) Unregister(token string) error {
 func (s *Sender) ForgetDevices(ids []string) error {
 	if s == nil || len(ids) == 0 {
 		return nil
+	}
+	for _, id := range ids {
+		s.ForgetActivity(id)
 	}
 	n, err := s.devs.removeDevices(ids)
 	if err != nil {

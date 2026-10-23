@@ -34,14 +34,40 @@ struct VoiceCapsule<VoiceMenu: View>: View {
 
     @ScaledMetric(relativeTo: .subheadline) private var scaledHeight: CGFloat = 60
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The row's own height, measured.
+    @State private var rowHeight: CGFloat = 0
 
     private var mode: CapsuleMode {
         CapsuleMode.resolve(state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen)
     }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
-    private var height: CGFloat { min(max(scaledHeight, 60), 110) }
+    private var height: CGFloat { min(max(scaledHeight, 60), Self.cap) }
+    /// Past this the capsule would cover the conversation it serves: the
+    /// name and status scroll inside it instead.
+    static var cap: CGFloat { 150 }
 
     var body: some View {
+        // As tall as its text up to the cap, then the row scrolls inside.
+        // Scrolling is off while it fits, so nothing delays the orb's
+        // press (hold to talk).
+        ScrollView {
+            row
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                    let rounded = h.rounded(.up)
+                    if rounded != rowHeight { rowHeight = rounded }
+                }
+        }
+        .scrollDisabled(rowHeight <= Self.cap)
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(rowHeight > Self.cap ? .visible : .hidden)
+        .frame(height: min(max(rowHeight, height), Self.cap))
+        .padding(.horizontal, 7)
+        .capsuleSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("voice.capsule")
+    }
+
+    private var row: some View {
         HStack(spacing: 8) {
             micSlot
             orb
@@ -66,11 +92,7 @@ struct VoiceCapsule<VoiceMenu: View>: View {
             .accessibilityLabel("Type instead")
             .accessibilityIdentifier("controls.type")
         }
-        .padding(.horizontal, 7)
         .frame(minHeight: height)
-        .capsuleSurface()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("voice.capsule")
     }
 
     // MARK: - Mic
@@ -90,12 +112,12 @@ struct VoiceCapsule<VoiceMenu: View>: View {
     @ViewBuilder
     private var orb: some View {
         if model.orbAction == .holdToTalk {
-            CapsuleOrb(mode: mode)
+            CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
                 .holdToTalk(holding: holding, onPress: onPress, onRelease: onRelease)
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                CapsuleOrb(mode: mode)
+                CapsuleOrb(mode: mode, outputLevel: meter.outputLevel)
             }
             // Disabled while it has nothing to do, but never dimmed: the
             // orb's colour is the state.
@@ -134,7 +156,7 @@ struct VoiceCapsule<VoiceMenu: View>: View {
                 Text(name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.ink)
@@ -150,8 +172,10 @@ struct VoiceCapsule<VoiceMenu: View>: View {
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(statusColor)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(0.85)
+                    // Wraps at the accessibility sizes; never cut there.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.85)
                     .accessibilityIdentifier("controls.statusLine")
             }
             .opacity(showsName ? 0 : 1)
@@ -219,6 +243,8 @@ extension View {
 struct CapsuleOrb: View {
     let mode: CapsuleMode
     var size: CGFloat = 44
+    /// The voice's output level while it speaks: the waveform follows it.
+    var outputLevel: Float = 0
 
     @State private var breathe = false
     @State private var spin = false
@@ -276,11 +302,17 @@ struct CapsuleOrb: View {
             if let stroke {
                 Circle().strokeBorder(stroke.0, lineWidth: stroke.1)
             }
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.44, weight: .semibold))
-                .foregroundStyle(glyphColor)
-                .rotationEffect(.degrees(mode == .reconnecting && spin ? 360 : 0))
-                .contentTransition(.symbolEffect(.replace))
+            if mode == .speaking, !reduceMotion {
+                SpeakingWave(level: outputLevel, color: glyphColor, height: size * 0.44)
+                    .transition(.opacity)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.44, weight: .semibold))
+                    .foregroundStyle(glyphColor)
+                    .rotationEffect(.degrees(mode == .reconnecting && spin ? 360 : 0))
+                    .contentTransition(.symbolEffect(.replace))
+                    .transition(.opacity)
+            }
         }
         .frame(width: size, height: size)
         // The cream sticker ring, with a hairline outside it.
@@ -430,6 +462,7 @@ struct CapsuleComposer: View {
     @State private var text = ""
     @FocusState private var focused: Bool
     @ScaledMetric(relativeTo: .body) private var scaledHeight: CGFloat = 60
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var canSend: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -453,7 +486,7 @@ struct CapsuleComposer: View {
                 TextField("Message to \(voiceName)", text: $text, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(1 ... 4)
+                    .lineLimit(1 ... (dynamicTypeSize.isAccessibilitySize ? 2 : 4))
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.send)
                     .focused($focused)
@@ -495,5 +528,29 @@ struct CapsuleComposer: View {
                 focused = false
             }
         }
+    }
+}
+
+/// The speaking orb's glyph: four bars that follow the voice's output
+/// level (one easing, 200 ms). Under Reduce Motion the orb keeps the still
+/// waveform symbol instead.
+private struct SpeakingWave: View {
+    let level: Float
+    let color: Color
+    let height: CGFloat
+
+    private static let shape: [CGFloat] = [0.55, 1, 0.8, 0.45]
+
+    var body: some View {
+        HStack(spacing: height * 0.14) {
+            ForEach(Array(Self.shape.enumerated()), id: \.offset) { _, factor in
+                Capsule()
+                    .fill(color)
+                    .frame(width: height * 0.13, height: max(height * 0.18, height * factor * CGFloat(0.3 + 0.7 * min(1, level * 2.2))))
+            }
+        }
+        .frame(height: height)
+        .animation(Theme.ease, value: level)
+        .accessibilityHidden(true)
     }
 }

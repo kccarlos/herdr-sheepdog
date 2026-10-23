@@ -54,6 +54,9 @@ final class AudioEngine {
     var onLevel: ((Float) -> Void)?
     /// Playback started or stopped (the voice speaking, for the orb).
     var onSpeakingChanged: ((Bool) -> Void)?
+    /// Output level, 0…1, as each chunk finishes playing: the speaking
+    /// orb's waveform follows it. 0 when the voice stops.
+    var onOutputLevel: ((Float) -> Void)?
     /// A playback report for the daemon (`started`, `drained`, `flushed`;
     /// docs/ws-contract.md "Playback reports"), in the order they happened.
     var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
@@ -521,6 +524,7 @@ final class AudioEngine {
         guard !chunks.isEmpty else { return }
         for chunk in chunks {
             guard let buffer = AudioEngine.buffer(chunk.samples, format: playbackFormat) else { continue }
+            let level = Float(PCMLevel.peak(of: chunk.samples)) / 32_768
             metrics.scheduledChunks += 1
             // No `at:`: each buffer starts where the last one ended, which is
             // what "gapless" means here.
@@ -528,6 +532,7 @@ final class AudioEngine {
                 Task { @MainActor in
                     guard let self else { return }
                     self.queue.completed(chunk.id, now: CFAbsoluteTimeGetCurrent())
+                    self.onOutputLevel?(level)
                     self.deliverReports()
                     self.metrics.playedChunks += 1
                     self.setSpeaking(self.queue.isSpeaking)
@@ -553,6 +558,7 @@ final class AudioEngine {
         guard speaking != wasSpeaking else { return }
         wasSpeaking = speaking
         onSpeakingChanged?(speaking)
+        if !speaking { onOutputLevel?(0) }
     }
 
     private static func buffer(_ samples: [Int16], format: AVAudioFormat) -> AVAudioPCMBuffer? {

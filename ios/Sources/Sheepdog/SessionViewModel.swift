@@ -8,8 +8,7 @@ import SwiftUI
 enum SettingsRoute: Hashable {
     case models
     case languages
-    /// Settings ▸ Daemon, with `daemonNotice` shown: the token was turned
-    /// down, or a pairing code's addresses did not answer.
+    /// Settings ▸ Connection, with `daemonNotice` shown.
     case daemon
 }
 
@@ -183,10 +182,14 @@ final class SessionViewModel: ObservableObject {
     /// on a daemon too old to report one.
     @Published private(set) var update: UpdateInfo?
     @Published var showSettings = false
-    /// A `sheepdog://pair` link that arrived from outside the app (the
-    /// Camera app scanned `sheepdog pair`'s code), waiting for the user to
-    /// confirm it. Nothing is contacted or saved before they do.
-    @Published var pendingPairing: PairingLink?
+    /// The pairing sheet on the main screen: a `sheepdog://pair#…` code
+    /// from outside the app (asked about first; nothing is contacted before
+    /// the user says yes), or "Please scan again".
+    @Published var pairingSheet: PairingSheet?
+    /// Why the app must scan again, while it must.
+    @Published private(set) var pairingProblem: PairingProblem?
+    /// The same, for Settings ▸ Connection when it is open.
+    @Published var daemonNoticeProblem: PairingProblem?
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
@@ -324,14 +327,20 @@ final class SessionViewModel: ObservableObject {
         #endif
         wire()
         away.onRoute = { [weak self] route in self?.handle(route: route) }
+        away.onActivityToken = { [weak self] token in self?.sendActivityToken(token) }
         // The last conversation, at once: before the network, or without it.
         loadCache()
         conversationChanged(save: false)
     }
 
+    private var started = false
+
     /// Called once from the first `onAppear`: an unconfigured app opens
     /// Settings instead of showing a Connect button that cannot work.
     func start() {
+        // Every window's first appearance calls this (iPad); once is enough.
+        guard !started else { return }
+        started = true
         if demo != nil {
             startDemo()
             return
@@ -344,7 +353,7 @@ final class SessionViewModel: ObservableObject {
         if !isConfigured || !settings.hasBeenConfigured {
             // A cold launch from the Camera app's pairing link asks about
             // the link instead (and reopens Settings if declined).
-            if pendingPairing == nil { showSettings = true }
+            if pairingSheet == nil { showSettings = true }
         } else {
             Task {
                 await refreshState(quiet: true)
@@ -357,6 +366,9 @@ final class SessionViewModel: ObservableObject {
     /// The app came back to the foreground: what happened while it was
     /// away is on the daemon.
     func becameActive() {
+        // The daemon may have pushed the Live Activity while the app was
+        // away: the next sync rewrites it even if our own state is unchanged.
+        away.forgetShownActivity()
         send(.scenePhase(.active))
         Task { await PushCoordinator.shared.refreshAuthorization() }
         guard isConfigured, settings.hasBeenConfigured else { return }
@@ -688,6 +700,9 @@ final class SessionViewModel: ObservableObject {
         audio.onLevel = { [weak self] level in
             self?.meter.setLevel(level)
         }
+        audio.onOutputLevel = { [weak self] level in
+            self?.meter.setOutputLevel(level)
+        }
         audio.onSpeakingChanged = { [weak self] speaking in
             self?.send(.playbackChanged(speaking: speaking))
         }
@@ -766,7 +781,12 @@ final class SessionViewModel: ObservableObject {
             defer { self.tokenProbe = nil }
             do {
                 _ = try await self.client.state()
+            } catch let DaemonError.pairing(problem) {
+                self.pairingProblem = problem
+                self.send(.tokenRefused(endpoint: self.endpointDisplay))
             } catch DaemonError.unauthorized {
+                // Signing in again did not help: only a new code will.
+                self.pairingProblem = .unknownDevice
                 self.send(.tokenRefused(endpoint: self.endpointDisplay))
             } catch {
                 // Unreachable or anything else: the reconnect loop's own
@@ -883,15 +903,8 @@ final class SessionViewModel: ObservableObject {
             case .micLost: Haptics.warning()
             }
         case .openSettings:
-            // Only a refused token opens Settings by itself.
-            daemonNotice = Probe(
-                ok: false,
-                title: DaemonError.unauthorized(endpoint: endpointDisplay).message,
-                lines: [SetupHelp.tokenFix],
-                help: SetupHelp.remoteAccessURL
-            )
-            settingsRoute = .daemon
-            showSettings = true
+            // Only a refusal a new scan fixes opens anything by itself.
+            needsNewScan(pairingProblem ?? .revoked)
         case .refreshState:
             refreshSoon()
         case .syncHistory:
@@ -953,39 +966,52 @@ final class SessionViewModel: ObservableObject {
         guard demo == nil else { return }
         #if DEBUG
         if let demo = DebugLaunch.demoLiveActivity {
-            away.sync(VoiceActivityState.make(state: demo, muted: demo == .muted, waiting: 2, voiceName: voiceName), voiceName: voiceName)
+            away.sync(LiveActivitySamples.demo(demo), voiceName: voiceName)
             return
         }
         #endif
         let activityState = wantsConnection
-            ? VoiceActivityState.make(
+            ? LiveActivityContent.make(
                 state: state,
                 muted: isMuted,
-                waiting: flock.waitingCount,
-                voiceName: voiceName,
+                agents: agents,
+                questions: questions,
                 suspendedInBackground: core.suspension.backgroundSuspended
             )
             : nil
         away.sync(activityState, voiceName: voiceName)
     }
 
+    /// The Live Activity's push token to the daemon (nil: the activity
+    /// ended), so it can update the banner while the app is away. Best
+    /// effort: without it the banner just stops updating while away.
+    private func sendActivityToken(_ token: String?) {
+        guard demo == nil else { return }
+        let client = self.client
+        Task {
+            if let token {
+                _ = try? await client.registerLiveActivity(token: token, environment: PushCoordinator.environment)
+            } else {
+                _ = try? await client.endLiveActivity()
+            }
+        }
+    }
+
     /// A `sheepdog://` link, or an App Intent speaking one.
     func open(url: URL) {
         guard demo == nil else { return }
-        if let link = PairingLink(url: url) {
-            // Settings' sheet holds its own copy of the address and token
-            // and writes it back when it closes; close it first, so the
-            // pairing is not overwritten, and so the question is on top.
+        if let code = PairingCode(url.absoluteString) {
+            // Close Settings first so the question is on top.
             guard showSettings else {
-                pendingPairing = link
+                pairingSheet = PairingSheet(stage: .confirm(code))
                 return
             }
             showSettings = false
             Task {
-                // An alert asked for while the sheet is still sliding away
-                // is dropped.
+                // A sheet asked for while another is still sliding away is
+                // dropped.
                 try? await Task.sleep(for: .milliseconds(700))
-                pendingPairing = link
+                pairingSheet = PairingSheet(stage: .confirm(code))
             }
             return
         }
@@ -1012,6 +1038,10 @@ final class SessionViewModel: ObservableObject {
             case let .openAgent(id):
                 // What a tap on an agent's notification does.
                 PushCoordinator.shared.focus(paneID: id)
+            case let .openWindow(id, _):
+                // A Live Activity row. One computer for now: the
+                // computer id is for when there are several.
+                openAgentWindow(paneID: id)
             }
         }
     }
@@ -1046,8 +1076,9 @@ final class SessionViewModel: ObservableObject {
                     }
                 } catch {
                     SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
-                    if case DaemonError.unauthorized = error {
-                        // A refused token does not fix itself by retrying.
+                    if case let DaemonError.pairing(problem) = error {
+                        // A revoked phone does not fix itself by retrying.
+                        self.pairingProblem = problem
                         self.send(.tokenRefused(endpoint: self.endpointDisplay))
                         return
                     }
@@ -1226,16 +1257,37 @@ final class SessionViewModel: ObservableObject {
         var all = state.agents
         #if DEBUG
         if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
+        var debugQuestions: [PendingAction] = []
+        if DebugLaunch.demoSecondQuestion {
+            all.append(DebugLaunch.secondQuestionAgent)
+            debugQuestions.append(DebugLaunch.secondQuestion)
+        }
+        #else
+        let debugQuestions: [PendingAction] = []
         #endif
         let sorted = Flock.sorted(all)
-        if sorted != agents {
-            agents = sorted
-            syncAway()
-        }
+        let agentsChanged = sorted != agents
+        if agentsChanged { agents = sorted }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
-        let open = state.questions ?? state.pendingAction.map { [$0] } ?? []
-        if open != questions { questions = open }
+        let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
+        let questionsChanged = open != questions
+        if questionsChanged {
+            // A question that arrived without its own event (another
+            // agent's, read from the state) rises with a light tap; the
+            // event-driven one already had the needs-you cue.
+            if questionsSeen {
+                for q in open where q.isAnswerPrompt && q.id != state.pendingAction?.id && cuedPendingIDs.insert(q.id).inserted {
+                    Haptics.push()
+                }
+            } else {
+                for q in open { cuedPendingIDs.insert(q.id) }
+            }
+            questions = open
+        }
+        questionsSeen = true
+        // The Live Activity's rows and counts.
+        if agentsChanged || questionsChanged { syncAway() }
         questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
@@ -1680,6 +1732,8 @@ final class SessionViewModel: ObservableObject {
 
     /// Questions the needs-you cue already played for.
     private var cuedPendingIDs: Set<String> = []
+    /// The first state has been read: questions open before it are not news.
+    private var questionsSeen = false
 
     private func applyApproval(_ effect: ApprovalFlow.Effect) {
         switch effect {
@@ -1749,7 +1803,12 @@ final class SessionViewModel: ObservableObject {
         presentedCard = card
     }
 
-    /// A card's "Open window": close the sheet, then push the agent's
+    /// An agent's window the session asked for (a card's Open window, a
+    /// Live Activity row): the presenting window's layout opens it (a push
+    /// on iPhone, the detail on iPad), then clears it.
+    @Published var windowRequest: WindowRequest?
+
+    /// A card's "Open window": close the sheet, then open the agent's
     /// window (a push made under a sheet that is closing is lost).
     func openAgentWindow(paneID: String) {
         let wasOpen = presentedCard != nil
@@ -1757,7 +1816,7 @@ final class SessionViewModel: ObservableObject {
         pane = .conversation
         Task { @MainActor in
             if wasOpen { try? await Task.sleep(for: .milliseconds(400)) }
-            navigationPath.append(AgentWindowRoute(paneID: paneID))
+            windowRequest = .agent(paneID)
         }
     }
 
@@ -1829,6 +1888,37 @@ final class SessionViewModel: ObservableObject {
         if let approval, approval.pending.paneID == paneID { return approval }
         guard let question = questions.first(where: { $0.paneID == paneID }) else { return nil }
         return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+    }
+
+    /// The questions floating above the capsule on the Conversation: every
+    /// open one, the current computer's first and then by age (one
+    /// computer today, so by age), each with its tap state; the voice's
+    /// own one through `approval`, kept in front while it shows how it
+    /// ended.
+    var floatingQuestions: [ApprovalFlow.Card] {
+        let open = QuestionOrder.ordered(questions) { _ in true }
+        // A settled question with a row in the conversation collapses into
+        // that row at once (the motion pass); one without stays to say how
+        // it ended.
+        let settledVoice = approval.flatMap { card -> PendingAction? in
+            guard card.isSettled, !rows.contains(where: { row in
+                if case let .item(item) = row { return item.kind == .approval && item.pendingID == card.pending.id }
+                return false
+            }) else { return nil }
+            return card.pending
+        }
+        let list = QuestionOrder.floating(open: open, voice: settledVoice, voiceSettled: settledVoice != nil)
+        return list.map { question in
+            if let approval, approval.pending.id == question.id { return approval }
+            return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+        }
+    }
+
+    /// The ids of the questions still open, for the rows that point at them.
+    var openQuestionIDs: Set<String> {
+        var ids = Set(questions.map(\.id))
+        if let approval, approval.isSettled { ids.remove(approval.pending.id) }
+        return ids
     }
 
     /// Answers a question by tap, whichever it is: the voice's question
@@ -1953,7 +2043,7 @@ final class SessionViewModel: ObservableObject {
     static func makeDemo() -> SessionViewModel {
         let suite = "sheepdog.demo"
         UserDefaults().removePersistentDomain(forName: suite)
-        let store = SettingsStore(defaults: UserDefaults(suiteName: suite) ?? .standard, secrets: MemorySecretStore())
+        let store = SettingsStore(defaults: UserDefaults(suiteName: suite) ?? .standard, credentials: DeviceCredentials(secrets: MemorySecretStore()))
         store.address = DemoDaemon.endpoint.display
         store.hasBeenConfigured = true
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SheepdogDemo-\(UUID().uuidString)", isDirectory: true)
@@ -1971,6 +2061,16 @@ final class SessionViewModel: ObservableObject {
         Task {
             try? await Task.sleep(for: .milliseconds(700))
             demoActive = true
+        }
+    }
+
+    /// Back to the first-run Settings once a sheet over it closed (a sheet
+    /// asked for while another closes is dropped).
+    private func reopenFirstRunSettings() {
+        guard !isConfigured || !settings.hasBeenConfigured else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            showSettings = true
         }
     }
 
@@ -2098,59 +2198,95 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Pairing
 
-    /// The user declined a pairing link: an app with no daemon yet goes
-    /// back to the first-run Settings it was on.
-    func cancelPairing() {
-        pendingPairing = nil
-        reopenFirstRunSettings()
+    // MARK: - Pairing
+
+    /// How a pairing ended.
+    enum PairOutcome {
+        case paired(PairedComputer)
+        case problem(PairingProblem)
+        case failed(title: String, detail: String)
     }
 
-    /// Back to the first-run Settings after the pairing question closed,
-    /// once the alert is gone (a sheet asked for while it closes is dropped).
-    private func reopenFirstRunSettings() {
-        guard !isConfigured || !settings.hasBeenConfigured else { return }
-        Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            showSettings = true
-        }
-    }
-
-    /// The user confirmed a pairing link from outside the app: apply it the
-    /// way Settings' scanner does and say how it went in a banner.
-    func confirmPairing() {
-        guard let link = pendingPairing else { return }
-        pendingPairing = nil
-        Task {
-            let result = await resolvePairing(link)
-            guard let address = result.address else {
-                show(Banner(tone: .error, message: result.probe.title, hint: result.probe.lines.joined(separator: " "), help: result.probe.help))
-                daemonNotice = result.probe
-                settingsRoute = .daemon
-                reopenFirstRunSettings()
-                return
+    /// Pairs with the computer a scanned code names (docs/dev/ws-contract.md
+    /// "Pairing"): finds the first address whose key matches the code's pin,
+    /// makes this phone's key, enrolls once (codes are one-time), signs in,
+    /// and only then saves the computer and repoints the app.
+    func pair(_ code: PairingCode) async -> PairOutcome {
+        let trust = PinnedTrustDelegate { [code.pin] }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        let session = URLSession(configuration: config, delegate: trust, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let mismatches = MismatchCounter()
+        let reachable = await code.firstReachable { address in
+            guard let url = URL(string: "https://\(address)/api/hello") else { return false }
+            do {
+                let (_, response) = try await session.data(from: url)
+                return (response as? HTTPURLResponse)?.statusCode == 200
+            } catch {
+                if trust.sawMismatch { mismatches.add() }
+                return false
             }
+        }
+        guard let address = reachable, let base = URL(string: "https://\(address)/") else {
+            if mismatches.count > 0 { return .problem(.pinMismatch) }
+            return .failed(title: "None of the code's addresses answered", detail: "Tried \(code.addresses.joined(separator: ", ")). \(SetupHelp.unreachableFix)")
+        }
+        do {
+            DeviceKey.delete(daemonID: code.daemonID)
+            let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
+            guard let publicKey = DeviceKey.publicKey(key) else {
+                return .failed(title: "This phone could not make its key", detail: "Try again; restart the phone if it keeps failing.")
+            }
+            let auth = DeviceAuth(base: base, session: session)
+            let kind = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
+            let enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
+            let computer = PairedComputer(
+                daemonID: enrolled.daemonID.isEmpty ? code.daemonID : enrolled.daemonID,
+                name: code.name.isEmpty ? enrolled.name : code.name,
+                addresses: [address] + code.addresses.filter { $0 != address },
+                pin: code.pin, deviceID: enrolled.deviceID, pairedAt: Date()
+            )
+            settings.computer = computer
             settings.address = address
-            settings.token = link.token
             settings.hasBeenConfigured = true
+            _ = try await settings.credentials.ticket(base: base)
+            pairingProblem = nil
             endpointChanged()
-            let probe = await probe(address: address, token: link.token)
-            show(Banner(tone: probe.ok ? .info : .error, message: probe.ok ? "Paired with \(address)." : probe.title, hint: probe.ok ? "Tap the orb to talk." : probe.lines.joined(separator: " ")))
+            return .paired(computer)
+        } catch let problem as PairingProblem {
+            return .problem(problem)
+        } catch let error as DaemonError {
+            return .failed(title: error.message, detail: error.hint ?? "")
+        } catch {
+            return .failed(title: "Pairing did not finish", detail: error.localizedDescription)
         }
     }
 
-    /// The first of a pairing link's addresses that answers `GET /api/hello`
-    /// (Tailscale before LAN); with none, a probe that says so. Shared by
-    /// Settings' scanner and links from outside the app.
-    func resolvePairing(_ link: PairingLink) async -> (address: String?, probe: Probe) {
-        let secret = link.token
-        let reachable = await link.firstReachable { address in
-            guard let endpoint = DaemonEndpoint(text: address, token: secret) else { return false }
-            return (try? await DaemonClient(endpoint: endpoint).hello()) != nil
+    /// Settings ▸ Remove: tells the computer to forget this phone (best
+    /// effort, `DELETE /api/devices/self`), then forgets the computer and
+    /// this phone's key for it.
+    func removeComputer() async {
+        if let endpoint = settings.endpoint, endpoint.secure, let base = endpoint.url(path: "/"),
+           let ticket = try? await settings.credentials.ticket(base: base) {
+            await DeviceAuth(base: base, session: DeviceCredentials.session(timeout: 4)).unpair(ticket: ticket)
         }
-        if let reachable {
-            return (reachable, Probe(ok: true, title: "Reached \(reachable)", lines: []))
+        if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
+        settings.credentials.forget()
+        settings.address = ""
+        settings.hasBeenConfigured = false
+        endpointChanged()
+    }
+
+    /// The scan-again screen a refusal opens, from Settings or the main
+    /// screen.
+    func needsNewScan(_ problem: PairingProblem) {
+        pairingProblem = problem
+        if showSettings {
+            daemonNoticeProblem = problem
+            return
         }
-        return (nil, Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + [SetupHelp.unreachableFix], help: SetupHelp.remoteAccessURL))
+        pairingSheet = PairingSheet(stage: .problem(problem))
     }
 
     // MARK: - Test connection (Settings)
@@ -2163,37 +2299,43 @@ final class SessionViewModel: ObservableObject {
         var help: URL? = nil
     }
 
-    /// What the "Test connection" button reports. `/api/hello` is public, so
-    /// it works before the token is right; `/api/state` is the token check.
-    func probe(address: String, token: String) async -> Probe {
-        guard let endpoint = DaemonEndpoint(text: address, token: token) else {
-            return Probe(ok: false, title: "That address doesn't look like host:port.", lines: ["For example 192.168.1.20:7777."])
+    /// What "Test connection" reports: `/api/hello`, then `/api/state` with
+    /// this phone's ticket.
+    func testConnection() async -> Probe {
+        guard let endpoint = settings.endpoint else {
+            return Probe(ok: false, title: "Not paired yet.", lines: ["Scan the pairing code on your computer."])
         }
         let probeClient = DaemonClient(endpoint: endpoint)
         do {
             let hello = try await probeClient.hello()
-            var lines = [
-                "\(hello.name) \(hello.version)",
-                "Voice name: \(hello.displayName)",
-                "Auth: \(hello.needsToken ? "token required" : "open (loopback)")",
-                "Audio: \(hello.audio.inHz) Hz in / \(hello.audio.outHz) Hz out, \(hello.audio.format)",
-            ]
-            if hello.needsToken {
-                // A hello alone would "pass" with the wrong token.
-                do {
-                    _ = try await probeClient.state()
-                    lines.append("Token accepted.")
-                } catch let error as DaemonError {
-                    return Probe(ok: false, title: error.message, lines: lines + [error.hint].compactMap { $0 }, help: SetupHelp.helpURL(for: error))
-                }
-            }
-            return Probe(ok: true, title: "Connected to \(endpoint.display)", lines: lines)
+            _ = try await probeClient.state()
+            var lines = ["\(hello.name) \(hello.version)", "Voice name: \(hello.displayName)"]
+            lines.append(endpoint.secure ? "Encrypted, key checked." : "This computer (loopback).")
+            return Probe(ok: true, title: "Connected to \(settings.computer?.name ?? endpoint.display)", lines: lines)
+        } catch let DaemonError.pairing(problem) {
+            needsNewScan(problem)
+            return Probe(ok: false, title: problem.title, lines: [problem.message])
         } catch let error as DaemonError {
             return Probe(ok: false, title: error.message, lines: [error.hint].compactMap { $0 }, help: SetupHelp.helpURL(for: error))
         } catch {
             return Probe(ok: false, title: "Could not reach \(endpoint.display).", lines: [SetupHelp.unreachableFix], help: SetupHelp.remoteAccessURL)
         }
     }
+}
+
+/// Counts pin mismatches across the parallel address probes.
+private final class MismatchCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func add() { lock.lock(); n += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
+/// The pairing sheet on the main screen: a code from outside the app, or a
+/// refusal that needs a new scan.
+struct PairingSheet: Identifiable {
+    let id = UUID()
+    var stage: PairingStage
 }
 
 extension SessionViewModel.Banner {

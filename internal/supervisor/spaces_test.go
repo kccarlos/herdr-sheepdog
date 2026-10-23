@@ -254,6 +254,27 @@ func TestWrapUpCommands(t *testing.T) {
 	if list, _ := w.sup.SpaceCommands(ctx, "w3"); len(list) != 0 {
 		t.Errorf("after delete = %+v", list)
 	}
+
+	// A one-off line runs the same way, named after its first word, and
+	// is not saved.
+	if _, err := w.sup.RunLine(ctx, "w3", "", "make lint\nrm -rf /"); !errors.Is(err, ErrUserAction) {
+		t.Errorf("two lines = %v", err)
+	}
+	pane, err = w.sup.RunLine(ctx, "w3", "", "  make lint ")
+	if err != nil || pane != "w3:p7" {
+		t.Fatalf("run line = %q, %v", pane, err)
+	}
+	tabs = w.params("tab.create")
+	if len(tabs) != 2 || tabs[1]["label"] != "make" {
+		t.Errorf("tab.create = %v", tabs)
+	}
+	in = w.params("pane.send_input")
+	if len(in) != 2 || in[1]["text"] != "make lint" {
+		t.Errorf("pane.send_input = %v", in)
+	}
+	if list, _ := w.sup.SpaceCommands(ctx, "w3"); len(list) != 0 {
+		t.Errorf("a one-off line was saved: %+v", list)
+	}
 }
 
 // kindList is kinds as "kind:Name" words.

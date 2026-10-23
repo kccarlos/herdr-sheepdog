@@ -736,6 +736,39 @@ func (s *Supervisor) DeleteCommand(ctx context.Context, id, cmdID string) error 
 // in its folder (herdr's pane run: the line and Enter at the shell
 // prompt), and returns the tab's pane.
 func (s *Supervisor) RunCommand(ctx context.Context, id, cmdID string) (string, error) {
+	space, err := s.space(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	list := s.loadWrapUps()[space.Path]
+	i := wrapUpIndex(list, cmdID)
+	if i < 0 {
+		return "", ErrNoSuchCommand
+	}
+	return s.runInSpace(ctx, id, list[i])
+}
+
+// RunLine runs a one-off command line in a new tab of space id, like a
+// saved command but not saved ("Run a command…" in the app). The tab is
+// named name, or after the command's first word.
+func (s *Supervisor) RunLine(ctx context.Context, id, name, command string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		if f := strings.Fields(command); len(f) > 0 {
+			name = f[0]
+			if utf8.RuneCountInString(name) > 40 {
+				name = string([]rune(name)[:40])
+			}
+		}
+	}
+	name, command, err := checkWrapUp(name, command)
+	if err != nil {
+		return "", err
+	}
+	return s.runInSpace(ctx, id, WrapUp{Name: name, Command: command})
+}
+
+// runInSpace opens a tab in space id's folder and types w's line there.
+func (s *Supervisor) runInSpace(ctx context.Context, id string, w WrapUp) (string, error) {
 	h, err := s.spaceHost()
 	if err != nil {
 		return "", err
@@ -748,12 +781,6 @@ func (s *Supervisor) RunCommand(ctx context.Context, id, cmdID string) (string, 
 	if err != nil {
 		return "", err
 	}
-	list := s.loadWrapUps()[space.Path]
-	i := wrapUpIndex(list, cmdID)
-	if i < 0 {
-		return "", ErrNoSuchCommand
-	}
-	w := list[i]
 	pane, err := h.CreateTab(ctx, id, space.Path, w.Name)
 	if err != nil {
 		return "", fmt.Errorf("could not open a tab in %s: %w", space.Name, err)

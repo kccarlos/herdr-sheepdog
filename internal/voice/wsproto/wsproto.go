@@ -23,13 +23,10 @@ const (
 // Protocol versions of the /ws contract (docs/dev/ws-contract.md "Protocol
 // version and handshake"). ProtocolVersion is what this build speaks;
 // MinProtocolVersion is the oldest client protocol the daemon still
-// serves. A client that never sends client-ready is protocol 1.
+// serves. A client that never sends client-ready is refused.
 const (
 	ProtocolVersion    = 1
 	MinProtocolVersion = 1
-	// LegacyProtocol is the protocol assumed for a client that sends no
-	// client-ready (the contract as it stood before the handshake).
-	LegacyProtocol = 1
 )
 
 // CloseProtocolUnsupported is the WebSocket close code the daemon uses
@@ -79,8 +76,8 @@ const (
 	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
 	// listed only when herdr is new enough for its terminal bridge.
 	FeatureTerm = "term"
-	// FeatureScreenANSI: screen-subscribe {ansi:true} and ?ansi=1 on the
-	// screen route give the visible screen with SGR colours.
+	// FeatureScreenANSI: screen frames and ?ansi=1 on the screen route
+	// give the visible screen with SGR colours.
 	FeatureScreenANSI = "screen-ansi"
 	// FeatureAgentActions: the user's own agent and space actions — GET
 	// /api/spaces and the /api/spaces/{id}/… routes, POST /api/agents (new agent) and POST
@@ -297,20 +294,17 @@ type Message struct {
 	Role    string `json:"role,omitempty"`
 	Fix     string `json:"fix,omitempty"`
 
-	// screen-subscribe (PaneID, Lines), screen-error (PaneID, Ended) and
+	// screen-subscribe (PaneID), screen-error (PaneID, Ended) and
 	// screen (Screen): the agent window over /ws. Ended is set on a
 	// screen-error that ended the subscription.
 	PaneID string  `json:"pane_id,omitempty"`
-	Lines  *int    `json:"lines,omitempty"`
 	Screen *Screen `json:"screen,omitempty"`
 	Ended  bool    `json:"ended,omitempty"`
 
 	// visibility (client→server): whether the client's screen is
 	// visible (the app in the foreground, the page not hidden) and its
 	// voice screen is the one in front. card (server→client): Card.
-	Visible *bool `json:"visible,omitempty"`
-	// ANSI (screen-subscribe) asks for coloured frames (feature screen-ansi).
-	ANSI        *bool `json:"ansi,omitempty"`
+	Visible     *bool `json:"visible,omitempty"`
 	VoiceScreen *bool `json:"voice_screen,omitempty"`
 	Card        *Card `json:"card,omitempty"`
 }
@@ -407,14 +401,9 @@ func AccountError(msg, problem, role, provider, fix string) Message {
 // Pong builds the reply to Ping.
 func Pong() Message { return Message{Type: TypePong} }
 
-// ScreenSubscribe builds the client→server request for an agent's window;
-// lines <= 0 leaves the daemon's default.
-func ScreenSubscribe(paneID string, lines int) Message {
-	m := Message{Type: TypeScreenSubscribe, PaneID: paneID}
-	if lines > 0 {
-		m.Lines = &lines
-	}
-	return m
+// ScreenSubscribe builds the client→server request for an agent's window.
+func ScreenSubscribe(paneID string) Message {
+	return Message{Type: TypeScreenSubscribe, PaneID: paneID}
 }
 
 // ScreenUnsubscribe builds the client→server end of the subscription.
@@ -514,9 +503,6 @@ func (m Message) Validate() error {
 	case TypeScreenSubscribe:
 		if m.PaneID == "" {
 			return fmt.Errorf("wsproto: screen-subscribe: missing \"pane_id\"")
-		}
-		if m.Lines != nil && *m.Lines < 1 {
-			return fmt.Errorf("wsproto: screen-subscribe: \"lines\" must be positive")
 		}
 	case TypeScreen:
 		if m.Screen == nil || m.Screen.PaneID == "" {

@@ -1,0 +1,9 @@
+{
+  "type": "term-hello",
+  "protocol": 1,
+  "client": {
+    "name": "Sheepdog",
+    "version": "0.2.0",
+    "platform": "iOS 26.1"
+  }
+}

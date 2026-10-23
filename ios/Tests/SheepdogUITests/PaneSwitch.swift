@@ -64,6 +64,30 @@ extension XCTestCase {
         return false
     }
 
+    /// + ▸ New agent, until its first step (Where) is up. At the
+    /// accessibility sizes the rows below the fold are not in the tree, so
+    /// wait for the list, not a row.
+    func openNewAgent(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let list = app.descendants(matching: .any)["newAgent.where"]
+        for _ in 0 ..< 3 where !list.exists {
+            tapMenuItem(app, menu: "toolbar.new", item: "new.agent", file: file, line: line)
+            if list.waitForExistence(timeout: 10) { break }
+        }
+        XCTAssertTrue(list.exists, "New agent opens on Where", file: file, line: line)
+    }
+
+    /// Swipes up until `element` is on screen: lists only hold the rows
+    /// they show, and at the accessibility sizes few fit.
+    @discardableResult
+    func scrollToVisible(_ app: XCUIApplication, _ element: XCUIElement, maxSwipes: Int = 8, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        for _ in 0 ..< maxSwipes {
+            if element.exists, element.isHittable { return element }
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(element.exists && element.isHittable, "\(element) is not on screen", file: file, line: line)
+        return element
+    }
+
     /// Closes an open menu by tapping the very top of the screen.
     /// Taps until `item` (an item of the open menu) is gone, so a tap
     /// that lands while the menu still animates in is not lost.

@@ -1,0 +1,23 @@
+{
+  "name": "sheepdog",
+  "version": "test",
+  "auth": "device",
+  "ws": "/ws",
+  "audio": {
+    "in_hz": 16000,
+    "out_hz": 24000,
+    "format": "pcm16le mono"
+  },
+  "voice_provider": "off",
+  "voice_model": "",
+  "protocol": 1,
+  "min_protocol": 1,
+  "computer": {
+    "id": "AAAAAAAAAAAAAAAAAAAAAA",
+    "name": "Test Mac"
+  },
+  "security": {
+    "pin": "sha256:pinned-at-pairing",
+    "cert_expires": "2026-10-21T09:00:00Z"
+  }
+}

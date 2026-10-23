@@ -59,6 +59,9 @@ type simWorld struct {
 	timers   []*time.Timer
 	timeline []SimLine // worker changes, for the judge's facts
 	closed   bool
+	// running counts timer callbacks in flight, so close waits for them
+	// before it removes the temp dir (a late state write would recreate it).
+	running sync.WaitGroup
 }
 
 // SimLine is one timed line of a conversation or its timeline.
@@ -375,7 +378,17 @@ func (w *simWorld) schedule(d time.Duration, fn func()) *time.Timer {
 	if w.closed {
 		return nil
 	}
-	t := time.AfterFunc(time.Duration(float64(d)*w.scale), fn)
+	t := time.AfterFunc(time.Duration(float64(d)*w.scale), func() {
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			return
+		}
+		w.running.Add(1)
+		w.mu.Unlock()
+		defer w.running.Done()
+		fn()
+	})
 	w.timers = append(w.timers, t)
 	return t
 }
@@ -406,6 +419,7 @@ func (w *simWorld) close() {
 		t.Stop()
 	}
 	w.mu.Unlock()
+	w.running.Wait()
 	w.runCancel()
 	<-w.runDone
 	w.brain.Quiesce()

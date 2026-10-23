@@ -14,6 +14,8 @@ final class RedesignShotsUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var directory: String? { environment["SHEEPDOG_REDESIGN_SHOTS"] }
     private var suffix: String { environment["SHEEPDOG_SHOTS_SUFFIX"] ?? "light" }
+    /// `ui` by default; `SHEEPDOG_SHOTS_PREFIX=ui2` keeps a later round apart.
+    private var prefix: String { environment["SHEEPDOG_SHOTS_PREFIX"] ?? "ui" }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -91,6 +93,56 @@ final class RedesignShotsUITests: XCTestCase {
         shot("more-keys")
     }
 
+    /// Two questions float above the capsule: the voice's first with the
+    /// filled button, the other outlined.
+    func testFloatingQuestions() throws {
+        let app = launchDemo(["-sheepdogDemoSecondQuestion"])
+        XCTAssertTrue(app.buttons["question.blog.option.1"].waitForExistence(timeout: 15), "the second agent's question floats")
+        // codex-payments asks after about 16 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("floating-questions")
+        app.buttons["approval.option.1"].tap()
+        sleep(3)
+        shot("floating-answered")
+    }
+
+    /// The Conversation once the demo has news and a question: the agent
+    /// strip, the rows and the floating question.
+    func testConversationWithQuestion() throws {
+        let app = launchDemo()
+        // codex-payments asks after about 16 s.
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40))
+        sleep(2)
+        shot("conversation-question")
+        app.swipeDown()
+        sleep(1)
+        shot("conversation-top")
+    }
+
+    func testBanners() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery", "banners"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("banners")
+    }
+
+    /// A ScreenCard's sheet, then its row and a question asked by tap.
+    func testCardSheetAndRows() throws {
+        let app = launchDemo(["-sheepdogDemoCard"])
+        let title = app.descendants(matching: .any)["card.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 45))
+        sleep(2)
+        shot("card-sheet")
+        app.buttons["card.done"].firstMatch.tap()
+        sleep(1)
+        tapOnScreen(app, "demo.question.0")
+        sleep(4)
+        shot("conversation-rows")
+    }
+
     func testEmptyConversation() throws {
         // A saved address with nothing behind it: no history, no banner
         // until the orb is tapped.
@@ -154,7 +206,8 @@ final class RedesignShotsUITests: XCTestCase {
 
     /// Closes an open menu by tapping the top of the screen.
     func dismissMenu(_ app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        // A tap at the left edge, halfway down: outside every menu.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)).tap()
         sleep(2)
     }
 
@@ -171,9 +224,9 @@ final class RedesignShotsUITests: XCTestCase {
         guard let directory else { return }
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "ui-\(name)-\(suffix)"
+        attachment.name = "\(prefix)-\(name)-\(suffix)"
         attachment.lifetime = .keepAlways
         add(attachment)
-        try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: directory).appendingPathComponent("ui-\(name)-\(suffix).png"))
+        try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(prefix)-\(name)-\(suffix).png"))
     }
 }

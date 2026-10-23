@@ -18,7 +18,6 @@ final class AgentScreenClientTests: XCTestCase {
         XCTAssertEqual(screen?.hash, "9f2c0e1a44b7d310")
         let request = try XCTUnwrap(StubProtocol.seen.first)
         XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:7799/api/agents/w1:p2/screen?lines=200&ansi=1")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
     }
 
     func testScreenSendsTheLastHashBack() async throws {

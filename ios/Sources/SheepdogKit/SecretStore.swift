@@ -8,13 +8,17 @@ public protocol SecretStore: AnyObject {
     func setSecret(_ value: String?, for account: String)
 }
 
-/// The real thing: a `kSecClassGenericPassword` item per account, readable
-/// only while the device is unlocked and never synced to iCloud.
+/// The real thing: a `kSecClassGenericPassword` item per account, never
+/// synced to iCloud, readable while the device is unlocked, or after the
+/// first unlock (the paired computer's record, so a notification's Approve
+/// works on a locked phone).
 public final class KeychainSecretStore: SecretStore {
     private let service: String
+    private let accessible: CFString
 
-    public init(service: String = "com.github.kccarlos.herdr-sheepdog-ios.daemon") {
+    public init(service: String = "com.github.kccarlos.herdr-sheepdog-ios.daemon", accessibleAfterFirstUnlock: Bool = false) {
         self.service = service
+        accessible = accessibleAfterFirstUnlock ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }
 
     public func secret(for account: String) -> String? {
@@ -39,7 +43,7 @@ public final class KeychainSecretStore: SecretStore {
         if status == errSecItemNotFound {
             var insert = query
             insert[kSecValueData as String] = data
-            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            insert[kSecAttrAccessible as String] = accessible
             SecItemAdd(insert as CFDictionary, nil)
         }
     }
@@ -54,7 +58,7 @@ public final class KeychainSecretStore: SecretStore {
 }
 
 /// Secrets that live only as long as the process: the offline demo's
-/// settings, which must never touch the real token in the keychain.
+/// settings, which must never touch the real keychain.
 public final class MemorySecretStore: SecretStore {
     private var values: [String: String] = [:]
 

@@ -96,6 +96,7 @@ struct PaneSwitcher: View {
             case .flock where waiting > 0:
                 Badge(count: waiting, fill: .accentColor, text: Theme.onAccent)
                     .contentTransition(.numericText())
+                    .animation(Theme.ease, value: waiting)
             default:
                 EmptyView()
             }

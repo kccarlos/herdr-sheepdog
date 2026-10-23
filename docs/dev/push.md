@@ -80,6 +80,8 @@ ticket, [`ws-contract.md`](ws-contract.md) "Auth").
 |---|---|---|
 | `POST /api/push/register` | `{"token":"<hex device token>","relay_token":"<optional>","environment":"production"\|"sandbox","device":"<optional name>"}` | `200 {"ok":true,"content_key":"<base64, 32 bytes>","encryption":"aes-256-gcm"}`. Idempotent: the same token again updates its environment, name and relay token and answers the **same** content key. The registration belongs to the paired device whose ticket sent it: a device has one registration (a new token replaces its old one), and revoking the device drops it. A new device's pairing pushes every other registered device (kind `device_paired`: "New device paired to <computer>. Not you? Open the computer's setup page to revoke."). `token` may be left out when `relay_token` is given (then `environment` is optional). `400` for a token that is not hex (64+ hex digits), a relay token that is not base64url, or an unknown environment; `503` when the daemon has no push service. |
 | `DELETE /api/push/register` | `{"token":"..."}` or `{"relay_token":"..."}` | `200 {"ok":true}`, also for an unknown token. |
+| `POST /api/push/activity` | `{"token":"<hex activity push token>","environment":"production"\|"sandbox"}` | `200 {"ok":true}`. The voice session's Live Activity push token, for the paired device whose ticket sent it (one per device; a new one replaces it; revoking the device drops it). Kept in `push_activities.json` under the data directory (mode 0600) so a restart keeps updating the banner, at most 8 hours. `400` from loopback (no paired device) or for a bad token or environment. See "Live Activity updates". |
+| `DELETE /api/push/activity` | — | `200 {"ok":true}`: the activity ended. |
 | `GET /api/push/status` | — | `{"enabled":bool,"reason":"<why not, when disabled>","devices":N,"mode":"relay"\|"apns"\|"off"}` |
 
 The app need not talk to the relay itself: in relay mode the daemon
@@ -96,7 +98,7 @@ a device token behind it is dropped.
 Each registered phone has a **content key**: 32 random bytes the daemon
 generates at the phone's first registration and answers (base64) in
 every `POST /api/push/register` response, over the same authenticated
-connection as the rest of `/api` (it is as private as `web.token`). The
+connection as the rest of `/api` (it is as private as the device's key). The
 app keeps it where its Notification Service Extension can read it (the
 shared app-group keychain). It lives in `push_devices.json` (mode 600)
 with the device and goes when the device is unregistered or dropped. A
@@ -217,6 +219,47 @@ device is sent to its own environment's host (`api.push.apple.com` or
 
 Events (source `push`): `push.enabled {mode, …}` / `push.disabled {mode, reason}` at
 startup, `push.registered`, `push.unregistered {reason}`, `push.sent`,
-`push.failed {status, reason}`. A log line carries only the token's last
+`push.failed {status, reason}`, `push.activity.registered`,
+`push.activity.sent {event, priority, waiting}` and
+`push.activity.failed {status, reason}`. A log line carries only the token's last
 six characters (`token_tail`), never the whole token, and never anything
 from the key file.
+
+## Live Activity updates
+
+The iPhone app shows the voice session as a Live Activity on the lock
+screen: the voice's phase, up to three agents waiting for an answer with
+their questions, and how many agents are working and done. While the app
+runs it updates the banner itself. It requests the activity with a push
+token and sends it to `POST /api/push/activity`, so the daemon can keep
+the banner current once the app is away (suspended with the screen
+locked, or closed).
+
+- **When.** Every 5 seconds the daemon looks at each registered activity.
+  While its device holds a connection (`/ws`, `/term`, `/events`), the app
+  is in charge and the daemon only notes what the banner shows. After 30
+  seconds without one, each change of the banner's content is pushed:
+  phase `away` ("Not listening"), the waiting rows and the counts. A new
+  waiting agent goes at priority 10, anything else at 5 (iOS rate-limits
+  priority 10 per activity; priority 5 is not counted). Each update moves
+  the stale date 30 minutes on. An activity older than 8 hours (iOS ends
+  it) is forgotten, and so is one APNs reports gone (`410`).
+- **Privacy.** The content state's `rows` (agent names, questions, pane
+  ids) are sealed like a notification: `sealed {c, n}`, AES-256-GCM under
+  the phone's content key, with `rows: []` in the clear. The relay and
+  Apple see the phase and the three counts only. The widget opens the rows
+  with the key in the App Group keychain; without a key (the phone never
+  registered for notifications) the daemon sends the counts alone.
+- **Relay path:** the activity token is traded for a relay token with
+  `/v1/register` like a device token, then `POST /v1/activity` with
+  `{relay_token, event, content_state, timestamp, stale_date, priority}`
+  ([relay/README.md](../../relay/README.md)). A relay older than 1.1.0
+  answers `404` and the banner simply stops updating while the app is
+  away.
+- **Direct path:** `apns-push-type: liveactivity`, topic
+  `<topic>.push-type.liveactivity`, body `{"aps": {timestamp, event,
+  content-state, stale-date}}`.
+
+The content state is the app's `LiveActivityContent`
+(`ios/Sources/SheepdogKit/LiveActivityContent.swift`); `ActivityState` in
+`internal/push/activity.go` mirrors it.

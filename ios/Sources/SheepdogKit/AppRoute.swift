@@ -9,12 +9,16 @@ import Foundation
 ///
 /// - `sheepdog://talk` — open the app and start the voice session
 /// - `sheepdog://agent/<pane id>` — open that agent's Agents card
+/// - `sheepdog://window/<pane id>?computer=<id>` — open that agent's
+///   window (a Live Activity row); `computer` names the computer the
+///   agent runs on, when there are several
 /// - `sheepdog://mute?on=true|false`, `sheepdog://mute` (toggle)
 /// - `sheepdog://stop` — the Stop button: silence the voice now
 /// - `sheepdog://end` — end the voice session
 public enum AppRoute: Equatable, Sendable {
     case talk
     case agent(String)
+    case window(String, computer: String?)
     case mute(Bool)
     case toggleMute
     case stop
@@ -42,6 +46,11 @@ public enum AppRoute: Equatable, Sendable {
             let id = argument.trimmingCharacters(in: .whitespaces)
             guard !id.isEmpty else { return nil }
             self = .agent(id)
+        case "window":
+            let id = argument.trimmingCharacters(in: .whitespaces)
+            guard !id.isEmpty else { return nil }
+            let computer = components?.queryItems?.first { $0.name == "computer" }?.value
+            self = .window(id, computer: computer?.isEmpty == false ? computer : nil)
         case "mute":
             let on = components?.queryItems?.first { $0.name == "on" }?.value?.lowercased()
             switch on {
@@ -67,6 +76,10 @@ public enum AppRoute: Equatable, Sendable {
         case let .agent(id):
             c.host = "agent"
             c.path = "/" + id
+        case let .window(id, computer):
+            c.host = "window"
+            c.path = "/" + id
+            if let computer { c.queryItems = [URLQueryItem(name: "computer", value: computer)] }
         case let .mute(on):
             c.host = "mute"
             c.queryItems = [URLQueryItem(name: "on", value: on ? "true" : "false")]
@@ -88,6 +101,7 @@ public enum AppRoute: Equatable, Sendable {
         case stop
         case disconnect
         case openAgent(String)
+        case openWindow(String, computer: String?)
     }
 
     public func actions(wantsConnection: Bool, muted: Bool) -> [Action] {
@@ -99,6 +113,8 @@ public enum AppRoute: Equatable, Sendable {
             return muted ? [.showConversation, .toggleMute] : [.showConversation]
         case let .agent(id):
             return [.openAgent(id)]
+        case let .window(id, computer):
+            return [.openWindow(id, computer: computer)]
         case let .mute(on):
             return wantsConnection && muted != on ? [.toggleMute] : []
         case .toggleMute:

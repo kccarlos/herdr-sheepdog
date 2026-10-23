@@ -123,7 +123,7 @@ public final class TermSocket {
         } else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 60
-            let session = URLSession(configuration: config)
+            let session = DeviceCredentials.session(configuration: config)
             self.makeTransport = { URLSessionTermTransport(request: $0, session: session) }
         }
     }
@@ -178,9 +178,7 @@ public final class TermSocket {
         let generation = self.generation
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        if !endpoint.token.isEmpty {
-            request.setValue("Bearer \(endpoint.token)", forHTTPHeaderField: "Authorization")
-        }
+        endpoint.authorize(&request)
         let transport = makeTransport(request)
         self.transport = transport
         for key in channels.keys {

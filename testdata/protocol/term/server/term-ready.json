@@ -1,0 +1,8 @@
+{
+  "type": "term-ready",
+  "protocol": 1,
+  "limits": {
+    "channels": 4
+  },
+  "shell": true
+}

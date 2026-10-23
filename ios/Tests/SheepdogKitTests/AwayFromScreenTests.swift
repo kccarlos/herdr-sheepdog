@@ -1,81 +1,6 @@
 import XCTest
 @testable import SheepdogKit
 
-/// The Live Activity's state builder (`VoiceActivityState`).
-final class VoiceActivityStateTests: XCTestCase {
-    private func make(_ state: SessionState, muted: Bool = false, waiting: Int = 0, suspended: Bool = false) -> VoiceActivityState? {
-        VoiceActivityState.make(state: state, muted: muted, waiting: waiting, voiceName: "Rex", suspendedInBackground: suspended)
-    }
-
-    func testNoSessionMeansNoActivity() {
-        XCTAssertNil(make(.disconnected))
-        XCTAssertNil(make(.disconnected, suspended: true))
-    }
-
-    func testEverySessionStateMapsToAPhase() {
-        let expected: [SessionState: VoiceActivityState.Phase] = [
-            .connecting: .connecting, .reconnecting: .connecting,
-            .voiceOff: .paused, .audioPaused: .paused, .noMicrophone: .paused,
-            .stalled: .thinking, .thinking: .thinking, .speaking: .speaking,
-            .muted: .muted, .silent: .listening, .listening: .listening, .idle: .listening,
-        ]
-        for state in SessionState.allCases where state != .disconnected {
-            XCTAssertEqual(make(state)?.phase, expected[state], "\(state)")
-        }
-    }
-
-    func testTitles() {
-        XCTAssertEqual(make(.listening)?.title, "Listening")
-        XCTAssertEqual(make(.silent)?.title, "Listening")
-        XCTAssertEqual(make(.speaking)?.title, "Speaking")
-        XCTAssertEqual(make(.muted, muted: true)?.title, "Muted")
-        XCTAssertEqual(make(.reconnecting)?.title, "Reconnecting…")
-        XCTAssertEqual(make(.connecting)?.title, "Connecting…")
-    }
-
-    func testWaitingAgentsAreCountedAndWorded() {
-        XCTAssertNil(make(.listening)?.waitingText)
-        XCTAssertEqual(make(.listening, waiting: 1)?.waitingText, "1 agent waiting for an answer")
-        let two = make(.listening, waiting: 2)
-        XCTAssertEqual(two?.waiting, 2)
-        XCTAssertEqual(two?.waitingText, "2 agents waiting for an answer")
-        XCTAssertEqual(two?.accessibilityLabel, "Rex is listening. 2 agents waiting for an answer")
-        XCTAssertEqual(two?.compactAccessibilityLabel, "Listening, 2 waiting")
-        XCTAssertEqual(make(.listening, waiting: -3)?.waiting, 0)
-    }
-
-    func testMuteIsKeptWhileSpeakingOutranksIt() {
-        let speaking = make(.speaking, muted: true)
-        XCTAssertEqual(speaking?.phase, .speaking)
-        XCTAssertEqual(speaking?.muted, true)
-        XCTAssertEqual(speaking?.accessibilityLabel, "Rex is speaking. Microphone muted")
-        XCTAssertEqual(speaking?.compactAccessibilityLabel, "Speaking, muted")
-
-        let muted = make(.muted, muted: true)
-        XCTAssertEqual(muted?.accessibilityLabel, "Microphone muted. Rex can still talk")
-        XCTAssertEqual(muted?.compactAccessibilityLabel, "Muted")
-    }
-
-    func testPausedInTheBackgroundSaysSo() {
-        let paused = make(.listening, suspended: true)
-        XCTAssertEqual(paused?.phase, .paused)
-        XCTAssertEqual(paused?.title, "Paused while locked")
-        XCTAssertEqual(paused?.accessibilityLabel, "Paused while the phone is locked. Open Sheepdog to talk again")
-        // Reconnecting is still reconnecting.
-        XCTAssertEqual(make(.reconnecting, suspended: true)?.phase, .connecting)
-    }
-
-    func testPhaseRawValuesAreTheWireStrings() {
-        // ContentState.phase carries these; the widget switches on them.
-        XCTAssertEqual(VoiceActivityState.Phase.allCases.map(\.rawValue),
-                       ["connecting", "listening", "speaking", "thinking", "muted", "paused"])
-    }
-
-    func testRefreshComesWellBeforeStale() {
-        XCTAssertLessThan(VoiceActivityState.refreshInterval * 2, VoiceActivityState.staleAfter)
-    }
-}
-
 /// `sheepdog://` links, the App Intents and the earbud remote (`AppRoute`).
 final class AppRouteTests: XCTestCase {
     private func route(_ s: String) -> AppRoute? { AppRoute(url: URL(string: s)!) }
@@ -91,9 +16,13 @@ final class AppRouteTests: XCTestCase {
         XCTAssertEqual(route("sheepdog://mute"), .toggleMute)
         XCTAssertEqual(route("sheepdog://stop"), .stop)
         XCTAssertEqual(route("sheepdog://end"), .end)
+        XCTAssertEqual(route("sheepdog://window/w1:p2"), .window("w1:p2", computer: nil))
+        XCTAssertEqual(route("sheepdog://window/w1:p2?computer=home"), .window("w1:p2", computer: "home"))
+        XCTAssertEqual(route("sheepdog://window/w1:p2?computer="), .window("w1:p2", computer: nil))
     }
 
     func testRejectsWhatIsNotARoute() {
+        XCTAssertNil(route("sheepdog://window/"))
         XCTAssertNil(route("https://talk"))
         XCTAssertNil(route("sheepdog://"))
         XCTAssertNil(route("sheepdog://agent"))
@@ -103,7 +32,7 @@ final class AppRouteTests: XCTestCase {
     }
 
     func testURLsRoundTrip() {
-        let all: [AppRoute] = [.talk, .agent("w1:p2"), .agent("pane with space"), .mute(true), .mute(false), .toggleMute, .stop, .end]
+        let all: [AppRoute] = [.talk, .agent("w1:p2"), .agent("pane with space"), .window("w1:p2", computer: nil), .window("w1:p2", computer: "a b&c"), .mute(true), .mute(false), .toggleMute, .stop, .end]
         for r in all {
             XCTAssertEqual(AppRoute(url: r.url), r, r.url.absoluteString)
         }
@@ -141,6 +70,7 @@ final class AppRouteTests: XCTestCase {
         XCTAssertEqual(AppRoute.end.actions(wantsConnection: true, muted: false), [.disconnect])
         XCTAssertEqual(AppRoute.end.actions(wantsConnection: false, muted: false), [])
         XCTAssertEqual(AppRoute.agent("w1:p2").actions(wantsConnection: false, muted: false), [.openAgent("w1:p2")])
+        XCTAssertEqual(AppRoute.window("w1:p2", computer: "home").actions(wantsConnection: false, muted: false), [.openWindow("w1:p2", computer: "home")])
     }
 
     func testEarbudRemote() {

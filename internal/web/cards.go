@@ -11,8 +11,8 @@ import (
 // whether its screen is visible (visibility), and the orchestrator's show
 // tool puts a card on it (card). The web layer owns the visibility: only
 // the attached client counts, it starts not visible, and it stops counting
-// when it is replaced or goes away, so a client that never reports (an
-// older app or page) never gets a card and the orchestrator speaks instead.
+// when it is replaced or goes away, so a client that never reports never
+// gets a card and the orchestrator speaks instead.
 
 // CardHost is the supervisor's card side, when it has one: the screen it
 // shows cards on, and the card store the conversation history reads.
