@@ -120,7 +120,8 @@ paths a PR or push changes (`ios/scripts/ci-plan.sh tier`) and picks a tier:
 
 Smoke is the unit tests (`SheepdogKitTests`, which include the protocol
 goldens), the first-run, settings, pairing, questions, history, agent
-window and reconnect UI tests, and one iPad test; the shards split the
+window and reconnect UI tests, and, in the smoke tier, one iPad test (in
+the full tier the iPad shard runs it, so no job boots two simulators); the shards split the
 other UI test classes, balanced by their CI durations.
 `ios/scripts/ci-shards.txt` lists which job runs which tests, and the
 `plan` job fails if a UI test class is in no job (`ci-plan.sh check`,

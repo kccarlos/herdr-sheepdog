@@ -7,8 +7,9 @@
 #   suite). docs/dev/development.md (CI/CD) has the tiers.
 # - Every class in Tests/SheepdogUITests must be listed as a whole class in
 #   exactly one job, or the plan job fails (scripts/ci-plan.sh check). A
-#   method listed in one job (IPadUITests/testSidebarAndDetail in smoke) is
-#   skipped in the job that runs its class.
+#   method listed in one job (IPadUITests/testSidebarAndDetail in smoke)
+#   runs there only in the smoke tier; in the full tier the job that runs
+#   its whole class covers it, so smoke boots no iPad.
 # - IPadUITests runs on an iPad simulator, everything else on an iPhone.
 #   HistoryApprovalUITests (after a daemon restart) and ReconnectUITests
 #   (with the restarter) get their own steps.
@@ -26,7 +27,7 @@ smoke    SheepdogUITests/AgentWindowDemoUITests        # 258
 smoke    SheepdogUITests/ReconnectUITests              # 36
 smoke    SheepdogUITests/IPadUITests/testSidebarAndDetail
 
-# iPad: about 215 without the smoke test
+# iPad: about 260
 shard-1  SheepdogUITests/IPadUITests
 
 # about 189

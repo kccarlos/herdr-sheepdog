@@ -94,7 +94,8 @@ jobs:
       # Smoke and the shards run side by side; the first job that fails
       # cancels the others (a red smoke stops the shards). Each job builds
       # the app itself: the build hides the simulator's boot, which costs
-      # five minutes when it is not hidden.
+      # five minutes when it is not hidden (a shared build would need an
+      # artifact and could not hide it).
       fail-fast: true
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
@@ -104,7 +105,6 @@ jobs:
       IPHONE_TESTS: ${{ matrix.iphone }}
       IPAD_TESTS: ${{ matrix.ipad }}
       WANT_IPHONE: ${{ matrix.iphone != '' || matrix.history || matrix.reconnect }}
-      WANT_IPAD: ${{ matrix.ipad != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -122,49 +122,6 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
-
-      # The simulators boot while the app builds (a few minutes each on a
-      # cold runner). A job with iPhone and iPad tests (smoke) boots both,
-      # runs the iPad tests first and then shuts the iPad down.
-      - name: Pick the simulators and start booting them
-        id: sim
-        run: |
-          # The newest iPhone on the image, but not a foldable one (iPhone
-          # Duo): unfolded it has regular width, which gets the iPad layout,
-          # and the iPhone tests test the iPhone layout. The newest iPad Pro
-          # 13" (any iPad if there is none) for IPadUITests.
-          picked=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
-          devs = json.load(sys.stdin)["devices"]
-          def newest(ok):
-              best = None
-              for runtime, items in devs.items():
-                  if "iOS" not in runtime:
-                      continue
-                  ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
-                  for d in items:
-                      if ok(d["name"]) and (best is None or ver > best[0]):
-                          best = (ver, d["udid"], d["name"], runtime)
-              return best
-          iphone = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
-          ipad = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
-          for key, best in (("iphone", iphone), ("ipad", ipad)):
-              if best is None:
-                  sys.exit("no %s simulator available" % key)
-              print("%s=%s" % (key, best[1]))
-              print(key, best[2], best[3], file=sys.stderr)
-          ')
-          iphone=$(echo "$picked" | sed -n 's/^iphone=//p')
-          ipad=$(echo "$picked" | sed -n 's/^ipad=//p')
-          # The build is for one simulator; its products run on the other.
-          build=$ipad
-          if [ "$WANT_IPHONE" = true ]; then build=$iphone; xcrun simctl boot "$iphone" || true; fi
-          if [ "$WANT_IPAD" = true ]; then xcrun simctl boot "$ipad" || true; fi
-          {
-            echo "iphone=$iphone"
-            echo "ipad=$ipad"
-            echo "build=$build"
-          } >> "$GITHUB_OUTPUT"
 
       # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
       # checkout's daemon, so an API change that breaks the app fails here.
@@ -198,6 +155,50 @@ jobs:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
+      # One simulator boots while the app builds (a few minutes on a cold
+      # runner); booting it earlier, or two at once, slows the setup and
+      # the build badly. A job with iPhone and iPad tests (smoke alone, in
+      # the smoke tier) boots the iPhone here and the iPad at the end.
+      - name: Pick the simulators and start booting one
+        id: sim
+        run: |
+          # The newest iPhone on the image, but not a foldable one (iPhone
+          # Duo): unfolded it has regular width, which gets the iPad layout,
+          # and the iPhone tests test the iPhone layout. The newest iPad Pro
+          # 13" (any iPad if there is none) for IPadUITests.
+          picked=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devs = json.load(sys.stdin)["devices"]
+          def newest(ok):
+              best = None
+              for runtime, items in devs.items():
+                  if "iOS" not in runtime:
+                      continue
+                  ver = tuple(int(p) for p in runtime.rsplit("iOS-", 1)[-1].split("-") if p.isdigit())
+                  for d in items:
+                      if ok(d["name"]) and (best is None or ver > best[0]):
+                          best = (ver, d["udid"], d["name"], runtime)
+              return best
+          iphone = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
+          ipad = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
+          for key, best in (("iphone", iphone), ("ipad", ipad)):
+              if best is None:
+                  sys.exit("no %s simulator available" % key)
+              print("%s=%s" % (key, best[1]))
+              print(key, best[2], best[3], file=sys.stderr)
+          ')
+          iphone=$(echo "$picked" | sed -n 's/^iphone=//p')
+          ipad=$(echo "$picked" | sed -n 's/^ipad=//p')
+          # The build is for one simulator; its products run on the other.
+          build=$ipad
+          if [ "$WANT_IPHONE" = true ]; then build=$iphone; fi
+          xcrun simctl boot "$build" || true
+          {
+            echo "iphone=$iphone"
+            echo "ipad=$ipad"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build for testing
         id: build
         working-directory: ios
@@ -218,14 +219,11 @@ jobs:
           if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
           exit "$status"
 
-      - name: Wait for the simulators
+      - name: Wait for the simulator
         run: |
+          xcrun simctl bootstatus "${{ steps.sim.outputs.build }}" -b
           # The app asks for the microphone when the session starts.
-          for want in "$WANT_IPHONE:${{ steps.sim.outputs.iphone }}" "$WANT_IPAD:${{ steps.sim.outputs.ipad }}"; do
-            [ "${want%%:*}" = true ] || continue
-            xcrun simctl bootstatus "${want#*:}" -b
-            xcrun simctl privacy "${want#*:}" grant microphone "$BUNDLE_ID"
-          done
+          xcrun simctl privacy "${{ steps.sim.outputs.build }}" grant microphone "$BUNDLE_ID"
 
       # Two free ports for the main (--voice=off) and the pair daemon, and
       # a control directory for scripts/fixture-daemon-restarter.sh. The
@@ -259,26 +257,6 @@ jobs:
       # that fails is run again (up to 3 times) and the job fails only if
       # it never passes. The retries show in the log as repeated
       # "Test Case ... failed" lines above the final pass.
-
-      # The iPad layout (IPadUITests, offline demo, no daemon).
-      - name: UI tests - iPad
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.ipad != '' }}
-        working-directory: ios
-        run: |
-          status=0
-          # shellcheck disable=SC2086 # IPAD_TESTS is a list of arguments
-          xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.ipad }}" \
-            -derivedDataPath "$DERIVED" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 3 \
-            $IPAD_TESTS \
-            -resultBundlePath "$RESULTS/IPad.xcresult" \
-            > "$RESULTS/ipad.log" 2>&1 || status=$?
-          xcrun simctl shutdown "${{ steps.sim.outputs.ipad }}" || true
-          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
 
       # The job's unit and UI tests on the iPhone, but the two that need a
       # fresh restart or the restarter (below). The recordings and
@@ -344,6 +322,34 @@ jobs:
             > "$RESULTS/reconnect.log" 2>&1 || status=$?
           kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
           sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
+
+      # The iPad layout (IPadUITests, offline demo, no daemon). In a job
+      # that also ran iPhone tests the iPhone shuts down and the iPad boots
+      # now.
+      - name: UI tests - iPad
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.ipad != '' }}
+        working-directory: ios
+        run: |
+          ipad=${{ steps.sim.outputs.ipad }}
+          if [ "$ipad" != "${{ steps.sim.outputs.build }}" ]; then
+            xcrun simctl shutdown "${{ steps.sim.outputs.build }}" || true
+            xcrun simctl boot "$ipad" || true
+            xcrun simctl bootstatus "$ipad" -b
+            xcrun simctl privacy "$ipad" grant microphone "$BUNDLE_ID"
+          fi
+          status=0
+          # shellcheck disable=SC2086 # IPAD_TESTS is a list of arguments
+          xcodebuild test-without-building \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -destination "id=$ipad" \
+            -derivedDataPath "$DERIVED" \
+            -collect-test-diagnostics never \
+            -retry-tests-on-failure -test-iterations 3 \
+            $IPAD_TESTS \
+            -resultBundlePath "$RESULTS/IPad.xcresult" \
+            > "$RESULTS/ipad.log" 2>&1 || status=$?
+          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
 
       - name: Stop the fixture daemons
         if: always()

@@ -92,22 +92,22 @@ matrix() {
     {
       if (!($1 in seen)) { seen[$1] = 1; order[++jobs] = $1 }
       n++; ejob[n] = $1; eid[n] = $2
-      k = split($2, p, "/")
-      if (k == 3) { mcount[p[2]]++; mid[p[2], mcount[p[2]]] = $2; mown[p[2], mcount[p[2]]] = $1 }
     }
     function add(dev, j, arg) {
       if (dev == "ipad") ipad[j] = ipad[j] (ipad[j] == "" ? "" : " ") arg
       else iphone[j] = iphone[j] (iphone[j] == "" ? "" : " ") arg
     }
     END {
+      for (i = 1; i <= n; i++) if (split(eid[i], p, "/") == 2) whole[p[2]] = 1
       for (i = 1; i <= n; i++) {
         j = ejob[i]; k = split(eid[i], p, "/"); cl = p[2]
+        # A method whose whole class runs in another job of this tier is
+        # left to that job (smoke then needs no iPad in the full tier).
+        if (k == 3 && (cl in whole)) continue
         if (k == 2 && cl == "HistoryApprovalUITests") { history[j] = 1; continue }
         if (k == 2 && cl == "ReconnectUITests") { reconnect[j] = 1; continue }
         dev = (cl ~ /^IPad/) ? "ipad" : "iphone"
         add(dev, j, "-only-testing:" eid[i])
-        # A method another job runs is skipped where its class runs.
-        if (k == 2) for (m = 1; m <= mcount[cl]; m++) if (mown[cl, m] != j) add(dev, j, "-skip-testing:" mid[cl, m])
       }
       printf "{\"include\":["
       for (o = 1; o <= jobs; o++) {

@@ -117,8 +117,9 @@ if bash "$plan" check > "$work/out" 2>&1; then ok "check the real ci-shards.txt"
   bad "check the real ci-shards.txt"; sed 's/^/     /' "$work/out"
 fi
 
-# The matrix: the smoke method is skipped where its class runs, the
-# iPad classes go to the iPad, the two special classes become flags.
+# The matrix: in the full tier the smoke method is left to the job that
+# runs its whole class, the iPad classes go to the iPad, the two special
+# classes become flags.
 cat > "$work/shards" <<'EOF'
 smoke    SheepdogKitTests
 smoke    SheepdogUITests/HistoryApprovalUITests
@@ -127,7 +128,7 @@ shard-1  SheepdogUITests/IPadUITests
 shard-2  SheepdogUITests/ReconnectUITests
 shard-2  SheepdogUITests/CardsUITests
 EOF
-want_full='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"-only-testing:SheepdogUITests/IPadUITests/testSidebar","history":true,"reconnect":false},{"name":"shard-1","iphone":"","ipad":"-only-testing:SheepdogUITests/IPadUITests -skip-testing:SheepdogUITests/IPadUITests/testSidebar","history":false,"reconnect":false},{"name":"shard-2","iphone":"-only-testing:SheepdogUITests/CardsUITests","ipad":"","history":false,"reconnect":true}]}'
+want_full='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"","history":true,"reconnect":false},{"name":"shard-1","iphone":"","ipad":"-only-testing:SheepdogUITests/IPadUITests","history":false,"reconnect":false},{"name":"shard-2","iphone":"-only-testing:SheepdogUITests/CardsUITests","ipad":"","history":false,"reconnect":true}]}'
 want_smoke='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"-only-testing:SheepdogUITests/IPadUITests/testSidebar","history":true,"reconnect":false}]}'
 got="$(bash "$plan" matrix full "$work/shards")"
 if [[ "$got" == "$want_full" ]]; then ok "matrix full"; else bad "matrix full"; echo "     got  $got"; echo "     want $want_full"; fi
