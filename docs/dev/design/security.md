@@ -735,6 +735,13 @@ runs Tailscale. Either:
 - The device key is checked by signature, not by source address.
 - Nothing depends on the network kind: there is no Tailscale identity
   check and the shell switch is per computer.
+- Whatever source address the router leaves, it is not loopback, so the
+  connection gets TLS and device auth and never a loopback-only route.
+  `TestPortForwardGetsTLSAndDeviceAuth` (`internal/web/portforward_test.go`)
+  serves the daemon behind a listener that reports a public source
+  address, as a port forward does, and checks plain HTTP (426), a wrong
+  pin, no ticket (401), every loopback-only and setup route with a ticket
+  (403), then enroll, sign-in, `/ws`, `/term` and a shell.
 
 **The address.** Subnet routing ((a), (c)) needs nothing: the QR's LAN
 address already works away from home. A port forward (b) needs the
