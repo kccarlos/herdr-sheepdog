@@ -28,7 +28,7 @@ final class ReconnectUITests: XCTestCase {
         // The one-time Voice Isolation tip is a banner too, and it comes the
         // second time the voice listens, which is the reconnect: mark it as
         // shown (an argument-domain default outlives the reset).
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-hint.micmode.shown", "YES"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-hint.micmode.shown", "YES"]
         app.launch()
 
         let status = app.staticTexts["controls.statusLine"]
@@ -71,7 +71,7 @@ final class ReconnectUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 

@@ -43,7 +43,7 @@ final class DemoUITests: XCTestCase {
         // demo's cover still animating, slower on a CI Mac): keep looking.
         let deadline = Date().addingTimeInterval(10)
         repeat {
-            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isTappable {
                 matches.element(boundBy: i).tap()
                 return
             }
@@ -62,7 +62,7 @@ final class DemoUITests: XCTestCase {
         let app = XCUIApplication()
         // Silent: no speech synthesis or recognition. On Xcode Cloud the
         // simulator's audio server hangs and the app aborts starting it.
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         app.launch()
 
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]

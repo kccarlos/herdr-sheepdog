@@ -26,7 +26,7 @@ final class ShellDemoUITests: XCTestCase {
         // demo's cover still animating, slower on a CI Mac): keep looking.
         let deadline = Date().addingTimeInterval(10)
         repeat {
-            for i in 0 ..< matches.count where matches.element(boundBy: i).isHittable {
+            for i in 0 ..< matches.count where matches.element(boundBy: i).isTappable {
                 matches.element(boundBy: i).tap()
                 return
             }
@@ -37,7 +37,7 @@ final class ShellDemoUITests: XCTestCase {
 
     private func launch(term: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent"]
         if let term { app.launchArguments += ["-sheepdogDemoTerm", term] }
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
@@ -61,7 +61,7 @@ final class ShellDemoUITests: XCTestCase {
         // Typing mode from the start; the key bar, and no composer.
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "shell.typingHint").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(identifier: "agentScreen.key.esc").firstMatch.exists)
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "agentScreen.field").allElementsBoundByIndex.contains { $0.isHittable }, "no composer")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "agentScreen.field").allElementsBoundByIndex.contains { $0.isTappable }, "no composer")
         let terminal = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
             .matching(NSPredicate(format: "value CONTAINS 'shop %'")).firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "the shell's prompt")
@@ -97,8 +97,8 @@ final class ShellDemoUITests: XCTestCase {
 
     func testTheAgentsTabOffersAShell() throws {
         let app = launch()
-        tapMenuItem(app, menu: "toolbar.new", item: "new.shell")
         let header = app.descendants(matching: .any).matching(identifier: "shell.header").firstMatch
+        tapMenuItem(app, menu: "toolbar.new", item: "new.shell", until: header)
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         XCTAssertTrue(header.label.contains("Shell"), header.label)
     }
@@ -116,7 +116,7 @@ final class ShellDemoUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() // close the menu
         sleep(1)
         let navButtons = app.navigationBars.buttons
-        for i in 0 ..< navButtons.count where navButtons.element(boundBy: i).isHittable && navButtons.element(boundBy: i).label != "More" {
+        for i in 0 ..< navButtons.count where navButtons.element(boundBy: i).isTappable && navButtons.element(boundBy: i).label != "More" {
             navButtons.element(boundBy: i).tap()
             break
         }

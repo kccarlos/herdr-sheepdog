@@ -18,7 +18,7 @@ final class NewConversationUITests: XCTestCase {
 
     func testNewConversationMenuDialogAndDivider() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
         // Scrollback to keep and see a divider land under: an utterance
         // logged on the daemon ahead of time, so it is already on the
         // newest `/api/conversation` page the app fetches at launch —
@@ -57,7 +57,7 @@ final class NewConversationUITests: XCTestCase {
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(what) never appeared", file: file, line: line)
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable, Date() < deadline { usleep(150_000) }
+        while !element.isTappable, Date() < deadline { usleep(150_000) }
         element.tap()
     }
 
@@ -97,13 +97,16 @@ final class NewConversationUITests: XCTestCase {
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The daemon answers once the change is in its state, within its
+        // own tool timeout; a busy CI Mac took more than 6 s.
+        request.timeoutInterval = 30
         var out = Data()
         let done = expectation(description: "post")
         URLSession.shared.dataTask(with: request) { data, _, _ in
             out = data ?? Data()
             done.fulfill()
         }.resume()
-        wait(for: [done], timeout: 6)
+        wait(for: [done], timeout: 35)
         return out
     }
 

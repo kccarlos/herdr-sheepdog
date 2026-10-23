@@ -135,7 +135,9 @@ from the daemon repository root (`..` from `ios/`). Neither needs a model
 key: `--brain=fake` is a scripted local model, and `--voice=off` means there
 is no live session. The script does it (`SHEEPDOG_FIXTURE_PORT`,
 `SHEEPDOG_FIXTURE_PAIR_PORT` and `SHEEPDOG_FIXTURE_DATA` move it off 7799,
-7798 and `/tmp/sd-bugs`; `stop` stops them):
+7798 and `/tmp/sd-bugs`; `stop` stops them). The daemons keep their data,
+an empty config and their `HOME` in that directory, so they never read
+your own `~/.config/sheepdog` (prompts, config) or your herdr socket:
 
 ```sh
 make build && SHEEPDOG_DAEMON_REPO=$PWD ios/scripts/fixture-daemons.sh start
@@ -145,11 +147,12 @@ or by hand:
 
 ```sh
 cd ..   # the repository root; build bin/sheepdog first with make build
-SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios/state.json \
-  bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7799 --env-file /dev/null &
-SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-pair SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-pair/state.json \
+mkdir -p /tmp/sheepdog-ios/home /tmp/sheepdog-ios-pair && : > /tmp/sheepdog-ios/config.toml
+HOME=/tmp/sheepdog-ios/home SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios/state.json \
+  bin/sheepdog serve --config /tmp/sheepdog-ios/config.toml --brain=fake --herdr=mock --voice=off --dev --port 7799 --env-file /dev/null &
+HOME=/tmp/sheepdog-ios/home SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-pair SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-pair/state.json \
   SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_ADVERTISE=127.0.0.1:7798 \
-  bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7798 --env-file /dev/null &
+  bin/sheepdog serve --config /tmp/sheepdog-ios/config.toml --brain=fake --herdr=mock --voice=off --dev --port 7798 --env-file /dev/null &
 
 cd ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
@@ -159,7 +162,8 @@ xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPh
 - `HistoryApprovalUITests` expects a restart divider, so restart the 7799
   daemon shortly before it runs.
 - `ReconnectUITests` skips unless `scripts/fixture-daemon-restarter.sh` is
-  running.
+  running (with the same environment as `fixture-daemons.sh`; it restarts
+  the main daemon through it).
 - `ReviewScreenshotsUITests` writes the screenshots below. Run it with
   `TEST_RUNNER_SHEEPDOG_SHOTS=light|dark|xxxl` against a fixture daemon on
   7797.

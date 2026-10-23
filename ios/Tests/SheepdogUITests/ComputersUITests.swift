@@ -22,7 +22,7 @@ final class ComputersUITests: XCTestCase {
         defer { stub.stop() }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(host)"]
         app.launch()
 
         // The voice menu: the connection, Manage computers… and Start; no Talk to.
@@ -66,7 +66,7 @@ final class ComputersUITests: XCTestCase {
 
         let app = XCUIApplication()
         // Studio's port is closed: an offline computer.
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost);Studio=127.0.0.1:9"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost);Studio=127.0.0.1:9"]
         app.launch()
 
         // The conversation: Work Mac's question first, then Home Mac's,
@@ -167,7 +167,7 @@ final class ComputersUITests: XCTestCase {
         var seen: [String] = []
         for _ in 0 ..< 4 {
             let button = app.buttons[menu]
-            if button.waitForExistence(timeout: 5), button.isHittable { button.tap() }
+            if button.waitForExistence(timeout: 5), button.isTappable { button.tap() }
             if app.buttons[item].waitForExistence(timeout: 3) { return }
             seen = app.buttons.allElementsBoundByIndex.map { "\($0.identifier)=\($0.label)" }
             closeMenu(app)
@@ -188,6 +188,6 @@ final class ComputersUITests: XCTestCase {
 
 private extension XCUIElement {
     func tapIfExists() {
-        if waitForExistence(timeout: 2), isHittable { tap() }
+        if waitForExistence(timeout: 2), isTappable { tap() }
     }
 }

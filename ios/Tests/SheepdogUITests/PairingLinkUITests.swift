@@ -34,7 +34,7 @@ final class PairingLinkUITests: XCTestCase {
 
     func testAsksBeforePairingAndCancelGoesBackToSettings() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations"]
         app.launch()
         XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10), "first run opens Settings")
 
@@ -47,7 +47,7 @@ final class PairingLinkUITests: XCTestCase {
 
     func testPairReportsAnUnreachableCode() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations"]
         app.launch()
         XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10))
 
@@ -64,7 +64,7 @@ final class PairingLinkUITests: XCTestCase {
     func testPairingWalkthrough() throws {
         let link = try freshLink()
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogShowStreamErrors"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogShowStreamErrors"]
         app.launch()
         XCTAssertTrue(app.buttons["settings.scan"].waitForExistence(timeout: 10))
 
@@ -93,7 +93,7 @@ final class PairingLinkUITests: XCTestCase {
 
     private func tapWhenReady(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15) {
         let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline, !(element.exists && element.isHittable) { usleep(200_000) }
+        while Date() < deadline, !(element.exists && element.isTappable) { usleep(200_000) }
         XCTAssertTrue(element.exists, "\(what) never appeared")
         element.tap()
     }

@@ -23,7 +23,7 @@ final class CardsUITests: XCTestCase {
     /// Where the demo's conversation starts: under its agent strip.
     private func conversationTop(_ app: XCUIApplication) -> CGFloat? {
         let chips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agent.chip.'"))
-        for i in 0 ..< chips.count where chips.element(boundBy: i).isHittable {
+        for i in 0 ..< chips.count where chips.element(boundBy: i).isTappable {
             return chips.element(boundBy: i).frame.maxY + 12
         }
         return nil
@@ -32,7 +32,7 @@ final class CardsUITests: XCTestCase {
     func testACardOpensOnceAndReopensFromItsRow() throws {
         let app = XCUIApplication()
         // -sheepdogDemoCard: the demo asks "Show me the agents" by itself.
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogDemoCard"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoCard"]
         app.launch()
 
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
@@ -58,20 +58,20 @@ final class CardsUITests: XCTestCase {
         // (The list is lazy: an off-screen row is not there at all.) On an
         // SE the pinned approval card leaves the list no room: answer it.
         let approve = app.buttons["approval.option.1"]
-        if approve.waitForExistence(timeout: 3), approve.isHittable {
+        if approve.waitForExistence(timeout: 3), approve.isTappable {
             approve.tap()
             sleep(2)
         }
         let row = app.buttons.matching(identifier: "bubble.card").firstMatch
         _ = row.waitForExistence(timeout: 3)
-        for _ in 0 ..< 8 where !(row.exists && row.isHittable) {
+        for _ in 0 ..< 8 where !(row.exists && row.isTappable) {
             // Drag the conversation down a little, just under the tabs.
             guard let top = conversationTop(app) else { break }
             let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.midX, dy: top + 12))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 70)))
         }
-        if !row.isHittable { shot("debug") }
-        XCTAssertTrue(row.isHittable, "the card's row on screen")
+        if !row.isTappable { shot("debug") }
+        XCTAssertTrue(row.isTappable, "the card's row on screen")
         sleep(4)
         XCTAssertFalse(title.exists, "a card opens by itself once")
         XCTAssertEqual(app.buttons.matching(identifier: "bubble.card").count, 1, "one row per card")

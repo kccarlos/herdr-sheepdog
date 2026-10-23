@@ -128,36 +128,53 @@ one runs `IPadUITests` on an iPad, three split the rest on an iPhone.
 iPhone tests (`ci-plan.sh check`, tested by `ci-plan_test.sh`), so a new
 class cannot be skipped silently.
 
-A `build` job (one Mac) builds the app and its test bundles once
+Every Mac job is a test job (one Mac, one simulator), at most five: GitHub
+runs five macOS jobs of an account at once, and a separate build job
+beside five test jobs could wait for a slot while they wait for it. One
+of them, the first to get a Mac (each job that finds no build yet
+uploads a tiny claim artifact, and the oldest claim wins; a job named in
+advance could get its Mac last while the others wait), builds the app
+and its test bundles once
 (`build-for-testing` for any simulator, arm64 only, no index store, about
-three minutes) and the daemon, and hands Build/Products, `bin/sheepdog`
-and the scripts and test sources the tests read to the test jobs as one
-zstd tar (an artifact of about 50 MB, kept for a day). Each test job (one
-Mac, one simulator) downloads it, boots its simulator, and runs
-`xcodebuild test-without-building -xctestrun` for its tests; it needs no
-checkout, Go or XcodeGen. A booting simulator slows everything else on the
-Mac badly (a download or the daemon's first launch takes minutes beside
-it), so it boots last; the boot is the biggest fixed cost of a test job
-(two to eight minutes), so a test job less saves Mac minutes and a test
-job more saves wall clock: five is where the slowest job, smoke or a
-shard, takes about as long as the others. Smoke
+three minutes; twelve with a simulator booting beside it, so it boots its
+own only after the upload) and the daemon, and hands Build/Products,
+`bin/sheepdog` and the scripts and test sources the tests read to the
+others as one zstd tar (an artifact of about 50 MB, kept for a day). The
+others boot their simulator meanwhile (two to eight minutes, the biggest
+fixed cost of a test job), wait for the boot to finish, then wait for the
+artifact (polled through the job's Actions runtime token, as
+`actions/download-artifact` itself does; the building job uploads a
+marker when its build fails, so they stop at once), download it and run
+`xcodebuild test-without-building -xctestrun` for their tests; they need
+no checkout, Go or XcodeGen. A booting simulator slows everything else
+on the Mac badly (a download or the daemon's first launch takes minutes
+beside it), so nothing but the build runs beside it. A test job less saves
+Mac minutes and a test job more saves wall clock: five is where the
+slowest job, smoke or a shard, takes about as long as the others. Smoke
 and the shards run side by side and the first that fails cancels the
 rest (`fail-fast`); the shards do not wait for smoke, because that would
-add smoke's whole time to every run, and a compile error already stops
-the run in `build` before any test Mac starts. Each test job prints its
-timings (download, boot, first test) in the job summary and every test
+add smoke's whole time to every run. Each test job prints its
+timings (build, boot, download, first test) in the job summary and every test
 case with its time in the log. Each iPhone job starts two fixture daemons
 on free ports
 (`ios/scripts/fixture-daemons.sh`, `--brain=fake --herdr=mock --voice=off`,
-temp data dirs) for its tests; `HistoryApprovalUITests` runs after
+with data, config and `HOME` in a temp dir, so they never read the Mac's
+`~/.config/sheepdog` or its herdr socket) for its tests; `HistoryApprovalUITests` runs after
 a fresh daemon restart, and `ReconnectUITests` with
 `ios/scripts/fixture-daemon-restarter.sh` running. `IPadUITests` runs on an
 iPad simulator, the rest on the newest iPhone that is not a foldable. Only the opt-in
-recording and screenshot tests skip. A failing test is retried up to
-three times (`-retry-tests-on-failure`): on the hosted Mac a tap now and
-then lands during an animation and is lost, a different test each run, so
-the job fails only when a test never passes; look for repeated
-`Test Case … failed` lines in a green run's log to find flaky tests. It builds for the simulator only and
+recording and screenshot tests skip. The tap-flow UI tests launch the app with
+`-sheepdogNoAnimations` (debug builds only), which turns UIKit and
+SwiftUI animations off, so a tap never lands on a sheet or menu that is
+still moving; they tap through helpers that wait for an element to be on
+screen and check that the tap landed (`ios/Tests/SheepdogUITests/PaneSwitch.swift`).
+Each test step runs `ios/scripts/ci-xctest.sh`: a failing test is run once
+more (`-retry-tests-on-failure -test-iterations 2`) and the job fails only
+if it fails twice, and a test runner that never started (once seen on a
+simulator that had just booted) gets one more start; a test
+that passed only on the second run is a flake, and
+`ios/scripts/ci-test-summary.sh` lists it in the job summary and as a
+warning on the run. It builds for the simulator only and
 uses no secrets. Archives, signing
 and TestFlight stay on Xcode Cloud, which runs no tests, and no signing
 certificate or App Store Connect key for the app goes into GitHub. The other exception

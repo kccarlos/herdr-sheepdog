@@ -80,16 +80,19 @@ final class PairingE2ETests: XCTestCase {
         _ = try await client.state()
         XCTAssertNotEqual(credentials.header(), "Bearer sds_bogus")
 
-        // The /ws upgrade over the pinned session, with the ticket.
+        // The /ws upgrade over the pinned session, with the ticket: the
+        // daemon's first frame is a status (docs/ws-contract.md). A
+        // WebSocket-level ping is no proof: URLSessionWebSocketTask reads
+        // the pong only while a receive is pending, so it waits forever
+        // (the app's own liveness ping is the contract's JSON one).
         var upgrade = URLRequest(url: try XCTUnwrap(endpoint.webSocketURL))
         endpoint.authorize(&upgrade)
         let ws = credentials.session(timeout: 8).webSocketTask(with: upgrade)
         ws.resume()
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
-            ws.sendPing { error in
-                if let error { done.resume(throwing: error) } else { done.resume() }
-            }
+        guard case .string(let first) = try await ws.receive() else {
+            return XCTFail("the first /ws frame is not text")
         }
+        XCTAssertTrue(first.contains("\"status\""), first)
         ws.cancel(with: .goingAway, reason: nil)
 
         // Remove: the computer forgets this phone; its ticket stops working.

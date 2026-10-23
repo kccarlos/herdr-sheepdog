@@ -194,6 +194,7 @@ struct AgentWindowScene: View {
     var body: some View {
         AgentWindowContent(route: route)
             .environmentObject(scenes.demoModel ?? app)
+            .debugAnimationsOff()
     }
 }
 
