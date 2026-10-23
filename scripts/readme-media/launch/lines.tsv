@@ -1,5 +1,8 @@
-# id	role	text: the iOS demo world's exact lines (DemoWorld.swift), as the take shows them
+# id	role	text: the iOS demo world's exact lines (DemoWorld.swift), as the take shows them,
+# except u_yes and s_ok: the spoken approval, which the demo does not script
 s_ask	sheepdog	codex-payments wants to run npm install p-retry. Approve?
+u_yes	you	Yes, go ahead.
+s_ok	sheepdog	Approved. Installing it now.
 u_status	you	What's going on?
 s_status	sheepdog	claude-auth is done, claude-migration failed, codex-docs is still writing.
 u_card	you	Show me the agents.
