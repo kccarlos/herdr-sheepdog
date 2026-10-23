@@ -4,7 +4,8 @@
 #
 #   scripts/ci-plan.sh tier < changed-paths     # prints full, smoke or none
 #   scripts/ci-plan.sh check [shards] [uitests dir]
-#       fails unless every UI test class is in exactly one job
+#       fails unless every UI test class is in exactly one job and no job
+#       mixes iPad and iPhone tests
 #   scripts/ci-plan.sh matrix <full|smoke> [shards]
 #       prints the jobs as a GitHub Actions matrix (JSON)
 #
@@ -58,6 +59,10 @@ check() {
       job = $1; id = $2
       if (job !~ /^(smoke|shard-[0-9]+)$/) err("job " job " must be smoke or shard-<n>")
       k = split(id, p, "/")
+      # One simulator per job: the iPad classes get jobs of their own.
+      dev = (k >= 2 && p[2] ~ /^IPad/) ? "ipad" : "iphone"
+      if ((job in jdev) && jdev[job] != dev) err("job " job " mixes iPad and iPhone tests (" id "); one simulator per job")
+      jdev[job] = dev
       if (p[1] == "SheepdogKitTests") {
         if (k != 1 || job != "smoke") err("SheepdogKitTests runs whole, in smoke")
         kit = 1; next
@@ -102,7 +107,7 @@ matrix() {
       for (i = 1; i <= n; i++) {
         j = ejob[i]; k = split(eid[i], p, "/"); cl = p[2]
         # A method whose whole class runs in another job of this tier is
-        # left to that job (smoke then needs no iPad in the full tier).
+        # left to that job.
         if (k == 3 && (cl in whole)) continue
         if (k == 2 && cl == "HistoryApprovalUITests") { history[j] = 1; continue }
         if (k == 2 && cl == "ReconnectUITests") { reconnect[j] = 1; continue }
@@ -126,5 +131,5 @@ case "$cmd" in
   tier) tier ;;
   check) check "$@" ;;
   matrix) matrix "$@" ;;
-  *) sed -n '2,10p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
+  *) sed -n '2,11p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac

@@ -44,12 +44,16 @@ final class AUITests: XCTestCase {
 EOF
 printf 'class BUITests : XCTestCase {}\n' > "$tests/sub/B.swift"
 printf 'final class CUITests: XCTestCase {}\nfinal class Helper {}\n' > "$tests/C.swift"
+# The same tree plus an iPad class, for the one-simulator-per-job rule.
+ipad_tests="$work/uitests-ipad"
+cp -R "$tests" "$ipad_tests"
+printf 'final class IPadDUITests: XCTestCase {\n    func testWide() {}\n}\n' > "$ipad_tests/D.swift"
 
-# check <pass|fail> <name> <<'EOF' ...shard list... EOF
+# [tree=<dir>] check <pass|fail> <name> <<'EOF' ...shard list... EOF
 check() {
   local want="$1" name="$2" got
   cat > "$work/shards"
-  if bash "$plan" check "$work/shards" "$tests" > "$work/out" 2>&1; then got=pass; else got=fail; fi
+  if bash "$plan" check "$work/shards" "${tree:-$tests}" > "$work/out" 2>&1; then got=pass; else got=fail; fi
   if [[ "$got" == "$want" ]]; then ok "check $name"; else
     bad "check $name (want $want, got $got)"; sed 's/^/     /' "$work/out"
   fi
@@ -113,6 +117,31 @@ shard-1  SheepdogUITests/BUITests
 shard-1  SheepdogUITests/CUITests
 EOF
 
+tree="$ipad_tests" check pass "an iPad class in a job of its own" <<'EOF'
+smoke    SheepdogKitTests
+shard-1  SheepdogUITests/AUITests
+shard-1  SheepdogUITests/BUITests
+shard-1  SheepdogUITests/CUITests
+shard-2  SheepdogUITests/IPadDUITests
+EOF
+
+tree="$ipad_tests" check fail "an iPad class with iPhone tests" <<'EOF'
+smoke    SheepdogKitTests
+shard-1  SheepdogUITests/AUITests
+shard-1  SheepdogUITests/BUITests
+shard-1  SheepdogUITests/CUITests
+shard-1  SheepdogUITests/IPadDUITests
+EOF
+
+tree="$ipad_tests" check fail "an iPad method in smoke" <<'EOF'
+smoke    SheepdogKitTests
+smoke    SheepdogUITests/IPadDUITests/testWide
+shard-1  SheepdogUITests/AUITests
+shard-1  SheepdogUITests/BUITests
+shard-1  SheepdogUITests/CUITests
+shard-2  SheepdogUITests/IPadDUITests
+EOF
+
 if bash "$plan" check > "$work/out" 2>&1; then ok "check the real ci-shards.txt"; else
   bad "check the real ci-shards.txt"; sed 's/^/     /' "$work/out"
 fi
@@ -123,13 +152,13 @@ fi
 cat > "$work/shards" <<'EOF'
 smoke    SheepdogKitTests
 smoke    SheepdogUITests/HistoryApprovalUITests
-smoke    SheepdogUITests/IPadUITests/testSidebar
+smoke    SheepdogUITests/CardsUITests/testCards
 shard-1  SheepdogUITests/IPadUITests
 shard-2  SheepdogUITests/ReconnectUITests
 shard-2  SheepdogUITests/CardsUITests
 EOF
 want_full='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"","history":true,"reconnect":false},{"name":"shard-1","iphone":"","ipad":"-only-testing:SheepdogUITests/IPadUITests","history":false,"reconnect":false},{"name":"shard-2","iphone":"-only-testing:SheepdogUITests/CardsUITests","ipad":"","history":false,"reconnect":true}]}'
-want_smoke='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests","ipad":"-only-testing:SheepdogUITests/IPadUITests/testSidebar","history":true,"reconnect":false}]}'
+want_smoke='{"include":[{"name":"smoke","iphone":"-only-testing:SheepdogKitTests -only-testing:SheepdogUITests/CardsUITests/testCards","ipad":"","history":true,"reconnect":false}]}'
 got="$(bash "$plan" matrix full "$work/shards")"
 if [[ "$got" == "$want_full" ]]; then ok "matrix full"; else bad "matrix full"; echo "     got  $got"; echo "     want $want_full"; fi
 got="$(bash "$plan" matrix smoke "$work/shards")"
