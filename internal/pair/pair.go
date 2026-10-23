@@ -239,6 +239,10 @@ type LinkInfo struct {
 	// Code is the one-time enroll code.
 	Code      string
 	Addresses []Address
+	// Host, when set, is the host:port the browser link opens instead of
+	// the first address: the *.ts.net name with a real certificate
+	// (web.tailscale_https). The app reads only the u= addresses.
+	Host string
 }
 
 // Link is the pairing link: an https link to /voice at the first address,
@@ -261,6 +265,9 @@ func Link(in LinkInfo) string {
 			first = hp
 		}
 		q.Add("u", hp)
+	}
+	if in.Host != "" {
+		first = in.Host
 	}
 	// pair=1 first, so a page tells a pairing link at a glance.
 	return "https://" + first + "/voice#pair=1&" + q.Encode()

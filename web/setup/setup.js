@@ -6,7 +6,7 @@ import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from '.
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 import { cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
-import { shellSwitch, shellSaved, countdown, deviceKind, lastSeen } from './phone.js';
+import { shellSwitch, shellSaved, tsnetSwitch, tsnetSaved, countdown, deviceKind, lastSeen } from './phone.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -169,6 +169,10 @@ function render() {
     $('shell-box').classList.toggle('hidden', !sh.show);
     $('shell-on').checked = sh.checked;
     if (!$('shell-on').disabled) $('shell-note').textContent = sh.note;
+    const ts = tsnetSwitch(p);
+    $('tsnet-box').classList.toggle('hidden', !ts.show);
+    $('tsnet-on').checked = ts.checked;
+    if (!$('tsnet-on').disabled) $('tsnet-note').textContent = ts.note;
     loadDevices();
   } else {
     $('phone-state').textContent = '';
@@ -750,6 +754,18 @@ async function setShell(on) {
   await loadState();
 }
 
+// setTsnet saves the Tailscale certificate switch (web.tailscale_https);
+// turning it on fetches the certificate first, which can take a while.
+async function setTsnet(on) {
+  const box = $('tsnet-on');
+  box.disabled = true;
+  if (on) $('tsnet-note').textContent = 'Asking Tailscale for a certificate…';
+  const r = await api('tailscale_https', { enable: on }).catch((e) => ({ error: String(e) }));
+  box.disabled = false;
+  if (r.error) { box.checked = !on; $('tsnet-note').textContent = tsnetSaved(r); return; }
+  await loadState();
+}
+
 async function setPhone(enable, msgEl) {
   msgEl.textContent = enable ? 'Turning phone access on…' : 'Saving…';
   const old = state.boot;
@@ -970,6 +986,7 @@ function init() {
   $('phone-enable').addEventListener('click', () => setPhone(true, $('phone-msg')));
   $('phone-disable').addEventListener('click', () => setPhone(false, $('phone-msg2')));
   $('shell-on').addEventListener('change', (e) => setShell(e.target.checked));
+  $('tsnet-on').addEventListener('change', (e) => setTsnet(e.target.checked));
   $('new-code').addEventListener('click', () => showCode(true));
   $('disconnect-all').addEventListener('click', async () => {
     if (!confirm('Disconnect all devices? Every phone and browser will need to scan the code again.')) return;

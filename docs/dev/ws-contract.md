@@ -593,9 +593,14 @@ plain HTTP.
   handshake and request headers must arrive within 10 seconds.
 
 `GET /api/hello` carries the served key as `security`:
-`{"pin":"<pin>","cert_expires":"2027-10-21T00:00:00Z"}`. The pin is a
-public key hash; a client never trusts this field, only the pin in the
-pairing code.
+`{"pin":"<pin>","cert_expires":"2027-10-21T00:00:00Z","tailscale_https":"<name>"?}`.
+The pin is a public key hash; a client never trusts this field, only the
+pin in the pairing code. `tailscale_https` is the computer's `*.ts.net`
+name while `web.tailscale_https` is on and its real certificate is
+served: a TLS client asking for that name (SNI) gets it, every other
+client (the app connects by address, with no SNI) gets the pinned key.
+The pairing link's browser host is then that name; the `u=` addresses
+stay the same.
 
 ### Loopback-only routes
 
@@ -720,9 +725,14 @@ Every device holds its own P-256 key; there is no shared secret
    A browser signs an empty pin line. The signature may be ASN.1 DER
    (Security framework) or `r‖s` (WebCrypto), in any base64 alphabet.
 3. `POST /api/auth/session {"device_id","nonce","time","signature","client":"app"|"browser"}`
-   → `200 {"ticket":"…","expires_in":43200,"device":{"id","name"},"next_pin":"…"?}`;
-   a browser also gets the cookie. `next_pin` appears while the daemon is
-   about to replace its certificate. Refused with `401 {"error":"unauthorized","reason":…}`:
+   → `200 {"ticket":"…","expires_in":43200,"device":{"id","name"},"cert_expires":"2027-10-21T00:00:00Z","next_pin":"…"?}`;
+   a browser also gets the cookie. `cert_expires` is when the served
+   certificate expires. `next_pin` appears from 37 days before that, when
+   the daemon has made its next key; 7 days before it the daemon serves
+   that key, and the session then accepts a signature over the new pin
+   only (or the empty browser pin). An app keeps both pins, accepts either
+   in the TLS handshake and signs with the one the server's key matched
+   ([security design §4.4](design/security.md#44-certificate-rotation)). Refused with `401 {"error":"unauthorized","reason":…}`:
    `bad_nonce`, `bad_time` (more than 5 minutes off), `bad_signature`,
    `unknown_device`, `device_revoked`. Logged as `web.device.session
    {device_id, remote_kind}` or `web.device.auth_failed {reason, remote,
@@ -762,7 +772,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…"}}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?}}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
