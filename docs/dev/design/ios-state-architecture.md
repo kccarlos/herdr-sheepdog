@@ -7,7 +7,7 @@ the fix for the three 0.1.17 bugs will move some lines.*
 The app grew fast: several computers, iPad with several windows, the
 terminal, the Live Activity, push, TLS pinning, certificate rotation and
 address switching. Each feature was added to the same `SessionViewModel`,
-so today one 2,560-line `ObservableObject` with 65 `@Published`
+so today one 2,560-line `ObservableObject` with 64 `@Published`
 properties holds most of the app's state. Many facts are stored in more
 than one place, and different code paths keep the copies up to date.
 TestFlight 0.1.17 showed three symptoms of this:
@@ -150,7 +150,7 @@ flowchart LR
     CS[ComputerStore<br/>currentID, addresses]
     SS[SettingsStore]
   end
-  subgraph VM["SessionViewModel: 65 @Published"]
+  subgraph VM["SessionViewModel: 64 @Published"]
     Core[SessionCore<br/>connection, voice, mic]
     Chip[connectionChip]
     Reach[currentReachability]
@@ -162,19 +162,23 @@ flowchart LR
   Others[ComputerSession × N<br/>own poll, own events,<br/>own reachability]
   Client[DaemonClient<br/>mutable endpoint]
   WS[VoiceSocket<br/>retry 1→10 s]
-  EV[/events loop<br/>retry 2 s/]
+  EV["/events loop<br/>retry 2 s"]
   TH[TermHub/TermSocket<br/>retry 1→10 s]
   PC[PushCoordinator<br/>own DaemonClient]
   LA[Live Activity]
-  CS -- endpointChanged() by hand --> Client & WS & TH & PC
+  CS -->|"endpointChanged, by hand"| Client
+  CS -->|"by hand"| WS
+  CS -->|"by hand"| TH
+  CS -->|"by hand"| PC
   WS --> Core --> Chip
   EV --> Core
-  Client -- refreshState --> Reach & Agents
-  Others -- objectWillChange forwarded --> VM
-  WS -- screen frames --> Push
-  VM -- any change --> Views[Every view that<br/>observes the model]
+  Client -->|"refreshState"| Reach
+  Client -->|"refreshState"| Agents
+  Others -->|"objectWillChange forwarded"| VM
+  WS -->|"screen frames"| Push
+  VM -->|"any change"| Views[Every view that<br/>observes the model]
   VM --> LA
-  PC -- answers on its own --> Daemon[(daemons)]
+  PC -->|"answers on its own"| Daemon[(daemons)]
 ```
 
 ### 1.4 The three 0.1.17 bugs, traced
@@ -223,8 +227,8 @@ These have not been reported yet, but they exist in the code today.
      (`:1267-1275`) with no check that the current computer is still the
      one it asked. A switch during the request writes computer A's agents
      onto computer B.
-   - The answer tasks read `self.client` *after* their first suspension
-     (`:1905`, `:1988`). Question ids are unique only within one daemon,
+   - The answer tasks read `self.client` when the spawned `Task` runs,
+     not at tap time (`:1905`, `:1988`). Question ids are unique only within one daemon,
      so a tap made just before a switch can be sent to the wrong computer.
 2. **Overlapping probes.** The `.probe` effect starts an untracked `Task`
    (`:883`). A fast A → B → A switch runs two `openSession`s; whichever
@@ -370,9 +374,9 @@ flowchart TB
   UI --> Feature --> App
   Feature --> CM
   AM --> CM
-  CR -- snapshots + epoch --> CM
+  CR -->|"snapshots + epoch"| CM
   NET --> CR
-  VE -- attaches to current --> CR
+  VE -->|"attaches to current"| CR
   ACT --> CR
   AM --> PROJ
 ```
@@ -572,7 +576,7 @@ APNs).
 **What the UI shows.** The chip, the Settings row, the Agents empty state
 and the sidebar all render one function, `LinkPresentation(link,
 isCurrent)`, so they cannot disagree. With one computer the copy has no
-names (decisions.md); with several, "your computer" becomes its name.
+names ([app-redesign.md](app-redesign.md), "The one rule for one computer"); with several, "your computer" becomes its name.
 
 | Link | Chip | Inline copy (where the data would be) | Data on screen |
 |---|---|---|---|
@@ -586,7 +590,7 @@ names (decisions.md); with several, "your computer" becomes its name.
 | `refused` | Scan again (red) | the existing pairing problem text (`DeviceAuth.swift:30-48`) and **Scan** | cleared |
 | `incompatible` | Update needed (red) | the handshake message | last data |
 
-The copy does not assume Tailscale (decisions.md). Another computer's row
+The copy does not assume Tailscale (app-redesign.md section 1.1). Another computer's row
 uses the same states with its name: "Home Mac · Offline since 9:12".
 
 ### 3.3 Address failover
@@ -963,7 +967,7 @@ Order and dependencies:
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on
   its own.
 - **No compatibility shims or data migrations.** Re-pairing once is fine
-  (decisions.md). Phase 10 deletes the one migration that exists.
+  (app-redesign.md, "The rules for every phase"). Phase 10 deletes the one migration that exists.
 - **No third-party architecture framework** (TCA and the like) and no new
   Combine pipelines. The existing reducer-plus-effects pattern is enough
   and the team knows it.
