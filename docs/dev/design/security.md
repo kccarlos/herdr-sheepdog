@@ -340,13 +340,25 @@ The app shows a reason for every "scan again" case:
 The certificate lasts 1 year and rotates on its own.
 
 1. **30 days before the switch** (37 days before expiry), the daemon makes
-   the next key and certificate and keeps serving the current one.
-2. From then on it announces `next_pin` to every authenticated client: in
-   the session answer and in `bot-ready` (section 10).
+   the next key and certificate (`next_key.pem`, `next_cert.pem`) and
+   keeps serving the current one. It checks when it starts and every
+   hour (`TLSIdentity.Maintain`), and logs `web.tls.rotate`.
+2. From then on it announces `next_pin` to every app that signs in, in
+   the session answer, next to `cert_expires` (the served certificate's
+   expiry). Tickets last 12 hours, so an app that is used at all in those
+   30 days learns it; `bot-ready` does not carry it.
 3. Each app that connects in that window stores it next to the current
    pin. Browsers do not pin, so they need nothing.
-4. **7 days before expiry**, the daemon switches to the new key. Apps
-   that stored `next_pin` accept it and drop the old pin.
+4. **7 days before expiry**, the daemon switches to the new key: it
+   writes `key.pem` and `cert.pem` from the next pair, then removes
+   `next_*`. A crash between those steps is finished at the next start.
+   New connections get the new key; open ones keep theirs. Apps
+   that stored `next_pin` accept it and drop the old pin. The session
+   accepts signatures over the current pin, the next pin and the empty
+   (browser) pin only; the retired pin is never accepted, so a leaked old
+   key cannot be used to relay a session.
+   A daemon that was off through the whole window makes the next key and
+   switches at once, so it never serves a certificate about to expire.
 5. An app that did not connect in those 30 days sees a pin mismatch.
    Because it knows the old certificate's expiry date, it shows the
    "renewed while this phone was away" reason instead of the
@@ -406,7 +418,7 @@ window, so every device scans again.
    - the time is within 5 minutes;
    - the device exists and is not revoked;
    - the signature is valid for the device's public key.
-4. It answers `{ticket, expires_in: 43200, device: {id, name}, next_pin?}`.
+4. It answers `{ticket, expires_in: 43200, device: {id, name}, cert_expires, next_pin?}`.
    For a browser it also sets the `sheepdog_session` cookie (`HttpOnly`,
    `Secure`, `SameSite=Strict`, `Path=/`).
 5. The ticket is 32 random bytes. The daemon keeps it in memory only,
@@ -653,8 +665,9 @@ Still public. `auth` becomes `"device"`, and it gains:
 ### 10.3 `/ws`
 
 - Auth before the upgrade (5.2). Origin checked.
-- `bot-ready` adds `device: {id, name}`, `computer: {id, name}`,
-  `shell: true|false`, and `next_pin` during a rotation.
+- `bot-ready` adds `device: {id, name}`, `computer: {id, name}` and
+  `shell: true|false`. (`next_pin` comes in the session answer only,
+  section 4.4.)
 - New server messages:
   - `device-paired {device_id, name, kind, at}` to every other connected
     device;
@@ -837,13 +850,16 @@ router's address, which the daemon cannot know. Both ways are offered:
 
 ### 14.4 Certificate rotation
 
-- Go test with a fake clock: at expiry − 37 days the next key appears and
-  `next_pin` is announced; at expiry − 7 days the daemon serves the new
-  key; a client that stored `next_pin` connects; one that did not fails
-  the pin check.
+- Go test with a fake clock (`internal/web/rotation_test.go`): at expiry
+  − 37 days the next key appears and `next_pin` is announced; a restart in
+  the window keeps the same next pin; at expiry − 7 days the daemon serves
+  the new key; a client that stored `next_pin` connects and signs with it;
+  one that did not fails the pin check; a crash in the middle of the
+  switch is finished at the next start.
 - iOS test with `StubDaemon`: a pin mismatch on every address shows the
   "scan again" message with the right reason (interception warning, or
-  "renewed while away" after the old expiry date), and sends no request.
+  "renewed while away" after the switch date, `cert_expires` − 7 days),
+  and sends no request.
 - iOS test: scanning a QR with the same daemon id and a new pin re-enrolls
   the existing key; with a new daemon id it replaces the entry and
   deletes the old key.

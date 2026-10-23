@@ -187,13 +187,17 @@ type SessionRequest struct {
 	Client string `json:"client"`
 }
 
-// SessionResponse is the answer: the ticket, its lifetime, the device and,
-// during a certificate rotation, the next pin.
+// SessionResponse is the answer: the ticket, its lifetime, the device,
+// when the served certificate expires and, during a certificate rotation,
+// the next pin (docs/dev/design/security.md "Certificate rotation"). The
+// app keeps both pins and tells a missed rotation from an interception by
+// CertExpires.
 type SessionResponse struct {
-	Ticket    string        `json:"ticket"`
-	ExpiresIn int           `json:"expires_in"`
-	Device    SessionDevice `json:"device"`
-	NextPin   string        `json:"next_pin,omitempty"`
+	Ticket      string        `json:"ticket"`
+	ExpiresIn   int           `json:"expires_in"`
+	Device      SessionDevice `json:"device"`
+	CertExpires time.Time     `json:"cert_expires"`
+	NextPin     string        `json:"next_pin,omitempty"`
 }
 
 // SessionDevice names the device a ticket belongs to.
@@ -292,8 +296,9 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, SessionResponse{
 		Ticket: t, ExpiresIn: int(TicketLifetime / time.Second),
-		Device:  SessionDevice{ID: d.ID, Name: d.Name},
-		NextPin: s.deps.TLS.NextPin(),
+		Device:      SessionDevice{ID: d.ID, Name: d.Name},
+		CertExpires: s.deps.TLS.Expires().UTC(),
+		NextPin:     s.deps.TLS.NextPin(),
 	})
 }
 
