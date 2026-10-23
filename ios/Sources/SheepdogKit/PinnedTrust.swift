@@ -47,13 +47,19 @@ public enum SPKIPin {
 /// one of the pins (the current one, and the next one during a certificate
 /// renewal). Plain HTTP to loopback (the fixture daemons) never reaches it.
 /// It serves `URLSessionWebSocketTask` too, so `/ws` and `/term` are pinned.
+///
+/// Each accepted handshake reports the pin it matched (`onMatch`), so the
+/// app notices the computer switched to its next key
+/// (`DeviceCredentials.served(pin:)`) before it signs in with a pin.
 public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
     private let pins: @Sendable () -> [String]
+    private let onMatch: (@Sendable (String) -> Void)?
     private let lock = NSLock()
     private var mismatched = false
 
-    public init(pins: @escaping @Sendable () -> [String]) {
+    public init(pins: @escaping @Sendable () -> [String], onMatch: (@Sendable (String) -> Void)? = nil) {
         self.pins = pins
+        self.onMatch = onMatch
     }
 
     /// True when the last server offered a key that matches no pin: the app
@@ -75,10 +81,11 @@ public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        if Self.accepts(trust: trust, pins: pins()) {
+        if let matched = Self.matchedPin(trust: trust, pins: pins()) {
             lock.lock()
             mismatched = false
             lock.unlock()
+            onMatch?(matched)
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             lock.lock()
@@ -90,7 +97,17 @@ public final class PinnedTrustDelegate: NSObject, URLSessionDelegate, @unchecked
 
     /// Whether the trust's leaf key matches one of the pins.
     public static func accepts(trust: SecTrust, pins: [String]) -> Bool {
-        guard let pin = SPKIPin.pin(of: trust) else { return false }
-        return pins.contains { !$0.isEmpty && $0 == pin }
+        matchedPin(trust: trust, pins: pins) != nil
+    }
+
+    /// The pin the trust's leaf key matches, nil for none.
+    public static func matchedPin(trust: SecTrust, pins: [String]) -> String? {
+        matchedPin(leaf: SPKIPin.pin(of: trust), pins: pins)
+    }
+
+    /// The pin that equals the leaf key's pin, nil for none (or no key).
+    public static func matchedPin(leaf: String?, pins: [String]) -> String? {
+        guard let leaf, !leaf.isEmpty else { return nil }
+        return pins.first { $0 == leaf }
     }
 }

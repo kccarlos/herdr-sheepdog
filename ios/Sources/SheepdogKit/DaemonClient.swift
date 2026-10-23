@@ -520,7 +520,7 @@ public final class DaemonClient: @unchecked Sendable {
     public static func translate(_ error: URLError, endpoint: DaemonEndpoint) -> DaemonError {
         if endpoint.secure, DeviceCredentials.trust.sawMismatch,
            [.cancelled, .serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot].contains(error.code) {
-            return .pairing(.pinMismatch)
+            return .pairing(PairingProblem.forPinMismatch(certExpires: DeviceCredentials.shared.computer?.certExpires))
         }
         return .unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(error))
     }
