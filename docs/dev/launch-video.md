@@ -18,20 +18,18 @@ against the app, not against this page, and drop a shot rather than fake it.
 
 ## The video we have now
 
-The README plays `assets/readme/launch.mp4` (36 s, 1920×1080), uploaded as a GitHub
-user-attachment. A vertical cut is in `launch-vertical.mp4`. How it was made is in
-[scripts/readme-media/launch/README.md](../../scripts/readme-media/launch/README.md). In short:
+The README plays a GitHub user-attachment of the first launch video (36 s, old brand). The
+repository's `assets/readme/launch.mp4` (66 s, 1920×1080), `launch-vertical.mp4` (1080×1920) and
+`launch-poster.png` are the synthetic re-make of this storyboard, in the new brand. How it is made
+is in [scripts/readme-media/launch/README.md](../../scripts/readme-media/launch/README.md). In
+short:
 
 - **Synthetic, not filmed.**
-  - The voices are Gemini TTS lines (`lines.tsv`; Puck plays the user and Kore plays the voice), not a live voice session.
-  - The phone is the iOS Simulator running the offline demo, driven by `LaunchRecordingUITests` and filmed with `simctl io recordVideo`.
-  - The lock screen is two screenshots.
-  - `compose.py` draws everything else: the captions, the waveform and the end card.
-- **Out of date.**
-  - It uses the old logo (`assets/logo-transparent.svg`) and a navy background with a yellow and a teal speaker, which [brand.md](brand.md) now rules out (one accent; ink, cream and orange).
-  - Its end card shows only the plugin install.
-  - It has none of the phone terminal, the diff, the new agent, the shell, the cards or the update notice.
-  - It shows no setup or pairing.
+  - The phone is the iOS Simulator running the offline demo in dark mode, driven by `LaunchRecordingUITests` and filmed with `simctl io recordVideo`.
+  - The voices are Gemini TTS lines (`lines.tsv`; Puck plays the user and Kore plays the voice), not a live voice session. There is no waveform, and a footnote says the voices are text-to-speech.
+  - `compose.py` draws the title, captions, setup steps and end card in the brand (ink, cream, one orange command; Outfit and Inter).
+- **What it shows** (shots 2, 4 in-app, 5, 6, 7, 12 and 13): the title lockup; four agents at work; codex-payments' question with the chime and the voice; Approve; "What's going on?"; "Show me the agents" and its card; claude-auth's live terminal; Changes and a diff; the three setup commands; the end card.
+- **What it leaves out**, because the demo cannot show it honestly: the lock screen and the Live Activity (a real device), and the attachment, New agent, the shell and the update notice (a real daemon, or the demo changes in [section 5](#5-what-to-prepare-and-what-would-need-code)). The README link still points at the old attachment; replacing it is the owner's call.
 
 ## 1. Goal, audience, length
 
@@ -392,8 +390,5 @@ filmed on a real daemon.
    - Its agents are in workspace `shop`.
    - One fake project (`shop` under `/Users/demo/code`) would let demo and real shots cut together.
 6. **More demo cards.** Today the demo only answers "Show me the agents". A "show me what claude-auth changed" card would back shot 6 with something closer to the diff.
-7. **The recording pipeline (scripts and a test, not the app).** If the owner wants a synthetic fallback cut like the old one:
-   - Update `LaunchRecordingUITests` (in `ios/`) and `scripts/readme-media/launch/phone.sh` to the new take.
-   - Rewrite `compose.py`'s palette to the brand tokens and point `make.sh` at `assets/brand/logo/` instead of the old `assets/logo-transparent.svg`.
-   - Update `lines.tsv` to the new lines.
+7. **The recording pipeline (scripts and a test, not the app).** Done: `LaunchRecordingUITests`, `phone.sh`, `compose.py` and `lines.tsv` make the synthetic cut described in [The video we have now](#the-video-we-have-now).
 8. **(Optional) A local notification in the demo** with the daemon's push text, to rehearse shot 3 on a phone without a daemon. Filming shot 3 still needs a real device, because a locked simulator stops the recorder.
