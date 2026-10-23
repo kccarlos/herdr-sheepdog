@@ -13,6 +13,31 @@ final class UpdateNoticeUITests: XCTestCase {
         element.tap()
     }
 
+    /// `-sheepdogDemoUpdate`: the offline demo shows the notice, for the
+    /// launch video's shot 10b without an older daemon.
+    func testDemoUpdateFlagShowsTheNotice() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogDemoPaused", "-sheepdogDemoUpdate"]
+        app.launch()
+        let banner = app.descendants(matching: .any)["updateNotice"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 15), "the update notice in the demo")
+        XCTAssertTrue(banner.label.contains("v0.1.17") || app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'v0.1.17'")).firstMatch.exists)
+        if let dir = ProcessInfo.processInfo.environment["SHEEPDOG_DEMO_SHOTS"] {
+            sleep(1)
+            let suffix = ProcessInfo.processInfo.environment["SHEEPDOG_DEMO_SHOTS_SUFFIX"] ?? "light"
+            try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("demo-update-\(suffix).png"))
+        }
+    }
+
+    func testDemoHasNoUpdateWithoutTheFlag() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogDemoPaused"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        sleep(3)
+        XCTAssertFalse(app.descendants(matching: .any)["updateNotice"].exists)
+    }
+
     func testSettingsShowsAnAvailableUpdate() throws {
         let stub = try StubDaemon(.daemon(update: #"{"current":"v0.1.4","latest":"v0.1.5","available":true,"how":"brew upgrade sheepdog","auto_restart":true}"#))
         let host = try stub.start()

@@ -19,14 +19,14 @@ struct DemoSpaces {
     }
 
     private(set) var spaces: [Space] = [
-        Space(id: "w1", name: "shop", path: "/Users/you/code/shop", git: true, branch: "main", worktree: false, hasAgents: true,
+        Space(id: "w1", name: "shop", path: "/Users/demo/code/shop", git: true, branch: "main", worktree: false, hasAgents: true,
               commands: [("c1", "Run tests", "npm test"), ("c2", "Lint", "npm run lint")]),
-        Space(id: "w2", name: "shop-fix-login", path: "/Users/you/code/shop-fix-login", git: true, branch: "fix-login", worktree: true,
+        Space(id: "w2", name: "shop-fix-login", path: "/Users/demo/code/shop-fix-login", git: true, branch: "fix-login", worktree: true,
               hasAgents: false, commands: [], dirty: true),
     ]
     private(set) var folders: [(name: String, path: String, git: Bool)] = [
-        ("website", "/Users/you/code/website", true),
-        ("notes", "/Users/you/code/notes", false),
+        ("website", "/Users/demo/code/website", true),
+        ("notes", "/Users/demo/code/notes", false),
     ]
     private var next = 3
 
@@ -86,7 +86,7 @@ struct DemoSpaces {
                 ["path": $0.path, "branch": $0.branch ?? "", "label": $0.name, "is_linked_worktree": $0.worktree,
                  "is_detached": false, "is_prunable": false, "is_bare": false, "open_workspace_id": $0.id]
             }
-            return (200, ["repo": "shop", "repo_root": "/Users/you/code/shop", "worktrees": trees])
+            return (200, ["repo": "shop", "repo_root": "/Users/demo/code/shop", "worktrees": trees])
         case ("POST", ["worktrees", "open"]):
             return (200, ["ok": true, "pane_id": ""])
         case ("POST", ["worktree", "remove"]):

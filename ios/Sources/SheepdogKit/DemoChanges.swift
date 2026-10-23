@@ -5,7 +5,7 @@ import Foundation
 /// path and never stored.
 extension DemoDaemon {
     static let demoChanges = AgentChanges(
-        repo: true, root: "/Users/demo/code/app", branch: "fix-login",
+        repo: true, root: "/Users/demo/code/shop", branch: "fix-login",
         files: [
             ChangedFile(path: "internal/auth/token.go", status: "modified", added: 9, deleted: 3),
             ChangedFile(path: "internal/web/api.go", status: "modified", added: 4, deleted: 1),

@@ -24,6 +24,10 @@ public final class DemoDaemon: @unchecked Sendable {
     /// New cards for the screen, on the main queue (the demo's `/ws`
     /// `card` messages).
     public var onCards: (([ScreenCard]) -> Void)?
+    /// What `/api/state` reports as `update`: nil, as a demo daemon has
+    /// no release to compare with, unless a recording sets one
+    /// (`-sheepdogDemoUpdate`).
+    public var update: UpdateInfo?
 
     private let lock = NSLock()
     private var world: DemoWorld
@@ -135,7 +139,9 @@ public final class DemoDaemon: @unchecked Sendable {
                 "audio": ["in_hz": 16000, "out_hz": 24000, "format": "pcm16le mono"],
             ])
         case ("GET", "/api/state"):
-            return encoded(world.state)
+            var state = world.state
+            state.update = update
+            return encoded(state)
         case ("GET", "/api/conversation"):
             return encoded(ConversationPage(items: world.history.items, nextBefore: nil))
         case ("GET", "/api/events"):
