@@ -4,6 +4,11 @@ There are two targets and one rule: anything that can be tested without a
 microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 `@MainActor` view models built on top of it.
 
+A proposed restructuring of the app's state and connection handling
+(per-computer runtimes, a connection state machine, address failover) is
+in [ios-state-architecture.md](../../../docs/dev/design/ios-state-architecture.md),
+under review.
+
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
 │  MainView ── PaneSwitcher ── AgentStrip ── ConversationView / FlockView /      │
