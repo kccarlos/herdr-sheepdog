@@ -104,9 +104,10 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
     /// "Noted" (or why a feedback mark did not land), shown for a moment.
     @Published private(set) var feedbackNotice: String?
-    /// The last thing the daemon pushed about the open agent window over
-    /// `/ws` (`AgentScreenStream`); `seq` makes every push a change.
-    @Published private(set) var agentScreenPush: AgentScreenPush?
+    /// What the daemon pushes about an open agent window over `/ws`,
+    /// handed straight to that window (`ScreenStreamRouter`), never
+    /// through a published property: a frame must not re-render the app.
+    let screenRouter = ScreenStreamRouter()
     /// The agent window over `/ws`: one subscription for the app.
     private var screenStream = AgentScreenStream()
     /// Cards (feature `cards`): the card open as a sheet, the main
@@ -312,7 +313,7 @@ final class SessionViewModel: ObservableObject {
     /// every mutation — a single `didSet`, not a copy hand-written at each
     /// of the half-dozen call sites that used to change `approvalFlow`.
     private var approvalFlow = ApprovalFlow() {
-        didSet { approval = approvalFlow.card }
+        didSet { assign(\.approval, approvalFlow.card) }
     }
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
@@ -352,13 +353,15 @@ final class SessionViewModel: ObservableObject {
         }
         if DebugLaunch.renderChurn {
             Task { @MainActor [weak self] in
-                // Only under Settings: the main screen's menus need an
-                // idle app for the test to open them.
+                try? await Task.sleep(for: .seconds(DebugLaunch.renderChurnDelay))
                 while self != nil {
-                    if self?.showSettings == true { self?.objectWillChange.send() }
+                    self?.objectWillChange.send()
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
             }
+        }
+        if DebugLaunch.countRenders {
+            renderProbe = objectWillChange.sink { _ in RenderProbe.hit("model") }
         }
         #endif
         wire()
@@ -376,6 +379,9 @@ final class SessionViewModel: ObservableObject {
     }
 
     private var started = false
+    #if DEBUG
+    private var renderProbe: AnyCancellable?
+    #endif
 
     /// Called once from the first `onAppear`: an unconfigured app opens
     /// Settings instead of showing a Connect button that cannot work.
@@ -875,7 +881,7 @@ final class SessionViewModel: ObservableObject {
             if let text = message.message { send(.daemonError(text)) }
         case .screen, .screenError:
             if let event = screenStream.receive(message), let pane = screenStream.paneID {
-                agentScreenPush = AgentScreenPush(seq: (agentScreenPush?.seq ?? 0) + 1, paneID: pane, event: event)
+                screenRouter.deliver(event, to: pane)
             }
         case .card:
             if let card = message.card { receiveCard(card) }
@@ -1295,7 +1301,7 @@ final class SessionViewModel: ObservableObject {
             if !quiet { banner = nil }
             return true
         } catch let error as DaemonError {
-            polledReachability = .offline(since: currentLastSeen)
+            assign(\.polledReachability, .offline(since: currentLastSeen))
             // A loud refresh that fails ends the session, as a failed
             // Connect would.
             if !quiet { send(.probeFailed(error)) }
@@ -1328,7 +1334,9 @@ final class SessionViewModel: ObservableObject {
         let sorted = Flock.sorted(all)
         let agentsChanged = sorted != agents
         if agentsChanged { agents = sorted }
-        pendingAction = state.pendingAction
+        // Each assignment only on a change: this runs on every poll, and an
+        // equal value would still re-render every view of the model.
+        assign(\.pendingAction, state.pendingAction)
         applyApproval(approvalFlow.present(state.pendingAction))
         let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
         let questionsChanged = open != questions
@@ -1348,11 +1356,17 @@ final class SessionViewModel: ObservableObject {
         questionsSeen = true
         // The Live Activity's rows and counts.
         if agentsChanged || questionsChanged { syncAway() }
-        questionPhases = questionPhases.filter { id, _ in open.contains { $0.id == id } }
-        brain = state.brain
-        stateVoiceProvider = state.voiceProvider
-        stateVoiceModel = state.voiceModel
-        if update != state.update { update = state.update }
+        assign(\.questionPhases, questionPhases.filter { id, _ in open.contains { $0.id == id } })
+        assign(\.brain, state.brain)
+        assign(\.stateVoiceProvider, state.voiceProvider)
+        assign(\.stateVoiceModel, state.voiceModel)
+        assign(\.update, state.update)
+    }
+
+    /// Assigns a published property only when the value differs: setting
+    /// an equal value still announces a change to every observer.
+    func assign<Value: Equatable>(_ key: ReferenceWritableKeyPath<SessionViewModel, Value>, _ value: Value) {
+        if self[keyPath: key] != value { self[keyPath: key] = value }
     }
 
     // MARK: - Conversation history
@@ -1681,11 +1695,13 @@ final class SessionViewModel: ObservableObject {
         if let demo {
             #if DEBUG
             let behavior = DebugLaunch.demoTerm
+            let tickInterval: TimeInterval = DebugLaunch.frameChurn ? 0.05 : 1
             #else
             let behavior = DemoTermTransport.Behavior.normal
+            let tickInterval: TimeInterval = 1
             #endif
             return TermHub(endpoint: DemoDaemon.endpoint, makeTransport: { _ in
-                DemoTermTransport(behavior: behavior) { [weak demo] pane in demo?.agentScreen(paneID: pane) }
+                DemoTermTransport(behavior: behavior, tickInterval: tickInterval) { [weak demo] pane in demo?.agentScreen(paneID: pane) }
             })
         }
         return TermHub(endpoint: settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1"))

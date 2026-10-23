@@ -54,14 +54,106 @@ struct PaneChrome {
     var extraMenu: AnyView?
     /// A tap or a key in this pane focuses it.
     var onInteract: (() -> Void)?
+    /// Which of two panes (the closures act on it).
+    var index = 0
+
+    /// Everything the pane's chrome shows or acts on, without the
+    /// closures: the window re-renders only when this changes.
+    struct Key: Equatable {
+        var index: Int
+        var focused: Bool
+        var closable: Bool
+        var splitCandidates: [AgentWindowMenu.Other]
+        var hasLeading: Bool
+        var hasExtraMenu: Bool
+        var interactive: Bool
+    }
+
+    var key: Key {
+        Key(
+            index: index,
+            focused: focused,
+            closable: onClose != nil,
+            splitCandidates: onSplit == nil ? [] : splitCandidates.map { .init(paneID: $0.paneID, name: $0.alias, blocked: $0.state == .blocked) },
+            hasLeading: leading != nil,
+            hasExtraMenu: extraMenu != nil,
+            interactive: onInteract != nil
+        )
+    }
 }
 
+/// What an agent window shows from the session, as values: the window's
+/// content re-renders only when one of these changes, never because the
+/// session changed something else (`AgentWindowView`).
+struct AgentWindowInputs: Equatable {
+    /// The agent as the app lists it now.
+    var live: Agent
+    var approval: ApprovalFlow.Card?
+    /// The question the voice is on.
+    var voiceQuestionID: String?
+    /// "Work Mac · webapp" under the name, several computers only.
+    var computerLine: String?
+    var shellShown: Bool
+    var actionsAvailable: Bool
+    /// ⋯ ▸ Switch agent.
+    var others: [AgentWindowMenu.Other]
+    var handshake: ProtocolHandshake.State
+    var pane: PaneChrome.Key?
+}
+
+/// The session's side of an agent window: it observes the session and
+/// passes values to `AgentWindowContent`, which observes only its own
+/// controller. A session change that leaves those values equal re-renders
+/// nothing in the window.
 private struct AgentWindowView: View {
     let agent: Agent
     let pane: PaneChrome?
     let onSwitch: (String) -> Void
 
     @EnvironmentObject private var model: SessionViewModel
+
+    var body: some View {
+        AgentWindowContent(agent: agent, pane: pane, onSwitch: onSwitch, model: model, inputs: inputs)
+            .equatable()
+    }
+
+    private var inputs: AgentWindowInputs {
+        let live = model.flock.all.first { $0.paneID == agent.paneID } ?? agent
+        let computerLine: String? = model.showsComputerLabels
+            ? [model.currentComputerName, live.workspaceLabel?.trimmedOrNil].compactMap { $0 }.joined(separator: " · ")
+            : nil
+        return AgentWindowInputs(
+            live: live,
+            // Any open question of this agent, not only the one the voice is on.
+            approval: model.questionCard(for: agent.paneID),
+            voiceQuestionID: model.approval?.pending.id,
+            computerLine: computerLine,
+            shellShown: model.shellEntryShown,
+            actionsAvailable: model.agentActionsAvailable,
+            others: model.flock.running.filter { $0.paneID != agent.paneID }
+                .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
+            handshake: model.handshake,
+            pane: pane?.key
+        )
+    }
+}
+
+/// An agent window's content. It observes its controller (the slow
+/// state: phase, notice, sending, typing) and nothing else: terminal
+/// frames go to the surface without re-rendering it, and the session
+/// reaches it only as `inputs`.
+private struct AgentWindowContent: View, Equatable {
+    let agent: Agent
+    let pane: PaneChrome?
+    let onSwitch: (String) -> Void
+    /// For actions only; what the window shows comes from `inputs`.
+    let model: SessionViewModel
+    let inputs: AgentWindowInputs
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.agent.paneID == b.agent.paneID && a.model === b.model && a.inputs == b.inputs
+    }
+
     @StateObject private var window: AgentWindowController
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -75,15 +167,17 @@ private struct AgentWindowView: View {
     @State private var showChanges = false
     @FocusState private var promptFocused: Bool
 
-    init(agent: Agent, pane: PaneChrome?, onSwitch: @escaping (String) -> Void) {
+    init(agent: Agent, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel, inputs: AgentWindowInputs) {
         self.agent = agent
         self.pane = pane
         self.onSwitch = onSwitch
+        self.model = model
+        self.inputs = inputs
         _window = StateObject(wrappedValue: AgentWindowController(paneID: agent.paneID))
     }
 
     /// The agent as the app lists it now.
-    private var live: Agent { model.flock.all.first { $0.paneID == agent.paneID } ?? agent }
+    private var live: Agent { inputs.live }
     private var name: String { live.displayName }
     private var theme: TerminalTheme { colorScheme == .dark ? .dark : .light }
     private var background: Color { Color(theme.background) }
@@ -91,10 +185,7 @@ private struct AgentWindowView: View {
     private var noticeFill: Color { Color(TerminalRGB(hex: colorScheme == .dark ? "#1F2126" : "#F1EEE7")) }
     private var state: AgentWindowState { window.state }
 
-    private var approval: ApprovalFlow.Card? {
-        // Any open question of this agent, not only the one the voice is on.
-        model.questionCard(for: agent.paneID)
-    }
+    private var approval: ApprovalFlow.Card? { inputs.approval }
 
     var body: some View {
         if let pane {
@@ -130,13 +221,13 @@ private struct AgentWindowView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
-            if let notice = state.notice, !(state.phase == .ended && window.screenText.isEmpty) {
+            if let notice = state.notice, !(state.phase == .ended && !window.hasScreen) {
                 NoticeBar(notice: notice, fill: noticeFill) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             terminal
             if let approval {
-                FloatingQuestions(cards: [approval], voiceQuestionID: model.approval?.pending.id) { id, index in model.answer(question: id, option: index) }
+                FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID) { id, index in model.answer(question: id, option: index) }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .id(approval.pending.id)
@@ -166,7 +257,7 @@ private struct AgentWindowView: View {
             default: break
             }
         }
-        .onChange(of: model.handshake) { _, _ in window.availabilityChanged() }
+        .onChange(of: inputs.handshake) { _, _ in window.availabilityChanged() }
         .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { leave() })
         .sheet(isPresented: $showsMoreKeys) {
             MoreKeysSheet(window: window, interrupt: true) { snippet in
@@ -195,31 +286,11 @@ private struct AgentWindowView: View {
     // MARK: - Header
 
     /// "Work Mac · webapp" under the name, several computers only.
-    private var computerLine: String? {
-        guard model.showsComputerLabels else { return nil }
-        return [model.currentComputerName, live.workspaceLabel?.trimmedOrNil].compactMap { $0 }.joined(separator: " · ")
-    }
+    private var computerLine: String? { inputs.computerLine }
 
     private var header: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                StateChip(state: live.state)
-            }
-            if let computerLine {
-                Text(computerLine)
-                    .font(.caption)
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("computerLabel.window")
-            }
-        }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("agentScreen.header")
+        AgentWindowHeader(name: name, state: live.state, computerLine: computerLine)
+            .equatable()
     }
 
     /// The ⋯ menu, from values only: it stays still while the screen
@@ -229,12 +300,11 @@ private struct AgentWindowView: View {
         return AgentWindowMenu(
             style: style,
             observing: state.phase == .observing,
-            shellCwd: model.shellEntryShown && !cwd.isEmpty ? cwd : nil,
+            shellCwd: inputs.shellShown && !cwd.isEmpty ? cwd : nil,
             canResetTextSize: window.fontSize != SwiftTermSurface.defaultFontSize,
-            actionsAvailable: model.agentActionsAvailable,
+            actionsAvailable: inputs.actionsAvailable,
             working: live.state == .working,
-            others: model.flock.running.filter { $0.paneID != agent.paneID }
-                .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
+            others: inputs.others,
             extra: pane?.extraMenu,
             perform: perform
         )
@@ -290,18 +360,20 @@ private struct AgentWindowView: View {
                     paneButton("xmark", label: "Close this pane", id: "pane.close", weight: .semibold, color: Theme.muted, action: onClose)
                 }
                 if let onSplit = pane.onSplit, !pane.splitCandidates.isEmpty {
-                    Menu {
-                        Section("Show beside \(name)") {
-                            ForEach(pane.splitCandidates) { other in
+                    // From values only (`StableMenu`): an open menu stays
+                    // still while the session re-renders.
+                    stableMenu(SplitMenuValue(name: name, candidates: pane.key.splitCandidates), probe: "split") { value in
+                        Section("Show beside \(value.name)") {
+                            ForEach(value.candidates, id: \.paneID) { other in
                                 Button {
                                     onSplit(other.paneID)
                                 } label: {
-                                    Label(other.alias, systemImage: other.state == .blocked ? "hand.raised" : "terminal")
+                                    Label(other.name, systemImage: other.blocked ? "hand.raised" : "terminal")
                                 }
-                                .accessibilityIdentifier("pane.split.\(other.alias)")
+                                .accessibilityIdentifier("pane.split.\(other.name)")
                             }
                         }
-                    } label: {
+                    } label: { _ in
                         Image(systemName: "rectangle.split.2x1")
                             .font(.system(size: 17))
                             .foregroundStyle(Theme.ink)
@@ -341,13 +413,13 @@ private struct AgentWindowView: View {
 
     private var terminal: some View {
         ZStack(alignment: .bottomTrailing) {
-            TerminalHost(surface: window.surface, accessibilityText: window.screenText)
+            TerminalHost(surface: window.surface)
                 .padding(.horizontal, 6)
                 .padding(.top, 4)
                 .opacity(state.showsSkeleton ? 0 : 1)
             if state.showsSkeleton {
                 TerminalSkeleton(name: name, reduceMotion: reduceMotion)
-            } else if state.phase == .ended, window.screenText.isEmpty {
+            } else if state.phase == .ended, !window.hasScreen {
                 // Closed before anything was drawn: say so in the middle,
                 // not over an empty terminal.
                 ContentUnavailableView {
@@ -400,7 +472,7 @@ private struct AgentWindowView: View {
                     canStop: live.state == .working,
                     focused: $promptFocused,
                     onSend: sendPrompt,
-                    onStop: { window.stop(actions: model.agentActionsAvailable) },
+                    onStop: { window.stop(actions: inputs.actionsAvailable) },
                     leading: {
                         AttachButton(upload: { data, fileName, type in
                             try await model.uploadAttachment(paneID: agent.paneID, data: data, fileName: fileName, mimeType: type)
@@ -456,6 +528,46 @@ private struct AgentWindowView: View {
 }
 
 // MARK: - Pieces
+
+/// The iPad split menu's contents.
+private struct SplitMenuValue: Equatable {
+    var name: String
+    var candidates: [AgentWindowMenu.Other]
+}
+
+/// The iPhone window's title: the name, the state chip and, with several
+/// computers, the computer line. From values only, so it stays still
+/// while the session or the terminal changes anything else.
+private struct AgentWindowHeader: View, Equatable {
+    let name: String
+    let state: Agent.State
+    let computerLine: String?
+
+    var body: some View {
+        #if DEBUG
+        let _ = RenderProbe.hit("header")
+        #endif
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                StateChip(state: state)
+            }
+            if let computerLine {
+                Text(computerLine)
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("computerLabel.window")
+            }
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("agentScreen.header")
+    }
+}
 
 /// The state dot and word.
 private struct StateChip: View {
@@ -564,10 +676,11 @@ struct TerminalSkeleton: View {
     }
 }
 
-/// The renderer's view in SwiftUI.
+/// The renderer's view in SwiftUI. Its accessibility value (the visible
+/// text) is set by the window's controller, at most twice a second, not
+/// through SwiftUI.
 struct TerminalHost: UIViewRepresentable {
     let surface: SwiftTermSurface
-    let accessibilityText: String
 
     func makeUIView(context: Context) -> UIView {
         let view = surface.view
@@ -575,9 +688,7 @@ struct TerminalHost: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) {
-        view.accessibilityValue = accessibilityText
-    }
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 extension Color {
@@ -605,9 +716,23 @@ final class AgentWindowController: ObservableObject {
     @Published private(set) var state: AgentWindowState {
         didSet { surface.pasteEnabled = state.takesRawInput }
     }
-    @Published private(set) var snapshot: AgentScreenModel
-    /// The visible text, for VoiceOver's value.
-    @Published private(set) var screenText = ""
+    /// The `screen` snapshot path's model. Not published: it changes with
+    /// every frame; the views read `snapshotUsable` instead.
+    private(set) var snapshot: AgentScreenModel {
+        didSet {
+            let usable = snapshot.screen != nil && !snapshot.unsupported
+            if usable != snapshotUsable { snapshotUsable = usable }
+        }
+    }
+    /// The snapshot has a screen to act on (`canOperate`).
+    @Published private(set) var snapshotUsable = false
+    /// The visible text, for VoiceOver's value and Copy. Not published:
+    /// the surface changes up to every frame. It is read at most twice a
+    /// second (`flushScreenText`), set on the terminal view directly, and
+    /// the views read only whether there is any (`hasScreen`).
+    private(set) var screenText = ""
+    /// Something is drawn: changes once, not per frame.
+    @Published private(set) var hasScreen = false
     @Published private(set) var fontSize: CGFloat
     @Published var sending = false
     @Published var inputError: String?
@@ -622,7 +747,7 @@ final class AgentWindowController: ObservableObject {
     var onActivity: (() -> Void)?
     private var channel: Int?
     private var snapshotTask: Task<Void, Never>?
-    private var pushes: AnyCancellable?
+    private var pushes: ScreenStreamRouter.Subscription?
 
     init(paneID: String, shell: Bool = false, shellCwd: String? = nil) {
         self.paneID = paneID
@@ -642,16 +767,23 @@ final class AgentWindowController: ObservableObject {
         surface.onInput = { [weak self] bytes in self?.typed(bytes) }
         surface.onFontSizeChange = { [weak self] size in self?.fontChanged(size) }
         surface.onContentChange = { [weak self] in self?.contentChanged() }
+        #if DEBUG
+        if RenderProbe.enabled { probe = objectWillChange.sink { _ in RenderProbe.hit("window") } }
+        #endif
     }
+
+    #if DEBUG
+    private var probe: AnyCancellable?
+    #endif
 
     // MARK: Lifecycle
 
     func attach(model: SessionViewModel) {
         guard self.model == nil else { return }
         self.model = model
-        pushes = model.$agentScreenPush.sink { [weak self] push in
-            guard let self, let push, push.paneID == self.paneID, self.state.snapshotRunning else { return }
-            switch push.event {
+        pushes = model.screenRouter.subscribe(paneID: paneID) { [weak self] event in
+            guard let self, self.state.snapshotRunning else { return }
+            switch event {
             case let .frame(frame): self.applySnapshot(frame)
             case let .error(message, _): self.snapshot.fail(message: message)
             }
@@ -666,6 +798,7 @@ final class AgentWindowController: ObservableObject {
 
     func detach() {
         run(mutate { $0.disappeared() })
+        pushes?.end()
         pushes = nil
     }
 
@@ -689,7 +822,7 @@ final class AgentWindowController: ObservableObject {
 
     var canOperate: Bool {
         guard !sending else { return false }
-        if state.phase == .snapshot { return snapshot.screen != nil && !snapshot.unsupported }
+        if state.phase == .snapshot { return snapshotUsable }
         return state.canOperate
     }
 
@@ -785,10 +918,33 @@ final class AgentWindowController: ObservableObject {
         model?.termHub.click(ch: channel, col: col, row: row)
     }
 
+    /// The surface redrew. High-frequency (each frame): the text is read
+    /// at most twice a second, then handed to the terminal view's
+    /// accessibility value; nothing observable changes but `hasScreen`.
     private func contentChanged() {
-        let text = surface.snapshotText()
-        if text != screenText { screenText = text }
+        guard textFlush == nil else { return }
+        let wait = max(0, Self.textInterval - Date().timeIntervalSince(lastTextFlush))
+        textFlush = Task { [weak self] in
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            self?.flushScreenText()
+        }
     }
+
+    /// VoiceOver's value and the UI tests' reading: ≤ 2 Hz.
+    static let textInterval: TimeInterval = 0.5
+    private var textFlush: Task<Void, Never>?
+    private var lastTextFlush = Date.distantPast
+
+    private func flushScreenText() {
+        textFlush = nil
+        lastTextFlush = Date()
+        let text = surface.snapshotText()
+        guard text != screenText else { return }
+        screenText = text
+        surface.view.accessibilityValue = text
+        if hasScreen == text.isEmpty { hasScreen = !text.isEmpty }
+    }
+
 
     // MARK: Commands
 
@@ -836,6 +992,9 @@ final class AgentWindowController: ObservableObject {
             if isShell { shellPane = opened.paneID }
             _ = mutate { $0.opened(mode: opened.mode); return [] }
         case let .frame(frame):
+            #if DEBUG
+            RenderProbe.hit("frames")
+            #endif
             surface.feed(frame.bytes)
             run(mutate { $0.frame() })
         case let .closed(_, reason, canTakeOver):

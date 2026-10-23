@@ -7,6 +7,10 @@ import SheepdogKit
 /// refreshed every few seconds and at once on any `/events` event. No
 /// voice, no conversation. Its questions are answered through its own
 /// daemon, by tap.
+///
+/// Every property is assigned only when its value changes: the app's
+/// model forwards this object's changes, and a poll every 5 s that found
+/// nothing new must not re-render the app (`SessionViewModel+Computers`).
 @MainActor
 final class ComputerSession: ObservableObject {
     let id: String
@@ -69,7 +73,7 @@ final class ComputerSession: ObservableObject {
 
     /// Retry on an offline row: fetch now.
     func retry() {
-        if case .offline = reachability { reachability = .connecting }
+        if case .offline = reachability { set(\.reachability, .connecting) }
         Task { await refresh() }
     }
 
@@ -80,16 +84,21 @@ final class ComputerSession: ObservableObject {
         do {
             let state = try await client.state()
             lastSeen = Date()
-            reachability = .online
-            if agents != state.agents { agents = state.agents }
-            let open = state.questions ?? state.pendingAction.map { [$0] } ?? []
-            if questions != open { questions = open }
+            set(\.reachability, .online)
+            set(\.agents, state.agents)
+            set(\.questions, state.questions ?? state.pendingAction.map { [$0] } ?? [])
             // Forget the tap state of questions that closed.
-            let ids = Set(open.map(\.id))
-            phases = phases.filter { ids.contains($0.key) || $0.value.isSettledPhase }
+            let ids = Set(questions.map(\.id))
+            set(\.phases, phases.filter { ids.contains($0.key) || $0.value.isSettledPhase })
         } catch {
-            reachability = .offline(since: lastSeen)
+            set(\.reachability, .offline(since: lastSeen))
         }
+    }
+
+    /// Assigns only a different value: an equal one would still announce
+    /// a change.
+    private func set<Value: Equatable>(_ key: ReferenceWritableKeyPath<ComputerSession, Value>, _ value: Value) {
+        if self[keyPath: key] != value { self[keyPath: key] = value }
     }
 
     var snapshot: ComputerSnapshot {

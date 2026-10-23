@@ -20,6 +20,12 @@ struct AttachButton: View {
     @State private var failure: String?
     @State private var retry: (Data, String, String)?
 
+    /// What the menu offers besides Photo and File.
+    private struct Sources: Equatable {
+        var camera: Bool
+        var pasteImage: Bool
+    }
+
     var body: some View {
         Group {
             if uploading {
@@ -27,16 +33,21 @@ struct AttachButton: View {
                     .frame(width: 32, height: 32)
                     .accessibilityLabel("Uploading")
             } else {
-                Menu {
+                // From values only (`StableMenu`): an open menu stays still
+                // while the window re-renders.
+                stableMenu(
+                    Sources(camera: UIImagePickerController.isSourceTypeAvailable(.camera), pasteImage: UIPasteboard.general.hasImages),
+                    probe: "attach"
+                ) { sources in
                     Button { showPhotos = true } label: { Label("Photo", systemImage: "photo") }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    if sources.camera {
                         Button { showCamera = true } label: { Label("Camera", systemImage: "camera") }
                     }
                     Button { showFiles = true } label: { Label("File", systemImage: "doc") }
-                    if UIPasteboard.general.hasImages {
+                    if sources.pasteImage {
                         Button { pasteImage() } label: { Label("Paste image", systemImage: "doc.on.clipboard") }
                     }
-                } label: {
+                } label: { _ in
                     Image(systemName: "paperclip")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(.secondary)

@@ -61,19 +61,21 @@ struct PaneSwitcher: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
     }
 
+    /// From values only (`StableMenu`): an open menu stays still while the
+    /// session re-renders.
     private var menu: some View {
-        Menu {
+        stableMenu(MenuValue(pane: pane, waiting: waiting), probe: "pane") { value in
             ForEach(MainPane.allCases) { option in
                 Button {
                     pane = option
                 } label: {
-                    Text(accessibilityLabel(for: option))
+                    Text(Self.accessibilityLabel(for: option, waiting: value.waiting))
                 }
                 .accessibilityIdentifier("main.pane.\(option)")
             }
-        } label: {
+        } label: { value in
             HStack(spacing: 8) {
-                label(for: pane)
+                label(for: value.pane)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.footnote.weight(.semibold))
             }
@@ -84,6 +86,11 @@ struct PaneSwitcher: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
         }
         .accessibilityLabel("Show: \(accessibilityLabel(for: pane))")
+    }
+
+    private struct MenuValue: Equatable {
+        var pane: MainPane
+        var waiting: Int
     }
 
     @ViewBuilder
@@ -104,6 +111,10 @@ struct PaneSwitcher: View {
     }
 
     private func accessibilityLabel(for option: MainPane) -> String {
+        Self.accessibilityLabel(for: option, waiting: waiting)
+    }
+
+    private static func accessibilityLabel(for option: MainPane, waiting: Int) -> String {
         switch option {
         case .conversation: return "Conversation"
         case .flock: return waiting == 0 ? "Agents" : "Agents, \(waiting) waiting on you"

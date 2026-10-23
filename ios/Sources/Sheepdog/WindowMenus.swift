@@ -42,6 +42,9 @@ struct AgentWindowMenu: View, Equatable {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderProbe.hit("menu.agent")
+        #endif
         switch style {
         case .toolbar:
             Menu { items } label: {
@@ -112,6 +115,9 @@ struct ShellWindowMenu: View, Equatable {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderProbe.hit("menu.shell")
+        #endif
         Menu {
             Button { perform(.copy) } label: { Label("Copy screen", systemImage: "doc.on.doc") }
                 .accessibilityIdentifier("shell.menu.copy")

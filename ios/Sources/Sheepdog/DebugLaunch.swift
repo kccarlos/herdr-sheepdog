@@ -46,12 +46,26 @@ enum DebugLaunch {
     /// stays at the start), so no agent finishes or asks: a UI test sees
     /// the opening state for as long as it needs, on a Mac of any speed.
     static var demoPaused: Bool { arguments.contains("-sheepdogDemoPaused") }
-    /// `-sheepdogRenderChurn`: while Settings is open, the session view
-    /// model announces a change ten times a second, as it does during a
-    /// live voice session, so a
-    /// UI test catches a view whose identity changes on every re-render
-    /// (a sheet that closes and reopens forever).
-    static var renderChurn: Bool { arguments.contains("-sheepdogRenderChurn") }
+    /// `-sheepdogRenderChurn`: the session view model announces a change
+    /// ten times a second, as it does during a live voice session, so a
+    /// UI test catches a view whose identity changes on every re-render (a
+    /// sheet that closes and reopens forever) and a menu that flickers or
+    /// closes while open.
+    static var renderChurn: Bool { arguments.contains("-sheepdogRenderChurn") || renderChurnDelay > 0 }
+    /// `-sheepdogRenderChurnAfter <seconds>`: the same churn, starting that
+    /// long after launch, so a UI test can first tap its way to a screen.
+    static var renderChurnDelay: Double {
+        guard let i = arguments.firstIndex(of: "-sheepdogRenderChurnAfter"), i + 1 < arguments.count else { return 0 }
+        return Double(arguments[i + 1]) ?? 0
+    }
+    /// `-sheepdogFrameChurn`: the demo's terminal moves a working agent's
+    /// status line twenty times a second instead of once, so a UI test can
+    /// count what re-renders per frame.
+    static var frameChurn: Bool { arguments.contains("-sheepdogFrameChurn") }
+    /// `-sheepdogCountRenders`: count model and window change
+    /// announcements, terminal frames and the menus' body evaluations
+    /// (`RenderProbe`), shown in a hidden element `debug.renders`.
+    static var countRenders: Bool { arguments.contains("-sheepdogCountRenders") }
     /// `-sheepdogNoAnimations`: no UIKit or SwiftUI animations
     /// (`AppDelegate`, `View.debugAnimationsOff()`), for the UI tests that
     /// tap through screens: on a slow Mac a tap landed on a sheet or menu

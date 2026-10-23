@@ -233,21 +233,6 @@ public enum AgentScreenEvent: Equatable, Sendable {
     case error(String, ended: Bool)
 }
 
-/// One push for the open window, numbered so two equal pushes in a row
-/// are still a change.
-public struct AgentScreenPush: Equatable, Sendable {
-    public let seq: Int
-    /// The window it is for: a view applies only its own pane's pushes.
-    public let paneID: String
-    public let event: AgentScreenEvent
-
-    public init(seq: Int, paneID: String, event: AgentScreenEvent) {
-        self.seq = seq
-        self.paneID = paneID
-        self.event = event
-    }
-}
-
 /// The agent window over `/ws` (the daemon's docs/ws-contract.md "Agent
 /// window over /ws"), without the socket: which window is open, whether
 /// the daemon streams it, and what to send when the window or the
