@@ -289,6 +289,12 @@ extension LiveActivityContent {
     /// A pushed update's rows, opened with the push content key the app
     /// stored in the App Group keychain (the widget shares the group).
     func openedWithStoredKey() -> LiveActivityContent {
-        sealed == nil ? self : opened(key: PushContentKeyStore().key())
+        guard sealed != nil else { return self }
+        // One key per paired computer: the sender's opens the rows.
+        for key in PushContentKeyStore().allKeys() {
+            let out = opened(key: key)
+            if out.sealed == nil { return out }
+        }
+        return self
     }
 }

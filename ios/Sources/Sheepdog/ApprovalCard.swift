@@ -18,6 +18,11 @@ struct ApprovalCardView: View {
     var idPrefix = "approval"
     /// The header's right side: "4 min · 1 of 2".
     var meta: String?
+    /// A question from another computer (several computers only): the
+    /// card says where it is and that a tap answers there.
+    var remote: RemoteQuestion?
+    /// Talk to that computer.
+    var talkTo: (() -> Void)?
     let answer: (Int) -> Void
 
     @State private var commandExpanded = false
@@ -27,6 +32,14 @@ struct ApprovalCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let remote, !embedded {
+                Label(remote.label, systemImage: "desktopcomputer")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("On \(remote.label)")
+                    .accessibilityIdentifier("computerLabel.question.\(remote.computerID)")
+            }
             if !embedded { header }
             Text(pending.displaySummary)
                 .font(.body.weight(.semibold))
@@ -57,6 +70,9 @@ struct ApprovalCardView: View {
                 .accessibilityIdentifier("\(idPrefix).command")
             }
             phaseView
+            if let remote, !card.isSettled {
+                remoteFooter(remote)
+            }
         }
         .padding(.horizontal, embedded ? 12 : 14)
         .padding(.top, 12)
@@ -74,6 +90,45 @@ struct ApprovalCardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(idPrefix).card")
+    }
+
+    /// "Answers by tap go to Home Mac." and Talk to Home Mac: the voice
+    /// answers only on the current computer.
+    private func remoteFooter(_ remote: RemoteQuestion) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                remoteNote(remote)
+                Spacer(minLength: 4)
+                talkButton(remote)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                remoteNote(remote)
+                talkButton(remote)
+            }
+        }
+    }
+
+    private func remoteNote(_ remote: RemoteQuestion) -> some View {
+        Text("Answers by tap go to \(remote.computerName).")
+            .font(.footnote)
+            .foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("computerLabel.answersGo.\(remote.computerID)")
+    }
+
+    @ViewBuilder private func talkButton(_ remote: RemoteQuestion) -> some View {
+        if let talkTo {
+            Button(action: talkTo) {
+                Text("Talk to \(remote.computerName)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("computerLabel.talkTo.\(remote.computerID)")
+        }
     }
 
     private var borderTint: Color {

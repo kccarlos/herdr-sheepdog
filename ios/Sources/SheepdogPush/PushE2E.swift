@@ -57,13 +57,27 @@ public enum PushE2E {
     /// - with `e2e` that does not open (no key, wrong key, damaged data):
     ///   the neutral fallback.
     public static func rewrite(_ content: UNNotificationContent, key: Data?) -> UNNotificationContent {
+        rewrite(content, keys: key.map { [$0] } ?? [])
+    }
+
+    /// `rewrite(_:key:)` with every paired computer's key: the one that
+    /// opens it is the sender's (any other fails GCM's check). With
+    /// several computers (`names` lists them), the sender's name becomes
+    /// the subtitle.
+    public static func rewrite(_ content: UNNotificationContent, keys: [Data], names: [String: String] = [:]) -> UNNotificationContent {
         guard let e2e = content.userInfo["e2e"] else { return content }
-        guard let key,
-              let dict = e2e as? [String: Any],
+        guard let dict = e2e as? [String: Any],
               let c = dict["c"] as? String, let n = dict["n"] as? String,
-              let plaintext = try? open(ciphertext: c, nonce: n, key: key)
+              let plaintext = keys.lazy.compactMap({ try? open(ciphertext: c, nonce: n, key: $0) }).first
         else { return fallback(content) }
-        return decrypted(content, plaintext: plaintext)
+        let out = decrypted(content, plaintext: plaintext)
+        guard names.count > 1,
+              let computer = (plaintext["sheepdog"] as? [String: Any])?["computer"] as? String,
+              let name = names[computer], !name.isEmpty,
+              let labelled = out.mutableCopy() as? UNMutableNotificationContent
+        else { return out }
+        labelled.subtitle = name
+        return labelled
     }
 
     /// The neutral notification for a relay push the extension could not

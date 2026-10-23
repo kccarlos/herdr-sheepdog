@@ -64,6 +64,29 @@ continue on that network.
 On the same Wi-Fi this just works. Away from home, see
 [remote-access.md](remote-access.md) (Tailscale, then pair again).
 
+### Several computers
+
+Each computer runs its own sheepdog, with its own voice, orchestrator and
+conversation. To add one, run `sheepdog pair` on it and tap ⋯ ▸ Settings ▸
+**Add a computer**. Scanning a computer you already paired updates it
+instead of adding it twice.
+
+- The voice talks to one computer at a time, the one you picked last (at
+  first, the one you paired first). The app never switches on its own.
+  To switch, tap the capsule's name ▸ **Talk to**, a section's **Talk to**
+  on the Agents page, or **Talk to Home Mac** on a question. On iPad, ⌘K
+  moves to the next computer. The voice never talks about the other
+  computers.
+- The Agents page has one section per computer, the one you are talking to
+  first. A computer that does not answer shows one row with **Retry**.
+- A question from another computer floats under the current one's,
+  labelled "Home Mac · blog". Tapping an answer sends it to that computer.
+- Notifications from another computer carry its name.
+- Settings ▸ **Computers** lists them. A computer's page renames it on this
+  phone, switches to it, and removes it.
+
+With one computer, none of this shows: no names and no Talk to.
+
 ## What it does
 
 - **The main screen.** At the top, **Conversation | Agents** (the badge

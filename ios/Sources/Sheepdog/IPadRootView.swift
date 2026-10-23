@@ -89,9 +89,14 @@ struct IPadSidebar: View {
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
 
+    /// The current computer first, then the others that answer (several
+    /// computers only; with one there is no computer level).
     private var sections: SidebarSections {
-        // One computer for now: its name is the voice's.
-        SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)])
+        var computers: [SidebarSections.Computer] = [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]
+        for other in model.otherSnapshots {
+            computers.append(.computer(id: other.id, name: other.name, agents: other.reachability.isOnline ? other.agents : []))
+        }
+        return SidebarSections(computers: computers)
     }
 
     private var paneState: FlockPaneState {
@@ -105,7 +110,7 @@ struct IPadSidebar: View {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     navRow(.conversation, title: "Conversation", symbol: "bubble.left", meta: nil, id: "sidebar.conversation")
                     navRow(.allAgents, title: "All agents", symbol: "square.grid.2x2",
-                           meta: model.flock.waitingCount > 0 ? "\(model.flock.waitingCount) waiting" : nil, id: "sidebar.allAgents")
+                           meta: model.waitingEverywhere > 0 ? "\(model.waitingEverywhere) waiting" : nil, id: "sidebar.allAgents")
                     agentRows
                 }
                 .padding(.horizontal, 10)
@@ -195,17 +200,14 @@ struct IPadSidebar: View {
     @ViewBuilder
     private var agentRows: some View {
         let sections = self.sections
-        if sections.agents.isEmpty {
+        if sections.computers.first?.spaces.isEmpty ?? true, !sections.showsComputerHeaders {
             emptyRow
                 .padding(.top, 16)
         }
         ForEach(sections.computers) { computer in
+            let remote = computer.id != model.currentComputerID
             if sections.showsComputerHeaders {
-                Label(computer.name, systemImage: "desktopcomputer")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 16)
+                computerHeader(computer.id, name: computer.name)
             }
             ForEach(computer.spaces) { space in
                 Text(space.name.isEmpty ? "Other" : space.name)
@@ -216,18 +218,77 @@ struct IPadSidebar: View {
                     .padding(.bottom, 2)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(space.agents) { agent in
-                    agentRow(agent)
+                    if remote {
+                        agentRow(agent, remote: true)
+                    } else {
+                        agentRow(agent)
+                            // Drag it beside the current pane, or out of the
+                            // app for a window of its own.
+                            .draggable(AgentWindowRoute(paneID: agent.paneID)) {
+                                Label(agent.alias, systemImage: "terminal")
+                                    .font(.body.weight(.semibold))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(Capsule().fill(Theme.card))
+                            }
+                    }
                 }
             }
         }
     }
 
-    private func agentRow(_ agent: Agent) -> some View {
-        let selected = ui.detail.panes.contains(agent.paneID)
+    /// A computer's row (several computers only): its name and status,
+    /// Talk to for another one, Retry for one that does not answer.
+    @ViewBuilder
+    private func computerHeader(_ id: String, name: String) -> some View {
+        let snapshot = model.computerSnapshots.first { $0.id == id }
+        let isCurrent = id == model.currentComputerID
+        let offline: Bool = { if case .offline = snapshot?.reachability { return true }; return false }()
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Label(name, systemImage: "desktopcomputer")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text(isCurrent ? "Talking here" : (snapshot?.summary() ?? ""))
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("computerLabel.sidebar.\(id)")
+            Spacer(minLength: 4)
+            if !isCurrent {
+                Button(offline ? "Retry" : "Talk to") {
+                    if offline { model.session(id)?.retry() } else { model.talk(to: id) }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 30)
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                .frame(minHeight: 44)
+                .contentShape(Capsule())
+                .buttonStyle(.plain)
+                .hoverEffect()
+                .accessibilityLabel(offline ? "Retry \(name)" : "Talk to \(name)")
+                .accessibilityIdentifier("computerLabel.sidebarTalkTo.\(id)")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 16)
+    }
+
+    private func agentRow(_ agent: Agent, remote: Bool = false) -> some View {
+        let selected = !remote && ui.detail.panes.contains(agent.paneID)
         let blocked = agent.state == .blocked
         return Button {
             withAnimation(Theme.ease) {
-                ui.show(agent.paneID)
+                if remote {
+                    // Another computer's agent: All agents shows it, with Talk to.
+                    ui.detail = .allAgents
+                } else {
+                    ui.show(agent.paneID)
+                }
                 ui.detailPath = NavigationPath()
                 if portrait { ui.columns = .detailOnly }
             }
@@ -267,16 +328,7 @@ struct IPadSidebar: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(agent.alias), \(blocked ? "waiting on you" : Theme.word(for: agent.state))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("sidebar.agent.\(agent.alias)")
-        // Drag it beside the current pane, or out of the app for a window
-        // of its own.
-        .draggable(AgentWindowRoute(paneID: agent.paneID)) {
-            Label(agent.alias, systemImage: "terminal")
-                .font(.body.weight(.semibold))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Capsule().fill(Theme.card))
-        }
+        .accessibilityIdentifier(remote ? "computerLabel.sidebarAgent.\(agent.alias)" : "sidebar.agent.\(agent.alias)")
     }
 
     /// No agent to list: why, in one line, with the one action that helps.
@@ -504,7 +556,9 @@ struct IPadConversationDetail: View {
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
                     },
-                    compact: false
+                    compact: false,
+                    remote: { model.remoteQuestion($0) },
+                    talkTo: { model.talk(to: $0) }
                 ) { id, index in
                     model.answer(question: id, option: index)
                 }

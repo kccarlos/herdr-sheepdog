@@ -63,6 +63,9 @@ type Config struct {
 	// DataDir is where push_devices.json lives; "" keeps devices in
 	// memory only (tests).
 	DataDir string
+	// ComputerID is this daemon's id: every payload carries it, so an app
+	// paired with several computers knows which one a notification is from.
+	ComputerID string
 
 	// ProductionURL / SandboxURL override the APNs hosts (tests).
 	ProductionURL, SandboxURL string
@@ -377,6 +380,9 @@ func (s *Sender) Notify(n Notification) {
 			s.seenList = s.seenList[1:]
 		}
 		s.mu.Unlock()
+	}
+	if n.Computer == "" {
+		n.Computer = s.cfg.ComputerID
 	}
 	devs := s.devs.list()
 	if n.ExceptDevice != "" {

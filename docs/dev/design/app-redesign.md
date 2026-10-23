@@ -609,6 +609,14 @@ All agents page. The sheets use the system form size. Dragging a sidebar
 row out of the app to make a window is wired (the row carries an
 `AgentWindowRoute`) but not verified; Open in New Window is.
 
+**As built (phase 11, several computers):** the sidebar's computer rows
+(the current one first, "Talking here"; Talk to or Retry on the others),
+All agents' sections, and ⌘K, which talks to the next computer that
+answers. Another computer's agent has no window yet: its row opens All
+agents, and its card has Talk to instead of a window button. The voice
+menu cannot show a Talk to row's second line ("4 agents · 1 waiting"),
+because an iOS menu drops it; that line is VoiceOver's label.
+
 ## 7. States, accessibility and dark mode
 
 | Screen | Empty | Error | Offline computer | Blocked agent | One vs several |

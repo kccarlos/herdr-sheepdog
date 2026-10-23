@@ -144,7 +144,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             UIApplication.shared.registerForRemoteNotifications()
         case .denied:
             if let token = deviceToken {
-                await unregister(token: token, from: SettingsStore().endpoint)
+                await unregisterEverywhere(token: token)
                 forgetToken()
             }
         case .notDetermined:
@@ -163,8 +163,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         defaults.set(hex, forKey: Key.token)
         registrationError = nil
         Task {
-            // A new token replaces the old one on the daemon.
-            if let previous, previous != hex { await unregister(token: previous, from: SettingsStore().endpoint) }
+            // A new token replaces the old one on every computer.
+            if let previous, previous != hex { await unregisterEverywhere(token: previous) }
             await register()
         }
     }
@@ -173,71 +173,105 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         registrationError = "APNs refused: \(error.localizedDescription)"
     }
 
-    /// Settings were saved: the token moves from the old daemon to the new
-    /// (with no daemon left, the content key is removed).
+    /// The computers or the address changed: register again with every
+    /// computer (each keeps its own registration and content key). With
+    /// nothing paired, the keys go.
     func endpointChanged(from old: DaemonEndpoint?) {
-        guard let token = deviceToken else {
-            if SettingsStore().endpoint == nil { contentKeys.remove() }
+        guard deviceToken != nil else {
+            if SettingsStore().endpoint == nil { removeAllKeys() }
+            writeNames()
             return
         }
-        Task {
-            if let old, old.display != SettingsStore().endpoint?.display {
-                await unregister(token: token, from: old)
-            }
-            await register()
-        }
+        Task { await register() }
     }
 
-    /// `POST /api/push/register` to the configured daemon. Idempotent on
-    /// the daemon, so it is sent on every launch with a token. Its answer's
-    /// content key replaces the stored one (the same daemon answers the
-    /// same key; another daemon, its own); no daemon, or one without a
-    /// push service, leaves no key behind.
+    /// Where the token goes: every paired computer by its id, or the bare
+    /// loopback address of the tests (nil id).
+    private func targets() -> [(id: String?, endpoint: DaemonEndpoint)] {
+        let store = ComputerStore.shared
+        let paired = store.ids.compactMap { id in store.endpoint(for: id).map { (id: Optional(id), endpoint: $0) } }
+        if !paired.isEmpty { return paired }
+        return SettingsStore().endpoint.map { [(id: nil, endpoint: $0)] } ?? []
+    }
+
+    private func keys(for id: String?) -> PushContentKeyStore {
+        id.map { PushContentKeyStore.forComputer($0) } ?? contentKeys
+    }
+
+    /// `POST /api/push/register` to every paired computer. Idempotent on
+    /// the daemon, so it is sent on every launch with a token. Each
+    /// answer's content key replaces that computer's stored one; a
+    /// computer without a push service leaves no key behind.
     func register() async {
-        guard let endpoint = SettingsStore().endpoint else {
-            contentKeys.remove()
+        writeNames()
+        let targets = targets()
+        guard !targets.isEmpty else {
+            removeAllKeys()
             return
         }
         guard let token = deviceToken else { return }
-        do {
-            let answer = try await DaemonClient(endpoint: endpoint).registerPushDevice(PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name))
-            if let answer {
-                if let key = answer.contentKey {
-                    contentKeys.store(base64: key)
+        let current = SettingsStore().endpoint
+        for target in targets {
+            let isCurrent = target.endpoint.computerID == current?.computerID && target.endpoint.display == current?.display
+            do {
+                let answer = try await DaemonClient(endpoint: target.endpoint).registerPushDevice(PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name))
+                if let key = answer?.contentKey {
+                    keys(for: target.id).store(base64: key)
                 } else {
-                    contentKeys.remove()
+                    keys(for: target.id).remove()
                 }
-                registeredWith = endpoint.display
-                defaults.set(endpoint.display, forKey: Key.registeredWith)
-                registrationError = nil
-            } else {
-                contentKeys.remove()
-                registeredWith = nil
-                defaults.removeObject(forKey: Key.registeredWith)
-                registrationError = "This daemon has no notification service."
+                guard isCurrent else { continue }
+                if answer != nil {
+                    registeredWith = target.endpoint.display
+                    defaults.set(target.endpoint.display, forKey: Key.registeredWith)
+                    registrationError = nil
+                } else {
+                    registeredWith = nil
+                    defaults.removeObject(forKey: Key.registeredWith)
+                    registrationError = "This daemon has no notification service."
+                }
+            } catch let error as DaemonError {
+                if isCurrent { registrationError = error.message }
+            } catch {
+                if isCurrent { registrationError = error.localizedDescription }
             }
-        } catch let error as DaemonError {
-            registrationError = error.message
-        } catch {
-            registrationError = error.localizedDescription
         }
+        // The one key from before several computers.
+        if targets.contains(where: { $0.id != nil }) { contentKeys.remove() }
         await loadDaemonStatus()
     }
 
-    /// Takes the token off a daemon; the content key that daemon issued
-    /// goes with it (a registration with the current daemon stores its own).
-    private func unregister(token: String, from endpoint: DaemonEndpoint?) async {
-        guard let endpoint else { return }
-        contentKeys.remove()
+    /// Takes the token off one computer (Remove), with that computer's key.
+    func unregister(computer id: String) async {
+        let store = ComputerStore.shared
+        keys(for: id).remove()
+        guard let token = deviceToken, let endpoint = store.endpoint(for: id) else { return }
         _ = try? await DaemonClient(endpoint: endpoint).unregisterPush(token: token)
-        if registeredWith == endpoint.display {
-            registeredWith = nil
-            defaults.removeObject(forKey: Key.registeredWith)
+    }
+
+    /// Takes the token off every computer, with their keys.
+    private func unregisterEverywhere(token: String) async {
+        for target in targets() {
+            keys(for: target.id).remove()
+            _ = try? await DaemonClient(endpoint: target.endpoint).unregisterPush(token: token)
         }
+        registeredWith = nil
+        defaults.removeObject(forKey: Key.registeredWith)
+    }
+
+    private func removeAllKeys() {
+        contentKeys.remove()
+        for id in ComputerStore.shared.ids { PushContentKeyStore.forComputer(id).remove() }
+    }
+
+    /// The names the extension adds to alerts, only with several computers.
+    func writeNames() {
+        let computers = ComputerStore.shared.computers
+        PushComputerNames.write(Dictionary(computers.map { ($0.daemonID, $0.displayName) }, uniquingKeysWith: { a, _ in a }))
     }
 
     private func forgetToken() {
-        contentKeys.remove()
+        removeAllKeys()
         deviceToken = nil
         defaults.removeObject(forKey: Key.token)
     }
@@ -295,7 +329,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             }
             return
         }
-        guard let endpoint = SettingsStore().endpoint else {
+        // Answered on the computer that asked.
+        guard let endpoint = payload.computer.flatMap({ ComputerStore.shared.endpoint(for: $0) }) ?? SettingsStore().endpoint else {
             await notifyOpenInstead(payload, reason: "Sheepdog has no daemon address yet.")
             return
         }

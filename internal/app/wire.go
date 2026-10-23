@@ -115,7 +115,7 @@ func (a *App) wire() error {
 	a.push, a.pushErr = push.New(push.Config{
 		Mode: cfg.Push.EffectiveMode(), RelayURL: cfg.Push.Relay.URL,
 		KeyPath: cfg.Push.APNs.KeyPath, KeyID: cfg.Push.APNs.KeyID, TeamID: cfg.Push.APNs.TeamID, Topic: cfg.Push.APNs.Topic,
-		DataDir: cfg.DataDir,
+		DataDir: cfg.DataDir, ComputerID: pushComputerID(cfg.DataDir),
 	}, a.log)
 	var notifier supervisor.Notifier
 	if a.push != nil {
@@ -406,4 +406,17 @@ func accountsOf(b *brain.Brain) *brain.AccountAlerts {
 		return nil
 	}
 	return b.Accounts()
+}
+
+// pushComputerID is the daemon id push payloads carry ("" without a data
+// dir or when it cannot be read; the app then cannot tell computers apart).
+func pushComputerID(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	id, err := identity.DaemonID(dataDir)
+	if err != nil {
+		return ""
+	}
+	return id
 }

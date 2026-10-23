@@ -73,6 +73,34 @@ public final class PushContentKeyStore {
         SecItemDelete(baseQuery() as CFDictionary)
     }
 
+    // MARK: - Several computers
+
+    /// The account of one computer's key: each paired computer issues its
+    /// own content key, so each has its own item.
+    public static func account(computer: String) -> String { "content-key.\(computer)" }
+
+    /// The store for one computer's key.
+    public static func forComputer(_ id: String, accessGroup: String? = PushContentKeyStore.appGroup) -> PushContentKeyStore {
+        PushContentKeyStore(account: account(computer: id), accessGroup: accessGroup)
+    }
+
+    /// Every content key stored under this service (one per computer): the
+    /// extension tries each, since a key that is not the sender's fails
+    /// AES-GCM's check.
+    public func allKeys() -> [Data] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        var items: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess else { return [] }
+        let list = (items as? [Data]) ?? ((items as? Data).map { [$0] } ?? [])
+        return list.filter { $0.count == 32 }
+    }
+
     private func baseQuery() -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -81,5 +109,26 @@ public final class PushContentKeyStore {
         ]
         if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
         return query
+    }
+}
+
+/// The paired computers' names for the Notification Service Extension,
+/// which adds the computer's name to an alert only when several are
+/// paired: the app writes them to the App Group's defaults (an empty map
+/// with one computer), the extension only reads.
+public enum PushComputerNames {
+    static let key = "push.computerNames"
+
+    public static func write(_ names: [String: String], suite: String = PushContentKeyStore.appGroup) {
+        let defaults = UserDefaults(suiteName: suite)
+        if names.count > 1 {
+            defaults?.set(names, forKey: key)
+        } else {
+            defaults?.removeObject(forKey: key)
+        }
+    }
+
+    public static func read(suite: String = PushContentKeyStore.appGroup) -> [String: String] {
+        UserDefaults(suiteName: suite)?.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 }

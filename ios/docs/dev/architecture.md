@@ -388,7 +388,8 @@ section 6.
   `keyboardShortcut` in each window (`KeyboardShortcuts`), not app
   `Commands`: the demo is a cover with its own view model, and the window's
   own shortcuts reach it and work while a terminal has the keyboard. ⌘K
-  (Talk to) waits for several computers.
+  (Talk to the next computer that answers) exists only with several
+  computers.
 - **Pointer:** sidebar rows, the filters and the round and header buttons
   have hover effects; the pane divider highlights.
 - **Tests:** `IPadUITests` (offline demo, skipped on iPhone) covers the
@@ -400,6 +401,72 @@ section 6.
   pushes on `navigationPath`. Requests from the session itself (a card's
   Open window, a Live Activity row) arrive as `model.windowRequest`, which
   the layout opens and clears.
+
+## Several computers
+
+Design: docs/dev/design/app-redesign.md sections 3 and 4 (option A). The
+store is `ComputerStore` ("Settings" below).
+
+- **The session is the current computer's.** `SessionViewModel` keeps its
+  `/ws`, `/events`, conversation, voice and approvals, as with one
+  computer. Every other paired computer is a `ComputerSession`
+  (`ComputerSession.swift`). It polls its own `/api/state` every 5 s,
+  fetches again at once on any `/events` event, and holds the agents, the
+  open questions and `Reachability` (connecting, online, offline since).
+  It has no voice and no conversation. Nothing from it reaches the current
+  daemon or the voice.
+- `SessionViewModel+Computers.swift` keeps one started session per other
+  computer (`rebuildOthers`, on start and on every change to the list or
+  the current computer). Each session's changes are forwarded to the
+  model, so the views read only the model. `computerSnapshots`
+  (`ComputerSnapshot`, Kit) is every computer in the store's order, with
+  "4 agents · 1 waiting" or "Offline since 9:12".
+- **Questions.** `floatingQuestions` is the current computer's questions,
+  then the others' oldest first across computers (`QuestionOrder.others`,
+  by `created_at`). Another computer's card carries a namespaced id
+  (`RemoteQuestion`, `remote:<computer>|<id>`), because question ids are
+  unique only within one daemon. `answer(question:option:)` routes it to
+  that computer's `POST /api/pending/answer`. The card says
+  "Home Mac · blog", "Answers by tap go to Home Mac." and **Talk to Home
+  Mac**.
+- **Talk to** (`talk(to:)`, `switchComputer(to:)`) ends the voice session
+  cleanly, loads the new computer's conversation, reconnects if the voice
+  was running, and adds a "Talking to Home Mac" divider. A computer that
+  does not answer is not switched to; a banner says why. It is reached
+  from the voice menu, a section header on the Agents page, All agents and
+  the iPad sidebar, a floating question, a computer's Settings page, and
+  ⌘K.
+- **Where they show** (several computers only): the voice menu's Talk to;
+  a section per computer on the Agents page and All agents (another
+  computer's cards have no window button; an offline computer is one
+  dashed row with Retry); the iPad sidebar's computer rows; strip chips
+  for agents blocked on another computer, which open the Agents page; the
+  Agents badge, which counts every computer; "Work Mac · webapp" under an
+  agent window's name; Settings ▸ Computers with each computer's page
+  (`ComputerSettingsView`: a local name, Talk to or the current
+  computer's Connection, Models and Languages, Remove). **Add a computer**
+  is also there with one computer.
+- **Push.** Each daemon puts its id in `sheepdog.computer`
+  (docs/dev/push.md). `PushCoordinator` registers this phone's token with
+  every computer. It keeps one content key per computer
+  (`PushContentKeyStore.forComputer`), and the Notification Service
+  Extension and the Live Activity widget try each key. With several
+  computers the app writes the names to the App Group
+  (`PushComputerNames`), and the extension sets the sender's name as the
+  subtitle. Approve and Decline answer on the computer named in the
+  payload. A Live Activity row from another computer opens the Agents
+  page instead of switching.
+- **Not built yet:** an agent window for another computer's agent (its
+  card has no window button: talk to that computer first) and reordering
+  computers.
+- **The Live Activity** names the current computer, and its waiting rows
+  continue with the other computers' rows (up to three in all), each
+  naming its computer.
+- **Tests:** `ComputersTests` and `ComputerStoreTests` (Kit);
+  `ComputersUITests` against `StubDaemon(.computer…)`: one computer
+  shows no label, and two computers plus an offline one cover Talk to,
+  the sections, a question answered on another computer, Settings and
+  switching.
 
 ## The terminal surface
 
@@ -855,7 +922,8 @@ and the status wraps to two lines at the accessibility sizes.
   "Listening — just talk", "Muted — tap to unmute", "Hold the orb to talk".
 - **The voice menu** (tap the name): the connection, Manage computers… and
   End voice session ("Your agents keep working."), or Start voice session.
-  With several computers it will add Talk to.
+  With several computers it adds Talk to (see "Several computers"), and
+  the capsule shows the current computer's name instead of the voice's.
 - **The composer.** The keyboard morphs the capsule into `CapsuleComposer`:
   the quiet orb (back to voice), the field and the ink send button.
   Sending goes through `POST /api/utterance`.

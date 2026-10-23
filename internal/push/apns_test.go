@@ -140,6 +140,7 @@ func approval() Notification {
 func TestNotifyPayloadHeadersAndJWT(t *testing.T) {
 	f := newFakeAPNs(t)
 	s, log, key := newTestSender(t, f, t.TempDir())
+	s.cfg.ComputerID = "daemon-1"
 	if err := s.Register(strings.ToUpper(tokA), EnvProduction, "KC's iPhone"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestNotifyPayloadHeadersAndJWT(t *testing.T) {
 		t.Errorf("aps = %v", aps)
 	}
 	sd := r.body["sheepdog"].(map[string]any)
-	if sd["kind"] != "approval" || sd["pane_id"] != "w1:p2" || sd["agent"] != "auth" || sd["pending_id"] != "pa-3" {
+	if sd["kind"] != "approval" || sd["pane_id"] != "w1:p2" || sd["agent"] != "auth" || sd["pending_id"] != "pa-3" || sd["computer"] != "daemon-1" {
 		t.Errorf("sheepdog = %v", sd)
 	}
 	opts := sd["options"].([]any)

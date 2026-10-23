@@ -165,17 +165,31 @@ extension LiveActivityContent {
         agents: [Agent] = [],
         questions: [PendingAction] = [],
         computer: String? = nil,
+        others: [ComputerSnapshot] = [],
         suspendedInBackground: Bool = false
     ) -> LiveActivityContent? {
         guard let phase = phase(state: state, suspendedInBackground: suspendedInBackground) else { return nil }
         let running = agents.filter { $0.state.isRunning }
-        let rows = waitingRows(agents: running, questions: questions)
+        // The current computer's waiting agents first, then the others',
+        // each row naming its computer.
+        var rows = waitingRows(agents: running, questions: questions)
+        var waiting = running.filter { $0.state == .blocked }.count
+        for other in others where other.reachability.isOnline {
+            waiting += other.waitingCount
+            let name = clip(other.name, to: nameLimit)
+            rows += waitingRows(agents: other.running, questions: other.questions).map { row in
+                var r = row
+                r.computer = name
+                r.computerID = other.id
+                return r
+            }
+        }
         return LiveActivityContent(
             phase: phase,
             muted: muted,
             computer: computer.flatMap { clip($0, to: nameLimit) },
-            rows: rows,
-            waiting: running.filter { $0.state == .blocked }.count,
+            rows: Array(rows.prefix(maxRows)),
+            waiting: waiting,
             working: running.filter { $0.state == .working }.count,
             done: running.filter { $0.state == .done }.count
         )

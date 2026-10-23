@@ -194,13 +194,28 @@ private struct AgentWindowView: View {
 
     // MARK: - Header
 
+    /// "Work Mac · webapp" under the name, several computers only.
+    private var computerLine: String? {
+        guard model.showsComputerLabels else { return nil }
+        return [model.currentComputerName, live.workspaceLabel?.trimmedOrNil].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(name)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            StateChip(state: live.state)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                StateChip(state: live.state)
+            }
+            if let computerLine {
+                Text(computerLine)
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("computerLabel.window")
+            }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .combine)
@@ -294,7 +309,7 @@ private struct AgentWindowView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                if let place = live.workspaceLabel?.trimmedOrNil {
+                if let place = computerLine ?? live.workspaceLabel?.trimmedOrNil {
                     Text(place)
                         .font(.caption)
                         .foregroundStyle(Theme.muted)

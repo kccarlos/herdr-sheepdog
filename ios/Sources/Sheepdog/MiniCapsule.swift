@@ -44,7 +44,7 @@ struct MiniCapsule: View {
             } label: {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 3) {
-                        Text(model.voiceName)
+                        Text(model.capsuleName)
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.ink)
                         Image(systemName: "chevron.down")

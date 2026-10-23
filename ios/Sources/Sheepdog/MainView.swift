@@ -55,7 +55,8 @@ struct MainView: View {
                 ? { model.toggleMute() } : nil,
             muted: model.isMuted,
             agents: SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]).agents,
-            openAgent: { open(.agent($0)) }
+            openAgent: { open(.agent($0)) },
+            talkToNext: model.showsComputerLabels ? { model.talkToNext() } : nil
         )
     }
 
@@ -116,16 +117,17 @@ struct PhoneRootView: View {
 
                 TopBar(
                     pane: $model.pane,
-                    waiting: model.flock.waitingCount,
+                    waiting: model.waitingEverywhere,
                     newMenu: { menus.newMenu },
                     moreMenu: { menus.moreMenu }
                 )
 
                 SessionBanners()
 
-                if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
-                    // One computer today: no chip names a computer.
-                    AgentStrip(agents: model.flock.running, pending: model.pendingAction)
+                if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty || !model.blockedElsewhere.isEmpty {
+                    // Another computer's chip names it (several computers only).
+                    AgentStrip(agents: model.flock.running, pending: model.pendingAction, computers: model.computerCount,
+                               elsewhere: model.blockedElsewhere, showElsewhere: { model.pane = .flock })
                         // Chrome: the chips grow up to the first
                         // accessibility size, then the strip stays one row.
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -138,7 +140,7 @@ struct PhoneRootView: View {
                     switch model.pane {
                     case .conversation:
                         ConversationPane()
-                    case .flock where paneState != .content:
+                    case .flock where paneState != .content && model.otherSnapshots.isEmpty:
                         FlockUnavailableView(state: paneState)
                     case .flock:
                         FlockView(
@@ -148,7 +150,12 @@ struct PhoneRootView: View {
                             expanded: $model.expandedAgents,
                             focusedPaneID: $model.focusedAgentPaneID,
                             onNewAgent: model.agentActionsAvailable ? { model.showsNewAgent = true } : nil,
-                            voiceQuestionID: model.approval?.pending.id
+                            voiceQuestionID: model.approval?.pending.id,
+                            others: model.otherSnapshots,
+                            currentName: model.currentComputerName,
+                            remoteCard: { model.remoteCard(computer: $0, paneID: $1) },
+                            talkTo: { model.talk(to: $0) },
+                            retry: { model.session($0)?.retry() }
                         )
                     }
                 }
@@ -197,7 +204,9 @@ struct PhoneRootView: View {
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
                     },
-                    compact: ui.typing
+                    compact: ui.typing,
+                    remote: { model.remoteQuestion($0) },
+                    talkTo: { model.talk(to: $0) }
                 ) { id, index in
                     model.answer(question: id, option: index)
                 }
@@ -345,7 +354,7 @@ struct SessionCapsule: View {
             state: model.state,
             meter: model.meter,
             muted: model.isMuted,
-            name: model.voiceName,
+            name: model.capsuleName,
             talkMode: model.talkMode,
             holding: model.holding,
             noSignal: model.noMicSignal,
@@ -409,6 +418,29 @@ struct SessionMenus {
         }
         .accessibilityLabel("Connection: \(model.connectionChip.word)")
         .accessibilityIdentifier("chip.connection")
+        if model.showsComputerLabels {
+            // Talk to: every computer, the current one checked; one that
+            // does not answer is disabled with its last-seen time.
+            Divider()
+            Group {
+                ForEach(model.computerSnapshots) { computer in
+                    let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                    Button {
+                        model.talk(to: computer.id)
+                    } label: {
+                        Label {
+                            Text(computer.isCurrent ? computer.name : "Talk to \(computer.name)")
+                            Text(computer.isCurrent ? "Talking here · \(computer.summary())" : computer.summary())
+                        } icon: {
+                            Image(systemName: computer.isCurrent ? "checkmark" : (offline ? "wifi.slash" : "desktopcomputer"))
+                        }
+                    }
+                    .disabled(offline && !computer.isCurrent)
+                    .accessibilityLabel(computer.isCurrent ? "\(computer.name), talking here, \(computer.summary())" : "Talk to \(computer.name), \(computer.summary())")
+                    .accessibilityIdentifier("voice.talkTo.\(computer.id)")
+                }
+            }
+        }
         Button {
             here { model.showSettings = true }
         } label: {

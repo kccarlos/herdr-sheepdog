@@ -127,6 +127,8 @@ public struct PushPayload: Equatable, Sendable {
     /// The open answer-prompt action, for an approval.
     public var pendingID: String?
     public var eventID: String?
+    /// The daemon id of the computer that sent it (`sheepdog.computer`).
+    public var computer: String?
     public var options: [PendingOption]
     /// `APPROVAL` or `AGENT`.
     public var category: String?
@@ -159,6 +161,7 @@ public struct PushPayload: Equatable, Sendable {
         agent = string("agent")
         pendingID = string("pending_id")
         eventID = string("event_id")
+        computer = string("computer")
         let raw = sd["options"] as? [[String: Any]] ?? []
         options = PendingOption.normalised(raw.compactMap { o -> PendingOption? in
             guard let label = o["label"] as? String else { return nil }

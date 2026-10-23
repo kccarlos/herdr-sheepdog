@@ -17,6 +17,10 @@ final class StubDaemon {
         /// object when given (nil: a daemon too old to report one);
         /// everything else is 404.
         case daemon(update: String?)
+        /// A computer of several: `/api/hello` names it, `/api/state`
+        /// sends these agents and questions (JSON arrays), and an answer
+        /// is accepted.
+        case computer(name: String, agents: String, questions: String)
     }
 
     private let listener: NWListener
@@ -78,7 +82,29 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"agents":[],"# + voice + #","version":"v0.1.4""# + tail + "}")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
+        case let .computer(name, agents, questions):
+            if path.hasPrefix("/api/hello") {
+                return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}}"#)
+            }
+            if path.hasPrefix("/api/state") {
+                let voice = #""voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false}"#
+                return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + questions + "," + voice + #","version":"v0.1.4"}"#)
+            }
+            if path.hasPrefix("/api/pending/answer") {
+                return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
+            }
+            if path.hasPrefix("/api/conversation") {
+                return http(200, "application/json", #"{"items":[]}"#)
+            }
+            return http(404, "application/json", #"{"error":"not found"}"#)
         }
+    }
+
+    /// One blocked agent with an open question, as `/api/state` sends it.
+    static func blocked(alias: String, space: String, pane: String, question: String, created: String = "2026-10-23T09:00:00Z") -> (agent: String, question: String) {
+        let agent = #"{"pane_id":""# + pane + #"","alias":""# + alias + #"","kind":"claude","state":"blocked","workspace_label":""# + space + #""}"#
+        let q = #"{"id":"q-"# + pane + #"","pane_id":""# + pane + #"","kind":"answer_prompt","agent":""# + alias + #"","summary":""# + question + #"","created_at":""# + created + #"","options":[{"index":1,"label":"Yes"},{"index":2,"label":"No"}]}"#
+        return (agent, q)
     }
 
     private func http(_ status: Int, _ type: String, _ body: String) -> Data {

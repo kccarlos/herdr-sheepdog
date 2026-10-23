@@ -16,6 +16,10 @@ struct FloatingQuestions: View {
     /// The composer and keyboard are up: a lower cap, so some of the
     /// conversation stays in view.
     var compact = false
+    /// A card from another computer: its label (by the card's id).
+    var remote: (String) -> RemoteQuestion? = { _ in nil }
+    /// Talk to a computer (by id).
+    var talkTo: (String) -> Void = { _ in }
     let answer: (String, Int) -> Void
 
     @State private var contentHeight: CGFloat = 0
@@ -39,6 +43,8 @@ struct FloatingQuestions: View {
                         primary: index == 0,
                         idPrefix: idPrefix(card),
                         meta: meta(card, index: index),
+                        remote: remote(card.pending.id),
+                        talkTo: remote(card.pending.id).map { r in { talkTo(r.computerID) } },
                         answer: { answer(card.pending.id, $0) }
                     )
                     // Rises from the capsule; collapses into its settled
@@ -65,6 +71,7 @@ struct FloatingQuestions: View {
 
     private func idPrefix(_ card: ApprovalFlow.Card) -> String {
         if card.pending.id == voiceQuestionID { return "approval" }
+        if let r = remote(card.pending.id) { return "question.\(r.computerID).\(r.pending.agent ?? r.pending.paneID)" }
         return "question.\(card.pending.agent ?? card.pending.paneID)"
     }
 

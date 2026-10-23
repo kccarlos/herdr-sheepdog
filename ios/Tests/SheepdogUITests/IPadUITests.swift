@@ -256,4 +256,29 @@ final class IPadUITests: XCTestCase {
         sleep(2)
         shot("new-agent-sheet")
     }
+
+    /// Several computers: the sidebar's computer level (the current one
+    /// first, Talk to on the other), and All agents' sections. With one
+    /// computer there is no computer row (`testSidebarAndDetail`).
+    func testSidebarComputerLevel() throws {
+        let home = StubDaemon.blocked(alias: "writer", space: "blog", pane: "h1:p1", question: "Publish the post now?")
+        let workStub = try StubDaemon(.computer(name: "Work Mac", agents: #"[{"pane_id":"w1:p1","alias":"api","kind":"claude","state":"working","workspace_label":"webapp"}]"#, questions: "[]"))
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[\(home.agent)]", questions: "[\(home.question)]"))
+        let workHost = try workStub.start()
+        let homeHost = try homeStub.start()
+        defer { workStub.stop(); homeStub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launch()
+        XCTAssertTrue(element(app, "computerLabel.sidebar.fixture-1").waitForExistence(timeout: 15), "the current computer's row")
+        XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-2").waitForExistence(timeout: 15), "Talk to Home Mac")
+        XCTAssertTrue(element(app, "computerLabel.sidebarAgent.writer").waitForExistence(timeout: 15), "Home Mac's waiting agent")
+        element(app, "sidebar.allAgents").tap()
+        XCTAssertTrue(element(app, "computerLabel.section.fixture-2").waitForExistence(timeout: 10), "All agents: Home Mac's section")
+        sleep(1)
+        shot("several-computers")
+        element(app, "computerLabel.sidebarTalkTo.fixture-2").tap()
+        XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-1").waitForExistence(timeout: 10), "Home Mac is current: Talk to Work Mac")
+    }
 }
