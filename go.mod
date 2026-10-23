@@ -7,7 +7,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.82.0
 	github.com/coder/websocket v1.8.15
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	google.golang.org/genai v1.71.0
+	google.golang.org/genai v1.75.0
 )
 
 require (
