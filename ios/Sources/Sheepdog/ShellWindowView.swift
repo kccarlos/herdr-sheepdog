@@ -103,34 +103,22 @@ struct ShellWindowView: View {
         }
     }
 
+    /// The ⋯ menu, from values only: it stays still while the screen
+    /// streams (`ShellWindowMenu`).
     private var menu: some View {
-        Menu {
-            Button {
+        ShellWindowMenu(
+            canResetTextSize: window.fontSize != SwiftTermSurface.defaultFontSize,
+            canClose: window.shellPane != nil
+        ) { item in
+            switch item {
+            case .copy:
                 UIPasteboard.general.string = window.surface.snapshotText()
                 Haptics.tap()
-            } label: {
-                Label("Copy screen", systemImage: "doc.on.doc")
+            case .resetTextSize: window.resetFontSize()
+            case .close: confirmClose = true
             }
-            .accessibilityIdentifier("shell.menu.copy")
-            Button {
-                window.resetFontSize()
-            } label: {
-                Label("Reset text size", systemImage: "textformat.size")
-            }
-            .disabled(window.fontSize == SwiftTermSurface.defaultFontSize)
-            Divider()
-            Button(role: .destructive) {
-                confirmClose = true
-            } label: {
-                Label("Close shell", systemImage: "xmark.circle")
-            }
-            .disabled(window.shellPane == nil)
-            .accessibilityIdentifier("shell.menu.close")
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .accessibilityLabel("More")
         }
-        .accessibilityIdentifier("shell.menu")
+        .equatable()
     }
 
     private var terminal: some View {

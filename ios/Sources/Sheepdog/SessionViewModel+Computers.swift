@@ -49,7 +49,8 @@ extension SessionViewModel {
         return store.computers.map { computer in
             if computer.daemonID == store.currentID {
                 return ComputerSnapshot(id: computer.daemonID, name: computer.displayName, isCurrent: true,
-                                        reachability: currentReachability, agents: agents, questions: questions)
+                                        reachability: .current(chip: connectionChip.status, polled: polledReachability, lastSeen: currentLastSeen),
+                                        agents: agents, questions: questions)
             }
             return session(computer.daemonID)?.snapshot
                 ?? ComputerSnapshot(id: computer.daemonID, name: computer.displayName, isCurrent: false, reachability: .connecting)

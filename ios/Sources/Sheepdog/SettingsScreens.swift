@@ -14,7 +14,7 @@ struct DaemonSettingsView: View {
 
     @State private var probing = false
     @State private var probe: SessionViewModel.Probe?
-    @State private var pairing: PairingStage?
+    @State private var pairing: PairingSheet?
     @State private var confirmRemove = false
     @State private var removing = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -47,7 +47,7 @@ struct DaemonSettingsView: View {
         }
         .navigationTitle(firstRun ? "Welcome" : "Connection")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: Binding(get: { pairing.map { PairingSheet(stage: $0) } }, set: { if $0 == nil { pairing = nil } })) { sheet in
+        .sheet(item: $pairing) { sheet in
             PairingFlowView(stage: sheet.stage) {
                 if firstRun { done() }
             }
@@ -74,13 +74,13 @@ struct DaemonSettingsView: View {
             }
             if let problem = model.daemonNoticeProblem {
                 model.daemonNoticeProblem = nil
-                pairing = .problem(problem)
+                pairing = PairingSheet(stage: .problem(problem))
             }
         }
         .onChange(of: model.daemonNoticeProblem) { _, problem in
             guard let problem else { return }
             model.daemonNoticeProblem = nil
-            pairing = .problem(problem)
+            pairing = PairingSheet(stage: .problem(problem))
         }
     }
 
@@ -118,7 +118,7 @@ struct DaemonSettingsView: View {
         }
         Section {
             Button {
-                pairing = PairingStage.start
+                pairing = PairingSheet(stage: .start)
             } label: {
                 Label("Scan a new code", systemImage: "qrcode.viewfinder")
             }
@@ -187,7 +187,7 @@ struct DaemonSettingsView: View {
     private func scanSection(title: String) -> some View {
         Section {
             Button {
-                pairing = PairingStage.start
+                pairing = PairingSheet(stage: .start)
             } label: {
                 Label(title, systemImage: "qrcode.viewfinder")
             }

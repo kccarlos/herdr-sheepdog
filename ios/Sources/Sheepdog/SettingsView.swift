@@ -26,7 +26,7 @@ struct SettingsView: View {
     /// be closed until an address is in.
     @State private var firstRun = false
     /// Add a computer: the pairing sheet for another computer's code.
-    @State private var addingComputer: PairingStage?
+    @State private var addingComputer: PairingSheet?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -139,7 +139,7 @@ struct SettingsView: View {
                 case let .computer(id): ComputerSettingsView(id: id, done: done)
                 }
             }
-            .sheet(item: Binding(get: { addingComputer.map { PairingSheet(stage: $0) } }, set: { if $0 == nil { addingComputer = nil } })) { sheet in
+            .sheet(item: $addingComputer) { sheet in
                 PairingFlowView(stage: sheet.stage)
                     .environmentObject(model)
             }
@@ -192,7 +192,7 @@ struct SettingsView: View {
 
     private var addComputerButton: some View {
         Button {
-            addingComputer = PairingStage.start
+            addingComputer = PairingSheet(stage: .start)
         } label: {
             Label("Add a computer", systemImage: "plus.circle")
         }

@@ -81,6 +81,20 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertNil(s.notice)
     }
 
+    func testAWatchingWindowDropsReconnectingOnceFramesComeBack() {
+        var s = S(paneID: "p")
+        _ = s.start(.yes)
+        _ = s.sizeChanged(cols: 58, rows: 40)
+        s.opened(mode: .observe)
+        _ = s.frame()
+        XCTAssertEqual(s.phase, .observing)
+        XCTAssertNil(s.notice)
+        XCTAssertEqual(s.connectionLost(), [])
+        XCTAssertEqual(s.notice, .reconnecting)
+        _ = s.frame()
+        XCTAssertNil(s.notice, "frames again: no stale Reconnecting…")
+    }
+
     func testTheHandshakeArrivingLaterUpgradesASnapshot() {
         var s = S(paneID: "p")
         _ = s.start(.no)
