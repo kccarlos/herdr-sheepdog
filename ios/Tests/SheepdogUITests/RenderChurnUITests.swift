@@ -146,15 +146,24 @@ extension XCTestCase {
         if !opened { print("menu \(probe) did not open:\n\(app.debugDescription)") }
         XCTAssertTrue(opened, "\(probe): the menu opens under churn", file: file, line: line)
         let label = item.label
-        let before = RenderCounts(app)
-        for i in 0 ..< 10 {
-            usleep(200_000)
-            XCTAssertTrue(item.exists, "\(probe): the menu is still open after \(i * 200 + 200) ms", file: file, line: line)
-            XCTAssertEqual(item.label, label, "\(probe): the item did not change", file: file, line: line)
+        // Two windows of two seconds: the first may still see the screen
+        // settling after a launch (a freshly booted simulator); a menu
+        // redrawn by the churn is redrawn in both.
+        var drawn = 0
+        var counts = ""
+        for _ in 0 ..< 2 {
+            let before = RenderCounts(app)
+            for i in 0 ..< 10 {
+                usleep(200_000)
+                XCTAssertTrue(item.exists, "\(probe): the menu is still open after \(i * 200 + 200) ms", file: file, line: line)
+                XCTAssertEqual(item.label, label, "\(probe): the item did not change", file: file, line: line)
+            }
+            let after = RenderCounts(app)
+            drawn = after["menu.\(probe)"] - before["menu.\(probe)"]
+            counts = after.text
+            if drawn <= 1 { break }
         }
-        let after = RenderCounts(app)
-        let drawn = after["menu.\(probe)"] - before["menu.\(probe)"]
-        XCTAssertLessThanOrEqual(drawn, 1, "\(probe): the open menu was drawn \(drawn) more times (\(after.text))", file: file, line: line)
+        XCTAssertLessThanOrEqual(drawn, 1, "\(probe): the open menu was drawn \(drawn) more times (\(counts))", file: file, line: line)
         closeMenu(app, item: item.identifier.isEmpty ? nil : item.identifier)
     }
 }

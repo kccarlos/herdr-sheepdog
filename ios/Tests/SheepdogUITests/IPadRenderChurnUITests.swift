@@ -39,7 +39,7 @@ final class IPadRenderChurnUITests: XCTestCase {
         // An agent in the detail: its split and ⋯ menus.
         tapWhenTappable(element(app, "sidebar.agent.claude-auth"), "claude-auth in the sidebar")
         XCTAssertTrue(element(app, "agentScreen.terminal").waitForExistence(timeout: 10))
-        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "pane.split"), item: app.buttons["pane.split.claude-migration"], probe: "split")
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "pane.split"), item: app.collectionViews.buttons["claude-migration"].firstMatch, probe: "split")
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "agentScreen.menu"), item: app.buttons["agentScreen.menu.copy"], probe: "agent")
     }
 
