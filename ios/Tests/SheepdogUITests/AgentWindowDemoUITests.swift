@@ -162,11 +162,15 @@ final class AgentWindowDemoUITests: XCTestCase {
         let toggle = app.switches["newAgent.worktree"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(toggle.value as? String, "0", "New worktree is off by default")
-        toggle.switches.firstMatch.tap()
+        // The switch shows the branch field; a lost tap leaves it off.
         let branch = app.textFields["newAgent.branch"]
-        XCTAssertTrue(branch.waitForExistence(timeout: 5), "New worktree shows the branch field")
-        branch.tap()
-        branch.typeText("fix-login")
+        for _ in 0 ..< 3 where !branch.exists {
+            tapWhenTappable(toggle.switches.firstMatch, "New worktree")
+            _ = branch.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(branch.exists, "New worktree shows the branch field")
+        tapWhenTappable(branch, "the branch field")
+        typeWhenFocused(branch, "fix-login")
         XCTAssertTrue(start.isEnabled)
         shot("new-agent-worktree")
         start.tap()

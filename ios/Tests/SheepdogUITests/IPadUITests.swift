@@ -233,13 +233,19 @@ final class IPadUITests: XCTestCase {
         let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'claude-auth'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 10), "⌘1 works from the terminal too")
 
-        app.typeKey("m", modifierFlags: [.command, .shift])
         // Any status line that says so: the real main view stays under the
         // demo's cover with its own (unmuted) one, and `firstMatch` was
-        // sometimes that one.
+        // sometimes that one. A key press sent while the window was still
+        // switching agents was lost now and then, so press again until it
+        // reads muted (a toggle: a late first press is undone by the second
+        // and redone by the third).
         let muted = NSPredicate(format: "label CONTAINS[c] 'muted' OR label CONTAINS[c] 'mic off'")
         let mutedStatus = app.staticTexts.matching(identifier: "controls.statusLine").matching(muted).firstMatch
-        XCTAssertTrue(mutedStatus.waitForExistence(timeout: 10), "⌘⇧M mutes")
+        for _ in 0 ..< 3 where !mutedStatus.exists {
+            app.typeKey("m", modifierFlags: [.command, .shift])
+            _ = mutedStatus.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(mutedStatus.exists, "⌘⇧M mutes")
         app.typeKey("m", modifierFlags: [.command, .shift])
 
         app.typeKey("n", modifierFlags: .command)

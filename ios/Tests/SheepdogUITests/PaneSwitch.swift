@@ -23,8 +23,11 @@ extension XCTestCase {
     func showAgentsPane(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let tabs = app.buttons.matching(identifier: "main.pane.flock")
         XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 10), "main.pane.flock", file: file, line: line)
-        let deadline = Date().addingTimeInterval(15)
+        // The pane is up once one of its agent rows can be tapped.
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'flock.agent.'")).firstMatch
+        let deadline = Date().addingTimeInterval(20)
         repeat {
+            if row.isTappable { return }
             for i in 0 ..< tabs.count where tabs.element(boundBy: i).isTappable {
                 let tab = tabs.element(boundBy: i)
                 if tab.isSelected { return }

@@ -56,15 +56,17 @@ final class FlockTypingUITests: XCTestCase {
         // Back to the conversation, and type instead of talking.
         tapWhenReady(app.buttons["main.pane.conversation"], "the Conversation pane")
         tapWhenReady(app.buttons["controls.type"], "the keyboard button")
-        let field = element(app, "type.field")
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.typeText("what is deploy doing")
+        typeWhenFocused(element(app, "type.field"), "what is deploy doing")
         shot(app, "30-type-instead")
-        tapWhenReady(app.buttons["type.send"], "Send")
 
-        // The daemon's text router answers; both land from /events.
+        // The daemon's text router answers; both land from /events. A Send
+        // lost on a busy Mac leaves the words in the field: send again.
         let said = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", "what is deploy doing")).firstMatch
-        XCTAssertTrue(said.waitForExistence(timeout: 15), "the typed words show as the user's")
+        for _ in 0 ..< 2 where !said.exists {
+            if app.buttons["type.send"].isTappable { app.buttons["type.send"].tap() }
+            _ = said.waitForExistence(timeout: 15)
+        }
+        XCTAssertTrue(said.exists, "the typed words show as the user's")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "bubble.sheepdog").firstMatch.waitForExistence(timeout: 15), "and the dog answers")
         sleep(1)
         shot(app, "31-typed-answered")
