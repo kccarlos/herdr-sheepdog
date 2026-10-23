@@ -6,8 +6,9 @@ extension XCUIElement {
     /// menu opens or closes has the frame {inf, inf}, and asking it
     /// `isHittable` fails the test with "Activation point invalid".
     var isTappable: Bool {
-        guard exists else { return false }
-        let frame = self.frame
+        // A snapshot, not `exists` then `frame`: an element that goes
+        // between the two fails the test ("no matches found").
+        guard let frame = try? snapshot().frame else { return false }
         guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return false }
         return isHittable
     }
@@ -156,9 +157,7 @@ extension XCTestCase {
     private func tapOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
         let screen = app.frame
         for i in 0 ..< query.count {
-            let element = query.element(boundBy: i)
-            guard element.exists else { continue }
-            let frame = element.frame
+            guard let frame = try? query.element(boundBy: i).snapshot().frame else { continue }
             guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty,
                   screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - screen.minX, dy: frame.midY - screen.minY)).tap()

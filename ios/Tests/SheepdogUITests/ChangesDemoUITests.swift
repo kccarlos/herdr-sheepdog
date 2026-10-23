@@ -40,7 +40,9 @@ final class ChangesDemoUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
         showAgentsPane(app)
         tapVisible(app.buttons, "flock.agent.claude-auth.window")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
+        // The first terminal on a simulator that just booted can take well
+        // over 10 s to come up (the first test of a CI job).
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 30))
         return app
     }
 

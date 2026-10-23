@@ -187,15 +187,15 @@ final class IPadUITests: XCTestCase {
         waitForExpectations(timeout: 30)
 
         XCUIDevice.shared.orientation = .portrait
+        // Right after the rotation a tap on Split can be lost while the
+        // layout settles: tap again until the picker is up.
         let splitButton = element(app, "pane.split")
-        let hittable = NSPredicate(format: "exists == true AND hittable == true")
-        expectation(for: hittable, evaluatedWith: splitButton)
-        waitForExpectations(timeout: 15)
-        splitButton.tap()
         let payments = app.collectionViews.buttons["codex-payments"].firstMatch
-        expectation(for: hittable, evaluatedWith: payments)
-        waitForExpectations(timeout: 15)
-        payments.tap()
+        for _ in 0 ..< 3 where !payments.exists {
+            tapWhenTappable(splitButton, "Split", timeout: 15)
+            _ = payments.waitForExistence(timeout: 5)
+        }
+        tapWhenTappable(payments, "codex-payments in the picker", timeout: 15)
         expectation(for: two, evaluatedWith: terminals)
         waitForExpectations(timeout: 30)
         sleep(2)

@@ -31,7 +31,12 @@ final class VoiceRobustnessUITests: XCTestCase {
         XCTAssertEqual(mic.label, "Mute microphone", "the mic button names its action")
         shot(app, "19-coach-mark")
 
-        tapWhenReady(app.buttons["controls.coachMark.dismiss"], "Got it")
+        // The coach mark leaves by itself after 9 s, which a slow CI Mac
+        // can reach before this line: tap Got it if it is still up, and go
+        // on once it is gone either way.
+        let gotIt = app.buttons["controls.coachMark.dismiss"]
+        if gotIt.isTappable { gotIt.tap() }
+        XCTAssertTrue(app.descendants(matching: .any)["controls.coachMark"].waitForNonExistence(timeout: 10), "the coach mark goes")
         sleep(1)
         shot(app, "20-mic-live")
 
