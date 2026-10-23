@@ -289,6 +289,11 @@ jobs:
         id: wait
         run: |
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          # One app launch settles the just-booted system before the test
+          # runner's (a runner launched straight after the boot stalled once
+          # and never started).
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.apple.Preferences > /dev/null
+          xcrun simctl terminate "${{ steps.sim.outputs.udid }}" com.apple.Preferences || true
           # The app asks for the microphone when the session starts.
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
           echo "simulator booted $(date +%s)" >> "$TIMINGS"
@@ -378,8 +383,8 @@ jobs:
             ios/scripts/fixture-daemons.sh start
           echo "fixture daemons up $(date +%s)" >> "$TIMINGS"
 
-      # A test that fails is run once more and the job fails only if it
-      # fails twice. The tap-flow UI tests run without animations
+      # scripts/ci-xctest.sh: a test that fails is run once more and the job
+      # fails only if it fails twice. The tap-flow UI tests run without animations
       # (-sheepdogNoAnimations), so a tap no longer lands on a moving
       # sheet; a test that needed the second run is listed in the job
       # summary and as a warning (scripts/ci-test-summary.sh).
@@ -392,17 +397,8 @@ jobs:
         if: ${{ !cancelled() && steps.wait.outcome == 'success' && steps.fixture.outcome == 'success' && matrix.iphone != '' }}
         working-directory: ios
         run: |
-          status=0
           # shellcheck disable=SC2086 # IPHONE_TESTS is a list of arguments
-          xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 2 \
-            $IPHONE_TESTS \
-            -resultBundlePath "$RESULTS/Tests.xcresult" \
-            > "$RESULTS/tests.log" 2>&1 || status=$?
-          sh scripts/ci-test-summary.sh "$RESULTS/tests.log" "$status"
+          sh scripts/ci-xctest.sh tests "${{ steps.sim.outputs.udid }}" $IPHONE_TESTS
 
       # Expects a restart divider in the history, so the main daemon restarts
       # just before it (the other UI tests add conversation after the seeded
@@ -412,16 +408,7 @@ jobs:
         working-directory: ios
         run: |
           ./scripts/fixture-daemons.sh restart
-          status=0
-          xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 2 \
-            -only-testing:SheepdogUITests/HistoryApprovalUITests \
-            -resultBundlePath "$RESULTS/HistoryApproval.xcresult" \
-            > "$RESULTS/history.log" 2>&1 || status=$?
-          sh scripts/ci-test-summary.sh "$RESULTS/history.log" "$status"
+          sh scripts/ci-xctest.sh history "${{ steps.sim.outputs.udid }}" -only-testing:SheepdogUITests/HistoryApprovalUITests
 
       # The restarter kills and restarts the main daemon when the test asks.
       - name: UI test - reconnect after a daemon restart
@@ -432,33 +419,18 @@ jobs:
           ./scripts/fixture-daemon-restarter.sh > "$RUNNER_TEMP/restarter.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/restarter.pid"
           status=0
-          TEST_RUNNER_SHEEPDOG_CONTROL_DIR="$SHEEPDOG_CONTROL_DIR" xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 2 \
-            -only-testing:SheepdogUITests/ReconnectUITests \
-            -resultBundlePath "$RESULTS/Reconnect.xcresult" \
-            > "$RESULTS/reconnect.log" 2>&1 || status=$?
+          TEST_RUNNER_SHEEPDOG_CONTROL_DIR="$SHEEPDOG_CONTROL_DIR" \
+            sh scripts/ci-xctest.sh reconnect "${{ steps.sim.outputs.udid }}" -only-testing:SheepdogUITests/ReconnectUITests || status=$?
           kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
-          sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
+          exit "$status"
 
       # The iPad layout (IPadUITests, offline demo, no daemon).
       - name: UI tests - iPad
         if: ${{ !cancelled() && steps.wait.outcome == 'success' && matrix.ipad != '' }}
         working-directory: ios
         run: |
-          status=0
           # shellcheck disable=SC2086 # IPAD_TESTS is a list of arguments
-          xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -collect-test-diagnostics never \
-            -retry-tests-on-failure -test-iterations 2 \
-            $IPAD_TESTS \
-            -resultBundlePath "$RESULTS/IPad.xcresult" \
-            > "$RESULTS/ipad.log" 2>&1 || status=$?
-          sh scripts/ci-test-summary.sh "$RESULTS/ipad.log" "$status"
+          sh scripts/ci-xctest.sh ipad "${{ steps.sim.outputs.udid }}" $IPAD_TESTS
 
       - name: Stop the fixture daemons
         if: always() && env.SHEEPDOG_FIXTURE_DATA != ''

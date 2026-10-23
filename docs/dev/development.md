@@ -167,8 +167,10 @@ recording and screenshot tests skip. The tap-flow UI tests launch the app with
 SwiftUI animations off, so a tap never lands on a sheet or menu that is
 still moving; they tap through helpers that wait for an element to be on
 screen and check that the tap landed (`ios/Tests/SheepdogUITests/PaneSwitch.swift`).
-A failing test is run once more (`-retry-tests-on-failure
--test-iterations 2`) and the job fails only if it fails twice; a test
+Each test step runs `ios/scripts/ci-xctest.sh`: a failing test is run once
+more (`-retry-tests-on-failure -test-iterations 2`) and the job fails only
+if it fails twice, and a test runner that never started (once seen on a
+simulator that had just booted) gets one more start; a test
 that passed only on the second run is a flake, and
 `ios/scripts/ci-test-summary.sh` lists it in the job summary and as a
 warning on the run. It builds for the simulator only and
