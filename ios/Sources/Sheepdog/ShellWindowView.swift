@@ -15,8 +15,22 @@ struct ShellRoute: Hashable {
 /// only detaches; Close shell (⋯, confirmed) ends it on the computer.
 struct ShellWindowView: View {
     let route: ShellRoute
-
     @EnvironmentObject private var model: SessionViewModel
+
+    /// The content observes only its controller: a session change
+    /// re-renders nothing in the shell (it shows nothing of the session).
+    var body: some View {
+        ShellWindowContent(route: route, model: model).equatable()
+    }
+}
+
+private struct ShellWindowContent: View, Equatable {
+    let route: ShellRoute
+    /// For actions only.
+    let model: SessionViewModel
+
+    static func == (a: Self, b: Self) -> Bool { a.route == b.route && a.model === b.model }
+
     @StateObject private var window: AgentWindowController
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -28,8 +42,9 @@ struct ShellWindowView: View {
     /// Typing mode goes on once, when the shell first goes live.
     @State private var typedOnce = false
 
-    init(route: ShellRoute) {
+    init(route: ShellRoute, model: SessionViewModel) {
         self.route = route
+        self.model = model
         _window = StateObject(wrappedValue: AgentWindowController(paneID: "shell:" + (route.cwd ?? ""), shell: true, shellCwd: route.cwd))
     }
 
@@ -38,7 +53,7 @@ struct ShellWindowView: View {
     private var background: Color { Color(theme.background) }
     private var noticeFill: Color { Color(TerminalRGB(hex: colorScheme == .dark ? "#1F2126" : "#F1EEE7")) }
     private var state: AgentWindowState { window.state }
-    private var endedEmpty: Bool { state.phase == .ended && window.screenText.isEmpty }
+    private var endedEmpty: Bool { state.phase == .ended && !window.hasScreen }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -123,7 +138,7 @@ struct ShellWindowView: View {
 
     private var terminal: some View {
         ZStack {
-            TerminalHost(surface: window.surface, accessibilityText: window.screenText)
+            TerminalHost(surface: window.surface)
                 .padding(.horizontal, 6)
                 .padding(.top, 4)
                 .opacity(state.showsSkeleton || endedEmpty ? 0 : 1)

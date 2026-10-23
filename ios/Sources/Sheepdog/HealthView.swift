@@ -9,7 +9,7 @@ import SwiftUI
 /// tap.
 struct HealthView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @ObservedObject var meter: VoiceMeter
+    let meter: VoiceMeter
     /// "Change in Settings": where Models lives from here. Nil hides the
     /// row (Settings already has the Models screen one tap away).
     var changeModels: (() -> Void)?

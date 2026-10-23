@@ -17,7 +17,7 @@ struct SettingsView: View {
     /// an `@EnvironmentObject`'s own `@Published` changes are what
     /// re-renders a view, and a nested object's changes do not propagate
     /// through it, so Diagnostics' live numbers need their own subscription.
-    @ObservedObject var meter: VoiceMeter
+    let meter: VoiceMeter
     @Environment(\.dismiss) private var dismiss
 
     @State private var loaded = false

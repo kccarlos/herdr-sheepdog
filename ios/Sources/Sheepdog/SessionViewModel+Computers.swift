@@ -23,7 +23,9 @@ extension SessionViewModel {
                 kept.append(existing)
             } else {
                 let made = ComputerSession(id: computer.daemonID, name: computer.displayName, endpoint: endpoint)
-                // The views read the session through this model.
+                // The views read the session through this model. The session
+                // announces only real changes (it assigns nothing equal),
+                // so a quiet poll re-renders nothing here.
                 otherSinks[made.id] = made.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
                 made.start()
                 kept.append(made)
@@ -33,7 +35,7 @@ extension SessionViewModel {
             gone.stop()
             otherSinks[gone.id] = nil
         }
-        others = kept
+        if !kept.elementsEqual(others, by: ===) { others = kept }
     }
 
     func session(_ id: String) -> ComputerSession? { others.first { $0.id == id } }

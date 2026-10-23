@@ -964,7 +964,7 @@ Order and dependencies:
 
 **Progress.**
 
-- **Phase 1 (done).** `Presentation` (app) and `PresentationQueue` (Kit,
+- **Phase 1 (done, #405).** `Presentation` (app) and `PresentationQueue` (Kit,
   pure, `PresentationQueueTests` with seeded interleavings) replace the
   model's `showSettings`, `pairingSheet`, `presentedCard`,
   `showsNewAgent`, `showsSpaces`, `primer` and `demoActive`, the scene's
@@ -986,6 +986,59 @@ Order and dependencies:
     Settings) stay `@State`.
   - **Tests:** `PairingLinkUITests.testPairingLinkOverSettingsIsQueuedNotDropped`
     (animations on, re-render churn), next to #402's Add a computer test.
+- **Phase 2 (done, #407).** The fan-out and the fast streams.
+  - **Assign only on change:** `refreshState`/`apply` (`pendingAction`,
+    the approval card, `questionPhases`, `brain`, the provider and model,
+    `update`, `polledReachability`) and every `ComputerSession` property,
+    so another computer's quiet poll announces nothing and its forwarder
+    fires only on a real change.
+  - **Terminal:** `ScreenStreamRouter` (Kit) replaces `agentScreenPush`.
+    `AgentWindowController` no longer publishes `screenText` or the
+    snapshot model per frame. The text is read at most twice a second,
+    always rather than only under VoiceOver, because the UI tests read it
+    too. `AgentWindowView` and `ShellWindowView` now observe the session
+    only in a thin outer view, and their content observes the controller
+    alone. The header is an `Equatable` view.
+  - **Audio levels:** `VoiceMeter` is `@Observable`. The orb and the mic
+    ring are the only readers of the levels; the capsule used to observe
+    the meter whole, which redrew its voice menu per level tick.
+  - **Menus:** `StableMenu` draws a menu from one `Equatable` value. Every
+    menu #402 left is one now:
+    - the voice menu in the capsule and the mini capsule, and `+` and
+      `⋯` on the iPhone and the iPad sidebar;
+    - the pane switcher, the iPad split menu, Spaces' New space and
+      worktree menus, and Attach.
+
+    The pane switcher's menu cannot show today, because the top bar caps
+    the text size below the accessibility sizes.
+  - **Measured** (`RenderChurnUITests.testTerminalFramesReRenderOnlyTheSurface`,
+    4 s of the demo terminal at 20 frames a second, about 105 frames):
+
+    | Count | Before | After |
+    |---|---|---|
+    | Window change announcements | 17 | 0 |
+    | Model change announcements | 0 | 0 |
+    | Header re-renders | — | 0 |
+    | ⋯ menu re-renders | — | 0 |
+
+    Before, each announcement re-rendered the whole window. A `/ws`
+    `screen` push used to announce a change on the app-wide model as well;
+    it now announces nothing.
+  - **Tests:** `RenderChurnUITests` (iPhone: the main menus, the agent and
+    shell windows' ⋯ and Attach, Spaces' menus, and the frame count) and
+    `IPadRenderChurnUITests` (the sidebar's menus, the voice and mini
+    capsule menus, a pane's split and ⋯). Each opens a menu under
+    `-sheepdogRenderChurn` and checks that it stays open with the same
+    items and is not drawn again. `ScreenStreamRouterTests` is in Kit.
+  - **Left for later phases:**
+    - the model still re-renders every observer on any real change, such
+      as transcripts while the voice talks (phase 8);
+    - the conversation's and the Agents page's own views;
+    - the side effect in `termAvailability`'s getter (phase 4b);
+    - on the CI Mac, a menu *item* tapped during the 10 Hz churn did not
+      open its screen (locally it did). The tests that need one tap their
+      way there before the churn starts (`-sheepdogRenderChurnAfter`);
+      worth a look once the model is split (phase 8).
 
 - **Phase 3, the pure part (done).** The machine is in Kit, not yet
   wired. It is named `ComputerLink`, because a public `Link` would clash

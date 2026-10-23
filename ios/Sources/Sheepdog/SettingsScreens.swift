@@ -313,7 +313,7 @@ struct NotificationsView: View {
 /// when something does not work.
 struct DiagnosticsView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @ObservedObject var meter: VoiceMeter
+    let meter: VoiceMeter
 
     var body: some View {
         let d = meter.gateDiagnostics
