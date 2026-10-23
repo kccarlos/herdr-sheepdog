@@ -101,6 +101,29 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(element(app, "flock.agent.claude-auth").waitForExistence(timeout: 5))
     }
 
+    /// A filter that matches no agent shows its empty state, and its Show
+    /// all brings every agent back. The demo is paused, so no agent asks
+    /// a question and Waiting stays empty however slow the Mac is.
+    func testAllAgentsEmptyFilterShowsAll() throws {
+        let app = launchDemo(["-sheepdogDemoPaused"])
+        let all = element(app, "sidebar.allAgents")
+        XCTAssertTrue(all.waitForExistence(timeout: 10))
+        all.tap()
+        XCTAssertTrue(element(app, "flock.agent.codex-payments").waitForExistence(timeout: 10))
+        element(app, "allAgents.filter.waiting").tap()
+        XCTAssertTrue(element(app, "allAgents.empty").waitForExistence(timeout: 5), "no agent is waiting")
+        XCTAssertFalse(element(app, "flock.agent.codex-payments").exists)
+        sleep(1)
+        shot("all-agents-waiting-empty")
+        let showAll = element(app, "allAgents.showAll")
+        XCTAssertTrue(showAll.exists)
+        showAll.tap()
+        XCTAssertTrue(element(app, "flock.agent.codex-payments").waitForExistence(timeout: 5), "Show all lists every agent again")
+        XCTAssertTrue(element(app, "flock.agent.claude-auth").exists)
+        XCTAssertFalse(element(app, "allAgents.empty").exists)
+        XCTAssertTrue(element(app, "allAgents.filter.all").isSelected, "the All filter is on")
+    }
+
     /// Portrait: the sidebar hides, and the detail's header carries Show
     /// sidebar and the mini capsule.
     func testPortraitHidesTheSidebar() throws {

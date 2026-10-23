@@ -2047,7 +2047,13 @@ final class SessionViewModel: ObservableObject {
         store.address = DemoDaemon.endpoint.display
         store.hasBeenConfigured = true
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SheepdogDemo-\(UUID().uuidString)", isDirectory: true)
-        return SessionViewModel(settings: store, cache: ConversationCache(directory: directory), demo: DemoDaemon())
+        #if DEBUG
+        let start = Date()
+        let demo = DebugLaunch.demoPaused ? DemoDaemon(clock: { start }) : DemoDaemon()
+        #else
+        let demo = DemoDaemon()
+        #endif
+        return SessionViewModel(settings: store, cache: ConversationCache(directory: directory), demo: demo)
     }
 
     /// The first-run screen's and Settings' "Try the demo".

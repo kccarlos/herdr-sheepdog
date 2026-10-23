@@ -8,16 +8,13 @@ name: iOS
 # Xcode Cloud only archives and uploads TestFlight builds on ios-v* tags; it
 # runs no tests (ios/docs/dev/xcode-cloud.md).
 #
-# Tiers (docs/dev/development.md, CI/CD): the plan job reads the changed
-# paths (ios/scripts/ci-plan.sh tier) and starts
-#   full   smoke and the four shards, for a PR that changes the app or this
-#          workflow (and for a manual run);
-#   smoke  smoke only, for a PR that changes the daemon's API, and for every
-#          push to main that changes either;
-#   none   no Mac at all (docs-only and other changes).
-# The jobs and their tests come from ios/scripts/ci-shards.txt. The workflow
-# starts on every PR, so ios-summary always reports and can be the one
-# required check.
+# plan (Linux) picks the tier and the test jobs, build (one Mac) builds the
+# app, its tests and the daemon once, and each test job (one Mac and one
+# simulator each) runs its share of the tests from that build. The tiers,
+# the job graph and why it looks like this are in docs/dev/development.md
+# (CI/CD); the jobs and their tests come from ios/scripts/ci-shards.txt.
+# The workflow starts on every PR, so ios-summary always reports and can be
+# the one required check.
 
 on:
   pull_request:
@@ -34,6 +31,13 @@ permissions:
 concurrency:
   group: ios-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
+
+env:
+  BUNDLE_ID: com.github.kccarlos.herdr-sheepdog-ios
+  # The build the test jobs share: one uncompressed upload of a zstd tar
+  # (an artifact keeps neither the execute bits nor the symlinks the app
+  # and test bundles need).
+  BUILD_ARTIFACT: ios-build.tar.zst
 
 jobs:
   plan:
@@ -83,31 +87,21 @@ jobs:
           fi
           echo "::notice::iOS tier: $tier"
 
-  tests:
+  # Builds the app and its test bundles for the simulator (arm64 only, no
+  # index store) and the daemon for the fixture daemons, once, and hands
+  # them to the test jobs as an artifact kept for a day.
+  build:
     needs: plan
     if: needs.plan.outputs.tier != 'none'
-    name: tests (${{ matrix.name }})
     # The xcode-27 image (macOS with Xcode 27.x) has the Xcode the app is
     # developed with; macos-26 stops at Xcode 26.x. Its simulators run iOS
     # 27.0, above the app's iOS 26 deployment target.
     # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
     runs-on: xcode-27
-    timeout-minutes: 60
-    strategy:
-      # Smoke and the shards run side by side; the first job that fails
-      # cancels the others (a red smoke stops the shards). Each job builds
-      # the app itself: the build hides the simulator's boot, which costs
-      # five minutes when it is not hidden (a shared build would need an
-      # artifact and could not hide it).
-      fail-fast: true
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    timeout-minutes: 40
     env:
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
-      BUNDLE_ID: com.github.kccarlos.herdr-sheepdog-ios
-      IPHONE_TESTS: ${{ matrix.iphone }}
-      IPAD_TESTS: ${{ matrix.ipad }}
-      WANT_IPHONE: ${{ matrix.iphone != '' || matrix.history || matrix.reconnect }}
     steps:
       - uses: actions/checkout@v7
 
@@ -127,7 +121,8 @@ jobs:
           xcodebuild -version
 
       # The fixture daemons (ios/scripts/fixture-daemons.sh) are this
-      # checkout's daemon, so an API change that breaks the app fails here.
+      # checkout's daemon, so an API change that breaks the app fails the
+      # tests.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -158,19 +153,98 @@ jobs:
           path: ${{ runner.temp }}/spm
           key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
 
-      # One simulator boots while the app builds (a few minutes on a cold
-      # runner); booting it earlier, or two at once, slows the setup and
-      # the build badly. A job with iPhone and iPad tests (smoke alone, in
-      # the smoke tier) boots the iPhone here and the iPad at the end.
-      - name: Pick the simulators and start booting one
+      # For any simulator, so no simulator boots here; arm64 only (the
+      # hosted Macs are Apple silicon), without the index store nobody reads.
+      - name: Build for testing
+        working-directory: ios
+        run: |
+          mkdir -p "$RESULTS"
+          status=0
+          xcodebuild build-for-testing \
+            -project Sheepdog.xcodeproj \
+            -scheme Sheepdog \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED" \
+            -clonedSourcePackagesDirPath "$SPM" \
+            -disableAutomaticPackageResolution \
+            -skipPackagePluginValidation \
+            ARCHS=arm64 \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            > "$RESULTS/build.log" 2>&1 || status=$?
+          grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
+          if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
+          exit "$status"
+
+      # Build/Products holds the .app, the test bundles and the .xctestrun
+      # (whose paths are relative to it); bin/sheepdog is the daemon.
+      - name: Pack the build
+        run: |
+          start=$(date +%s)
+          tar -cf - -C "$DERIVED/Build" Products -C "$GITHUB_WORKSPACE" bin \
+            | zstd -T0 -3 -q -o "$RUNNER_TEMP/$BUILD_ARTIFACT"
+          ls "$DERIVED"/Build/Products/*.xctestrun
+          echo "products $(du -sh "$DERIVED/Build/Products" | cut -f1), packed $(du -h "$RUNNER_TEMP/$BUILD_ARTIFACT" | cut -f1) in $(( $(date +%s) - start )) s" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/${{ env.BUILD_ARTIFACT }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-build-log
+          path: ${{ runner.temp }}/results
+          retention-days: 7
+
+  tests:
+    needs: [plan, build]
+    name: tests (${{ matrix.name }})
+    runs-on: xcode-27
+    timeout-minutes: 45
+    strategy:
+      # Smoke and the shards run side by side; the first job that fails
+      # cancels the others (a red smoke stops the shards).
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      IPHONE_TESTS: ${{ matrix.iphone }}
+      IPAD_TESTS: ${{ matrix.ipad }}
+      # One simulator per job: an iPad job runs only iPad tests
+      # (ci-plan.sh check).
+      DEVICE: ${{ matrix.ipad != '' && 'ipad' || 'iphone' }}
+    steps:
+      - name: Set the paths
+        run: |
+          {
+            echo "BUILD=$RUNNER_TEMP/build"
+            echo "RESULTS=$RUNNER_TEMP/results"
+            echo "TIMINGS=$RUNNER_TEMP/timings"
+          } >> "$GITHUB_ENV"
+          echo "job start $(date +%s)" > "$RUNNER_TEMP/timings"
+
+      - name: Select Xcode 27.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+
+      # Boots first, so the boot runs while the checkout and the build
+      # download do.
+      - name: Pick the simulator and start booting it
         id: sim
         run: |
           # The newest iPhone on the image, but not a foldable one (iPhone
           # Duo): unfolded it has regular width, which gets the iPad layout,
           # and the iPhone tests test the iPhone layout. The newest iPad Pro
           # 13" (any iPad if there is none) for IPadUITests.
-          picked=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, os, sys
           devs = json.load(sys.stdin)["devices"]
           def newest(ok):
               best = None
@@ -182,51 +256,44 @@ jobs:
                       if ok(d["name"]) and (best is None or ver > best[0]):
                           best = (ver, d["udid"], d["name"], runtime)
               return best
-          iphone = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
-          ipad = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
-          for key, best in (("iphone", iphone), ("ipad", ipad)):
-              if best is None:
-                  sys.exit("no %s simulator available" % key)
-              print("%s=%s" % (key, best[1]))
-              print(key, best[2], best[3], file=sys.stderr)
+          if os.environ["DEVICE"] == "ipad":
+              best = newest(lambda n: n.startswith("iPad Pro 13")) or newest(lambda n: n.startswith("iPad"))
+          else:
+              best = newest(lambda n: n.startswith("iPhone") and "Duo" not in n and "Fold" not in n)
+          if best is None:
+              sys.exit("no %s simulator available" % os.environ["DEVICE"])
+          print(best[2], best[3], file=sys.stderr)
+          print(best[1])
           ')
-          iphone=$(echo "$picked" | sed -n 's/^iphone=//p')
-          ipad=$(echo "$picked" | sed -n 's/^ipad=//p')
-          # The build is for one simulator; its products run on the other.
-          build=$ipad
-          if [ "$WANT_IPHONE" = true ]; then build=$iphone; fi
-          xcrun simctl boot "$build" || true
-          {
-            echo "iphone=$iphone"
-            echo "ipad=$ipad"
-            echo "build=$build"
-          } >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid" || true
+          echo "boot started $(date +%s)" >> "$TIMINGS"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
-      - name: Build for testing
-        id: build
-        working-directory: ios
+      # The scripts (fixture daemons, test summary); the build has the rest.
+      - uses: actions/checkout@v7
+
+      - name: Download the build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.BUILD_ARTIFACT }}
+          path: ${{ runner.temp }}
+
+      - name: Unpack the build
         run: |
-          mkdir -p "$RESULTS"
-          status=0
-          xcodebuild build-for-testing \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -configuration Debug \
-            -destination "id=${{ steps.sim.outputs.build }}" \
-            -derivedDataPath "$DERIVED" \
-            -clonedSourcePackagesDirPath "$SPM" \
-            -disableAutomaticPackageResolution \
-            -skipPackagePluginValidation \
-            > "$RESULTS/build.log" 2>&1 || status=$?
-          grep -E 'error:|^\*\* ' "$RESULTS/build.log" | tail -n 100 || true
-          if [ "$status" -ne 0 ]; then tail -n 80 "$RESULTS/build.log"; fi
-          exit "$status"
+          mkdir -p "$BUILD" "$RESULTS"
+          zstd -dc "$RUNNER_TEMP/$BUILD_ARTIFACT" | tar -xf - -C "$BUILD"
+          mv "$BUILD/bin" "$GITHUB_WORKSPACE/bin"
+          rm "$RUNNER_TEMP/$BUILD_ARTIFACT"
+          xctestrun=$(ls "$BUILD"/Products/*.xctestrun)
+          echo "XCTESTRUN=$xctestrun" >> "$GITHUB_ENV"
+          echo "build unpacked $(date +%s)" >> "$TIMINGS"
 
       - name: Wait for the simulator
         run: |
-          xcrun simctl bootstatus "${{ steps.sim.outputs.build }}" -b
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
           # The app asks for the microphone when the session starts.
-          xcrun simctl privacy "${{ steps.sim.outputs.build }}" grant microphone "$BUNDLE_ID"
+          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant microphone "$BUNDLE_ID"
+          echo "simulator booted $(date +%s)" >> "$TIMINGS"
 
       # Two free ports for the main (--voice=off) and the pair daemon, and
       # a control directory for scripts/fixture-daemon-restarter.sh. The
@@ -272,10 +339,8 @@ jobs:
           status=0
           # shellcheck disable=SC2086 # IPHONE_TESTS is a list of arguments
           xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.iphone }}" \
-            -derivedDataPath "$DERIVED" \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
             $IPHONE_TESTS \
@@ -293,10 +358,8 @@ jobs:
           ./scripts/fixture-daemons.sh restart
           status=0
           xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.iphone }}" \
-            -derivedDataPath "$DERIVED" \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
             -only-testing:SheepdogUITests/HistoryApprovalUITests \
@@ -314,10 +377,8 @@ jobs:
           echo $! > "$RUNNER_TEMP/restarter.pid"
           status=0
           TEST_RUNNER_SHEEPDOG_CONTROL_DIR="$SHEEPDOG_CONTROL_DIR" xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=${{ steps.sim.outputs.iphone }}" \
-            -derivedDataPath "$DERIVED" \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
             -only-testing:SheepdogUITests/ReconnectUITests \
@@ -326,27 +387,16 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/restarter.pid")" || true
           sh scripts/ci-test-summary.sh "$RESULTS/reconnect.log" "$status"
 
-      # The iPad layout (IPadUITests, offline demo, no daemon). In a job
-      # that also ran iPhone tests the iPhone shuts down and the iPad boots
-      # now.
+      # The iPad layout (IPadUITests, offline demo, no daemon).
       - name: UI tests - iPad
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.ipad != '' }}
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' && matrix.ipad != '' }}
         working-directory: ios
         run: |
-          ipad=${{ steps.sim.outputs.ipad }}
-          if [ "$ipad" != "${{ steps.sim.outputs.build }}" ]; then
-            xcrun simctl shutdown "${{ steps.sim.outputs.build }}" || true
-            xcrun simctl boot "$ipad" || true
-            xcrun simctl bootstatus "$ipad" -b
-            xcrun simctl privacy "$ipad" grant microphone "$BUNDLE_ID"
-          fi
           status=0
           # shellcheck disable=SC2086 # IPAD_TESTS is a list of arguments
           xcodebuild test-without-building \
-            -project Sheepdog.xcodeproj \
-            -scheme Sheepdog \
-            -destination "id=$ipad" \
-            -derivedDataPath "$DERIVED" \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             -collect-test-diagnostics never \
             -retry-tests-on-failure -test-iterations 3 \
             $IPAD_TESTS \
@@ -357,6 +407,19 @@ jobs:
       - name: Stop the fixture daemons
         if: always()
         run: ios/scripts/fixture-daemons.sh stop || true
+
+      # When the simulator was ready and the first test started, in seconds
+      # from the job's start (the runner's clock and xcodebuild's are UTC).
+      - name: Timings
+        if: always()
+        run: |
+          echo "tests done $(date +%s)" >> "$TIMINGS"
+          first=$(grep -h -m1 -oE "Test Suite '(Selected|All) tests' started at [0-9-]+ [0-9:]+" "$RESULTS"/*.log 2>/dev/null \
+            | head -n 1 | sed -E 's/.* at //') || true
+          if [ -n "$first" ]; then
+            echo "first test $(date -j -u -f '%Y-%m-%d %H:%M:%S' "$first" +%s)" >> "$TIMINGS"
+          fi
+          awk 'NR == 1 { t0 = $NF } { $NF = sprintf("+%ds", $NF - t0); print }' "$TIMINGS" | sort -t+ -k2 -n | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the test results
         if: failure()
@@ -369,29 +432,30 @@ jobs:
             ${{ runner.temp }}/restarter.log
           retention-days: 7
 
-  # The one check to require on main: green when the tier's jobs passed,
-  # or when the tier is none and no Mac job ran.
+  # The one check to require on main: green when the tier's build and test
+  # jobs passed, or when the tier is none and no Mac job ran.
   summary:
     name: ios-summary
-    needs: [plan, tests]
+    needs: [plan, build, tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check the plan and the tests
+      - name: Check the plan, the build and the tests
         env:
           PLAN: ${{ needs.plan.result }}
           TIER: ${{ needs.plan.outputs.tier }}
+          BUILD: ${{ needs.build.result }}
           TESTS: ${{ needs.tests.result }}
         run: |
-          echo "plan: $PLAN, tier: $TIER, tests: $TESTS"
+          echo "plan: $PLAN, tier: $TIER, build: $BUILD, tests: $TESTS"
           if [ "$PLAN" != success ]; then echo "::error::the plan job did not succeed"; exit 1; fi
           case "$TIER" in
             none) want=skipped ;;
             full|smoke) want=success ;;
             *) echo "::error::unknown tier '$TIER'"; exit 1 ;;
           esac
-          if [ "$TESTS" != "$want" ]; then
-            echo "::error::tier $TIER wants the tests $want, got $TESTS"
+          if [ "$BUILD" != "$want" ] || [ "$TESTS" != "$want" ]; then
+            echo "::error::tier $TIER wants the build and the tests $want, got $BUILD and $TESTS"
             exit 1
           fi

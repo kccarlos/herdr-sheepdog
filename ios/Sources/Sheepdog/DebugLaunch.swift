@@ -42,6 +42,10 @@ enum DebugLaunch {
     /// `-sheepdogOpenDemo`: open the offline demo at launch, for the
     /// redesign screenshots (`RedesignShotsUITests`).
     static var openDemo: Bool { arguments.contains("-sheepdogOpenDemo") }
+    /// `-sheepdogDemoPaused`: the demo's script never moves on (its clock
+    /// stays at the start), so no agent finishes or asks: a UI test sees
+    /// the opening state for as long as it needs, on a Mac of any speed.
+    static var demoPaused: Bool { arguments.contains("-sheepdogDemoPaused") }
     /// `-sheepdogSplashHold`: keep the splash up, for its screenshot.
     static var splashHold: Bool { arguments.contains("-sheepdogSplashHold") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
