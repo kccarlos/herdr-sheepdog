@@ -25,6 +25,20 @@ func (s *Server) handleSpaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// Logged once per folder, until it is readable again.
+	still := map[string]bool{}
+	for _, b := range v.NeedsAccess {
+		still[b.Path] = true
+		if _, seen := s.noAccessLogged.LoadOrStore(b.Path, true); !seen {
+			s.log.Log(logSource, "web.spaces.no_access", "", map[string]any{"path": b.Path, "reason": b.Reason})
+		}
+	}
+	s.noAccessLogged.Range(func(k, _ any) bool {
+		if !still[k.(string)] {
+			s.noAccessLogged.Delete(k)
+		}
+		return true
+	})
 	writeJSON(w, http.StatusOK, v)
 }
 

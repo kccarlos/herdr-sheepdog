@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -536,9 +537,18 @@ func (s *Supervisor) spawnRateLocked() string {
 // existing workspace's directory, then every immediate subdirectory of a
 // project root (hidden ones skipped), each once.
 func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
+	return s.spawnDirsIn(snap, fsaccess.NewSet())
+}
+
+// spawnDirsIn is spawnDirs that skips folders access finds unreadable,
+// so a folder macOS has not been allowed into cannot stall the listing.
+func (s *Supervisor) spawnDirsIn(snap herdr.Snapshot, access *fsaccess.Set) []spawnDir {
 	var out []spawnDir
 	seen := map[string]bool{}
 	for _, p := range snap.Panes {
+		if !access.OK(p.Cwd) {
+			continue
+		}
 		path := realDir(p.Cwd)
 		if path == "" || seen[path] {
 			continue
@@ -547,6 +557,9 @@ func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
 		out = append(out, spawnDir{Name: filepath.Base(path), Path: path, Pane: p.PaneID})
 	}
 	for _, root := range s.cfg.ProjectRoots {
+		if !access.OK(root) {
+			continue
+		}
 		r := realDir(root)
 		if r == "" {
 			continue

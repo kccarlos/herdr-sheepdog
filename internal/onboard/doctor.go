@@ -62,6 +62,7 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	out = append(out, CheckVoice(cfg))
 	out = append(out, CheckPort(ctx, o.PortClient, cfg.Web.Bind, cfg.Web.Port))
 	out = append(out, CheckBind(cfg.Web))
+	out = append(out, CheckProjectRoots(cfg.Supervisor.ProjectRoots)...)
 	out = append(out, CheckPush(ctx, o.Endpoints, cfg.Push))
 	if o.EnvPath != "" {
 		out = append(out, CheckSecretFile("env file", o.EnvPath))

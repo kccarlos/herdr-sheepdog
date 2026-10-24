@@ -60,6 +60,35 @@ func TestSpacesListsSpacesFoldersAndKinds(t *testing.T) {
 	if kindList(v.Kinds) != "claude:Claude codex:Codex agy:Antigravity" || !v.Worktrees {
 		t.Errorf("kinds = %v, worktrees = %v", v.Kinds, v.Worktrees)
 	}
+	if v.NeedsAccess == nil || len(v.NeedsAccess) != 0 {
+		t.Errorf("needs_access = %#v, want []", v.NeedsAccess)
+	}
+}
+
+// A project root the system refuses to list is reported in needs_access
+// and does not fail or stall the listing.
+func TestSpacesReportsAFolderItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	w := spacesWorld(t)
+	if err := os.Chmod(w.root, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(w.root, 0o755) })
+	v, err := w.sup.Spaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.NeedsAccess) != 1 || v.NeedsAccess[0].Path != w.root || v.NeedsAccess[0].Reason != "denied" {
+		t.Fatalf("needs_access = %+v", v.NeedsAccess)
+	}
+	if len(v.Spaces) != 1 || v.Spaces[0].Path != w.bench || v.Spaces[0].Git || len(v.Spaces[0].Agents) != 1 {
+		t.Errorf("space = %+v", v.Spaces)
+	}
+	if len(v.Folders) != 0 {
+		t.Errorf("folders = %+v", v.Folders)
+	}
 }
 
 // A new agent starts in an open space (split from its first pane) or in
