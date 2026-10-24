@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRunner records the commands instead of running them: no test
@@ -108,11 +109,9 @@ func TestRenderRefuses(t *testing.T) {
 
 func TestInstallDarwin(t *testing.T) {
 	s := spec(t, "darwin")
-	f := &fakeRunner{out: map[string]string{
-		"launchctl print gui/501/" + Label: "gui/501/io.github.kccarlos.sheepdog = {\n\tstate = running\n\tpid = 4242\n\tlast exit code = 0\n}",
-	}}
+	f := &fakeRunner{fail: map[string]bool{"launchctl print gui/501/" + Label: true}}
 	var out strings.Builder
-	m := Manager{Spec: s, Run: f.run, Out: &out}
+	m := Manager{Spec: s, Run: f.run, Out: &out, Sleep: func(time.Duration) {}}
 	if st, _ := m.Status(context.Background()); !strings.HasPrefix(st, "not installed") {
 		t.Errorf("status before = %q", st)
 	}
@@ -125,10 +124,12 @@ func TestInstallDarwin(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(s.LogPath())); err != nil {
 		t.Errorf("log dir not made: %v", err)
 	}
-	want := []string{"launchctl bootout gui/501/" + Label, "launchctl bootstrap gui/501 " + s.UnitPath()}
+	want := []string{"launchctl bootout gui/501/" + Label, "launchctl print gui/501/" + Label, "launchctl bootstrap gui/501 " + s.UnitPath()}
 	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
 		t.Errorf("calls = %q", f.calls)
 	}
+	delete(f.fail, "launchctl print gui/501/"+Label)
+	f.out = map[string]string{"launchctl print gui/501/" + Label: "gui/501/io.github.kccarlos.sheepdog = {\n\tstate = running\n\tpid = 4242\n\tlast exit code = 0\n}"}
 	st, err := m.Status(context.Background())
 	if err != nil || !strings.HasSuffix(st, "state running, pid 4242, last exit code 0") {
 		t.Errorf("status = %q, %v", st, err)
@@ -151,8 +152,96 @@ func TestInstallDarwin(t *testing.T) {
 func TestInstallDarwinBootstrapFails(t *testing.T) {
 	s := spec(t, "darwin")
 	f := &fakeRunner{fail: map[string]bool{"launchctl bootstrap gui/501 " + s.UnitPath(): true}}
-	if err := (Manager{Spec: s, Run: f.run}).Install(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
+	if err := (Manager{Spec: s, Run: f.run, Sleep: func(time.Duration) {}}).Install(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v", err)
+	}
+	// A failure that is not status 5 is not retried.
+	n := 0
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "launchctl bootstrap") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("bootstrap tried %d times", n)
+	}
+}
+
+// scriptRunner answers launchctl from a script: print says the job is
+// loaded for the first loaded calls, bootstrap fails with status 5 for
+// the first busy calls.
+type scriptRunner struct {
+	calls  []string
+	loaded int
+	busy   int
+}
+
+func (r *scriptRunner) run(_ context.Context, name string, args ...string) (string, error) {
+	r.calls = append(r.calls, strings.Join(append([]string{name}, args...), " "))
+	switch args[0] {
+	case "print":
+		if r.loaded > 0 {
+			r.loaded--
+			return "state = running", nil
+		}
+		return "Could not find service", errors.New("exit status 113")
+	case "bootstrap":
+		if r.busy > 0 {
+			r.busy--
+			return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+		}
+	}
+	return "", nil
+}
+
+func TestInstallDarwinWaitsAndRetries(t *testing.T) {
+	s := spec(t, "darwin")
+	r := &scriptRunner{loaded: 3, busy: 2}
+	var slept time.Duration
+	m := Manager{Spec: s, Run: r.run, Sleep: func(d time.Duration) { slept += d }}
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	count := func(prefix string) (n int) {
+		for _, c := range r.calls {
+			if strings.HasPrefix(c, prefix) {
+				n++
+			}
+		}
+		return
+	}
+	if count("launchctl print") != 4 || count("launchctl bootstrap") != 3 {
+		t.Errorf("calls = %q", r.calls)
+	}
+	// bootstrap never ran before the job was gone.
+	lastPrint, firstBoot := -1, -1
+	for i, c := range r.calls {
+		if strings.HasPrefix(c, "launchctl print") {
+			lastPrint = i
+		}
+		if strings.HasPrefix(c, "launchctl bootstrap") && firstBoot < 0 {
+			firstBoot = i
+		}
+	}
+	if firstBoot < lastPrint {
+		t.Errorf("bootstrap before the job was gone: %q", r.calls)
+	}
+	if slept <= 0 {
+		t.Error("no waiting")
+	}
+}
+
+func TestInstallDarwinGivesUp(t *testing.T) {
+	s := spec(t, "darwin")
+	r := &scriptRunner{loaded: 1 << 20, busy: 1 << 20}
+	var slept time.Duration
+	m := Manager{Spec: s, Run: r.run, Sleep: func(d time.Duration) { slept += d }}
+	err := m.Install(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Input/output error") {
+		t.Fatalf("err = %v", err)
+	}
+	if slept < 10*time.Second || slept > 30*time.Second {
+		t.Errorf("slept %v", slept)
 	}
 }
 
