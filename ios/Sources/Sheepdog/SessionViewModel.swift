@@ -1197,13 +1197,8 @@ final class SessionViewModel: ObservableObject {
             send(.tokenRefused(endpoint: endpointDisplay))
             needsNewScan(problem)
         }
-        if next.isUsable, !previous.isUsable {
-            Task {
-                await syncHistory()
-                await backfillActivity()
-            }
-        }
-        syncAway()
+        // Coming online needs nothing more here: the channel set opens
+        // `/events`, and every open syncs the history.
     }
 
     private func presentLink() {
@@ -1248,6 +1243,9 @@ final class SessionViewModel: ObservableObject {
                 for try await output in stream {
                     if Task.isCancelled { return }
                     self.eventsOpened()
+                    // A stream that delivers is healthy: the next drop
+                    // reopens without waiting.
+                    if case .event = output { self.eventFailures = 0 }
                     self.handle(event: output)
                 }
             } catch {
@@ -1271,8 +1269,9 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func eventsOpened() {
+        // Not a reset of `eventFailures`: a stream that opens and drops at
+        // once would otherwise reopen in a tight loop.
         guard eventTask != nil, liveUpdates != .open else { return }
-        eventFailures = 0
         setLiveUpdates(.open)
         linkRuntime?.send(.channelOpened(.events))
     }

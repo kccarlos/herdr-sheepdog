@@ -693,6 +693,11 @@ public final class DaemonClient: @unchecked Sendable {
                         self.endpoint.credentials?.dropTicket()
                         throw DaemonError.unauthorized(endpoint: self.endpoint.display)
                     }
+                    // Only a 200 is a stream: a 404 or a 500 body is not
+                    // "open", and must not reset anyone's backoff.
+                    if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
+                        throw DaemonError.http(status: http.statusCode, endpoint: self.endpoint.display)
+                    }
                     onOpen?()
                     var parser = SSEParser(lastSeq: since)
                     // Not `bytes.lines`: Foundation's AsyncLineSequence drops
