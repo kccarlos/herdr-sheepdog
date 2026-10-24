@@ -1070,7 +1070,7 @@ Order and dependencies:
     quiet period stays "Offline".
   - **New copy:** "Replies are slow" in Health; "Connecting…" as the hint
     on cached questions during a first connect.
-- **Phase 3, the wiring (done, #PRNUM).** The current computer's connection
+- **Phase 3, the wiring (done, #413).** The current computer's connection
   is its `ComputerLink`, and nothing else.
   - **`LinkRuntime`** (Kit) runs the link's effects behind two seams,
     `LinkTransport` and `LinkScheduler`: the 4 s probe timeout, timers with
