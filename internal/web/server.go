@@ -261,6 +261,9 @@ type Server struct {
 	mux  *http.ServeMux
 	hub  *hub
 	term *termServer
+	// noAccessLogged are the folders web.spaces.no_access already named
+	// (path -> true), so a phone polling /api/spaces logs each once.
+	noAccessLogged sync.Map
 	// shellOn is config web.shell, live: the setup page switches it
 	// without a restart (shell.go). kindHook, when set, classifies a
 	// request's peer in place of remoteKind (tests).

@@ -24,6 +24,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
@@ -428,6 +429,27 @@ func CheckBind(w config.Web) Result {
 		return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": this machine only (turn on phone access in sheepdog setup for the app)"}
 	}
 	return Result{Name: name, Status: OK, Detail: "bind " + w.Bind + ": TLS and paired devices only (pair with sheepdog pair)"}
+}
+
+// CheckProjectRoots checks that the project folders can be listed. On
+// macOS a protected folder (Documents, Desktop, Downloads, iCloud Drive)
+// blocks until the program is allowed in, and sheepdog skips it; the
+// daemon is allowed separately from the terminal this runs in.
+func CheckProjectRoots(roots []string) []Result {
+	const name = "project folders"
+	var bad []string
+	seen := map[string]bool{}
+	for _, r := range roots {
+		if b := fsaccess.Probe(r); b != nil && !seen[b.Path] {
+			seen[b.Path] = true
+			bad = append(bad, b.Path)
+		}
+	}
+	if len(bad) == 0 {
+		return []Result{{Name: name, Status: OK, Detail: "readable"}}
+	}
+	return []Result{{Name: name, Status: Warn, Detail: "sheepdog cannot read " + strings.Join(bad, ", "),
+		Fix: "Allow sheepdog in System Settings ▸ Privacy & Security ▸ Files and Folders (or Full Disk Access)"}}
 }
 
 // CheckPush checks phone notifications by push.mode: the relay's
