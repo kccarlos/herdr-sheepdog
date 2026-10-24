@@ -233,7 +233,10 @@ public final class DaemonClient: @unchecked Sendable {
     /// Every finished request's outcome, for the connection's
     /// `ComputerLink` (`requestSucceeded` / `requestFailed`). Called off the
     /// main thread; set it before the first request.
-    public var onOutcome: (@Sendable (RequestOutcome) -> Void)?
+    /// The first argument is the address the request went to, read when
+    /// it was sent: the client is repointed on a switch, and a late
+    /// outcome must not land on the next computer's link.
+    public var onOutcome: (@Sendable (String, RequestOutcome) -> Void)?
 
     /// How one request ended, classified for that request alone.
     public enum RequestOutcome: Equatable, Sendable {
@@ -543,16 +546,17 @@ public final class DaemonClient: @unchecked Sendable {
     /// refusal only a new scan fixes into `.pairing`.
     func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
         let started = Date()
+        let address = endpoint.display
         do {
             let result = try await performOnce(request)
             if let status = (result.1 as? HTTPURLResponse)?.statusCode, status >= 500 {
-                onOutcome?(.failed(.httpOther(status)))
+                onOutcome?(address, .failed(.httpOther(status)))
             } else {
-                onOutcome?(.succeeded(rtt: Date().timeIntervalSince(started)))
+                onOutcome?(address, .succeeded(rtt: Date().timeIntervalSince(started)))
             }
             return result
         } catch {
-            onOutcome?(.failed(LinkError(error)))
+            onOutcome?(address, .failed(LinkError(error)))
             throw error
         }
     }

@@ -329,6 +329,8 @@ final class SessionViewModel: ObservableObject {
     /// or new credentials (`rebuildLink`), so nothing from the old one
     /// lands on the new one.
     private var linkRuntime: LinkRuntime?
+    /// The address `linkRuntime` was built for.
+    private var linkAddress: String?
     private var linkTransport: DaemonProbeTransport?
     private var appPhase: AppPhase = .active
     private var lastSeq: UInt64 = 0
@@ -375,8 +377,8 @@ final class SessionViewModel: ObservableObject {
         wire()
         // Every request's outcome tells the link (`requestSucceeded`,
         // `requestFailed`); the probes have their own clients.
-        client.onOutcome = { [weak self] outcome in
-            Task { @MainActor in self?.requestFinished(outcome) }
+        client.onOutcome = { [weak self] address, outcome in
+            Task { @MainActor in self?.requestFinished(outcome, address: address) }
         }
         presentation.onFollowup = { [weak self] followup in
             switch followup {
@@ -581,7 +583,7 @@ final class SessionViewModel: ObservableObject {
     /// A banner's Try again: the link tries now, and the voice starts over
     /// with a clean disconnect (if one is needed) and a fresh connect.
     func reconnect() {
-        retryLink()
+        linkRuntime?.send(.retryTapped)
         if core.connection.wantsConnection { disconnect() }
         connect()
     }
@@ -1133,6 +1135,7 @@ final class SessionViewModel: ObservableObject {
         linkTransport?.invalidate()
         linkRuntime = nil
         linkTransport = nil
+        linkAddress = nil
         closeEvents()
         guard let endpoint = settings.endpoint else {
             linkChanged(ComputerLink(addresses: []))
@@ -1181,6 +1184,7 @@ final class SessionViewModel: ObservableObject {
         runtime.onRenewTicket = { endpoint.credentials?.dropTicket() }
         linkRuntime = runtime
         linkTransport = transport
+        linkAddress = address
         linkChanged(runtime.link)
         runtime.send(.demandChanged(linkDemand))
     }
@@ -1207,7 +1211,10 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// A request through `client` finished: the link hears about it.
-    private func requestFinished(_ outcome: DaemonClient.RequestOutcome) {
+    private func requestFinished(_ outcome: DaemonClient.RequestOutcome, address: String) {
+        // A late reply from the computer (or address) the app left: not
+        // this link's business.
+        guard address == linkAddress else { return }
         switch outcome {
         case let .succeeded(rtt): linkRuntime?.send(.requestSucceeded(rtt: rtt))
         case let .failed(error): linkRuntime?.send(.requestFailed(error))

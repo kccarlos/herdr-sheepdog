@@ -379,6 +379,13 @@ final class LinkRuntimeTests: XCTestCase {
     }
 }
 
+private final class OutcomeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [(String, DaemonClient.RequestOutcome)] = []
+    func add(_ address: String, _ outcome: DaemonClient.RequestOutcome) { lock.lock(); items.append((address, outcome)); lock.unlock() }
+    var all: [(String, DaemonClient.RequestOutcome)] { lock.lock(); defer { lock.unlock() }; return items }
+}
+
 /// Each attempt's error, classified on its own.
 final class LinkErrorClassificationTests: XCTestCase {
     func testDaemonErrorsMapToLinkErrors() {
@@ -410,6 +417,21 @@ final class LinkErrorClassificationTests: XCTestCase {
         XCTAssertEqual(DaemonClient.translate(URLError(.cancelled), endpoint: secure, sawMismatch: true), .untrusted(endpoint: "mac:7777"))
         XCTAssertEqual(DaemonClient.translate(URLError(.cancelled), endpoint: secure, sawMismatch: false), .unreachable(endpoint: "mac:7777", detail: ""))
         XCTAssertEqual(DaemonClient.translate(URLError(.timedOut), endpoint: secure, sawMismatch: false), .timedOut(endpoint: "mac:7777"))
+    }
+
+    /// Each outcome names the address it went to, read at send time, so the
+    /// app can drop a late one from a computer it switched away from.
+    func testOutcomesNameTheirAddress() async throws {
+        let daemon = DemoDaemon()
+        DemoDaemon.current = daemon
+        defer { daemon.stop() }
+        let client = DaemonClient(endpoint: DemoDaemon.endpoint, session: DemoDaemon.session())
+        let seen = OutcomeBox()
+        client.onOutcome = { address, outcome in seen.add(address, outcome) }
+        _ = try await client.state()
+        let first = try XCTUnwrap(seen.all.first)
+        XCTAssertEqual(first.0, DemoDaemon.endpoint.display)
+        guard case .succeeded = first.1 else { return XCTFail("\(first.1)") }
     }
 
     func testRequestFailureWords() {
