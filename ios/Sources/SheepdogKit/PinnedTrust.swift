@@ -85,36 +85,28 @@ public final class EndpointTrust: @unchecked Sendable {
 /// app notices the computer switched to its next key
 /// (`DeviceCredentials.served(pin:)`) before it signs in with a pin.
 ///
-/// It answers the challenge at the task level too: `URLSession.bytes(for:)`
-/// (the `/events` stream) asks only `urlSession(_:task:didReceive:…)`.
-/// With the session-level method alone the system's default trust judged
-/// the self-signed certificate (-1202), `/events` never opened over TLS,
-/// and the chip said "Reconnecting…" for good while `/ws` worked.
+/// It answers the challenge only at the task level
+/// (`urlSession(_:task:didReceive:…)`): without the session-level method,
+/// URLSession sends the server-trust challenge of every task there,
+/// including `URLSession.bytes(for:)` (`/events`) and the web sockets. That
+/// is also what lets a per-task delegate (`attempt()`) answer it instead,
+/// so each request learns whether *its own* handshake matched
+/// (docs/dev/design/ios-state-architecture.md 3.4). There is no shared,
+/// sticky "saw a mismatch" flag any more: one used to turn any later
+/// cancellation, including the app's own, into "scan again".
 public final class PinnedTrustDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let pins: @Sendable () -> [String]
     private let onMatch: (@Sendable (String) -> Void)?
-    private let lock = NSLock()
-    private var mismatched = false
 
     public init(pins: @escaping @Sendable () -> [String], onMatch: (@Sendable (String) -> Void)? = nil) {
         self.pins = pins
         self.onMatch = onMatch
     }
 
-    /// True when the last server offered a key that matches no pin: the app
-    /// shows "Scan the pairing code again" instead of retrying.
-    public var sawMismatch: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return mismatched
-    }
-
-    public func urlSession(
-        _ session: URLSession,
-        didReceive challenge: URLAuthenticationChallenge,
-        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-    ) {
-        answer(challenge, completionHandler)
+    /// A delegate for one request (`session.data(for:delegate:)`): the
+    /// same pin check, and its own verdict.
+    public func attempt() -> Attempt {
+        Attempt(pins: pins, onMatch: onMatch)
     }
 
     public func urlSession(
@@ -123,31 +115,65 @@ public final class PinnedTrustDelegate: NSObject, URLSessionTaskDelegate, @unche
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        answer(challenge, completionHandler)
+        _ = Self.answer(challenge, pins: pins(), onMatch: onMatch, completionHandler)
     }
 
-    private func answer(
+    /// One request's own pin check. `sawMismatch` is about this request's
+    /// handshake alone.
+    public final class Attempt: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let pins: @Sendable () -> [String]
+        private let onMatch: (@Sendable (String) -> Void)?
+        private let lock = NSLock()
+        private var mismatched = false
+
+        init(pins: @escaping @Sendable () -> [String], onMatch: (@Sendable (String) -> Void)?) {
+            self.pins = pins
+            self.onMatch = onMatch
+        }
+
+        /// This request's server offered a key that matches no pin.
+        public var sawMismatch: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return mismatched
+        }
+
+        public func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            if PinnedTrustDelegate.answer(challenge, pins: pins(), onMatch: onMatch, completionHandler) == false {
+                lock.lock()
+                mismatched = true
+                lock.unlock()
+            }
+        }
+    }
+
+    /// Answers a challenge: true for a matched pin, false for a mismatch,
+    /// nil for a challenge that is not about the server's key.
+    @discardableResult
+    static func answer(
         _ challenge: URLAuthenticationChallenge,
+        pins: [String],
+        onMatch: (@Sendable (String) -> Void)?,
         _ completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-    ) {
+    ) -> Bool? {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust
         else {
             completionHandler(.performDefaultHandling, nil)
-            return
+            return nil
         }
-        if let matched = Self.matchedPin(trust: trust, pins: pins()) {
-            lock.lock()
-            mismatched = false
-            lock.unlock()
+        if let matched = matchedPin(trust: trust, pins: pins) {
             onMatch?(matched)
             completionHandler(.useCredential, URLCredential(trust: trust))
-        } else {
-            lock.lock()
-            mismatched = true
-            lock.unlock()
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            return true
         }
+        completionHandler(.cancelAuthenticationChallenge, nil)
+        return false
     }
 
     /// Whether the trust's leaf key matches one of the pins.

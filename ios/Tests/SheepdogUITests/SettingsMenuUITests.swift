@@ -46,8 +46,9 @@ final class SettingsMenuUITests: XCTestCase {
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
         tapWhenReady(app.buttons["main.pane.flock"], "the Agents pane")
-        XCTAssertTrue(app.buttons["flock.unreachable.retry"].waitForExistence(timeout: 20), "Daemon unreachable offers Try again")
-        XCTAssertTrue(app.staticTexts["Daemon unreachable"].exists)
+        // Past the link's 30 s quiet period: Can't reach, with Try now.
+        XCTAssertTrue(app.buttons["flock.unreachable.retry"].waitForExistence(timeout: 45), "Can't reach offers Try now")
+        XCTAssertTrue(app.staticTexts["Can't reach your computer"].exists)
         XCTAssertFalse(app.buttons["main.pane.health"].exists, "Health is not a pane")
     }
 

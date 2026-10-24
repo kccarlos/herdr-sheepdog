@@ -44,8 +44,10 @@ final class FirstRunUITests: XCTestCase {
         XCTAssertTrue(fix.waitForExistence(timeout: 5), "the banner names the fix")
         XCTAssertTrue(app.descendants(matching: .any)["banner.help"].exists, "and links to it")
 
+        // The Agents page reads the computer's link: Reconnecting… inside
+        // the 30 s quiet period, then Can't reach with Try now.
         tapWhenReady(app.buttons["main.pane.flock"], "the Agents pane")
-        XCTAssertTrue(app.buttons["flock.unreachable.retry"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["flock.unreachable.retry"].waitForExistence(timeout: 45))
         XCTAssertTrue(app.descendants(matching: .any)["flock.unreachable.help"].exists)
     }
 
@@ -57,8 +59,9 @@ final class FirstRunUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", host]
         app.launch()
-        tapWhenReady(app.buttons["controls.orb"], "the orb")
 
+        // The link finds out by itself, with the voice off: its first probe
+        // is refused, and only a new scan helps.
         let sheet = app.descendants(matching: .any)["pairing.scanAgain"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 20), "a refused phone opens \"Please scan again\"")
         XCTAssertTrue(app.staticTexts["Please scan again"].exists)

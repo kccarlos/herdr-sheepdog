@@ -12,16 +12,20 @@ public enum Reachability: Equatable, Sendable {
 
     public var isOnline: Bool { self == .online }
 
-    /// The current computer's, from the one source that knows: the
-    /// session's own connection (the chip) while a session runs, and the
-    /// last `/api/state` poll (`polled`) only when there is none. Never a
-    /// copy kept beside the chip, which went stale while the voice worked.
-    public static func current(chip: ConnectionChip.Status, polled: Reachability, lastSeen: Date?) -> Reachability {
-        switch chip {
-        case .connected: return .online
-        case .connecting, .reconnecting: return .connecting
-        case .offline: return .offline(since: lastSeen)
-        case .notConnected, .tokenRefused, .updateNeeded: return polled
+    /// A computer's, read from its link: the one source that knows. A blip
+    /// inside the quiet period is still "connecting"; past it, and for
+    /// anything a retry does not fix by itself, it is offline since the
+    /// last time anything succeeded.
+    public init(_ link: ComputerLink) {
+        switch link.state {
+        case .online, .degraded:
+            self = .online
+        case .idle, .waiting:
+            self = .connecting
+        case let .connecting(_, outage):
+            self = outage?.long == true ? .offline(since: link.lastSeen) : .connecting
+        case .offline, .noNetwork, .untrustedAnswer, .refused, .incompatible:
+            self = .offline(since: link.lastSeen)
         }
     }
 }

@@ -43,16 +43,42 @@ struct FlockUnavailableView: View {
                         .accessibilityIdentifier("flock.notConnected.connect")
                 }
             case .unreachable:
+                // The link's words (`LinkPresentation`): when it was last
+                // seen, and what to check.
+                let title = "Can't reach \(model.showsComputerLabels ? model.currentComputerName : "your computer")"
                 ContentUnavailableView {
-                    Label("Daemon unreachable", systemImage: "wifi.slash")
+                    Label(title, systemImage: "wifi.slash")
                 } description: {
-                    Text(LocalizedStringKey(SetupHelp.unreachableFix))
+                    // The rest of the link's words: the title already says
+                    // the first sentence.
+                    Text(Self.dropping("\(title).", from: model.linkPresentation.inline?.message ?? SetupHelp.unreachableFix))
                 } actions: {
-                    Button("Try again") { model.reconnect() }
+                    Button("Try now") { model.retryLink() }
                         .accessibilityIdentifier("flock.unreachable.retry")
                     Link("How to fix this", destination: SetupHelp.remoteAccessURL)
                         .tint(Theme.primaryText)
                         .accessibilityIdentifier("flock.unreachable.help")
+                }
+            case .noNetwork:
+                ContentUnavailableView {
+                    Label("No network", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(model.linkPresentation.inline?.message ?? "")
+                }
+                .accessibilityIdentifier("flock.noNetwork")
+            case .untrusted:
+                ContentUnavailableView {
+                    Label("Not verified", systemImage: "exclamationmark.shield")
+                } description: {
+                    Text(model.linkPresentation.inline?.message ?? "")
+                } actions: {
+                    Button("Try again") { model.retryLink() }
+                        .accessibilityIdentifier("flock.untrusted.retry")
+                    Button("Use another address") {
+                        model.settingsRoute = .daemon
+                        model.presentation.present(.settings)
+                    }
+                    .accessibilityIdentifier("flock.untrusted.addresses")
                 }
             case .tokenRefused:
                 ContentUnavailableView {
@@ -71,7 +97,7 @@ struct FlockUnavailableView: View {
                 } description: {
                     Text("This app and the daemon speak different protocol versions. Update the older one.")
                 } actions: {
-                    Button("Try again") { model.reconnect() }
+                    Button("Try again") { model.retryLink() }
                 }
             case .content:
                 EmptyView()
@@ -79,6 +105,12 @@ struct FlockUnavailableView: View {
         }
         .tint(Theme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// `text` without a leading `prefix` (and the space after it).
+    static func dropping(_ prefix: String, from text: String) -> String {
+        guard text.hasPrefix(prefix) else { return text }
+        return String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
     }
 }
 

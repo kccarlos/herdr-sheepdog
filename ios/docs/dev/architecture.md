@@ -29,7 +29,7 @@ under review.
 │  MicSignalWatchdog     SessionCore           ConversationCache (JSON file)    │
 │  PlaybackQueue /       SessionState          ApprovalFlow / QuestionFocus     │
 │  PlaybackRatePolicy    VoiceBarModel         BrainActivity / DaemonHealth     │
-│  Metrics               ConnectionChip        Push / MarkdownRenderer          │
+│  Metrics               ComputerLink          Push / MarkdownRenderer          │
 │                        SessionPolicies       VoiceProviders                   │
 │                                              ComputerStore / SecretStore      │
 └───────────────────────────────────────────────────────────────────────────────┘
@@ -170,11 +170,19 @@ There are two `/events` pitfalls that any client of this daemon will hit:
    would kill the stream between the daemon's 15 s keepalives. The stream
    session allows 60 s.
 3. **`URLSession.bytes(for:)` asks only the task-level auth challenge.**
-   `PinnedTrustDelegate` answers both the session-level and the task-level
-   method. With the session-level one alone, the pin was never checked for
+   With a session-level method alone, the pin was never checked for
    `/events`, the system rejected the self-signed certificate (-1202), and
-   the stream never opened on a paired phone. `EventsTLSE2ETests` opens
-   `/events` over pinned TLS against the pair fixture daemon.
+   the stream never opened on a paired phone. `PinnedTrustDelegate` now
+   answers only at the task level, where URLSession sends every task's
+   server-trust challenge (web sockets included), and each request passes
+   its own `attempt()` delegate, so a key that matches no pin is that
+   request's verdict alone. `EventsTLSE2ETests` opens `/events` over
+   pinned TLS against the pair fixture daemon; `PairingE2ETests` checks a
+   wrong pin per request and that a cancellation is never a mismatch.
+
+The stream belongs to the computer's link (see "The connection"): it is
+open while the link is online and in the foreground, it does not retry by
+itself, and a drop tells the link, which probes once and reopens it.
 
 ## History and the cache
 
@@ -202,7 +210,8 @@ duplicate copies of a pinned question folded to one-line pointers
 error shown. A `pending.confirmed` from somewhere else settles the card as
 answered by voice. `expired`, `cancelled`, `replaced`, or a state refresh
 without the question dismisses it. `/api/state`'s `pending_action` is the
-source of truth (refreshed every 5 s and on every `pending.*` event), and
+source of truth (refreshed by the link's probes, at least every 30 s, and
+on every `pending.*` event), and
 the event is the fast path. The POST to `/api/pending/answer` sends the
 option's 1-based `index`. On the Agents pane the card sits on its agent's
 card instead of above the voice capsule.
@@ -969,13 +978,58 @@ and the status wraps to two lines at the accessibility sizes.
   (Settings ▸ Microphone) turns the orb into a push-to-talk button and
   hides Mute.
 
-The **connection** (`ConnectionChip`) says whether the phone can talk to
-the daemon (the `/ws` socket and the token), never the voice state, and
-never the `/events` stream, which Health shows as "Live updates": "Connected", "Connecting…", "Reconnecting…", "Offline", "Token
-refused" or "Not connected". It is the first row of the voice menu, which
-opens `ConnectionDetailView`: the address, a timed round trip, the daemon's
-version, the voice provider and model, the orchestrator, Health, and
-Reconnect / Open Settings.
+The **connection** is the current computer's `ComputerLink` (see "The
+connection" below), rendered through `LinkPresentation`: "Connected",
+"Connecting…", "Reconnecting…", "Offline", "No network", "Not verified",
+"Scan again", "Update needed" or "Not connected". It says whether the app
+can talk to the computer, never the voice state (the capsule shows that),
+and never the `/events` stream alone, which Health shows as "Live
+updates". It is the first row of the voice menu, which opens
+`ConnectionDetailView`: the status and its explanation, the address, a
+timed round trip, the daemon's version, the voice provider and model, the
+orchestrator, Health, and Reconnect / Open Settings.
+
+## The connection
+
+`ComputerLink` (Kit) is one computer's connection as a value, the one
+truth for "can the app talk to this computer, and if not, why"
+(docs/dev/design/ios-state-architecture.md 3.2–3.4). `LinkRuntime` runs it
+for the current computer:
+
+- it executes the link's effects: a pinned `GET /api/state` probe with a
+  4 s timeout (through one immutable `DaemonClient` per address,
+  `DaemonProbeTransport`), timers with tokens (`LinkClock`), the channel
+  set, the address in use and the race winners per interface
+  (`LinkWinnerDefaults`);
+- it feeds back every result, plus what the rest of the app sees: each
+  request's outcome through `client` (`DaemonClient.onOutcome`), `/ws`
+  opening and dropping, a handshake mismatch, `/events` opening and
+  dropping, the app going to the background and back;
+- a probe's `/api/state` reply is applied as the data, so the 30 s
+  safety-net refresh replaces the old 5 s poll;
+- it is rebuilt for another computer, address or credentials, and the old
+  one's late replies land nowhere.
+
+Errors are classified per request (`LinkError(_:)`): a key that matches no
+pin is `DaemonError.untrusted`, never "scan again" by itself. The link
+decides: with one address it is the untrusted-answer warning ("Not
+verified", Try again); only a mismatch inside the certificate's rotation
+window asks for a new scan. A 401 with a known reason (revoked, unknown
+device) is `refused`: the link opens the scan sheet, once, and the voice
+ends. A request that times out is `DaemonError.timedOut`: with the link
+online it is one slow answer, and the place the user tapped says "taking
+longer than usual, try again" (`RequestFailure`), not "couldn't reach".
+
+Every status surface renders `linkPresentation`: the voice menu's first
+row, the chip's sheet, Settings ▸ Computers' row for this computer, the
+Agents page's empty states (`FlockPaneState.resolve(link:)`), the iPad
+sidebar, Health, and this computer in the snapshots (`Reachability(link)`).
+Foreground notifications stay quiet while the link is usable.
+
+Not yet the link's (phase 5): `VoiceSocket` and `TermSocket` keep their
+own reconnects and only report to it, and there is no `NWPathMonitor`, so
+the remembered winners stay empty and the race has one address (failover is
+phase 6). Other computers still use `ComputerSession` (phase 4a).
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
@@ -1000,7 +1054,7 @@ their exact effects.
 
 | Group | Fields |
 |---|---|
-| `connection` | `wantsConnection`, `socket` and `events` (`SocketLife`), `failed`, `tokenRefused`, `reconnect` (`ReconnectPolicy`), `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
+| `connection` | `wantsConnection`, `socket` (`SocketLife`), `handshake`, `reconnect` (`ReconnectPolicy`), `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
 | `voice` | `status`, `closedReason`, `stalled`, `provider`, `saidVoiceIsOff` |
 | `mic` | `talkMode`, `muted` (the user's intent), `holding`, `gateClosed`, `noSignal` |
 | `playback` | `speaking`, `hold` (`SpeakingHold`), `heldSpeaking` |
@@ -1008,8 +1062,9 @@ their exact effects.
 | `suspension` | `pausedByIOS`, `backgroundSuspended`, `keepListeningWhenLocked` |
 
 These are derived as pure computed properties: `sessionState` (the orb),
-`connectionChip`, `voiceBar`, `statusLine`, `daemonMute`, `acceptsPlayback`
-and `playbackBusy`.
+`voiceBar`, `statusLine`, `daemonMute`, `acceptsPlayback` and
+`playbackBusy`. Whether the computer answers at all is the link's, not the
+core's.
 
 Behaviour worth knowing:
 

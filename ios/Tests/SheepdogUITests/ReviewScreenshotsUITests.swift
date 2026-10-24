@@ -113,7 +113,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         dead.launch()
         tapWhenReady(dead.buttons["controls.orb"], "the orb")
         selectPane(dead, "flock")
-        XCTAssertTrue(dead.buttons["flock.unreachable.retry"].waitForExistence(timeout: 20))
+        XCTAssertTrue(dead.buttons["flock.unreachable.retry"].waitForExistence(timeout: 45))
         sleep(1)
         shot(dead, "flock-unreachable")
     }

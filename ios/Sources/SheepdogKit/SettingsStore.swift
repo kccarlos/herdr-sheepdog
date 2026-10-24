@@ -10,7 +10,7 @@ public final class SettingsStore {
         static let talkMode = "voice.talkMode"
     }
 
-    private let defaults: UserDefaults
+    public let defaults: UserDefaults
     /// The paired computers: the shared keychain ones, or the demo's own
     /// (which must never touch the real ones).
     public let computers: ComputerStore

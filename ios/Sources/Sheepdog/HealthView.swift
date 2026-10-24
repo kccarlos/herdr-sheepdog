@@ -35,9 +35,18 @@ struct HealthView: View {
 
     private var daemonSection: some View {
         Section("Daemon") {
-            LabeledContent("Connection", value: model.connectionChip.word)
-            LabeledContent("Live updates", value: model.connectionChip.liveUpdatesWord)
+            LabeledContent("Connection", value: model.linkPresentation.chip)
+                .accessibilityIdentifier("health.connection")
+            LabeledContent("Live updates", value: liveUpdatesWord)
                 .accessibilityIdentifier("health.liveUpdates")
+            if let note = model.linkPresentation.health, !note.hasPrefix("Live updates") {
+                // Degraded: still Connected on the chip, said only here
+                // (the row above already says live updates are back soon).
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("health.linkNote")
+            }
             LabeledContent("Address", value: model.endpointDisplay)
             LabeledContent("Version", value: model.daemonVersion ?? "—")
                 .accessibilityIdentifier("health.version")
@@ -47,6 +56,17 @@ struct HealthView: View {
                 LabeledContent("Up for", value: model.daemonStartedAt.map { Agent.duration(context.date.timeIntervalSince($0)) } ?? "—")
                     .accessibilityIdentifier("health.uptime")
             }
+        }
+    }
+
+    /// The `/events` stream: "Connected", "Connecting…",
+    /// "Reconnecting…", "Off".
+    private var liveUpdatesWord: String {
+        switch model.liveUpdates {
+        case .open: return "Connected"
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .idle: return "Off"
         }
     }
 

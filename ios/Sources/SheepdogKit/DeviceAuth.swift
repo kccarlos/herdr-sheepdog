@@ -91,10 +91,16 @@ public struct SessionTicket: Equatable, Sendable {
 public struct DeviceAuth: Sendable {
     public var base: URL
     public var session: URLSession
+    /// The session's pin check, asked per request so that a key that
+    /// matches no pin is told apart from any other failure
+    /// (`DaemonError.untrusted`). Nil for a session without pinning (the
+    /// tests' plain fakes).
+    public var trust: PinnedTrustDelegate?
 
-    public init(base: URL, session: URLSession) {
+    public init(base: URL, session: URLSession, trust: PinnedTrustDelegate? = nil) {
         self.base = base
         self.session = session
+        self.trust = trust
     }
 
     public struct Enrolled: Decodable, Equatable, Sendable {
@@ -170,8 +176,14 @@ public struct DeviceAuth: Sendable {
         request.httpMethod = method
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        let (data, response) = try await session.data(for: request)
-        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        let attempt = trust?.attempt()
+        do {
+            let (data, response) = try await session.data(for: request, delegate: attempt)
+            return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        } catch is URLError where attempt?.sawMismatch == true {
+            let port = base.port.map { ":\($0)" } ?? ""
+            throw DaemonError.untrusted(endpoint: "\(base.host ?? "")\(port)")
+        }
     }
 
     private static func errorText(_ data: Data) -> String {

@@ -1070,10 +1070,80 @@ Order and dependencies:
     quiet period stays "Offline".
   - **New copy:** "Replies are slow" in Health; "Connecting…" as the hint
     on cached questions during a first connect.
-- **The wiring PR (rest of phase 3)** runs the effects, feeds the events
-  and renders `LinkPresentation` in place of `connectionChip` and
-  `currentReachability`. It also classifies errors per attempt
-  (`LinkError`), with a per-task trust delegate.
+- **Phase 3, the wiring (done, #413).** The current computer's connection
+  is its `ComputerLink`, and nothing else.
+  - **`LinkRuntime`** (Kit) runs the link's effects behind two seams,
+    `LinkTransport` and `LinkScheduler`: the 4 s probe timeout, timers with
+    tokens, the channel set, `useAddress` and the winners per interface
+    (`LinkWinnerDefaults`). The app passes `DaemonProbeTransport` (one
+    immutable `DaemonClient` per address) and `LinkClock`, which uses the
+    wall clock, because the presentation prints times of day.
+  - **The view model feeds it** with each request's outcome
+    (`DaemonClient.onOutcome`), `/ws` opening and dropping, a handshake
+    mismatch, `/events`, and the app phase. It is rebuilt on every
+    `endpointChanged`, so a late reply from the old computer lands nowhere.
+  - **Per-attempt errors.** `PinnedTrustDelegate` answers only at the task
+    level, and each request passes its own `attempt()` delegate. The
+    sticky `mismatched` flag is gone, and so is its other user, pairing's
+    parallel probes. A mismatch is `DaemonError.untrusted`, classified as
+    `LinkError.tlsUntrusted`, so decision 1 applies: `untrustedAnswer`, and
+    a rescan only inside the rotation window. A cancelled `URLError` stays a
+    cancellation (it used to read as unreachable).
+    `DaemonError.unauthorized`, a 401 that survived the client's own
+    re-sign-in, is `unauthorized(.unknownDevice)`, as the old `/ws` token
+    probe read it.
+  - **One presenter.** The link opens the scan sheet on entering
+    `refused`, and the voice ends. `SessionCore` lost `openSettings`,
+    `events`, `failed`, `dropped`, `tokenRefused`, `connectionChip`,
+    `startStreams` and `stopStreams`. `ConnectionChip` and
+    `Reachability.current` are deleted, and `probeTokenAfterSocketFailure`
+    is replaced by the link's confirming probe.
+  - **The link owns `/events`.** The stream opens with the link's channel
+    set (in the foreground, voice on or off), does not retry by itself, and
+    reports drops. A stream that keeps failing while the computer answers
+    waits a little longer before each reopen. The 5 s `/api/state` poll is
+    gone: the probe's reply is the data, every 30 s and on every kick.
+  - **Every surface renders `linkPresentation`:**
+    - the capsule's connection row and the chip's sheet (with the inline
+      explanation);
+    - Settings ▸ Computers' row (`status`, without the name);
+    - the Agents page and the iPad sidebar (`FlockPaneState.resolve(link:)`,
+      with new `noNetwork` and `untrusted` states);
+    - Health ("Connection", "Live updates", and the degraded note);
+    - this computer's snapshot (`Reachability(link)`);
+    - quiet foreground notifications (`link.isUsable`).
+
+    The Live Activity shows the voice, not the connection, so it is
+    unchanged.
+  - **A slow answer is not "unreachable"** (backlog). A `URLError.timedOut`
+    is `DaemonError.timedOut`. With the link online, the New agent sheet
+    says "Taking longer than usual … Try again" (`RequestFailure`), and the
+    link's confirming probe keeps the chip Connected.
+  - **Behaviour that changed:**
+    - with the voice off, the chip says Connected (it used to say "Not
+      connected");
+    - a computer that does not answer reads "Reconnecting…" for the 30 s
+      quiet period before "Offline";
+    - `/events` runs whenever the app is in front.
+  - **Tests.**
+    - `LinkRuntimeTests` (a manual clock and a scripted network): the probe
+      timeout, backoff and quiet period, Try now, the stale-"Reconnecting…"
+      class in both directions, the slow request, decision 1, refusal,
+      ticket renewal, the refresh timer, the winners, stopping and no
+      demand.
+    - `LinkErrorClassificationTests`, and `FlockPaneStateTests` and
+      `ComputersTests` on links.
+    - `PairingE2ETests` checks the per-request verdict over real TLS, an
+      untrusted sign-in and a cancellation.
+    - `LinkStatusUITests`: `StubDaemon` 404s `/events` forever and the
+      status stays Connected, with Health saying the rest.
+  - **Left for later:**
+    - phase 4a: other computers still use `ComputerSession`;
+    - phase 5: `VoiceSocket` and `TermSocket` still back off on their own
+      and only report to the link, and there is no `NWPathMonitor`, so no
+      interface is known and no winner is remembered yet;
+    - phase 6: the race has one address (the one in use);
+    - phase 7: only the New agent sheet uses `RequestFailure`.
 
 **What not to do:**
 

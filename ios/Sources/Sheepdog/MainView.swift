@@ -103,7 +103,7 @@ struct PhoneRootView: View {
     private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
     private var paneState: FlockPaneState {
-        FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
+        FlockPaneState.resolve(link: model.link, hasAgents: !model.flock.isEmpty)
     }
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
@@ -425,7 +425,7 @@ struct SessionMenus {
 
     var voiceValue: VoiceValue {
         VoiceValue(
-            connectionWord: model.connectionChip.word,
+            connectionWord: model.linkPresentation.chip,
             endpoint: model.endpointDisplay,
             connectionSymbol: connectionSymbol,
             computers: model.showsComputerLabels ? model.computerSnapshots.map { computer in
@@ -505,14 +505,7 @@ struct SessionMenus {
         }
     }
 
-    private var connectionSymbol: String {
-        switch model.connectionChip.tint {
-        case .green: return "checkmark.circle"
-        case .amber: return "arrow.triangle.2.circlepath"
-        case .red: return "wifi.slash"
-        case .grey: return "circle.dashed"
-        }
-    }
+    private var connectionSymbol: String { model.linkPresentation.tint.symbol }
 
     /// What `+` and `⋯` show.
     struct BarValue: Equatable {

@@ -57,9 +57,14 @@ whole month before the renewal says the computer "renewed its security
 certificate while this phone was away" and asks you to scan again.
 
 If the app says **Please scan again**, the phone was removed on the
-computer, or the computer's certificate changed (sheepdog reinstalled, or
-**Reset pairing**). Show a new code and scan it. If you did neither, do not
-continue on that network.
+computer. Show a new code and scan it.
+
+If it says **Not verified**, something on this network answered with a
+different certificate, so the app sent nothing. That happens on some hotel
+or office networks, and after sheepdog was reinstalled or **Reset pairing**
+was used on the computer. Tap **Try again** on another network. If you
+reset the computer, scan its new code. If you did neither, do not continue
+on that network.
 
 On the same Wi-Fi this just works. Away from home, see
 [remote-access.md](remote-access.md) (Tailscale, then pair again).
@@ -302,7 +307,7 @@ in [dev/push.md](dev/push.md).
 |---|---|
 | Camera refuses to scan | Allow Camera for Sheepdog in iOS Settings (the app has an **Open Settings** button). |
 | This code has expired or was used | Show a new code on the computer and scan it. |
-| Offline, or Please scan again | [remote-access.md](remote-access.md). |
+| Offline, Not verified, or Please scan again | [remote-access.md](remote-access.md). |
 | No sound from the voice | Check the daemon: `sheepdog status` shows "NOT connected" with the reason ([troubleshooting.md](troubleshooting.md)). |
 | Local network prompt dismissed | iOS Settings, Sheepdog, Local Network on. |
 | App talks but agents are empty | herdr is not running or not reachable: `sheepdog doctor`. |

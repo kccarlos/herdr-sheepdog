@@ -95,10 +95,18 @@ final class SessionViewModel: ObservableObject {
     /// properties (and the views that only read those) stay quiet on every
     /// tick. See `VoiceMeter`.
     let meter = VoiceMeter()
-    /// The daemon connection's own health — the `/ws` socket, the `/events`
-    /// stream and the token — independent of the voice state. Drives the
-    /// top-left chip.
-    @Published private(set) var connectionChip = ConnectionChip(.init())
+    /// Can the app talk to the current computer right now, and if not, why
+    /// and what it is doing about it: the computer's `ComputerLink`, run by
+    /// `linkRuntime` (docs/dev/design/ios-state-architecture.md 3.2). The
+    /// one truth for the connection; not published, because `lastSeen`
+    /// moves on every request.
+    private(set) var link = ComputerLink(addresses: [])
+    /// What every status surface shows: the chip, Settings, the Agents
+    /// page, the capsule's menu, Health. Published only when it changes.
+    @Published private(set) var linkPresentation = LinkPresentation(ComputerLink(addresses: []))
+    /// The `/events` stream's own life, for Health ▸ Live updates (the
+    /// chip does not follow it, decision 5).
+    @Published private(set) var liveUpdates: SocketLife = .idle
     /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
     /// the chip's sheet.
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
@@ -234,13 +242,6 @@ final class SessionViewModel: ObservableObject {
     /// The other paired computers (`SessionViewModel+Computers.swift`).
     @Published var others: [ComputerSession] = []
     var otherSinks: [String: AnyCancellable] = [:]
-    /// Whether the current computer answered its last `/api/state`.
-    /// The current computer as the last `/api/state` poll found it; what
-    /// the app shows comes from `Reachability.current`, which prefers the
-    /// session's own connection.
-    @Published var polledReachability: Reachability = .connecting
-    var currentLastSeen: Date?
-
     /// The current computer's daemon id ("" for a bare address).
     var currentComputerID: String { settings.computers.currentID ?? "" }
 
@@ -286,9 +287,9 @@ final class SessionViewModel: ObservableObject {
         guard let p = hello.protocol else { return "1 (older daemon)" }
         return "\(p) (serves \(hello.minProtocol ?? p) and up)"
     }
-    /// The daemon connection is up: notifications stay quiet in the
-    /// foreground, the screen already shows what they would say.
-    var sessionIsLive: Bool { connectionChip.status == .connected }
+    /// The computer answers: notifications stay quiet in the foreground,
+    /// the screen already shows what they would say.
+    var sessionIsLive: Bool { link.isUsable }
     var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
     var isConfigured: Bool { settings.endpoint != nil }
 
@@ -321,8 +322,17 @@ final class SessionViewModel: ObservableObject {
     private var syncingHistory = false
 
     private var eventTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
+    /// `/events` failures in a row, for the small wait before reopening.
+    private var eventFailures = 0
     private var ticker: Task<Void, Never>?
+    /// Runs `link` for the current computer: rebuilt for another computer
+    /// or new credentials (`rebuildLink`), so nothing from the old one
+    /// lands on the new one.
+    private var linkRuntime: LinkRuntime?
+    /// The address `linkRuntime` was built for.
+    private var linkAddress: String?
+    private var linkTransport: DaemonProbeTransport?
+    private var appPhase: AppPhase = .active
     private var lastSeq: UInt64 = 0
 
     /// The session's state and decisions. Fed only through `send(_:)`.
@@ -365,6 +375,11 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         wire()
+        // Every request's outcome tells the link (`requestSucceeded`,
+        // `requestFailed`); the probes have their own clients.
+        client.onOutcome = { [weak self] address, outcome in
+            Task { @MainActor in self?.requestFinished(outcome, address: address) }
+        }
         presentation.onFollowup = { [weak self] followup in
             switch followup {
             case let .openWindow(request): self?.windowRequest = request
@@ -389,6 +404,7 @@ final class SessionViewModel: ObservableObject {
         // Every window's first appearance calls this (iPad); once is enough.
         guard !started else { return }
         started = true
+        rebuildLink()
         if demo != nil {
             startDemo()
             return
@@ -419,10 +435,12 @@ final class SessionViewModel: ObservableObject {
         // away: the next sync rewrites it even if our own state is unchanged.
         away.forgetShownActivity()
         send(.scenePhase(.active))
+        // Coming back kicks the link: a probe now (which refreshes the
+        // state), and the channels reopen once it answers.
+        setAppPhase(.active)
         Task { await PushCoordinator.shared.refreshAuthorization() }
         guard isConfigured, settings.hasBeenConfigured else { return }
         Task {
-            await refreshState(quiet: true)
             await syncHistory()
             await backfillActivity()
         }
@@ -441,6 +459,7 @@ final class SessionViewModel: ObservableObject {
         willResignActive()
         send(.keepListeningLockedChanged(settings.keepListeningWhenLocked))
         send(.scenePhase(.background))
+        setAppPhase(.background)
     }
 
     /// Settings were saved: repoint everything without losing the conversation.
@@ -457,10 +476,11 @@ final class SessionViewModel: ObservableObject {
         }
         banner = nil
         hello = nil
+        // A new link for the new computer, address or credentials: the old
+        // one's probes and timers stop, and its late replies land nowhere.
+        rebuildLink()
         if !sameDaemon {
             // Another daemon, another conversation.
-            polledReachability = .connecting
-            currentLastSeen = nil
             agents = []
             questions = []
             reducer.clear()
@@ -481,10 +501,7 @@ final class SessionViewModel: ObservableObject {
             disconnect()
             connect()
         } else {
-            Task {
-                await refreshState(quiet: true)
-                await syncHistory()
-            }
+            Task { await syncHistory() }
         }
     }
 
@@ -563,11 +580,23 @@ final class SessionViewModel: ObservableObject {
         meter.setLevel(0)
     }
 
-    /// The chip popover's Reconnect button: a clean disconnect (if one is
-    /// needed) followed by a fresh connect, whatever state we are in now.
+    /// A banner's Try again: the link tries now, and the voice starts over
+    /// with a clean disconnect (if one is needed) and a fresh connect.
     func reconnect() {
+        linkRuntime?.send(.retryTapped)
         if core.connection.wantsConnection { disconnect() }
         connect()
+    }
+
+    /// Try now, Try again, the chip sheet's Reconnect: the link tries at
+    /// once (a probe, the backoff starts over). A running voice session
+    /// starts over too; one that is off stays off.
+    func retryLink() {
+        linkRuntime?.send(.retryTapped)
+        if core.connection.wantsConnection {
+            disconnect()
+            connect()
+        }
     }
 
     // MARK: - Controls
@@ -799,6 +828,7 @@ final class SessionViewModel: ObservableObject {
         switch event {
         case .opened:
             send(.socketOpened)
+            linkRuntime?.send(.channelOpened(.ws))
             #if DEBUG
             // The UI tests start configured; a permission alert would sit
             // on top of everything they tap.
@@ -816,44 +846,21 @@ final class SessionViewModel: ObservableObject {
             screenStream.socketClosed()
             cardVisibility.socketClosed()
             send(.socketClosed(reason: reason, willRetry: retrying))
-            if retrying { probeTokenAfterSocketFailure() }
+            // A drop the socket retries: the link probes once to tell a
+            // restart from a refusal (a 401 on the upgrade is unreadable).
+            if retrying { linkRuntime?.send(.channelLost(.ws, .transport)) }
         case let .failed(error, retrying):
             screenStream.socketClosed()
             cardVisibility.socketClosed()
             send(.socketFailed(error, willRetry: retrying))
-            if retrying { probeTokenAfterSocketFailure() }
+            if retrying { linkRuntime?.send(.channelLost(.ws, LinkError(error))) }
         case let .handshake(state):
             send(.handshakeChanged(state))
+            if let message = state.mismatchMessage {
+                linkRuntime?.send(.requestFailed(.incompatible(message)))
+            }
             if let message = screenStream.handshake(state) { socket.send(message) }
             if let message = cardVisibility.handshake(state) { socket.send(message) }
-        }
-    }
-
-    private var tokenProbe: Task<Void, Never>?
-
-    /// A 401 on the WebSocket upgrade is not readable from
-    /// `URLSessionWebSocketTask`: a token revoked mid-session looked like
-    /// "could not connect" forever. After a failed reconnect, ask
-    /// `/api/state` (where a 401 is plain) and end the session with "the
-    /// token was refused" if that is what it is. One probe at a time.
-    private func probeTokenAfterSocketFailure() {
-        guard tokenProbe == nil, core.connection.wantsConnection else { return }
-        tokenProbe = Task { [weak self] in
-            guard let self else { return }
-            defer { self.tokenProbe = nil }
-            do {
-                _ = try await self.client.state()
-            } catch let DaemonError.pairing(problem) {
-                self.pairingProblem = problem
-                self.send(.tokenRefused(endpoint: self.endpointDisplay))
-            } catch DaemonError.unauthorized {
-                // Signing in again did not help: only a new code will.
-                self.pairingProblem = .unknownDevice
-                self.send(.tokenRefused(endpoint: self.endpointDisplay))
-            } catch {
-                // Unreachable or anything else: the reconnect loop's own
-                // words already say it.
-            }
         }
     }
 
@@ -918,12 +925,6 @@ final class SessionViewModel: ObservableObject {
             socket.connect()
         case .closeSocket:
             socket.disconnect()
-        case .startStreams:
-            startEvents()
-            startRefreshing()
-        case .stopStreams:
-            eventTask?.cancel(); eventTask = nil
-            refreshTask?.cancel(); refreshTask = nil
         case let .send(message):
             socket.send(message)
         case .startAudio:
@@ -964,9 +965,6 @@ final class SessionViewModel: ObservableObject {
             case .answerFailed: Haptics.answerFailed()
             case .micLost: Haptics.warning()
             }
-        case .openSettings:
-            // Only a refusal a new scan fixes opens anything by itself.
-            needsNewScan(pairingProblem ?? .revoked)
         case .refreshState:
             refreshSoon()
         case .syncHistory:
@@ -1010,9 +1008,13 @@ final class SessionViewModel: ObservableObject {
         if talkMode != core.mic.talkMode { talkMode = core.mic.talkMode }
         if holding != core.mic.holding { holding = core.mic.holding }
         if noMicSignal != core.mic.noSignal { noMicSignal = core.mic.noSignal }
-        if wantsConnection != core.connection.wantsConnection { wantsConnection = core.connection.wantsConnection }
-        let chip = core.connectionChip
-        if chip != connectionChip { connectionChip = chip }
+        if wantsConnection != core.connection.wantsConnection {
+            wantsConnection = core.connection.wantsConnection
+            // The voice keeps the link up in the background (Keep
+            // listening), and Settings says "Talking here".
+            linkRuntime?.send(.demandChanged(linkDemand))
+            presentLink()
+        }
         if handshake != core.connection.handshake { handshake = core.connection.handshake }
         let next = core.sessionState
         if next != state { state = next }
@@ -1108,54 +1110,188 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Events and state
 
-    private func startEvents() {
-        eventTask?.cancel()
-        eventTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self, self.core.connection.wantsConnection else { return }
-                // Every (re)open: what the stream missed is in the history
-                // too, and a page is cheaper than a long replay to read.
-                Task {
-                    await self.syncHistory()
-                    await self.backfillActivity()
-                }
-                self.send(.eventsChanged(.connecting))
-                do {
-                    let stream = self.client.events(since: self.resumeID, onOpen: { [weak self] in
-                        Task { @MainActor in
-                            guard let self, self.core.connection.events != .open else { return }
-                            self.send(.eventsChanged(.open))
-                        }
-                    })
-                    for try await output in stream {
-                        if Task.isCancelled { return }
-                        if self.core.connection.events != .open {
-                            self.send(.eventsChanged(.open))
-                        }
-                        self.handle(event: output)
-                    }
-                } catch {
-                    // A stream that End or a restart cancelled: its error
-                    // must not mark the new stream "reconnecting".
-                    if Task.isCancelled { return }
-                    SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
-                    if case let DaemonError.pairing(problem) = error {
-                        // A revoked phone does not fix itself by retrying.
-                        self.pairingProblem = problem
-                        self.send(.tokenRefused(endpoint: self.endpointDisplay))
-                        return
-                    }
-                    #if DEBUG
-                    if DebugLaunch.showStreamErrors {
-                        self.reducer.apply(.notice("event stream: \(error)"))
-                        self.conversationChanged()
-                    }
-                    #endif
-                    self.send(.eventsChanged(.reconnecting))
-                }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+    // MARK: - The link
+
+    /// Who needs the current computer's link: the app in front, or the
+    /// voice in the background with Keep listening on.
+    private var linkDemand: LinkDemand {
+        LinkDemand(isCurrent: true, phase: appPhase, voiceOn: wantsConnection, keepListening: settings.keepListeningWhenLocked)
+    }
+
+    private func setAppPhase(_ phase: AppPhase) {
+        guard phase != appPhase else { return }
+        // Keep listening may have changed since: the demand first, then
+        // the phase (coming to the foreground kicks the link).
+        linkRuntime?.send(.demandChanged(linkDemand))
+        appPhase = phase
+        linkRuntime?.send(.appPhase(phase))
+    }
+
+    /// A new link for the current computer (its address, its credentials),
+    /// started. The old runtime stops first: its probes, timers and late
+    /// replies end with it.
+    private func rebuildLink() {
+        linkRuntime?.stop()
+        linkTransport?.invalidate()
+        linkRuntime = nil
+        linkTransport = nil
+        linkAddress = nil
+        closeEvents()
+        guard let endpoint = settings.endpoint else {
+            linkChanged(ComputerLink(addresses: []))
+            return
+        }
+        // The address in use only: switching between a computer's
+        // addresses (failover) is phase 6. The demo's probe answers from
+        // `DemoDaemon` and never leaves the app.
+        let address = endpoint.display
+        let demoSession = demo == nil ? nil : DemoDaemon.session()
+        let transport = DaemonProbeTransport { candidate in
+            let target = candidate == address ? endpoint : DaemonEndpoint(text: candidate, secure: endpoint.secure, credentials: endpoint.credentials)
+            guard let target else { return nil }
+            return demoSession.map { DaemonClient(endpoint: target, session: $0) } ?? DaemonClient(endpoint: target)
+        }
+        let runtime = LinkRuntime(
+            computerID: currentComputerID,
+            link: ComputerLink(addresses: [address], certExpires: endpoint.credentials?.computer?.certExpires, demand: linkDemand),
+            transport: transport,
+            scheduler: LinkClock(),
+            winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil
+        )
+        runtime.onChange = { [weak self, weak runtime] link in
+            guard let self, let runtime, self.linkRuntime === runtime else { return }
+            self.linkChanged(link)
+        }
+        runtime.onState = { [weak self, weak runtime] state in
+            guard let self, let runtime, self.linkRuntime === runtime else { return }
+            self.apply(state)
+            if self.hello == nil { Task { self.hello = try? await self.client.hello() } }
+        }
+        runtime.onChannels = { [weak self, weak runtime] channels in
+            guard let self, let runtime, self.linkRuntime === runtime else { return }
+            // `/events` is the link's; `/ws` and `/term` keep their own
+            // reconnects until phase 5 and only report to it.
+            if channels.contains(.events) {
+                if self.eventTask == nil { self.openEvents() }
+            } else {
+                self.closeEvents()
             }
         }
+        runtime.onReopen = { [weak self, weak runtime] channel in
+            guard let self, let runtime, self.linkRuntime === runtime, channel == .events else { return }
+            self.openEvents()
+        }
+        runtime.onRenewTicket = { endpoint.credentials?.dropTicket() }
+        linkRuntime = runtime
+        linkTransport = transport
+        linkAddress = address
+        linkChanged(runtime.link)
+        runtime.send(.demandChanged(linkDemand))
+    }
+
+    /// The link moved: what the screen shows follows, and the transitions
+    /// that need an action get one.
+    private func linkChanged(_ next: ComputerLink) {
+        let previous = link
+        link = next
+        presentLink()
+        if case let .refused(problem) = next.state, previous.state != next.state {
+            // Only a new scan fixes it: the voice ends too, and the scan
+            // sheet opens once.
+            send(.tokenRefused(endpoint: endpointDisplay))
+            needsNewScan(problem)
+        }
+        // Coming online needs nothing more here: the channel set opens
+        // `/events`, and every open syncs the history.
+    }
+
+    private func presentLink() {
+        let presented = LinkPresentation(link, name: showsComputerLabels ? currentComputerName : nil, voiceOn: wantsConnection)
+        if presented != linkPresentation { linkPresentation = presented }
+    }
+
+    /// A request through `client` finished: the link hears about it.
+    private func requestFinished(_ outcome: DaemonClient.RequestOutcome, address: String) {
+        // A late reply from the computer (or address) the app left: not
+        // this link's business.
+        guard address == linkAddress else { return }
+        switch outcome {
+        case let .succeeded(rtt): linkRuntime?.send(.requestSucceeded(rtt: rtt))
+        case let .failed(error): linkRuntime?.send(.requestFailed(error))
+        }
+    }
+
+    /// Opens `/events` once. It does not retry by itself: a drop tells the
+    /// link (`channelLost`), which probes and says when to open it again
+    /// (`reopen`, or the channel set once it is online again).
+    private func openEvents() {
+        eventTask?.cancel()
+        let failures = eventFailures
+        eventTask = Task { [weak self] in
+            // A stream that keeps failing while the computer answers waits
+            // a little longer each time, so it cannot spin.
+            if failures > 0 {
+                let wait = LinkBackoff.ceiling(attempt: failures, cap: LinkBackoff.cap)
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+            guard let self, !Task.isCancelled else { return }
+            // Every (re)open: what the stream missed is in the history
+            // too, and a page is cheaper than a long replay to read.
+            Task {
+                await self.syncHistory()
+                await self.backfillActivity()
+            }
+            self.setLiveUpdates(failures > 0 ? .reconnecting : .connecting)
+            var failure: LinkError = .transport
+            do {
+                let stream = self.client.events(since: self.resumeID, onOpen: { [weak self] in
+                    Task { @MainActor in self?.eventsOpened() }
+                })
+                for try await output in stream {
+                    if Task.isCancelled { return }
+                    self.eventsOpened()
+                    // A stream that delivers is healthy: the next drop
+                    // reopens without waiting.
+                    if case .event = output { self.eventFailures = 0 }
+                    self.handle(event: output)
+                }
+            } catch {
+                if Task.isCancelled { return }
+                SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
+                #if DEBUG
+                if DebugLaunch.showStreamErrors {
+                    self.reducer.apply(.notice("event stream: \(error)"))
+                    self.conversationChanged()
+                }
+                #endif
+                failure = LinkError(error)
+            }
+            // Ended or failed, not cancelled by the app: tell the link.
+            if Task.isCancelled { return }
+            self.eventTask = nil
+            self.eventFailures += 1
+            self.setLiveUpdates(.reconnecting)
+            self.linkRuntime?.send(.channelLost(.events, failure))
+        }
+    }
+
+    private func eventsOpened() {
+        // Not a reset of `eventFailures`: a stream that opens and drops at
+        // once would otherwise reopen in a tight loop.
+        guard eventTask != nil, liveUpdates != .open else { return }
+        setLiveUpdates(.open)
+        linkRuntime?.send(.channelOpened(.events))
+    }
+
+    private func closeEvents() {
+        eventTask?.cancel()
+        eventTask = nil
+        eventFailures = 0
+        setLiveUpdates(.idle)
+    }
+
+    private func setLiveUpdates(_ life: SocketLife) {
+        if liveUpdates != life { liveUpdates = life }
     }
 
     /// Where `/events` resumes: the last id seen (kept in the cache across
@@ -1251,17 +1387,6 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    private func startRefreshing() {
-        refreshTask?.cancel()
-        refreshTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                guard let self, self.core.connection.wantsConnection else { return }
-                await self.refreshState(quiet: true)
-            }
-        }
-    }
-
     /// One timer drives the playback release, the metrics and the thinking
     /// timeout, so a missed event cannot leave the orb stuck. It runs fast
     /// only while audio is actually moving; idle (or with the daemon's voice
@@ -1295,13 +1420,10 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil else { return false }
         do {
             apply(try await client.state())
-            currentLastSeen = Date()
-            if polledReachability != .online { polledReachability = .online }
             if hello == nil { hello = try? await client.hello() }
             if !quiet { banner = nil }
             return true
         } catch let error as DaemonError {
-            assign(\.polledReachability, .offline(since: currentLastSeen))
             // A loud refresh that fails ends the session, as a failed
             // Connect would.
             if !quiet { send(.probeFailed(error)) }
@@ -1726,6 +1848,12 @@ final class SessionViewModel: ObservableObject {
     func daemon<T>(_ body: (DaemonClient) async throws -> T) async throws -> T {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
         return try await body(client)
+    }
+
+    /// What a failed request says where it was made: a timeout while the
+    /// link is online is one slow answer, not an unreachable computer.
+    func requestFailure(_ error: Error) -> RequestFailure {
+        RequestFailure(error, linkUsable: link.isUsable, name: showsComputerLabels ? currentComputerName : nil)
     }
 
     /// Whether the agent window can go live (`/term`).
@@ -2309,12 +2437,14 @@ final class SessionViewModel: ObservableObject {
         let mismatches = MismatchCounter()
         let reachable = await code.firstReachable { address in
             guard let url = URL(string: "https://\(address)/api/hello") else { return false }
+            // Each address's own verdict: the probes run in parallel.
+            let attempt = trust.attempt()
             do {
-                let (_, response) = try await session.data(from: url)
+                let (_, response) = try await session.data(for: URLRequest(url: url), delegate: attempt)
                 return (response as? HTTPURLResponse)?.statusCode == 200
             } catch {
                 SheepdogLog.session.error("pair probe \(address, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                if trust.sawMismatch { mismatches.add() }
+                if attempt.sawMismatch { mismatches.add() }
                 return false
             }
         }
@@ -2328,7 +2458,7 @@ final class SessionViewModel: ObservableObject {
             guard let publicKey = DeviceKey.publicKey(key) else {
                 return .failed(title: "This phone could not make its key", detail: "Try again; restart the phone if it keeps failing.")
             }
-            let auth = DeviceAuth(base: base, session: session)
+            let auth = DeviceAuth(base: base, session: session, trust: trust)
             let kind = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
             let enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
             let computer = PairedComputer(
@@ -2419,6 +2549,8 @@ final class SessionViewModel: ObservableObject {
     func computersChanged() {
         computerCount = settings.computers.count
         rebuildOthers()
+        // A second computer puts names in the status copy.
+        presentLink()
         // Every computer gets this phone's push token, and the extension
         // the names it labels alerts with.
         if demo == nil { PushCoordinator.shared.endpointChanged(from: nil) }
@@ -2523,7 +2655,7 @@ extension SessionViewModel {
         do {
             _ = try await DaemonClient(endpoint: endpoint).hello()
             return nil
-        } catch DaemonError.pairing(.pinMismatch), DaemonError.pairing(.renewedWhileAway) {
+        } catch DaemonError.untrusted {
             return "Something answered at \(address), but not with this computer's key, so the app did not use it."
         } catch let error as DaemonError {
             return error.message
