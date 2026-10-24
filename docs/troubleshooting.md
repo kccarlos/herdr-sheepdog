@@ -55,6 +55,7 @@ you changed `web.port`.
 | `sheepdog stop` says `sheepdog is not running` | Fine, nothing to stop. |
 | `WARN env file … is readable by other users (0644) — fix: chmod 600 ~/.config/sheepdog/.env` | Run the `chmod`. |
 | The daemon keeps coming back after `kill` | The login service restarts it. Use `sheepdog stop`; it unloads the service. |
+| `sheepdog doctor` says `project folders` needs access, or the phone lists no project folders | macOS has not let sheepdog into a folder such as Documents. Allow sheepdog in System Settings, Privacy & Security, Files and Folders (or Full Disk Access), then retry. Until you answer macOS's prompt the daemon skips that folder instead of waiting. |
 | Browser blocks the microphone | See [faq.md](faq.md) (per origin: `127.0.0.1` and `localhost` are separate). |
 
 ## Phone

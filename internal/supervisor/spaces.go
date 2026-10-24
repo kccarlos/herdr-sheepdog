@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -110,6 +111,10 @@ type SpacesView struct {
 	// Worktrees is true when this herdr can make a fresh worktree for a
 	// new agent (a space's Git says whether its folder can have one).
 	Worktrees bool `json:"worktrees"`
+	// NeedsAccess lists folders the daemon could not read (on macOS: not
+	// yet allowed in Privacy & Security ▸ Files and Folders). Their
+	// spaces and folders are listed without git details or left out.
+	NeedsAccess []fsaccess.Blocked `json:"needs_access"`
 }
 
 // Spaces lists the spaces, the free project folders and the kinds.
@@ -128,6 +133,7 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 	}
 	_, wt := s.herdr.(WorktreeCreator)
 	out := SpacesView{Spaces: []Space{}, Folders: []Folder{}, Kinds: []Kind{}, Worktrees: wt}
+	access := fsaccess.NewSet()
 	for _, k := range kinds {
 		out.Kinds = append(out.Kinds, Kind{Kind: k, Name: state.KindWord(k)})
 	}
@@ -138,26 +144,34 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 	}
 	taken := map[string]bool{}
 	for _, w := range snap.Workspaces {
-		sp := spaceOf(snap, w, rows)
+		sp := spaceOf(snap, w, rows, access.OK)
 		sp.Commands = append([]WrapUp{}, cmds[sp.Path]...)
 		if sp.Path != "" {
 			taken[sp.Path] = true
 		}
 		out.Spaces = append(out.Spaces, sp)
 	}
-	for _, d := range s.spawnDirs(snap) {
+	for _, d := range s.spawnDirsIn(snap, access) {
 		if d.Pane != "" || taken[d.Path] {
 			continue
 		}
-		_, git := gitInfo(d.Path)
+		git := false
+		if access.OK(d.Path) {
+			_, git = gitInfo(d.Path)
+		}
 		out.Folders = append(out.Folders, Folder{Name: d.Name, Path: d.Path, Git: git})
 	}
+	out.NeedsAccess = access.Blocked()
 	return out, nil
 }
 
 // spaceOf builds the view of workspace w from the snapshot and the
 // roster rows.
-func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.Agent) Space {
+//
+// readable says whether a folder may be read: for one that may not (macOS
+// has not been allowed in yet) the space keeps the path herdr reported
+// and no git details, instead of waiting on the folder.
+func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.Agent, readable func(string) bool) Space {
 	sp := Space{ID: w.WorkspaceID, Name: w.Label, Agents: []SpaceAgent{}, Shells: []string{}}
 	var panes []herdr.PaneInfo
 	for _, p := range snap.Panes {
@@ -166,14 +180,23 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 		}
 	}
 	sort.Slice(panes, func(i, j int) bool { return paneLess(panes[i].PaneID, panes[j].PaneID) })
+	raw := ""
 	if w.Worktree != nil && w.Worktree.CheckoutPath != "" {
-		sp.Path = realDir(w.Worktree.CheckoutPath)
+		raw = w.Worktree.CheckoutPath
+		if readable(raw) {
+			sp.Path = realDir(raw)
+		}
 		sp.Worktree = w.Worktree.Linked
 	}
 	if sp.Path == "" && len(panes) > 0 {
-		sp.Path = realDir(panes[0].Cwd)
+		if raw = panes[0].Cwd; readable(raw) {
+			sp.Path = realDir(raw)
+		}
 	}
-	if sp.Path != "" {
+	unreadable := sp.Path == "" && raw != "" && !readable(raw)
+	if unreadable {
+		sp.Path = raw
+	} else if sp.Path != "" {
 		g, ok := gitInfo(sp.Path)
 		sp.Git, sp.Repo, sp.Branch = ok, g.repo, g.branch
 		if w.Worktree != nil && w.Worktree.RepoName != "" {
@@ -272,7 +295,7 @@ func (s *Supervisor) space(ctx context.Context, id string) (Space, error) {
 	}
 	for _, w := range snap.Workspaces {
 		if w.WorkspaceID == id {
-			return spaceOf(snap, w, rows), nil
+			return spaceOf(snap, w, rows, fsaccess.NewSet().OK), nil
 		}
 	}
 	return Space{}, ErrNoSuchSpace

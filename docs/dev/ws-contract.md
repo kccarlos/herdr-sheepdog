@@ -1073,9 +1073,24 @@ shells. Each action is logged as `web.space_action {action, space}` and
 `supervisor.space_*` / `supervisor.worktree_*` / `supervisor.wrapup_*`,
 and told to the orchestrator in one line.
 
+**`needs_access`** (always present, `[]` when nothing is blocked) lists the
+folders the daemon could not read, so `GET /api/spaces` answers within a
+couple of seconds instead of waiting on them. `path` is the folder that
+needs the user's permission (on macOS the protected folder itself, such as
+`~/Documents`, `~/Desktop`, `~/Downloads` or iCloud Drive; otherwise the
+folder) and `reason` is `denied` (the system refused) or `slow` (the read
+did not answer in time: macOS is showing its permission prompt). Spaces
+inside such a folder are still listed, with their `path` as herdr reported
+it and `git` false, no `repo` or `branch`; its project folders are left
+out of `folders`. The first time a path appears the daemon logs
+`web.spaces.no_access {path, reason}` (again only after it was readable
+in between). The app shows "sheepdog needs access to <folder>: allow it in
+System Settings, Privacy & Security, Files and Folders" instead of
+"Couldn't reach your computer".
+
 | Route | Body | Answer |
 |---|---|---|
-| `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": [{"kind", "name"}], "worktrees": true}` |
+| `GET /api/spaces` | | `{"spaces": [Space], "folders": [{"name", "path", "git"}], "kinds": [{"kind", "name"}], "worktrees": true, "needs_access": [{"path", "reason"}]}` |
 | `POST /api/spaces` | `{"dir", "name"?, "worktree"?: {"branch"}}` | `{"ok": true, "space", "pane_id"}` |
 | `POST /api/spaces/{id}/rename` | `{"name"}` | `{"ok": true, "spoken"}` |
 | `POST /api/spaces/{id}/close` | | `{"ok": true, "spoken"}` |
