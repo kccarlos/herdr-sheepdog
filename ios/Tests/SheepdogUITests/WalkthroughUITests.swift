@@ -62,9 +62,9 @@ final class WalkthroughUITests: XCTestCase {
         // conversation; a fresh data dir leaves it empty.
         shot(app, "03-main-empty")
         // The voice bar before Connect: Mute and End hidden, the orb is a
-        // Connect button, and the top-left chip reads the daemon connection
-        // itself (grey "Not connected"), never the voice state.
-        XCTAssertEqual(menuItemLabel(app, menu: "voice.menu", item: "chip.connection"), "Connection: Not connected")
+        // Connect button, and the connection row reads the computer's link
+        // ("Connected": the computer answers), never the voice state.
+        XCTAssertTrue(waitForMenuItem(app, menu: "voice.menu", item: "chip.connection", label: "Connection: Connected", timeout: 15))
         shot(app, "15-voicebar-not-connected")
 
         // 4. Connect. The daemon runs without a voice session and says so

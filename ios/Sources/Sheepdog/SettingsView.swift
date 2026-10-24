@@ -209,23 +209,19 @@ struct SettingsView: View {
         }
     }
 
+    /// The link's status (`LinkPresentation`, the same as the chip):
     /// "Talking here · address" while the voice runs, "Connected ·
-    /// address", "Offline · address", or "Not paired yet".
+    /// address", "Offline since 9:12 · address", or "Not paired yet".
     private var computerStatus: String {
         guard model.isConfigured else { return "Not paired yet" }
+        let presented = model.linkPresentation
         let address = model.endpointDisplay
-        if model.wantsConnection, model.connectionChip.tint == .green { return "Talking here · \(address)" }
-        return "\(model.connectionChip.word) · \(address)"
+        return presented.status.hasSuffix(address) ? presented.status : "\(presented.status) · \(address)"
     }
 
     private var computerTint: Color {
         guard model.isConfigured else { return Theme.unknown }
-        switch model.connectionChip.tint {
-        case .green: return Theme.done
-        case .amber: return Theme.blocked
-        case .red: return Theme.danger
-        case .grey: return Theme.unknown
-        }
+        return model.linkPresentation.tint.color
     }
 
     private func row(_ title: String, _ symbol: String, _ page: SettingsPage, id: String) -> some View {

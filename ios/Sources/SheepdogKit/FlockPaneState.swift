@@ -15,25 +15,34 @@ public enum FlockPaneState: Equatable, Sendable {
     case reconnecting
     /// Connected, and herdr reports no agent.
     case empty
-    /// The session was never started (or was ended).
+    /// Nothing needs the link (no computer paired yet).
     case notConnected
-    /// The daemon cannot be reached; Retry helps.
+    /// The computer cannot be reached past the quiet period; Try now helps.
     case unreachable
-    /// The daemon refused the token; Settings helps.
+    /// The phone itself has no network.
+    case noNetwork
+    /// Something on this network answered with another key.
+    case untrusted
+    /// The computer refused this device; a new scan helps.
     case tokenRefused
     /// App and daemon protocols differ; updating one helps.
     case updateNeeded
 
-    public static func resolve(chip: ConnectionChip.Status, hasAgents: Bool) -> FlockPaneState {
+    /// From the computer's link, the same truth as the chip.
+    public static func resolve(link: ComputerLink, hasAgents: Bool) -> FlockPaneState {
         if hasAgents { return .content }
-        switch chip {
-        case .connecting: return .loading
-        case .reconnecting: return .reconnecting
-        case .connected: return .empty
-        case .notConnected: return .notConnected
+        switch link.state {
+        case .idle: return .notConnected
+        case let .connecting(_, outage):
+            guard let outage else { return .loading }
+            return outage.long ? .unreachable : .reconnecting
+        case .waiting: return .reconnecting
+        case .online, .degraded: return .empty
         case .offline: return .unreachable
-        case .tokenRefused: return .tokenRefused
-        case .updateNeeded: return .updateNeeded
+        case .noNetwork: return .noNetwork
+        case .untrustedAnswer: return .untrusted
+        case .refused: return .tokenRefused
+        case .incompatible: return .updateNeeded
         }
     }
 }

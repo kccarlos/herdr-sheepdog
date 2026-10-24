@@ -20,25 +20,17 @@ import Foundation
 /// reconnect quiet period and the speaking hold always used; the thinking
 /// timeout is only ever compared with the same `now`.
 public struct SessionCore: Equatable, Sendable {
-    /// The `/ws` socket, the `/events` stream, the token and the reconnect
-    /// policy.
+    /// The voice's `/ws` socket and its reconnect policy. Whether the app
+    /// can talk to the computer at all is not here: that is the computer's
+    /// `ComputerLink`, which every status surface renders
+    /// (`LinkPresentation`, docs/dev/design/ios-state-architecture.md 3.2).
     public struct Connection: Equatable, Sendable {
         /// True from Connect until End (or a failure that ends the session).
         public var wantsConnection = false
         public var socket: SocketLife = .idle
-        /// The `/events` stream's own life, shown in Health (not the chip).
-        public var events: SocketLife = .idle
-        /// A connection attempt ended in a failure that will not retry by
-        /// itself; cleared on the next attempt or once the socket opens.
-        public var failed = false
-        /// Something dropped since Connect: the chip says "Reconnecting"
-        /// (not "Connecting") from then until the next Connect or End.
-        public var dropped = false
-        /// The daemon refused the token.
-        public var tokenRefused = false
         /// The `/ws` protocol handshake (`ProtocolHandshake`), as the socket
-        /// last reported it. A mismatch outlives the connection, so the
-        /// chip keeps saying what to update until the next Connect.
+        /// last reported it. A mismatch outlives the connection, for Health
+        /// and the chip's sheet, until the next Connect.
         public var handshake: ProtocolHandshake.State = .idle
         /// Retry quietly through a daemon restart, then with a banner.
         public var reconnect = ReconnectPolicy()
@@ -148,18 +140,6 @@ public struct SessionCore: Equatable, Sendable {
     /// The orb.
     public var sessionState: SessionState { SessionState.resolve(stateInputs) }
 
-    /// The top-left chip.
-    public var connectionChip: ConnectionChip {
-        ConnectionChip(.init(
-            socket: connection.socket,
-            events: connection.events,
-            failed: connection.failed,
-            tokenRefused: connection.tokenRefused,
-            updateNeeded: connection.handshake.isMismatch,
-            dropped: connection.dropped
-        ))
-    }
-
     /// What the voice bar's controls do.
     public var voiceBar: VoiceBarModel { VoiceBarModel(state: sessionState, talkMode: mic.talkMode) }
 
@@ -199,11 +179,6 @@ public struct SessionCore: Equatable, Sendable {
             resetSession()
             connection.wantsConnection = true
             connection.socket = .connecting
-            // The `/events` stream does not exist until the probe passes.
-            connection.events = .idle
-            connection.failed = false
-            connection.dropped = false
-            connection.tokenRefused = false
             connection.handshake = .idle
             connection.reconnect.reset()
             effects.append(.probe)
@@ -240,16 +215,8 @@ public struct SessionCore: Equatable, Sendable {
         case .endTapped:
             disconnect(&effects)
 
-        case let .eventsChanged(life):
-            // A stream task cancelled by End or a failure can still report
-            // from its `catch`; without a session the stream is idle.
-            // Health only: the chip follows /ws (ConnectionChip).
-            connection.events = connection.wantsConnection ? life : .idle
-
         case .socketOpened:
             connection.socket = .open
-            connection.failed = false
-            connection.tokenRefused = false
             effects.append(.clearBanner)
             connection.reconnect.opened()
             connection.muteSync.reset()
@@ -263,12 +230,10 @@ public struct SessionCore: Equatable, Sendable {
             effects.append(.stopAudio)
             quietSpeaking()
             if retrying {
-                connection.dropped = true
                 connection.reconnect.connectionLost(at: t)
             } else {
                 connection.wantsConnection = false
-                connection.events = .idle
-                effects.append(contentsOf: [.stopStreams, .stopTicker])
+                effects.append(.stopTicker)
                 resetSession()
                 if reason == "replaced" {
                     effects.append(.showBanner(.replaced))
@@ -479,19 +444,14 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func openSocket(_ effects: inout [SessionEffect]) {
         connection.socketMuted = daemonMute
         connection.socketGateClosed = false
-        connection.events = .connecting
-        effects.append(contentsOf: [.openSocket, .startStreams, .startTicker])
+        effects.append(contentsOf: [.openSocket, .startTicker])
     }
 
     /// End: everything back to "not connected".
     private mutating func disconnect(_ effects: inout [SessionEffect]) {
         connection.wantsConnection = false
-        effects.append(contentsOf: [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
+        effects.append(contentsOf: [.closeSocket, .stopAudio, .stopTicker])
         connection.socket = .idle
-        connection.events = .idle
-        connection.failed = false
-        connection.dropped = false
-        connection.tokenRefused = false
         connection.handshake = .idle
         resetSession()
         if mic.talkMode == .holdToTalk { effects.append(.setManualGate(false)) }
@@ -517,18 +477,14 @@ public struct SessionCore: Equatable, Sendable {
         thinkingExpiry = nil
     }
 
-    /// A failure that ends the session: say why, and stop everything.
+    /// A failure that ends the session: say why, and stop everything. A
+    /// refusal that only a new scan fixes is the link's to present
+    /// (`ComputerLink.State.refused`), not the voice's.
     private mutating func fail(_ error: DaemonError, _ effects: inout [SessionEffect]) {
         effects.append(.showBanner(.connectionFailed(error)))
-        connection.failed = true
-        if case .unauthorized = error {
-            connection.tokenRefused = true
-            effects.append(.openSettings)
-        }
         connection.wantsConnection = false
         connection.socket = .idle
-        connection.events = .idle
-        effects.append(contentsOf: [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
+        effects.append(contentsOf: [.closeSocket, .stopAudio, .stopTicker])
         resetSession()
     }
 
@@ -644,10 +600,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// microphone permission, asked right after.
     case probeSucceeded(micGranted: Bool)
     case probeFailed(DaemonError)
-    /// `/events` answered 401.
+    /// The computer refused this device (the link is `refused`): the
+    /// voice ends too.
     case tokenRefused(endpoint: String)
-    /// The `/events` stream's life.
-    case eventsChanged(SocketLife)
 
     // The `/ws` socket
     case socketOpened
@@ -702,10 +657,6 @@ public enum SessionEffect: Equatable, Sendable {
     case openSocket
     /// `VoiceSocket.disconnect()`.
     case closeSocket
-    /// Start the `/events` stream and the periodic `/api/state` refresh.
-    case startStreams
-    /// Stop them.
-    case stopStreams
     case send(WSMessage)
     /// Start the engine unless it already runs; report `audioStarted` or
     /// `audioStartFailed`.
@@ -728,8 +679,6 @@ public enum SessionEffect: Equatable, Sendable {
     /// A notice in the conversation.
     case notice(String)
     case haptic(SessionHaptic)
-    /// Open Settings (the token was refused).
-    case openSettings
     /// A debounced `/api/state` fetch.
     case refreshState
     /// A history sync once the daemon has logged the turn (2.5 s).

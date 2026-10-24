@@ -135,6 +135,17 @@ public struct DaemonEndpoint: Equatable, Sendable {
 public enum DaemonError: Error, Equatable, Sendable {
     /// Nothing answered: wrong address, daemon not running, phone on another network.
     case unreachable(endpoint: String, detail: String)
+    /// The request went out but no answer came in time. Not the same as
+    /// unreachable: with the computer otherwise online, it is one slow
+    /// answer (macOS asking for folder access, a busy daemon), worth a
+    /// "try again" where the user tapped, not "can't reach".
+    case timedOut(endpoint: String)
+    /// Something answered over TLS with a key that matches none of the
+    /// computer's pins: nothing was sent. On its own this is not "scan
+    /// again" (decision 1 of docs/dev/design/ios-state-architecture.md):
+    /// the connection's `ComputerLink` decides, across the computer's
+    /// addresses, between the untrusted-answer warning and a rescan.
+    case untrusted(endpoint: String)
     /// 401 that signing in again did not fix.
     case unauthorized(endpoint: String)
     /// The app must scan the pairing code again (revoked, a changed key…).
@@ -148,11 +159,18 @@ public enum DaemonError: Error, Equatable, Sendable {
     /// Another refusal with the daemon's own words (`{"error": "…"}`).
     case rejected(status: Int, message: String)
 
+    /// What a request that ran out of time says, where the user tapped.
+    public static let slowAnswer = "Your computer is taking longer than usual to answer."
+
     /// The banner headline.
     public var message: String {
         switch self {
         case let .unreachable(endpoint, _):
             return "Can't reach the daemon at \(endpoint) — is it running?"
+        case .timedOut:
+            return Self.slowAnswer
+        case let .untrusted(endpoint):
+            return "Something answered at \(endpoint), but not with this computer's key, so the app did not use it."
         case let .unauthorized(endpoint):
             return "\(endpoint) turned this phone down. Scan the pairing code again."
         case let .pairing(problem):
@@ -177,6 +195,10 @@ public enum DaemonError: Error, Equatable, Sendable {
             return detail.isEmpty ? SetupHelp.unreachableFix : "\(detail) \(SetupHelp.unreachableFix)"
         case .unauthorized:
             return SetupHelp.pairFix
+        case .timedOut:
+            return "Try again."
+        case .untrusted:
+            return "If this is a hotel or office network, try another one."
         case let .pairing(problem):
             return problem.message
         case .notSheepdog:
@@ -208,9 +230,21 @@ public final class DaemonClient: @unchecked Sendable {
     /// The pins of the endpoint's computer, followed across `update`.
     private let trust: EndpointTrust
 
+    /// Every finished request's outcome, for the connection's
+    /// `ComputerLink` (`requestSucceeded` / `requestFailed`). Called off the
+    /// main thread; set it before the first request.
+    public var onOutcome: (@Sendable (RequestOutcome) -> Void)?
+
+    /// How one request ended, classified for that request alone.
+    public enum RequestOutcome: Equatable, Sendable {
+        case succeeded(rtt: TimeInterval)
+        case failed(LinkError)
+    }
+
     public init(endpoint: DaemonEndpoint, session: URLSession? = nil) {
         self.endpoint = endpoint
         trust = EndpointTrust(endpoint.credentials)
+        ownsSessions = session == nil
         if let session {
             self.session = session
             self.streamSession = session
@@ -224,6 +258,17 @@ public final class DaemonClient: @unchecked Sendable {
             stream.shouldUseExtendedBackgroundIdleMode = true
             self.streamSession = trust.session(configuration: stream)
         }
+    }
+
+    /// The sessions were made here (not handed in, like the demo's).
+    private let ownsSessions: Bool
+
+    /// Cancels what is in flight and releases the sessions (and their
+    /// delegates). The client is unusable afterwards.
+    public func invalidate() {
+        guard ownsSessions else { return }
+        session.invalidateAndCancel()
+        streamSession.invalidateAndCancel()
     }
 
     public func update(endpoint: DaemonEndpoint) {
@@ -497,6 +542,22 @@ public final class DaemonClient: @unchecked Sendable {
     /// again once on `401 no_session` / `session_expired`, and turns a
     /// refusal only a new scan fixes into `.pairing`.
     func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let started = Date()
+        do {
+            let result = try await performOnce(request)
+            if let status = (result.1 as? HTTPURLResponse)?.statusCode, status >= 500 {
+                onOutcome?(.failed(.httpOther(status)))
+            } else {
+                onOutcome?(.succeeded(rtt: Date().timeIntervalSince(started)))
+            }
+            return result
+        } catch {
+            onOutcome?(.failed(LinkError(error)))
+            throw error
+        }
+    }
+
+    private func performOnce(_ request: URLRequest) async throws -> (Data, URLResponse) {
         guard endpoint.secure else { return try await send(request) }
         var request = request
         try await authorize(&request)
@@ -521,29 +582,36 @@ public final class DaemonClient: @unchecked Sendable {
         } catch let problem as PairingProblem {
             throw DaemonError.pairing(problem)
         } catch let error as URLError {
-            throw translate(error)
+            // The sign-in judged its own handshakes: a mismatch there
+            // arrives as `DaemonError.untrusted`, not as a URLError.
+            throw Self.translate(error, endpoint: endpoint, sawMismatch: false)
         }
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        // A per-request delegate answers the challenge instead of the
+        // session's: this request's verdict is its own.
+        let attempt = trust.delegate.attempt()
         do {
-            return try await session.data(for: request)
+            return try await session.data(for: request, delegate: attempt)
         } catch let error as URLError {
-            throw translate(error)
+            // The app's own cancellation stays a cancellation: it is never
+            // "unreachable" (`LinkError.cancelled`).
+            if error.code == .cancelled, !attempt.sawMismatch { throw error }
+            throw Self.translate(error, endpoint: endpoint, sawMismatch: attempt.sawMismatch)
         }
     }
 
-    /// A transport error in the app's words; a key that matches no pin
-    /// (here or in the sign-in) is "scan again", not "unreachable".
-    func translate(_ error: URLError) -> DaemonError {
-        Self.translate(error, endpoint: endpoint, sawMismatch: trust.delegate.sawMismatch || endpoint.credentials?.trust.sawMismatch == true)
-    }
-
+    /// A transport error in the app's words. A key that matches no pin on
+    /// *this* request is `untrusted`, never "scan again" by itself
+    /// (`ComputerLink` decides that across the addresses); a timeout is
+    /// `timedOut`; the rest is unreachable.
     public static func translate(_ error: URLError, endpoint: DaemonEndpoint, sawMismatch: Bool) -> DaemonError {
         if endpoint.secure, sawMismatch,
            [.cancelled, .serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot].contains(error.code) {
-            return .pairing(PairingProblem.forPinMismatch(certExpires: endpoint.credentials?.computer?.certExpires))
+            return .untrusted(endpoint: endpoint.display)
         }
+        if error.code == .timedOut { return .timedOut(endpoint: endpoint.display) }
         return .unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(error))
     }
 
@@ -609,10 +677,12 @@ public final class DaemonClient: @unchecked Sendable {
                     try await self.authorize(&request)
                     let bytes: URLSession.AsyncBytes
                     let response: URLResponse
+                    let attempt = self.trust.delegate.attempt()
                     do {
-                        (bytes, response) = try await self.streamSession.bytes(for: request)
+                        (bytes, response) = try await self.streamSession.bytes(for: request, delegate: attempt)
                     } catch let error as URLError {
-                        throw self.translate(error)
+                        if error.code == .cancelled, !attempt.sawMismatch { throw error }
+                        throw Self.translate(error, endpoint: self.endpoint, sawMismatch: attempt.sawMismatch)
                     }
                     if let http = response as? HTTPURLResponse, http.statusCode == 401 {
                         let body = try? await bytes.reduce(into: Data()) { $0.append($1) }

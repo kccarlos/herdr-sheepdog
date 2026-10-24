@@ -17,7 +17,14 @@ struct ConnectionDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent("Status", value: model.connectionChip.word)
+                    LabeledContent("Status", value: model.linkPresentation.chip)
+                        .accessibilityIdentifier("chip.status")
+                    if let inline = model.linkPresentation.inline {
+                        Text(inline.message)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.muted)
+                            .accessibilityIdentifier("chip.statusDetail")
+                    }
                     LabeledContent("Address", value: model.endpointDisplay)
                         .accessibilityIdentifier("chip.address")
                     LabeledContent("Round trip") {
@@ -64,7 +71,7 @@ struct ConnectionDetailView: View {
 
                 Section {
                     Button("Reconnect") {
-                        model.reconnect()
+                        model.retryLink()
                         dismiss()
                     }
                     .accessibilityIdentifier("chip.reconnect")
@@ -93,5 +100,28 @@ struct ConnectionDetailView: View {
         roundTrip = await model.pingRoundTrip()
         hasPinged = true
         pinging = false
+    }
+}
+
+extension LinkPresentation.Tint {
+    /// The status colour: green connected, amber on its way, red needs
+    /// something, grey off.
+    var color: Color {
+        switch self {
+        case .green: return Theme.done
+        case .amber: return Theme.blocked
+        case .red: return Theme.danger
+        case .grey: return Theme.unknown
+        }
+    }
+
+    /// The symbol beside the status word in menus.
+    var symbol: String {
+        switch self {
+        case .green: return "checkmark.circle"
+        case .amber: return "arrow.triangle.2.circlepath"
+        case .red: return "wifi.slash"
+        case .grey: return "circle.dashed"
+        }
     }
 }

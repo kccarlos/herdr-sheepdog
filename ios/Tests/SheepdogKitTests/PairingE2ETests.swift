@@ -37,26 +37,36 @@ final class PairingE2ETests: XCTestCase {
         let address = "127.0.0.1:\(port)"
         let base = URL(string: "https://\(address)/")!
 
-        // A key that matches no pin is refused, and the delegate says so.
+        // A key that matches no pin is refused, and that request's own
+        // delegate says so.
         let (wrong, wrongTrust) = pinnedSession(["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
+        let wrongAttempt = wrongTrust.attempt()
         do {
-            _ = try await wrong.data(from: base.appendingPathComponent("api/hello"))
+            _ = try await wrong.data(for: URLRequest(url: base.appendingPathComponent("api/hello")), delegate: wrongAttempt)
             XCTFail("a wrong pin was accepted")
         } catch {
-            XCTAssertTrue(wrongTrust.sawMismatch)
+            XCTAssertTrue(wrongAttempt.sawMismatch)
         }
+        // The next request on the same session starts with a clean verdict:
+        // nothing sticky survives from the last one.
+        XCTAssertFalse(wrongTrust.attempt().sawMismatch)
 
         // The code's pin: TLS to a self-signed certificate, no ATS exception.
         let (session, trust) = pinnedSession([code.pin])
-        let (_, hello) = try await session.data(from: base.appendingPathComponent("api/hello"))
+        let attempt = trust.attempt()
+        let (_, hello) = try await session.data(for: URLRequest(url: base.appendingPathComponent("api/hello")), delegate: attempt)
         XCTAssertEqual((hello as? HTTPURLResponse)?.statusCode, 200)
-        XCTAssertFalse(trust.sawMismatch)
+        XCTAssertFalse(attempt.sawMismatch)
+        // Without a per-request delegate the session's own (task-level)
+        // check still pins.
+        let (_, plain) = try await session.data(from: base.appendingPathComponent("api/hello"))
+        XCTAssertEqual((plain as? HTTPURLResponse)?.statusCode, 200)
 
         // Enroll once; the same code again is refused.
         DeviceKey.delete(daemonID: code.daemonID)
         let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
         defer { DeviceKey.delete(daemonID: code.daemonID) }
-        let auth = DeviceAuth(base: base, session: session)
+        let auth = DeviceAuth(base: base, session: session, trust: trust)
         let enrolled = try await auth.enroll(code: code.code, publicKey: try XCTUnwrap(DeviceKey.publicKey(key)), name: "Test iPhone", kind: "ios", hardware: false)
         XCTAssertFalse(enrolled.deviceID.isEmpty)
         do {
@@ -72,6 +82,31 @@ final class PairingE2ETests: XCTestCase {
         let endpoint = try XCTUnwrap(DaemonEndpoint(text: address, secure: true, credentials: credentials))
         let client = DaemonClient(endpoint: endpoint)
         _ = try await client.state()
+
+        // A paired client whose pin does not match (the phone's key exists,
+        // so the sign-in reaches TLS): the request is `untrusted`, and the
+        // link decides between the warning and a rescan, never this
+        // request by itself.
+        let stranger = DeviceCredentials(daemonID: code.daemonID, secrets: InMemorySecretStore())
+        stranger.computer = PairedComputer(daemonID: code.daemonID, name: code.name, addresses: [address], pin: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", deviceID: enrolled.deviceID, pairedAt: Date())
+        do {
+            _ = try await DaemonClient(endpoint: try XCTUnwrap(DaemonEndpoint(text: address, secure: true, credentials: stranger))).hello()
+            XCTFail("a wrong pin was accepted")
+        } catch {
+            XCTAssertEqual(error as? DaemonError, .untrusted(endpoint: address))
+            XCTAssertEqual(LinkError(error), .tlsUntrusted)
+        }
+
+        // The app's own cancellation is never an error for the link, even
+        // right after a mismatch on another client (the old sticky flag
+        // turned it into "scan again").
+        let slow = Task { try await client.conversation(limit: 200) }
+        slow.cancel()
+        do {
+            _ = try await slow.value
+        } catch {
+            XCTAssertEqual(LinkError(error), .cancelled, "\(error)")
+        }
         let header = try XCTUnwrap(credentials.header())
         XCTAssertTrue(header.hasPrefix("Bearer sds_"))
 

@@ -100,7 +100,7 @@ struct IPadSidebar: View {
     }
 
     private var paneState: FlockPaneState {
-        FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
+        FlockPaneState.resolve(link: model.link, hasAgents: !model.flock.isEmpty)
     }
 
     var body: some View {
@@ -365,13 +365,23 @@ struct IPadSidebar: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(Theme.primaryText)
                 .frame(minHeight: 44)
-            case .unreachable, .tokenRefused, .updateNeeded:
-                Text("Can't reach the computer.")
-                Button("Retry") { model.reconnect() }
+            case .tokenRefused:
+                Text((model.pairingProblem ?? .revoked).title)
+                Button("Scan again") { model.needsNewScan(model.pairingProblem ?? .revoked) }
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.primaryText)
                     .frame(minHeight: 44)
-                    .accessibilityIdentifier("sidebar.retry")
+                    .accessibilityIdentifier("sidebar.scan")
+            case .unreachable, .noNetwork, .untrusted, .updateNeeded:
+                // The link's own words, the same as the chip's sheet.
+                Text(model.linkPresentation.inline?.message ?? "Can't reach the computer.")
+                if paneState != .noNetwork {
+                    Button("Try again") { model.retryLink() }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.primaryText)
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("sidebar.retry")
+                }
             }
         }
         .font(.subheadline)

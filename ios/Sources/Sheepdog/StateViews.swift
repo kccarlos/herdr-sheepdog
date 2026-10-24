@@ -43,16 +43,39 @@ struct FlockUnavailableView: View {
                         .accessibilityIdentifier("flock.notConnected.connect")
                 }
             case .unreachable:
+                // The link's words (`LinkPresentation`): when it was last
+                // seen, and what to check.
                 ContentUnavailableView {
-                    Label("Daemon unreachable", systemImage: "wifi.slash")
+                    Label("Can't reach \(model.showsComputerLabels ? model.currentComputerName : "your computer")", systemImage: "wifi.slash")
                 } description: {
-                    Text(LocalizedStringKey(SetupHelp.unreachableFix))
+                    Text(model.linkPresentation.inline?.message ?? SetupHelp.unreachableFix)
                 } actions: {
-                    Button("Try again") { model.reconnect() }
+                    Button("Try now") { model.retryLink() }
                         .accessibilityIdentifier("flock.unreachable.retry")
                     Link("How to fix this", destination: SetupHelp.remoteAccessURL)
                         .tint(Theme.primaryText)
                         .accessibilityIdentifier("flock.unreachable.help")
+                }
+            case .noNetwork:
+                ContentUnavailableView {
+                    Label("No network", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(model.linkPresentation.inline?.message ?? "")
+                }
+                .accessibilityIdentifier("flock.noNetwork")
+            case .untrusted:
+                ContentUnavailableView {
+                    Label("Not verified", systemImage: "exclamationmark.shield")
+                } description: {
+                    Text(model.linkPresentation.inline?.message ?? "")
+                } actions: {
+                    Button("Try again") { model.retryLink() }
+                        .accessibilityIdentifier("flock.untrusted.retry")
+                    Button("Use another address") {
+                        model.settingsRoute = .daemon
+                        model.presentation.present(.settings)
+                    }
+                    .accessibilityIdentifier("flock.untrusted.addresses")
                 }
             case .tokenRefused:
                 ContentUnavailableView {
@@ -71,7 +94,7 @@ struct FlockUnavailableView: View {
                 } description: {
                     Text("This app and the daemon speak different protocol versions. Update the older one.")
                 } actions: {
-                    Button("Try again") { model.reconnect() }
+                    Button("Try again") { model.retryLink() }
                 }
             case .content:
                 EmptyView()

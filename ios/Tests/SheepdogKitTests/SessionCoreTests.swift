@@ -31,18 +31,17 @@ final class SessionCoreTests: XCTestCase {
         // Connect: the probe first.
         XCTAssertEqual(core.apply(.connectTapped, now: at(0)), [.clearBanner, .probe])
         XCTAssertEqual(core.sessionState, .connecting)
-        XCTAssertEqual(core.connectionChip.status, .connecting)
+        XCTAssertEqual(core.connection.socket, .connecting)
         XCTAssertTrue(core.connection.wantsConnection)
 
         // The probe passed and the microphone is allowed: open everything.
-        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: true), now: at(0.1)), [.openSocket, .startStreams, .startTicker])
+        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: true), now: at(0.1)), [.openSocket, .startTicker])
         XCTAssertFalse(core.connection.socketMuted, "the socket says mute(false) on open")
         XCTAssertFalse(core.connection.socketGateClosed)
 
         XCTAssertEqual(core.apply(.socketOpened, now: at(0.2)), [.clearBanner, .haptic(.connected)])
         XCTAssertEqual(core.sessionState, .idle, "open, no voice status yet")
-        XCTAssertEqual(core.apply(.eventsChanged(.open), now: at(0.2)), [])
-        XCTAssertEqual(core.connectionChip.status, .connected)
+        XCTAssertEqual(core.connection.socket, .open)
 
         // The daemon's voice is up: the engine starts.
         XCTAssertEqual(core.apply(.status(.status(.connected, muted: false, provider: "gemini")), now: at(0.3)), [.startAudio])
@@ -78,9 +77,9 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.sessionState, .listening)
 
         // End.
-        XCTAssertEqual(core.apply(.endTapped, now: at(7)), [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
+        XCTAssertEqual(core.apply(.endTapped, now: at(7)), [.closeSocket, .stopAudio, .stopTicker])
         XCTAssertEqual(core.sessionState, .disconnected)
-        XCTAssertEqual(core.connectionChip.status, .notConnected)
+        XCTAssertEqual(core.connection.socket, .idle)
         XCTAssertNil(core.voice.status)
         XCTAssertNil(core.voice.provider)
         XCTAssertFalse(core.connection.wantsConnection)
@@ -99,60 +98,16 @@ final class SessionCoreTests: XCTestCase {
     func testADeniedMicrophoneStillOpensTheSession() {
         var core = SessionCore()
         _ = core.apply(.connectTapped, now: t0)
-        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: false), now: t0), [.showBanner(.microphoneDenied), .openSocket, .startStreams, .startTicker])
+        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: false), now: t0), [.showBanner(.microphoneDenied), .openSocket, .startTicker])
     }
 
     func testAFailedProbeEndsTheSessionWithABanner() {
         var core = SessionCore()
         _ = core.apply(.connectTapped, now: t0)
-        XCTAssertEqual(core.apply(.probeFailed(unreachable), now: t0), [.showBanner(.connectionFailed(unreachable)), .closeSocket, .stopAudio, .stopStreams, .stopTicker])
+        XCTAssertEqual(core.apply(.probeFailed(unreachable), now: t0), [.showBanner(.connectionFailed(unreachable)), .closeSocket, .stopAudio, .stopTicker])
         XCTAssertFalse(core.connection.wantsConnection)
-        XCTAssertEqual(core.connectionChip.status, .offline)
+        XCTAssertEqual(core.connection.socket, .idle)
         XCTAssertEqual(core.sessionState, .disconnected)
-    }
-
-    // MARK: - The chip's words: Connecting first, Reconnecting after a drop
-
-    func testTheChipSaysConnectingUntilSomethingDropsThenReconnecting() {
-        var core = SessionCore()
-        _ = core.apply(.connectTapped, now: at(0))
-        XCTAssertEqual(core.connectionChip.word, "Connecting…")
-        _ = core.apply(.probeSucceeded(micGranted: true), now: at(0.1))
-        _ = core.apply(.socketOpened, now: at(0.2))
-        // The chip follows /ws: the phone can talk to the computer.
-        XCTAssertEqual(core.connectionChip.word, "Connected")
-        XCTAssertEqual(core.connectionChip.liveUpdatesWord, "Connecting…")
-        _ = core.apply(.eventsChanged(.open), now: at(0.3))
-        XCTAssertEqual(core.connectionChip.liveUpdatesWord, "Connected")
-
-        _ = core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: at(10))
-        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
-        _ = core.apply(.eventsChanged(.connecting), now: at(11))
-        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
-        _ = core.apply(.socketOpened, now: at(12))
-        XCTAssertEqual(core.connectionChip.word, "Connected", "the events stream coming back is Health's business")
-
-        // A new Connect starts from "Connecting" again.
-        _ = core.apply(.endTapped, now: at(20))
-        _ = core.apply(.connectTapped, now: at(21))
-        XCTAssertEqual(core.connectionChip.word, "Connecting…")
-    }
-
-    /// The 0.1.18 bug: `/events` failed on every try (its TLS pin was never
-    /// checked) and Settings said "Reconnecting…" while the voice worked.
-    /// A stream that keeps reconnecting shows only in Health.
-    func testAStreamThatKeepsReconnectingLeavesTheChipConnected() {
-        var core = connected()
-        for i in 0..<5 {
-            _ = core.apply(.eventsChanged(.reconnecting), now: at(5 + Double(i) * 2))
-            XCTAssertEqual(core.connectionChip.status, .connected)
-            _ = core.apply(.eventsChanged(.connecting), now: at(6 + Double(i) * 2))
-            XCTAssertEqual(core.connectionChip.status, .connected)
-        }
-        XCTAssertEqual(core.connectionChip.liveUpdatesWord, "Connecting…")
-        _ = core.apply(.eventsChanged(.reconnecting), now: at(20))
-        XCTAssertEqual(core.connectionChip.liveUpdatesWord, "Reconnecting…")
-        XCTAssertFalse(core.connection.dropped, "an events drop alone does not make the next /ws connect a retry")
     }
 
     // MARK: - Rule: reconnect keeps retrying (quiet 30 s, one banner, on)
@@ -219,15 +174,15 @@ final class SessionCoreTests: XCTestCase {
 
     func testAClosedSocketThatWillNotRetryEndsTheSessionAndReplacedSaysSo() {
         var core = connected()
-        XCTAssertEqual(core.apply(.socketClosed(reason: "replaced", willRetry: false), now: t0), [.stopAudio, .stopStreams, .stopTicker, .showBanner(.replaced)])
+        XCTAssertEqual(core.apply(.socketClosed(reason: "replaced", willRetry: false), now: t0), [.stopAudio, .stopTicker, .showBanner(.replaced)])
         XCTAssertFalse(core.connection.wantsConnection)
         XCTAssertEqual(core.sessionState, .disconnected)
 
         var other = connected()
-        XCTAssertEqual(other.apply(.socketClosed(reason: "going away", willRetry: false), now: t0), [.stopAudio, .stopStreams, .stopTicker])
+        XCTAssertEqual(other.apply(.socketClosed(reason: "going away", willRetry: false), now: t0), [.stopAudio, .stopTicker])
     }
 
-    func testAProtocolMismatchEndsTheSessionSaysWhyAndKeepsTheChipRed() {
+    func testAProtocolMismatchEndsTheSessionAndSaysWhy() {
         var core = connected()
         _ = core.apply(.handshakeChanged(.waiting), now: t0)
         let words = "This app speaks /ws protocol 1; the daemon needs protocol 2 or newer. Update the app."
@@ -235,20 +190,19 @@ final class SessionCoreTests: XCTestCase {
         let effects = core.apply(.socketClosed(reason: ProtocolHandshake.closeReason, willRetry: false), now: t0)
         XCTAssertEqual(effects.last, .showBanner(.protocolMismatch(words)))
         XCTAssertFalse(core.connection.wantsConnection, "retrying cannot fix it")
-        XCTAssertEqual(core.connectionChip.status, .updateNeeded)
-        XCTAssertEqual(core.connectionChip.word, "Update needed")
+        XCTAssertTrue(core.connection.handshake.isMismatch, "Health still says what to update")
         // The next Connect starts over.
         _ = core.apply(.connectTapped, now: t0)
         XCTAssertEqual(core.connection.handshake, .idle)
-        XCTAssertNotEqual(core.connectionChip.status, .updateNeeded)
     }
 
-    func testANegotiatedOrLegacyHandshakeLeavesTheChipAlone() {
+    func testANegotiatedOrLegacyHandshakeLeavesTheSessionAlone() {
         var core = connected()
         _ = core.apply(.handshakeChanged(.legacy), now: t0)
-        XCTAssertEqual(core.connectionChip, connected().connectionChip)
+        XCTAssertEqual(core.sessionState, connected().sessionState)
         _ = core.apply(.handshakeChanged(.ready(protocol: 1, daemonVersion: "x", features: [])), now: t0)
-        XCTAssertEqual(core.connectionChip, connected().connectionChip)
+        XCTAssertEqual(core.sessionState, connected().sessionState)
+        XCTAssertEqual(core.connection.socket, .open)
         _ = core.apply(.endTapped, now: t0)
         XCTAssertEqual(core.connection.handshake, .idle)
     }
@@ -256,19 +210,21 @@ final class SessionCoreTests: XCTestCase {
     func testARetryingCloseAfterEndIsNotReconnecting() {
         var core = connected()
         _ = core.apply(.endTapped, now: t0)
-        XCTAssertEqual(core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: t0), [.stopAudio, .stopStreams, .stopTicker])
+        XCTAssertEqual(core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: t0), [.stopAudio, .stopTicker])
         XCTAssertEqual(core.sessionState, .disconnected)
     }
 
     // MARK: - Rule: 401 stops
 
-    func testARefusedTokenStopsAndOpensSettings() {
+    /// The voice stops; the scan sheet is the link's to open
+    /// (`ComputerLink.State.refused`), so the core asks for nothing more.
+    func testARefusedTokenStops() {
         let refused = DaemonError.unauthorized(endpoint: "mac:7777")
-        let stop: [SessionEffect] = [.showBanner(.connectionFailed(refused)), .openSettings, .closeSocket, .stopAudio, .stopStreams, .stopTicker]
+        let stop: [SessionEffect] = [.showBanner(.connectionFailed(refused)), .closeSocket, .stopAudio, .stopTicker]
 
         var socket = connected()
         XCTAssertEqual(socket.apply(.socketFailed(refused, willRetry: true), now: t0), stop, "the socket would retry; a 401 does not")
-        XCTAssertEqual(socket.connectionChip.status, .tokenRefused)
+        XCTAssertEqual(socket.connection.socket, .idle)
         XCTAssertFalse(socket.connection.wantsConnection)
 
         var probe = SessionCore()
@@ -277,11 +233,11 @@ final class SessionCoreTests: XCTestCase {
 
         var events = connected()
         XCTAssertEqual(events.apply(.tokenRefused(endpoint: "mac:7777"), now: t0), stop)
-        XCTAssertEqual(events.connectionChip.status, .tokenRefused)
+        XCTAssertFalse(events.connection.wantsConnection)
 
         // The next Connect starts clean.
         XCTAssertEqual(events.apply(.connectTapped, now: t0), [.clearBanner, .probe])
-        XCTAssertEqual(events.connectionChip.status, .connecting)
+        XCTAssertEqual(events.connection.socket, .connecting)
     }
 
     // MARK: - Rule: the app owns mute
@@ -336,7 +292,7 @@ final class SessionCoreTests: XCTestCase {
         var core = SessionCore()
         _ = core.apply(.connectTapped, now: t0)
         _ = core.apply(.muteTapped, now: t0)
-        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: true), now: t0), [.openSocket, .startStreams, .startTicker])
+        XCTAssertEqual(core.apply(.probeSucceeded(micGranted: true), now: t0), [.openSocket, .startTicker])
         XCTAssertTrue(core.connection.socketMuted, "the open says mute(true)")
         _ = core.apply(.socketOpened, now: t0)
         XCTAssertEqual(core.apply(.status(.status(.connected, muted: true)), now: t0), [.startAudio])
@@ -456,7 +412,7 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertFalse(core.mic.holding)
         XCTAssertEqual(core.apply(.holdEnded, now: t0), [])
 
-        XCTAssertEqual(core.apply(.endTapped, now: t0), [.closeSocket, .stopAudio, .stopStreams, .stopTicker, .setManualGate(false)])
+        XCTAssertEqual(core.apply(.endTapped, now: t0), [.closeSocket, .stopAudio, .stopTicker, .setManualGate(false)])
     }
 
     func testHoldingOverTheDogStopsIt() {
@@ -635,26 +591,8 @@ final class SessionCoreTests: XCTestCase {
         _ = core.apply(.connectTapped, now: t0)
         _ = core.apply(.endTapped, now: t0)
         XCTAssertEqual(core.apply(.probeFailed(.unreachable(endpoint: "x", detail: "")), now: at(1)), [])
-        XCTAssertFalse(core.connection.failed)
-        XCTAssertEqual(core.connectionChip.status, ConnectionChip(.init()).status, "still plain Not connected")
+        XCTAssertEqual(core.connection.socket, .idle, "still plain Not connected")
         XCTAssertEqual(core.apply(.tokenRefused(endpoint: "x"), now: at(1)), [])
-    }
-
-    /// 3. The `/events` task cancelled by End could still say "reconnecting".
-    func testAStreamReportAfterEndLeavesTheStreamIdle() {
-        var core = connected()
-        _ = core.apply(.endTapped, now: t0)
-        _ = core.apply(.eventsChanged(.reconnecting), now: at(1))
-        XCTAssertEqual(core.connection.events, .idle)
-    }
-
-    /// 4. Connect marked the stream as connecting before it existed.
-    func testTheStreamIsConnectingOnlyOnceItIsStarted() {
-        var core = SessionCore()
-        _ = core.apply(.connectTapped, now: t0)
-        XCTAssertEqual(core.connection.events, .idle, "the probe runs first")
-        _ = core.apply(.probeSucceeded(micGranted: true), now: t0)
-        XCTAssertEqual(core.connection.events, .connecting)
     }
 
     /// 5. An engine that died after a route change stayed dead.

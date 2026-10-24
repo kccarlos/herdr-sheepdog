@@ -51,8 +51,7 @@ public final class VoiceSocket {
     /// `VoiceSocketTests` observation point) since PR #11's `ReconnectPolicy`
     /// moved reconnect *decisions* to the view model, which now tracks its
     /// own life from `onEvent` rather than reading this. Backing off after a
-    /// drop is `.reconnecting`, the same case `SessionState` and
-    /// `ConnectionChip` use for it.
+    /// drop is `.reconnecting`, the same case `SessionState` uses for it.
     private(set) var life: SocketLife = .idle
 
     /// What the caller wants the daemon to believe on every (re)connection.

@@ -208,7 +208,7 @@ public final class DeviceCredentials: @unchecked Sendable {
         } else {
             task = Task {
                 guard let key = DeviceKey.load(daemonID: computer.daemonID) else { throw PairingProblem.noKey }
-                let auth = DeviceAuth(base: base, session: self.session(timeout: 8))
+                let auth = DeviceAuth(base: base, session: self.session(timeout: 8), trust: self.trust)
                 // Read after the challenge's handshake, which may have
                 // switched to the next pin.
                 return try await auth.signIn(daemonID: computer.daemonID, pins: { [weak self] in self?.pins ?? [computer.pin] },

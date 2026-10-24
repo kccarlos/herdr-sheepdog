@@ -18,7 +18,7 @@ struct NewAgentSheet: View {
 
     private enum Load: Equatable {
         case loading
-        case failed(String)
+        case failed(RequestFailure)
         case loaded(SpacesView)
     }
 
@@ -67,16 +67,18 @@ struct NewAgentSheet: View {
         case .loading:
             ProgressView("Loading spaces…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case let .failed(message):
+        case let .failed(failure):
+            // A slow answer while the computer is online is "try again",
+            // not "couldn't reach" (`RequestFailure`).
             ContentUnavailableView {
-                Label("Couldn't reach your computer", systemImage: "wifi.slash")
+                Label(failure.title, systemImage: failure.isSlow ? "hourglass" : "wifi.slash")
             } description: {
-                Text(message)
+                Text(failure.message)
             } actions: {
                 Button("Try again") { Task { await fetch() } }
                     .accessibilityIdentifier("newAgent.retry")
             }
-            .accessibilityIdentifier("newAgent.offline")
+            .accessibilityIdentifier(failure.isSlow ? "newAgent.slow" : "newAgent.offline")
         case let .loaded(view) where view.kinds.isEmpty:
             ContentUnavailableView {
                 Label("No agent found", systemImage: "questionmark.app.dashed")
@@ -191,7 +193,7 @@ struct NewAgentSheet: View {
             let view = try await model.daemon { try await $0.spaces() }
             load = .loaded(view)
         } catch {
-            load = .failed((error as? DaemonError)?.message ?? error.localizedDescription)
+            load = .failed(model.requestFailure(error))
         }
     }
 }
@@ -447,7 +449,7 @@ private struct NewAgentKindStep: View {
                 phase = .failed(error, error.message)
                 Haptics.answerFailed()
             } catch {
-                phase = .failed(nil, (error as? DaemonError)?.message ?? error.localizedDescription)
+                phase = .failed(nil, model.requestFailure(error).message)
                 Haptics.answerFailed()
             }
         }

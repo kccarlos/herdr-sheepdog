@@ -28,7 +28,7 @@ public enum SetupHelp {
     public static func helpURL(for error: DaemonError) -> URL? {
         switch error {
         case .unreachable, .unauthorized, .notSheepdog: return remoteAccessURL
-        case .http, .malformed, .pendingGone, .rejected, .pairing: return nil
+        case .http, .malformed, .pendingGone, .rejected, .pairing, .timedOut, .untrusted: return nil
         }
     }
 }

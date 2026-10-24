@@ -40,11 +40,21 @@ public struct LinkPresentation: Equatable, Sendable {
         case hidden
     }
 
+    /// A colour name, kept as a word so SheepdogKit stays free of UIKit and
+    /// SwiftUI; the app maps it to a `Color`.
+    public enum Tint: Equatable, Sendable {
+        case green, amber, red, grey
+    }
+
     public var chip: String
-    public var tint: ConnectionChip.Tint
+    public var tint: Tint
     /// A spinner belongs next to the chip's word.
     public var isBusy: Bool
-    /// Settings ▸ Connection, and another computer's row.
+    /// The status without the computer's name: Settings ▸ Computers' row
+    /// for this computer, which shows the name beside it.
+    public var status: String
+    /// Settings ▸ Connection, and another computer's row: `status`, after
+    /// the computer's name once a second computer is paired.
     public var statusLine: String
     public var inline: Inline?
     /// Health only (a degraded link still shows Connected).
@@ -184,6 +194,7 @@ public struct LinkPresentation: Equatable, Sendable {
             composer = .disabled(Self.reconnectToSend)
             statusLine = chip
         }
+        status = statusLine
         if let name { statusLine = "\(name) · \(statusLine)" }
     }
 
