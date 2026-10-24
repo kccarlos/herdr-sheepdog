@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -215,6 +216,60 @@ type Manager struct {
 	Run  Runner
 	// Out receives what each step did.
 	Out io.Writer
+	// Sleep waits between launchctl retries; nil means time.Sleep.
+	// Tests set it so they do not wait.
+	Sleep func(time.Duration)
+}
+
+func (m Manager) sleep(d time.Duration) {
+	if m.Sleep != nil {
+		m.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// Timings of the launchd restart in Install.
+const (
+	bootoutWait   = 10 * time.Second // how long to wait for the old job to go
+	bootoutPoll   = 250 * time.Millisecond
+	bootstrapTry  = 5 // attempts when launchd answers "5: Input/output error"
+	bootstrapBack = 500 * time.Millisecond
+)
+
+// launchdRetry reports whether a failed launchctl call is launchd's
+// "Bootstrap failed: 5: Input/output error", which means the old job is
+// still being torn down.
+func launchdRetry(out string, err error) bool {
+	return strings.Contains(out, "Input/output error") || strings.Contains(err.Error(), "exit status 5")
+}
+
+// restartDarwin replaces a loaded job: bootout, wait until launchd no
+// longer knows it, then bootstrap, retrying with a growing pause on
+// exit status 5 (bootstrap right after bootout races the teardown).
+func (m Manager) restartDarwin(ctx context.Context, path string) error {
+	job := m.domain() + "/" + Label
+	// bootout fails when it is not loaded: that is the normal case.
+	_, _ = m.Run(ctx, "launchctl", "bootout", job)
+	for waited := time.Duration(0); waited < bootoutWait; waited += bootoutPoll {
+		// print exits non-zero once the job is gone.
+		if _, err := m.Run(ctx, "launchctl", "print", job); err != nil {
+			break
+		}
+		m.sleep(bootoutPoll)
+	}
+	var out string
+	var err error
+	for try := 1; try <= bootstrapTry; try++ {
+		if out, err = m.Run(ctx, "launchctl", "bootstrap", m.domain(), path); err == nil {
+			return nil
+		}
+		if !launchdRetry(out, err) || try == bootstrapTry || ctx.Err() != nil {
+			break
+		}
+		m.sleep(time.Duration(try) * bootstrapBack)
+	}
+	return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(out))
 }
 
 func (m Manager) say(format string, a ...any) {
@@ -244,10 +299,8 @@ func (m Manager) Install(ctx context.Context) error {
 		return err
 	}
 	if m.Spec.OS == "darwin" {
-		// bootout fails when it is not loaded: that is the normal case.
-		_, _ = m.Run(ctx, "launchctl", "bootout", m.domain()+"/"+Label)
-		if out, err := m.Run(ctx, "launchctl", "bootstrap", m.domain(), path); err != nil {
-			return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(out))
+		if err := m.restartDarwin(ctx, path); err != nil {
+			return err
 		}
 		m.say("started %s (logs: sheepdog logs)", Label)
 		return nil
