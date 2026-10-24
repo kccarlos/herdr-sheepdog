@@ -39,8 +39,9 @@ struct HealthView: View {
                 .accessibilityIdentifier("health.connection")
             LabeledContent("Live updates", value: liveUpdatesWord)
                 .accessibilityIdentifier("health.liveUpdates")
-            if let note = model.linkPresentation.health {
-                // Degraded: still Connected on the chip, said only here.
+            if let note = model.linkPresentation.health, !note.hasPrefix("Live updates") {
+                // Degraded: still Connected on the chip, said only here
+                // (the row above already says live updates are back soon).
                 Text(note)
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)

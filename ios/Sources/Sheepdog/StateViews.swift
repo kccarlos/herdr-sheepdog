@@ -45,10 +45,13 @@ struct FlockUnavailableView: View {
             case .unreachable:
                 // The link's words (`LinkPresentation`): when it was last
                 // seen, and what to check.
+                let title = "Can't reach \(model.showsComputerLabels ? model.currentComputerName : "your computer")"
                 ContentUnavailableView {
-                    Label("Can't reach \(model.showsComputerLabels ? model.currentComputerName : "your computer")", systemImage: "wifi.slash")
+                    Label(title, systemImage: "wifi.slash")
                 } description: {
-                    Text(model.linkPresentation.inline?.message ?? SetupHelp.unreachableFix)
+                    // The rest of the link's words: the title already says
+                    // the first sentence.
+                    Text(Self.dropping("\(title).", from: model.linkPresentation.inline?.message ?? SetupHelp.unreachableFix))
                 } actions: {
                     Button("Try now") { model.retryLink() }
                         .accessibilityIdentifier("flock.unreachable.retry")
@@ -102,6 +105,12 @@ struct FlockUnavailableView: View {
         }
         .tint(Theme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// `text` without a leading `prefix` (and the space after it).
+    static func dropping(_ prefix: String, from text: String) -> String {
+        guard text.hasPrefix(prefix) else { return text }
+        return String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
     }
 }
 
