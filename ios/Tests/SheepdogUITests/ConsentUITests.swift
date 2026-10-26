@@ -39,7 +39,7 @@ final class ConsentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your voice goes to AI services"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["consent.learnMore"].exists, "Learn more")
         // The text is exactly true: the push relay and photos are named.
-        for phrase in ["push relay", "cannot read what a notification says", "passes it to its own AI service"] {
+        for phrase in ["push relay", "forwards notifications it cannot read", "passes it to its own AI service"] {
             let match = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", phrase))
             XCTAssertTrue(match.firstMatch.exists, "the consent says: \(phrase)")
         }

@@ -47,8 +47,8 @@ your computer does, with the API keys you put in its configuration. **The app
 asks you first.** Before the first real voice session or typed line, a screen
 names the services your computer uses (read from the daemon, with a generic list
 when it has not said), says that the developer of sheepdog never sees your voice, text, photos or
-screens and that the push relay only forwards notifications to Apple (it sees your
-phone's notification token, when one is sent and how many agents are waiting, working and done, and cannot read what a notification says), and
+screens and that the one service we run, a push relay, forwards notifications it
+cannot read (what it does see is under "Phone notifications" below), and
 has **Agree** and **Learn more** (this page). Nothing is sent until you tap
 Agree. The answer is kept on the phone and asked again if the text changes in
 a way that matters. The demo uses no AI service and never asks.
