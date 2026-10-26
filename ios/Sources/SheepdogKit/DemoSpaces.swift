@@ -29,10 +29,17 @@ struct DemoSpaces {
         ("notes", "/Users/demo/code/notes", false),
     ]
     private var next = 3
+    /// `-sheepdogDemoNeedsAccess`: the first `GET /api/spaces` says macOS has
+    /// not let the daemon into Documents; the next one (Retry) finds it
+    /// allowed. For the banner's screenshots and UI test.
+    private var blocked = ProcessInfo.processInfo.arguments.contains("-sheepdogDemoNeedsAccess")
 
     /// `GET /api/spaces`, with the scripted agents in "shop".
-    func view(agents: [Agent]) -> [String: Any] {
-        [
+    mutating func view(agents: [Agent]) -> [String: Any] {
+        let needsAccess: [[String: Any]] = blocked ? [["path": "/Users/demo/Documents", "reason": "denied"]] : []
+        blocked = false
+        return [
+            "needs_access": needsAccess,
             "kinds": [["kind": "claude", "name": "Claude"], ["kind": "codex", "name": "Codex"], ["kind": "agy", "name": "Antigravity"]],
             "worktrees": true,
             "spaces": spaces.map { space -> [String: Any] in

@@ -40,6 +40,7 @@ shard-2  SheepdogUITests/RenderChurnUITests
 
 # about 501
 shard-3  SheepdogUITests/SpacesDemoUITests             # 213
+shard-3  SheepdogUITests/NeedsAccessUITests
 shard-3  SheepdogUITests/ShellDemoUITests              # 113
 shard-3  SheepdogUITests/CardsUITests                  # 86
 shard-3  SheepdogUITests/FlockTypingUITests            # 48

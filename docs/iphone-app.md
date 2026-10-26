@@ -311,5 +311,6 @@ in [dev/push.md](dev/push.md).
 | No sound from the voice | Check the daemon: `sheepdog status` shows "NOT connected" with the reason ([troubleshooting.md](troubleshooting.md)). |
 | Local network prompt dismissed | iOS Settings, Sheepdog, Local Network on. |
 | App talks but agents are empty | herdr is not running or not reachable: `sheepdog doctor`. |
+| New agent or Spaces says "Sheepdog needs access to Documents" (or "waiting for you to allow access") | macOS has not let sheepdog into that folder. On the computer, allow it in System Settings, Privacy & Security, Files and Folders (or answer the prompt on screen), then tap **Retry**. The spaces that did load stay usable. |
 
 Everything the app collects is in [privacy.md](privacy.md).

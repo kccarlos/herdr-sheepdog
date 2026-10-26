@@ -54,11 +54,79 @@ public struct SpacesView: Codable, Equatable, Sendable {
         public var command: String
     }
 
+    /// A folder the daemon could not read (`needs_access`): macOS has not
+    /// let it in yet. The rest of the answer is still good.
+    public struct NeedsAccess: Codable, Equatable, Sendable, Hashable {
+        public enum Reason: String, Codable, Sendable {
+            /// The system refused.
+            case denied
+            /// The read did not answer in time: macOS is asking its user.
+            case slow
+        }
+
+        public var path: String
+        public var reason: Reason
+
+        public init(path: String, reason: Reason) {
+            self.path = path
+            self.reason = reason
+        }
+
+        /// An unknown reason from a newer daemon reads as `denied`.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            path = try c.decode(String.self, forKey: .path)
+            let raw = try c.decodeIfPresent(String.self, forKey: .reason) ?? ""
+            reason = Reason(rawValue: raw) ?? .denied
+        }
+
+        /// The folder's last path component ("Documents").
+        public var folder: String {
+            let name = (path as NSString).lastPathComponent
+            return name.isEmpty ? path : name
+        }
+
+        /// The calm sentence for the banner.
+        public var message: String {
+            switch reason {
+            case .denied:
+                return "Sheepdog needs access to \(folder). On your computer, allow it in System Settings ▸ Privacy & Security ▸ Files and Folders."
+            case .slow:
+                return "Your computer is waiting for you to allow access to \(folder)."
+            }
+        }
+    }
+
     public var spaces: [Space]
     public var folders: [Folder]
     public var kinds: [Kind]
     /// herdr can make a fresh worktree for a new agent.
     public var worktrees: Bool
+    /// Folders macOS has not let the daemon read; `[]` when fine and from
+    /// daemons that do not send it.
+    public var needsAccess: [NeedsAccess]
+
+    enum CodingKeys: String, CodingKey {
+        case spaces, folders, kinds, worktrees
+        case needsAccess = "needs_access"
+    }
+
+    public init(spaces: [Space], folders: [Folder], kinds: [Kind], worktrees: Bool, needsAccess: [NeedsAccess] = []) {
+        self.spaces = spaces
+        self.folders = folders
+        self.kinds = kinds
+        self.worktrees = worktrees
+        self.needsAccess = needsAccess
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        spaces = try c.decode([Space].self, forKey: .spaces)
+        folders = try c.decode([Folder].self, forKey: .folders)
+        kinds = try c.decode([Kind].self, forKey: .kinds)
+        worktrees = try c.decode(Bool.self, forKey: .worktrees)
+        needsAccess = try c.decodeIfPresent([NeedsAccess].self, forKey: .needsAccess) ?? []
+    }
 }
 
 /// What the New agent sheet offers, built from `GET /api/spaces`.
