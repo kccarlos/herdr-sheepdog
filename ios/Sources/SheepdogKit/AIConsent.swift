@@ -3,7 +3,8 @@ import Foundation
 /// Whether the person has agreed that what they say, type and attach goes
 /// to the AI services their own computer is set up with.
 ///
-/// The app developer receives nothing: the voice and the text go to the
+/// The app developer never sees your data (only the push relay forwards
+/// encrypted notifications): the voice and the text go to the
 /// sheepdog program on the person's computer, and from there to the voice
 /// and orchestrator services the person configured. Because that is a
 /// third party, the app asks once (App Review Guidelines 5.1.2(i)) and lets

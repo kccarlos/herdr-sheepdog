@@ -286,7 +286,7 @@ it looks exactly like the iPhone app.
 The first time you start a real voice session or send a typed line, the app asks
 once: your voice and words go to your own computer, and from there to the AI
 voice and answer services you set up on it (for example Google Gemini, DeepSeek
-or OpenAI). The app's developer receives nothing. Tap **Agree** to go on, or
+or OpenAI). The app's developer never sees your voice, text, photos or screens; the push relay only forwards notifications to Apple and cannot read them (see [Phone notifications](privacy.md#phone-notifications)). Tap **Agree** to go on, or
 **Learn more** for the [privacy policy](privacy.md#ai-services). The demo never asks.
 
 To take it back, open Settings, **Privacy**, and turn off **Send to AI

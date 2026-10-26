@@ -28,15 +28,17 @@ Limit: 4,000 characters.
 > about 15 seconds, codex-payments asks for approval: tap "Yes, proceed". Open Agents for the
 > list, tap an agent and "Open window" to see its (scripted) terminal, and tap a suggested
 > question such as "What's going on?" to hear a spoken answer. iOS may ask for the microphone
-> and speech recognition (on-device only). Both are optional; tap or type instead. "Leave"
-> returns to setup. A recording of real use with a computer: <VIDEO LINK>.
+> and speech recognition (on-device only). "Leave"
+> returns to setup. Real use: <VIDEO LINK>.
 >
 > AI SERVICES AND CONSENT. In real use, the user's own computer sends the voice and the
 > conversation to the AI services the user configured there with their own API keys (Google
 > Gemini or OpenAI for the voice; Google Gemini, DeepSeek, Anthropic, an OpenAI-compatible
 > service or a local model for answers). Before the first real voice session or typed line,
 > the app shows a consent screen that names these services, says that the app's developer
-> receives nothing, and has Agree and Learn more (the privacy policy). Nothing is sent until
+> never sees the voice, text, photos or screens, that the relay only forwards notifications (it
+> cannot read them) and that a photo goes to the user's computer and the coding agent it is sent
+> to passes it to its own AI service, and has Agree and Learn more (the privacy policy). Nothing is sent until
 > the user taps Agree. Settings > Privacy > "Send to AI services" withdraws consent: the voice
 > stops and typed lines are blocked until the user agrees again. The demo uses no AI service,
 > sends nothing and never asks.
@@ -44,7 +46,7 @@ Limit: 4,000 characters.
 > THE SHELL AND AGENT WINDOWS. An agent window shows the terminal of a coding agent on the
 > user's own computer. "New shell" opens a terminal there. The app sends keystrokes and draws the
 > text, like an SSH client. Nothing is downloaded or run on the iPhone, and the app's features
-> do not change. The user can turn the shell off on their computer.
+> do not change.
 >
 > NETWORK SECURITY (ATS). NSAllowsArbitraryLoads is on because the app connects to the user's
 > own computer at a private IP address (home Wi-Fi or Tailscale), whose certificate is
