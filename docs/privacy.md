@@ -13,8 +13,9 @@ sheepdog daemon. Questions: kccarlos.opensource@gmail.com.
 
 **In short.** Your voice, what you say, your agents' screens and the photos you
 attach go from the app to *your own* computer, over TLS. Your computer passes
-them to the AI services you set up there with your own API keys. The developer
-never sees them.
+your voice, words and screens to the AI services you set up there with your own
+API keys, and the coding agent you send a photo to passes it to its own AI
+service. The developer never sees them.
 
 ## What goes to which provider
 
@@ -45,7 +46,9 @@ The app itself talks to no AI service. In real use, the sheepdog daemon on
 your computer does, with the API keys you put in its configuration. **The app
 asks you first.** Before the first real voice session or typed line, a screen
 names the services your computer uses (read from the daemon, with a generic list
-when it has not said), says that the developer of sheepdog receives nothing, and
+when it has not said), says that the developer of sheepdog never sees your voice, text, photos or
+screens and that the push relay only forwards notifications to Apple (it sees your
+phone's notification token, when one is sent and how many agents are waiting, working and done, and cannot read what a notification says), and
 has **Agree** and **Learn more** (this page). Nothing is sent until you tap
 Agree. The answer is kept on the phone and asked again if the text changes in
 a way that matters. The demo uses no AI service and never asks.
@@ -55,10 +58,9 @@ a way that matters. The demo uses no AI service and never asks.
 | The **voice service**: Google Gemini Live or OpenAI GPT-Live | Your microphone audio, and short briefings about agent events | You, in the daemon's config |
 | The **orchestrator**: DeepSeek, Google Gemini, Anthropic, an OpenAI-compatible service, or a local model (Ollama) | What you said as text, the agents' screens, session records and command output the orchestrator reads | You, in the daemon's config |
 
-Photos you attach in the app go to your computer and are stored there (see
-"What is stored on your computer"); the agent receives only the file path, so
-a photo goes to an AI service only if the agent you ask to look at it sends it
-on. The demo uses no AI service and sends nothing.
+A photo you attach in the app goes to your computer and is stored there (see
+"What is stored on your computer"); the coding agent you send it to receives
+the file path, reads the photo and passes it to its own AI service. The demo uses no AI service and sends nothing.
 
 These services act under your own account and your own terms with them; the
 developer of sheepdog is not a party and cannot see the data. Choose providers
@@ -104,7 +106,7 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/brain/` | The orchestrator's transcripts and the requests it sent to its model; they include what you said. | `events.retention_days`, deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | Notes the orchestrator wrote about your agents. | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions, your runtime settings. | Overwritten as it changes. |
-| `~/.local/share/sheepdog/attachments/` | Photos and files you attach in the iPhone app. They stay on your computer; the agent gets only their path in your prompt. | 7 days. |
+| `~/.local/share/sheepdog/attachments/` | Photos and files you attach in the iPhone app. They are stored on your computer; the agent gets their path in your prompt and reads the file. | 7 days. |
 | `~/.local/share/sheepdog/devices.json` | Your paired phones and browsers: their names, kinds, public keys and when each was last seen. No secret. | Until you delete it or revoke a device on the setup page. |
 | `~/.local/share/sheepdog/tls/` | This computer's id and its own TLS certificate and key. | Until you delete it. |
 | `~/.local/share/sheepdog/push_devices.json` | Your phones' notification tokens and each phone's notification encryption key. | Until a phone unregisters. |
@@ -156,7 +158,7 @@ All three ask first. Deleting the plugin is `herdr plugin uninstall kccarlos.she
 
 ## The iPhone app
 
-The app has no server of its own and collects nothing. It talks to the
+The app has no server of its own and collects nothing; the one service the project runs is the push relay. It talks to the
 sheepdog daemon you pair it with, and to Apple for push notifications (these
 reach it through the push relay above unless you chose otherwise). No
 analytics or tracking code is in it, and it loads no web content.
@@ -175,8 +177,8 @@ relies on that pin.
 |---|---|---|
 | Microphone | Your voice goes to your daemon, which passes it to the voice service you chose ("AI services"). | When a voice session starts |
 | Speech recognition | Demo only: your spoken questions are recognised on the phone, on-device; nothing is sent anywhere. | When the demo starts, on devices that support it |
-| Camera | To scan the pairing QR code, and to take a photo you attach for an agent. A photo goes to your computer only when you send it; nothing is recorded or kept otherwise. | When you tap Scan pairing code or the camera in the attach menu |
-| Photos and files | You pick a photo or file to attach through the system picker; the app sees only what you pick, and has no access to your library. It goes to your computer. | When you tap attach |
+| Camera | To scan the pairing QR code, and to take a photo you attach for an agent. A photo goes to the sheepdog daemon on your own computer, and the coding agent you send it to passes it to its own AI service. Nothing is recorded in the background. | When you tap Scan pairing code or the camera in the attach menu |
+| Photos and files | You pick a photo or file to attach through the system picker; the app sees only what you pick, and has no access to your library. It goes to your computer, and the coding agent you send it to passes it to its own AI service. | When you tap attach |
 | Local network | To reach the daemon on your Wi-Fi or Tailscale. | On the first connection |
 | Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token** and receives the key that encrypts the alerts' content; the daemon keeps both in `push_devices.json`. | Once, after the app connects to a daemon that can send notifications (never in the demo, never for a daemon that cannot send them) |
 

@@ -38,6 +38,12 @@ final class ConsentUITests: XCTestCase {
         XCTAssertTrue(consentScreen(app).waitForExistence(timeout: 15), "the first real connect shows the consent")
         XCTAssertTrue(app.staticTexts["Your voice goes to AI services"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["consent.learnMore"].exists, "Learn more")
+        // The text is exactly true: the push relay and photos are named.
+        for phrase in ["push relay", "cannot read what a notification says", "passes it to its own AI service"] {
+            let match = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", phrase))
+            XCTAssertTrue(match.firstMatch.exists, "the consent says: \(phrase)")
+        }
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'runs no server'")).firstMatch.exists)
         // Nothing is sent before Agree: no connection banner yet.
         XCTAssertFalse(app.descendants(matching: .any)["banner"].exists)
 

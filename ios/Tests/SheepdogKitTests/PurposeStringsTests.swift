@@ -12,7 +12,7 @@ final class PurposeStringsTests: XCTestCase {
         let expectations: [String: [String]] = [
             "NSMicrophoneUsageDescription": ["talk", "daemon", "AI voice and orchestrator services", "demo"],
             "NSSpeechRecognitionUsageDescription": ["demo", "on-device"],
-            "NSCameraUsageDescription": ["pairing code", "attach", "your own computer", "AI services", "Nothing is recorded"],
+            "NSCameraUsageDescription": ["pairing code", "attach", "your own computer", "coding agent", "its own AI service", "Nothing is recorded"],
             "NSLocalNetworkUsageDescription": ["daemon", "your own computer", "AI voice and orchestrator services"],
         ]
         for (key, words) in expectations {
