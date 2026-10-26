@@ -35,7 +35,7 @@ no signing change. It adds the UI polish (#36) and the Live Activity widget,
 App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
 Xcode Cloud only archives TestFlight builds on `ios-v*` tags ([`xcode-cloud.md`](xcode-cloud.md));
 the tests run on GitHub Actions (`.github/workflows/ios.yml`, below).
-The App Store Connect record is **"Sheepdog for herdr"**. For setup,
+The App Store Connect record is still **"Sheepdog for herdr"**; the store name is decided as **"Sheepdog: Voice for AI Agents"** and the CEO renames the record at submission ([app-store-review.md](../../../docs/dev/app-store-review.md)). For setup,
 workflows and troubleshooting, see [`xcode-cloud.md`](xcode-cloud.md).
 
 ## Verified on a real iPhone

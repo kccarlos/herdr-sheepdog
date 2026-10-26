@@ -4,7 +4,7 @@ The text for App Store Connect ▸ App Review Information ▸ Notes, and the fac
 behind it. It comes from the App Store review audit (section 4)
 and is checked against the code. Nothing has been submitted for App Store
 review or external TestFlight review yet; the CEO decides when. The app
-name is **TBD — pending CEO decision**. The text for TestFlight is in
+name is **Sheepdog: Voice for AI Agents** (subtitle "Manage coding agents by voice"), decided by the CEO on 2026-10-26; the first App Store version is 0.2.0. The text for TestFlight is in
 [dev/testflight-metadata.md](dev/testflight-metadata.md); the privacy policy
 is [docs/privacy.md](../../docs/privacy.md).
 
@@ -15,17 +15,13 @@ the user's computer sends the voice to the AI services the user configured,
 and that removing the computer stops it). The contact name, phone and email
 go in App Store Connect, not in this repository.
 
-> **Stale in parts (2026-10-25).** The App Store audit in
-> [../../docs/dev/app-store-review.md](../../docs/dev/app-store-review.md) supersedes these notes
-> (ATS, AI consent, privacy manifest). Its section 4 replaces them when the docs fix lands.
-
 ## Notes for the reviewer (paste into App Store Connect)
 
 Limit: 4,000 characters.
 
 > No sign-in is needed. The app has no accounts.
 >
-> WHAT IT IS. The app (name: TBD — pending CEO decision) is a voice remote for sheepdog, a free open-source program that people
+> WHAT IT IS. The app (name: Sheepdog: Voice for AI Agents) is a voice remote for sheepdog, a free open-source program that people
 > run on their own Mac or Linux computer to supervise coding agents (Claude Code, Codex and
 > others) in the herdr terminal: https://github.com/kccarlos/herdr-sheepdog. The app talks only
 > to that program on the user's own computer. We run no server for it, except an optional relay
@@ -96,5 +92,7 @@ Limit: 4,000 characters.
   https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md
   (resolves once the repository is public).
 - App Review contact (name, phone, e-mail) in App Store Connect.
-- App Privacy label: "Data Not Collected" is the recommended answer
-  (audit, section 5); the CEO confirms.
+- App Privacy label: "Data Not Collected" (decided by the CEO; audit,
+  section 5). EU trader status, no Mac or Vision Pro availability and the
+  real-use video are also decided; the step-by-step list is the submission
+  checklist in the audit (section 3).
