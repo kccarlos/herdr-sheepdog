@@ -225,7 +225,7 @@ private struct NewAgentKindStep: View {
     /// The sheet's dedup key, and the idempotency key of this start: kept
     /// across Start again only after no reply came (a timeout).
     @State private var sheetID = UUID().uuidString
-    @State private var attemptKey = UUID().uuidString
+    @State private var attempt: (choices: String, key: String)?
 
     private enum Phase: Equatable {
         case editing
@@ -449,6 +449,11 @@ private struct NewAgentKindStep: View {
         lastKind = kind
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let worktree = inWorktree ? branch : nil
+        // The same choices again after no reply keep the key; any change
+        // is a new start.
+        let choices = [kind, project.path, worktree ?? "", text].joined(separator: "\u{1F}")
+        if attempt?.choices != choices { attempt = (choices, UUID().uuidString) }
+        let attemptKey = attempt?.key
         Task {
             do {
                 // One sheet starts one agent at a time; Start again after a
@@ -457,19 +462,19 @@ private struct NewAgentKindStep: View {
                 let reply = try await model.action({ ActionRunner.Key.newAgent($0, sheetID) }, .newAgent, idempotencyKey: attemptKey) {
                     try await $0.newAgent(kind: kind, project: project, worktree: worktree, text: text)
                 }
-                attemptKey = UUID().uuidString
+                attempt = nil
                 phase = .started(reply.spoken ?? "Started.")
                 Haptics.answered()
                 try? await Task.sleep(for: .milliseconds(reply.paneID?.isEmpty == false ? 300 : 1400))
                 started(reply.paneID?.isEmpty == false ? reply.paneID : nil)
             } catch let error as AgentStartError {
-                attemptKey = UUID().uuidString
+                attempt = nil
                 phase = .failed(error, error.message)
                 Haptics.answerFailed()
             } catch {
                 // A reply (even a refusal) is final: a new start gets a new
                 // key. No reply keeps it.
-                if !ActionRunner.isTransport(error) { attemptKey = UUID().uuidString }
+                if !ActionRunner.isTransport(error) { attempt = nil }
                 phase = .failed(nil, model.requestFailure(error).message)
                 Haptics.answerFailed()
             }

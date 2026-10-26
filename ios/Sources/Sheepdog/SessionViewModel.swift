@@ -1840,7 +1840,7 @@ final class SessionViewModel: ObservableObject {
     /// `POST /api/agents/{pane}/input` with a prompt.
     func agentInput(paneID: String, text: String) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await action({ ActionRunner.Key.input($0, paneID) }, .input) { try await $0.agentInput(paneID: paneID, text: text) }
+        return try await action({ ActionRunner.Key.input($0, paneID) + ":" + text }, .input) { try await $0.agentInput(paneID: paneID, text: text) }
     }
 
     /// `POST /api/agents/{pane}/input` with keys.

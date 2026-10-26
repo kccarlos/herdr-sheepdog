@@ -1392,7 +1392,7 @@ Order and dependencies:
       `ActionRunner` with keys, and the 30 s background task;
     - a per-Wi-Fi-network memory stays out (decision 10).
 
-- **Phase 7 (done).** The action pipeline, and the daemon's
+- **Phase 7 (done, #429, #430).** The action pipeline, and the daemon's
   `Idempotency-Key` (decision 3).
   - **The daemon (#429).** Any `POST` from a paired device may carry
     `Idempotency-Key`; the reply is kept 10 minutes per device, route and
@@ -1405,7 +1405,8 @@ Order and dependencies:
     (the voice's approval card, the question cards, a notification's
     Approve while the app runs), the typed line, New agent, agent input
     and keys, agent actions and the Spaces actions. A run under a key in
-    flight joins it; the epoch is the one at tap time, so a re-pairing
+    flight joins it (a key carries what is sent, so different words or
+    names are two actions); the epoch is the one at tap time, so a re-pairing
     drops the reply and a switch does not (decision 6); a per-kind timeout
     on the model's clock, also set on the URL request; one retry after no
     reply, for answers always and for keyed actions only on a daemon that

@@ -79,7 +79,7 @@ struct AgentActionDialogs: ViewModifier {
             do {
                 let reply: AgentActionReply
                 switch action {
-                case .rename: reply = try await model.action({ ActionRunner.Key.agent($0, pane, "rename") }, .agent) { try await $0.renameAgent(paneID: pane, name: name) }
+                case .rename: reply = try await model.action({ ActionRunner.Key.agent($0, pane, "rename:" + name) }, .agent) { try await $0.renameAgent(paneID: pane, name: name) }
                 case .stop: reply = try await model.action({ ActionRunner.Key.agent($0, pane, "stop") }, .agent) { try await $0.interruptAgent(paneID: pane) }
                 case .close: reply = try await model.action({ ActionRunner.Key.agent($0, pane, "close") }, .agent) { try await $0.closeAgent(paneID: pane) }
                 }

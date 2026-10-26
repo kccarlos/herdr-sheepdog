@@ -475,8 +475,10 @@ store is `ComputerStore` ("Settings" below).
   stop, close, close a shell) and the Spaces actions.
   - **One per key.** A second run under a key in flight joins the first
     and gets its result. Keys are per surface (`utter:<computer>`,
-    `spawn:<computer>:<sheet>`); agent keys add a sequence, since every
-    press counts.
+    `spawn:<computer>:<sheet>`) and carry what is sent (the prompt, a
+    name, a command line), so the same words twice join and different
+    words both go; keys add a sequence, since every press counts. The New
+    agent sheet's idempotency key follows its choices.
   - **A timeout per kind** on the model's clock (answers 10 s, a typed
     line 10 s, New agent 60 s, input 5 s, Spaces 30 s), also set on the
     request, so New agent is not cut at the session's 8 s. No reply

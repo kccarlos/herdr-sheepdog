@@ -166,7 +166,7 @@ struct SpacesSheet: View {
     private func rename(_ space: SpacesView.Space, to name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != space.name else { return }
-        await act("rename:\(space.id)") { try await $0.renameSpace(id: space.id, name: trimmed) }
+        await act("rename:\(space.id):\(trimmed)") { try await $0.renameSpace(id: space.id, name: trimmed) }
     }
 
     private func close(_ space: SpacesView.Space) async {
@@ -365,12 +365,12 @@ struct SpaceDetailView: View {
             CommandSheet(mode: mode, spaceName: space.name) { name, command, save in
                 switch mode {
                 case let .edit(old):
-                    await act("command:\(space.id):\(old.id)") { try await $0.updateCommand(space: space.id, command: old.id, name: name, command: command) }
+                    await act("command:\(space.id):\(old.id):\(name):\(command)") { try await $0.updateCommand(space: space.id, command: old.id, name: name, command: command) }
                 case .add:
-                    await act("addCommand:\(space.id)") { try await $0.addCommand(space: space.id, name: name, command: command) }
+                    await act("addCommand:\(space.id):\(name):\(command)") { try await $0.addCommand(space: space.id, name: name, command: command) }
                 case .runOnce:
                     if save {
-                        await act("addCommand:\(space.id)") { try await $0.addCommand(space: space.id, name: name, command: command) }
+                        await act("addCommand:\(space.id):\(name):\(command)") { try await $0.addCommand(space: space.id, name: name, command: command) }
                     }
                     await runLine(command)
                 }
@@ -381,7 +381,7 @@ struct SpaceDetailView: View {
             Button("Rename") {
                 let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { return }
-                Task { await act("rename:\(space.id)") { _ = try await $0.renameSpace(id: space.id, name: name) } }
+                Task { await act("rename:\(space.id):\(name)") { _ = try await $0.renameSpace(id: space.id, name: name) } }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -505,7 +505,7 @@ struct SpaceDetailView: View {
 
     private func runLine(_ command: String) async {
         do {
-            _ = try await model.action({ ActionRunner.Key.space($0, "runLine:\(space.id)") }, .space) { try await $0.runLine(space: space.id, command: command) }
+            _ = try await model.action({ ActionRunner.Key.space($0, "runLine:\(space.id):\(command)") }, .space) { try await $0.runLine(space: space.id, command: command) }
             notice = "It is running in a new tab of \(space.name) on your computer."
             Haptics.answered()
         } catch {

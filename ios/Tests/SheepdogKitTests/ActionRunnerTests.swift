@@ -321,6 +321,23 @@ final class ActionRunnerTests: XCTestCase {
         XCTAssertEqual(background.ended, 1)
     }
 
+    func testDifferentWordsUnderOnePaneAreTwoActions() async {
+        let home = makeModel("home")
+        // The surfaces put what is sent in the key: the same words twice
+        // join, different words both go.
+        let base = ActionRunner.Key.input("home", "p1")
+        let a = tap(home, base + ":yes", text: "yes")
+        let b = tap(home, base + ":yes", text: "yes")
+        let c = tap(home, base + ":no", text: "no")
+        await eventually("two requests") { daemon.pending.count == 2 }
+        await settle()
+        XCTAssertEqual(daemon.made.count, 2)
+        daemon.resolve()
+        daemon.resolve()
+        _ = await (a.value, b.value, c.value)
+        XCTAssertEqual(Set(daemon.effects), ["home:yes", "home:no"])
+    }
+
     func testAReplyIsNeverRetried() async {
         let home = makeModel("home")
         let result = tap(home, "utter:home")
