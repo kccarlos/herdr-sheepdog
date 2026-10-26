@@ -9,6 +9,7 @@ final class FakeActionDaemon: @unchecked Sendable {
         var id: Int
         var address: String
         var key: String?
+        var text: String
         var resume: (Result<String, Error>) -> Void
     }
 
@@ -50,11 +51,11 @@ final class FakeActionDaemon: @unchecked Sendable {
             nextID += 1
             return (_hang, nextID)
         }
-        guard hang else { return "\(address):\(text)" }
+        guard hang else { return "\(address):\(id)" }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
                 lock.withLock {
-                    _calls.append(Call(id: id, address: address, key: key) { continuation.resume(with: $0) })
+                    _calls.append(Call(id: id, address: address, key: key, text: text) { continuation.resume(with: $0) })
                 }
             }
         } onCancel: {
@@ -308,14 +309,14 @@ final class ActionRunnerTests: XCTestCase {
 
     func testOneBackgroundTaskForSeveralActions() async {
         let home = makeModel("home")
-        let a = tap(home, "a")
-        let b = tap(home, "b")
+        let a = tap(home, "a", text: "a")
+        let b = tap(home, "b", text: "b")
         await eventually("both sent") { daemon.pending.count == 2 }
         XCTAssertEqual(background.begun, 1)
-        daemon.resolve()
+        daemon.resolve(daemon.pending.first { $0.text == "a" }?.id)
         _ = await a.value
         XCTAssertEqual(background.ended, 0)
-        daemon.resolve()
+        daemon.resolve(daemon.pending.first { $0.text == "b" }?.id)
         _ = await b.value
         XCTAssertEqual(background.ended, 1)
     }
@@ -362,9 +363,12 @@ final class ActionRunnerTests: XCTestCase {
                 await settle(2)
                 let out = daemon.pending.map { $0.key }
                 XCTAssertEqual(out.count, Set(out).count, "seed \(seed): two requests out under one key")
-                let inFlight = daemon.pending.count
-                XCTAssertEqual(inFlight, home.actions.count, "seed \(seed): the runner's count")
+                // A request may still be on its way to the daemon.
+                XCTAssertLessThanOrEqual(daemon.pending.count, home.actions.count, "seed \(seed): the runner's count")
             }
+            // From here on the daemon answers at once, so a tap whose task
+            // has not started yet still finishes.
+            daemon.hang = false
             while !daemon.pending.isEmpty || home.actions.count > 0 {
                 daemon.resolve()
                 await settle(2)
