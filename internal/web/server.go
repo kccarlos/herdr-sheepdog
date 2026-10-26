@@ -299,6 +299,8 @@ type Server struct {
 	// phones remembers the last authorized request from another machine
 	// (the setup page's "Connected").
 	phones phoneTracker
+	// idem keeps the replies to POSTs sent with an Idempotency-Key.
+	idem *idemStore
 
 	mu sync.Mutex
 	ln net.Listener
@@ -363,6 +365,7 @@ func New(deps Deps) (*Server, error) {
 	}
 	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog(), limits: newRateLimiter()}
 	s.hub = newHub(s)
+	s.idem = newIdemStore(deps.Now)
 	if ch, ok := s.cardHost(); ok {
 		ch.SetCardSink(cardSink{s.hub})
 	}
@@ -413,7 +416,13 @@ func (s *Server) routes() error {
 		return err
 	}
 	for _, rt := range table {
-		s.mux.HandleFunc(rt.pattern, s.wrap(rt.access, rt.h))
+		h := rt.h
+		if rt.access == accessDevice && strings.HasPrefix(rt.pattern, "POST ") {
+			// Any POST a paired device makes takes an Idempotency-Key
+			// (idempotency.go).
+			h = s.idempotent(h)
+		}
+		s.mux.HandleFunc(rt.pattern, s.wrap(rt.access, h))
 	}
 	return nil
 }

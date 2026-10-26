@@ -139,12 +139,29 @@ public final class DeviceCredentials: @unchecked Sendable {
     /// the pin and the old one is dropped. The ticket stays valid.
     public func served(pin: String) {
         guard let computer, computer.nextPin == pin, computer.pin != pin else { return }
+        var promoted = false
         update { c in
             guard c.nextPin == pin else { return }
             c.pin = pin
             c.nextPin = nil
             c.certExpires = nil // the new certificate's comes with the next sign-in
+            promoted = true
         }
+        if promoted { postCertificateChanged(nil) }
+    }
+
+    /// Posted when the computer's certificate changed under these
+    /// credentials: the next pin was promoted, or a sign-in learned the
+    /// certificate's expiry. The object is the credentials; the expiry is
+    /// `certExpiresKey` in the user info (absent when unknown). The
+    /// computer's link hears it as `credentialsChanged(.pinPromoted)`, so
+    /// the rotation window is current without a relaunch.
+    public static let certificateChanged = Notification.Name("sheepdog.credentials.certificateChanged")
+    public static let certExpiresKey = "certExpires"
+
+    private func postCertificateChanged(_ certExpires: Date?) {
+        let info: [String: Any] = certExpires.map { [Self.certExpiresKey: $0] } ?? [:]
+        NotificationCenter.default.post(name: Self.certificateChanged, object: self, userInfo: info)
     }
 
     /// Adds an address the user typed (Settings ▸ Connection ▸ Addresses),
@@ -223,11 +240,16 @@ public final class DeviceCredentials: @unchecked Sendable {
             if signing == task { signing = nil }
             ticket = fresh
             lock.unlock()
+            var learned: Date?
             update { c in
                 guard c.daemonID == computer.daemonID else { return }
                 if let next = fresh.nextPin, next != c.pin { c.nextPin = next }
-                if let expires = fresh.certExpires { c.certExpires = expires }
+                if let expires = fresh.certExpires, expires != c.certExpires {
+                    c.certExpires = expires
+                    learned = expires
+                }
             }
+            if let learned { postCertificateChanged(learned) }
             return fresh
         } catch {
             lock.lock()

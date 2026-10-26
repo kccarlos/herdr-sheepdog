@@ -87,6 +87,7 @@ struct NewAgentSheet: View {
             } actions: {
                 Button("Try again") { Task { await fetch() } }
             }
+            .needsAccessAbove(view.needsAccess) { Task { await fetch() } }
             .accessibilityIdentifier("newAgent.noKinds")
         case let .loaded(view) where view.spaces.isEmpty && view.folders.isEmpty:
             ContentUnavailableView {
@@ -94,6 +95,7 @@ struct NewAgentSheet: View {
             } description: {
                 Text("Open a workspace in herdr, or list your code folders in supervisor.project_roots in sheepdog's config on your computer.")
             }
+            .needsAccessAbove(view.needsAccess) { Task { await fetch() } }
             .accessibilityIdentifier("newAgent.empty")
         case let .loaded(view):
             whereList(view)
@@ -105,6 +107,13 @@ struct NewAgentSheet: View {
         let spaces = options.projects.filter(\.open)
         let folders = options.projects.filter { !$0.open }
         return List {
+            if !view.needsAccess.isEmpty {
+                Section {
+                    NeedsAccessBanner(items: view.needsAccess) { Task { await fetch() } }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
+            }
             Section {
                 Text("Step 1 of 2 · Where")
                     .font(.footnote.weight(.semibold))
@@ -522,7 +531,7 @@ private struct ChooseFolderStep: View {
                     .buttonStyle(PillButtonStyle(prominent: true))
                     .disabled(choice == nil)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .accessibilityIdentifier("newAgent.folderNext")
             }
         }

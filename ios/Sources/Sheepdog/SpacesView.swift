@@ -100,9 +100,15 @@ struct SpacesSheet: View {
             } description: {
                 Text("Start an agent and herdr makes one.")
             }
+            .needsAccessAbove(view.needsAccess) { Task { await fetch() } }
             .accessibilityIdentifier("spaces.empty")
         case let .loaded(view):
             List {
+                if !view.needsAccess.isEmpty {
+                    NeedsAccessBanner(items: view.needsAccess) { Task { await fetch() } }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
                 ForEach(view.spaces) { space in
                     NavigationLink(value: space.id) {
                         SpaceRow(space: space)
@@ -171,7 +177,7 @@ struct SpacesSheet: View {
         await act { try await $0.newSpace(dir: folder.path) }
     }
 
-    private func act(_ body: (DaemonClient) async throws -> AgentActionReply) async {
+    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> AgentActionReply) async {
         do {
             _ = try await model.daemon(body)
             Haptics.answered()
@@ -525,7 +531,7 @@ struct SpaceDetailView: View {
         }
     }
 
-    private func act(_ body: (DaemonClient) async throws -> Void) async {
+    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> Void) async {
         do {
             try await model.daemon(body)
             Haptics.answered()

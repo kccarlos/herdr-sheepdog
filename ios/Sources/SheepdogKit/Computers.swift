@@ -32,8 +32,8 @@ public enum Reachability: Equatable, Sendable {
 
 /// One paired computer as the several-computers UI shows it: the Talk to
 /// rows, the Agents page's sections, the iPad sidebar and Settings ▸
-/// Computers. The current computer's comes from the session itself; the
-/// others' from their `ComputerSession`.
+/// Computers. Each comes from its computer's `ComputerModel`; the current
+/// one's link from the session.
 public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
@@ -41,14 +41,25 @@ public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
     public var reachability: Reachability
     public var agents: [Agent]
     public var questions: [PendingAction]
+    /// Talk to may switch here now (`ComputerModel.canTalkTo`): a computer
+    /// that is backing off is not switched to, even inside the quiet period
+    /// that still reads "Connecting…".
+    public var canTalkTo: Bool
 
-    public init(id: String, name: String, isCurrent: Bool, reachability: Reachability, agents: [Agent] = [], questions: [PendingAction] = []) {
+    public init(id: String, name: String, isCurrent: Bool, reachability: Reachability, agents: [Agent] = [], questions: [PendingAction] = [], canTalkTo: Bool? = nil) {
         self.id = id
         self.name = name
         self.isCurrent = isCurrent
         self.reachability = reachability
         self.agents = agents
         self.questions = questions
+        if let canTalkTo {
+            self.canTalkTo = canTalkTo
+        } else if case .offline = reachability {
+            self.canTalkTo = false
+        } else {
+            self.canTalkTo = true
+        }
     }
 
     public var running: [Agent] { agents.filter { $0.state.isRunning } }

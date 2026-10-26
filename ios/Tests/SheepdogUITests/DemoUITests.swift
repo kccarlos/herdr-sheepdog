@@ -101,4 +101,18 @@ final class DemoUITests: XCTestCase {
         app.buttons["demo.leave"].tap()
         XCTAssertTrue(app.buttons["settings.firstRun.tryDemo"].waitForExistence(timeout: 10), "back to the first-run setup")
     }
+
+    /// The approval can be answered aloud: the demo's "Yes, go ahead." chip
+    /// stands in for the recognised speech, and the conversation records
+    /// the approval as given by voice.
+    func testApproveByVoiceInTheDemo() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40), "codex-payments' question")
+        tapVisible(app.buttons, "demo.sayYes")
+        let approved = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved' AND label CONTAINS 'by voice'")).firstMatch
+        XCTAssertTrue(approved.waitForExistence(timeout: 10), "the approval says it was given by voice")
+    }
 }

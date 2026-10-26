@@ -145,6 +145,7 @@ public final class ComputerStore: @unchecked Sendable {
     public func remove(_ id: String) {
         credentials(for: id).forget()
         defaults.removeObject(forKey: Key.address(id))
+        defaults.removeObject(forKey: LinkWinnerDefaults.key(id))
         var order = defaults.stringArray(forKey: Key.order) ?? []
         order.removeAll { $0 == id }
         defaults.set(order, forKey: Key.order)

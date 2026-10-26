@@ -4,10 +4,10 @@ There are two targets and one rule: anything that can be tested without a
 microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 `@MainActor` view models built on top of it.
 
-A proposed restructuring of the app's state and connection handling
+The restructuring of the app's state and connection handling
 (per-computer runtimes, a connection state machine, address failover) is
 in [ios-state-architecture.md](../../../docs/dev/design/ios-state-architecture.md),
-under review.
+accepted and built in phases (its section 6 says which are done).
 
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
@@ -85,7 +85,7 @@ The app sends what `web/voice/app.js` sends, in the same order:
 - **Ping.** Every 5 s the app sends a JSON `ping` carrying `gated_frames`,
   `peak`, the playback counters (`underruns`, `drains`, `buffer_ms`,
   `rate`, `stretched_ms`) and `audio_state`. If a ping has no `pong` after
-  10 s, the socket goes into the reconnect path.
+  10 s, the socket drops and tells the link (see "The connection").
 - **On every (re)connection** the app re-sends the mute, gate and speaking
   state, because the daemon treats a reconnecting client as unmuted and
   ungated.
@@ -440,20 +440,50 @@ section 6.
 Design: docs/dev/design/app-redesign.md sections 3 and 4 (option A). The
 store is `ComputerStore` ("Settings" below).
 
-- **The session is the current computer's.** `SessionViewModel` keeps its
-  `/ws`, `/events`, conversation, voice and approvals, as with one
-  computer. Every other paired computer is a `ComputerSession`
-  (`ComputerSession.swift`). It polls its own `/api/state` every 5 s,
-  fetches again at once on any `/events` event, and holds the agents, the
-  open questions and `Reachability` (connecting, online, offline since).
-  It has no voice and no conversation. Nothing from it reaches the current
-  daemon or the voice.
-- `SessionViewModel+Computers.swift` keeps one started session per other
-  computer (`rebuildOthers`, on start and on every change to the list or
-  the current computer). Each session's changes are forwarded to the
-  model, so the views read only the model. `computerSnapshots`
-  (`ComputerSnapshot`, Kit) is every computer in the store's order, with
-  "4 agents · 1 waiting" or "Offline since 9:12".
+- **One runtime per computer, the current one included** (Kit,
+  docs/dev/design/ios-state-architecture.md 3.1). `ComputerFleet` holds
+  every paired computer's runtime (plus one for a bare address or the
+  demo) and `currentID`:
+  - `ComputerConnection`, an actor, does its I/O: one immutable
+    `DaemonClient` per address, `GET /api/state`, the answers and the
+    `/events` loop;
+  - `ComputerModel` (`@MainActor @Observable`) is what the views read: the
+    agents, the open questions with their tap phases, `reachability` and
+    `canTalkTo`, all from its own `ComputerLink`, which runs in a
+    `LinkRuntime` there. It also keeps the computer's conversation
+    (`ComputerConversation`: history, live bubbles, activity, the last
+    event id), its last state, its hello and its features.
+- **The session attaches to the current computer.** `attachCurrent` hooks
+  `SessionViewModel` to the current model: its link (the chip), its
+  state, its `/events` output (folded into the conversation) and the
+  stream's life. Every other model is detached and refreshes itself on
+  its own events. The voice (`/ws`) and the terminal (`/term`) are
+  pointed at the current computer. Nothing from another computer reaches
+  the current daemon, the conversation or the voice.
+- **Requests on the current computer** go through `current { … }`
+  (`ComputerFleet.onCurrent`): the reply comes back only if that computer
+  is still current at the same epoch, else it throws (`Moved`, `Stale`)
+  and nothing is applied. An answer by tap goes through the computer's
+  model, current or not.
+- **Each link** works the same way (see "The connection"): in the
+  foreground it streams `/events` and refreshes on each event and every
+  30 s; another computer is idle in the background (decision 2). On a constrained
+  path (Low Data Mode) it keeps `/events` closed and refreshes on the 30 s
+  timer only; `NWPathMonitor` feeds the path (see "The connection"). While the voice
+  runs on the current computer it backs off up to 60 s. An answer in flight
+  keeps its link up until it finishes.
+- **Epochs.** Every reply carries the epoch it was asked in, and the model
+  applies it only while that epoch is still its own. Re-pairing a computer
+  or changing its address starts a new epoch (`renew`); removing it stops
+  its runtime. Switching computers does not: an answer already sent
+  finishes on its own computer (decision 6).
+- `SessionViewModel+Computers.swift` keeps the fleet in step with the
+  store (`syncFleet`, on launch and on every change to the list, the
+  current computer or its address). The views read the models through the
+  session view model, and SwiftUI observes each model's properties
+  directly.
+  `computerSnapshots` (`ComputerSnapshot`, Kit) is every computer in the
+  store's order, with "4 agents · 1 waiting" or "Offline since 9:12".
 - **Questions.** `floatingQuestions` is the current computer's questions,
   then the others' oldest first across computers (`QuestionOrder.others`,
   by `created_at`). Another computer's card carries a namespaced id
@@ -462,10 +492,16 @@ store is `ComputerStore` ("Settings" below).
   that computer's `POST /api/pending/answer`. The card says
   "Home Mac · blog", "Answers by tap go to Home Mac." and **Talk to Home
   Mac**.
-- **Talk to** (`talk(to:)`, `switchComputer(to:)`) ends the voice session
-  cleanly, loads the new computer's conversation, reconnects if the voice
-  was running, and adds a "Talking to Home Mac" divider. A computer that
-  does not answer is not switched to; a banner says why. It is reached
+- **Talk to** (`talk(to:)`, `switchComputer(to:)`) changes the current
+  id: the session attaches to the new computer's model and shows its
+  conversation and last state at once, the voice ends cleanly and
+  reconnects there if it was running, and a "Talking to Home Mac" divider
+  is added. The computer it left keeps running, so an answer in flight
+  finishes there; its live bubbles end with the voice, and its
+  conversation is saved to its own cache. A computer that
+  does not answer is not switched to (`canTalkTo`: its link is backing
+  off, offline, not verified or refused, even while the quiet period
+  still reads "Connecting…"); a banner says why, and its link retries. It is reached
   from the voice menu, a section header on the Agents page, All agents and
   the iPad sidebar, a floating question, a computer's Settings page, and
   ⌘K.
@@ -495,7 +531,14 @@ store is `ComputerStore` ("Settings" below).
 - **The Live Activity** names the current computer, and its waiting rows
   continue with the other computers' rows (up to three in all), each
   naming its computer.
-- **Tests:** `ComputersTests` and `ComputerStoreTests` (Kit);
+- **Tests:** `ComputersTests`, `ComputerStoreTests`, `ComputerRuntimeTests`
+  (two computers on a scripted network and a manual clock) and
+  `ComputerSwitchPropertyTests` (fast switching with requests in flight:
+  no reply is applied to the wrong computer, every answer finishes on its
+  own), `ComputerFleetTests` and
+  `ComputerRuntimePropertyTests` (seeded interleavings of refreshes,
+  answers, replies in any order, re-pairing and the app's phase: no reply
+  lands on the wrong computer or an older pairing) in Kit;
   `ComputersUITests` against `StubDaemon(.computer…)`: one computer
   shows no label, and two computers plus an offline one cover Talk to,
   the sections, a question answered on another computer, Settings and
@@ -574,9 +617,13 @@ big-endian). Use it only when `bot-ready` lists the `term` feature.
 - `resize(ch:cols:rows:)` is debounced by 150 ms. The same size is sent
   too, because it asks for a repaint.
 - Input goes as binary frames of at most 64 KB; a long paste is split.
-- A dropped connection reconnects with backoff (1 s, doubling to 10 s) and
-  reopens every channel the daemon had not closed, at its latest size and
-  without takeover. A WebSocket ping goes every 20 s, and a ping still
+- It is the current computer's `/term` channel (`TermHub` is its
+  `LinkChannelClient`, see "The connection") and never retries by itself.
+  A dropped connection tells the link, which probes once and says when to
+  open it again; then it reopens every channel the daemon had not closed,
+  at its latest size and without takeover. While the link does not allow
+  it (offline, no network, the background) it is closed and keeps its
+  channels for then. A WebSocket ping goes every 20 s, and a ping still
   unanswered at the next tick drops the connection.
 - `TermSocketTests` run it on a fake `TermTransport`. One test uses the real
   URLSession transport against a local server, and one replays a recorded
@@ -993,22 +1040,27 @@ orchestrator, Health, and Reconnect / Open Settings.
 
 `ComputerLink` (Kit) is one computer's connection as a value, the one
 truth for "can the app talk to this computer, and if not, why"
-(docs/dev/design/ios-state-architecture.md 3.2–3.4). `LinkRuntime` runs it
-for the current computer:
+(docs/dev/design/ios-state-architecture.md 3.2–3.4). Each computer's
+`ComputerModel` runs its link in a `LinkRuntime` ("Several computers"):
 
 - it executes the link's effects: a pinned `GET /api/state` probe with a
-  4 s timeout (through one immutable `DaemonClient` per address,
-  `DaemonProbeTransport`), timers with tokens (`LinkClock`), the channel
-  set, the address in use and the race winners per interface
+  4 s timeout (through the computer's `ComputerConnection`, one immutable
+  client per address), timers with tokens (`LinkClock`), the channel set,
+  the address in use and the race winners per interface
   (`LinkWinnerDefaults`);
 - it feeds back every result, plus what the rest of the app sees: each
-  request's outcome through `client` (`DaemonClient.onOutcome`), `/ws`
-  opening and dropping, a handshake mismatch, `/events` opening and
-  dropping, the app going to the background and back;
+  request's outcome (`ComputerModel.request`), every channel opening and
+  dropping, a handshake mismatch, the network path, the app going to the
+  background and back;
 - a probe's `/api/state` reply is applied as the data, so the 30 s
   safety-net refresh replaces the old 5 s poll;
-- it is rebuilt for another computer, address or credentials, and the old
-  one's late replies land nowhere.
+- switching computers rebuilds nothing; new credentials start a new epoch,
+  and the old epoch's late replies land nowhere. A new address set or
+  Prefer does not: the pin, not the address, is the computer
+  (`ComputerModel.setAddresses`, `prefer`);
+- a promoted pin or a certificate expiry learned at sign-in reaches it as
+  `credentialsChanged(.pinPromoted)` (`DeviceCredentials.certificateChanged`),
+  so the rotation window is current without a relaunch.
 
 Errors are classified per request (`LinkError(_:)`): a key that matches no
 pin is `DaemonError.untrusted`, never "scan again" by itself. The link
@@ -1026,10 +1078,85 @@ Agents page's empty states (`FlockPaneState.resolve(link:)`), the iPad
 sidebar, Health, and this computer in the snapshots (`Reachability(link)`).
 Foreground notifications stay quiet while the link is usable.
 
-Not yet the link's (phase 5): `VoiceSocket` and `TermSocket` keep their
-own reconnects and only report to it, and there is no `NWPathMonitor`, so
-the remembered winners stay empty and the race has one address (failover is
-phase 6). Other computers still use `ComputerSession` (phase 4a).
+**Channels and one backoff.** `/ws`, `/events` and `/term` are the
+link's channels, and no socket retries by itself:
+
+- the model opens `/events` itself; the session attaches the voice's
+  `VoiceSocket` and the `TermHub` to the current computer's model
+  (`ComputerModel.attach`, `LinkChannelClient`), and detaches them on a
+  switch;
+- a channel opens only while it is wanted (the voice is on, a window or a
+  warm-up wants `/term`) and the link allows it (`linkAllows`: online,
+  with the channel in the demand table below);
+- a drop reports `lost` through its `LinkChannelReporter`, which carries
+  the computer's epoch and the attachment, so a late callback from an
+  older pairing or a computer the app left lands nowhere;
+- the link probes once (hysteresis: still Connected), and on a good probe
+  says `reopen`. The first loss reopens at once; a channel that keeps
+  failing while the computer answers (lost again within 10 s of opening)
+  waits on the link's `reopen` timer, `LinkBackoff` with full jitter, up
+  to the cap. That replaced `VoiceSocket`'s and `TermSocket`'s own 1–10 s
+  loops and `/events`' wait after failures;
+- a failed probe makes the link back off (`waiting`, then `offline` after
+  30 s), and every channel reopens when it is online again.
+
+**The network path.** `SystemNetworkMonitor` (`NWPathMonitor`, Kit's
+`NetworkMonitor.swift`) feeds `ComputerFleet.setPath`, which hands every
+computer's model the path (`NetworkPath`: satisfied, the interface kind,
+Low Data Mode), including a model added later:
+
+- no network: every link is `noNetwork` ("No network", grey), retries
+  stop and every channel closes; Connect says "This phone is offline."
+  instead of "can't reach" the address;
+- the network back, or a new interface (Wi-Fi ↔ cellular): every link with
+  demand tries at once, from attempt 0. An online link re-checks without
+  leaving online, and once that probe wins every open channel reopens on
+  the new interface (a socket on the old one is dead before its keepalive
+  says so). The first interface the monitor reports is not a change;
+- Low Data Mode (`isConstrained` only, decision 2): other computers keep
+  `/events` closed and refresh every 30 s.
+
+The demo always has Wi-Fi (`ManualNetworkPath`), and the debug launch
+argument `-sheepdogNoNetwork` has none (`LinkStatusUITests`).
+
+**Foreground and background** (`LinkDemand.channels(on:)`):
+
+| | current computer | other computers |
+|---|---|---|
+| foreground | `/events`, `/term`, and `/ws` while the voice is on | `/events` (not under Low Data Mode), `/term` |
+| background, voice on, Keep listening on | `/ws` only | idle |
+| background, Keep listening off or voice off | idle: everything closes (the core has already paused the audio; the Live Activity says paused, not "Reconnecting…") | idle |
+| an answer in flight | REST only, until it finishes | same |
+
+Coming to the foreground kicks every link: a probe now, the backoff
+starts over, and the channels reopen once it answers.
+
+**Address failover** (design doc 3.3). The link races every address of
+the computer: the store's address (the preferred one, set by Prefer) first,
+then the pairing's (`raceAddresses`), with the remembered winner for the
+current interface ahead of both:
+
+- the race is staggered: the next address starts after 300 ms without an
+  answer, or at once after a failure; the first pinned `GET /api/state`
+  success wins and the probes still in flight are cancelled. The pin is the
+  only check, so any address that verifies is the computer;
+- the winner is remembered per interface (Wi-Fi, cellular, wired; decision
+  10) in `LinkWinnerDefaults` (`computers.linkWinners.<id>`), and removing a
+  computer forgets them;
+- one address at a time: the model passes the link's address with every
+  request and `/events` open (it never relies on the actor having heard
+  `use` first), and tells the attached `/ws` and `/term` clients
+  (`LinkChannelClient.linkUses`) before the reopen that moves them; the
+  session's `channelEndpoint` does the same when it repoints the voice or
+  the terminal after a switch;
+- a pin mismatch on the address in use starts a full race, so another
+  address that verifies wins and the mismatching one is marked; only when
+  nothing verifies is it `untrustedAnswer` (decision 1);
+- Settings ▸ Connection ▸ Addresses renders `AddressRow` (Kit): "In use on
+  Wi-Fi", "Checking…", "Answered with another key", and Preferred. Tapping
+  a row prefers it (`preferAddress`): the link re-races without leaving
+  online and forgets the old winners; there is no separate check. Add still
+  checks an address by the pin before keeping it.
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
@@ -1054,7 +1181,7 @@ their exact effects.
 
 | Group | Fields |
 |---|---|
-| `connection` | `wantsConnection`, `socket` (`SocketLife`), `handshake`, `reconnect` (`ReconnectPolicy`), `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
+| `connection` | `wantsConnection`, `socket` (`SocketLife`), `handshake`, `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
 | `voice` | `status`, `closedReason`, `stalled`, `provider`, `saidVoiceIsOff` |
 | `mic` | `talkMode`, `muted` (the user's intent), `holding`, `gateClosed`, `noSignal` |
 | `playback` | `speaking`, `hold` (`SpeakingHold`), `heldSpeaking` |
@@ -1068,11 +1195,13 @@ core's.
 
 Behaviour worth knowing:
 
-- **Reconnects** use backoff of up to 10 s. For the first 30 s the orb
-  quietly says "Reconnecting…". After that, one banner says the daemon is
-  unreachable while the app keeps trying until End. A refused token stops
-  the session at once. If another client takes the session (the daemon
-  serves one at a time), the app says so once and waits.
+- **Reconnects** are the link's. While `/ws` waits for it the orb quietly
+  says "Reconnecting…", for as long as it takes, until End; the chip says
+  why (Reconnecting…, then Offline with Try now after 30 s, or No
+  network). The voice raises no banner of its own for it (the old "still
+  trying every few seconds" banner duplicated Offline). A refused token
+  stops the session at once. If another client takes the session (the
+  daemon serves one at a time), the app says so once and waits.
 - **The app owns mute.** It tells the daemon its mute state on every
   connect and corrects a daemon that disagrees. Hold-to-talk never mutes.
 - **Keep listening with the screen locked** (on by default). When it is
@@ -1101,9 +1230,10 @@ re-renders every view that observes it. The rules that keep that cheap:
 
 - **Assign only on change.** A poll or a refresh assigns a published
   property only when the value differs (`SessionViewModel.assign`,
-  `ComputerSession.set`); an equal value still announces a change. Each
-  other computer's changes are forwarded to the model, so an unchanged
-  5 s poll must announce nothing.
+  `ComputerModel.set`); an equal value still announces a change, and an
+  `@Observable` setter notifies its observers even for an equal value.
+  Another computer's refresh that found nothing new must notify nothing
+  (`ComputerRuntimeTests.testAnUnchangedRefreshAssignsNothing`).
 - **High-frequency values have one reader.** Terminal frames: the surface
   (above). Audio levels: `VoiceMeter` is `@Observable`, and only
   `MeteredOrb` and `MeteredMicButton` read `micLevel` and `outputLevel`, so

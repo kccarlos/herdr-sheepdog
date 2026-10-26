@@ -94,7 +94,8 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
             }
             if path.hasPrefix("/api/conversation") {
-                return http(200, "application/json", #"{"items":[]}"#)
+                // One line that says whose conversation this is.
+                return http(200, "application/json", #"{"items":[{"id":1790127618456893,"ts":"2026-10-23T09:00:00Z","kind":"dog","text":"Hi from "# + name + #"."}]}"#)
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
         }

@@ -70,6 +70,9 @@ final class FakeLinkTransport: LinkTransport {
         }
     }
 
+    /// Probes still hanging and not cancelled, by address.
+    var openProbes: [String] { hanging.filter { !$0.handle.isCancelled }.map(\.address).sorted() }
+
     /// Answers the oldest hanging probe of an address.
     func answer(_ address: String, _ result: LinkProbeResult) {
         guard let index = hanging.firstIndex(where: { $0.address == address && !$0.handle.isCancelled }) else {
@@ -201,7 +204,14 @@ final class LinkRuntimeTests: XCTestCase {
             XCTAssertEqual(chip(r), "Connected")
             XCTAssertEqual(LinkPresentation(r.link).health, "Live updates are reconnecting")
         }
-        XCTAssertEqual(reopened.filter { $0 == .events }.count, 5, "each loss is confirmed by one probe, then reopened")
+        // Each loss is confirmed by one probe; from the second in a row the
+        // reopen waits on the link's timer (one schedule, no spin).
+        XCTAssertEqual(r.link.channelFailures[.events], 5)
+        let reopenedSoFar = reopened.filter { $0 == .events }.count
+        XCTAssertLessThan(reopenedSoFar, 5)
+        clock.advance(LinkBackoff.cap)
+        XCTAssertEqual(reopened.filter { $0 == .events }.count, reopenedSoFar + 1, "reopened once the wait is over")
+        XCTAssertEqual(chip(r), "Connected")
         r.send(.channelOpened(.events))
         guard case .online = r.link.state else { return XCTFail("\(r.link.state)") }
         XCTAssertNil(LinkPresentation(r.link).health)

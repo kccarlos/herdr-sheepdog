@@ -76,6 +76,7 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(label.label.contains("Home Mac · blog"), label.label)
         XCTAssertTrue(app.staticTexts["Answers by tap go to Home Mac."].exists)
         XCTAssertTrue(app.buttons["computerLabel.talkTo.fixture-2"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.waitForExistence(timeout: 10), "Work Mac's conversation")
         shot(app, "conversation")
 
         // Talk to in the voice menu, with every computer.
@@ -95,7 +96,7 @@ final class ComputersUITests: XCTestCase {
         showAgentsPane(app)
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.current").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.fixture-2").firstMatch.exists)
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 20), "Studio's dashed row")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 45), "Studio's dashed row, after the 30 s quiet period")
         shot(app, "agents")
 
         // Answer Home Mac's question by tap: it goes to Home Mac.
@@ -122,6 +123,12 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(starting(app, "Talk to Work Mac").waitForExistence(timeout: 5))
         XCTAssertTrue(starting(app, "Home Mac, talking here").exists, "Home Mac is current now")
         closeMenu(app, item: "voice.manageComputers")
+
+        // The conversation is Home Mac's now, caught up at once, with
+        // nothing of Work Mac's.
+        tapWhenTappable(app.buttons.matching(identifier: "main.pane.conversation").firstMatch, "the Conversation tab")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Home Mac")).firstMatch.waitForExistence(timeout: 10), "Home Mac's conversation after the switch")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.exists, "nothing of Work Mac's conversation")
     }
 
     /// Settings ▸ Add a computer while the session view model re-renders
@@ -132,19 +139,26 @@ final class ComputersUITests: XCTestCase {
         let stub = try StubDaemon(.daemon(update: nil))
         let host = try stub.start()
         defer { stub.stop() }
+        let churnAfter = 20.0
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)", "-sheepdogRenderChurn"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)", "-sheepdogNoAnimations", "-sheepdogRenderChurnAfter", "\(churnAfter)"]
+        let launched = Date()
         app.launch()
 
-        tapMenuItem(app, menu: "voice.menu", item: "voice.manageComputers")
+        // Reach Settings first, with the session still: the churn starts
+        // later (as #407 did for the shell and Spaces), so a tap on the
+        // capsule or its menu is not lost to ten re-renders a second.
         let add = app.buttons["settings.addComputer"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10), "Settings ▸ Add a computer")
-        add.tap()
+        tapMenuItem(app, menu: "voice.menu", item: "voice.manageComputers", until: add)
+        tapWhenTappable(add, "Add a computer")
 
         let sheet = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pairing.'")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "the scan sheet opens")
         let id = sheet.identifier
+        // The churn is on from here on.
+        let wait = churnAfter - Date().timeIntervalSince(launched)
+        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         // Stays up, the same screen, for several seconds of re-renders.
         let done = app.buttons["settings.done"]
         for i in 0 ..< 40 {

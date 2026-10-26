@@ -10,6 +10,8 @@ public enum SetupHelp {
     public static let projectURL = URL(string: "https://github.com/kccarlos/herdr-sheepdog")!
     /// The iPhone app's page in the daemon's user docs (install, pair).
     public static let appGuideURL = URL(string: "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/iphone-app.md")!
+    /// The privacy policy, also the App Store Connect privacy URL.
+    public static let privacyURL = URL(string: "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md")!
     /// Same Wi-Fi, Tailscale, the token: what to check when the phone
     /// cannot reach the computer.
     public static let remoteAccessURL = URL(string: "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/remote-access.md")!

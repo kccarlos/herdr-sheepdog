@@ -8,16 +8,18 @@ import XCTest
 final class VoiceSocketTests: XCTestCase {
     // MARK: - A daemon that is down (the restart case)
 
-    func testAnUnreachableDaemonFailsAsRetryingAndTheSocketKeepsRetrying() async throws {
+    func testAnUnreachableDaemonFailsAsRetryingAndWaitsForTheLink() async throws {
         // Port 9 (discard) on loopback: nothing listens, the connect is refused.
         let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 9))
         var failedRetrying: Bool?
         var closedRetrying: Bool?
+        var closes = 0
         let closed = expectation(description: "closed")
         socket.onEvent = { event in
             switch event {
             case let .failed(_, retrying): failedRetrying = retrying
             case let .closed(_, retrying):
+                closes += 1
                 if closedRetrying == nil {
                     closedRetrying = retrying
                     closed.fulfill()
@@ -27,9 +29,13 @@ final class VoiceSocketTests: XCTestCase {
         }
         socket.connect()
         await fulfillment(of: [closed], timeout: 10)
-        XCTAssertEqual(failedRetrying, true, "the view model must know this failure is being retried")
+        XCTAssertEqual(failedRetrying, true, "the view model must know the link will try again")
         XCTAssertEqual(closedRetrying, true)
-        XCTAssertEqual(socket.life, .reconnecting, "the socket goes on retrying by itself")
+        XCTAssertEqual(socket.life, .reconnecting, "waiting for the link")
+        // The old socket retried after 1 s by itself; now only the link
+        // opens it again.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(closes, 1, "no attempt of its own")
         socket.disconnect()
         XCTAssertEqual(socket.life, .idle)
     }

@@ -431,6 +431,10 @@ type HelloResponse struct {
 	// "GET /api/hello"). The pin is a public key hash, safe to publish;
 	// the app never trusts this field, it trusts the pairing code's pin.
 	Security HelloSecurity `json:"security"`
+	// IdempotencyKeys says the daemon honours Idempotency-Key on a
+	// device's POSTs (idempotency.go), so the app may retry a typed
+	// line or a New agent after a timeout.
+	IdempotencyKeys bool `json:"idempotency_keys"`
 }
 
 // HelloSecurity is /api/hello's security object.
@@ -456,8 +460,9 @@ func (s *Server) handleHello(w http.ResponseWriter, _ *http.Request) {
 		Audio:         HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
 		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
-		Computer: s.computer(),
-		Security: s.helloSecurity(),
+		Computer:        s.computer(),
+		Security:        s.helloSecurity(),
+		IdempotencyKeys: true,
 	})
 }
 

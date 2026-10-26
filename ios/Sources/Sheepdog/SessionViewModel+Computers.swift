@@ -1,44 +1,134 @@
-import Combine
 import Foundation
 import SheepdogKit
 
 /// Several computers (docs/dev/design/app-redesign.md sections 3 and 4,
-/// option A): the session is the current computer's; each other paired
-/// computer is a `ComputerSession` that shows its agents and questions and
-/// answers them by tap. Nothing from another computer reaches the current
-/// daemon or the voice.
+/// option A, and docs/dev/design/ios-state-architecture.md 3.1): every
+/// paired computer is a `ComputerModel` in `fleet`, the current one
+/// included. The session attaches to the current one (its conversation,
+/// its `/events`, the voice); each other one shows its agents and
+/// questions and answers them by tap. Nothing from another computer
+/// reaches the current daemon or the voice.
 extension SessionViewModel {
-    /// Keeps one `ComputerSession` per other computer, started, in the
-    /// store's order. Called on start and whenever the list or the current
-    /// computer changes.
-    func rebuildOthers() {
-        guard demo == nil else { return }
+    /// Keeps one model per paired computer, in the store's order, plus one
+    /// for a bare address or the demo (a computer without a record). Called
+    /// on launch and whenever the list, the current computer or its address
+    /// changes. A computer whose address or pairing changed keeps its model
+    /// and starts a new epoch, so nothing asked before lands; a removed one
+    /// stops.
+    func syncFleet() {
+        var next: [ComputerModel] = []
         let store = settings.computers
-        let current = store.currentID
-        var kept: [ComputerSession] = []
-        for computer in store.computers where computer.daemonID != current {
-            guard let endpoint = store.endpoint(for: computer.daemonID) else { continue }
-            if let existing = others.first(where: { $0.id == computer.daemonID }) {
-                existing.rename(computer.displayName)
-                kept.append(existing)
-            } else {
-                let made = ComputerSession(id: computer.daemonID, name: computer.displayName, endpoint: endpoint)
-                // The views read the session through this model. The session
-                // announces only real changes (it assigns nothing equal),
-                // so a quiet poll re-renders nothing here.
-                otherSinks[made.id] = made.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
-                made.start()
-                kept.append(made)
+        if demo == nil {
+            for computer in store.computers {
+                guard let endpoint = store.endpoint(for: computer.daemonID) else { continue }
+                next.append(fleetModel(id: computer.daemonID, name: computer.displayName, endpoint: endpoint,
+                                       addresses: Self.raceAddresses(preferred: store.address(for: computer.daemonID), computer.addresses),
+                                       certExpires: computer.certExpires, fingerprint: Self.fingerprint(computer, endpoint: endpoint)))
             }
         }
-        for gone in others where !kept.contains(where: { $0 === gone }) {
-            gone.stop()
-            otherSinks[gone.id] = nil
+        if let endpoint = settings.endpoint, !next.contains(where: { $0.id == currentComputerID }) {
+            next.insert(fleetModel(id: currentComputerID, name: currentComputerName, endpoint: endpoint,
+                                   addresses: [endpoint.display], certExpires: endpoint.credentials?.computer?.certExpires,
+                                   fingerprint: "\(endpoint.display)|\(endpoint.secure)"), at: 0)
         }
-        if !kept.elementsEqual(others, by: ===) { others = kept }
+        for gone in fleet.models where !next.contains(where: { $0 === gone }) {
+            fingerprints[gone.id] = nil
+            endpoints[gone.id] = nil
+        }
+        fleet.set(next)
+        if started { updateDemands() }
     }
 
-    func session(_ id: String) -> ComputerSession? { others.first { $0.id == id } }
+    /// The model for one computer: the existing one (renamed, renewed when
+    /// its pairing changed, given its addresses when only they changed) or a
+    /// new one, started once the app has started.
+    private func fleetModel(id: String, name: String, endpoint: DaemonEndpoint, addresses: [String], certExpires: Date?,
+                            fingerprint: String) -> ComputerModel {
+        endpoints[id] = endpoint
+        defer { fingerprints[id] = fingerprint }
+        if let existing = fleet.model(id) {
+            existing.rename(name)
+            if fingerprints[id] != fingerprint {
+                existing.renew(addresses: addresses, certExpires: certExpires)
+            } else {
+                existing.setAddresses(addresses)
+            }
+            return existing
+        }
+        let made = makeComputerModel(id: id, name: name, endpoint: endpoint, addresses: addresses, certExpires: certExpires)
+        if started { made.start() }
+        return made
+    }
+
+    /// What a computer's runtime depends on: its pairing. Not the pin (a
+    /// promoted pin is a normal event, `certificateChanged`), and not its
+    /// addresses: the pin, not the address, is the computer, so a new
+    /// address, a removed one or Prefer goes to the link (`setAddresses`,
+    /// `prefer`) without a new epoch.
+    private static func fingerprint(_ computer: PairedComputer, endpoint: DaemonEndpoint) -> String {
+        "\(endpoint.secure)|\(computer.deviceID)|\(computer.pairedAt.timeIntervalSince1970)"
+    }
+
+    /// The addresses a computer's link races: the preferred one first (the
+    /// store's address, set by Prefer), then the rest in the pairing's order
+    /// (docs/dev/design/ios-state-architecture.md 3.3).
+    static func raceAddresses(preferred: String, _ addresses: [String]) -> [String] {
+        var order = preferred.isEmpty ? [] : [preferred]
+        for address in addresses where !order.contains(address) { order.append(address) }
+        return order
+    }
+
+    /// One computer's runtime: its connection (one client per address,
+    /// made from the computer's endpoint when first used) and its model.
+    /// The demo's clients answer from `DemoDaemon` inside the app and never
+    /// open a network connection.
+    private func makeComputerModel(id: String, name: String, endpoint: DaemonEndpoint, addresses: [String], certExpires: Date?) -> ComputerModel {
+        let endpoints = self.endpoints
+        let demoSession = demo == nil ? nil : DemoDaemon.session()
+        let connection = ComputerConnection(computerID: id, address: addresses.first ?? endpoint.display) { address in
+            guard let endpoint = endpoints[id] else { return nil }
+            let target = address == endpoint.display ? endpoint : DaemonEndpoint(text: address, secure: endpoint.secure, credentials: endpoint.credentials)
+            guard let target else { return nil }
+            return demoSession.map { DaemonClient(endpoint: target, session: $0) } ?? DaemonClient(endpoint: target)
+        }
+        let isCurrent = id == currentComputerID
+        let model = ComputerModel(id: id, name: name, addresses: addresses, certExpires: certExpires,
+                                  connection: connection, scheduler: LinkClock(), demand: isCurrent ? currentDemand : otherDemand,
+                                  path: fleet.path,
+                                  winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil)
+        model.onAnswerFeedback = { feedback in
+            switch feedback {
+            case .tapped: Haptics.tap()
+            case .answered: Haptics.answered()
+            case .failed: Haptics.answerFailed()
+            }
+        }
+        model.onRenewTicket = { endpoints[id]?.credentials?.dropTicket() }
+        return model
+    }
+
+    /// Who needs another computer's link: the app in front (it streams
+    /// `/events` there and stops in the background, decision 2); it backs
+    /// off further while the voice runs on the current computer.
+    var otherDemand: LinkDemand {
+        LinkDemand(isCurrent: false, phase: appPhase, voiceOn: false, keepListening: settings.keepListeningWhenLocked,
+                   voiceOnAnotherComputer: wantsConnection)
+    }
+
+
+    /// A computer's certificate changed under its credentials (a promoted
+    /// pin, a newly learned expiry): its link hears it, so the rotation
+    /// window is current without a relaunch.
+    func certificateChanged(daemonID: String, certExpires: Date?) {
+        if daemonID == currentComputerID {
+            currentCertificateChanged(certExpires: certExpires)
+        } else {
+            session(daemonID)?.certificateChanged(certExpires: certExpires)
+        }
+    }
+
+    /// Another computer's model (nil for the current one).
+    func session(_ id: String) -> ComputerModel? { others.first { $0.id == id } }
 
     /// The capsule's name: the voice's with one computer, the current
     /// computer's with several (the voice itself never names one).
@@ -106,7 +196,9 @@ extension SessionViewModel {
     /// does not answer stays where it is and says why.
     func talk(to id: String) {
         guard id != currentComputerID else { return }
-        if let other = session(id), case .offline = other.reachability {
+        // A computer that is backing off is not switched to, even while it
+        // still reads "Connecting…".
+        if let other = session(id), !other.canTalkTo {
             banner = Banner(tone: .warning, message: "Can't reach \(other.name).",
                             hint: "Still talking to \(currentComputerName). Is \(other.name) awake and on the same network?", retryTitle: nil)
             other.retry()
@@ -121,7 +213,7 @@ extension SessionViewModel {
         guard all.count > 1, let index = all.firstIndex(where: \.isCurrent) else { return }
         for step in 1 ..< all.count {
             let next = all[(index + step) % all.count]
-            if case .offline = next.reachability { continue }
+            if !next.canTalkTo { continue }
             talk(to: next.id)
             return
         }
@@ -131,5 +223,17 @@ extension SessionViewModel {
     func renameComputer(_ id: String, to name: String?) {
         settings.computers.rename(id, to: name)
         computersChanged()
+    }
+}
+
+/// Each computer's endpoint, read by its connection off the main actor
+/// when it makes a client, and written when the store changes.
+final class EndpointBook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var endpoints: [String: DaemonEndpoint] = [:]
+
+    subscript(id: String) -> DaemonEndpoint? {
+        get { lock.withLock { endpoints[id] } }
+        set { lock.withLock { endpoints[id] = newValue } }
     }
 }

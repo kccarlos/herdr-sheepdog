@@ -30,8 +30,8 @@ final class LinkPropertyTests: XCTestCase {
                     if probes.remove(Probe(address: address, race: race)) == nil { fail("cancelled a probe not in flight: \(address) \(race)") }
                 case let .setTimer(timer, at):
                     if at < now { fail("a timer in the past: \(timer)") }
-                    if timer.kind == .backoff, at.timeIntervalSince(now) > cap + 1e-9 {
-                        fail("backoff \(at.timeIntervalSince(now)) s over the cap \(cap)")
+                    if timer.kind == .backoff || timer.kind == .reopen, at.timeIntervalSince(now) > cap + 1e-9 {
+                        fail("\(timer.kind) \(at.timeIntervalSince(now)) s over the cap \(cap)")
                     }
                     timers[timer.kind] = (timer, at)
                 case let .cancelTimer(kind):
@@ -77,6 +77,19 @@ final class LinkPropertyTests: XCTestCase {
             trace[trace.count - 1] += "\(link.state) \(effects)"
             // The cap of the demand in force after the event.
             runtime.run(effects, now: now, cap: max(cap, link.demand.backoffCap), fail: fail)
+            // One reconnect at a time: a channel reopens only on a usable
+            // link with no race in flight, once per event, and only if it
+            // may be open.
+            let reopens = effects.compactMap { effect -> LinkChannel? in
+                if case let .reopen(channel) = effect { return channel }
+                return nil
+            }
+            if Set(reopens).count != reopens.count { fail("a channel reopened twice in one event: \(reopens)") }
+            for channel in reopens {
+                if !link.isUsable || link.race != nil || !link.channels.contains(channel) {
+                    fail("reopened \(channel) while \(link.state), race \(String(describing: link.race?.id)), channels \(link.channels)")
+                }
+            }
             check()
         }
 
@@ -89,6 +102,9 @@ final class LinkPropertyTests: XCTestCase {
             }
             if runtime.channels != link.channels { fail("channels \(runtime.channels) != \(link.channels)") }
             if !link.channels.isEmpty && !link.isUsable { fail("channels open while \(link.state)") }
+            if !link.reopening.isSubset(of: link.channels) { fail("waiting to reopen \(link.reopening) outside \(link.channels)") }
+            if !link.reopening.isEmpty && link.timers[.reopen] == nil && link.race == nil { fail("a reopen nothing will run: \(link.reopening)") }
+            if link.timers[.reopen] != nil && link.reopening.isEmpty { fail("a reopen timer with nothing to reopen") }
             if !link.demand.needed {
                 switch link.state {
                 case .idle, .refused: break

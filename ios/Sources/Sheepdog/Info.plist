@@ -41,11 +41,11 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Sheepdog uses the camera to scan the pairing code that "sheepdog setup" or "sheepdog pair" shows on your computer, and to take a photo you attach for an agent, which goes only to your own computer. Nothing is recorded in the background.</string>
+	<string>Sheepdog uses the camera to scan the pairing code that "sheepdog setup" or "sheepdog pair" shows on your computer, and to take a photo you attach for an agent. A photo goes to the sheepdog daemon on your own computer, and from there to the AI services you set up. Nothing is recorded in the background.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Sheepdog connects to the sheepdog daemon on your own computer, over your local network.</string>
+	<string>Sheepdog connects to the sheepdog daemon on your own computer, over your local network. What you say or send goes to that computer, and from there to the AI voice and orchestrator services you set up.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sheepdog uses the microphone so you can talk to your coding agents. Your voice goes only to the sheepdog daemon on your own computer; in the demo it stays on this device.</string>
+	<string>Sheepdog uses the microphone so you can talk to your coding agents. What you say goes to the sheepdog daemon on your own computer, and from there to the AI voice and orchestrator services you set up. In the demo it stays on this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>In the demo, Sheepdog recognises your spoken questions on this device only (on-device recognition). Nothing is sent anywhere.</string>
 	<key>NSSupportsLiveActivities</key>

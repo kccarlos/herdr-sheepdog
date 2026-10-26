@@ -72,6 +72,10 @@ enum DebugLaunch {
     /// still moving in and was lost. The recordings and screenshots keep
     /// the motion.
     static var noAnimations: Bool { arguments.contains("-sheepdogNoAnimations") }
+
+    /// `-sheepdogNoNetwork`: the phone has no network (a fixed path instead
+    /// of `NWPathMonitor`), for the "No network" screens and their test.
+    static var noNetwork: Bool { arguments.contains("-sheepdogNoNetwork") }
     /// `-sheepdogDemoUpdate`: the demo's daemon reports a newer release,
     /// so the update notice can be filmed without an older daemon
     /// (docs/dev/launch-video.md, shot 10b).

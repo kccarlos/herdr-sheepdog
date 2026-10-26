@@ -1145,6 +1145,253 @@ Order and dependencies:
     - phase 6: the race has one address (the one in use);
     - phase 7: only the New agent sheet uses `RequestFailure`.
 
+- **Phase 4a (done, #419).** Other computers run on `ComputerConnection` and
+  `ComputerModel`; `ComputerSession` is deleted.
+  - **Decision 7, as built.** `ComputerConnection` is an actor that owns
+    the I/O: one immutable client per address (`ComputerRequests`, which
+    `DaemonClient` is), the REST requests and the `/events` loop with its
+    wait after failures. The link's machine stays where #413 put it, in a
+    `@MainActor` `LinkRuntime`, now owned by `ComputerModel`
+    (`@MainActor @Observable`), whose probe goes through the actor
+    (`ConnectionProbeTransport`). Moving `LinkRuntime` into the actor would
+    have meant rewriting it and its tests for no gain: the actor is the
+    ownership and cancellation scope, and its callbacks never touch the
+    machine.
+  - **Epochs.** The model owns the number and every call names it. A newer
+    epoch drops every client of the actor, a call from an older one is
+    refused, and a reply is applied only while its epoch is still the
+    model's. Re-pairing or a new address set is a new epoch (`renew`, which
+    also sends `credentialsChanged(.newPairing)`); `stop` ends the last
+    one. A promoted pin is not a new epoch.
+  - **Demand.** Other computers stream `/events` in the foreground and are
+    idle in the background (decision 2). `LinkDemand.channels(on:)`
+    already keeps `/events` closed on a constrained path, and the model
+    takes the path (`setPath`), so Low Data Mode polls every 30 s once
+    phase 5's `NWPathMonitor` feeds it. While the voice is on the current
+    computer they back off up to 60 s. An answer in flight keeps the link
+    up (`actionsInFlight`) until it finishes; the 30 s background task is
+    phase 7's.
+  - **Talk to** asks `canTalkTo`, not `Reachability`: a computer whose link
+    is backing off, offline, not verified, refused or incompatible is not
+    switched to, even while its quiet period still reads "Connecting…".
+    The voice menu and a computer's page disable it the same way. Because
+    the link waits out the 30 s quiet period, an unreachable computer's
+    dashed row now shows after about 30 s, not after one failed poll.
+  - **`pinPromoted`.** `DeviceCredentials` posts `certificateChanged` when
+    a TLS handshake promotes the next pin or a sign-in learns a new
+    `cert_expires`. The current computer's link and the others' models
+    hear it as `credentialsChanged(.pinPromoted)`, so `renewedWhileAway`
+    can trigger without a relaunch.
+  - **Observation.** The session view model no longer forwards each other
+    computer's changes (`otherSinks` is gone): SwiftUI observes the
+    models' properties read in `body`. `ComputerModel` assigns only on
+    change, because an `@Observable` setter notifies even for an equal
+    value.
+  - **Tests.** `ComputerRuntimeTests` (two computers on a scripted network
+    and a manual clock: own state per computer, an event refreshes only
+    its computer, a late reply from an older pairing, an answer that
+    finishes after the app leaves, a gone question, Low Data Mode, the
+    background, a lost stream, the quiet period and Talk to, a promoted
+    pin, stop, and an unchanged refresh that notifies nothing) and
+    `ComputerRuntimePropertyTests` (40 seeds × 40 steps of refreshes,
+    answers, replies in any order, re-pairing, events and the app's
+    phase). `ComputersUITests` waits up to 45 s for the offline row.
+
+- **Phase 4b (done, #423).** The current computer runs on its runtime too.
+  - **`ComputerFleet`** (Kit, `@MainActor @Observable`) holds every
+    computer's `ComputerModel` (plus one for a bare address or the demo)
+    and `currentID`. Switching computers changes that id. The computer the
+    app left keeps running as one of the others: its link backs off as
+    another computer's, its answers in flight finish there, and its stream
+    goes on refreshing its badges.
+  - **The session attaches** (`attachCurrent`): the current model's link
+    is the chip, its state and its `/events` output feed the session view
+    model, and the stream's life is Health's Live updates. Each hook checks
+    that its model is still current. `rebuildLink`, the session's own
+    `/events` loop, `linkRuntime`, `requestFinished` and the repointed
+    `client` are gone; so is `endpointChanged`'s fan-out of `update(endpoint:)`.
+  - **Requests on the current computer** go through `current { … }`
+    (`ComputerFleet.onCurrent`, then `ComputerModel.request`). The reply is
+    returned only if the same computer is still current at the same epoch,
+    otherwise it throws `Moved` or `Stale` and nothing is applied. That
+    covers every REST call the session makes: state, history, health,
+    models, settings, typed lines, agent actions and the voice's probe.
+    Each outcome tells that computer's link, which replaces
+    `DaemonClient.onOutcome` for it.
+  - **Answers by tap** on the current computer's other questions go
+    through its model (`ComputerModel.answer`), like another computer's.
+    After a switch they finish and land on that computer's card
+    (decision 6). The voice's approval card still answers through
+    `approvalFlow` (phase 7).
+  - **The conversation is per computer** (`ComputerConversation` on the
+    model: history, live bubbles, activity, the last event id). Switching
+    back shows it again without reading the cache, and a switch syncs the
+    new computer's history at once, because its stream may have been open
+    all along. Switching away clears only that computer's live bubbles and
+    saves its conversation to its own cache. This also fixes a bug: a
+    switch used to save the old conversation under the new computer's
+    cache key, because it read the endpoint after the switch.
+  - **Per computer:** `hello` and the features from the last `bot-ready`
+    live on the model. `termAvailability` is a pure read now; the features
+    are recorded where the handshake lands.
+  - **The voice** is not yet a separate `VoiceEngine`: `VoiceSocket` and
+    the `TermHub` are still one object each, repointed on a switch, with
+    the voice ended before and reconnected after. Splitting the voice out
+    of the session view model is phase 8, and making `/ws` and `/term`
+    channels of the link is phase 5.
+  - **Tests.**
+    - `ComputerSwitchPropertyTests` runs 40 seeds × 50 steps. Each step is
+      one of: a switch, a request on the current computer, an answer on
+      any computer, re-pairing, or a reply in any order. After every step
+      it checks two things. A reply is applied only for the computer it
+      was asked of, while that computer is still current. Every answer
+      finishes on its own computer.
+    - `ComputerFleetTests`.
+    - `ComputersUITests` now checks that, after Talk to Home Mac, the
+      conversation is Home Mac's, caught up, with nothing of Work Mac's.
+  - **Left for later:**
+    - phase 5: `NWPathMonitor` feeds `setPath`, `/ws` and `/term` become
+      the link's channels, and a late `/ws` callback is guarded by epoch;
+    - phase 7: the approval card, typed lines and New agent go through an
+      `ActionRunner` with keys;
+    - phase 8: the voice leaves the session view model;
+    - the session's own `refreshState` does not update the current
+      model's copy of the state; the model's next probe does.
+
+- **Phase 5 (done).** The network path, the foreground kick, and one
+  jittered backoff per computer.
+  - **`NWPathMonitor`.** `SystemNetworkMonitor` (Kit) feeds
+    `ComputerFleet.setPath`, which gives every `ComputerModel` the path,
+    a model added later included. No network is `noNetwork` with no
+    retries; the network back or a new interface kicks every link with
+    demand from attempt 0; Low Data Mode is `isConstrained` only
+    (decision 2), so other computers poll every 30 s. Models start with
+    the monitor's last path, and the first interface it reports is not a
+    change, so launch does not kick every link twice. The demo always has
+    Wi-Fi; `-sheepdogNoNetwork` has none.
+  - **An interface change while online** re-checks without leaving
+    online and, once the probe wins, reopens every open channel: a socket
+    on the old interface is dead before its keepalive notices (up to 10 s
+    for `/ws`, 40 s for `/term`, 60 s for `/events`).
+  - **The foreground kick was lost.** `ComputerModel.setAppPhase` sent a
+    `demandChanged` with the new phase before `.appPhase`, so the link saw
+    no change and a `waiting` link kept its backoff timer. It now sends
+    only `.appPhase`.
+  - **`/ws` and `/term` are channels of the link.** `VoiceSocket` and
+    `TermHub` are `LinkChannelClient`s that the session attaches to the
+    current computer's model (`ComputerModel.attach`) and detaches on a
+    switch. Each opens only while it is wanted and the link allows it, and
+    reports through a `LinkChannelReporter` tagged with the epoch and the
+    attachment, so a late callback from an older pairing or a computer the
+    app left is dropped. A channel the link stops allowing closes without
+    reporting a loss (`VoiceSocket.Event.paused`; `TermSocket` keeps its
+    channels for the reopen).
+  - **Removed retry loops:** `VoiceSocket`'s 1–10 s reconnect
+    (`scheduleRetry`, `retryMinimum`, `retryMaximum`), `TermSocket`'s
+    (`retryDelay`, `retryTask`, `nextRetryDelay`), and
+    `ComputerConnection`'s wait before reopening `/events`
+    (`eventFailures`, its `sleep`).
+  - **One schedule.** The link's own `reopen` timer replaces that last
+    wait: the first loss of a channel reopens as soon as the confirming
+    probe answers; a channel lost again within 10 s of opening waits
+    `LinkBackoff` with full jitter, up to the cap, so a `/ws` upgrade or a
+    `/events` stream that keeps failing while REST works cannot spin at
+    the probe's pace. A reopen never runs while a race is in flight.
+  - **The background, strictly** (3.2's table, `LinkDemand.channels`):
+    with Keep listening off the current computer goes idle and `/ws`
+    closes too (it used to stay open, muted); the Live Activity says
+    paused, not "Reconnecting…", while suspended. With Keep listening on,
+    only `/ws` stays.
+  - **The voice's copy.** `SessionCore` lost `ReconnectPolicy` and its
+    `stillReconnecting` banner: past 30 s the chip already says Offline
+    with Try now, and the banner's "still trying every few seconds" no
+    longer described the backoff. Connect with no network ends with "This
+    phone is offline." (`SessionBanner.noNetwork`), not "can't reach" the
+    address under a "No network" chip.
+  - **Tests.** `LinkChannelTests` (the streak and its cap, an interface
+    change, no network and back, Low Data Mode, the background table, the
+    foreground kick) and `LinkChannelRuntimeTests` (a manual path source,
+    a manual clock and the scripted network: Wi-Fi to cellular, no network
+    and back, a model added offline, foreground retry-now, the background
+    rules with both channels, a lost channel reopened by the link alone, a
+    channel that keeps failing, reports from an older pairing or a
+    detached channel). `LinkPropertyTests` now also checks that a reopen
+    happens only on a usable link with no race in flight, once per event,
+    and that the reopen wait stays within the cap.
+    `LinkStatusUITests.testNoNetworkSaysSoAndConnectSaysWhy`. The socket
+    tests that asserted the deleted loops now assert that a lost socket
+    waits for the link.
+  - **Left for later:**
+    - phase 6: the race still has one address, so the per-interface
+      winners stay empty;
+    - the voice still opens `/ws` from the session's endpoint, not the
+      link's address in use (they are the same with one address);
+    - the 30 s background task for an answer in flight is phase 7's.
+
+- **Phase 6 (done).** Address failover.
+  - **Every address races.** A paired computer's model gets all its
+    addresses: the store's address first (now the *preferred* one, which
+    only Prefer changes), then the pairing's. The link's machine already
+    had the staggered race, the per-interface winners, `preferAddress` and
+    the partial-then-full race of decision 1 (phase 3); this phase feeds
+    it. The winners per interface are kept per computer in
+    `LinkWinnerDefaults`, and `ComputerStore.remove` forgets them.
+  - **No new epoch for addresses.** The fingerprint that renews a model
+    is the pairing only (device id, paired-at, secure), not the address:
+    a new address or a removed one is `ComputerModel.setAddresses`, Prefer
+    is `prefer`, and both keep the epoch, so an answer in flight survives
+    them. This changes phase 4a's "a new address set is a new epoch":
+    the pin, not the address, is the computer.
+  - **One address for every channel.** The model passes the link's
+    address (the runtime's link, which is current inside effects) with
+    every request and `/events` open, so the actor never serves an
+    address the link has left because a `use` call arrived late. The
+    attached `/ws` and `/term` hear `LinkChannelClient.linkUses` before
+    the reopen that moves them, and on `attach`; the session repoints the
+    voice and the terminal with `channelEndpoint` after a switch, and Test
+    connection uses it too. The Settings header shows the address in use.
+  - **Settings ▸ Connection ▸ Addresses** renders `AddressRow` (Kit,
+    pure): "In use on Wi-Fi" (cellular, a wired network), "Checking…",
+    "Answered with another key", and Preferred. Tapping a row prefers it,
+    with no separate check (the race is the check); the link re-races
+    without leaving online and stays put if the preferred address does not
+    verify. Add still checks a typed address by the pin before keeping it,
+    and no longer switches to it. Remove is for an address neither
+    preferred nor in use. A confirmation dialog with Prefer and Remove was
+    tried and dropped: one tap is simpler, and Remove stays a swipe.
+  - **Tests.** `AddressFailoverTests` (a manual clock and a scripted
+    network): Tailscale down at home, the LAN address wins after the
+    300 ms stagger and the loser is cancelled; on cellular Tailscale wins
+    and back on Wi-Fi the LAN goes first; a mismatch on the address in use
+    goes online on the other; all unreachable backs off, all mismatched is
+    `untrustedAnswer`, one mismatched and one unreachable too, and inside
+    the rotation window it is `renewedWhileAway`; Prefer moves the link and
+    forgets the winners, a dead preferred address leaves it where it was;
+    winners in `UserDefaults` per computer; and a property test (150 seeds
+    × 120 steps of answers, time, paths, Prefer, Retry, failed requests and
+    the app's phase) that every probe open on the network is the current
+    race's and a decided race leaves none. `AddressFailoverRuntimeTests`
+    runs the same through `ComputerModel`: a dead preferred address, and
+    requests, `/events`, `/ws` and `/term` all on the winner; Prefer moves
+    every channel without a new epoch; an added address is raced.
+    `EventsTLSE2ETests.testTheRaceSkipsADeadAddressAndStreamsFromTheLiveOne`
+    pairs with the fixture daemon and races a dead `127.0.0.1:9` against it
+    over pinned TLS. `AddressesUITests` checks the in-use and Preferred
+    labels and that a tap moves them.
+  - **Left for later:**
+    - phase 7: three callers still build a `DaemonClient` from a
+      computer's preferred address, not the address in use: push
+      registration and the push status (`PushCoordinator`), an answer
+      from a notification action (`PushNotifications.swift`), and the
+      unpair call when a computer is removed. Route them through the
+      computer's model like the other requests;
+    - `AddressesUITests` runs on a fixture (`AddressesFixture`) that
+      builds the rows itself, so `SessionViewModel.presentAddresses` is
+      covered by the Kit tests of `AddressRow` only;
+    - phase 7: the voice's approval card, typed lines and New agent through
+      `ActionRunner` with keys, and the 30 s background task;
+    - a per-Wi-Fi-network memory stays out (decision 10).
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on

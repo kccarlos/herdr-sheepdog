@@ -36,10 +36,13 @@ shard-2  SheepdogUITests/AgentWindowDemoUITests        # 371
 shard-2  SheepdogUITests/HealthUITests                 # 57
 shard-2  SheepdogUITests/FeedbackUITests               # 38
 shard-2  SheepdogUITests/UpdateNoticeUITests           # 29
+shard-2  SheepdogUITests/PrivacyLinksUITests            # 44
 shard-2  SheepdogUITests/RenderChurnUITests
 
 # about 501
 shard-3  SheepdogUITests/SpacesDemoUITests             # 213
+shard-3  SheepdogUITests/NeedsAccessUITests
+shard-3  SheepdogUITests/AddressesUITests
 shard-3  SheepdogUITests/ShellDemoUITests              # 113
 shard-3  SheepdogUITests/CardsUITests                  # 86
 shard-3  SheepdogUITests/FlockTypingUITests            # 48

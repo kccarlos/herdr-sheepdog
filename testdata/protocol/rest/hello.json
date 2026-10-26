@@ -19,5 +19,6 @@
   "security": {
     "pin": "sha256:pinned-at-pairing",
     "cert_expires": "2026-10-21T09:00:00Z"
-  }
+  },
+  "idempotency_keys": true
 }

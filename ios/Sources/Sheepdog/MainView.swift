@@ -429,8 +429,9 @@ struct SessionMenus {
             endpoint: model.endpointDisplay,
             connectionSymbol: connectionSymbol,
             computers: model.showsComputerLabels ? model.computerSnapshots.map { computer in
-                let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
-                return .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: offline, summary: computer.summary())
+                // Not offline yet (the quiet period still reads
+                // "Connecting…"), but backing off: not picked either.
+                .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: !computer.canTalkTo, summary: computer.summary())
             } : [],
             wantsConnection: model.wantsConnection,
             isConfigured: model.isConfigured
@@ -882,6 +883,17 @@ struct DemoHeader: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    // While a worker asks, the way to answer it aloud: what
+                    // on-device recognition would hand the demo when you say it.
+                    if let card = model.approval, !card.isSettled {
+                        Button(DemoWorld.sayYes) { model.askDemo(DemoWorld.sayYes) }
+                            .font(.footnote.weight(.medium))
+                            .buttonStyle(.borderedProminent)
+                            .buttonBorderShape(.capsule)
+                            .tint(Theme.primaryText)
+                            .disabled(model.sendingTyped)
+                            .accessibilityIdentifier("demo.sayYes")
+                    }
                     ForEach(Array(DemoWorld.suggestedQuestions.enumerated()), id: \.offset) { index, question in
                         Button(question) { model.askDemo(question) }
                             .font(.footnote.weight(.medium))

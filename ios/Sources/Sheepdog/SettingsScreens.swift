@@ -91,7 +91,7 @@ struct DaemonSettingsView: View {
                 Text(computer.name.isEmpty ? "Your computer" : computer.name)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.ink)
-                Text(model.settings.address)
+                Text(model.addressInUse)
                     .font(.subheadline.monospaced())
                     .foregroundStyle(Theme.muted)
                     .textSelection(.enabled)
@@ -105,8 +105,7 @@ struct DaemonSettingsView: View {
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
             NavigationLink {
-                AddressesView(snapshot: { model.addressSnapshot }, add: { await model.addAddress($0) },
-                              use: { await model.useAddress($0) }, remove: { model.removeAddress($0) })
+                AddressesScreen()
             } label: {
                 LabeledContent("Addresses", value: "\(computer.addresses.count)")
             }
@@ -214,6 +213,8 @@ struct DaemonSettingsView: View {
                 }
                 .tint(Theme.primaryText)
                 .accessibilityIdentifier("settings.firstRun.guide")
+                PrivacyPolicyLink()
+                    .font(.subheadline)
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .contain)
@@ -429,6 +430,18 @@ struct AboutView: View {
                 LabeledContent("App", value: Bundle.appVersion)
                 LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
                 LabeledContent("Voice name", value: model.voiceName)
+            }
+
+            Section {
+                PrivacyPolicyLink()
+                NavigationLink {
+                    LicencesView()
+                } label: {
+                    Label("Licences", systemImage: "doc.text")
+                }
+                .accessibilityIdentifier("settings.licences")
+            } footer: {
+                Text("sheepdog collects nothing. Your voice goes to your own computer, which sends it to the AI services you set up there.")
             }
 
             Section {

@@ -44,3 +44,74 @@ public enum ComputerAddress {
         return .success(address)
     }
 }
+
+/// One row of Settings ▸ Connection ▸ Addresses: the address, whether it
+/// is the preferred one (first in the race), and what the link says about
+/// it now (docs/dev/design/ios-state-architecture.md 3.3 and 3.4).
+public struct AddressRow: Equatable, Identifiable, Sendable {
+    public enum Status: Equatable, Sendable {
+        /// The link is online here; the interface says why ("on Wi-Fi").
+        case inUse(NetworkInterface?)
+        /// A race is trying it now.
+        case checking
+        /// It answered with a key that matches no pin: not this computer.
+        case anotherKey
+    }
+
+    public let address: String
+    public let isPreferred: Bool
+    public let status: Status?
+
+    public var id: String { address }
+
+    public init(address: String, isPreferred: Bool, status: Status?) {
+        self.address = address
+        self.isPreferred = isPreferred
+        self.status = status
+    }
+
+    /// The rows in the computer's order, the preferred address first.
+    public static func rows(addresses: [String], preferred: String, link: ComputerLink) -> [AddressRow] {
+        var ordered = addresses
+        if let index = ordered.firstIndex(of: preferred) {
+            ordered.insert(ordered.remove(at: index), at: 0)
+        }
+        let checking = Set(link.race?.inFlight ?? [])
+        var untrusted = link.mismatched
+        if case let .untrustedAnswer(addresses) = link.state { untrusted.formUnion(addresses) }
+        return ordered.map { address in
+            let status: Status?
+            if link.onlineAddress == address {
+                status = .inUse(link.path.interface)
+            } else if checking.contains(address) {
+                status = .checking
+            } else if untrusted.contains(address) {
+                status = .anotherKey
+            } else {
+                status = nil
+            }
+            return AddressRow(address: address, isPreferred: address == preferred, status: status)
+        }
+    }
+
+    /// The status in a few words, nil when there is nothing to say.
+    public var statusText: String? {
+        switch status {
+        case let .inUse(interface):
+            switch interface {
+            case .wifi: return "In use on Wi-Fi"
+            case .cellular: return "In use on cellular"
+            case .wired: return "In use on a wired network"
+            case .other, nil: return "In use"
+            }
+        case .checking: return "Checking…"
+        case .anotherKey: return "Answered with another key"
+        case nil: return nil
+        }
+    }
+
+    public var isInUse: Bool {
+        if case .inUse = status { return true }
+        return false
+    }
+}
