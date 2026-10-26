@@ -27,20 +27,20 @@ enum IPadDetail: Hashable {
 /// capsule.
 struct IPadRootView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(SceneUI.self) private var ui
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
 
     var body: some View {
         GeometryReader { proxy in
             let portrait = proxy.size.height > proxy.size.width
-            NavigationSplitView(columnVisibility: $ui.columns) {
+            NavigationSplitView(columnVisibility: Bindable(ui).columns) {
                 IPadSidebar(portrait: portrait)
                     .navigationSplitViewColumnWidth(390)
                     .toolbar(removing: .sidebarToggle)
                     .toolbar(.hidden, for: .navigationBar)
             } detail: {
-                NavigationStack(path: $ui.detailPath) {
+                NavigationStack(path: Bindable(ui).detailPath) {
                     IPadDetailView(sidebarHidden: ui.columns == .detailOnly || (ui.columns == .automatic && portrait), portrait: portrait)
                         .toolbar(.hidden, for: .navigationBar)
                         .navigationDestination(for: ShellRoute.self) { route in
@@ -83,8 +83,8 @@ private struct SplitStyle: ViewModifier {
 struct IPadSidebar: View {
     let portrait: Bool
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(SceneUI.self) private var ui
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
@@ -429,8 +429,8 @@ struct IPadDetailView: View {
     let sidebarHidden: Bool
     let portrait: Bool
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(SceneUI.self) private var ui
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
@@ -517,8 +517,8 @@ struct DetailHeader<Leading: View, Trailing: View>: View {
 struct IPadConversationDetail: View {
     let leading: AnyView?
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(SceneUI.self) private var ui
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -590,7 +590,7 @@ struct IPadConversationDetail: View {
 /// The capsule's keyboard button focuses it.
 struct IPadComposer: View {
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
+    @Environment(SceneUI.self) private var ui
     @State private var text = ""
     @FocusState private var focused: Bool
 
