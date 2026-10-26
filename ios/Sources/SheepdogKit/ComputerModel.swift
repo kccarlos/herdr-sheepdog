@@ -184,14 +184,15 @@ public final class ComputerModel {
 
     /// Thrown by `request` when its reply belongs to an epoch (or a
     /// runtime) that is gone.
-    public struct Stale: Error, Equatable {
+    public struct Stale: LocalizedError, Equatable {
         public init() {}
+        public var errorDescription: String? { "The computer was paired again before the answer came." }
     }
 
     /// One request on the address in use, for the current computer's REST
     /// calls. Its outcome tells the link. A reply from an older epoch, or
     /// after `stop`, throws `Stale` and is never applied.
-    public func request<Client, T: Sendable>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
+    public func request<Client, T>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
         guard !stopped else { throw Stale() }
         let epoch = epoch
         let reply = await connection.request(epoch: epoch) { client -> T in

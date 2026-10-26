@@ -49,15 +49,16 @@ public final class ComputerFleet {
     /// Thrown by `onCurrent` when the current computer changed while the
     /// request was in flight: its reply belongs to the computer it was
     /// asked of, not to the one the app now talks to.
-    public struct Moved: Error, Equatable {
+    public struct Moved: LocalizedError, Equatable {
         public init() {}
+        public var errorDescription: String? { "The app switched to another computer before the answer came." }
     }
 
     /// A request on the current computer, captured when it is made: its
     /// reply is returned only if that computer is still current, at the
     /// same epoch. Otherwise it throws (`Moved`, `ComputerModel.Stale`), and
     /// the caller applies nothing.
-    public func onCurrent<Client, T: Sendable>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
+    public func onCurrent<Client, T>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
         guard let model = current else { throw Moved() }
         let value = try await model.request(as: type, body)
         guard current === model else { throw Moved() }

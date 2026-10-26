@@ -440,23 +440,34 @@ section 6.
 Design: docs/dev/design/app-redesign.md sections 3 and 4 (option A). The
 store is `ComputerStore` ("Settings" below).
 
-- **The session is the current computer's.** `SessionViewModel` keeps its
-  `/ws`, `/events`, conversation, voice and approvals, as with one
-  computer. Every other paired computer has its own runtime (Kit,
-  docs/dev/design/ios-state-architecture.md 3.1):
+- **One runtime per computer, the current one included** (Kit,
+  docs/dev/design/ios-state-architecture.md 3.1). `ComputerFleet` holds
+  every paired computer's runtime (plus one for a bare address or the
+  demo) and `currentID`:
   - `ComputerConnection`, an actor, does its I/O: one immutable
     `DaemonClient` per address, `GET /api/state`, the answers and the
     `/events` loop;
   - `ComputerModel` (`@MainActor @Observable`) is what the views read: the
     agents, the open questions with their tap phases, `reachability` and
     `canTalkTo`, all from its own `ComputerLink`, which runs in a
-    `LinkRuntime` there.
-
-  It has no voice and no conversation. Nothing from it reaches the current
-  daemon or the voice.
-- **Its link** works like the current computer's (see "The connection"):
-  in the foreground it streams `/events` and refreshes on each event and
-  every 30 s; in the background it is idle (decision 2). On a constrained
+    `LinkRuntime` there. It also keeps the computer's conversation
+    (`ComputerConversation`: history, live bubbles, activity, the last
+    event id), its last state, its hello and its features.
+- **The session attaches to the current computer.** `attachCurrent` hooks
+  `SessionViewModel` to the current model: its link (the chip), its
+  state, its `/events` output (folded into the conversation) and the
+  stream's life. Every other model is detached and refreshes itself on
+  its own events. The voice (`/ws`) and the terminal (`/term`) are
+  pointed at the current computer. Nothing from another computer reaches
+  the current daemon, the conversation or the voice.
+- **Requests on the current computer** go through `current { … }`
+  (`ComputerFleet.onCurrent`): the reply comes back only if that computer
+  is still current at the same epoch, else it throws (`Moved`, `Stale`)
+  and nothing is applied. An answer by tap goes through the computer's
+  model, current or not.
+- **Each link** works the same way (see "The connection"): in the
+  foreground it streams `/events` and refreshes on each event and every
+  30 s; another computer is idle in the background (decision 2). On a constrained
   path (Low Data Mode) it keeps `/events` closed and refreshes on the 30 s
   timer only (phase 5 adds the `NWPathMonitor` that feeds the path). While the voice
   runs on the current computer it backs off up to 60 s. An answer in flight
@@ -466,10 +477,11 @@ store is `ComputerStore` ("Settings" below).
   or changing its address starts a new epoch (`renew`); removing it stops
   its runtime. Switching computers does not: an answer already sent
   finishes on its own computer (decision 6).
-- `SessionViewModel+Computers.swift` keeps one started model per other
-  computer (`rebuildOthers`, on start and on every change to the list or
-  the current computer). The views read the models through the session
-  view model, and SwiftUI observes each model's properties directly.
+- `SessionViewModel+Computers.swift` keeps the fleet in step with the
+  store (`syncFleet`, on launch and on every change to the list, the
+  current computer or its address). The views read the models through the
+  session view model, and SwiftUI observes each model's properties
+  directly.
   `computerSnapshots` (`ComputerSnapshot`, Kit) is every computer in the
   store's order, with "4 agents · 1 waiting" or "Offline since 9:12".
 - **Questions.** `floatingQuestions` is the current computer's questions,
@@ -480,9 +492,13 @@ store is `ComputerStore` ("Settings" below).
   that computer's `POST /api/pending/answer`. The card says
   "Home Mac · blog", "Answers by tap go to Home Mac." and **Talk to Home
   Mac**.
-- **Talk to** (`talk(to:)`, `switchComputer(to:)`) ends the voice session
-  cleanly, loads the new computer's conversation, reconnects if the voice
-  was running, and adds a "Talking to Home Mac" divider. A computer that
+- **Talk to** (`talk(to:)`, `switchComputer(to:)`) changes the current
+  id: the session attaches to the new computer's model and shows its
+  conversation and last state at once, the voice ends cleanly and
+  reconnects there if it was running, and a "Talking to Home Mac" divider
+  is added. The computer it left keeps running, so an answer in flight
+  finishes there; its live bubbles end with the voice, and its
+  conversation is saved to its own cache. A computer that
   does not answer is not switched to (`canTalkTo`: its link is backing
   off, offline, not verified or refused, even while the quiet period
   still reads "Connecting…"); a banner says why, and its link retries. It is reached
@@ -517,6 +533,9 @@ store is `ComputerStore` ("Settings" below).
   naming its computer.
 - **Tests:** `ComputersTests`, `ComputerStoreTests`, `ComputerRuntimeTests`
   (two computers on a scripted network and a manual clock) and
+  `ComputerSwitchPropertyTests` (fast switching with requests in flight:
+  no reply is applied to the wrong computer, every answer finishes on its
+  own), `ComputerFleetTests` and
   `ComputerRuntimePropertyTests` (seeded interleavings of refreshes,
   answers, replies in any order, re-pairing and the app's phase: no reply
   lands on the wrong computer or an older pairing) in Kit;
@@ -1017,22 +1036,22 @@ orchestrator, Health, and Reconnect / Open Settings.
 
 `ComputerLink` (Kit) is one computer's connection as a value, the one
 truth for "can the app talk to this computer, and if not, why"
-(docs/dev/design/ios-state-architecture.md 3.2–3.4). `LinkRuntime` runs it
-for the current computer:
+(docs/dev/design/ios-state-architecture.md 3.2–3.4). Each computer's
+`ComputerModel` runs its link in a `LinkRuntime` ("Several computers"):
 
 - it executes the link's effects: a pinned `GET /api/state` probe with a
-  4 s timeout (through one immutable `DaemonClient` per address,
-  `DaemonProbeTransport`), timers with tokens (`LinkClock`), the channel
-  set, the address in use and the race winners per interface
+  4 s timeout (through the computer's `ComputerConnection`, one immutable
+  client per address), timers with tokens (`LinkClock`), the channel set,
+  the address in use and the race winners per interface
   (`LinkWinnerDefaults`);
 - it feeds back every result, plus what the rest of the app sees: each
-  request's outcome through `client` (`DaemonClient.onOutcome`), `/ws`
-  opening and dropping, a handshake mismatch, `/events` opening and
-  dropping, the app going to the background and back;
+  request's outcome (`ComputerModel.request`), `/ws` opening and dropping,
+  a handshake mismatch, `/events` opening and dropping, the app going to
+  the background and back;
 - a probe's `/api/state` reply is applied as the data, so the 30 s
   safety-net refresh replaces the old 5 s poll;
-- it is rebuilt for another computer, address or credentials, and the old
-  one's late replies land nowhere;
+- switching computers rebuilds nothing; new credentials or a new address
+  start a new epoch, and the old epoch's late replies land nowhere;
 - a promoted pin or a certificate expiry learned at sign-in reaches it as
   `credentialsChanged(.pinPromoted)` (`DeviceCredentials.certificateChanged`),
   so the rotation window is current without a relaunch.
@@ -1056,8 +1075,7 @@ Foreground notifications stay quiet while the link is usable.
 Not yet the link's (phase 5): `VoiceSocket` and `TermSocket` keep their
 own reconnects and only report to it, and there is no `NWPathMonitor`, so
 the remembered winners stay empty and the race has one address (failover is
-phase 6). Other computers run the same link in their own `ComputerModel`
-("Several computers"); the current computer moves onto one in phase 4b.
+phase 6).
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
