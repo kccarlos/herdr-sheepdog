@@ -31,16 +31,25 @@ What is real:
   environment. A rendered line is cached and never requested again; with
   `-strict` a failed line stops the run instead of falling back to `say`.
   Two lines are not in the demo: the spoken approval, "Yes, go ahead." and
-  "Approved. Installing it now." (`u_yes`, `s_ok`). The take shows the
-  approval as a tap, so `compose.py` skips the tap and repaints the settled
-  card's "by tap" as "by voice", which is what the app logs for a spoken
-  approval. The only other sound is a two-tone chime made with ffmpeg's sine source.
+  "Approved. Installing it now." (`u_yes`, `s_ok`; the first is the text of
+  the demo's chip). The approval is not painted: while codex-payments asks,
+  the demo header offers a "Yes, go ahead." chip, which hands that text to the
+  demo's `ask` exactly as the demo's own speech recognition does with what you
+  say, so the app logs the approval as given by voice and the conversation
+  shows "You approved ... by voice" by itself. The only other sound is a
+  two-tone chime made with ffmpeg's sine source.
+- **Marks on a loaded Mac**: the UI test notices things late there, so its
+  marks can trail the video by seconds. `phone/shift.txt` (one number) moves
+  the second launch's marks, and `phone/at.txt` (`<step> <video s>`) sets a
+  step's time from the frame where it happens; `compose.py` reads both if
+  present. Check a few frames of every scene after a new take.
 - **Devices scene**: three phones side by side, the live terminal (the take,
   playing), the diff (a frame of the take) and the Agents page grouped by
   computer. The last is `agents-by-computer-dark.png`, a simulator
-  screenshot of the app with two computers paired and one offline (660 px
-  wide), with the take's 9:41 status bar pasted over its clock. Replace it
-  with a fresh screenshot of the same page when the page changes.
+  screenshot (dark, 9:41 status bar from `simctl status_bar`) of the app with
+  three stub-daemon computers paired and all online, taken the way
+  `ComputersUITests.testSeveralComputers` sets them up. Replace it with a fresh
+  screenshot of the same page when the page changes.
 - **Waveform**: when someone speaks, a bar waveform fills the speaker's
   pill, orange for you (the product listening) and cream for the voice. It
   is drawn from the audio: `compose.py` reads each line's WAV, takes the RMS

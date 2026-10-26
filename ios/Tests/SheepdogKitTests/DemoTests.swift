@@ -6,6 +6,19 @@ import XCTest
 final class DemoWorldTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// The demo's "Yes, go ahead." chip is what the voice would hand `ask`:
+    /// the history says the approval was answered by voice, not by tap.
+    func testSayingYesApprovesByVoice() throws {
+        var world = DemoWorld(now: t0)
+        world.advance(to: t0.addingTimeInterval(40))
+        let id = try XCTUnwrap(world.pending?.id)
+        XCTAssertTrue(world.ask(DemoWorld.sayYes).hasPrefix("Approved"))
+        XCTAssertNil(world.pending)
+        let item = try XCTUnwrap(world.history.items.first { $0.pendingID == id })
+        XCTAssertEqual(item.resolution, .confirmed)
+        XCTAssertEqual(item.approvalOutcome, "You approved — Yes, proceed · by voice")
+    }
+
     func testScriptFinishesAsksAndFails() {
         var world = DemoWorld(now: t0)
         XCTAssertEqual(world.takeLines().map(\.text), [DemoWorld.greeting])

@@ -27,6 +27,11 @@ public struct DemoWorld: Sendable {
         "Show me the agents",
     ]
 
+    /// Offered while a worker asks: approving by voice. The demo's voice
+    /// hands the text it recognised to the same `ask` as a tapped question,
+    /// which answers the approval "by voice" (`via: "brain"`).
+    public static let sayYes = "Yes, go ahead."
+
     public static let greeting = "This is the demo. Four scripted agents are working on a sample project, and I'll tell you when one finishes, fails or needs you. Nothing leaves this phone."
 
     public private(set) var agents: [Agent]

@@ -883,6 +883,17 @@ struct DemoHeader: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    // While a worker asks, the way to answer it aloud: what
+                    // on-device recognition would hand the demo when you say it.
+                    if let card = model.approval, !card.isSettled {
+                        Button(DemoWorld.sayYes) { model.askDemo(DemoWorld.sayYes) }
+                            .font(.footnote.weight(.medium))
+                            .buttonStyle(.borderedProminent)
+                            .buttonBorderShape(.capsule)
+                            .tint(Theme.primaryText)
+                            .disabled(model.sendingTyped)
+                            .accessibilityIdentifier("demo.sayYes")
+                    }
                     ForEach(Array(DemoWorld.suggestedQuestions.enumerated()), id: \.offset) { index, question in
                         Button(question) { model.askDemo(question) }
                             .font(.footnote.weight(.medium))
