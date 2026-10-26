@@ -66,7 +66,7 @@ struct ComputerSettingsView: View {
                             Label("Talk to \(computer.displayName)", systemImage: "waveform")
                         }
                         .tint(Theme.primaryText)
-                        .disabled({ if case .offline = snapshot?.reachability { return true }; return false }())
+                        .disabled(snapshot?.canTalkTo == false)
                         .accessibilityIdentifier("computer.talkTo")
                     }
                 } header: {

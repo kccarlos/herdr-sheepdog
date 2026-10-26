@@ -95,7 +95,7 @@ final class ComputersUITests: XCTestCase {
         showAgentsPane(app)
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.current").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.fixture-2").firstMatch.exists)
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 20), "Studio's dashed row")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 45), "Studio's dashed row, after the 30 s quiet period")
         shot(app, "agents")
 
         // Answer Home Mac's question by tap: it goes to Home Mac.

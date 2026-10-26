@@ -1145,6 +1145,58 @@ Order and dependencies:
     - phase 6: the race has one address (the one in use);
     - phase 7: only the New agent sheet uses `RequestFailure`.
 
+- **Phase 4a (done).** Other computers run on `ComputerConnection` and
+  `ComputerModel`; `ComputerSession` is deleted.
+  - **Decision 7, as built.** `ComputerConnection` is an actor that owns
+    the I/O: one immutable client per address (`ComputerRequests`, which
+    `DaemonClient` is), the REST requests and the `/events` loop with its
+    wait after failures. The link's machine stays where #413 put it, in a
+    `@MainActor` `LinkRuntime`, now owned by `ComputerModel`
+    (`@MainActor @Observable`), whose probe goes through the actor
+    (`ConnectionProbeTransport`). Moving `LinkRuntime` into the actor would
+    have meant rewriting it and its tests for no gain: the actor is the
+    ownership and cancellation scope, and its callbacks never touch the
+    machine.
+  - **Epochs.** The model owns the number and every call names it. A newer
+    epoch drops every client of the actor, a call from an older one is
+    refused, and a reply is applied only while its epoch is still the
+    model's. Re-pairing or a new address set is a new epoch (`renew`, which
+    also sends `credentialsChanged(.newPairing)`); `stop` ends the last
+    one. A promoted pin is not a new epoch.
+  - **Demand.** Other computers stream `/events` in the foreground and are
+    idle in the background (decision 2). `LinkDemand.channels(on:)`
+    already keeps `/events` closed on a constrained path, and the model
+    takes the path (`setPath`), so Low Data Mode polls every 30 s once
+    phase 5's `NWPathMonitor` feeds it. While the voice is on the current
+    computer they back off up to 60 s. An answer in flight keeps the link
+    up (`actionsInFlight`) until it finishes; the 30 s background task is
+    phase 7's.
+  - **Talk to** asks `canTalkTo`, not `Reachability`: a computer whose link
+    is backing off, offline, not verified, refused or incompatible is not
+    switched to, even while its quiet period still reads "Connecting…".
+    The voice menu and a computer's page disable it the same way. Because
+    the link waits out the 30 s quiet period, an unreachable computer's
+    dashed row now shows after about 30 s, not after one failed poll.
+  - **`pinPromoted`.** `DeviceCredentials` posts `certificateChanged` when
+    a TLS handshake promotes the next pin or a sign-in learns a new
+    `cert_expires`. The current computer's link and the others' models
+    hear it as `credentialsChanged(.pinPromoted)`, so `renewedWhileAway`
+    can trigger without a relaunch.
+  - **Observation.** The session view model no longer forwards each other
+    computer's changes (`otherSinks` is gone): SwiftUI observes the
+    models' properties read in `body`. `ComputerModel` assigns only on
+    change, because an `@Observable` setter notifies even for an equal
+    value.
+  - **Tests.** `ComputerRuntimeTests` (two computers on a scripted network
+    and a manual clock: own state per computer, an event refreshes only
+    its computer, a late reply from an older pairing, an answer that
+    finishes after the app leaves, a gone question, Low Data Mode, the
+    background, a lost stream, the quiet period and Talk to, a promoted
+    pin, stop, and an unchanged refresh that notifies nothing) and
+    `ComputerRuntimePropertyTests` (40 seeds × 40 steps of refreshes,
+    answers, replies in any order, re-pairing, events and the app's
+    phase). `ComputersUITests` waits up to 45 s for the offline row.
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on
