@@ -4,10 +4,10 @@ There are two targets and one rule: anything that can be tested without a
 microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 `@MainActor` view models built on top of it.
 
-A proposed restructuring of the app's state and connection handling
+The restructuring of the app's state and connection handling
 (per-computer runtimes, a connection state machine, address failover) is
 in [ios-state-architecture.md](../../../docs/dev/design/ios-state-architecture.md),
-under review.
+accepted and built in phases (its section 6 says which are done).
 
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
@@ -85,7 +85,7 @@ The app sends what `web/voice/app.js` sends, in the same order:
 - **Ping.** Every 5 s the app sends a JSON `ping` carrying `gated_frames`,
   `peak`, the playback counters (`underruns`, `drains`, `buffer_ms`,
   `rate`, `stretched_ms`) and `audio_state`. If a ping has no `pong` after
-  10 s, the socket goes into the reconnect path.
+  10 s, the socket drops and tells the link (see "The connection").
 - **On every (re)connection** the app re-sends the mute, gate and speaking
   state, because the daemon treats a reconnecting client as unmuted and
   ungated.
@@ -469,7 +469,7 @@ store is `ComputerStore` ("Settings" below).
   foreground it streams `/events` and refreshes on each event and every
   30 s; another computer is idle in the background (decision 2). On a constrained
   path (Low Data Mode) it keeps `/events` closed and refreshes on the 30 s
-  timer only (phase 5 adds the `NWPathMonitor` that feeds the path). While the voice
+  timer only; `NWPathMonitor` feeds the path (see "The connection"). While the voice
   runs on the current computer it backs off up to 60 s. An answer in flight
   keeps its link up until it finishes.
 - **Epochs.** Every reply carries the epoch it was asked in, and the model
@@ -617,9 +617,13 @@ big-endian). Use it only when `bot-ready` lists the `term` feature.
 - `resize(ch:cols:rows:)` is debounced by 150 ms. The same size is sent
   too, because it asks for a repaint.
 - Input goes as binary frames of at most 64 KB; a long paste is split.
-- A dropped connection reconnects with backoff (1 s, doubling to 10 s) and
-  reopens every channel the daemon had not closed, at its latest size and
-  without takeover. A WebSocket ping goes every 20 s, and a ping still
+- It is the current computer's `/term` channel (`TermHub` is its
+  `LinkChannelClient`, see "The connection") and never retries by itself.
+  A dropped connection tells the link, which probes once and says when to
+  open it again; then it reopens every channel the daemon had not closed,
+  at its latest size and without takeover. While the link does not allow
+  it (offline, no network, the background) it is closed and keeps its
+  channels for then. A WebSocket ping goes every 20 s, and a ping still
   unanswered at the next tick drops the connection.
 - `TermSocketTests` run it on a fake `TermTransport`. One test uses the real
   URLSession transport against a local server, and one replays a recorded
@@ -1045,9 +1049,9 @@ truth for "can the app talk to this computer, and if not, why"
   the address in use and the race winners per interface
   (`LinkWinnerDefaults`);
 - it feeds back every result, plus what the rest of the app sees: each
-  request's outcome (`ComputerModel.request`), `/ws` opening and dropping,
-  a handshake mismatch, `/events` opening and dropping, the app going to
-  the background and back;
+  request's outcome (`ComputerModel.request`), every channel opening and
+  dropping, a handshake mismatch, the network path, the app going to the
+  background and back;
 - a probe's `/api/state` reply is applied as the data, so the 30 s
   safety-net refresh replaces the old 5 s poll;
 - switching computers rebuilds nothing; new credentials or a new address
@@ -1072,10 +1076,61 @@ Agents page's empty states (`FlockPaneState.resolve(link:)`), the iPad
 sidebar, Health, and this computer in the snapshots (`Reachability(link)`).
 Foreground notifications stay quiet while the link is usable.
 
-Not yet the link's (phase 5): `VoiceSocket` and `TermSocket` keep their
-own reconnects and only report to it, and there is no `NWPathMonitor`, so
-the remembered winners stay empty and the race has one address (failover is
-phase 6).
+**Channels and one backoff.** `/ws`, `/events` and `/term` are the
+link's channels, and no socket retries by itself:
+
+- the model opens `/events` itself; the session attaches the voice's
+  `VoiceSocket` and the `TermHub` to the current computer's model
+  (`ComputerModel.attach`, `LinkChannelClient`), and detaches them on a
+  switch;
+- a channel opens only while it is wanted (the voice is on, a window or a
+  warm-up wants `/term`) and the link allows it (`linkAllows`: online,
+  with the channel in the demand table below);
+- a drop reports `lost` through its `LinkChannelReporter`, which carries
+  the computer's epoch and the attachment, so a late callback from an
+  older pairing or a computer the app left lands nowhere;
+- the link probes once (hysteresis: still Connected), and on a good probe
+  says `reopen`. The first loss reopens at once; a channel that keeps
+  failing while the computer answers (lost again within 10 s of opening)
+  waits on the link's `reopen` timer, `LinkBackoff` with full jitter, up
+  to the cap. That replaced `VoiceSocket`'s and `TermSocket`'s own 1–10 s
+  loops and `/events`' wait after failures;
+- a failed probe makes the link back off (`waiting`, then `offline` after
+  30 s), and every channel reopens when it is online again.
+
+**The network path.** `SystemNetworkMonitor` (`NWPathMonitor`, Kit's
+`NetworkMonitor.swift`) feeds `ComputerFleet.setPath`, which hands every
+computer's model the path (`NetworkPath`: satisfied, the interface kind,
+Low Data Mode), including a model added later:
+
+- no network: every link is `noNetwork` ("No network", grey), retries
+  stop and every channel closes; Connect says "This phone is offline."
+  instead of "can't reach" the address;
+- the network back, or a new interface (Wi-Fi ↔ cellular): every link with
+  demand tries at once, from attempt 0. An online link re-checks without
+  leaving online, and once that probe wins every open channel reopens on
+  the new interface (a socket on the old one is dead before its keepalive
+  says so). The first interface the monitor reports is not a change;
+- Low Data Mode (`isConstrained` only, decision 2): other computers keep
+  `/events` closed and refresh every 30 s.
+
+The demo always has Wi-Fi (`ManualNetworkPath`), and the debug launch
+argument `-sheepdogNoNetwork` has none (`LinkStatusUITests`).
+
+**Foreground and background** (`LinkDemand.channels(on:)`):
+
+| | current computer | other computers |
+|---|---|---|
+| foreground | `/events`, `/term`, and `/ws` while the voice is on | `/events` (not under Low Data Mode), `/term` |
+| background, voice on, Keep listening on | `/ws` only | idle |
+| background, Keep listening off or voice off | idle: everything closes (the core has already paused the audio; the Live Activity says paused, not "Reconnecting…") | idle |
+| an answer in flight | REST only, until it finishes | same |
+
+Coming to the foreground kicks every link: a probe now, the backoff
+starts over, and the channels reopen once it answers.
+
+Not yet: the race has one address, so the remembered winners stay empty
+(failover is phase 6).
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
@@ -1100,7 +1155,7 @@ their exact effects.
 
 | Group | Fields |
 |---|---|
-| `connection` | `wantsConnection`, `socket` (`SocketLife`), `handshake`, `reconnect` (`ReconnectPolicy`), `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
+| `connection` | `wantsConnection`, `socket` (`SocketLife`), `handshake`, `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
 | `voice` | `status`, `closedReason`, `stalled`, `provider`, `saidVoiceIsOff` |
 | `mic` | `talkMode`, `muted` (the user's intent), `holding`, `gateClosed`, `noSignal` |
 | `playback` | `speaking`, `hold` (`SpeakingHold`), `heldSpeaking` |
@@ -1114,11 +1169,13 @@ core's.
 
 Behaviour worth knowing:
 
-- **Reconnects** use backoff of up to 10 s. For the first 30 s the orb
-  quietly says "Reconnecting…". After that, one banner says the daemon is
-  unreachable while the app keeps trying until End. A refused token stops
-  the session at once. If another client takes the session (the daemon
-  serves one at a time), the app says so once and waits.
+- **Reconnects** are the link's. While `/ws` waits for it the orb quietly
+  says "Reconnecting…", for as long as it takes, until End; the chip says
+  why (Reconnecting…, then Offline with Try now after 30 s, or No
+  network). The voice raises no banner of its own for it (the old "still
+  trying every few seconds" banner duplicated Offline). A refused token
+  stops the session at once. If another client takes the session (the
+  daemon serves one at a time), the app says so once and waits.
 - **The app owns mute.** It tells the daemon its mute state on every
   connect and corrects a daemon that disagrees. Hold-to-talk never mutes.
 - **Keep listening with the screen locked** (on by default). When it is

@@ -59,26 +59,19 @@ public actor ComputerConnection {
     public typealias MakeRequests = @Sendable (_ address: String) -> ComputerRequests?
 
     private let makeRequests: MakeRequests
-    private let sleep: @Sendable (TimeInterval) async -> Void
     private var epoch = 0
     private var addressInUse: String?
     private var clients: [String: ComputerRequests] = [:]
     private var eventsTask: Task<Void, Never>?
     private var eventsToken = 0
-    /// `/events` failures in a row, for the small wait before reopening.
-    private var eventFailures = 0
     private var stopped = false
 
-    /// - Parameters:
-    ///   - address: the address requests go to until the link picks one.
-    ///   - sleep: how the stream waits before reopening after a failure;
-    ///     the tests pass one that returns at once.
-    public init(computerID: String, address: String?, makeRequests: @escaping MakeRequests,
-                sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64(max(0, $0) * 1_000_000_000)) }) {
+    /// - Parameter address: the address requests go to until the link
+    ///   picks one.
+    public init(computerID: String, address: String?, makeRequests: @escaping MakeRequests) {
         self.computerID = computerID
         self.addressInUse = address
         self.makeRequests = makeRequests
-        self.sleep = sleep
     }
 
     // MARK: - Epochs and addresses
@@ -163,10 +156,10 @@ public actor ComputerConnection {
 
     // MARK: - /events
 
-    /// Opens `/events` on the address in use, once. It does not retry by
-    /// itself: a drop is delivered as `.lost`, and the link says when to
-    /// open it again. A stream that keeps failing while the computer
-    /// answers waits a little longer before each reopen, so it cannot spin.
+    /// Opens `/events` on the address in use, once. It does not retry or
+    /// wait by itself: a drop is delivered as `.lost`, and the link says
+    /// when to open it again (a stream that keeps failing while the
+    /// computer answers waits on the link's `reopen` timer).
     ///
     /// `deliver` runs on the main actor, in order, and only for the stream
     /// opened last: an older stream's updates are dropped here.
@@ -175,16 +168,14 @@ public actor ComputerConnection {
         eventsTask?.cancel()
         eventsToken += 1
         let token = eventsToken
-        let failures = eventFailures
         eventsTask = Task { [weak self] in
             guard let self else { return }
-            await self.runEvents(token: token, epoch: epoch, failures: failures, since: since, deliver: deliver)
+            await self.runEvents(token: token, epoch: epoch, since: since, deliver: deliver)
         }
     }
 
-    private func runEvents(token: Int, epoch: Int, failures: Int, since: UInt64,
+    private func runEvents(token: Int, epoch: Int, since: UInt64,
                            deliver: @escaping @MainActor @Sendable (ComputerReply<ComputerStreamUpdate>) -> Void) async {
-        if failures > 0 { await sleep(LinkBackoff.ceiling(attempt: failures, cap: LinkBackoff.cap)) }
         guard !Task.isCancelled, token == eventsToken, let address = addressInUse, let client = client(for: address) else { return }
         var failure: LinkError = .transport
         var opened = false
@@ -198,9 +189,6 @@ public actor ComputerConnection {
                     opened = true
                     await deliver(reply(epoch, .opened))
                 }
-                // A stream that delivers is healthy: the next drop reopens
-                // without waiting.
-                if case .event = output { eventFailures = 0 }
                 await deliver(reply(epoch, .output(output)))
             }
         } catch {
@@ -209,7 +197,6 @@ public actor ComputerConnection {
         // Ended or failed, not closed by the app: tell the link.
         guard !Task.isCancelled, token == eventsToken else { return }
         eventsTask = nil
-        eventFailures += 1
         await deliver(reply(epoch, .lost(failure)))
     }
 
@@ -223,7 +210,6 @@ public actor ComputerConnection {
         eventsTask?.cancel()
         eventsTask = nil
         eventsToken += 1
-        eventFailures = 0
     }
 
     /// Whether a stream is open or opening, for the tests.

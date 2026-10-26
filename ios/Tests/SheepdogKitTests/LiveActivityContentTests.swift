@@ -39,11 +39,15 @@ final class LiveActivityContentTests: XCTestCase {
         }
     }
 
-    func testPausedInTheBackgroundSaysSoButReconnectingStays() {
+    func testPausedInTheBackgroundSaysSoEvenWhileTheSocketIsClosed() {
         XCTAssertEqual(make(.listening, suspended: true)?.phase, .locked)
         XCTAssertEqual(make(.listening, suspended: true)?.title, "Paused while locked")
-        XCTAssertEqual(make(.reconnecting, suspended: true)?.phase, .reconnecting)
-        XCTAssertEqual(make(.connecting, suspended: true)?.phase, .connecting)
+        // Paused in the background, the link closes `/ws` on purpose (no
+        // demand with Keep listening off): still "paused", never
+        // "Reconnecting…" on the lock screen. Nothing retries meanwhile.
+        XCTAssertEqual(make(.reconnecting, suspended: true)?.phase, .locked)
+        XCTAssertEqual(make(.connecting, suspended: true)?.phase, .locked)
+        XCTAssertEqual(make(.reconnecting, suspended: false)?.phase, .reconnecting)
     }
 
     func testTitles() {
