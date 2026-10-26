@@ -115,4 +115,18 @@ final class DemoUITests: XCTestCase {
         let approved = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved' AND label CONTAINS 'by voice'")).firstMatch
         XCTAssertTrue(approved.waitForExistence(timeout: 10), "the approval says it was given by voice")
     }
+
+    /// Opening the demo asks for nothing: the microphone and speech
+    /// recognition prompts wait for the first tap on the microphone.
+    func testOpeningTheDemoShowsNoMicrophonePrompt() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogOpenDemo"]
+        // No earlier answer: a prompt would show if the demo asked.
+        app.resetAuthorizationStatus(for: .microphone)
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40), "the demo is running")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertFalse(springboard.alerts.firstMatch.waitForExistence(timeout: 4), "no permission prompt in the demo's first seconds")
+    }
 }

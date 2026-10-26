@@ -19,7 +19,8 @@ iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 Tap **Try the demo** on the first screen. Scripted agents run on the phone: one
 finishes, one fails, one asks for an approval you can answer. The voice reads
 the news aloud with on-device speech and you can tap a suggested question,
-type one, or ask it aloud. No daemon, no key, no network. **Leave** returns to
+type one, or ask it aloud (the demo starts with the microphone off and
+asks for the microphone and speech recognition when you first tap it). No daemon, no key, no network. **Leave** returns to
 setup.
 
 ## Pair

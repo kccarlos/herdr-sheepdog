@@ -2464,6 +2464,17 @@ final class SessionViewModel: ObservableObject {
         connect()
     }
 
+    /// The microphone was turned on in the demo: ask for speech recognition
+    /// and the microphone now (once), then listen; if the person says no,
+    /// the mic goes back off and questions stay by tap or typing.
+    private func demoListenOnFirstUse() {
+        guard let voice = demoVoice, !voice.listening, !voice.asking else { return }
+        Task {
+            guard let granted = await voice.listenOnFirstUse() else { return }
+            if !granted, !core.mic.muted { send(.muteTapped) }
+        }
+    }
+
     /// The session core's effects that would touch `/ws` or the audio
     /// engine, done on the device instead. False: run it the usual way.
     private func runDemo(_ effect: SessionEffect) -> Bool {
@@ -2478,8 +2489,9 @@ final class SessionViewModel: ObservableObject {
                     return
                 }
                 guard core.connection.wantsConnection else { return }
-                let canListen = demoSilent ? false : await DemoVoice.requestListening()
-                send(.probeSucceeded(micGranted: canListen))
+                // No permission prompt here: the demo asks when the person
+                // first taps the microphone (`demoListenOnFirstUse`).
+                send(.probeSucceeded(micGranted: !demoSilent))
             }
         case .openSocket:
             send(.socketOpened)
@@ -2491,8 +2503,13 @@ final class SessionViewModel: ObservableObject {
             break
         case .startAudio, .resumeAudio:
             do {
-                try demoVoice?.startListening()
+                // Listening starts at once only where the person already
+                // allowed it; otherwise the demo starts with the mic off
+                // and asks at the first tap on it.
+                let allowed = DemoVoice.listeningAllowed
+                if allowed { try demoVoice?.startListening() }
                 send(.audioStarted(gateClosed: true))
+                if !allowed, demoVoice != nil, !core.mic.muted { send(.muteTapped) }
             } catch {
                 send(.audioStartFailed(error.localizedDescription))
             }
@@ -2500,6 +2517,7 @@ final class SessionViewModel: ObservableObject {
             demoVoice?.stopListening()
         case let .setCaptureMuted(muted):
             demoVoice?.muted = muted
+            if !muted { demoListenOnFirstUse() }
         case .setManualGate:
             break
         case .flushPlayback:
