@@ -20,10 +20,13 @@ import Foundation
 /// reconnect quiet period and the speaking hold always used; the thinking
 /// timeout is only ever compared with the same `now`.
 public struct SessionCore: Equatable, Sendable {
-    /// The voice's `/ws` socket and its reconnect policy. Whether the app
-    /// can talk to the computer at all is not here: that is the computer's
-    /// `ComputerLink`, which every status surface renders
+    /// The voice's `/ws` socket. Whether the app can talk to the computer
+    /// at all, and when a lost socket opens again, is not here: that is the
+    /// computer's `ComputerLink`, which every status surface renders
     /// (`LinkPresentation`, docs/dev/design/ios-state-architecture.md 3.2).
+    /// While the link backs off, the orb says "Reconnecting…" and the chip
+    /// says why (Reconnecting…, Offline with Try now, No network); the
+    /// voice raises no banner of its own for it.
     public struct Connection: Equatable, Sendable {
         /// True from Connect until End (or a failure that ends the session).
         public var wantsConnection = false
@@ -32,8 +35,6 @@ public struct SessionCore: Equatable, Sendable {
         /// last reported it. A mismatch outlives the connection, for Health
         /// and the chip's sheet, until the next Connect.
         public var handshake: ProtocolHandshake.State = .idle
-        /// Retry quietly through a daemon restart, then with a banner.
-        public var reconnect = ReconnectPolicy()
         /// The app owns mute; this answers a daemon that disagrees.
         public var muteSync = MuteSync()
         /// What `VoiceSocket` tells the daemon on every open (`mute`, and
@@ -180,7 +181,6 @@ public struct SessionCore: Equatable, Sendable {
             connection.wantsConnection = true
             connection.socket = .connecting
             connection.handshake = .idle
-            connection.reconnect.reset()
             effects.append(.probe)
 
         case let .probeSucceeded(micGranted):
@@ -204,6 +204,14 @@ public struct SessionCore: Equatable, Sendable {
             }
             fail(error, &effects)
 
+        case .noNetwork:
+            // Connect with no network: the link's words, not the address's.
+            guard connection.wantsConnection else {
+                derive = false
+                break
+            }
+            end(banner: .noNetwork, &effects)
+
         case let .tokenRefused(endpoint):
             guard connection.wantsConnection else {
                 derive = false
@@ -218,7 +226,6 @@ public struct SessionCore: Equatable, Sendable {
         case .socketOpened:
             connection.socket = .open
             effects.append(.clearBanner)
-            connection.reconnect.opened()
             connection.muteSync.reset()
             effects.append(.haptic(.connected))
 
@@ -229,9 +236,7 @@ public struct SessionCore: Equatable, Sendable {
             connection.socket = retrying ? .reconnecting : .idle
             effects.append(.stopAudio)
             quietSpeaking()
-            if retrying {
-                connection.reconnect.connectionLost(at: t)
-            } else {
+            if !retrying {
                 connection.wantsConnection = false
                 effects.append(.stopTicker)
                 resetSession()
@@ -244,14 +249,16 @@ public struct SessionCore: Equatable, Sendable {
             }
 
         case let .socketFailed(error, willRetry):
-            switch connection.reconnect.failure(error, retrying: willRetry, wantsConnection: connection.wantsConnection, at: t) {
-            case .stop:
+            if case .unauthorized = error {
+                // A refused token does not fix itself by retrying.
                 fail(error, &effects)
-            case .keepRetrying(showBanner: false):
-                // A daemon restart: the orb says "Reconnecting…", quietly.
+            } else if willRetry && connection.wantsConnection {
+                // A daemon restart: the orb says "Reconnecting…", quietly,
+                // and the link says when to try again. Past its quiet
+                // period the chip reads Offline, with Try now.
                 effects.append(.log(.reconnectRetry(error.message)))
-            case .keepRetrying(showBanner: true):
-                effects.append(.showBanner(.stillReconnecting(error)))
+            } else {
+                fail(error, &effects)
             }
 
         case let .status(message):
@@ -463,7 +470,6 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func resetSession() {
         suspension.backgroundSuspended = false
         suspension.pausedByIOS = false
-        connection.reconnect.reset()
         connection.muteSync.reset()
         voice = Voice()
         mic.gateClosed = false
@@ -481,7 +487,11 @@ public struct SessionCore: Equatable, Sendable {
     /// refusal that only a new scan fixes is the link's to present
     /// (`ComputerLink.State.refused`), not the voice's.
     private mutating func fail(_ error: DaemonError, _ effects: inout [SessionEffect]) {
-        effects.append(.showBanner(.connectionFailed(error)))
+        end(banner: .connectionFailed(error), &effects)
+    }
+
+    private mutating func end(banner: SessionBanner, _ effects: inout [SessionEffect]) {
+        effects.append(.showBanner(banner))
         connection.wantsConnection = false
         connection.socket = .idle
         effects.append(contentsOf: [.closeSocket, .stopAudio, .stopTicker])
@@ -600,6 +610,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// microphone permission, asked right after.
     case probeSucceeded(micGranted: Bool)
     case probeFailed(DaemonError)
+    /// Connect found the phone with no network: the session ends with
+    /// the link's words.
+    case noNetwork
     /// The computer refused this device (the link is `refused`): the
     /// voice ends too.
     case tokenRefused(endpoint: String)
@@ -692,7 +705,8 @@ public enum SessionBanner: Equatable, Sendable {
     /// The session ended: "Try again".
     case connectionFailed(DaemonError)
     /// Still retrying after the quiet period: "Try now".
-    case stillReconnecting(DaemonError)
+    /// Connect with no network (the link is `noNetwork`).
+    case noNetwork
     /// Another client took the voice session: "Take it back".
     case replaced
     case microphoneDenied

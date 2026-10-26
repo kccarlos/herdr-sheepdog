@@ -214,7 +214,7 @@ final class TermSocketTests: XCTestCase {
         XCTAssertEqual(rig.socket.openChannels, [ch], "the channel stays open")
     }
 
-    func testReconnectReopensChannelsWithTheirCurrentSize() async throws {
+    func testALostConnectionWaitsForTheLinkThenReopensChannelsWithTheirCurrentSize() async throws {
         let (rig, ch) = try openRig(takeover: true)
         let gone = try XCTUnwrap(rig.socket.open(target: .pane("w1:p9"), mode: .observe, cols: 40, rows: 20))
         rig.last!.text(#"{"type":"term-closed","ch":\#(gone),"reason":"gone"}"#)
@@ -222,20 +222,24 @@ final class TermSocketTests: XCTestCase {
         rig.socket.resize(ch: ch, cols: 44, rows: 30)
         rig.last!.drop()
         XCTAssertEqual(rig.socket.state, .reconnecting)
-        XCTAssertEqual(rig.socket.nextRetryDelay, 2, "backoff doubles")
-        try await waitUntil(timeout: 3) { rig.transports.count == 2 }
+        // It used to retry after 1 s by itself; only the link reopens it.
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        XCTAssertEqual(rig.transports.count, 1, "no attempt of its own")
+        rig.socket.reopen(reporter: nil)
+        XCTAssertEqual(rig.transports.count, 2)
         let second = rig.last!
         XCTAssertEqual(try second.messages().map(\.type), [.hello], "hello first again; opens wait for term-ready")
         rig.ready()
         XCTAssertEqual(try second.messages().dropFirst().map { $0 },
                        [.open(ch: ch, target: .pane("w1:p2"), mode: .control, cols: 44, rows: 30)],
                        "same channel id, latest size, no takeover; the closed channel stays closed")
-        XCTAssertEqual(rig.socket.nextRetryDelay, TermSocket.retryMinimum, "backoff resets once ready")
+        rig.socket.reopen(reporter: nil)
+        XCTAssertEqual(rig.transports.count, 2, "a reopen while connected does nothing")
         rig.frame(ch, seq: 1, full: false)
         XCTAssertEqual(rig.resyncs, [ch], "a new bridge starts its seq again; a diff first still needs a full frame")
     }
 
-    func testAMissedPongReconnects() async throws {
+    func testAMissedPongDropsTheConnectionForTheLink() async throws {
         let rig = Rig()
         rig.socket.connect()
         rig.ready()
@@ -245,6 +249,7 @@ final class TermSocketTests: XCTestCase {
         XCTAssertEqual(rig.socket.state, .ready(.init(protocolVersion: 1, channels: 4, shell: false)), "answered pings keep it up")
         rig.socket.pingTick()
         XCTAssertEqual(rig.socket.state, .reconnecting, "a ping unanswered at the next tick drops the connection")
+        XCTAssertEqual(rig.transports.count, 1, "and waits for the link")
     }
 
     func testDisconnectStopsEverything() throws {

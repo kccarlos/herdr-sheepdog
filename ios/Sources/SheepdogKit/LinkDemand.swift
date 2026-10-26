@@ -36,8 +36,9 @@ public struct NetworkPath: Equatable, Sendable {
     public var satisfied: Bool
     /// The interface in use, nil when unknown.
     public var interface: NetworkInterface?
-    /// Low Data Mode or an expensive path: other computers refresh on the
-    /// 30 s timer instead of streaming `/events`.
+    /// Low Data Mode (`NWPath.isConstrained`): other computers refresh on
+    /// the 30 s timer instead of streaming `/events` (decision 2). An
+    /// expensive path (cellular) alone does not count.
     public var constrained: Bool
 
     public init(satisfied: Bool = true, interface: NetworkInterface? = nil, constrained: Bool = false) {

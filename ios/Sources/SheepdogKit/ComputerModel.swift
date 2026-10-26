@@ -40,6 +40,8 @@ public final class ComputerModel {
 
     /// The link changed (state, last seen…).
     @ObservationIgnored public var onLinkChange: ((ComputerLink) -> Void)?
+    /// The channels the session attached here (`attach`), for the tests.
+    public var attachedChannels: Set<LinkChannel> { Set(clients.keys) }
     /// A tap's feedback, for haptics.
     @ObservationIgnored public var onAnswerFeedback: ((AnswerFeedback) -> Void)?
     /// A verified computer wants a fresh ticket.
@@ -91,6 +93,11 @@ public final class ComputerModel {
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var eventsWanted = false
     @ObservationIgnored private var stopped = false
+    /// The channels the session attached (the voice's `/ws`, the
+    /// terminal's `/term`), each with the token its reports must carry.
+    @ObservationIgnored private var clients: [LinkChannel: (client: LinkChannelClient, token: Int)] = [:]
+    @ObservationIgnored private var nextClientToken = 0
+    @ObservationIgnored private var lastAddress: String?
 
     /// - Parameters:
     ///   - addresses: the addresses the link races (the one in use first).
@@ -116,14 +123,19 @@ public final class ComputerModel {
         runtime.onChange = { [weak self] link in self?.linkChanged(link) }
         runtime.onState = { [weak self] state in self?.apply(state) }
         runtime.onChannels = { [weak self] channels in self?.channelsChanged(channels) }
-        runtime.onReopen = { [weak self] channel in
-            guard channel == .events else { return }
-            self?.openEvents()
-        }
+        runtime.onReopen = { [weak self] channel in self?.reopen(channel) }
         runtime.onUseAddress = { [weak self] address in
             guard let self else { return }
             let epoch = self.epoch
-            Task { await self.connection.use(address: address, epoch: epoch) }
+            let connection = self.connection
+            let moved = self.lastAddress != nil && self.lastAddress != address
+            self.lastAddress = address
+            Task { [weak self] in
+                await connection.use(address: address, epoch: epoch)
+                // Open channels follow the link to its new address.
+                guard moved, let self, epoch == self.epoch else { return }
+                for channel in LinkChannel.allCases where self.link.channels.contains(channel) { self.reopen(channel) }
+            }
         }
         runtime.onRenewTicket = { [weak self] in self?.onRenewTicket?() }
         linkChanged(runtime.link)
@@ -156,18 +168,63 @@ public final class ComputerModel {
         runtime.send(.demandChanged(effectiveDemand))
     }
 
-    /// The app came to the foreground or left it.
+    /// The app came to the foreground or left it. Coming to the foreground
+    /// kicks the link: the backoff starts over and it tries at once.
     public func setAppPhase(_ phase: AppPhase) {
-        var next = demand
-        next.phase = phase
-        setDemand(next)
+        guard !stopped else { return }
+        // Only `.appPhase`: a `demandChanged` with the new phase first would
+        // leave the link nothing to compare, and the kick would be lost.
+        demand.phase = phase
         runtime.send(.appPhase(phase))
     }
 
-    /// What the network path is (Low Data Mode keeps `/events` closed for a
-    /// computer that is not the current one; it refreshes every 30 s).
+    /// What the network path is: no network stops the retries, a new
+    /// interface re-checks at once, Low Data Mode keeps `/events` closed
+    /// for a computer that is not the current one (it refreshes every
+    /// 30 s). `ComputerFleet.setPath` calls it for every computer.
     public func setPath(_ path: NetworkPath) {
+        guard !stopped else { return }
         runtime.send(.pathChanged(path))
+    }
+
+    // MARK: - Channels the session attaches
+
+    /// Attaches the voice's `/ws` or the terminal's `/term` to this
+    /// computer's link, which alone says when it may be open and when to
+    /// open it again (`LinkChannelClient`). It hears the link's current
+    /// answer at once. nil detaches: reports from the old client are
+    /// dropped from then on.
+    public func attach(_ channel: LinkChannel, _ client: LinkChannelClient?) {
+        precondition(channel != .events, "the model owns /events")
+        guard let client else {
+            clients[channel] = nil
+            return
+        }
+        if let existing = clients[channel], existing.client === client { return }
+        nextClientToken += 1
+        clients[channel] = (client, nextClientToken)
+        client.linkAllows(link.channels.contains(channel), reporter: reporter(channel))
+    }
+
+    /// The reporter for an attached channel, tagged with this epoch.
+    private func reporter(_ channel: LinkChannel) -> LinkChannelReporter {
+        LinkChannelReporter(model: self, channel: channel, epoch: epoch, token: clients[channel]?.token ?? 0)
+    }
+
+    /// A report from an attached channel: applied only while that client
+    /// is still attached and the epoch it was given is still this one.
+    fileprivate func report(_ channel: LinkChannel, epoch: Int, token: Int, _ event: LinkEvent) {
+        guard !stopped, epoch == self.epoch, let entry = clients[channel], entry.token == token else { return }
+        runtime.send(event)
+    }
+
+    private func reopen(_ channel: LinkChannel) {
+        if channel == .events {
+            // Only a stream the link still allows.
+            if link.channels.contains(.events) { openEvents() }
+        } else if let entry = clients[channel] {
+            entry.client.linkReopens(reporter: reporter(channel))
+        }
     }
 
     /// Retry, Try now: the link tries at once.
@@ -263,6 +320,9 @@ public final class ComputerModel {
     }
 
     private func channelsChanged(_ channels: Set<LinkChannel>) {
+        for (channel, entry) in clients {
+            entry.client.linkAllows(channels.contains(channel), reporter: reporter(channel))
+        }
         if channels.contains(.events) {
             if !eventsWanted { openEvents() }
         } else if eventsWanted {
@@ -410,6 +470,8 @@ public final class ComputerModel {
     /// Answers in flight, for the tests.
     public var answersPending: Int { answersInFlight }
 
+    fileprivate func attachedToken(_ channel: LinkChannel) -> Int? { clients[channel]?.token }
+
     // MARK: - What the several-computers UI reads
 
     public var snapshot: ComputerSnapshot {
@@ -478,5 +540,63 @@ final class ConnectionProbeTransport: LinkTransport {
             done(reply.value)
         }
         return LinkHandle { task.cancel() }
+    }
+}
+
+/// A channel the session attaches to a computer's link
+/// (`ComputerModel.attach`): the voice's `/ws` socket, the terminal's
+/// `/term`. It never reconnects by itself. The link says when it may be
+/// open, and when a lost one may open again; it opens only while it is
+/// also wanted (the voice is on, a window is open).
+@MainActor
+public protocol LinkChannelClient: AnyObject {
+    /// The link allows the channel now, or no longer (offline, no network,
+    /// the background). Not allowed: close, keep what to reopen, and do not
+    /// report a loss. `reporter` is what to tell the link from now on.
+    func linkAllows(_ allowed: Bool, reporter: LinkChannelReporter)
+    /// A lost channel, confirmed reachable (or the interface changed): open
+    /// it again if it is still wanted.
+    func linkReopens(reporter: LinkChannelReporter)
+}
+
+/// What a channel tells its computer's link, tagged with the computer's
+/// epoch and the attachment: a report from a socket of an older pairing,
+/// or one the session has since detached (a switch), lands nowhere.
+@MainActor
+public struct LinkChannelReporter {
+    private weak var model: ComputerModel?
+    public let channel: LinkChannel
+    public let epoch: Int
+    let token: Int
+
+    init(model: ComputerModel, channel: LinkChannel, epoch: Int, token: Int) {
+        self.model = model
+        self.channel = channel
+        self.epoch = epoch
+        self.token = token
+    }
+
+    /// The channel opened (the socket answered, `term-ready`).
+    public func opened() {
+        model?.report(channel, epoch: epoch, token: token, .channelOpened(channel))
+    }
+
+    /// The channel dropped or could not open, not because the app closed
+    /// it: the link probes once and says when to open it again.
+    public func lost(_ error: LinkError) {
+        model?.report(channel, epoch: epoch, token: token, .channelLost(channel, error))
+    }
+
+    /// Whether this reporter still reaches its computer's link, for the
+    /// tests.
+    public var isCurrent: Bool {
+        guard let model else { return false }
+        return model.isAttached(channel, epoch: epoch, token: token)
+    }
+}
+
+extension ComputerModel {
+    fileprivate func isAttached(_ channel: LinkChannel, epoch: Int, token: Int) -> Bool {
+        epoch == self.epoch && attachedToken(channel) == token
     }
 }

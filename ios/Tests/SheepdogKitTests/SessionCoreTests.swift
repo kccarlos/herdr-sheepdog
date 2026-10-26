@@ -110,9 +110,9 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.sessionState, .disconnected)
     }
 
-    // MARK: - Rule: reconnect keeps retrying (quiet 30 s, one banner, on)
+    // MARK: - Rule: a lost socket waits for the link, quietly, until End
 
-    func testADaemonRestartReconnectsQuietlyThenOneBannerThenKeepsGoing() {
+    func testADaemonRestartWaitsForTheLinkQuietlyWithNoBanner() {
         var core = connected()
         XCTAssertEqual(core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: at(10)), [.stopAudio])
         XCTAssertEqual(core.sessionState, .reconnecting)
@@ -124,14 +124,44 @@ final class SessionCoreTests: XCTestCase {
         }
         XCTAssertEqual(core.sessionState, .reconnecting)
 
-        XCTAssertEqual(core.apply(.socketFailed(unreachable, willRetry: true), now: at(41)), [.showBanner(.stillReconnecting(unreachable))], "one banner after 30 s")
-        XCTAssertEqual(core.apply(.socketFailed(unreachable, willRetry: true), now: at(51)), [.log(.reconnectRetry(unreachable.message))], "then quiet again")
+        // Past 30 s the link's chip reads Offline with Try now: the voice
+        // adds no banner of its own.
+        XCTAssertEqual(core.apply(.socketFailed(unreachable, willRetry: true), now: at(41)), [.log(.reconnectRetry(unreachable.message))], "no banner after 30 s")
         XCTAssertEqual(core.apply(.socketFailed(unreachable, willRetry: true), now: at(600)), [.log(.reconnectRetry(unreachable.message))], "until End")
         XCTAssertTrue(core.connection.wantsConnection)
 
         XCTAssertEqual(core.apply(.socketOpened, now: at(601)), [.clearBanner, .haptic(.connected)])
-        XCTAssertNil(core.connection.reconnect.failingSince)
         XCTAssertEqual(core.apply(.status(.status(.connected)), now: at(601)), [.startAudio], "the engine comes back with the status")
+    }
+
+    func testAFailureNothingWillRetryOrARefusedTokenStillEndsTheSession() {
+        var core = connected()
+        let refused = DaemonError.unauthorized(endpoint: "x")
+        XCTAssertEqual(core.apply(.socketFailed(refused, willRetry: true), now: at(1)).first, .showBanner(.connectionFailed(refused)))
+        XCTAssertFalse(core.connection.wantsConnection)
+        var other = connected()
+        let notURL = DaemonError.malformed("not a URL")
+        XCTAssertEqual(other.apply(.socketFailed(notURL, willRetry: false), now: at(1)).first, .showBanner(.connectionFailed(notURL)))
+        XCTAssertFalse(other.connection.wantsConnection)
+    }
+
+    func testConnectWithNoNetworkEndsWithTheLinksWords() {
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: t0)
+        XCTAssertEqual(core.apply(.noNetwork, now: t0), [.showBanner(.noNetwork), .closeSocket, .stopAudio, .stopTicker])
+        XCTAssertFalse(core.connection.wantsConnection)
+        XCTAssertEqual(core.apply(.noNetwork, now: t0), [], "after End, nothing")
+    }
+
+    func testTheLinkPausingTheSocketInTheBackgroundIsNotReconnectingOnTheLockScreen() {
+        var core = connected()
+        _ = core.apply(.keepListeningLockedChanged(false), now: t0)
+        _ = core.apply(.scenePhase(.background), now: t0)
+        // The link closes `/ws` (no demand with Keep listening off).
+        _ = core.apply(.socketClosed(reason: "paused", willRetry: true), now: t0)
+        XCTAssertEqual(core.sessionState, .reconnecting)
+        XCTAssertTrue(core.connection.wantsConnection, "the voice is still on")
+        XCTAssertEqual(LiveActivityContent.phase(state: core.sessionState, suspendedInBackground: core.suspension.backgroundSuspended), .locked)
     }
 
     func testBeingReplacedIsSaidOnceByTheBannerNotAlsoByANotice() {

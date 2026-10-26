@@ -8,8 +8,12 @@ import Foundation
 /// first channel and closes `linger` seconds after the last one, so moving
 /// from one agent's window to another reuses it. `TermSocket` refuses a
 /// channel past the daemon's limit (4); `open` then returns nil.
+///
+/// It is the current computer's `/term` channel (`LinkChannelClient`): the
+/// link says when the connection may be open and when a lost one opens
+/// again; the socket never retries by itself.
 @MainActor
-public final class TermHub {
+public final class TermHub: LinkChannelClient {
     /// How long the connection stays up with no channel open.
     public static let linger: TimeInterval = 20
 
@@ -106,6 +110,16 @@ public final class TermHub {
         lingerTask?.cancel()
         lingerTask = nil
         socket.disconnect()
+    }
+
+    // MARK: - The link
+
+    public func linkAllows(_ allowed: Bool, reporter: LinkChannelReporter) {
+        socket.allow(allowed, reporter: reporter)
+    }
+
+    public func linkReopens(reporter: LinkChannelReporter) {
+        socket.reopen(reporter: reporter)
     }
 
     private func scheduleLinger() {

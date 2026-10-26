@@ -1,7 +1,11 @@
 import Foundation
 
-/// The `/ws` connection: binary PCM frames both ways, JSON control frames,
-/// a liveness ping, and reconnect with backoff.
+/// The `/ws` connection: binary PCM frames both ways, JSON control frames
+/// and a liveness ping. It is a channel of the current computer's link
+/// (`LinkChannelClient`): it never retries by itself. A drop is reported to
+/// the link, which probes once and says when to open it again
+/// (docs/dev/design/ios-state-architecture.md 3.2 "One schedule per
+/// computer").
 ///
 /// Everything here mirrors the browser page (`web/voice/app.js`) and
 /// docs/ws-contract.md:
@@ -23,36 +27,49 @@ import Foundation
 /// * the ping goes every 5 s (the daemon's `web.client.stats` interval) and
 ///   waits for its pong before the next one, like `/voice`: a ping still
 ///   unanswered after 10 s drops the socket.
+///
+/// It opens only while it is both wanted (`connect()` until
+/// `disconnect()`) and allowed by the link (`linkAllows`).
 @MainActor
-public final class VoiceSocket {
+public final class VoiceSocket: LinkChannelClient {
     public enum Event: Sendable {
         case opened
         case control(WSMessage)
         case audio(Data)
-        /// The socket went away. `retrying` is false when the app will not
-        /// reconnect by itself (the user disconnected, or we were replaced).
+        /// The socket went away. `retrying` is true when the link will open
+        /// it again (it was lost), false when nothing will (we were
+        /// replaced, or the protocol does not match).
         case closed(reason: String, retrying: Bool)
-        /// An attempt failed. `retrying` is true when the socket will try
-        /// again by itself (the daemon was unreachable), false when it
-        /// will not (the address is not a URL).
+        /// An attempt failed. `retrying` is true when the link will try
+        /// again (the daemon was unreachable), false when nothing will (the
+        /// address is not a URL).
         case failed(DaemonError, retrying: Bool)
+        /// The link closed the socket (offline, no network, the
+        /// background): it opens again when the link allows it. Not a
+        /// loss, so the link is not told.
+        case paused
         /// The protocol handshake moved (`ProtocolHandshake.State`).
         case handshake(ProtocolHandshake.State)
     }
 
     /// Browser constants (`web/voice/app.js`: `PING_EVERY_MS`,
-    /// `PONG_TIMEOUT_MS`, the reconnect backoff).
+    /// `PONG_TIMEOUT_MS`).
     public static let pingInterval: TimeInterval = 5
     public static let pongTimeout: TimeInterval = 10
-    public static let retryMinimum: TimeInterval = 1
-    public static let retryMaximum: TimeInterval = 10
 
-    /// The socket's own connection state — internal bookkeeping (and a
-    /// `VoiceSocketTests` observation point) since PR #11's `ReconnectPolicy`
-    /// moved reconnect *decisions* to the view model, which now tracks its
-    /// own life from `onEvent` rather than reading this. Backing off after a
-    /// drop is `.reconnecting`, the same case `SessionState` uses for it.
+    /// The socket's own connection state: internal bookkeeping (and a
+    /// `VoiceSocketTests` observation point); the view model tracks its own
+    /// life from `onEvent`. Waiting for the link after a drop is
+    /// `.reconnecting`, the same case `SessionState` uses for it.
     private(set) var life: SocketLife = .idle
+    /// The link allows the socket (`linkAllows`). True until a link says
+    /// otherwise, so a socket with no link (the tests) opens on `connect`.
+    public private(set) var allowed = true
+    /// What to tell the link, as of the last `linkAllows`/`linkReopens`.
+    private var reporter: LinkChannelReporter?
+    /// The reporter the open socket was opened with: its reports go to the
+    /// computer and epoch it belongs to, never to a later one.
+    private var openReporter: LinkChannelReporter?
 
     /// What the caller wants the daemon to believe on every (re)connection.
     public var muted = false
@@ -86,8 +103,6 @@ public final class VoiceSocket {
     private var receiveLoop: Task<Void, Never>?
     private var pingLoop: Task<Void, Never>?
     private var handshakeTimer: Task<Void, Never>?
-    private var retryTask: Task<Void, Never>?
-    private var retryDelay: TimeInterval = VoiceSocket.retryMinimum
     private var userClosed = true
     private var pingSentAt: Date?
     private var generation = 0
@@ -115,16 +130,49 @@ public final class VoiceSocket {
 
     // MARK: - Lifecycle
 
+    /// The voice wants the socket: it opens now if the link allows it, else
+    /// as soon as it does.
     public func connect() {
         userClosed = false
-        retryDelay = VoiceSocket.retryMinimum
-        open()
+        if allowed {
+            open()
+        } else {
+            life = .connecting
+        }
     }
 
     public func disconnect(reason: String = "user disconnect") {
         userClosed = true
         teardown(code: .goingAway, reason: reason)
         life = .idle
+    }
+
+    /// Whether the voice wants the socket (from `connect` until
+    /// `disconnect`, a replacement or a protocol mismatch).
+    public var wanted: Bool { !userClosed }
+
+    // MARK: - The link
+
+    public func linkAllows(_ allowed: Bool, reporter: LinkChannelReporter) {
+        self.reporter = reporter
+        self.allowed = allowed
+        if allowed {
+            if wanted, task == nil { open() }
+        } else if task != nil || life == .connecting {
+            teardown(reason: "paused")
+            guard wanted else {
+                life = .idle
+                return
+            }
+            life = .reconnecting
+            onEvent?(.paused)
+        }
+    }
+
+    public func linkReopens(reporter: LinkChannelReporter) {
+        self.reporter = reporter
+        guard wanted, allowed, task == nil else { return }
+        open()
     }
 
     private func open() {
@@ -136,7 +184,7 @@ public final class VoiceSocket {
             return
         }
         teardown(code: .goingAway, reason: "reopening")
-        generation += 1
+        openReporter = reporter
         let generation = self.generation
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
@@ -153,9 +201,9 @@ public final class VoiceSocket {
         }
     }
 
+    /// Closes the socket; nothing from it arrives after this.
     private func teardown(code: URLSessionWebSocketTask.CloseCode = .goingAway, reason: String) {
-        retryTask?.cancel()
-        retryTask = nil
+        generation += 1
         pingLoop?.cancel()
         pingLoop = nil
         handshakeTimer?.cancel()
@@ -197,7 +245,7 @@ public final class VoiceSocket {
 
     private func didOpen() {
         life = .open
-        retryDelay = VoiceSocket.retryMinimum
+        openReporter?.opened()
         // The handshake first, before anything else on the connection.
         // An older daemon answers it with an "unknown type" error, which
         // the handshake swallows.
@@ -249,40 +297,34 @@ public final class VoiceSocket {
     }
 
     private func didClose(error: Error, everOpened: Bool) {
-        pingLoop?.cancel()
-        pingLoop = nil
-        handshakeTimer?.cancel()
-        handshakeTimer = nil
-        task = nil
+        let reporter = openReporter
+        teardown(reason: "closed")
         if userClosed {
             life = .idle
             return
         }
+        var lost = LinkError(error)
         if let urlError = error as? URLError {
             if urlError.code == .cancelled {
-                life = .idle
-                return
+                // Not ours (ours bump the generation first): the system
+                // gave up on it, which is a loss like any other.
+                lost = .transport
             }
             if !everOpened {
-                // Never reached the daemon: say why, and keep retrying so a
-                // daemon that comes back is picked up.
+                // Never reached the daemon: say why. The link probes and
+                // opens it again once the computer answers.
                 onEvent?(.failed(.unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(urlError)), retrying: true))
             }
         }
-        onEvent?(.closed(reason: everOpened ? "connection lost" : "could not connect", retrying: true))
-        scheduleRetry()
+        lostConnection(reason: everOpened ? "connection lost" : "could not connect", error: lost, reporter: reporter)
     }
 
-    private func scheduleRetry() {
-        let delay = retryDelay
-        retryDelay = min(retryDelay * 2, VoiceSocket.retryMaximum)
+    /// The socket dropped, not by the app: wait for the link, which probes
+    /// once and says when to open it again.
+    private func lostConnection(reason: String, error: LinkError, reporter: LinkChannelReporter?) {
         life = .reconnecting
-        retryTask?.cancel()
-        retryTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, !Task.isCancelled, !self.userClosed else { return }
-            self.open()
-        }
+        onEvent?(.closed(reason: reason, retrying: true))
+        reporter?.lost(error == .cancelled ? .transport : error)
     }
 
     // MARK: - Sending
@@ -337,11 +379,11 @@ public final class VoiceSocket {
     func pingTick(now: Date = Date()) {
         if let sent = pingSentAt {
             guard PingSchedule.timedOut(sentAt: sent, now: now) else { return }
-            // The daemon stopped answering: drop the socket so the normal
-            // reconnect path takes over.
-            onEvent?(.closed(reason: "no answer from the daemon", retrying: true))
+            // The daemon stopped answering: drop the socket and tell the
+            // link, which decides when to open it again.
+            let reporter = openReporter
             teardown(code: .abnormalClosure, reason: "pong timeout")
-            scheduleRetry()
+            lostConnection(reason: "no answer from the daemon", error: .transport, reporter: reporter)
             return
         }
         pingSentAt = now

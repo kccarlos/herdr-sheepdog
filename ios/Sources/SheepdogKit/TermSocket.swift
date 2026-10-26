@@ -13,10 +13,14 @@ import Foundation
 ///   to its current size) until a full frame arrives.
 /// - `resize(ch:cols:rows:)` is debounced (150 ms); a resize to the same
 ///   size is sent too, since it asks for a repaint.
-/// - A dropped connection reconnects with backoff (1 s doubling to 10 s)
-///   and reopens every channel the daemon had not closed.
+/// - It is a channel of the current computer's link: it never retries by
+///   itself. A dropped connection tells the link (`reporter.lost`), which
+///   probes once and says when to open it again (`reopen`); then every
+///   channel the daemon had not closed reopens. While the link does not
+///   allow it (offline, the background) it stays closed and keeps its
+///   channels for then.
 /// - A WebSocket ping goes every 20 s; one still unanswered at the next
-///   tick drops the connection, which then reconnects.
+///   tick drops the connection.
 ///
 /// Use it only when the daemon's `bot-ready` lists the `term` feature.
 @MainActor
@@ -44,7 +48,8 @@ public final class TermSocket {
         case idle
         case connecting
         case ready(Ready)
-        /// The connection dropped or could not be made; trying again.
+        /// The connection dropped or could not be made, or the link does
+        /// not allow it now; it opens again when the link says.
         case reconnecting
     }
 
@@ -65,10 +70,8 @@ public final class TermSocket {
     }
 
     public static let resizeDebounce: TimeInterval = 0.15
-    public static let retryMinimum: TimeInterval = 1
-    public static let retryMaximum: TimeInterval = 10
     public static let pingInterval: TimeInterval = 20
-    /// No `term-ready` this long after connecting: try again.
+    /// No `term-ready` this long after connecting: the connection is lost.
     public static let readyTimeout: TimeInterval = 10
     /// A repaint asked for and not answered this long: ask again.
     public static let resyncRetry: TimeInterval = 1
@@ -102,8 +105,12 @@ public final class TermSocket {
     private var transport: TermTransport?
     private var generation = 0
     private var userClosed = true
-    private var retryDelay = TermSocket.retryMinimum
-    private var retryTask: Task<Void, Never>?
+    /// The link allows the connection. True until a link says otherwise,
+    /// so a socket with no link (the tests) opens on `connect`.
+    public private(set) var allowed = true
+    private var reporter: LinkChannelReporter?
+    /// The reporter the live connection was opened with.
+    private var openReporter: LinkChannelReporter?
     private var readyTimer: Task<Void, Never>?
     private var pingLoop: Task<Void, Never>?
     private var pingOutstanding = false
@@ -147,9 +154,40 @@ public final class TermSocket {
 
     // MARK: - Connection
 
+    /// Wanted from now on: opens now if the link allows it, else when it
+    /// does.
     public func connect() {
         userClosed = false
-        retryDelay = Self.retryMinimum
+        if allowed {
+            start()
+        } else {
+            state = .connecting
+        }
+    }
+
+    /// Whether a window (or a warm-up) wants the connection.
+    public var wanted: Bool { !userClosed }
+
+    // MARK: - The link
+
+    /// The link allows the connection, or no longer: closed, the channels
+    /// are kept and reopen when it allows it again. Not a loss.
+    public func allow(_ allowed: Bool, reporter: LinkChannelReporter?) {
+        self.reporter = reporter
+        self.allowed = allowed
+        if allowed {
+            if wanted, transport == nil { start() }
+        } else if transport != nil || state == .connecting {
+            teardown()
+            state = wanted ? .reconnecting : .idle
+        }
+    }
+
+    /// A lost connection, confirmed reachable: open it again if still
+    /// wanted.
+    public func reopen(reporter: LinkChannelReporter?) {
+        self.reporter = reporter
+        guard wanted, allowed, transport == nil else { return }
         start()
     }
 
@@ -182,8 +220,8 @@ public final class TermSocket {
             state = .idle
             return
         }
-        generation += 1
         let generation = self.generation
+        openReporter = reporter
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
         endpoint.authorize(&request)
@@ -211,8 +249,6 @@ public final class TermSocket {
     }
 
     private func teardown() {
-        retryTask?.cancel()
-        retryTask = nil
         readyTimer?.cancel()
         readyTimer = nil
         pingLoop?.cancel()
@@ -225,24 +261,18 @@ public final class TermSocket {
         transport = nil
     }
 
+    /// The connection dropped, not by the app: tell the link, which probes
+    /// once and says when to open it again.
     private func connectionLost() {
+        let reporter = openReporter
         teardown()
         guard !userClosed else {
             state = .idle
             return
         }
         state = .reconnecting
-        let delay = retryDelay
-        retryDelay = min(retryDelay * 2, Self.retryMaximum)
-        retryTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, !Task.isCancelled, !self.userClosed else { return }
-            self.start()
-        }
+        reporter?.lost(.transport)
     }
-
-    /// The delay before the next reconnect attempt (tests).
-    var nextRetryDelay: TimeInterval { retryDelay }
 
     // MARK: - Channels
 
@@ -341,7 +371,7 @@ public final class TermSocket {
         case .ready:
             readyTimer?.cancel()
             readyTimer = nil
-            retryDelay = Self.retryMinimum
+            openReporter?.opened()
             state = .ready(Ready(protocolVersion: message.protocol ?? 1,
                                  channels: message.limits?.channels ?? Self.defaultChannelLimit,
                                  shell: message.shell ?? false))

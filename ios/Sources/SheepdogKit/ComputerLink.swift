@@ -80,7 +80,7 @@ public struct ComputerLink: Equatable, Sendable {
     // MARK: - Policy
 
     /// The outage stays "Reconnecting…" this long before it is offline.
-    public static let quietPeriod = ReconnectPolicy.defaultQuietPeriod
+    public static let quietPeriod: TimeInterval = 30
     /// The probe (`GET /api/state`) gives up after this long.
     public static let probeTimeout: TimeInterval = 4
     /// Replies slower than this make the link degraded.
@@ -88,6 +88,9 @@ public struct ComputerLink: Equatable, Sendable {
     /// While online, a safety-net refresh (a confirming probe) runs this
     /// often.
     public static let refreshInterval: TimeInterval = 30
+    /// A channel that stayed open this long was healthy: its next loss
+    /// reopens at once. One lost sooner counts towards its failure streak.
+    public static let healthyChannel: TimeInterval = 10
 
     // MARK: - State
 
@@ -114,11 +117,24 @@ public struct ComputerLink: Equatable, Sendable {
     public private(set) var timers: [LinkTimer.Kind: LinkTimer] = [:]
     /// The address every channel was last told to use.
     public private(set) var addressInUse: String?
+    /// Each channel's losses in a row (a loss within `healthyChannel` of
+    /// its opening counts). From the second, the reopen waits on the link's
+    /// `reopen` timer with the backoff, so a channel that keeps failing
+    /// while the computer answers cannot spin.
+    public private(set) var channelFailures: [LinkChannel: Int] = [:]
+    /// Lost channels confirmed reachable, waiting for the `reopen` timer.
+    public private(set) var reopening: Set<LinkChannel> = []
 
     private var slow = false
     private var eventsReconnecting = false
     /// Channels lost while online, waiting for the confirming probe.
     private var lost: Set<LinkChannel> = []
+    /// When each channel last opened, for its failure streak.
+    private var channelOpenedAt: [LinkChannel: Date] = [:]
+    /// The interface changed while online: once the re-race wins, every
+    /// open channel reopens, since a socket on the old interface is dead
+    /// even if no keepalive has noticed yet.
+    private var reopenAllOnWin = false
     private var nextRaceID = 0
     private var nextTimerToken = 0
     /// The jitter fraction drawn for the event being applied (0 between
@@ -182,10 +198,18 @@ public struct ComputerLink: Equatable, Sendable {
             guard isUsable else { break }
             lastSeen = now
             lost.remove(channel)
+            channelOpenedAt[channel] = now
             if channel == .events { eventsReconnecting = false }
             settle()
         case let .channelLost(channel, error):
             guard isUsable, error != .cancelled else { break }
+            if let opened = channelOpenedAt.removeValue(forKey: channel), now.timeIntervalSince(opened) >= Self.healthyChannel {
+                channelFailures[channel] = 1
+            } else {
+                channelFailures[channel, default: 0] += 1
+            }
+            reopening.remove(channel)
+            if reopening.isEmpty { cancelTimer(.reopen, &fx) }
             lost.insert(channel)
             confirm(now: now, &fx)
         case let .requestSucceeded(rtt):
@@ -246,7 +270,8 @@ public struct ComputerLink: Equatable, Sendable {
         }
         if state == .noNetwork {
             connect(attempt: 0, outage: nil, now: now, &fx)
-        } else if !old.satisfied || old.interface != path.interface {
+        } else if !old.satisfied || (old.interface != nil && old.interface != path.interface) {
+            // The first interface the monitor reports is not a change.
             kick(now: now, &fx, from: .pathChange)
         }
     }
@@ -271,6 +296,7 @@ public struct ComputerLink: Equatable, Sendable {
             connect(attempt: 0, outage: outage, now: now, &fx)
         case .online, .degraded:
             if source == .pathChange || source == .addresses {
+                if source == .pathChange { reopenAllOnWin = true }
                 startRace(order: fullOrder, now: now, &fx)
             } else {
                 confirm(now: now, &fx)
@@ -302,6 +328,8 @@ public struct ComputerLink: Equatable, Sendable {
             self.certExpires = certExpires
             mismatched = []
             addressInUse = nil
+            channelFailures = [:]
+            channelOpenedAt = [:]
             stop(&fx)
             state = .idle
             if demand.needed { begin(now: now, &fx) }
@@ -344,10 +372,13 @@ public struct ComputerLink: Equatable, Sendable {
     private mutating func connect(attempt: Int, outage: Outage?, now: Date, _ fx: inout [LinkEffect]) {
         cancelTimer(.backoff, &fx)
         cancelTimer(.quiet, &fx)
+        cancelTimer(.reopen, &fx)
         state = .connecting(attempt: attempt, outage: outage)
         slow = false
         eventsReconnecting = false
         lost = []
+        reopening = []
+        reopenAllOnWin = false
         startRace(order: fullOrder, now: now, &fx)
     }
 
@@ -413,16 +444,44 @@ public struct ComputerLink: Equatable, Sendable {
             addressInUse = address
             fx.append(.useAddress(address))
             lost = []
+            reopening = []
+            cancelTimer(.reopen, &fx)
         } else if wasUsable {
             // A lost channel, confirmed: open it again (and say so while
-            // `/events` comes back).
-            for channel in LinkChannel.allCases where lost.contains(channel) && channels.contains(channel) {
-                fx.append(.reopen(channel))
+            // `/events` comes back). After an interface change, every open
+            // channel reopens on the new one.
+            for channel in LinkChannel.allCases where channels.contains(channel) {
+                if lost.contains(channel) {
+                    scheduleReopen(channel, now: now, &fx)
+                } else if reopenAllOnWin, !reopening.contains(channel) {
+                    channelOpenedAt[channel] = nil
+                    fx.append(.reopen(channel))
+                } else if reopening.contains(channel), timers[.reopen] == nil {
+                    // Its timer fired while this race was in flight.
+                    reopening.remove(channel)
+                    fx.append(.reopen(channel))
+                }
             }
             if lost.contains(.events) && channels.contains(.events) { eventsReconnecting = true }
             lost = []
         }
+        reopenAllOnWin = false
         settle()
+    }
+
+    /// Opens a lost channel again: at once after a healthy run or its first
+    /// loss, else after the backoff for its streak on the `reopen` timer.
+    private mutating func scheduleReopen(_ channel: LinkChannel, now: Date, _ fx: inout [LinkEffect]) {
+        let failures = channelFailures[channel] ?? 0
+        guard failures > 1 else {
+            fx.append(.reopen(channel))
+            return
+        }
+        reopening.insert(channel)
+        if timers[.reopen] == nil {
+            let delay = LinkBackoff.delay(attempt: failures - 1, cap: demand.backoffCap, jitter: jitter)
+            setTimer(.reopen, at: now.addingTimeInterval(delay), &fx)
+        }
     }
 
     private mutating func probeFailed(_ address: String, raceID: Int, error: LinkError, now: Date, _ fx: inout [LinkEffect]) {
@@ -543,6 +602,13 @@ public struct ComputerLink: Equatable, Sendable {
             guard isUsable else { return }
             setTimer(.refresh, at: now.addingTimeInterval(Self.refreshInterval), &fx)
             confirm(now: now, &fx)
+        case .reopen:
+            // A race in flight answers first; its win reopens them.
+            guard isUsable, race == nil else { return }
+            for channel in LinkChannel.allCases where reopening.contains(channel) && channels.contains(channel) {
+                fx.append(.reopen(channel))
+            }
+            reopening = []
         }
     }
 
@@ -552,6 +618,8 @@ public struct ComputerLink: Equatable, Sendable {
         // A refusal is a fact about the credentials: it outlives demand.
         if case .refused = state { return }
         stop(&fx)
+        channelFailures = [:]
+        channelOpenedAt = [:]
         state = .idle
     }
 
@@ -567,6 +635,8 @@ public struct ComputerLink: Equatable, Sendable {
         slow = false
         eventsReconnecting = false
         lost = []
+        reopening = []
+        reopenAllOnWin = false
     }
 
     /// Online or degraded, from the facts.
@@ -593,6 +663,12 @@ public struct ComputerLink: Equatable, Sendable {
         if allowed != channels {
             channels = allowed
             fx.append(.channels(allowed))
+            // A closed channel is not open: it reopens with the set.
+            for channel in LinkChannel.allCases where !allowed.contains(channel) {
+                channelOpenedAt[channel] = nil
+            }
+            reopening.formIntersection(allowed)
+            if reopening.isEmpty { cancelTimer(.reopen, &fx) }
         }
         if isUsable, timers[.refresh] == nil {
             setTimer(.refresh, at: now.addingTimeInterval(Self.refreshInterval), &fx)
@@ -627,6 +703,8 @@ public struct LinkTimer: Hashable, Sendable {
         case quiet
         /// The safety-net refresh while online.
         case refresh
+        /// Reopen the channels in `reopening` (a failure streak's wait).
+        case reopen
     }
 
     public var kind: Kind
@@ -675,7 +753,9 @@ public enum LinkEffect: Hashable, Sendable {
     case useAddress(String)
     /// The channels that may be open; close any other.
     case channels(Set<LinkChannel>)
-    /// A channel that was lost, confirmed reachable: open it again.
+    /// A channel that was lost, confirmed reachable (or an open one after
+    /// the interface changed): open it again. The only way a channel
+    /// reconnects; no socket retries by itself.
     case reopen(LinkChannel)
     /// Persist the winners per interface.
     case rememberWinners([NetworkInterface: String])

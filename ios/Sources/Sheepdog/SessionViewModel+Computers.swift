@@ -78,6 +78,7 @@ extension SessionViewModel {
         let isCurrent = id == currentComputerID
         let model = ComputerModel(id: id, name: name, addresses: [endpoint.display], certExpires: certExpires,
                                   connection: connection, scheduler: LinkClock(), demand: isCurrent ? currentDemand : otherDemand,
+                                  path: fleet.path,
                                   winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil)
         model.onAnswerFeedback = { feedback in
             switch feedback {

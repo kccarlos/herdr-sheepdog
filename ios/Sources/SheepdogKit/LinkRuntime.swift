@@ -11,11 +11,10 @@ import Foundation
 /// so the tests drive it with a fake network and a manual clock. The app
 /// passes `DaemonProbeTransport` and `LinkClock`.
 ///
-/// What the link does not own yet stays with its owner and is only
-/// reported here: the voice's `/ws` socket and the terminal's `/term` keep
-/// their own reconnects until phase 5, so the runtime passes the channel
-/// set and `reopen` on to `onChannels` / `onReopen` and the caller acts on
-/// the channels it owns (`/events`).
+/// The channels themselves belong to the computer's model: the runtime
+/// passes the channel set and `reopen` on to `onChannels` / `onReopen`,
+/// and `ComputerModel` opens `/events` and tells the session's `/ws` and
+/// `/term` (`LinkChannelClient`). None of them retries by itself.
 @MainActor
 public final class LinkRuntime {
     /// The computer this runtime is for.
