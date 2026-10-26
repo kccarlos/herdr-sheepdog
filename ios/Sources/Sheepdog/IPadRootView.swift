@@ -366,8 +366,8 @@ struct IPadSidebar: View {
                 .foregroundStyle(Theme.primaryText)
                 .frame(minHeight: 44)
             case .tokenRefused:
-                Text((model.pairingProblem ?? .revoked).title)
-                Button("Scan again") { model.needsNewScan(model.pairingProblem ?? .revoked) }
+                Text((model.notices.pairingProblem ?? .revoked).title)
+                Button("Scan again") { model.needsNewScan(model.notices.pairingProblem ?? .revoked) }
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.primaryText)
                     .frame(minHeight: 44)
@@ -555,7 +555,7 @@ struct IPadConversationDetail: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
         }
         .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
-        .animation(Theme.ease, value: model.banner)
+        .animation(Theme.ease, value: model.notices.banner)
     }
 
     private var bottom: some View {

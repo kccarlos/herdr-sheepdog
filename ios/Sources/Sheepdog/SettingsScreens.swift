@@ -68,18 +68,18 @@ struct DaemonSettingsView: View {
             Text("The computer forgets this phone, and this phone forgets its key. To connect again, scan a new code.")
         }
         .onAppear {
-            if let notice = model.daemonNotice {
+            if let notice = model.notices.daemonNotice {
                 probe = notice
-                model.daemonNotice = nil
+                model.notices.daemonNotice = nil
             }
-            if let problem = model.daemonNoticeProblem {
-                model.daemonNoticeProblem = nil
+            if let problem = model.notices.daemonNoticeProblem {
+                model.notices.daemonNoticeProblem = nil
                 pairing = PairingSheet(stage: .problem(problem))
             }
         }
-        .onChange(of: model.daemonNoticeProblem) { _, problem in
+        .onChange(of: model.notices.daemonNoticeProblem) { _, problem in
             guard let problem else { return }
-            model.daemonNoticeProblem = nil
+            model.notices.daemonNoticeProblem = nil
             pairing = PairingSheet(stage: .problem(problem))
         }
     }

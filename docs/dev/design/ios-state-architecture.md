@@ -1478,9 +1478,11 @@ Order and dependencies:
     `onVoiceProvidersChange`, when the audio engine's profile must follow.
     Views read `model.settingsModel`. A catalog or an error changing no
     longer announces on the session view model.
+  - **Done: Notices.** `NoticeModel` (`NoticeModel.swift`, `@Observable`)
+    holds `banner`, `feedbackNotice`, `update`, `pairingProblem`,
+    `daemonNoticeProblem` and `daemonNotice`; views read `model.notices`.
+    `update` and `pairingProblem` assign only on change.
   - **Left, in order** (sizes S/M/L):
-    2. Notices: `update`, `pairingProblem`, `daemonNotice*`,
-       `feedbackNotice`, `banner` (S).
     3. Link: `linkPresentation`, `addressRows`, `liveUpdates`,
        `handshake`, `hello` (S–M; mostly mirrors of `ComputerLink`).
     4. Navigation: `pane`, `navigationPath`, `settingsRoute`,

@@ -52,7 +52,7 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    if let notice = model.update?.notice {
+                    if let notice = model.notices.update?.notice {
                         Section {
                             UpdateNoticeRow(notice: notice)
                         }

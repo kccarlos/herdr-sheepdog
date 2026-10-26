@@ -165,7 +165,7 @@ struct PhoneRootView: View {
             // The question, the coach mark and the capsule float over the
             // content, which scrolls under them.
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
-            .animation(Theme.ease, value: model.banner)
+            .animation(Theme.ease, value: model.notices.banner)
             .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
             .animation(Theme.ease, value: model.showMuteHint)
             .animation(Theme.ease, value: model.showCoachMark)
@@ -299,13 +299,13 @@ struct ConversationPane: View {
             }
         }
         .overlay(alignment: .top) {
-            if let notice = model.feedbackNotice {
+            if let notice = model.notices.feedbackNotice {
                 FeedbackNoticeView(text: notice)
                     .padding(.top, 8)
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(Theme.ease, value: model.feedbackNotice)
+        .animation(Theme.ease, value: model.notices.feedbackNotice)
     }
 }
 
@@ -318,8 +318,8 @@ struct SessionBanners: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if let banner = model.banner {
-            BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
+        if let banner = model.notices.banner {
+            BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.notices.banner = nil })
                 // Chrome stops growing at the largest non-accessibility
                 // size: at AX5 a banner alone filled the screen. The
                 // conversation keeps scaling.
@@ -327,7 +327,7 @@ struct SessionBanners: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
                 .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-        } else if let notice = model.update?.notice, notice.text != dismissedUpdate {
+        } else if let notice = model.notices.update?.notice, notice.text != dismissedUpdate {
             UpdateBanner(notice: notice) {
                 withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
             }

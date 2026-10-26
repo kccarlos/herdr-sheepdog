@@ -113,8 +113,6 @@ final class SessionViewModel: ObservableObject {
     /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
     /// the chip's sheet.
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
-    /// "Noted" (or why a feedback mark did not land), shown for a moment.
-    @Published private(set) var feedbackNotice: String?
     /// What the daemon pushes about an open agent window over `/ws`,
     /// handed straight to that window (`ScreenStreamRouter`), never
     /// through a published property: a frame must not re-render the app.
@@ -138,7 +136,8 @@ final class SessionViewModel: ObservableObject {
     /// daemon's own answer to `POST /api/conversation/reset` (a 404 hides
     /// it), optimistic (shown) until then.
     @Published private(set) var conversationResetSupported = true
-    @Published var banner: Banner?
+    /// The banner, the feedback line, the update and pairing notices.
+    let notices = NoticeModel()
     /// Typed input (`POST /api/utterance`): in flight, and the
     /// daemon's refusal if it had one.
     @Published private(set) var sendingTyped = false
@@ -180,15 +179,8 @@ final class SessionViewModel: ObservableObject {
         didSet { audio.setProvider(resolvedVoiceProvider) }
     }
     @Published private(set) var stateVoiceModel: String?
-    /// `/api/state`'s update notice (Settings shows one line for it); nil
-    /// on a daemon too old to report one.
-    @Published private(set) var update: UpdateInfo?
     /// Settings is the presentation on screen.
     var showSettings: Bool { presentation.isShowing(.settings) }
-    /// Why the app must scan again, while it must.
-    @Published private(set) var pairingProblem: PairingProblem?
-    /// The same, for Settings ▸ Connection when it is open.
-    @Published var daemonNoticeProblem: PairingProblem?
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
@@ -196,7 +188,6 @@ final class SessionViewModel: ObservableObject {
     /// pairing code nothing answered), shown there where the fix is. A
     /// banner on the main screen would sit under the Settings sheet.
     /// Consumed by DaemonSettingsView.
-    @Published var daemonNotice: Probe?
 
     /// Health's "Change in Settings ›": Settings, pushed to Models.
     func openModels() {
@@ -573,7 +564,7 @@ final class SessionViewModel: ObservableObject {
             termHub.update(endpoint: channelEndpoint(endpoint))
             shellOffered = nil
         }
-        banner = nil
+        notices.banner = nil
         hello = fleet.current?.hello
         attachCurrent()
         if !sameDaemon {
@@ -589,7 +580,7 @@ final class SessionViewModel: ObservableObject {
             cardInbox.clear()
             healthModel.clear()
             settingsModel.clear()
-            update = nil
+            notices.clearForSwitch()
             approvalFlow.reset()
             if !conversation.loaded { loadCache() }
             conversationChanged(save: false)
@@ -787,7 +778,7 @@ final class SessionViewModel: ObservableObject {
             }
             return
         }
-        guard !showCoachMark, banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
+        guard !showCoachMark, notices.banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
         refreshMicrophoneMode()
         guard microphoneMode != .voiceIsolation else { return }
         defaults.set(true, forKey: Self.micTipShownKey)
@@ -1024,7 +1015,7 @@ final class SessionViewModel: ObservableObject {
         case let .showBanner(banner):
             show(Banner(banner))
         case .clearBanner:
-            banner = nil
+            notices.banner = nil
         case let .notice(text):
             reducer.apply(.notice(text))
             conversationChanged()
@@ -1439,7 +1430,7 @@ final class SessionViewModel: ObservableObject {
         do {
             apply(try await current { try await $0.state() })
             if hello == nil { await loadHello() }
-            if !quiet { banner = nil }
+            if !quiet { notices.banner = nil }
             return true
         } catch let error as DaemonError {
             // A loud refresh that fails ends the session, as a failed
@@ -1499,7 +1490,7 @@ final class SessionViewModel: ObservableObject {
         assign(\.brain, state.brain)
         assign(\.stateVoiceProvider, state.voiceProvider)
         assign(\.stateVoiceModel, state.voiceModel)
-        assign(\.update, state.update)
+        notices.setUpdate(state.update)
     }
 
     /// Assigns a published property only when the value differs: setting
@@ -2011,14 +2002,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    private func showFeedbackNotice(_ text: String) {
-        feedbackNotice = text
-        AccessibilityNotification.Announcement(text).post()
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            if self?.feedbackNotice == text { self?.feedbackNotice = nil }
-        }
-    }
+    private func showFeedbackNotice(_ text: String) { notices.showFeedback(text) }
 
     /// The user tapped an option on the approval card.
     func answer(option index: Int) {
@@ -2123,11 +2107,11 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Banners
 
     private func show(_ banner: Banner) {
-        self.banner = banner
+        notices.banner = banner
     }
 
     func retry() {
-        banner = nil
+        notices.banner = nil
         reconnect()
     }
 
@@ -2138,11 +2122,11 @@ final class SessionViewModel: ObservableObject {
 
     /// The banner's button.
     func bannerAction() {
-        switch banner?.action ?? .retry {
+        switch notices.banner?.action ?? .retry {
         case .retry:
             retry()
         case .microphoneModes:
-            banner = nil
+            notices.banner = nil
             showMicrophoneModes()
         }
     }
@@ -2435,7 +2419,7 @@ final class SessionViewModel: ObservableObject {
             store.save(computer, address: address)
             settings.hasBeenConfigured = true
             _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
-            pairingProblem = nil
+            notices.setPairingProblem(nil)
             computersChanged()
             if repoint {
                 store.currentID = computer.daemonID
@@ -2531,9 +2515,9 @@ final class SessionViewModel: ObservableObject {
     /// The scan-again screen a refusal opens, from Settings or the main
     /// screen.
     func needsNewScan(_ problem: PairingProblem) {
-        pairingProblem = problem
+        notices.setPairingProblem(problem)
         if showSettings {
-            daemonNoticeProblem = problem
+            notices.daemonNoticeProblem = problem
             return
         }
         presentation.present(.pairing(.problem(problem)))
