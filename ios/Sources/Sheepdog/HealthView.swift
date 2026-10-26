@@ -82,7 +82,7 @@ struct HealthView: View {
                 .accessibilityIdentifier("health.brainModel")
             // Every stats line carries the field once the daemon can switch
             // voice (0 with Gemini): only worth a row when something billed.
-            if let billed = model.health.billedSeconds, billed > 0 || model.voiceProviders?.provider == "openai" {
+            if let billed = model.healthModel.health.billedSeconds, billed > 0 || model.voiceProviders?.provider == "openai" {
                 LabeledContent("GPT-Live billed", value: Self.billed(billed))
                     .accessibilityIdentifier("health.billed")
             }
@@ -105,7 +105,7 @@ struct HealthView: View {
         } header: {
             Text("Voice and orchestrator")
         } footer: {
-            if model.health.billedSeconds != nil {
+            if model.healthModel.health.billedSeconds != nil {
                 Text("GPT-Live bills every second a session is open, this daemon run so far.")
             }
         }
@@ -177,9 +177,9 @@ struct HealthView: View {
 
     private var problemsSection: some View {
         Section {
-            let problems = DaemonHealth.grouped(model.health.problems)
+            let problems = DaemonHealth.grouped(model.healthModel.health.problems)
             if problems.isEmpty {
-                Label(model.loadingHealth ? "Looking…" : "Nothing went wrong this run.", systemImage: "checkmark.circle")
+                Label(model.healthModel.loading ? "Looking…" : "Nothing went wrong this run.", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
             }
             ForEach(problems) { group in

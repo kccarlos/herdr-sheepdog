@@ -1462,8 +1462,35 @@ Order and dependencies:
     `window` count tracks the controller's observable properties
     (`withObservationTracking`, DEBUG only) in place of
     `objectWillChange`.
-  - **Left:** `SessionViewModel` itself (the slices in order are in the
-    phase 8 hand-off).
+  - **Done: Health.** `HealthModel` (`HealthModel.swift`, `@Observable`)
+    holds `health` and `loading`; `/events` folds, the computer switch
+    and the Health pane's fetch go through it, and `HealthView` reads
+    `model.healthModel`. The `async let` fan-out to models, settings and
+    providers stays in `SessionViewModel.loadHealth` until those move.
+    A problem count changing no longer announces on the session view
+    model.
+  - **Left, in order** (sizes S/M/L):
+    1. Settings, models and providers: `brainModels`, `daemonSettings`,
+       `voiceProviders`, the switching flags and their errors, and the
+       loaders (M; also takes the rest of `loadHealth`'s fan-out).
+    2. Notices: `update`, `pairingProblem`, `daemonNotice*`,
+       `feedbackNotice`, `banner` (S).
+    3. Link: `linkPresentation`, `addressRows`, `liveUpdates`,
+       `handshake`, `hello` (S–M; mostly mirrors of `ComputerLink`).
+    4. Navigation: `pane`, `navigationPath`, `settingsRoute`,
+       `windowRequest`, `focusedAgentPaneID` (S).
+    5. Agents and questions: `agents`, `pendingAction`, `questions`,
+       `expandedAgents`, `screenCovers`, `shellOffered` (M).
+    6. Conversation: `rows`, paging, the typed line (M).
+    7. The voice leaves: `VoiceEngine` owns `state`, mute, talk mode,
+       hold, microphone modes, the coach mark, `wantsConnection` and the
+       audio session (L, the hard part: the audio path is Swift 5 and
+       its tests need a real engine).
+    8. The approval card's `ApprovalFlow` phase becomes the model's
+       per-question `phases` (M, hard: it changes who owns the answer
+       key, see phase 7's left-for-later).
+    9. Delete `SessionViewModel`; `@EnvironmentObject` becomes
+       `@Environment(Type.self)` (S).
 
 **What not to do:**
 

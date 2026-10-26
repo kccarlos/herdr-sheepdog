@@ -151,8 +151,7 @@ final class SessionViewModel: ObservableObject {
 
     // The Health pane.
     /// Uptime, GPT-Live's billed seconds and the recent problems.
-    @Published private(set) var health = DaemonHealth()
-    @Published private(set) var loadingHealth = false
+    let healthModel = HealthModel()
     /// The orchestrator's catalog and choice; nil until loaded, and on a daemon
     /// without the route.
     @Published private(set) var brainModels: BrainModels?
@@ -596,7 +595,7 @@ final class SessionViewModel: ObservableObject {
             agents = []
             questions = []
             cardInbox.clear()
-            health.clear()
+            healthModel.clear()
             brainModels = nil
             daemonSettings = nil
             update = nil
@@ -1418,8 +1417,7 @@ final class SessionViewModel: ObservableObject {
         if activity.fold(event) || folded {
             conversationChanged()
         }
-        var nextHealth = health
-        if nextHealth.fold(event) { health = nextHealth }
+        healthModel.fold(event)
         switch event.type {
         case "voice.push":
             guard let text = event.string("text"), !text.isEmpty, event.string("urgency") != "silent" else { break }
@@ -1680,30 +1678,29 @@ final class SessionViewModel: ObservableObject {
     /// "Sheepdog started." divider in the history (the event ring may
     /// have rolled past it on a long run).
     var daemonStartedAt: Date? {
-        health.startedAt ?? history.items.last { $0.kind == .notice && $0.text.hasPrefix("Sheepdog started") }?.ts
+        healthModel.health.startedAt ?? history.items.last { $0.kind == .notice && $0.text.hasPrefix("Sheepdog started") }?.ts
     }
 
     /// Everything the Health pane shows, fetched once when it opens (and
     /// on pull to refresh); `/events` keeps the problems and the billed
     /// seconds current after that.
     func loadHealth() async {
-        guard settings.endpoint != nil, !loadingHealth else { return }
-        loadingHealth = true
-        defer { loadingHealth = false }
+        guard settings.endpoint != nil, healthModel.begin() else { return }
+        defer { healthModel.end() }
         async let state: Bool = refreshState(quiet: true)
         async let models: Void = loadBrainModels()
         async let chattiness: Void = loadDaemonSettings()
         async let providers: Void = loadVoiceProviders()
         if hello == nil { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
-        var next = health
+        var next = healthModel.health
         for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
                      "voice.push_", "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
             let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
             guard let events = try? await current({ try await $0.recentEvents(type: type, limit: limit) }) else { continue }
             for event in events { next.fold(event) }
         }
-        if next != health { health = next }
+        healthModel.replace(with: next)
         _ = await (state, models, chattiness, providers)
     }
 
