@@ -66,6 +66,50 @@ final class EventsTLSE2ETests: XCTestCase {
         let ticket = try await credentials.ticket(base: base)
         await auth.unpair(ticket: ticket)
     }
+
+    /// Two addresses, the preferred one dead (nothing listens on port 9):
+    /// the computer's runtime races both over pinned TLS, goes online on the
+    /// live one, and opens `/events` there (docs/dev/design/ios-state-architecture.md 3.3).
+    @MainActor
+    func testTheRaceSkipsADeadAddressAndStreamsFromTheLiveOne() async throws {
+        let data: Data
+        do {
+            (data, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/api/pair?new=1")!)
+        } catch {
+            throw XCTSkip("no pair fixture daemon on 127.0.0.1:\(port)")
+        }
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let code = try XCTUnwrap(PairingCode(try XCTUnwrap(object["link"] as? String)))
+        let live = "127.0.0.1:\(port)"
+        let dead = "127.0.0.1:9"
+        let base = URL(string: "https://\(live)/")!
+
+        DeviceKey.delete(daemonID: code.daemonID)
+        let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
+        defer { DeviceKey.delete(daemonID: code.daemonID) }
+        let trust = PinnedTrustDelegate { [code.pin] }
+        let pinned = URLSession(configuration: .ephemeral, delegate: trust, delegateQueue: nil)
+        defer { pinned.invalidateAndCancel() }
+        let auth = DeviceAuth(base: base, session: pinned)
+        let enrolled = try await auth.enroll(code: code.code, publicKey: try XCTUnwrap(DeviceKey.publicKey(key)), name: "Race iPhone", kind: "ios", hardware: false)
+        let credentials = DeviceCredentials(daemonID: code.daemonID, secrets: InMemorySecretStore())
+        credentials.computer = PairedComputer(daemonID: code.daemonID, name: code.name, addresses: [dead, live], pin: code.pin, deviceID: enrolled.deviceID, pairedAt: Date())
+
+        let connection = ComputerConnection(computerID: code.daemonID, address: dead) { address in
+            DaemonEndpoint(text: address, secure: true, credentials: credentials).map { DaemonClient(endpoint: $0) }
+        }
+        let model = ComputerModel(id: code.daemonID, name: code.name, addresses: [dead, live], certExpires: nil, connection: connection,
+                                  scheduler: LinkClock(), demand: LinkDemand(isCurrent: true),
+                                  path: NetworkPath(satisfied: true, interface: .wifi))
+        model.start()
+        defer { model.stop() }
+        await eventually("online on the live address", timeout: 15) { model.link.onlineAddress == live }
+        XCTAssertEqual(model.link.winners, [.wifi: live])
+        await eventually("/events open there", timeout: 15) { model.liveUpdates == .open }
+
+        let ticket = try await credentials.ticket(base: base)
+        await auth.unpair(ticket: ticket)
+    }
 }
 
 private final class ErrorBox: @unchecked Sendable {

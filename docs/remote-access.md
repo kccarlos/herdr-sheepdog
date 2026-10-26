@@ -27,6 +27,12 @@ running), then its Wi-Fi/LAN address (a private 192.168.x, 10.x or
 the fingerprint of its certificate. With no Tailscale it holds the Wi-Fi
 address only, so the phone must be on the same Wi-Fi.
 
+The iPhone app tries every address and uses the first that answers with the
+computer's certificate, and it remembers the winner separately for Wi-Fi and
+for cellular. So with Tailscale on both, the phone uses the Wi-Fi address at
+home and the Tailscale address away from home, and switches by itself
+([iphone-app.md](iphone-app.md#pair)).
+
 **A code works once and expires after 10 minutes.** Showing a new one
 replaces it. The setup page lists every paired device; if one is not
 yours, revoke it there.

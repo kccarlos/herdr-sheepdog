@@ -68,12 +68,9 @@ struct SheepdogApp: App {
             } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-sheepdogAddressesScreen"),
                       i + 1 < ProcessInfo.processInfo.arguments.count {
                 // Settings ▸ Connection ▸ Addresses with made-up addresses,
-                // for screenshots ("list" or "error").
+                // for screenshots and the UI test ("list" or "error").
                 NavigationStack {
-                    AddressesView(snapshot: { (["192.168.1.20:7777", "100.101.102.103:7777", "100.101.1.1:7777"], "100.101.1.1:7777") },
-                                  add: { _ in nil }, use: { _ in nil }, remove: { _ in },
-                                  initialError: ProcessInfo.processInfo.arguments[i + 1] == "error"
-                                      ? "Something answered at 100.101.1.2:7777, but not with this computer's key, so the app did not use it." : nil)
+                    AddressesFixture(error: ProcessInfo.processInfo.arguments[i + 1] == "error")
                 }
             } else if ProcessInfo.processInfo.arguments.contains("-sheepdogCapsuleGallery") {
                 CapsuleGallery()

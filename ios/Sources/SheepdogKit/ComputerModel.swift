@@ -130,6 +130,9 @@ public final class ComputerModel {
             let connection = self.connection
             let moved = self.lastAddress != nil && self.lastAddress != address
             self.lastAddress = address
+            // The session's `/ws` and `/term` move first, so the reopen
+            // below (and any open the channel set allows next) goes there.
+            for entry in self.clients.values { entry.client.linkUses(address: address) }
             Task { [weak self] in
                 await connection.use(address: address, epoch: epoch)
                 // Open channels follow the link to its new address.
@@ -203,6 +206,7 @@ public final class ComputerModel {
         if let existing = clients[channel], existing.client === client { return }
         nextClientToken += 1
         clients[channel] = (client, nextClientToken)
+        if let address = runtime.link.addressInUse { client.linkUses(address: address) }
         client.linkAllows(link.channels.contains(channel), reporter: reporter(channel))
     }
 
@@ -226,6 +230,30 @@ public final class ComputerModel {
             entry.client.linkReopens(reporter: reporter(channel))
         }
     }
+
+    /// Settings ▸ Addresses ▸ Prefer: the address goes to the front of the
+    /// race, the remembered winners are forgotten, and the link re-races
+    /// (without leaving online) unless it is already there. Not a new
+    /// epoch: the pin, not the address, is the computer.
+    public func prefer(_ address: String) {
+        guard !stopped else { return }
+        runtime.send(.preferAddress(address))
+    }
+
+    /// The computer's addresses changed (one added or removed in Settings),
+    /// preferred first. Not a new epoch: the link keeps the address in use
+    /// if it is still there, else races the new set.
+    public func setAddresses(_ addresses: [String]) {
+        guard !stopped, addresses != link.addresses else { return }
+        runtime.send(.addressesChanged(addresses))
+    }
+
+    /// Where requests and `/events` go: the race's winner, else the
+    /// preferred address (before the first race is won). Passed with each
+    /// call, so the actor never uses an address the link has left.
+    /// The runtime's link, not `link`: inside the link's effects (the
+    /// channel set opening `/events`) `link` is not updated yet.
+    private var targetAddress: String? { runtime.link.addressInUse ?? runtime.link.addresses.first }
 
     /// Retry, Try now: the link tries at once.
     public func retry() {
@@ -252,7 +280,8 @@ public final class ComputerModel {
     public func request<Client, T>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
         guard !stopped else { throw Stale() }
         let epoch = epoch
-        let reply = await connection.request(epoch: epoch) { client -> T in
+        let target = targetAddress
+        let reply = await connection.request(epoch: epoch, address: target) { client -> T in
             guard let typed = client as? Client else { throw DaemonError.malformed("this computer's client cannot do that") }
             return try await body(typed)
         }
@@ -340,10 +369,11 @@ public final class ComputerModel {
         let epoch = epoch
         let connection = connection
         let since = eventsSince?() ?? 0
+        let target = targetAddress
         setLiveUpdates(reopening ? .reconnecting : .connecting)
         onStreamOpening?()
         Task { [weak self] in
-            await connection.openEvents(epoch: epoch, since: since) { [weak self] update in
+            await connection.openEvents(epoch: epoch, address: target, since: since) { [weak self] update in
                 self?.streamUpdate(update)
             }
         }
@@ -398,7 +428,7 @@ public final class ComputerModel {
         repeat {
             refreshAgain = false
             let epoch = epoch
-            let reply = await connection.request(epoch: epoch) { try await $0.state() }
+            let reply = await connection.request(epoch: epoch, address: targetAddress) { try await $0.state() }
             guard reply.epoch == self.epoch, !stopped else { return }
             report(reply)
             if case let .success(state) = reply.value { apply(state) }
@@ -442,9 +472,10 @@ public final class ComputerModel {
         answersInFlight += 1
         if answersInFlight == 1 { runtime.send(.demandChanged(effectiveDemand)) }
         let epoch = epoch
+        let target = targetAddress
         Task { [weak self] in
             guard let self else { return }
-            let reply = await self.connection.request(epoch: epoch) { try await $0.answerPending(id: id, option: index) }
+            let reply = await self.connection.request(epoch: epoch, address: target) { try await $0.answerPending(id: id, option: index) }
             self.answersInFlight -= 1
             if self.answersInFlight == 0, !self.stopped { self.runtime.send(.demandChanged(self.effectiveDemand)) }
             guard reply.epoch == self.epoch, !self.stopped else { return }
@@ -557,6 +588,10 @@ public protocol LinkChannelClient: AnyObject {
     /// A lost channel, confirmed reachable (or the interface changed): open
     /// it again if it is still wanted.
     func linkReopens(reporter: LinkChannelReporter)
+    /// The link uses this address of the computer now (a race won there):
+    /// open there from now on. It comes before the reopen that moves an
+    /// open channel, and on `attach` when the link already has one.
+    func linkUses(address: String)
 }
 
 /// What a channel tells its computer's link, tagged with the computer's

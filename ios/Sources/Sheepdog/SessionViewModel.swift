@@ -104,6 +104,9 @@ final class SessionViewModel: ObservableObject {
     /// What every status surface shows: the chip, Settings, the Agents
     /// page, the capsule's menu, Health. Published only when it changes.
     @Published private(set) var linkPresentation = LinkPresentation(ComputerLink(addresses: []))
+    /// Settings ▸ Connection ▸ Addresses: each address, the preferred one,
+    /// and the one in use and why. Published only when it changes.
+    @Published private(set) var addressRows: [AddressRow] = []
     /// The `/events` stream's own life, for Health ▸ Live updates (the
     /// chip does not follow it, decision 5).
     @Published private(set) var liveUpdates: SocketLife = .idle
@@ -539,10 +542,11 @@ final class SessionViewModel: ObservableObject {
         let sameDaemon = attachedEndpoint.map { ConversationCache.key(for: endpoint) == ConversationCache.key(for: $0) } ?? false
         fleet.makeCurrent(currentComputerID)
         attachedEndpoint = endpoint
-        // The voice and the terminal follow the current computer.
-        socket.update(endpoint: endpoint)
+        // The voice and the terminal follow the current computer, at the
+        // address its link uses.
+        socket.update(endpoint: channelEndpoint(endpoint))
         if demo == nil {
-            termHub.update(endpoint: endpoint)
+            termHub.update(endpoint: channelEndpoint(endpoint))
             shellOffered = nil
         }
         banner = nil
@@ -592,8 +596,15 @@ final class SessionViewModel: ObservableObject {
             presentation.present(.settings)
             return
         }
-        socket.update(endpoint: endpoint)
+        socket.update(endpoint: channelEndpoint(endpoint))
         send(.connectTapped)
+    }
+
+    /// The current computer at the address its link uses now (same pin):
+    /// `/ws` and `/term` open there, like requests and `/events`. Before the
+    /// first race is won, the preferred address.
+    func channelEndpoint(_ endpoint: DaemonEndpoint) -> DaemonEndpoint {
+        endpoint.at(fleet.current?.link.addressInUse)
     }
 
     /// The `probe` effect: the auth probe first — a 401 on the WebSocket
@@ -1315,6 +1326,7 @@ final class SessionViewModel: ObservableObject {
         let previous = link
         link = next
         presentLink()
+        presentAddresses()
         if case let .refused(problem) = next.state, previous.state != next.state {
             // Only a new scan fixes it: the voice ends too, and the scan
             // sheet opens once.
@@ -2613,9 +2625,10 @@ final class SessionViewModel: ObservableObject {
     /// What "Test connection" reports: `/api/hello`, then `/api/state` with
     /// this phone's ticket.
     func testConnection() async -> Probe {
-        guard let endpoint = settings.endpoint else {
+        guard let preferred = settings.endpoint else {
             return Probe(ok: false, title: "Not paired yet.", lines: ["Scan the pairing code on your computer."])
         }
+        let endpoint = channelEndpoint(preferred)
         let probeClient = DaemonClient(endpoint: endpoint)
         do {
             let hello = try await probeClient.hello()
@@ -2637,14 +2650,23 @@ final class SessionViewModel: ObservableObject {
 // MARK: - Addresses (Settings ▸ Connection ▸ Addresses)
 
 extension SessionViewModel {
-    /// The paired computer's addresses and the one in use.
-    var addressSnapshot: (addresses: [String], current: String) {
-        (settings.computer?.addresses ?? [], settings.address)
+    /// The rows of Settings ▸ Connection ▸ Addresses, from the current
+    /// computer's link; published only when they change.
+    func presentAddresses() {
+        let rows = settings.computer.map {
+            AddressRow.rows(addresses: Self.raceAddresses(preferred: settings.address, $0.addresses), preferred: settings.address, link: link)
+        } ?? []
+        if rows != addressRows { addressRows = rows }
     }
 
+    /// The address the current computer's link uses now, else the
+    /// preferred one (Settings' header).
+    var addressInUse: String { link.onlineAddress ?? settings.address }
+
     /// Checks a typed address by the computer's pin and, when it answers
-    /// with the computer's key, keeps it and switches to it (a router's
-    /// port forward). Nil on success, else the reason in plain words.
+    /// with the computer's key, keeps it (a router's port forward). The link
+    /// races it with the others from then on. Nil on success, else the
+    /// reason in plain words.
     func addAddress(_ text: String) async -> String? {
         guard let computer = settings.computer else { return "Scan the pairing code on your computer first." }
         switch ComputerAddress.normalize(text, known: computer.addresses) {
@@ -2653,24 +2675,27 @@ extension SessionViewModel {
         case let .success(address):
             if let problem = await checkAddress(address) { return problem }
             settings.credentials?.addAddress(address)
-            switchAddress(address)
+            addressesChanged()
             return nil
         }
     }
 
-    /// Checks one of the computer's addresses and switches to it.
-    func useAddress(_ address: String) async -> String? {
-        guard address != settings.address else { return nil }
-        if let problem = await checkAddress(address) { return problem }
-        switchAddress(address)
-        return nil
+    /// Prefer this address: the link tries it first from now on, on every
+    /// network, and moves there if it answers with the computer's key; if it
+    /// does not, the link stays on (or races to) another address. No check
+    /// first: the race is the check.
+    func preferAddress(_ address: String) {
+        guard address != settings.address else { return }
+        settings.address = address
+        fleet.current?.prefer(address)
+        addressesChanged()
     }
 
-    /// Forgets an address that is not in use.
+    /// Forgets an address that is neither preferred nor in use.
     func removeAddress(_ address: String) {
-        guard address != settings.address else { return }
+        guard address != settings.address, address != link.onlineAddress else { return }
         settings.credentials?.removeAddress(address)
-        objectWillChange.send()
+        addressesChanged()
     }
 
     /// Nil when address answers over TLS with the computer's key (the
@@ -2689,10 +2714,12 @@ extension SessionViewModel {
         }
     }
 
-    private func switchAddress(_ address: String) {
-        settings.address = address
+    /// The current computer's address set changed: its link hears it
+    /// (same epoch, same pin) and the screen shows it.
+    private func addressesChanged() {
+        syncFleet()
+        presentAddresses()
         objectWillChange.send()
-        endpointChanged()
     }
 }
 

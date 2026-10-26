@@ -1054,8 +1054,10 @@ truth for "can the app talk to this computer, and if not, why"
   background and back;
 - a probe's `/api/state` reply is applied as the data, so the 30 s
   safety-net refresh replaces the old 5 s poll;
-- switching computers rebuilds nothing; new credentials or a new address
-  start a new epoch, and the old epoch's late replies land nowhere;
+- switching computers rebuilds nothing; new credentials start a new epoch,
+  and the old epoch's late replies land nowhere. A new address set or
+  Prefer does not: the pin, not the address, is the computer
+  (`ComputerModel.setAddresses`, `prefer`);
 - a promoted pin or a certificate expiry learned at sign-in reaches it as
   `credentialsChanged(.pinPromoted)` (`DeviceCredentials.certificateChanged`),
   so the rotation window is current without a relaunch.
@@ -1129,8 +1131,32 @@ argument `-sheepdogNoNetwork` has none (`LinkStatusUITests`).
 Coming to the foreground kicks every link: a probe now, the backoff
 starts over, and the channels reopen once it answers.
 
-Not yet: the race has one address, so the remembered winners stay empty
-(failover is phase 6).
+**Address failover** (design doc 3.3). The link races every address of
+the computer: the store's address (the preferred one, set by Prefer) first,
+then the pairing's (`raceAddresses`), with the remembered winner for the
+current interface ahead of both:
+
+- the race is staggered: the next address starts after 300 ms without an
+  answer, or at once after a failure; the first pinned `GET /api/state`
+  success wins and the probes still in flight are cancelled. The pin is the
+  only check, so any address that verifies is the computer;
+- the winner is remembered per interface (Wi-Fi, cellular, wired; decision
+  10) in `LinkWinnerDefaults` (`computers.linkWinners.<id>`), and removing a
+  computer forgets them;
+- one address at a time: the model passes the link's address with every
+  request and `/events` open (it never relies on the actor having heard
+  `use` first), and tells the attached `/ws` and `/term` clients
+  (`LinkChannelClient.linkUses`) before the reopen that moves them; the
+  session's `channelEndpoint` does the same when it repoints the voice or
+  the terminal after a switch;
+- a pin mismatch on the address in use starts a full race, so another
+  address that verifies wins and the mismatching one is marked; only when
+  nothing verifies is it `untrustedAnswer` (decision 1);
+- Settings ▸ Connection ▸ Addresses renders `AddressRow` (Kit): "In use on
+  Wi-Fi", "Checking…", "Answered with another key", and Preferred. Tapping
+  a row prefers it (`preferAddress`): the link re-races without leaving
+  online and forgets the old winners; there is no separate check. Add still
+  checks an address by the pin before keeping it.
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)

@@ -67,6 +67,15 @@ public struct DaemonEndpoint: Equatable, Sendable {
     /// TLS, pinned, with a ticket: a paired computer.
     public var secure = false
 
+    /// The same computer (its credentials, so the same pin) at another of
+    /// its addresses: the one its link is using
+    /// (docs/dev/design/ios-state-architecture.md 3.3). Itself when
+    /// `address` is nil or not an address.
+    public func at(_ address: String?) -> DaemonEndpoint {
+        guard let address, let moved = DaemonEndpoint(text: address, secure: secure, credentials: credentials) else { return self }
+        return moved
+    }
+
     public var scheme: String { secure ? "https" : "http" }
     public var webSocketScheme: String { secure ? "wss" : "ws" }
 

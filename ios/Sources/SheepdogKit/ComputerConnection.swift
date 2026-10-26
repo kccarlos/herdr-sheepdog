@@ -135,10 +135,11 @@ public actor ComputerConnection {
         }
     }
 
-    /// One request to the address in use.
-    public func request<T>(epoch: Int, _ body: @Sendable (ComputerRequests) async throws -> T) async -> ComputerReply<Result<T, Error>> {
+    /// One request to `address` (the model passes its link's address in
+    /// use), else to the last address the link picked.
+    public func request<T>(epoch: Int, address: String? = nil, _ body: @Sendable (ComputerRequests) async throws -> T) async -> ComputerReply<Result<T, Error>> {
         guard enter(epoch) else { return reply(epoch, .failure(CancellationError())) }
-        guard let address = addressInUse, let client = client(for: address) else {
+        guard let address = address ?? addressInUse, let client = client(for: address) else {
             return reply(epoch, .failure(DaemonError.malformed("no address for this computer")))
         }
         let started = Date()
@@ -156,27 +157,29 @@ public actor ComputerConnection {
 
     // MARK: - /events
 
-    /// Opens `/events` on the address in use, once. It does not retry or
+    /// Opens `/events` on `address` (the link's address in use), once. It does not retry or
     /// wait by itself: a drop is delivered as `.lost`, and the link says
     /// when to open it again (a stream that keeps failing while the
     /// computer answers waits on the link's `reopen` timer).
     ///
     /// `deliver` runs on the main actor, in order, and only for the stream
     /// opened last: an older stream's updates are dropped here.
-    public func openEvents(epoch: Int, since: UInt64, deliver: @escaping @MainActor @Sendable (ComputerReply<ComputerStreamUpdate>) -> Void) {
+    public func openEvents(epoch: Int, address: String? = nil, since: UInt64,
+                           deliver: @escaping @MainActor @Sendable (ComputerReply<ComputerStreamUpdate>) -> Void) {
         guard enter(epoch) else { return }
+        let address = address ?? addressInUse
         eventsTask?.cancel()
         eventsToken += 1
         let token = eventsToken
         eventsTask = Task { [weak self] in
             guard let self else { return }
-            await self.runEvents(token: token, epoch: epoch, since: since, deliver: deliver)
+            await self.runEvents(token: token, epoch: epoch, address: address, since: since, deliver: deliver)
         }
     }
 
-    private func runEvents(token: Int, epoch: Int, since: UInt64,
+    private func runEvents(token: Int, epoch: Int, address: String?, since: UInt64,
                            deliver: @escaping @MainActor @Sendable (ComputerReply<ComputerStreamUpdate>) -> Void) async {
-        guard !Task.isCancelled, token == eventsToken, let address = addressInUse, let client = client(for: address) else { return }
+        guard !Task.isCancelled, token == eventsToken, let address, let client = client(for: address) else { return }
         var failure: LinkError = .transport
         var opened = false
         do {
