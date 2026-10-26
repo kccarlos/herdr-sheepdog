@@ -32,8 +32,9 @@ Limit: 4,000 characters. This draft is about 1,500.
 >   end-to-end encrypted: the relay sees when a notification is sent and
 >   whether it is an approval, never what it says. Your daemon uses it by
 >   default; no account is needed.
-> - The connection to your daemon is plain HTTP. Use it on your home Wi-Fi
->   or Tailscale only.
+> - The connection to your daemon uses TLS, pinned to your computer's own
+>   certificate from the pairing code. Use it on your home Wi-Fi or
+>   Tailscale.
 >
 > Source code, setup and privacy: https://github.com/kccarlos/herdr-sheepdog
 

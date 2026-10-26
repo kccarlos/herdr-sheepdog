@@ -155,8 +155,10 @@ targets:
           UIImageName: LaunchLogo
         UIBackgroundModes:
           - audio
-        # The voice session's Live Activity (SheepdogWidgets). Started and
-        # updated locally; no push updates, so no push-type entitlement.
+        # The voice session's Live Activity (SheepdogWidgets). The app
+        # requests it with pushType .token, so the daemon updates it through
+        # the relay (docs/dev/push.md); aps-environment covers that, so there
+        # is no separate push-type entitlement.
         NSSupportsLiveActivities: true
         # sheepdog://talk starts the voice session, sheepdog://agent/<pane id>
         # opens that agent (SheepdogKit AppRoute).
@@ -166,7 +168,8 @@ targets:
               - sheepdog
         NSMicrophoneUsageDescription: >-
           Sheepdog uses the microphone so you can talk to your coding agents.
-          Your voice goes only to the sheepdog daemon on your own computer; in
+          What you say goes to the sheepdog daemon on your own computer, and
+          from there to the AI voice and orchestrator services you set up. In
           the demo it stays on this device.
         NSSpeechRecognitionUsageDescription: >-
           In the demo, Sheepdog recognises your spoken questions on this
@@ -174,11 +177,13 @@ targets:
         NSCameraUsageDescription: >-
           Sheepdog uses the camera to scan the pairing code that
           "sheepdog setup" or "sheepdog pair" shows on your computer, and to
-          take a photo you attach for an agent, which goes only to your own
-          computer. Nothing is recorded in the background.
+          take a photo you attach for an agent. A photo goes to the sheepdog
+          daemon on your own computer, and from there to the AI services you
+          set up. Nothing is recorded in the background.
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
-          your local network.
+          your local network. What you say or send goes to that computer, and
+          from there to the AI voice and orchestrator services you set up.
         # Every address but loopback is TLS (docs/dev/design/security.md):
         # the app checks the daemon's self-signed certificate by its pin
         # (PinnedTrustDelegate). ATS cannot express that: even after the
