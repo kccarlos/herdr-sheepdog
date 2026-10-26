@@ -1145,7 +1145,7 @@ Order and dependencies:
     - phase 6: the race has one address (the one in use);
     - phase 7: only the New agent sheet uses `RequestFailure`.
 
-- **Phase 4a (done).** Other computers run on `ComputerConnection` and
+- **Phase 4a (done, #419).** Other computers run on `ComputerConnection` and
   `ComputerModel`; `ComputerSession` is deleted.
   - **Decision 7, as built.** `ComputerConnection` is an actor that owns
     the I/O: one immutable client per address (`ComputerRequests`, which
