@@ -1,8 +1,7 @@
 # App Review notes
 
 The text for App Store Connect ▸ App Review Information ▸ Notes, and the facts
-behind it. It comes from the audit in
-the App Store review audit (section 4)
+behind it. It comes from the App Store review audit (section 4)
 and is checked against the code. Nothing has been submitted for App Store
 review or external TestFlight review yet; the CEO decides when. The app
 name is **TBD — pending CEO decision**. The text for TestFlight is in
