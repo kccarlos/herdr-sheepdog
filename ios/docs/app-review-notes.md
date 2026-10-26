@@ -6,6 +6,10 @@ external TestFlight review yet. The CEO decides when to submit. The text
 for TestFlight (beta description, What to Test, Beta App Review notes) is
 in [dev/testflight-metadata.md](dev/testflight-metadata.md).
 
+> **Stale in parts (2026-10-25).** The App Store audit in
+> [../../docs/dev/app-store-review.md](../../docs/dev/app-store-review.md) supersedes these notes
+> (ATS, AI consent, privacy manifest). Its section 4 replaces them when the docs fix lands.
+
 ## Notes for the reviewer (paste into App Store Connect)
 
 > Sheepdog for herdr is a voice front end for **sheepdog**, an open-source
