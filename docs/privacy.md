@@ -42,7 +42,13 @@ logged.
 ## AI services
 
 The app itself talks to no AI service. In real use, the sheepdog daemon on
-your computer does, with the API keys you put in its configuration:
+your computer does, with the API keys you put in its configuration. **The app
+asks you first.** Before the first real voice session or typed line, a screen
+names the services your computer uses (read from the daemon, with a generic list
+when it has not said), says that the developer of sheepdog receives nothing, and
+has **Agree** and **Learn more** (this page). Nothing is sent until you tap
+Agree. The answer is kept on the phone and asked again if the text changes in
+a way that matters. The demo uses no AI service and never asks.
 
 | Service | What it receives | Chosen by |
 |---|---|---|
@@ -69,8 +75,10 @@ promises: read it, especially for free-tier keys.
   deletes its keys from the keychain and the Secure Enclave), or delete the
   app. Delete the phone from the daemon with the device list on the setup page
   or `sheepdog data clear --all`.
-- A switch in Settings that withdraws the AI-services consent inside the app
-  is planned and is not in the app yet. This page is updated when it ships.
+- **Withdraw inside the app:** Settings, Privacy, turn off **Send to AI
+  services**. A running voice session ends, and while the switch is off the app
+  starts no voice session and sends no typed line. Turning it back on, or Agree
+  on the screen the app then shows, is the way back.
 
 ## The daily update check
 

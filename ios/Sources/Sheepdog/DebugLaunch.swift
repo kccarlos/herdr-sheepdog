@@ -39,6 +39,9 @@ enum DebugLaunch {
     /// `-sheepdogAskPrimers`: show the permission primers even when the
     /// UI tests start configured.
     static var askPrimers: Bool { arguments.contains("-sheepdogAskPrimers") }
+    /// `-sheepdogAskConsent`: ask for the AI-services consent even when a
+    /// UI test starts configured (the tests otherwise skip it).
+    static var askConsent: Bool { arguments.contains("-sheepdogAskConsent") }
     /// `-sheepdogOpenDemo`: open the offline demo at launch, for the
     /// redesign screenshots (`RedesignShotsUITests`).
     static var openDemo: Bool { arguments.contains("-sheepdogOpenDemo") }

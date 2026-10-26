@@ -8,12 +8,8 @@ name is **Sheepdog: Voice for AI Agents** (subtitle "Manage coding agents by voi
 [dev/testflight-metadata.md](dev/testflight-metadata.md); the privacy policy
 is [docs/privacy.md](../../docs/privacy.md).
 
-Before pasting, fill `<VIDEO LINK>`. The AI-services consent screen and its
-Settings ▸ Privacy switch are planned and not in the app yet: paste the
-"AI SERVICES AND CONSENT" paragraph only once they ship (until then say that
-the user's computer sends the voice to the AI services the user configured,
-and that removing the computer stops it). The contact name, phone and email
-go in App Store Connect, not in this repository.
+Before pasting, fill `<VIDEO LINK>`. The contact name, phone and email go in
+App Store Connect, not in this repository.
 
 ## Notes for the reviewer (paste into App Store Connect)
 
@@ -38,9 +34,12 @@ Limit: 4,000 characters.
 > AI SERVICES AND CONSENT. In real use, the user's own computer sends the voice and the
 > conversation to the AI services the user configured there with their own API keys (Google
 > Gemini or OpenAI for the voice; Google Gemini, DeepSeek, Anthropic, an OpenAI-compatible
-> service or a local model for answers). Before the first real connection, the app shows a
-> consent screen that names these services. Nothing is sent until the user taps Agree, and
-> Settings > Privacy withdraws consent (once that screen ships; until then removing the computer stops all sharing). The demo uses no AI service and sends nothing.
+> service or a local model for answers). Before the first real voice session or typed line,
+> the app shows a consent screen that names these services, says that the app's developer
+> receives nothing, and has Agree and Learn more (the privacy policy). Nothing is sent until
+> the user taps Agree. Settings > Privacy > "Send to AI services" withdraws consent: the voice
+> stops and typed lines are blocked until the user agrees again. The demo uses no AI service,
+> sends nothing and never asks.
 >
 > THE SHELL AND AGENT WINDOWS. An agent window shows the terminal of a coding agent on the
 > user's own computer. "New shell" opens a terminal there. The app sends keystrokes and draws the

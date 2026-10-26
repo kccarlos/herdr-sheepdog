@@ -281,6 +281,19 @@ it looks exactly like the iPhone app.
   order, ⌘⇧M mute or unmute, and ⌘↩ starts the agent in New agent. Hold ⌘
   to see the list.
 
+## AI services and your consent
+
+The first time you start a real voice session or send a typed line, the app asks
+once: your voice and words go to your own computer, and from there to the AI
+voice and answer services you set up on it (for example Google Gemini, DeepSeek
+or OpenAI). The app's developer receives nothing. Tap **Agree** to go on, or
+**Learn more** for the [privacy policy](privacy.md#ai-services). The demo never asks.
+
+To take it back, open Settings, **Privacy**, and turn off **Send to AI
+services**. A running voice session ends, and the app starts no voice session
+and sends no typed line until you agree again (turn the switch on, or tap
+**Turn it back on** on the screen the app shows). Your agents keep working.
+
 ## Notifications
 
 When an agent needs you, the daemon sends a time-sensitive notification through
