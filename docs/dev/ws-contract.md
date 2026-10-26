@@ -633,6 +633,8 @@ the same key gets the same status and body, with
 (`web.idempotent_replay {path, status}`); a repeat that arrives while the
 first is still running waits for it. Another key, another device or
 another route runs as usual, and so does a request with no key.
+`GET /api/hello` says `"idempotency_keys": true`; the app retries a
+non-idempotent action only on a daemon that says so.
 
 The app sends a fresh key with every action that is not idempotent on
 its own (a typed line, `POST /api/agents`, agent input, the Spaces
@@ -792,7 +794,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?}}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
