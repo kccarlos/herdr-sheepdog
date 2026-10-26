@@ -463,8 +463,41 @@ store is `ComputerStore` ("Settings" below).
 - **Requests on the current computer** go through `current { … }`
   (`ComputerFleet.onCurrent`): the reply comes back only if that computer
   is still current at the same epoch, else it throws (`Moved`, `Stale`)
-  and nothing is applied. An answer by tap goes through the computer's
-  model, current or not.
+  and nothing is applied. That is for reads.
+- **Every tap that changes something** goes through the computer's
+  `ActionRunner` (`ComputerModel.actions`, Kit; design 3.5), captured when
+  it is tapped: the session's `action(key, kind) { … }` picks the current
+  computer then, and the action finishes there even if the app switches
+  (decision 6). That covers answers (the voice's approval card, the other
+  questions' cards, a notification's Approve while the app runs, all under
+  the question's key `answer:<computer>:<question>`, so they join), the
+  typed line, New agent, agent input and keys, agent actions (rename,
+  stop, close, close a shell) and the Spaces actions.
+  - **One per key.** A second run under a key in flight joins the first
+    and gets its result. Keys are per surface (`utter:<computer>`,
+    `spawn:<computer>:<sheet>`); agent keys add a sequence, since every
+    press counts.
+  - **A timeout per kind** on the model's clock (answers 10 s, a typed
+    line 10 s, New agent 60 s, input 5 s, Spaces 30 s), also set on the
+    request, so New agent is not cut at the session's 8 s. No reply
+    (`ActionRunner.isTransport`) retries once: an answer always (it is
+    idempotent by question), a keyed action only on a daemon whose hello
+    says `idempotency_keys`, with the same `Idempotency-Key` (a
+    `@TaskLocal` that `DaemonClient` puts on the POST). A reply, even a
+    refusal, is never retried. The typed line and the New agent sheet keep
+    the key across the user's Try again after no reply, and drop it after
+    any reply.
+  - **The error shows where it was tapped**, as `RequestFailure` with that
+    computer's link: a timeout while it answers is "Taking longer than
+    usual… Try again", an unreachable one says so in the link's words.
+  - **The background.** While any action is in flight the app holds one
+    short background task (`AppActionBackground`, about 30 s), and the
+    link stays up (`LinkDemand.actionsInFlight`).
+  - **Push and removal** go through the computer's model too, on the
+    address its link uses: push registration and status, the
+    notification's Approve (straight to the stored endpoint only when the
+    app has no model yet, a cold launch), and the unpair on Remove, which
+    runs before the store forgets the computer.
 - **Each link** works the same way (see "The connection"): in the
   foreground it streams `/events` and refreshes on each event and every
   30 s; another computer is idle in the background (decision 2). On a constrained
