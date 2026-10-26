@@ -5,7 +5,7 @@ import SwiftUI
 /// applies a change at once (there is no Save or Cancel), the way iOS's own
 /// Settings does.
 enum SettingsPage: Hashable {
-    case daemon, voice, models, languages, notifications, diagnostics, about
+    case daemon, voice, models, languages, notifications, privacy, diagnostics, about
     /// One computer's page (several computers only).
     case computer(String)
 }
@@ -103,6 +103,7 @@ struct SettingsView: View {
                     // none to show, so it does not list them.
                     if !model.isDemo {
                         row("Notifications", "bell", .notifications, id: "settings.notifications")
+                        row("Privacy", "hand.raised", .privacy, id: "settings.privacy")
                     }
                 }
 
@@ -134,6 +135,7 @@ struct SettingsView: View {
                 case .models: ModelsView()
                 case .languages: LanguagesView()
                 case .notifications: NotificationsView()
+                case .privacy: PrivacyView(consent: model.consent)
                 case .diagnostics: DiagnosticsView(meter: meter)
                 case .about: AboutView()
                 case let .computer(id): ComputerSettingsView(id: id, done: done)

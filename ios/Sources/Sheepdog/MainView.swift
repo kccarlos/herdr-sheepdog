@@ -703,6 +703,8 @@ struct SessionChrome: ViewModifier {
             .presentationDetents([.large])
         case let .primer(primer):
             PermissionPrimerView(primer: primer) { model.answerPrimer($0) }
+        case .consent:
+            AIConsentView(model: model)
         case .demo:
             // The offline demo: a second view model on a scripted daemon
             // inside the app, over the real one.

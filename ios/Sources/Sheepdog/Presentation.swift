@@ -19,6 +19,9 @@ enum Presentation: Identifiable, Equatable {
     case primer(PermissionPrimer)
     /// The offline demo.
     case demo
+    /// Before the voice and typed lines go to AI services, once; and the
+    /// way back after they were turned off.
+    case consent
 
     var id: String {
         switch self {
@@ -30,13 +33,14 @@ enum Presentation: Identifiable, Equatable {
         case .connection: "connection"
         case let .primer(primer): "primer.\(primer.rawValue)"
         case .demo: "demo"
+        case .consent: "consent"
         }
     }
 
     /// Full screen (a cover) rather than a sheet.
     var isCover: Bool {
         switch self {
-        case .primer, .demo: true
+        case .primer, .demo, .consent: true
         default: false
         }
     }
