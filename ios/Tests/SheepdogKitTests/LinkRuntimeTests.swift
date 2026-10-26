@@ -70,6 +70,9 @@ final class FakeLinkTransport: LinkTransport {
         }
     }
 
+    /// Probes still hanging and not cancelled, by address.
+    var openProbes: [String] { hanging.filter { !$0.handle.isCancelled }.map(\.address).sorted() }
+
     /// Answers the oldest hanging probe of an address.
     func answer(_ address: String, _ result: LinkProbeResult) {
         guard let index = hanging.firstIndex(where: { $0.address == address && !$0.handle.isCancelled }) else {

@@ -195,6 +195,13 @@ final class LinkChannelRuntimeTests: XCTestCase {
         var opens = 0
         var reopens = 0
         var reporter: LinkChannelReporter?
+        /// The address the link told it to use, and where each open went.
+        var address: String?
+        var openedAt: [String?] = []
+
+        func linkUses(address: String) {
+            self.address = address
+        }
 
         func linkAllows(_ allowed: Bool, reporter: LinkChannelReporter) {
             self.reporter = reporter
@@ -213,6 +220,7 @@ final class LinkChannelRuntimeTests: XCTestCase {
         private func open() {
             isOpen = true
             opens += 1
+            openedAt.append(address)
             reporter?.opened()
         }
 

@@ -169,6 +169,12 @@ public final class VoiceSocket: LinkChannelClient {
         }
     }
 
+    /// The link moved to another of the computer's addresses: the next
+    /// socket opens there (the link's reopen follows).
+    public func linkUses(address: String) {
+        endpoint = endpoint.at(address)
+    }
+
     /// Opens it again: after a loss, or (with a socket still up) after the
     /// interface changed, when the old socket is dead before its ping says
     /// so. The new socket replaces it.

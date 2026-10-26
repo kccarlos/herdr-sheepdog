@@ -152,6 +152,11 @@ public final class TermSocket {
         trust.follow(endpoint.credentials)
     }
 
+    /// The same computer at the address its link uses now (same pin).
+    public func linkUses(address: String) {
+        endpoint = endpoint.at(address)
+    }
+
     // MARK: - Connection
 
     /// Wanted from now on: opens now if the link allows it, else when it

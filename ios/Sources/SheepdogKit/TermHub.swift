@@ -122,6 +122,12 @@ public final class TermHub: LinkChannelClient {
         socket.reopen(reporter: reporter)
     }
 
+    /// The link moved to another address: the next connection opens there,
+    /// and every window keeps its channel for the reopen.
+    public func linkUses(address: String) {
+        socket.linkUses(address: address)
+    }
+
     private func scheduleLinger() {
         guard handlers.isEmpty else { return }
         lingerTask?.cancel()

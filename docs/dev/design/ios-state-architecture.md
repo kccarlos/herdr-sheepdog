@@ -1328,6 +1328,64 @@ Order and dependencies:
       link's address in use (they are the same with one address);
     - the 30 s background task for an answer in flight is phase 7's.
 
+- **Phase 6 (done).** Address failover.
+  - **Every address races.** A paired computer's model gets all its
+    addresses: the store's address first (now the *preferred* one, which
+    only Prefer changes), then the pairing's. The link's machine already
+    had the staggered race, the per-interface winners, `preferAddress` and
+    the partial-then-full race of decision 1 (phase 3); this phase feeds
+    it. The winners per interface are kept per computer in
+    `LinkWinnerDefaults`, and `ComputerStore.remove` forgets them.
+  - **No new epoch for addresses.** The fingerprint that renews a model
+    is the pairing only (device id, paired-at, secure), not the address:
+    a new address or a removed one is `ComputerModel.setAddresses`, Prefer
+    is `prefer`, and both keep the epoch, so an answer in flight survives
+    them. This changes phase 4a's "a new address set is a new epoch":
+    the pin, not the address, is the computer.
+  - **One address for every channel.** The model passes the link's
+    address (the runtime's link, which is current inside effects) with
+    every request and `/events` open, so the actor never serves an
+    address the link has left because a `use` call arrived late. The
+    attached `/ws` and `/term` hear `LinkChannelClient.linkUses` before
+    the reopen that moves them, and on `attach`; the session repoints the
+    voice and the terminal with `channelEndpoint` after a switch, and Test
+    connection uses it too. The Settings header shows the address in use.
+  - **Settings ▸ Connection ▸ Addresses** renders `AddressRow` (Kit,
+    pure): "In use on Wi-Fi" (cellular, a wired network), "Checking…",
+    "Answered with another key", and Preferred. Tapping a row prefers it,
+    with no separate check (the race is the check); the link re-races
+    without leaving online and stays put if the preferred address does not
+    verify. Add still checks a typed address by the pin before keeping it,
+    and no longer switches to it. Remove is for an address neither
+    preferred nor in use. A confirmation dialog with Prefer and Remove was
+    tried and dropped: one tap is simpler, and Remove stays a swipe.
+  - **Tests.** `AddressFailoverTests` (a manual clock and a scripted
+    network): Tailscale down at home, the LAN address wins after the
+    300 ms stagger and the loser is cancelled; on cellular Tailscale wins
+    and back on Wi-Fi the LAN goes first; a mismatch on the address in use
+    goes online on the other; all unreachable backs off, all mismatched is
+    `untrustedAnswer`, one mismatched and one unreachable too, and inside
+    the rotation window it is `renewedWhileAway`; Prefer moves the link and
+    forgets the winners, a dead preferred address leaves it where it was;
+    winners in `UserDefaults` per computer; and a property test (150 seeds
+    × 120 steps of answers, time, paths, Prefer, Retry, failed requests and
+    the app's phase) that every probe open on the network is the current
+    race's and a decided race leaves none. `AddressFailoverRuntimeTests`
+    runs the same through `ComputerModel`: a dead preferred address, and
+    requests, `/events`, `/ws` and `/term` all on the winner; Prefer moves
+    every channel without a new epoch; an added address is raced.
+    `EventsTLSE2ETests.testTheRaceSkipsADeadAddressAndStreamsFromTheLiveOne`
+    pairs with the fixture daemon and races a dead `127.0.0.1:9` against it
+    over pinned TLS. `AddressesUITests` checks the in-use and Preferred
+    labels and that a tap moves them.
+  - **Left for later:**
+    - phase 7: push registration (`PushCoordinator`) still goes to each
+      computer's preferred address, not the address in use; route it
+      through the computer's model like the other requests;
+    - phase 7: the voice's approval card, typed lines and New agent through
+      `ActionRunner` with keys, and the 30 s background task;
+    - a per-Wi-Fi-network memory stays out (decision 10).
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on

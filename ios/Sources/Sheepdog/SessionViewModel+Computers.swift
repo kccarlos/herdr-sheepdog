@@ -22,12 +22,13 @@ extension SessionViewModel {
             for computer in store.computers {
                 guard let endpoint = store.endpoint(for: computer.daemonID) else { continue }
                 next.append(fleetModel(id: computer.daemonID, name: computer.displayName, endpoint: endpoint,
+                                       addresses: Self.raceAddresses(preferred: store.address(for: computer.daemonID), computer.addresses),
                                        certExpires: computer.certExpires, fingerprint: Self.fingerprint(computer, endpoint: endpoint)))
             }
         }
         if let endpoint = settings.endpoint, !next.contains(where: { $0.id == currentComputerID }) {
             next.insert(fleetModel(id: currentComputerID, name: currentComputerName, endpoint: endpoint,
-                                   certExpires: endpoint.credentials?.computer?.certExpires,
+                                   addresses: [endpoint.display], certExpires: endpoint.credentials?.computer?.certExpires,
                                    fingerprint: "\(endpoint.display)|\(endpoint.secure)"), at: 0)
         }
         for gone in fleet.models where !next.contains(where: { $0 === gone }) {
@@ -39,44 +40,59 @@ extension SessionViewModel {
     }
 
     /// The model for one computer: the existing one (renamed, renewed when
-    /// its address or pairing changed) or a new one, started once the app
-    /// has started.
-    private func fleetModel(id: String, name: String, endpoint: DaemonEndpoint, certExpires: Date?, fingerprint: String) -> ComputerModel {
+    /// its pairing changed, given its addresses when only they changed) or a
+    /// new one, started once the app has started.
+    private func fleetModel(id: String, name: String, endpoint: DaemonEndpoint, addresses: [String], certExpires: Date?,
+                            fingerprint: String) -> ComputerModel {
         endpoints[id] = endpoint
         defer { fingerprints[id] = fingerprint }
         if let existing = fleet.model(id) {
             existing.rename(name)
             if fingerprints[id] != fingerprint {
-                existing.renew(addresses: [endpoint.display], certExpires: certExpires)
+                existing.renew(addresses: addresses, certExpires: certExpires)
+            } else {
+                existing.setAddresses(addresses)
             }
             return existing
         }
-        let made = makeComputerModel(id: id, name: name, endpoint: endpoint, certExpires: certExpires)
+        let made = makeComputerModel(id: id, name: name, endpoint: endpoint, addresses: addresses, certExpires: certExpires)
         if started { made.start() }
         return made
     }
 
-    /// What a computer's runtime depends on: its address and its pairing
-    /// (not the pin: a promoted pin is a normal event, `certificateChanged`).
+    /// What a computer's runtime depends on: its pairing. Not the pin (a
+    /// promoted pin is a normal event, `certificateChanged`), and not its
+    /// addresses: the pin, not the address, is the computer, so a new
+    /// address, a removed one or Prefer goes to the link (`setAddresses`,
+    /// `prefer`) without a new epoch.
     private static func fingerprint(_ computer: PairedComputer, endpoint: DaemonEndpoint) -> String {
-        "\(endpoint.display)|\(endpoint.secure)|\(computer.deviceID)|\(computer.pairedAt.timeIntervalSince1970)"
+        "\(endpoint.secure)|\(computer.deviceID)|\(computer.pairedAt.timeIntervalSince1970)"
+    }
+
+    /// The addresses a computer's link races: the preferred one first (the
+    /// store's address, set by Prefer), then the rest in the pairing's order
+    /// (docs/dev/design/ios-state-architecture.md 3.3).
+    static func raceAddresses(preferred: String, _ addresses: [String]) -> [String] {
+        var order = preferred.isEmpty ? [] : [preferred]
+        for address in addresses where !order.contains(address) { order.append(address) }
+        return order
     }
 
     /// One computer's runtime: its connection (one client per address,
     /// made from the computer's endpoint when first used) and its model.
     /// The demo's clients answer from `DemoDaemon` inside the app and never
     /// open a network connection.
-    private func makeComputerModel(id: String, name: String, endpoint: DaemonEndpoint, certExpires: Date?) -> ComputerModel {
+    private func makeComputerModel(id: String, name: String, endpoint: DaemonEndpoint, addresses: [String], certExpires: Date?) -> ComputerModel {
         let endpoints = self.endpoints
         let demoSession = demo == nil ? nil : DemoDaemon.session()
-        let connection = ComputerConnection(computerID: id, address: endpoint.display) { address in
+        let connection = ComputerConnection(computerID: id, address: addresses.first ?? endpoint.display) { address in
             guard let endpoint = endpoints[id] else { return nil }
             let target = address == endpoint.display ? endpoint : DaemonEndpoint(text: address, secure: endpoint.secure, credentials: endpoint.credentials)
             guard let target else { return nil }
             return demoSession.map { DaemonClient(endpoint: target, session: $0) } ?? DaemonClient(endpoint: target)
         }
         let isCurrent = id == currentComputerID
-        let model = ComputerModel(id: id, name: name, addresses: [endpoint.display], certExpires: certExpires,
+        let model = ComputerModel(id: id, name: name, addresses: addresses, certExpires: certExpires,
                                   connection: connection, scheduler: LinkClock(), demand: isCurrent ? currentDemand : otherDemand,
                                   path: fleet.path,
                                   winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil)

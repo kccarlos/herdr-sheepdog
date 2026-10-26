@@ -91,7 +91,7 @@ struct DaemonSettingsView: View {
                 Text(computer.name.isEmpty ? "Your computer" : computer.name)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.ink)
-                Text(model.settings.address)
+                Text(model.addressInUse)
                     .font(.subheadline.monospaced())
                     .foregroundStyle(Theme.muted)
                     .textSelection(.enabled)
@@ -105,8 +105,7 @@ struct DaemonSettingsView: View {
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
             NavigationLink {
-                AddressesView(snapshot: { model.addressSnapshot }, add: { await model.addAddress($0) },
-                              use: { await model.useAddress($0) }, remove: { model.removeAddress($0) })
+                AddressesScreen()
             } label: {
                 LabeledContent("Addresses", value: "\(computer.addresses.count)")
             }
