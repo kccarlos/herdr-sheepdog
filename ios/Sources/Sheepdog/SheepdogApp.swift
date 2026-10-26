@@ -34,6 +34,7 @@ struct SheepdogApp: App {
             // A test that tried Hold to talk must not leave it on for the
             // next one (ReconnectUITests waits for "Listening").
             store.talkMode = .openMic
+            AIConsent(defaults: store.defaults).forget()
             try? FileManager.default.removeItem(at: ConversationCache.standard().directory)
             // The one-time hints are cleared by the view model (all of
             // them, as `-sheepdogResetHints` does).

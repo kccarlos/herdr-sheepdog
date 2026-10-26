@@ -376,6 +376,20 @@ final class SessionViewModel: ObservableObject {
     /// The session's state and decisions. Fed only through `send(_:)`.
     private var core: SessionCore
 
+    /// Whether the person agreed to send their voice and words to AI
+    /// services (`SessionViewModel+Consent.swift`).
+    let consent: AIConsentModel
+
+    /// The demo sends nothing anywhere; debug launches that start
+    /// configured (the UI tests) skip the question unless asked to show it.
+    private static func skipsConsent(demo: Bool) -> Bool {
+        if demo { return true }
+        #if DEBUG
+        if DebugLaunch.address != nil || DebugLaunch.resetState || DebugLaunch.computers != nil { return !DebugLaunch.askConsent }
+        #endif
+        return false
+    }
+
     /// The core's clock: monotonic (uptime), as the reconnect quiet period
     /// and the speaking hold always were.
     private var now: Date { Date(timeIntervalSinceReferenceDate: ProcessInfo.processInfo.systemUptime) }
@@ -384,6 +398,7 @@ final class SessionViewModel: ObservableObject {
         self.settings = settings
         self.cache = cache
         self.demo = demo
+        consent = AIConsentModel(store: AIConsent(defaults: settings.defaults), bypass: Self.skipsConsent(demo: demo != nil))
         let pathSource = Self.makePathSource(demo: demo != nil)
         self.pathSource = pathSource
         fleet = ComputerFleet(path: pathSource.path)
@@ -614,6 +629,7 @@ final class SessionViewModel: ObservableObject {
             presentation.present(.settings)
             return
         }
+        guard requireAIConsent(onAgree: { [weak self] in self?.connect() }) else { return }
         socket.update(endpoint: channelEndpoint(endpoint))
         send(.connectTapped)
     }
@@ -629,6 +645,11 @@ final class SessionViewModel: ObservableObject {
     /// upgrade is almost unreadable, so find out here where the status code
     /// is plain — then the microphone permission.
     private func openSession() async {
+        // Withdrawn while the probe was on its way: no voice session.
+        guard consent.isAllowed else {
+            send(.endTapped)
+            return
+        }
         if fleet.current?.link.state == .noNetwork {
             send(.noNetwork)
             return
@@ -1332,7 +1353,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// `/api/hello` for the current computer, kept on its model.
-    private func loadHello() async {
+    func loadHello() async {
         guard let model = fleet.current, let fetched = try? await current({ try await $0.hello() }) else { return }
         model.hello = fetched
         hello = fetched
@@ -1779,6 +1800,10 @@ final class SessionViewModel: ObservableObject {
     func sendTyped(_ text: String) async -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, settings.endpoint != nil, !sendingTyped else { return false }
+        guard requireAIConsent() else {
+            if consent.decision == .withdrawn { typedError = Self.aiOffMessage }
+            return false
+        }
         sendingTyped = true
         typedError = nil
         defer { sendingTyped = false }
