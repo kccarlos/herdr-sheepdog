@@ -63,6 +63,31 @@ final class SpacesTests: XCTestCase {
         XCTAssertEqual(demo.spaces[0].commands.count, 2, "a one-off line is not saved")
     }
 
+    // MARK: - needs_access
+
+    private func decodeSpaces(extra: String) throws -> SpacesView {
+        let json = #"{"spaces":[],"folders":[],"kinds":[{"kind":"claude","name":"Claude"}],"worktrees":true"# + extra + "}"
+        return try DaemonClient.decoder.decode(SpacesView.self, from: Data(json.utf8))
+    }
+
+    func testNeedsAccessIsEmptyFromAnOlderDaemon() throws {
+        XCTAssertEqual(try decodeSpaces(extra: "").needsAccess, [])
+        XCTAssertEqual(try decodeSpaces(extra: #","needs_access":[]"#).needsAccess, [])
+    }
+
+    func testNeedsAccessDecodesBothReasonsAndNamesTheFolder() throws {
+        let view = try decodeSpaces(extra: #","needs_access":[{"path":"/Users/x/Documents","reason":"denied"},{"path":"/Users/x/Desktop","reason":"slow"}]"#)
+        XCTAssertEqual(view.needsAccess.map(\.reason), [.denied, .slow])
+        XCTAssertEqual(view.needsAccess.map(\.folder), ["Documents", "Desktop"])
+        XCTAssertEqual(view.needsAccess[0].message, "Sheepdog needs access to Documents. On your computer, allow it in System Settings ▸ Privacy & Security ▸ Files and Folders.")
+        XCTAssertEqual(view.needsAccess[1].message, "Your computer is waiting for you to allow access to Desktop.")
+    }
+
+    func testAnUnknownNeedsAccessReasonReadsAsDenied() throws {
+        let view = try decodeSpaces(extra: #","needs_access":[{"path":"/Users/x/Downloads","reason":"later"}]"#)
+        XCTAssertEqual(view.needsAccess, [.init(path: "/Users/x/Downloads", reason: .denied)])
+    }
+
     // MARK: - Choose another folder…
 
     private func folderView() throws -> SpacesView {
