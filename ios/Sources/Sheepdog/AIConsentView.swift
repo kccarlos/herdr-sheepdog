@@ -2,7 +2,7 @@ import SheepdogKit
 import SwiftUI
 
 /// The one-time screen before the first real voice session or typed line:
-/// what goes where, what the app's developer gets (nothing), and how to
+/// what goes where, what the app's developer gets (never your voice, text or screens), and how to
 /// take it back. After a withdrawal the same screen is the way back.
 /// Agree is the only thing that turns sending on.
 struct AIConsentView: View {
@@ -41,11 +41,11 @@ struct AIConsentView: View {
                         .accessibilityIdentifier("consent.lead")
                     VStack(alignment: .leading, spacing: 16) {
                         fact("arrow.up.right", "What is sent",
-                             "What you say and type, and what your agents' screens show. A photo you attach stays on your computer unless an agent sends it on.")
+                             "What you say and type, and what your agents' screens show. A photo you attach goes to your computer, and the coding agent you send it to passes it to its own AI service.")
                         fact("desktopcomputer", "Where it goes",
                              "To your own computer, then to the AI services you set up on it. They have their own terms.")
                         fact("lock.shield", "What we get",
-                             "Nothing. Sheepdog's developer runs no server and never sees your voice, text or screens.")
+                             "Sheepdog's developer never sees your voice, text, photos or screens. The one service we run, a push relay, only forwards notifications to Apple. It sees your phone's notification token, when one is sent and how many agents are waiting, working and done, and cannot read what a notification says.")
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -172,7 +172,7 @@ struct PrivacyView: View {
     }
 
     private var footer: String {
-        let where_ = "Your voice and typed lines go to your own computer and from there to \(model.aiServicesSummary). Sheepdog's developer receives nothing."
+        let where_ = "Your voice and typed lines go to your own computer and from there to \(model.aiServicesSummary). Sheepdog's developer never sees them."
         if consent.isAllowed { return where_ }
         return "Off: no voice session starts and no typed line is sent. Your agents keep working. " + where_
     }
