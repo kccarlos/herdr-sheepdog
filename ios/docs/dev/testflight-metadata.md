@@ -8,7 +8,7 @@ the form. Each quoted block is ready to paste.
 
 Limit: 4,000 characters. This draft is about 1,500.
 
-> Sheepdog for herdr is the iPhone app for sheepdog, an open-source tool
+> Sheepdog: Voice for AI Agents is the iPhone app for sheepdog, an open-source tool
 > that lets you manage the coding agents (Claude Code, Codex and others)
 > running in the herdr terminal on your computer by voice.
 >
