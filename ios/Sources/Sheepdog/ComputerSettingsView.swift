@@ -56,7 +56,7 @@ struct ComputerSettingsView: View {
                             LabeledContent { Text(model.modelsSummary) } label: { Label("Models", systemImage: "cpu") }
                         }
                         NavigationLink(value: SettingsPage.languages) {
-                            LabeledContent { Text(model.daemonSettings?.languagesSummary ?? "—") } label: { Label("Languages", systemImage: "globe") }
+                            LabeledContent { Text(model.settingsModel.daemonSettings?.languagesSummary ?? "—") } label: { Label("Languages", systemImage: "globe") }
                         }
                     } else {
                         Button {

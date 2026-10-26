@@ -77,7 +77,7 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("settings.models")
                         NavigationLink(value: SettingsPage.languages) {
-                            MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
+                            MenuRow(title: "Languages", symbol: "globe", value: model.settingsModel.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
                         if model.shellOffered == false {
@@ -157,8 +157,8 @@ struct SettingsView: View {
             .task {
                 // The update line reads /api/state: make it current.
                 if !model.isDemo { await model.refreshState(quiet: true) }
-                await model.loadVoiceProviders()
-                await model.loadDaemonSettings()
+                await model.settingsModel.loadVoiceProviders()
+                await model.settingsModel.loadDaemonSettings()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 // Back from Control Center's Mic Mode panel.
