@@ -155,8 +155,10 @@ targets:
           UIImageName: LaunchLogo
         UIBackgroundModes:
           - audio
-        # The voice session's Live Activity (SheepdogWidgets). Started and
-        # updated locally; no push updates, so no push-type entitlement.
+        # The voice session's Live Activity (SheepdogWidgets). The app
+        # requests it with pushType .token, so the daemon updates it through
+        # the relay (docs/dev/push.md); aps-environment covers that, so there
+        # is no separate push-type entitlement.
         NSSupportsLiveActivities: true
         # sheepdog://talk starts the voice session, sheepdog://agent/<pane id>
         # opens that agent (SheepdogKit AppRoute).
