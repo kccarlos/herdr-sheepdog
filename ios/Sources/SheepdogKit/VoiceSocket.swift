@@ -169,9 +169,12 @@ public final class VoiceSocket: LinkChannelClient {
         }
     }
 
+    /// Opens it again: after a loss, or (with a socket still up) after the
+    /// interface changed, when the old socket is dead before its ping says
+    /// so. The new socket replaces it.
     public func linkReopens(reporter: LinkChannelReporter) {
         self.reporter = reporter
-        guard wanted, allowed, task == nil else { return }
+        guard wanted, allowed else { return }
         open()
     }
 

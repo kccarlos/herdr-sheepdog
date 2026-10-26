@@ -1197,7 +1197,7 @@ Order and dependencies:
     answers, replies in any order, re-pairing, events and the app's
     phase). `ComputersUITests` waits up to 45 s for the offline row.
 
-- **Phase 4b (done).** The current computer runs on its runtime too.
+- **Phase 4b (done, #423).** The current computer runs on its runtime too.
   - **`ComputerFleet`** (Kit, `@MainActor @Observable`) holds every
     computer's `ComputerModel` (plus one for a bare address or the demo)
     and `currentID`. Switching computers changes that id. The computer the
@@ -1257,6 +1257,76 @@ Order and dependencies:
     - phase 8: the voice leaves the session view model;
     - the session's own `refreshState` does not update the current
       model's copy of the state; the model's next probe does.
+
+- **Phase 5 (done).** The network path, the foreground kick, and one
+  jittered backoff per computer.
+  - **`NWPathMonitor`.** `SystemNetworkMonitor` (Kit) feeds
+    `ComputerFleet.setPath`, which gives every `ComputerModel` the path,
+    a model added later included. No network is `noNetwork` with no
+    retries; the network back or a new interface kicks every link with
+    demand from attempt 0; Low Data Mode is `isConstrained` only
+    (decision 2), so other computers poll every 30 s. Models start with
+    the monitor's last path, and the first interface it reports is not a
+    change, so launch does not kick every link twice. The demo always has
+    Wi-Fi; `-sheepdogNoNetwork` has none.
+  - **An interface change while online** re-checks without leaving
+    online and, once the probe wins, reopens every open channel: a socket
+    on the old interface is dead before its keepalive notices (up to 10 s
+    for `/ws`, 40 s for `/term`, 60 s for `/events`).
+  - **The foreground kick was lost.** `ComputerModel.setAppPhase` sent a
+    `demandChanged` with the new phase before `.appPhase`, so the link saw
+    no change and a `waiting` link kept its backoff timer. It now sends
+    only `.appPhase`.
+  - **`/ws` and `/term` are channels of the link.** `VoiceSocket` and
+    `TermHub` are `LinkChannelClient`s that the session attaches to the
+    current computer's model (`ComputerModel.attach`) and detaches on a
+    switch. Each opens only while it is wanted and the link allows it, and
+    reports through a `LinkChannelReporter` tagged with the epoch and the
+    attachment, so a late callback from an older pairing or a computer the
+    app left is dropped. A channel the link stops allowing closes without
+    reporting a loss (`VoiceSocket.Event.paused`; `TermSocket` keeps its
+    channels for the reopen).
+  - **Removed retry loops:** `VoiceSocket`'s 1–10 s reconnect
+    (`scheduleRetry`, `retryMinimum`, `retryMaximum`), `TermSocket`'s
+    (`retryDelay`, `retryTask`, `nextRetryDelay`), and
+    `ComputerConnection`'s wait before reopening `/events`
+    (`eventFailures`, its `sleep`).
+  - **One schedule.** The link's own `reopen` timer replaces that last
+    wait: the first loss of a channel reopens as soon as the confirming
+    probe answers; a channel lost again within 10 s of opening waits
+    `LinkBackoff` with full jitter, up to the cap, so a `/ws` upgrade or a
+    `/events` stream that keeps failing while REST works cannot spin at
+    the probe's pace. A reopen never runs while a race is in flight.
+  - **The background, strictly** (3.2's table, `LinkDemand.channels`):
+    with Keep listening off the current computer goes idle and `/ws`
+    closes too (it used to stay open, muted); the Live Activity says
+    paused, not "Reconnecting…", while suspended. With Keep listening on,
+    only `/ws` stays.
+  - **The voice's copy.** `SessionCore` lost `ReconnectPolicy` and its
+    `stillReconnecting` banner: past 30 s the chip already says Offline
+    with Try now, and the banner's "still trying every few seconds" no
+    longer described the backoff. Connect with no network ends with "This
+    phone is offline." (`SessionBanner.noNetwork`), not "can't reach" the
+    address under a "No network" chip.
+  - **Tests.** `LinkChannelTests` (the streak and its cap, an interface
+    change, no network and back, Low Data Mode, the background table, the
+    foreground kick) and `LinkChannelRuntimeTests` (a manual path source,
+    a manual clock and the scripted network: Wi-Fi to cellular, no network
+    and back, a model added offline, foreground retry-now, the background
+    rules with both channels, a lost channel reopened by the link alone, a
+    channel that keeps failing, reports from an older pairing or a
+    detached channel). `LinkPropertyTests` now also checks that a reopen
+    happens only on a usable link with no race in flight, once per event,
+    and that the reopen wait stays within the cap.
+    `LinkStatusUITests.testNoNetworkSaysSoAndConnectSaysWhy`. The socket
+    tests that asserted the deleted loops now assert that a lost socket
+    waits for the link.
+  - **Left for later:**
+    - phase 6: the race still has one address, so the per-interface
+      winners stay empty;
+    - the voice still opens `/ws` from the session's endpoint, not the
+      link's address in use (they are the same with one address);
+    - the 30 s background task for an answer in flight is phase 7's.
 
 **What not to do:**
 

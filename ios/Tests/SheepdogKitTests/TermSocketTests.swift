@@ -233,10 +233,17 @@ final class TermSocketTests: XCTestCase {
         XCTAssertEqual(try second.messages().dropFirst().map { $0 },
                        [.open(ch: ch, target: .pane("w1:p2"), mode: .control, cols: 44, rows: 30)],
                        "same channel id, latest size, no takeover; the closed channel stays closed")
-        rig.socket.reopen(reporter: nil)
-        XCTAssertEqual(rig.transports.count, 2, "a reopen while connected does nothing")
         rig.frame(ch, seq: 1, full: false)
         XCTAssertEqual(rig.resyncs, [ch], "a new bridge starts its seq again; a diff first still needs a full frame")
+        // A reopen with the connection up (the interface changed) replaces it.
+        rig.socket.reopen(reporter: nil)
+        XCTAssertEqual(rig.transports.count, 3)
+        XCTAssertTrue(rig.transports[1].isClosed, "the old one is closed")
+        rig.ready()
+        XCTAssertEqual(try rig.last!.messages().dropFirst().map(\.type), [.open], "its channels reopen there")
+        rig.socket.disconnect()
+        rig.socket.reopen(reporter: nil)
+        XCTAssertEqual(rig.transports.count, 3, "nothing reopens what is no longer wanted")
     }
 
     func testAMissedPongDropsTheConnectionForTheLink() async throws {

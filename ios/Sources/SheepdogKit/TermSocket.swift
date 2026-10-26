@@ -183,11 +183,12 @@ public final class TermSocket {
         }
     }
 
-    /// A lost connection, confirmed reachable: open it again if still
-    /// wanted.
+    /// Open it again if still wanted: after a loss, or (with a connection
+    /// still up) after the interface changed, when the old one is dead
+    /// before its ping says so. Its channels reopen on the new one.
     public func reopen(reporter: LinkChannelReporter?) {
         self.reporter = reporter
-        guard wanted, allowed, transport == nil else { return }
+        guard wanted, allowed else { return }
         start()
     }
 
