@@ -143,7 +143,7 @@ public actor ComputerConnection {
     }
 
     /// One request to the address in use.
-    public func request<T: Sendable>(epoch: Int, _ body: @Sendable (ComputerRequests) async throws -> T) async -> ComputerReply<Result<T, Error>> {
+    public func request<T>(epoch: Int, _ body: @Sendable (ComputerRequests) async throws -> T) async -> ComputerReply<Result<T, Error>> {
         guard enter(epoch) else { return reply(epoch, .failure(CancellationError())) }
         guard let address = addressInUse, let client = client(for: address) else {
             return reply(epoch, .failure(DaemonError.malformed("no address for this computer")))

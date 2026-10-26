@@ -45,6 +45,38 @@ public final class ComputerModel {
     /// A verified computer wants a fresh ticket.
     @ObservationIgnored public var onRenewTicket: (() -> Void)?
 
+    // MARK: The current computer
+    //
+    // The session attaches to the current computer's model through these
+    // (docs/dev/design/ios-state-architecture.md 3.1); another computer
+    // leaves them nil.
+
+    /// This computer's conversation, kept with it: switching away and back
+    /// shows it again without reloading, and nothing from another
+    /// computer lands in it.
+    @ObservationIgnored public var conversation = ComputerConversation()
+    /// The last `/api/state` this computer answered, for an instant switch.
+    @ObservationIgnored public private(set) var lastState: DaemonState?
+    /// What `/api/hello` said, and the features its last `bot-ready`
+    /// listed (`term`, agent actions), learned per computer.
+    @ObservationIgnored public var hello: Hello?
+    @ObservationIgnored public var features: [String]?
+    /// Every `/api/state` reply of the current epoch, after the model's own
+    /// copy is updated.
+    @ObservationIgnored public var onState: ((DaemonState) -> Void)?
+    /// Takes the `/events` stream's output instead of the model's own
+    /// refresh on each event (the current computer folds it into the
+    /// conversation).
+    @ObservationIgnored public var onStreamOutput: ((SSEParser.Output) -> Void)?
+    /// The stream (re)opens: what it missed is in the history.
+    @ObservationIgnored public var onStreamOpening: (() -> Void)?
+    /// The stream's own life, for Health ▸ Live updates.
+    @ObservationIgnored public var onLiveUpdates: ((SocketLife) -> Void)?
+    /// Where `/events` resumes (the last event id the conversation saw).
+    @ObservationIgnored public var eventsSince: (() -> UInt64)?
+    /// The stream's own life.
+    @ObservationIgnored public private(set) var liveUpdates: SocketLife = .idle
+
     public enum AnswerFeedback: Equatable, Sendable {
         case tapped
         case answered
@@ -143,6 +175,35 @@ public final class ComputerModel {
         runtime.send(.retryTapped)
     }
 
+    /// Anything else the link hears about this computer: the voice's `/ws`
+    /// opening and dropping, a handshake mismatch.
+    public func send(_ event: LinkEvent) {
+        guard !stopped else { return }
+        runtime.send(event)
+    }
+
+    /// Thrown by `request` when its reply belongs to an epoch (or a
+    /// runtime) that is gone.
+    public struct Stale: LocalizedError, Equatable {
+        public init() {}
+        public var errorDescription: String? { "The computer was paired again before the answer came." }
+    }
+
+    /// One request on the address in use, for the current computer's REST
+    /// calls. Its outcome tells the link. A reply from an older epoch, or
+    /// after `stop`, throws `Stale` and is never applied.
+    public func request<Client, T>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
+        guard !stopped else { throw Stale() }
+        let epoch = epoch
+        let reply = await connection.request(epoch: epoch) { client -> T in
+            guard let typed = client as? Client else { throw DaemonError.malformed("this computer's client cannot do that") }
+            return try await body(typed)
+        }
+        guard reply.epoch == self.epoch, !stopped else { throw Stale() }
+        report(reply)
+        return try reply.value.get()
+    }
+
     public func rename(_ name: String) {
         set(\.name, name)
     }
@@ -163,6 +224,10 @@ public final class ComputerModel {
         let address = addresses.first
         Task { await connection.renew(epoch: epoch, address: address) }
         eventsWanted = false
+        setLiveUpdates(.idle)
+        lastState = nil
+        hello = nil
+        features = nil
         if addresses != link.addresses { runtime.send(.addressesChanged(addresses)) }
         runtime.send(.credentialsChanged(.newPairing(certExpires: certExpires)))
         set(\.agents, [])
@@ -202,6 +267,7 @@ public final class ComputerModel {
             if !eventsWanted { openEvents() }
         } else if eventsWanted {
             eventsWanted = false
+            setLiveUpdates(.idle)
             let connection = connection
             Task { await connection.closeEvents() }
         }
@@ -209,11 +275,15 @@ public final class ComputerModel {
 
     private func openEvents() {
         guard !stopped else { return }
+        let reopening = liveUpdates == .reconnecting
         eventsWanted = true
         let epoch = epoch
         let connection = connection
+        let since = eventsSince?() ?? 0
+        setLiveUpdates(reopening ? .reconnecting : .connecting)
+        onStreamOpening?()
         Task { [weak self] in
-            await connection.openEvents(epoch: epoch, since: 0) { [weak self] update in
+            await connection.openEvents(epoch: epoch, since: since) { [weak self] update in
                 self?.streamUpdate(update)
             }
         }
@@ -223,15 +293,26 @@ public final class ComputerModel {
         guard !stopped, update.epoch == epoch, eventsWanted else { return }
         switch update.value {
         case .opened:
+            guard liveUpdates != .open else { return }
+            setLiveUpdates(.open)
             runtime.send(.channelOpened(.events))
-        case .output(.event):
-            Task { await refresh() }
-        case .output:
-            break
+        case let .output(output):
+            if let onStreamOutput {
+                onStreamOutput(output)
+            } else if case .event = output {
+                Task { await refresh() }
+            }
         case let .lost(error):
             eventsWanted = false
+            setLiveUpdates(.reconnecting)
             runtime.send(.channelLost(.events, error))
         }
+    }
+
+    private func setLiveUpdates(_ life: SocketLife) {
+        guard liveUpdates != life else { return }
+        liveUpdates = life
+        onLiveUpdates?(life)
     }
 
     /// A request's outcome tells the link.
@@ -265,11 +346,13 @@ public final class ComputerModel {
     }
 
     private func apply(_ state: DaemonState) {
+        lastState = state
         set(\.agents, state.agents)
         set(\.questions, state.questions ?? state.pendingAction.map { [$0] } ?? [])
         // Forget the tap state of questions that closed.
         let ids = Set(questions.map(\.id))
         set(\.phases, phases.filter { ids.contains($0.key) || $0.value.isSettledPhase })
+        onState?(state)
     }
 
     // MARK: - Answers
@@ -284,8 +367,15 @@ public final class ComputerModel {
     /// switches to meanwhile (decision 6), and a reply from an older epoch
     /// is dropped.
     public func answer(question id: String, option index: Int) {
-        guard !stopped, let question = questions.first(where: { $0.id == id }),
-              let option = question.options?.first(where: { $0.index == index }) else { return }
+        guard let question = questions.first(where: { $0.id == id }) else { return }
+        answer(question, option: index)
+    }
+
+    /// The same, for a question the caller holds (the current computer's
+    /// list may carry one the last state did not).
+    public func answer(_ question: PendingAction, option index: Int) {
+        let id = question.id
+        guard !stopped, let option = question.options?.first(where: { $0.index == index }) else { return }
         if case .sending = phases[id] { return }
         phases[id] = .sending(option)
         onAnswerFeedback?(.tapped)
@@ -350,6 +440,21 @@ private extension ApprovalFlow.Phase {
         case .open, .sending: return false
         }
     }
+}
+
+/// One computer's conversation, kept on its model: the server's history,
+/// the live bubbles, the orchestrator's activity and where `/events`
+/// resumes.
+public struct ComputerConversation: Sendable {
+    public var history = ConversationHistory()
+    public var reducer = ConversationReducer()
+    public var activity = BrainActivity()
+    public var lastSeq: UInt64 = 0
+    /// The cache was read (or there was none): a switch back does not read
+    /// it again over what is newer.
+    public var loaded = false
+
+    public init() {}
 }
 
 /// The link's probe through the computer's connection: one immutable

@@ -71,8 +71,8 @@ final class SessionViewModel: ObservableObject {
     /// blocked agent gets its own answer buttons. The voice's question,
     /// `pendingAction`, is among them and goes through `approval`.
     @Published private(set) var questions: [PendingAction] = []
-    /// A tapped answer to one of the other questions, by question id.
-    @Published private(set) var questionPhases: [String: ApprovalFlow.Phase] = [:]
+    /// A tapped answer to one of the other questions: its tap state, kept on the current computer's model.
+    func questionPhase(_ id: String) -> ApprovalFlow.Phase { fleet.current?.phase(id) ?? .open(error: nil) }
     /// Agents cards the user opened, by pane id; kept for the session.
     @Published var expandedAgents: Set<String> = []
     /// Every sheet and cover over the main screen: Settings, New agent,
@@ -240,10 +240,7 @@ final class SessionViewModel: ObservableObject {
     var showsComputerLabels: Bool { computerCount > 1 }
 
     /// The other paired computers (`SessionViewModel+Computers.swift`).
-    @Published var others: [ComputerModel] = []
-    /// What each other computer's runtime was made for (its address and
-    /// pairing): a change starts a new epoch (`rebuildOthers`).
-    var otherFingerprints: [String: String] = [:]
+    var others: [ComputerModel] { fleet.others }
     /// The current computer's daemon id ("" for a bare address).
     var currentComputerID: String { settings.computers.currentID ?? "" }
 
@@ -303,15 +300,53 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Collaborators
 
     let settings: SettingsStore
-    private var client: DaemonClient
+    /// Every computer's runtime, the current one included
+    /// (docs/dev/design/ios-state-architecture.md 3.1): switching changes
+    /// one id, and nothing is rebuilt or repointed.
+    let fleet = ComputerFleet()
+    /// What each computer's runtime was made for (its address and pairing);
+    /// a change starts a new epoch. Each connection reads its computer's
+    /// endpoint from `endpoints` when it makes a client.
+    var fingerprints: [String: String] = [:]
+    let endpoints = EndpointBook()
+    /// The current computer's endpoint the session last attached to.
+    private var attachedEndpoint: DaemonEndpoint?
     private var socket: VoiceSocket
     private let audio = AudioEngine()
     /// The Live Activity and the earbud remote (`AwayControls.swift`).
     let away = AwayControls()
-    private var reducer = ConversationReducer()
-    private var history = ConversationHistory()
+    /// The conversation lives on the current computer's model
+    /// (`ComputerModel.conversation`), so a late reply from another one
+    /// never lands in it; these read and write it in place.
+    private var conversation: ComputerConversation {
+        get { fleet.current?.conversation ?? spareConversation }
+        _modify {
+            if let model = fleet.current {
+                yield &model.conversation
+            } else {
+                yield &spareConversation
+            }
+        }
+    }
+    /// The conversation while no computer is set up.
+    private var spareConversation = ComputerConversation()
+    private var reducer: ConversationReducer {
+        get { conversation.reducer }
+        _modify { yield &conversation.reducer }
+    }
+    private var history: ConversationHistory {
+        get { conversation.history }
+        _modify { yield &conversation.history }
+    }
     /// The orchestrator's replies and held pushes, which the history does not carry.
-    private var activity = BrainActivity()
+    private var activity: BrainActivity {
+        get { conversation.activity }
+        _modify { yield &conversation.activity }
+    }
+    private var lastSeq: UInt64 {
+        get { conversation.lastSeq }
+        set { conversation.lastSeq = newValue }
+    }
     /// `approval` (the one thing the views read) is derived from this on
     /// every mutation — a single `didSet`, not a copy hand-written at each
     /// of the half-dozen call sites that used to change `approvalFlow`.
@@ -321,21 +356,13 @@ final class SessionViewModel: ObservableObject {
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
     private var historySyncTask: Task<Void, Never>?
-    private var syncingHistory = false
+    /// The computers whose newest page is being fetched: one sync per
+    /// computer, so a sync still in flight for the computer the app left
+    /// does not hold back the new one's.
+    private var syncingHistory: Set<String> = []
 
-    private var eventTask: Task<Void, Never>?
-    /// `/events` failures in a row, for the small wait before reopening.
-    private var eventFailures = 0
     private var ticker: Task<Void, Never>?
-    /// Runs `link` for the current computer: rebuilt for another computer
-    /// or new credentials (`rebuildLink`), so nothing from the old one
-    /// lands on the new one.
-    private var linkRuntime: LinkRuntime?
-    /// The address `linkRuntime` was built for.
-    private var linkAddress: String?
-    private var linkTransport: DaemonProbeTransport?
     private(set) var appPhase: AppPhase = .active
-    private var lastSeq: UInt64 = 0
 
     /// The session's state and decisions. Fed only through `send(_:)`.
     private var core: SessionCore
@@ -349,9 +376,6 @@ final class SessionViewModel: ObservableObject {
         self.cache = cache
         self.demo = demo
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
-        // The demo's client answers from `DemoDaemon` inside the app and
-        // never opens a network connection.
-        self.client = demo == nil ? DaemonClient(endpoint: endpoint) : DaemonClient(endpoint: endpoint, session: DemoDaemon.session())
         self.socket = VoiceSocket(endpoint: endpoint)
         self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
         talkMode = settings.talkMode
@@ -377,11 +401,11 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         wire()
-        // Every request's outcome tells the link (`requestSucceeded`,
-        // `requestFailed`); the probes have their own clients.
-        client.onOutcome = { [weak self] address, outcome in
-            Task { @MainActor in self?.requestFinished(outcome, address: address) }
-        }
+        // Every computer's runtime, made now (started in `start`), so the
+        // cached conversation loads into the current one.
+        syncFleet()
+        fleet.makeCurrent(settings.endpoint == nil ? nil : currentComputerID)
+        attachedEndpoint = settings.endpoint
         presentation.onFollowup = { [weak self] followup in
             switch followup {
             case let .openWindow(request): self?.windowRequest = request
@@ -395,7 +419,15 @@ final class SessionViewModel: ObservableObject {
         conversationChanged(save: false)
     }
 
-    private var started = false
+    /// Runs a request on the current computer. Its reply comes back only
+    /// if that computer is still current at the same epoch; otherwise it
+    /// throws and nothing is applied (a late reply from the computer the
+    /// app left lands nowhere).
+    func current<T>(_ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
+        try await fleet.onCurrent(as: DaemonClient.self, body)
+    }
+
+    private(set) var started = false
     private var certificateObserver: NSObjectProtocol?
     #if DEBUG
     private var renderProbe: AnyCancellable?
@@ -407,7 +439,8 @@ final class SessionViewModel: ObservableObject {
         // Every window's first appearance calls this (iPad); once is enough.
         guard !started else { return }
         started = true
-        rebuildLink()
+        attachCurrent()
+        for model in fleet.models { model.start() }
         if demo != nil {
             startDemo()
             return
@@ -417,7 +450,6 @@ final class SessionViewModel: ObservableObject {
         // "Talk to Sheepdog") runs now.
         SheepdogIntentBridge.install { [weak self] url in self?.open(url: url) }
         syncAway()
-        rebuildOthers()
         // A promoted pin or a newly learned certificate expiry reaches the
         // computer's link (`credentialsChanged(.pinPromoted)`), so the
         // rotation window is current without a relaunch.
@@ -475,44 +507,63 @@ final class SessionViewModel: ObservableObject {
 
     /// Settings were saved: repoint everything without losing the conversation.
     func endpointChanged() {
-        guard let endpoint = settings.endpoint else { return }
-        PushCoordinator.shared.endpointChanged(from: client.endpoint)
-        let sameDaemon = ConversationCache.key(for: endpoint) == ConversationCache.key(for: client.endpoint)
-        if !sameDaemon { saveCache(now: true) }
-        client.update(endpoint: endpoint)
+        // A re-pair or a new address renews that computer's epoch; a
+        // removed one stops. Every other runtime keeps running.
+        let previous = fleet.current
+        syncFleet()
+        guard let endpoint = settings.endpoint else {
+            fleet.makeCurrent(nil)
+            attachedEndpoint = nil
+            attachCurrent()
+            return
+        }
+        if let old = attachedEndpoint { PushCoordinator.shared.endpointChanged(from: old) }
+        let sameDaemon = attachedEndpoint.map { ConversationCache.key(for: endpoint) == ConversationCache.key(for: $0) } ?? false
+        fleet.makeCurrent(currentComputerID)
+        attachedEndpoint = endpoint
+        // The voice and the terminal follow the current computer.
         socket.update(endpoint: endpoint)
         if demo == nil {
             termHub.update(endpoint: endpoint)
             shellOffered = nil
         }
         banner = nil
-        hello = nil
-        // A new link for the new computer, address or credentials: the old
-        // one's probes and timers stop, and its late replies land nowhere.
-        rebuildLink()
+        hello = fleet.current?.hello
+        attachCurrent()
         if !sameDaemon {
-            // Another daemon, another conversation.
+            // Another computer, its own conversation. The one the app left
+            // keeps running (its answers finish there, decision 6); only its
+            // live bubbles end with the voice.
+            if let previous, previous !== fleet.current {
+                previous.conversation.reducer.clear()
+                saveCache(now: true, model: previous)
+            }
             agents = []
             questions = []
-            reducer.clear()
-            activity.clear()
             cardInbox.clear()
             health.clear()
             brainModels = nil
             daemonSettings = nil
             update = nil
             approvalFlow.reset()
-            loadCache()
+            if !conversation.loaded { loadCache() }
             conversationChanged(save: false)
             // Learned per daemon: a different one gets the benefit of the
             // doubt again rather than staying hidden from the last one's 404.
             conversationResetSupported = true
+            // What the new computer last said, at once.
+            if let state = fleet.current?.lastState { apply(state) }
         }
         if core.connection.wantsConnection {
             disconnect()
             connect()
-        } else {
-            Task { await syncHistory() }
+        }
+        // The new computer's stream may have been open all along (as
+        // another computer it only refreshed on its events), so nothing
+        // reopens to catch the conversation up: sync it here.
+        Task {
+            await syncHistory()
+            await backfillActivity()
         }
     }
 
@@ -523,7 +574,6 @@ final class SessionViewModel: ObservableObject {
             presentation.present(.settings)
             return
         }
-        client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
         send(.connectTapped)
     }
@@ -533,12 +583,16 @@ final class SessionViewModel: ObservableObject {
     /// is plain — then the microphone permission.
     private func openSession() async {
         do {
-            let state = try await client.state()
+            let state = try await current { try await $0.state() }
             apply(state)
-            hello = try? await client.hello()
+            await loadHello()
             await loadVoiceProviders()
         } catch let error as DaemonError {
             send(.probeFailed(error))
+            return
+        } catch is ComputerFleet.Moved, is ComputerModel.Stale {
+            // Asked of the computer the app left: the connect that followed
+            // the switch has its own probe.
             return
         } catch {
             send(.probeFailed(.malformed(error.localizedDescription)))
@@ -594,7 +648,7 @@ final class SessionViewModel: ObservableObject {
     /// A banner's Try again: the link tries now, and the voice starts over
     /// with a clean disconnect (if one is needed) and a fresh connect.
     func reconnect() {
-        linkRuntime?.send(.retryTapped)
+        fleet.current?.retry()
         if core.connection.wantsConnection { disconnect() }
         connect()
     }
@@ -603,7 +657,7 @@ final class SessionViewModel: ObservableObject {
     /// once (a probe, the backoff starts over). A running voice session
     /// starts over too; one that is off stays off.
     func retryLink() {
-        linkRuntime?.send(.retryTapped)
+        fleet.current?.retry()
         if core.connection.wantsConnection {
             disconnect()
             connect()
@@ -706,7 +760,7 @@ final class SessionViewModel: ObservableObject {
     func loadVoiceProviders() async {
         guard settings.endpoint != nil else { return }
         do {
-            let list = try await client.voiceProviders()
+            let list = try await current { try await $0.voiceProviders() }
             #if DEBUG
             // The fixture daemon (`--voice=off`) lists no providers.
             if list?.providers.isEmpty ?? true, DebugLaunch.fakeProviders {
@@ -731,7 +785,7 @@ final class SessionViewModel: ObservableObject {
             guard let self else { return }
             defer { self.switchingProvider = false }
             do {
-                let list = try await self.client.setVoiceProvider(id)
+                let list = try await self.current { try await $0.setVoiceProvider(id) }
                 self.voiceProviders = list
                 self.send(.providerSelected(list.provider))
                 Haptics.tap()
@@ -839,7 +893,7 @@ final class SessionViewModel: ObservableObject {
         switch event {
         case .opened:
             send(.socketOpened)
-            linkRuntime?.send(.channelOpened(.ws))
+            fleet.current?.send(.channelOpened(.ws))
             #if DEBUG
             // The UI tests start configured; a permission alert would sit
             // on top of everything they tap.
@@ -859,16 +913,16 @@ final class SessionViewModel: ObservableObject {
             send(.socketClosed(reason: reason, willRetry: retrying))
             // A drop the socket retries: the link probes once to tell a
             // restart from a refusal (a 401 on the upgrade is unreadable).
-            if retrying { linkRuntime?.send(.channelLost(.ws, .transport)) }
+            if retrying { fleet.current?.send(.channelLost(.ws, .transport)) }
         case let .failed(error, retrying):
             screenStream.socketClosed()
             cardVisibility.socketClosed()
             send(.socketFailed(error, willRetry: retrying))
-            if retrying { linkRuntime?.send(.channelLost(.ws, LinkError(error))) }
+            if retrying { fleet.current?.send(.channelLost(.ws, LinkError(error))) }
         case let .handshake(state):
             send(.handshakeChanged(state))
             if let message = state.mismatchMessage {
-                linkRuntime?.send(.requestFailed(.incompatible(message)))
+                fleet.current?.send(.requestFailed(.incompatible(message)))
             }
             if let message = screenStream.handshake(state) { socket.send(message) }
             if let message = cardVisibility.handshake(state) { socket.send(message) }
@@ -1023,12 +1077,17 @@ final class SessionViewModel: ObservableObject {
             wantsConnection = core.connection.wantsConnection
             // The voice keeps the link up in the background (Keep
             // listening), and Settings says "Talking here".
-            linkRuntime?.send(.demandChanged(linkDemand))
-            // The others back off further while the voice is on here.
-            updateOthersDemand()
+            // The voice keeps the current computer's link up in the
+            // background, and the others back off further while it is on.
+            updateDemands()
             presentLink()
         }
-        if handshake != core.connection.handshake { handshake = core.connection.handshake }
+        if handshake != core.connection.handshake {
+            handshake = core.connection.handshake
+            // The features are learned per computer, so a window opened
+            // while the voice is off still knows about `term`.
+            if case let .ready(_, _, features) = handshake { fleet.current?.features = features }
+        }
         let next = core.sessionState
         if next != state { state = next }
         syncAway()
@@ -1066,12 +1125,11 @@ final class SessionViewModel: ObservableObject {
     /// effort: without it the banner just stops updating while away.
     private func sendActivityToken(_ token: String?) {
         guard demo == nil else { return }
-        let client = self.client
         Task {
             if let token {
-                _ = try? await client.registerLiveActivity(token: token, environment: PushCoordinator.environment)
+                _ = try? await current { try await $0.registerLiveActivity(token: token, environment: PushCoordinator.environment) }
             } else {
-                _ = try? await client.endLiveActivity()
+                _ = try? await current { try await $0.endLiveActivity() }
             }
         }
     }
@@ -1127,87 +1185,94 @@ final class SessionViewModel: ObservableObject {
 
     /// Who needs the current computer's link: the app in front, or the
     /// voice in the background with Keep listening on.
-    private var linkDemand: LinkDemand {
+    var currentDemand: LinkDemand {
         LinkDemand(isCurrent: true, phase: appPhase, voiceOn: wantsConnection, keepListening: settings.keepListeningWhenLocked)
+    }
+
+    /// Each computer's demand: the current one's with the voice, the
+    /// others' (`otherDemand`).
+    func updateDemands() {
+        let others = otherDemand
+        for model in fleet.models {
+            model.setDemand(model === fleet.current ? currentDemand : others)
+        }
     }
 
     private func setAppPhase(_ phase: AppPhase) {
         guard phase != appPhase else { return }
         // Keep listening may have changed since: the demand first, then
-        // the phase (coming to the foreground kicks the link).
-        linkRuntime?.send(.demandChanged(linkDemand))
+        // the phase (coming to the foreground kicks every link). Other
+        // computers stream in the foreground and stop in the background
+        // (decision 2).
+        updateDemands()
         appPhase = phase
-        linkRuntime?.send(.appPhase(phase))
-        // Other computers stream in the foreground and stop in the
-        // background (decision 2).
-        for other in others { other.setAppPhase(phase) }
+        for model in fleet.models { model.setAppPhase(phase) }
     }
 
     /// The current computer's certificate changed under its credentials.
     func currentCertificateChanged(certExpires: Date?) {
-        linkRuntime?.send(.credentialsChanged(.pinPromoted(certExpires: certExpires)))
+        fleet.current?.certificateChanged(certExpires: certExpires)
     }
 
-    /// A new link for the current computer (its address, its credentials),
-    /// started. The old runtime stops first: its probes, timers and late
-    /// replies end with it.
-    private func rebuildLink() {
-        linkRuntime?.stop()
-        linkTransport?.invalidate()
-        linkRuntime = nil
-        linkTransport = nil
-        linkAddress = nil
-        closeEvents()
-        guard let endpoint = settings.endpoint else {
+    /// Attaches the session to the current computer's model: its link, its
+    /// state, its `/events` output. Every other model is detached and runs
+    /// on its own (refreshing on its events). Nothing is rebuilt.
+    func attachCurrent() {
+        let current = fleet.current
+        for model in fleet.models where model !== current { detach(model) }
+        updateDemands()
+        guard let model = current else {
             linkChanged(ComputerLink(addresses: []))
+            setLiveUpdates(.idle)
             return
         }
-        // The address in use only: switching between a computer's
-        // addresses (failover) is phase 6. The demo's probe answers from
-        // `DemoDaemon` and never leaves the app.
-        let address = endpoint.display
-        let demoSession = demo == nil ? nil : DemoDaemon.session()
-        let transport = DaemonProbeTransport { candidate in
-            let target = candidate == address ? endpoint : DaemonEndpoint(text: candidate, secure: endpoint.secure, credentials: endpoint.credentials)
-            guard let target else { return nil }
-            return demoSession.map { DaemonClient(endpoint: target, session: $0) } ?? DaemonClient(endpoint: target)
-        }
-        let runtime = LinkRuntime(
-            computerID: currentComputerID,
-            link: ComputerLink(addresses: [address], certExpires: endpoint.credentials?.computer?.certExpires, demand: linkDemand),
-            transport: transport,
-            scheduler: LinkClock(),
-            winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil
-        )
-        runtime.onChange = { [weak self, weak runtime] link in
-            guard let self, let runtime, self.linkRuntime === runtime else { return }
+        // Each hook checks that its model is still current: a late call
+        // from the computer the app left lands nowhere.
+        model.onLinkChange = { [weak self, weak model] link in
+            guard let self, let model, self.fleet.current === model else { return }
             self.linkChanged(link)
         }
-        runtime.onState = { [weak self, weak runtime] state in
-            guard let self, let runtime, self.linkRuntime === runtime else { return }
+        model.onState = { [weak self, weak model] state in
+            guard let self, let model, self.fleet.current === model else { return }
             self.apply(state)
-            if self.hello == nil { Task { self.hello = try? await self.client.hello() } }
+            if self.hello == nil { Task { await self.loadHello() } }
         }
-        runtime.onChannels = { [weak self, weak runtime] channels in
-            guard let self, let runtime, self.linkRuntime === runtime else { return }
-            // `/events` is the link's; `/ws` and `/term` keep their own
-            // reconnects until phase 5 and only report to it.
-            if channels.contains(.events) {
-                if self.eventTask == nil { self.openEvents() }
-            } else {
-                self.closeEvents()
+        model.onStreamOutput = { [weak self, weak model] output in
+            guard let self, let model, self.fleet.current === model else { return }
+            self.handle(event: output)
+        }
+        model.onStreamOpening = { [weak self, weak model] in
+            guard let self, let model, self.fleet.current === model else { return }
+            // Every (re)open: what the stream missed is in the history
+            // too, and a page is cheaper than a long replay to read.
+            Task {
+                await self.syncHistory()
+                await self.backfillActivity()
             }
         }
-        runtime.onReopen = { [weak self, weak runtime] channel in
-            guard let self, let runtime, self.linkRuntime === runtime, channel == .events else { return }
-            self.openEvents()
+        model.onLiveUpdates = { [weak self, weak model] life in
+            guard let self, let model, self.fleet.current === model else { return }
+            self.setLiveUpdates(life)
         }
-        runtime.onRenewTicket = { endpoint.credentials?.dropTicket() }
-        linkRuntime = runtime
-        linkTransport = transport
-        linkAddress = address
-        linkChanged(runtime.link)
-        runtime.send(.demandChanged(linkDemand))
+        model.eventsSince = { [weak model] in model.map { Self.resumeID($0.conversation) } ?? 0 }
+        linkChanged(model.link)
+        setLiveUpdates(model.liveUpdates)
+    }
+
+    private func detach(_ model: ComputerModel) {
+        model.onLinkChange = nil
+        model.onState = nil
+        model.onStreamOutput = nil
+        model.onStreamOpening = nil
+        model.onLiveUpdates = nil
+        model.eventsSince = nil
+    }
+
+    /// `/api/hello` for the current computer, kept on its model.
+    private func loadHello() async {
+        guard let model = fleet.current, let fetched = try? await current({ try await $0.hello() }) else { return }
+        model.hello = fetched
+        hello = fetched
     }
 
     /// The link moved: what the screen shows follows, and the transitions
@@ -1231,95 +1296,15 @@ final class SessionViewModel: ObservableObject {
         if presented != linkPresentation { linkPresentation = presented }
     }
 
-    /// A request through `client` finished: the link hears about it.
-    private func requestFinished(_ outcome: DaemonClient.RequestOutcome, address: String) {
-        // A late reply from the computer (or address) the app left: not
-        // this link's business.
-        guard address == linkAddress else { return }
-        switch outcome {
-        case let .succeeded(rtt): linkRuntime?.send(.requestSucceeded(rtt: rtt))
-        case let .failed(error): linkRuntime?.send(.requestFailed(error))
-        }
-    }
-
-    /// Opens `/events` once. It does not retry by itself: a drop tells the
-    /// link (`channelLost`), which probes and says when to open it again
-    /// (`reopen`, or the channel set once it is online again).
-    private func openEvents() {
-        eventTask?.cancel()
-        let failures = eventFailures
-        eventTask = Task { [weak self] in
-            // A stream that keeps failing while the computer answers waits
-            // a little longer each time, so it cannot spin.
-            if failures > 0 {
-                let wait = LinkBackoff.ceiling(attempt: failures, cap: LinkBackoff.cap)
-                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-            }
-            guard let self, !Task.isCancelled else { return }
-            // Every (re)open: what the stream missed is in the history
-            // too, and a page is cheaper than a long replay to read.
-            Task {
-                await self.syncHistory()
-                await self.backfillActivity()
-            }
-            self.setLiveUpdates(failures > 0 ? .reconnecting : .connecting)
-            var failure: LinkError = .transport
-            do {
-                let stream = self.client.events(since: self.resumeID, onOpen: { [weak self] in
-                    Task { @MainActor in self?.eventsOpened() }
-                })
-                for try await output in stream {
-                    if Task.isCancelled { return }
-                    self.eventsOpened()
-                    // A stream that delivers is healthy: the next drop
-                    // reopens without waiting.
-                    if case .event = output { self.eventFailures = 0 }
-                    self.handle(event: output)
-                }
-            } catch {
-                if Task.isCancelled { return }
-                SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
-                #if DEBUG
-                if DebugLaunch.showStreamErrors {
-                    self.reducer.apply(.notice("event stream: \(error)"))
-                    self.conversationChanged()
-                }
-                #endif
-                failure = LinkError(error)
-            }
-            // Ended or failed, not cancelled by the app: tell the link.
-            if Task.isCancelled { return }
-            self.eventTask = nil
-            self.eventFailures += 1
-            self.setLiveUpdates(.reconnecting)
-            self.linkRuntime?.send(.channelLost(.events, failure))
-        }
-    }
-
-    private func eventsOpened() {
-        // Not a reset of `eventFailures`: a stream that opens and drops at
-        // once would otherwise reopen in a tight loop.
-        guard eventTask != nil, liveUpdates != .open else { return }
-        setLiveUpdates(.open)
-        linkRuntime?.send(.channelOpened(.events))
-    }
-
-    private func closeEvents() {
-        eventTask?.cancel()
-        eventTask = nil
-        eventFailures = 0
-        setLiveUpdates(.idle)
-    }
-
     private func setLiveUpdates(_ life: SocketLife) {
         if liveUpdates != life { liveUpdates = life }
     }
 
     /// Where `/events` resumes: the last id seen (kept in the cache across
     /// launches), else the newest history item's.
-    private var resumeID: UInt64 {
-        if lastSeq > 0 { return lastSeq }
-        if let newest = history.newestID, newest > 0 { return UInt64(newest) }
+    private static func resumeID(_ conversation: ComputerConversation) -> UInt64 {
+        if conversation.lastSeq > 0 { return conversation.lastSeq }
+        if let newest = conversation.history.newestID, newest > 0 { return UInt64(newest) }
         return 0
     }
 
@@ -1440,8 +1425,8 @@ final class SessionViewModel: ObservableObject {
     func refreshState(quiet: Bool) async -> Bool {
         guard settings.endpoint != nil else { return false }
         do {
-            apply(try await client.state())
-            if hello == nil { hello = try? await client.hello() }
+            apply(try await current { try await $0.state() })
+            if hello == nil { await loadHello() }
             if !quiet { banner = nil }
             return true
         } catch let error as DaemonError {
@@ -1499,7 +1484,6 @@ final class SessionViewModel: ObservableObject {
         questionsSeen = true
         // The Live Activity's rows and counts.
         if agentsChanged || questionsChanged { syncAway() }
-        assign(\.questionPhases, questionPhases.filter { id, _ in open.contains { $0.id == id } })
         assign(\.brain, state.brain)
         assign(\.stateVoiceProvider, state.voiceProvider)
         assign(\.stateVoiceModel, state.voiceModel)
@@ -1532,7 +1516,7 @@ final class SessionViewModel: ObservableObject {
     /// Loads the newest page and merges it: the server's copy wins, and the
     /// finished transcript bubbles it now has stop showing twice.
     func syncHistory() async {
-        guard settings.endpoint != nil, !syncingHistory else { return }
+        guard settings.endpoint != nil, let syncing = fleet.current?.id, !syncingHistory.contains(syncing) else { return }
         // A bubble still growing on /ws is already an item on the server
         // (from its first fragment); swapping now would show it twice. The
         // dog's `out` bubble often closes only when the next turn starts.
@@ -1540,11 +1524,11 @@ final class SessionViewModel: ObservableObject {
             scheduleHistorySync()
             return
         }
-        syncingHistory = true
-        defer { syncingHistory = false }
+        syncingHistory.insert(syncing)
+        defer { syncingHistory.remove(syncing) }
         let sent = Date()
         do {
-            let page = try await client.conversation(limit: 200)
+            let page = try await current { try await $0.conversation(limit: 200) }
             history.applyNewest(page, requestedAt: sent)
             reducer.dropSettledSpeech(before: sent)
             conversationChanged()
@@ -1564,7 +1548,7 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil else { return }
         var changed = false
         for type in ["voice.tool_result", "voice.push_"] {
-            guard let events = try? await client.recentEvents(type: type, limit: 100) else { continue }
+            guard let events = try? await current({ try await $0.recentEvents(type: type, limit: 100) }) else { continue }
             for event in events where activity.fold(event) { changed = true }
         }
         if changed { conversationChanged(save: false) }
@@ -1587,7 +1571,7 @@ final class SessionViewModel: ObservableObject {
         loadingOlder = true
         defer { loadingOlder = false }
         do {
-            let page = try await client.conversation(limit: 100, before: before)
+            let page = try await current { try await $0.conversation(limit: 100, before: before) }
             history.applyOlder(page)
             conversationChanged()
         } catch let error as DaemonError {
@@ -1625,13 +1609,13 @@ final class SessionViewModel: ObservableObject {
         async let models: Void = loadBrainModels()
         async let chattiness: Void = loadDaemonSettings()
         async let providers: Void = loadVoiceProviders()
-        if hello == nil { hello = try? await client.hello() }
+        if hello == nil { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
         var next = health
         for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
                      "voice.push_", "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
             let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
-            guard let events = try? await client.recentEvents(type: type, limit: limit) else { continue }
+            guard let events = try? await current({ try await $0.recentEvents(type: type, limit: limit) }) else { continue }
             for event in events { next.fold(event) }
         }
         if next != health { health = next }
@@ -1640,7 +1624,7 @@ final class SessionViewModel: ObservableObject {
 
     func loadBrainModels(provider: String? = nil) async {
         do {
-            brainModels = try await client.brainModels(provider: provider)
+            brainModels = try await current { try await $0.brainModels(provider: provider) }
             brainError = nil
         } catch let error as DaemonError {
             brainError = error.message
@@ -1658,7 +1642,7 @@ final class SessionViewModel: ObservableObject {
             guard let self else { return }
             defer { self.switchingBrain = false }
             do {
-                self.brainModels = try await self.client.setBrainModel(provider: provider, model: model)
+                self.brainModels = try await self.current { try await $0.setBrainModel(provider: provider, model: model) }
                 Haptics.tap()
             } catch let error as DaemonError {
                 self.brainError = error.message
@@ -1671,7 +1655,7 @@ final class SessionViewModel: ObservableObject {
 
     func loadDaemonSettings() async {
         do {
-            daemonSettings = try await client.settings()
+            daemonSettings = try await current { try await $0.settings() }
             settingsError = nil
         } catch let error as DaemonError {
             // No orchestrator is a 503: hide the control, say why.
@@ -1687,7 +1671,7 @@ final class SessionViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                self.daemonSettings = try await self.client.setChattiness(level)
+                self.daemonSettings = try await self.current { try await $0.setChattiness(level) }
                 self.settingsError = nil
                 Haptics.tap()
             } catch let error as DaemonError {
@@ -1710,7 +1694,7 @@ final class SessionViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                self.daemonSettings = try await self.client.setLanguages(codes)
+                self.daemonSettings = try await self.current { try await $0.setLanguages(codes) }
                 self.settingsError = nil
                 Haptics.tap()
             } catch {
@@ -1735,7 +1719,7 @@ final class SessionViewModel: ObservableObject {
         typedError = nil
         defer { sendingTyped = false }
         do {
-            _ = try await client.sendUtterance(text)
+            _ = try await current { try await $0.sendUtterance(text) }
             typedSent += 1
             Haptics.tap()
             if !core.connection.wantsConnection {
@@ -1775,37 +1759,37 @@ final class SessionViewModel: ObservableObject {
     /// daemon is configured.
     func agentScreen(paneID: String, hash: String?) async throws -> AgentScreen? {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.agentScreen(paneID: paneID, hash: hash)
+        return try await current { try await $0.agentScreen(paneID: paneID, hash: hash) }
     }
 
     /// `POST /api/agents/{pane}/input` with a prompt.
     func agentInput(paneID: String, text: String) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.agentInput(paneID: paneID, text: text)
+        return try await current { try await $0.agentInput(paneID: paneID, text: text) }
     }
 
     /// `POST /api/agents/{pane}/input` with keys.
     func agentInput(paneID: String, keys: [AgentKey]) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.agentInput(paneID: paneID, keys: keys)
+        return try await current { try await $0.agentInput(paneID: paneID, keys: keys) }
     }
 
     /// `GET /api/agents/{pane}/changes` (the changes view).
     func agentChanges(paneID: String) async throws -> AgentChanges? {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.agentChanges(paneID: paneID)
+        return try await current { try await $0.agentChanges(paneID: paneID) }
     }
 
     /// `GET /api/agents/{pane}/changes/{path}`.
     func agentDiff(paneID: String, path: String) async throws -> FileDiff? {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.agentDiff(paneID: paneID, path: path)
+        return try await current { try await $0.agentDiff(paneID: paneID, path: path) }
     }
 
     /// `POST /api/agents/{pane}/attachments`.
     func uploadAttachment(paneID: String, data: Data, fileName: String, mimeType: String) async throws -> AttachmentReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await client.uploadAttachment(paneID: paneID, data: data, fileName: fileName, mimeType: mimeType)
+        return try await current { try await $0.uploadAttachment(paneID: paneID, data: data, fileName: fileName, mimeType: mimeType) }
     }
 
     // MARK: - Live agent window (/term)
@@ -1850,25 +1834,19 @@ final class SessionViewModel: ObservableObject {
         return TermHub(endpoint: settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1"))
     }
 
-    /// The features the last `bot-ready` listed, per daemon, so a window
-    /// opened while the voice session is not connected still knows about
-    /// `term`.
-    private var rememberedFeatures: [String: [String]] = [:]
-
     /// Whether the daemon has the user's own agent actions (New agent,
     /// Rename, Stop, Close).
     var agentActionsAvailable: Bool {
         if demo != nil { return true }
-        let key = settings.endpoint.map(ConversationCache.key(for:)) ?? ""
         if case let .ready(_, _, features) = handshake { return features.contains(AgentAction.feature) }
-        return rememberedFeatures[key]?.contains(AgentAction.feature) ?? false
+        return fleet.current?.features?.contains(AgentAction.feature) ?? false
     }
 
     /// Runs `body` against the daemon (the agent actions). Throws when no
     /// daemon is configured.
-    func daemon<T>(_ body: (DaemonClient) async throws -> T) async throws -> T {
+    func daemon<T>(_ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await body(client)
+        return try await current(body)
     }
 
     /// What a failed request says where it was made: a timeout while the
@@ -1877,12 +1855,11 @@ final class SessionViewModel: ObservableObject {
         RequestFailure(error, linkUsable: link.isUsable, name: showsComputerLabels ? currentComputerName : nil)
     }
 
-    /// Whether the agent window can go live (`/term`).
+    /// Whether the agent window can go live (`/term`). A pure read: the
+    /// features are remembered where the handshake lands (`publish`).
     var termAvailability: TermAvailability {
         if demo != nil { return .yes }
-        let key = settings.endpoint.map(ConversationCache.key(for:)) ?? ""
-        if case let .ready(_, _, features) = handshake { rememberedFeatures[key] = features }
-        return TermAvailability.from(handshake: handshake, remembered: rememberedFeatures[key])
+        return TermAvailability.from(handshake: handshake, remembered: fleet.current?.features)
     }
 
     // MARK: - New conversation
@@ -1898,7 +1875,7 @@ final class SessionViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let response = try await self.client.resetConversation(via: "app")
+                let response = try await self.current { try await $0.resetConversation(via: "app") }
                 self.conversationResetSupported = ConversationResetAvailability(response: response).showsAction
                 guard response != nil else {
                     self.show(Banner(tone: .info, message: "This daemon doesn't have New conversation yet.", hint: nil, retryTitle: nil))
@@ -1922,7 +1899,9 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    /// Reads the current computer's cached conversation into its model.
     private func loadCache() {
+        conversation.loaded = true
         guard let endpoint = settings.endpoint, let snapshot = cache.load(for: endpoint) else {
             history = ConversationHistory()
             lastSeq = 0
@@ -1932,10 +1911,14 @@ final class SessionViewModel: ObservableObject {
         lastSeq = UInt64(max(0, snapshot.lastEventID ?? 0))
     }
 
-    private func saveCache(now: Bool) {
-        guard let endpoint = settings.endpoint else { return }
-        saveTask?.cancel()
-        let snapshot = ConversationSnapshot(endpoint: endpoint, history: history, lastEventID: lastSeq > 0 ? Int64(clamping: lastSeq) : nil)
+    /// Writes a computer's conversation (the current one's by default) to
+    /// its own cache, keyed by its own endpoint.
+    private func saveCache(now: Bool, model: ComputerModel? = nil) {
+        let target = model ?? fleet.current
+        guard let endpoint = target.flatMap({ endpoints[$0.id] }) ?? settings.endpoint else { return }
+        let saved = target?.conversation ?? spareConversation
+        if model == nil { saveTask?.cancel() }
+        let snapshot = ConversationSnapshot(endpoint: endpoint, history: saved.history, lastEventID: saved.lastSeq > 0 ? Int64(clamping: saved.lastSeq) : nil)
         let cache = self.cache
         let write = {
             do { try cache.save(snapshot, for: endpoint) } catch {
@@ -2070,7 +2053,7 @@ final class SessionViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                if try await self.client.sendFeedback(mark) != nil {
+                if try await self.current { try await $0.sendFeedback(mark) } != nil {
                     Haptics.answered()
                     self.showFeedbackNotice("Noted")
                 } else {
@@ -2100,7 +2083,7 @@ final class SessionViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let spoken = try await self.client.answerPending(id: pendingID, option: option.index)
+                let spoken = try await self.current { try await $0.answerPending(id: pendingID, option: option.index) }
                 self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken))
                 Haptics.answered()
             } catch DaemonError.pendingGone {
@@ -2109,6 +2092,10 @@ final class SessionViewModel: ObservableObject {
             } catch let error as DaemonError {
                 self.approvalFlow.failed(pendingID: pendingID, message: error.message)
                 Haptics.answerFailed()
+            } catch is ComputerFleet.Moved, is ComputerModel.Stale {
+                // The answer went to the computer the app left; its card
+                // there follows that computer's next state.
+                return
             } catch {
                 self.approvalFlow.failed(pendingID: pendingID, message: error.localizedDescription)
             }
@@ -2124,7 +2111,7 @@ final class SessionViewModel: ObservableObject {
     func questionCard(for paneID: String) -> ApprovalFlow.Card? {
         if let approval, approval.pending.paneID == paneID { return approval }
         guard let question = questions.first(where: { $0.paneID == paneID }) else { return nil }
-        return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+        return ApprovalFlow.Card(pending: question, phase: questionPhase(question.id))
     }
 
     /// The questions floating above the capsule on the Conversation: every
@@ -2147,7 +2134,7 @@ final class SessionViewModel: ObservableObject {
         let list = QuestionOrder.floating(open: open, voice: settledVoice, voiceSettled: settledVoice != nil)
         let local = list.map { question in
             if let approval, approval.pending.id == question.id { return approval }
-            return ApprovalFlow.Card(pending: question, phase: questionPhases[question.id] ?? .open(error: nil))
+            return ApprovalFlow.Card(pending: question, phase: questionPhase(question.id))
         }
         // Then the other computers' questions, oldest first.
         return local + remoteQuestions.map { remote in
@@ -2175,28 +2162,11 @@ final class SessionViewModel: ObservableObject {
             answer(option: index)
             return
         }
-        guard let question = questions.first(where: { $0.id == id }),
-              let option = question.options?.first(where: { $0.index == index }) else { return }
-        if case .sending = questionPhases[id] { return }
-        questionPhases[id] = .sending(option)
-        Haptics.tap()
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let spoken = try await self.client.answerPending(id: id, option: index)
-                self.questionPhases[id] = .answered(outcome: "Answered: \(option.label)", spoken: spoken.isEmpty ? nil : spoken)
-                Haptics.answered()
-            } catch DaemonError.pendingGone {
-                self.questionPhases[id] = .gone(message: ApprovalFlow.goneMessage)
-                Haptics.answerFailed()
-            } catch let error as DaemonError {
-                self.questionPhases[id] = .open(error: error.message)
-                Haptics.answerFailed()
-            } catch {
-                self.questionPhases[id] = .open(error: error.localizedDescription)
-            }
-            await self.refreshState(quiet: true)
-        }
+        guard let question = questions.first(where: { $0.id == id }) else { return }
+        // Through the current computer's model, like another computer's:
+        // the answer finishes there and lands on its card even if the app
+        // switches meanwhile (decision 6), and its refresh follows.
+        fleet.current?.answer(question, option: index)
     }
 
     // MARK: - Banners
@@ -2263,7 +2233,7 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil else { return nil }
         let start = Date()
         do {
-            _ = try await client.hello()
+            _ = try await current { try await $0.hello() }
             return Date().timeIntervalSince(start)
         } catch {
             return nil
@@ -2391,8 +2361,8 @@ final class SessionViewModel: ObservableObject {
         case .probe:
             Task {
                 do {
-                    apply(try await client.state())
-                    hello = try? await client.hello()
+                    apply(try await current { try await $0.state() })
+                    await loadHello()
                 } catch {
                     send(.probeFailed(.malformed(error.localizedDescription)))
                     return
@@ -2569,7 +2539,7 @@ final class SessionViewModel: ObservableObject {
     /// The list of computers changed (paired, removed, renamed, moved).
     func computersChanged() {
         computerCount = settings.computers.count
-        rebuildOthers()
+        syncFleet()
         // A second computer puts names in the status copy.
         presentLink()
         // Every computer gets this phone's push token, and the extension

@@ -2,41 +2,58 @@ import Foundation
 import SheepdogKit
 
 /// Several computers (docs/dev/design/app-redesign.md sections 3 and 4,
-/// option A): the session is the current computer's; each other paired
-/// computer is a `ComputerModel` (docs/dev/design/ios-state-architecture.md
-/// 3.1) that shows its agents and questions and answers them by tap.
-/// Nothing from another computer reaches the current daemon or the voice.
+/// option A, and docs/dev/design/ios-state-architecture.md 3.1): every
+/// paired computer is a `ComputerModel` in `fleet`, the current one
+/// included. The session attaches to the current one (its conversation,
+/// its `/events`, the voice); each other one shows its agents and
+/// questions and answers them by tap. Nothing from another computer
+/// reaches the current daemon or the voice.
 extension SessionViewModel {
-    /// Keeps one started `ComputerModel` per other computer, in the
-    /// store's order. Called on start and whenever the list or the current
-    /// computer changes. A computer whose address or pairing changed keeps
-    /// its model and starts a new epoch, so nothing asked before lands.
-    func rebuildOthers() {
-        guard demo == nil else { return }
+    /// Keeps one model per paired computer, in the store's order, plus one
+    /// for a bare address or the demo (a computer without a record). Called
+    /// on launch and whenever the list, the current computer or its address
+    /// changes. A computer whose address or pairing changed keeps its model
+    /// and starts a new epoch, so nothing asked before lands; a removed one
+    /// stops.
+    func syncFleet() {
+        var next: [ComputerModel] = []
         let store = settings.computers
-        let current = store.currentID
-        var kept: [ComputerModel] = []
-        for computer in store.computers where computer.daemonID != current {
-            guard let endpoint = store.endpoint(for: computer.daemonID) else { continue }
-            let fingerprint = Self.fingerprint(computer, endpoint: endpoint)
-            if let existing = others.first(where: { $0.id == computer.daemonID }) {
-                existing.rename(computer.displayName)
-                if otherFingerprints[existing.id] != fingerprint {
-                    existing.renew(addresses: [endpoint.display], certExpires: computer.certExpires)
-                }
-                kept.append(existing)
-            } else {
-                let made = makeComputerModel(computer, endpoint: endpoint)
-                made.start()
-                kept.append(made)
+        if demo == nil {
+            for computer in store.computers {
+                guard let endpoint = store.endpoint(for: computer.daemonID) else { continue }
+                next.append(fleetModel(id: computer.daemonID, name: computer.displayName, endpoint: endpoint,
+                                       certExpires: computer.certExpires, fingerprint: Self.fingerprint(computer, endpoint: endpoint)))
             }
-            otherFingerprints[computer.daemonID] = fingerprint
         }
-        for gone in others where !kept.contains(where: { $0 === gone }) {
-            gone.stop()
-            otherFingerprints[gone.id] = nil
+        if let endpoint = settings.endpoint, !next.contains(where: { $0.id == currentComputerID }) {
+            next.insert(fleetModel(id: currentComputerID, name: currentComputerName, endpoint: endpoint,
+                                   certExpires: endpoint.credentials?.computer?.certExpires,
+                                   fingerprint: "\(endpoint.display)|\(endpoint.secure)"), at: 0)
         }
-        if !kept.elementsEqual(others, by: ===) { others = kept }
+        for gone in fleet.models where !next.contains(where: { $0 === gone }) {
+            fingerprints[gone.id] = nil
+            endpoints[gone.id] = nil
+        }
+        fleet.set(next)
+        if started { updateDemands() }
+    }
+
+    /// The model for one computer: the existing one (renamed, renewed when
+    /// its address or pairing changed) or a new one, started once the app
+    /// has started.
+    private func fleetModel(id: String, name: String, endpoint: DaemonEndpoint, certExpires: Date?, fingerprint: String) -> ComputerModel {
+        endpoints[id] = endpoint
+        defer { fingerprints[id] = fingerprint }
+        if let existing = fleet.model(id) {
+            existing.rename(name)
+            if fingerprints[id] != fingerprint {
+                existing.renew(addresses: [endpoint.display], certExpires: certExpires)
+            }
+            return existing
+        }
+        let made = makeComputerModel(id: id, name: name, endpoint: endpoint, certExpires: certExpires)
+        if started { made.start() }
+        return made
     }
 
     /// What a computer's runtime depends on: its address and its pairing
@@ -45,19 +62,23 @@ extension SessionViewModel {
         "\(endpoint.display)|\(endpoint.secure)|\(computer.deviceID)|\(computer.pairedAt.timeIntervalSince1970)"
     }
 
-    /// Another computer's runtime: its connection (one client per address,
-    /// made from the store's record when first used) and its model.
-    private func makeComputerModel(_ computer: PairedComputer, endpoint: DaemonEndpoint) -> ComputerModel {
-        let id = computer.daemonID
-        let store = settings.computers
+    /// One computer's runtime: its connection (one client per address,
+    /// made from the computer's endpoint when first used) and its model.
+    /// The demo's clients answer from `DemoDaemon` inside the app and never
+    /// open a network connection.
+    private func makeComputerModel(id: String, name: String, endpoint: DaemonEndpoint, certExpires: Date?) -> ComputerModel {
+        let endpoints = self.endpoints
+        let demoSession = demo == nil ? nil : DemoDaemon.session()
         let connection = ComputerConnection(computerID: id, address: endpoint.display) { address in
-            guard let endpoint = store.endpoint(for: id) else { return nil }
+            guard let endpoint = endpoints[id] else { return nil }
             let target = address == endpoint.display ? endpoint : DaemonEndpoint(text: address, secure: endpoint.secure, credentials: endpoint.credentials)
-            return target.map { DaemonClient(endpoint: $0) }
+            guard let target else { return nil }
+            return demoSession.map { DaemonClient(endpoint: target, session: $0) } ?? DaemonClient(endpoint: target)
         }
-        let model = ComputerModel(id: id, name: computer.displayName, addresses: [endpoint.display], certExpires: computer.certExpires,
-                                  connection: connection, scheduler: LinkClock(), demand: otherDemand,
-                                  winners: LinkWinnerDefaults(defaults: settings.defaults))
+        let isCurrent = id == currentComputerID
+        let model = ComputerModel(id: id, name: name, addresses: [endpoint.display], certExpires: certExpires,
+                                  connection: connection, scheduler: LinkClock(), demand: isCurrent ? currentDemand : otherDemand,
+                                  winners: demo == nil ? LinkWinnerDefaults(defaults: settings.defaults) : nil)
         model.onAnswerFeedback = { feedback in
             switch feedback {
             case .tapped: Haptics.tap()
@@ -65,7 +86,7 @@ extension SessionViewModel {
             case .failed: Haptics.answerFailed()
             }
         }
-        model.onRenewTicket = { store.endpoint(for: id)?.credentials?.dropTicket() }
+        model.onRenewTicket = { endpoints[id]?.credentials?.dropTicket() }
         return model
     }
 
@@ -77,10 +98,6 @@ extension SessionViewModel {
                    voiceOnAnotherComputer: wantsConnection)
     }
 
-    func updateOthersDemand() {
-        let demand = otherDemand
-        for other in others { other.setDemand(demand) }
-    }
 
     /// A computer's certificate changed under its credentials (a promoted
     /// pin, a newly learned expiry): its link hears it, so the rotation
@@ -93,6 +110,7 @@ extension SessionViewModel {
         }
     }
 
+    /// Another computer's model (nil for the current one).
     func session(_ id: String) -> ComputerModel? { others.first { $0.id == id } }
 
     /// The capsule's name: the voice's with one computer, the current
@@ -188,5 +206,17 @@ extension SessionViewModel {
     func renameComputer(_ id: String, to name: String?) {
         settings.computers.rename(id, to: name)
         computersChanged()
+    }
+}
+
+/// Each computer's endpoint, read by its connection off the main actor
+/// when it makes a client, and written when the store changes.
+final class EndpointBook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var endpoints: [String: DaemonEndpoint] = [:]
+
+    subscript(id: String) -> DaemonEndpoint? {
+        get { lock.withLock { endpoints[id] } }
+        set { lock.withLock { endpoints[id] = newValue } }
     }
 }
