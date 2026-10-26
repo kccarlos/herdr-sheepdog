@@ -6,7 +6,7 @@ import SwiftUI
 /// take it back. After a withdrawal the same screen is the way back.
 /// Agree is the only thing that turns sending on.
 struct AIConsentView: View {
-    @ObservedObject private var consent: AIConsentModel
+    private let consent: AIConsentModel
     let model: SessionViewModel
 
     init(model: SessionViewModel) {
@@ -141,7 +141,7 @@ struct AIConsentView: View {
 /// screen as the way back.
 struct PrivacyView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @ObservedObject var consent: AIConsentModel
+    let consent: AIConsentModel
 
     var body: some View {
         Form {

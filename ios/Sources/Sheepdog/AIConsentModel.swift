@@ -7,13 +7,14 @@ import SheepdogKit
 /// so it never asks; debug launches that start already configured do not
 /// ask either unless `-sheepdogAskConsent` is given.
 @MainActor
-final class AIConsentModel: ObservableObject {
-    private let store: AIConsent
-    private let bypass: Bool
+@Observable
+final class AIConsentModel {
+    @ObservationIgnored private let store: AIConsent
+    @ObservationIgnored private let bypass: Bool
 
-    @Published private(set) var decision: AIConsent.Decision
+    private(set) var decision: AIConsent.Decision
     /// What to do once the person agrees: the connect that asked.
-    var afterAgree: (() -> Void)?
+    @ObservationIgnored var afterAgree: (() -> Void)?
 
     init(store: AIConsent, bypass: Bool = false) {
         self.store = store

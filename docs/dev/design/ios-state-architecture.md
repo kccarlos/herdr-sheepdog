@@ -1448,6 +1448,23 @@ Order and dependencies:
     - another computer has no `hello` until it is current, so its keyed
       actions are not retried (only answers happen there today).
 
+- **Phase 8 (in progress, small PRs).**
+  - **Done: the small objects.** `SceneCoordinator`, `SceneUI`,
+    `AgentWindowController`, `PushCoordinator` and `AIConsentModel` are
+    `@Observable`; `@Published`, `@ObservedObject`, `@StateObject` and
+    `@EnvironmentObject` of those are gone (`SceneUI` travels as
+    `@Environment(SceneUI.self)`). State the views must not follow per
+    frame (`snapshot`, `screenText`, the stream subscription) is
+    `@ObservationIgnored`, so the window's granularity is the same or
+    finer. A `@State` initial value is built on every `init` of the view,
+    so a window's controller (it owns a terminal surface) is built on
+    first use by `LazyWindow`, as `@StateObject` did. The render probe's
+    `window` count tracks the controller's observable properties
+    (`withObservationTracking`, DEBUG only) in place of
+    `objectWillChange`.
+  - **Left:** `SessionViewModel` itself (the slices in order are in the
+    phase 8 hand-off).
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on

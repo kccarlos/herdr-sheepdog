@@ -7,9 +7,9 @@ import SwiftUI
 /// lifecycle (`SessionChrome`).
 struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @StateObject private var ui = SceneUI()
+    @State private var ui = SceneUI()
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
     /// The question collapse, the window zoom and the capsule morph.
     @Namespace private var motion
@@ -40,7 +40,7 @@ struct MainView: View {
             }
             .background { KeyboardShortcuts(commands: commands) }
             // Outside the chrome, so its sheets (New agent, Spaces) see them.
-            .environmentObject(ui)
+            .environment(ui)
             .environment(\.motionNamespace, motion)
             .environment(\.openAgentWindow, OpenWindowAction { open($0) })
     }
@@ -93,8 +93,8 @@ struct MainView: View {
 /// reach. iPad uses it too at compact width (Slide Over, a narrow split).
 struct PhoneRootView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @Environment(SceneUI.self) private var ui
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motionNamespace) private var motionNamespace
@@ -346,7 +346,7 @@ struct SessionCapsule: View {
     /// composer; the iPad focuses the Conversation's composer.
     var onType: (() -> Void)?
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
+    @Environment(SceneUI.self) private var ui
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -617,12 +617,12 @@ private struct NewShellButton: View {
 /// the audio owner reports the screen and runs the session's foreground
 /// and background.
 struct SessionChrome: ViewModifier {
-    @ObservedObject var ui: SceneUI
+    let ui: SceneUI
     /// The layout shows the Conversation with nothing over it.
     let voiceScreen: Bool
 
     @EnvironmentObject private var model: SessionViewModel
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
     @Environment(\.appPhase) private var appPhase
     @Environment(\.splashShowing) private var splashShowing
@@ -716,7 +716,7 @@ struct SessionChrome: ViewModifier {
         content
             .confirmationDialog(
                 "Start a new conversation?",
-                isPresented: $ui.confirmNewConversation,
+                isPresented: Bindable(ui).confirmNewConversation,
                 titleVisibility: .visible
             ) {
                 Button("Start fresh") { model.startNewConversation() }

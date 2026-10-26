@@ -32,7 +32,7 @@ struct AgentActionDialogs: ViewModifier {
     @Binding var pending: AgentWindowAction?
     let name: String
     let paneID: String
-    @ObservedObject var window: AgentWindowController
+    let window: AgentWindowController
     let onClosed: () -> Void
     @EnvironmentObject private var model: SessionViewModel
     @State private var newName = ""

@@ -25,7 +25,7 @@ struct AgentPanes: View {
     let panes: [String]
     let leading: AnyView?
     @EnvironmentObject private var model: SessionViewModel
-    @EnvironmentObject private var ui: SceneUI
+    @Environment(SceneUI.self) private var ui
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -41,13 +41,13 @@ struct AgentPanes: View {
                     if side {
                         HStack(spacing: 0) {
                             pane(0).frame(width: first)
-                            PaneDivider(fraction: $ui.splitFraction, total: total, horizontal: true)
+                            PaneDivider(fraction: Bindable(ui).splitFraction, total: total, horizontal: true)
                             pane(1)
                         }
                     } else {
                         VStack(spacing: 0) {
                             pane(0).frame(height: first)
-                            PaneDivider(fraction: $ui.splitFraction, total: total, horizontal: false)
+                            PaneDivider(fraction: Bindable(ui).splitFraction, total: total, horizontal: false)
                             pane(1)
                         }
                     }
@@ -190,7 +190,7 @@ struct PaneDivider: View {
 struct AgentWindowScene: View {
     let route: AgentWindowRoute?
     @EnvironmentObject private var app: SessionViewModel
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    private let scenes = SceneCoordinator.shared
 
     var body: some View {
         AgentWindowContent(route: route)
@@ -202,8 +202,8 @@ struct AgentWindowScene: View {
 private struct AgentWindowContent: View {
     let route: AgentWindowRoute?
     @EnvironmentObject private var model: SessionViewModel
-    @StateObject private var ui = SceneUI()
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    @State private var ui = SceneUI()
+    private let scenes = SceneCoordinator.shared
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
@@ -234,7 +234,7 @@ private struct AgentWindowContent: View {
             }
         }
         .background(Theme.surface)
-        .environmentObject(ui)
+        .environment(ui)
         .onAppear {
             #if DEBUG
             // A UI test starting clean does not want last run's windows.

@@ -1260,7 +1260,8 @@ hear it.
 ## Re-renders
 
 The session view model is still one `ObservableObject` (until phase 8 of
-docs/dev/design/ios-state-architecture.md), so anything it announces
+docs/dev/design/ios-state-architecture.md; the scene, window, push and
+consent objects are already `@Observable`), so anything it announces
 re-renders every view that observes it. The rules that keep that cheap:
 
 - **Assign only on change.** A poll or a refresh assigns a published

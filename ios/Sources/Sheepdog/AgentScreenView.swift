@@ -1,4 +1,3 @@
-import Combine
 import SheepdogKit
 import SwiftUI
 import UIKit
@@ -154,7 +153,8 @@ private struct AgentWindowContent: View, Equatable {
         a.agent.paneID == b.agent.paneID && a.model === b.model && a.inputs == b.inputs
     }
 
-    @StateObject private var window: AgentWindowController
+    @State private var box: LazyWindow
+    private var window: AgentWindowController { box.controller }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -173,7 +173,8 @@ private struct AgentWindowContent: View, Equatable {
         self.onSwitch = onSwitch
         self.model = model
         self.inputs = inputs
-        _window = StateObject(wrappedValue: AgentWindowController(paneID: agent.paneID))
+        let paneID = agent.paneID
+        _box = State(initialValue: LazyWindow { AgentWindowController(paneID: paneID) })
     }
 
     /// The agent as the app lists it now.
@@ -699,11 +700,32 @@ extension Color {
 
 // MARK: - The window's controller
 
+/// Builds an `AgentWindowController` on first use and keeps it in the
+/// view's `@State`. `@StateObject` took an autoclosure and ran it once;
+/// a `@State` initial value is built on every `init` of the view, and a
+/// controller owns a terminal surface, so only this small box is.
+@MainActor
+final class LazyWindow {
+    private var make: (() -> AgentWindowController)?
+    private var built: AgentWindowController?
+
+    init(_ make: @escaping () -> AgentWindowController) { self.make = make }
+
+    var controller: AgentWindowController {
+        if let built { return built }
+        let controller = make!()
+        built = controller
+        make = nil
+        return controller
+    }
+}
+
 /// Runs one window: holds the surface and the `AgentWindowState`, opens and
 /// closes its `/term` channel on the shared `TermHub`, and draws the
 /// `screen` snapshot in the same surface when the window cannot go live.
 @MainActor
-final class AgentWindowController: ObservableObject {
+@Observable
+final class AgentWindowController {
     static let fontSizeKey = "agentWindow.fontSize"
 
     let paneID: String
@@ -711,43 +733,43 @@ final class AgentWindowController: ObservableObject {
     let isShell: Bool
     let shellCwd: String?
     /// The shell's pane, once the daemon opened it (for Close shell).
-    @Published private(set) var shellPane: String?
+    private(set) var shellPane: String?
     let surface: SwiftTermSurface
-    @Published private(set) var state: AgentWindowState {
+    private(set) var state: AgentWindowState {
         didSet { surface.pasteEnabled = state.takesRawInput }
     }
     /// The `screen` snapshot path's model. Not published: it changes with
     /// every frame; the views read `snapshotUsable` instead.
-    private(set) var snapshot: AgentScreenModel {
+    @ObservationIgnored private(set) var snapshot: AgentScreenModel {
         didSet {
             let usable = snapshot.screen != nil && !snapshot.unsupported
             if usable != snapshotUsable { snapshotUsable = usable }
         }
     }
     /// The snapshot has a screen to act on (`canOperate`).
-    @Published private(set) var snapshotUsable = false
+    private(set) var snapshotUsable = false
     /// The visible text, for VoiceOver's value and Copy. Not published:
     /// the surface changes up to every frame. It is read at most twice a
     /// second (`flushScreenText`), set on the terminal view directly, and
     /// the views read only whether there is any (`hasScreen`).
-    private(set) var screenText = ""
+    @ObservationIgnored private(set) var screenText = ""
     /// Something is drawn: changes once, not per frame.
-    @Published private(set) var hasScreen = false
-    @Published private(set) var fontSize: CGFloat
-    @Published var sending = false
-    @Published var inputError: String?
-    @Published var lastReply: String?
+    private(set) var hasScreen = false
+    private(set) var fontSize: CGFloat
+    var sending = false
+    var inputError: String?
+    var lastReply: String?
     /// The key bar's one-shot Ctrl and Alt.
-    @Published var modifiers = KeyModifiers()
+    var modifiers = KeyModifiers()
     /// Typing mode: the system keyboard types into the pane.
-    @Published var typing = false
+    var typing = false
 
-    weak var model: SessionViewModel?
+    @ObservationIgnored weak var model: SessionViewModel?
     /// A tap, a key or a prompt in this window (iPad: focuses its pane).
-    var onActivity: (() -> Void)?
-    private var channel: Int?
-    private var snapshotTask: Task<Void, Never>?
-    private var pushes: ScreenStreamRouter.Subscription?
+    @ObservationIgnored var onActivity: (() -> Void)?
+    @ObservationIgnored private var channel: Int?
+    @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var pushes: ScreenStreamRouter.Subscription?
 
     init(paneID: String, shell: Bool = false, shellCwd: String? = nil) {
         self.paneID = paneID
@@ -768,12 +790,23 @@ final class AgentWindowController: ObservableObject {
         surface.onFontSizeChange = { [weak self] size in self?.fontChanged(size) }
         surface.onContentChange = { [weak self] in self?.contentChanged() }
         #if DEBUG
-        if RenderProbe.enabled { probe = objectWillChange.sink { _ in RenderProbe.hit("window") } }
+        if RenderProbe.enabled { probeChanges() }
         #endif
     }
 
     #if DEBUG
-    private var probe: AnyCancellable?
+    /// Counts every change of the observable state (the old
+    /// `objectWillChange`), for the render-churn tests.
+    private func probeChanges() {
+        withObservationTracking {
+            _ = (shellPane, state, snapshotUsable, hasScreen, fontSize, sending, inputError, lastReply, modifiers, typing)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                RenderProbe.hit("window")
+                self?.probeChanges()
+            }
+        }
+    }
     #endif
 
     // MARK: Lifecycle

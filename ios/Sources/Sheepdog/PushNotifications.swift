@@ -60,31 +60,32 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// Agents card on a tap. While the session is live in the foreground the
 /// banner is suppressed — the app already shows the card.
 @MainActor
-final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+@Observable
+final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     static let shared = PushCoordinator()
 
     /// The screen, once SwiftUI has built it (nil during a background launch
     /// for a notification action).
-    weak var model: SessionViewModel? {
+    @ObservationIgnored weak var model: SessionViewModel? {
         didSet { applyPendingFocus() }
     }
 
-    @Published private(set) var authorization: UNAuthorizationStatus = .notDetermined
+    private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// The device token (hex), once APNs gave one.
-    @Published private(set) var deviceToken: String?
+    private(set) var deviceToken: String?
     /// The daemon this token was last registered with (`host:port`).
-    @Published private(set) var registeredWith: String?
-    @Published private(set) var registrationError: String?
+    private(set) var registeredWith: String?
+    private(set) var registrationError: String?
     /// `GET /api/push/status` of the current daemon.
-    @Published private(set) var daemonStatus: PushStatus?
-    @Published private(set) var daemonStatusError: String?
+    private(set) var daemonStatus: PushStatus?
+    private(set) var daemonStatusError: String?
 
     private let defaults = UserDefaults.standard
     /// The daemon's end-to-end content key, in the App Group keychain the
     /// Notification Service Extension reads it from.
     private let contentKeys = PushContentKeyStore()
     private let center = UNUserNotificationCenter.current()
-    private var pendingFocus: String?
+    @ObservationIgnored private var pendingFocus: String?
 
     private enum Key {
         static let token = "push.deviceToken"
@@ -404,7 +405,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
 
 /// Settings ▸ Models: whether notifications reach this phone.
 struct NotificationsSection: View {
-    @ObservedObject var push: PushCoordinator
+    let push: PushCoordinator
 
     var body: some View {
         Section {
