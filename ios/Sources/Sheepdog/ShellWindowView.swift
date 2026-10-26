@@ -31,7 +31,8 @@ private struct ShellWindowContent: View, Equatable {
 
     static func == (a: Self, b: Self) -> Bool { a.route == b.route && a.model === b.model }
 
-    @StateObject private var window: AgentWindowController
+    @State private var box: LazyWindow
+    private var window: AgentWindowController { box.controller }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -45,7 +46,8 @@ private struct ShellWindowContent: View, Equatable {
     init(route: ShellRoute, model: SessionViewModel) {
         self.route = route
         self.model = model
-        _window = StateObject(wrappedValue: AgentWindowController(paneID: "shell:" + (route.cwd ?? ""), shell: true, shellCwd: route.cwd))
+        let cwd = route.cwd
+        _box = State(initialValue: LazyWindow { AgentWindowController(paneID: "shell:" + (cwd ?? ""), shell: true, shellCwd: cwd) })
     }
 
     private var title: String { PhoneShell.title(cwd: route.cwd) }

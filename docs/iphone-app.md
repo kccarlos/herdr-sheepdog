@@ -19,7 +19,8 @@ iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 Tap **Try the demo** on the first screen. Scripted agents run on the phone: one
 finishes, one fails, one asks for an approval you can answer. The voice reads
 the news aloud with on-device speech and you can tap a suggested question,
-type one, or ask it aloud. No daemon, no key, no network. **Leave** returns to
+type one, or ask it aloud (the demo starts with the microphone off and
+asks for the microphone and speech recognition when you first tap it). No daemon, no key, no network. **Leave** returns to
 setup.
 
 ## Pair
@@ -280,6 +281,19 @@ it looks exactly like the iPhone app.
 - **Keyboard:** ⌘N new agent, ⌘1 to ⌘9 jump to the agents in sidebar
   order, ⌘⇧M mute or unmute, and ⌘↩ starts the agent in New agent. Hold ⌘
   to see the list.
+
+## AI services and your consent
+
+The first time you start a real voice session or send a typed line, the app asks
+once: your voice and words go to your own computer, and from there to the AI
+voice and answer services you set up on it (for example Google Gemini, DeepSeek
+or OpenAI). The app's developer never sees your voice, text, photos or screens; the push relay only forwards notifications to Apple and cannot read them (see [Phone notifications](privacy.md#phone-notifications)). Tap **Agree** to go on, or
+**Learn more** for the [privacy policy](privacy.md#ai-services). The demo never asks.
+
+To take it back, open Settings, **Privacy**, and turn off **Send to AI
+services**. A running voice session ends, and the app starts no voice session
+and sends no typed line until you agree again (turn the switch on, or tap
+**Turn it back on** on the screen the app shows). Your agents keep working.
 
 ## Notifications
 

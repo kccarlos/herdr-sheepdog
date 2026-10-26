@@ -16,16 +16,17 @@ import SwiftUI
 /// An agent window opened with Open in New Window never registers: it is
 /// always a mini-capsule window.
 @MainActor
-final class SceneCoordinator: ObservableObject {
+@Observable
+final class SceneCoordinator {
     static let shared = SceneCoordinator()
 
     /// Main windows, oldest first.
-    @Published private(set) var scenes: [UUID] = []
+    var scenes: [UUID] = []
     /// The window that last asked for a session sheet.
-    @Published private(set) var requester: UUID?
+    var requester: UUID?
     /// The offline demo's view model while it is open: an agent window
     /// opened from it shows the demo's agents.
-    @Published var demoModel: SessionViewModel?
+    var demoModel: SessionViewModel?
 
     var owner: UUID? { scenes.first }
     var presenter: UUID? { requester ?? owner }
@@ -62,22 +63,23 @@ final class SceneCoordinator: ObservableObject {
 /// What one window keeps for itself: its dialogs, the composer and, on
 /// iPad, what its detail shows (kept across size-class changes).
 @MainActor
-final class SceneUI: ObservableObject {
-    @Published var confirmNewConversation = false
+@Observable
+final class SceneUI {
+    var confirmNewConversation = false
     /// The capsule turned into the composer.
-    @Published var typing = false
+    var typing = false
 
     // iPad (IPadRootView)
-    @Published var detail: IPadDetail = .conversation
-    @Published var columns: NavigationSplitViewVisibility = .all
+    var detail: IPadDetail = .conversation
+    var columns: NavigationSplitViewVisibility = .all
     /// A shell pushed over the detail.
-    @Published var detailPath = NavigationPath()
+    var detailPath = NavigationPath()
     /// Bumped to focus the Conversation's composer (the capsule's keyboard).
-    @Published var focusComposer = 0
+    var focusComposer = 0
     /// Of two panes, the one keys and ⌘ shortcuts act on.
-    @Published var focusedPane = 0
+    var focusedPane = 0
     /// The first of two panes' share of the room.
-    @Published var splitFraction: CGFloat = 0.5
+    var splitFraction: CGFloat = 0.5
 
     /// A sidebar row: focus the agent if it is on screen, else show it in
     /// the focused pane.
@@ -189,7 +191,7 @@ extension EnvironmentValues {
 struct MainSceneRoot<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @State private var id = UUID()
-    @ObservedObject private var scenes = SceneCoordinator.shared
+    private let scenes = SceneCoordinator.shared
 
     var body: some View {
         content()

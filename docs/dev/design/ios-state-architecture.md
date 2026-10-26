@@ -1448,6 +1448,58 @@ Order and dependencies:
     - another computer has no `hello` until it is current, so its keyed
       actions are not retried (only answers happen there today).
 
+- **Phase 8 (in progress, small PRs).**
+  - **Done: the small objects.** `SceneCoordinator`, `SceneUI`,
+    `AgentWindowController`, `PushCoordinator` and `AIConsentModel` are
+    `@Observable`; `@Published`, `@ObservedObject`, `@StateObject` and
+    `@EnvironmentObject` of those are gone (`SceneUI` travels as
+    `@Environment(SceneUI.self)`). State the views must not follow per
+    frame (`snapshot`, `screenText`, the stream subscription) is
+    `@ObservationIgnored`, so the window's granularity is the same or
+    finer. A `@State` initial value is built on every `init` of the view,
+    so a window's controller (it owns a terminal surface) is built on
+    first use by `LazyWindow`, as `@StateObject` did. The render probe's
+    `window` count tracks the controller's observable properties
+    (`withObservationTracking`, DEBUG only) in place of
+    `objectWillChange`.
+  - **Done: Health.** `HealthModel` (`HealthModel.swift`, `@Observable`)
+    holds `health` and `loading`; `/events` folds, the computer switch
+    and the Health pane's fetch go through it, and `HealthView` reads
+    `model.healthModel`. The `async let` fan-out to models, settings and
+    providers stays in `SessionViewModel.loadHealth` until those move.
+    A problem count changing no longer announces on the session view
+    model.
+  - **Done: Settings.** `SettingsModel` (`SettingsModel.swift`,
+    `@Observable`) holds `brainModels`, `daemonSettings`, `voiceProviders`,
+    the switching flags and their errors, with the loaders and pickers;
+    `loadAll()` is the Health pane's fan-out. It runs requests through the
+    session's `current` (a weak `session`), and tells the session when a
+    provider was picked (`voiceProviderSelected`) and, through
+    `onVoiceProvidersChange`, when the audio engine's profile must follow.
+    Views read `model.settingsModel`. A catalog or an error changing no
+    longer announces on the session view model.
+  - **Done: Notices.** `NoticeModel` (`NoticeModel.swift`, `@Observable`)
+    holds `banner`, `feedbackNotice`, `update`, `pairingProblem`,
+    `daemonNoticeProblem` and `daemonNotice`; views read `model.notices`.
+    `update` and `pairingProblem` assign only on change.
+  - **Left, in order** (sizes S/M/L):
+    3. Link: `linkPresentation`, `addressRows`, `liveUpdates`,
+       `handshake`, `hello` (S–M; mostly mirrors of `ComputerLink`).
+    4. Navigation: `pane`, `navigationPath`, `settingsRoute`,
+       `windowRequest`, `focusedAgentPaneID` (S).
+    5. Agents and questions: `agents`, `pendingAction`, `questions`,
+       `expandedAgents`, `screenCovers`, `shellOffered` (M).
+    6. Conversation: `rows`, paging, the typed line (M).
+    7. The voice leaves: `VoiceEngine` owns `state`, mute, talk mode,
+       hold, microphone modes, the coach mark, `wantsConnection` and the
+       audio session (L, the hard part: the audio path is Swift 5 and
+       its tests need a real engine).
+    8. The approval card's `ApprovalFlow` phase becomes the model's
+       per-question `phases` (M, hard: it changes who owns the answer
+       key, see phase 7's left-for-later).
+    9. Delete `SessionViewModel`; `@EnvironmentObject` becomes
+       `@Environment(Type.self)` (S).
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on

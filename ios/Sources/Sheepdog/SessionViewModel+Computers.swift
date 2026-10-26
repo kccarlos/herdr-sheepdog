@@ -199,7 +199,7 @@ extension SessionViewModel {
         // A computer that is backing off is not switched to, even while it
         // still reads "Connecting…".
         if let other = session(id), !other.canTalkTo {
-            banner = Banner(tone: .warning, message: "Can't reach \(other.name).",
+            notices.banner = Banner(tone: .warning, message: "Can't reach \(other.name).",
                             hint: "Still talking to \(currentComputerName). Is \(other.name) awake and on the same network?", retryTitle: nil)
             other.retry()
             return

@@ -178,8 +178,9 @@ targets:
           Sheepdog uses the camera to scan the pairing code that
           "sheepdog setup" or "sheepdog pair" shows on your computer, and to
           take a photo you attach for an agent. A photo goes to the sheepdog
-          daemon on your own computer, and from there to the AI services you
-          set up. Nothing is recorded in the background.
+          daemon on your own computer, and the coding agent you send it to
+          passes it to its own AI service. Nothing is recorded in the
+          background.
         NSLocalNetworkUsageDescription: >-
           Sheepdog connects to the sheepdog daemon on your own computer, over
           your local network. What you say or send goes to that computer, and

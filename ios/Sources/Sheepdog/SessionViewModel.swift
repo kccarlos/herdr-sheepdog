@@ -113,8 +113,6 @@ final class SessionViewModel: ObservableObject {
     /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
     /// the chip's sheet.
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
-    /// "Noted" (or why a feedback mark did not land), shown for a moment.
-    @Published private(set) var feedbackNotice: String?
     /// What the daemon pushes about an open agent window over `/ws`,
     /// handed straight to that window (`ScreenStreamRouter`), never
     /// through a published property: a frame must not re-render the app.
@@ -138,7 +136,8 @@ final class SessionViewModel: ObservableObject {
     /// daemon's own answer to `POST /api/conversation/reset` (a 404 hides
     /// it), optimistic (shown) until then.
     @Published private(set) var conversationResetSupported = true
-    @Published var banner: Banner?
+    /// The banner, the feedback line, the update and pairing notices.
+    let notices = NoticeModel()
     /// Typed input (`POST /api/utterance`): in flight, and the
     /// daemon's refusal if it had one.
     @Published private(set) var sendingTyped = false
@@ -151,16 +150,9 @@ final class SessionViewModel: ObservableObject {
 
     // The Health pane.
     /// Uptime, GPT-Live's billed seconds and the recent problems.
-    @Published private(set) var health = DaemonHealth()
-    @Published private(set) var loadingHealth = false
-    /// The orchestrator's catalog and choice; nil until loaded, and on a daemon
-    /// without the route.
-    @Published private(set) var brainModels: BrainModels?
-    @Published private(set) var switchingBrain = false
-    @Published var brainError: String?
-    /// The push chattiness; nil until loaded, and without an orchestrator.
-    @Published private(set) var daemonSettings: DaemonSettings?
-    @Published var settingsError: String?
+    let healthModel = HealthModel()
+    /// Settings, models and providers (the Settings and Health panes).
+    let settingsModel = SettingsModel()
 
     // Mirrors of `core`, published for the views (see `publish()`).
     @Published private(set) var isMuted = false
@@ -179,13 +171,6 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var microphoneMode: MicrophoneModeName = .standard
     @Published private(set) var preferredMicrophoneMode: MicrophoneModeName = .standard
 
-    // The voice provider (GET/PUT /api/voice/provider[s]).
-    /// nil until loaded, and when the daemon has no provider API (404).
-    @Published private(set) var voiceProviders: VoiceProviders? {
-        didSet { audio.setProvider(resolvedVoiceProvider) }
-    }
-    @Published private(set) var switchingProvider = false
-    @Published var providerError: String?
     /// From the `/ws` status message, `/api/state` and `/api/hello`.
     @Published private(set) var liveVoiceProvider: String? {
         didSet { audio.setProvider(resolvedVoiceProvider) }
@@ -194,15 +179,8 @@ final class SessionViewModel: ObservableObject {
         didSet { audio.setProvider(resolvedVoiceProvider) }
     }
     @Published private(set) var stateVoiceModel: String?
-    /// `/api/state`'s update notice (Settings shows one line for it); nil
-    /// on a daemon too old to report one.
-    @Published private(set) var update: UpdateInfo?
     /// Settings is the presentation on screen.
     var showSettings: Bool { presentation.isShowing(.settings) }
-    /// Why the app must scan again, while it must.
-    @Published private(set) var pairingProblem: PairingProblem?
-    /// The same, for Settings ▸ Connection when it is open.
-    @Published var daemonNoticeProblem: PairingProblem?
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
@@ -210,7 +188,6 @@ final class SessionViewModel: ObservableObject {
     /// pairing code nothing answered), shown there where the fix is. A
     /// banner on the main screen would sit under the Settings sheet.
     /// Consumed by DaemonSettingsView.
-    @Published var daemonNotice: Probe?
 
     /// Health's "Change in Settings ›": Settings, pushed to Models.
     func openModels() {
@@ -221,7 +198,7 @@ final class SessionViewModel: ObservableObject {
     /// "Gemini · gemini-3.5-flash": the orchestrator as the catalog names it, else
     /// as `/api/state` reports it.
     var brainDisplay: String? {
-        if let models = brainModels, !models.model.isEmpty {
+        if let models = settingsModel.brainModels, !models.model.isEmpty {
             let provider = models.providers.first { $0.id == models.provider }?.displayName ?? models.provider
             return [provider, models.model].filter { !$0.isEmpty }.joined(separator: " · ")
         }
@@ -267,14 +244,14 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello` — in that order of freshness. One resolver instead of
     /// this fallback chain copied at each of its two call sites.
     private var resolvedVoiceProvider: String? {
-        liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+        liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
     }
 
     /// "Gemini Live · gemini-3.8-live", from whichever source knows.
     var voiceProviderDisplay: String? {
         let id = resolvedVoiceProvider
-        let option = voiceProviders?.providers.first { $0.id == id }
-        let model = (id == voiceProviders?.provider ? voiceProviders?.model : nil)
+        let option = settingsModel.voiceProviders?.providers.first { $0.id == id }
+        let model = (id == settingsModel.voiceProviders?.provider ? settingsModel.voiceProviders?.model : nil)
             ?? (id == stateVoiceProvider ? stateVoiceModel : nil)
             ?? (id == hello?.voiceProvider ? hello?.voiceModel : nil)
             ?? option?.model
@@ -376,6 +353,20 @@ final class SessionViewModel: ObservableObject {
     /// The session's state and decisions. Fed only through `send(_:)`.
     private var core: SessionCore
 
+    /// Whether the person agreed to send their voice and words to AI
+    /// services (`SessionViewModel+Consent.swift`).
+    let consent: AIConsentModel
+
+    /// The demo sends nothing anywhere; debug launches that start
+    /// configured (the UI tests) skip the question unless asked to show it.
+    private static func skipsConsent(demo: Bool) -> Bool {
+        if demo { return true }
+        #if DEBUG
+        if DebugLaunch.address != nil || DebugLaunch.resetState || DebugLaunch.computers != nil { return !DebugLaunch.askConsent }
+        #endif
+        return false
+    }
+
     /// The core's clock: monotonic (uptime), as the reconnect quiet period
     /// and the speaking hold always were.
     private var now: Date { Date(timeIntervalSinceReferenceDate: ProcessInfo.processInfo.systemUptime) }
@@ -384,6 +375,7 @@ final class SessionViewModel: ObservableObject {
         self.settings = settings
         self.cache = cache
         self.demo = demo
+        consent = AIConsentModel(store: AIConsent(defaults: settings.defaults), bypass: Self.skipsConsent(demo: demo != nil))
         let pathSource = Self.makePathSource(demo: demo != nil)
         self.pathSource = pathSource
         fleet = ComputerFleet(path: pathSource.path)
@@ -412,6 +404,11 @@ final class SessionViewModel: ObservableObject {
             renderProbe = objectWillChange.sink { _ in RenderProbe.hit("model") }
         }
         #endif
+        settingsModel.session = self
+        settingsModel.onVoiceProvidersChange = { [weak self] in
+            guard let self else { return }
+            audio.setProvider(resolvedVoiceProvider)
+        }
         wire()
         // Every computer's runtime, made now (started in `start`), so the
         // cached conversation loads into the current one.
@@ -567,7 +564,7 @@ final class SessionViewModel: ObservableObject {
             termHub.update(endpoint: channelEndpoint(endpoint))
             shellOffered = nil
         }
-        banner = nil
+        notices.banner = nil
         hello = fleet.current?.hello
         attachCurrent()
         if !sameDaemon {
@@ -581,10 +578,9 @@ final class SessionViewModel: ObservableObject {
             agents = []
             questions = []
             cardInbox.clear()
-            health.clear()
-            brainModels = nil
-            daemonSettings = nil
-            update = nil
+            healthModel.clear()
+            settingsModel.clear()
+            notices.clearForSwitch()
             approvalFlow.reset()
             if !conversation.loaded { loadCache() }
             conversationChanged(save: false)
@@ -614,6 +610,7 @@ final class SessionViewModel: ObservableObject {
             presentation.present(.settings)
             return
         }
+        guard requireAIConsent(onAgree: { [weak self] in self?.connect() }) else { return }
         socket.update(endpoint: channelEndpoint(endpoint))
         send(.connectTapped)
     }
@@ -629,6 +626,11 @@ final class SessionViewModel: ObservableObject {
     /// upgrade is almost unreadable, so find out here where the status code
     /// is plain — then the microphone permission.
     private func openSession() async {
+        // Withdrawn while the probe was on its way: no voice session.
+        guard consent.isAllowed else {
+            send(.endTapped)
+            return
+        }
         if fleet.current?.link.state == .noNetwork {
             send(.noNetwork)
             return
@@ -637,7 +639,7 @@ final class SessionViewModel: ObservableObject {
             let state = try await current { try await $0.state() }
             apply(state)
             await loadHello()
-            await loadVoiceProviders()
+            await settingsModel.loadVoiceProviders()
         } catch let error as DaemonError {
             send(.probeFailed(error))
             return
@@ -776,7 +778,7 @@ final class SessionViewModel: ObservableObject {
             }
             return
         }
-        guard !showCoachMark, banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
+        guard !showCoachMark, notices.banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
         refreshMicrophoneMode()
         guard microphoneMode != .voiceIsolation else { return }
         defaults.set(true, forKey: Self.micTipShownKey)
@@ -806,70 +808,8 @@ final class SessionViewModel: ObservableObject {
         AVCaptureDevice.showSystemUserInterface(.microphoneModes)
     }
 
-    // MARK: - Voice provider
-
-    func loadVoiceProviders() async {
-        guard settings.endpoint != nil else { return }
-        do {
-            let list = try await current { try await $0.voiceProviders() }
-            #if DEBUG
-            // The fixture daemon (`--voice=off`) lists no providers.
-            if list?.providers.isEmpty ?? true, DebugLaunch.fakeProviders {
-                voiceProviders = Self.fakeProviders(current: voiceProviders?.provider ?? "gemini")
-                return
-            }
-            #endif
-            voiceProviders = list
-        } catch {
-            // Hidden rather than an error: the picker is a convenience, and
-            // the connection itself reports what is wrong.
-            SheepdogLog.session.error("voice providers: \(String(describing: error), privacy: .public)")
-            voiceProviders = nil
-        }
-    }
-
-    func selectVoiceProvider(_ id: String) {
-        guard id != voiceProviders?.provider, !switchingProvider else { return }
-        switchingProvider = true
-        providerError = nil
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.switchingProvider = false }
-            do {
-                let list = try await self.current { try await $0.setVoiceProvider(id) }
-                self.voiceProviders = list
-                self.send(.providerSelected(list.provider))
-                Haptics.tap()
-            } catch let error as DaemonError {
-                #if DEBUG
-                if DebugLaunch.fakeProviders {
-                    self.voiceProviders = Self.fakeProviders(current: id)
-                    self.send(.providerSelected(id))
-                    return
-                }
-                #endif
-                self.providerError = error.message
-            } catch {
-                self.providerError = error.localizedDescription
-            }
-            await self.refreshState(quiet: true)
-        }
-    }
-
-    #if DEBUG
-    /// The contract's example, for screenshots against a daemon that lists
-    /// no voice providers (the `--voice=off` fixture daemon).
-    static func fakeProviders(current: String) -> VoiceProviders {
-        VoiceProviders(
-            provider: current,
-            model: current == "openai" ? "gpt-live-1" : "gemini-3.8-live",
-            providers: [
-                VoiceProviderOption(id: "gemini", label: "Gemini Live", model: "gemini-3.8-live", available: true),
-                VoiceProviderOption(id: "openai", label: "GPT-Live", model: "gpt-live-1", available: true, billing: "per_minute"),
-            ]
-        )
-    }
-    #endif
+    /// The provider picker changed it (`SettingsModel`): the core learns it.
+    func voiceProviderSelected(_ id: String?) { send(.providerSelected(id)) }
 
     /// Once per install: what Mute does and does not do.
     private func offerMuteHint() {
@@ -1075,7 +1015,7 @@ final class SessionViewModel: ObservableObject {
         case let .showBanner(banner):
             show(Banner(banner))
         case .clearBanner:
-            banner = nil
+            notices.banner = nil
         case let .notice(text):
             reducer.apply(.notice(text))
             conversationChanged()
@@ -1332,7 +1272,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// `/api/hello` for the current computer, kept on its model.
-    private func loadHello() async {
+    func loadHello() async {
         guard let model = fleet.current, let fetched = try? await current({ try await $0.hello() }) else { return }
         model.hello = fetched
         hello = fetched
@@ -1397,8 +1337,7 @@ final class SessionViewModel: ObservableObject {
         if activity.fold(event) || folded {
             conversationChanged()
         }
-        var nextHealth = health
-        if nextHealth.fold(event) { health = nextHealth }
+        healthModel.fold(event)
         switch event.type {
         case "voice.push":
             guard let text = event.string("text"), !text.isEmpty, event.string("urgency") != "silent" else { break }
@@ -1491,7 +1430,7 @@ final class SessionViewModel: ObservableObject {
         do {
             apply(try await current { try await $0.state() })
             if hello == nil { await loadHello() }
-            if !quiet { banner = nil }
+            if !quiet { notices.banner = nil }
             return true
         } catch let error as DaemonError {
             // A loud refresh that fails ends the session, as a failed
@@ -1551,7 +1490,7 @@ final class SessionViewModel: ObservableObject {
         assign(\.brain, state.brain)
         assign(\.stateVoiceProvider, state.voiceProvider)
         assign(\.stateVoiceModel, state.voiceModel)
-        assign(\.update, state.update)
+        notices.setUpdate(state.update)
     }
 
     /// Assigns a published property only when the value differs: setting
@@ -1659,114 +1598,28 @@ final class SessionViewModel: ObservableObject {
     /// "Sheepdog started." divider in the history (the event ring may
     /// have rolled past it on a long run).
     var daemonStartedAt: Date? {
-        health.startedAt ?? history.items.last { $0.kind == .notice && $0.text.hasPrefix("Sheepdog started") }?.ts
+        healthModel.health.startedAt ?? history.items.last { $0.kind == .notice && $0.text.hasPrefix("Sheepdog started") }?.ts
     }
 
     /// Everything the Health pane shows, fetched once when it opens (and
     /// on pull to refresh); `/events` keeps the problems and the billed
     /// seconds current after that.
     func loadHealth() async {
-        guard settings.endpoint != nil, !loadingHealth else { return }
-        loadingHealth = true
-        defer { loadingHealth = false }
+        guard settings.endpoint != nil, healthModel.begin() else { return }
+        defer { healthModel.end() }
         async let state: Bool = refreshState(quiet: true)
-        async let models: Void = loadBrainModels()
-        async let chattiness: Void = loadDaemonSettings()
-        async let providers: Void = loadVoiceProviders()
+        async let settings: Void = settingsModel.loadAll()
         if hello == nil { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
-        var next = health
+        var next = healthModel.health
         for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
                      "voice.push_", "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
             let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
             guard let events = try? await current({ try await $0.recentEvents(type: type, limit: limit) }) else { continue }
             for event in events { next.fold(event) }
         }
-        if next != health { health = next }
-        _ = await (state, models, chattiness, providers)
-    }
-
-    func loadBrainModels(provider: String? = nil) async {
-        do {
-            brainModels = try await current { try await $0.brainModels(provider: provider) }
-            brainError = nil
-        } catch let error as DaemonError {
-            brainError = error.message
-        } catch {
-            brainError = error.localizedDescription
-        }
-    }
-
-    /// The orchestrator picker: provider and model for the orchestrator's next turn.
-    func selectBrain(provider: String?, model: String) {
-        guard !switchingBrain else { return }
-        switchingBrain = true
-        brainError = nil
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.switchingBrain = false }
-            do {
-                self.brainModels = try await self.current { try await $0.setBrainModel(provider: provider, model: model) }
-                Haptics.tap()
-            } catch let error as DaemonError {
-                self.brainError = error.message
-            } catch {
-                self.brainError = error.localizedDescription
-            }
-            await self.refreshState(quiet: true)
-        }
-    }
-
-    func loadDaemonSettings() async {
-        do {
-            daemonSettings = try await current { try await $0.settings() }
-            settingsError = nil
-        } catch let error as DaemonError {
-            // No orchestrator is a 503: hide the control, say why.
-            daemonSettings = nil
-            settingsError = error.message
-        } catch {
-            settingsError = error.localizedDescription
-        }
-    }
-
-    func setChattiness(_ level: String) {
-        guard level != daemonSettings?.chattiness else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                self.daemonSettings = try await self.current { try await $0.setChattiness(level) }
-                self.settingsError = nil
-                Haptics.tap()
-            } catch let error as DaemonError {
-                self.settingsError = error.message
-            } catch {
-                self.settingsError = error.localizedDescription
-            }
-        }
-    }
-
-    /// Sends the language preference (most preferred first); the
-    /// daemon's reply replaces the local copy, so the screen shows what
-    /// it kept.
-    func setLanguages(_ codes: [String]) {
-        guard codes != (daemonSettings?.languages ?? []) else { return }
-        if var optimistic = daemonSettings {
-            optimistic.languages = codes
-            daemonSettings = optimistic
-        }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                self.daemonSettings = try await self.current { try await $0.setLanguages(codes) }
-                self.settingsError = nil
-                Haptics.tap()
-            } catch {
-                // Back to what the daemon has, then say why it refused.
-                await self.loadDaemonSettings()
-                self.settingsError = (error as? DaemonError)?.message ?? error.localizedDescription
-            }
-        }
+        healthModel.replace(with: next)
+        _ = await (state, settings)
     }
 
     // MARK: - Typed input
@@ -1779,6 +1632,10 @@ final class SessionViewModel: ObservableObject {
     func sendTyped(_ text: String) async -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, settings.endpoint != nil, !sendingTyped else { return false }
+        guard requireAIConsent() else {
+            if consent.decision == .withdrawn { typedError = Self.aiOffMessage }
+            return false
+        }
         sendingTyped = true
         typedError = nil
         defer { sendingTyped = false }
@@ -2145,14 +2002,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    private func showFeedbackNotice(_ text: String) {
-        feedbackNotice = text
-        AccessibilityNotification.Announcement(text).post()
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            if self?.feedbackNotice == text { self?.feedbackNotice = nil }
-        }
-    }
+    private func showFeedbackNotice(_ text: String) { notices.showFeedback(text) }
 
     /// The user tapped an option on the approval card.
     func answer(option index: Int) {
@@ -2257,11 +2107,11 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Banners
 
     private func show(_ banner: Banner) {
-        self.banner = banner
+        notices.banner = banner
     }
 
     func retry() {
-        banner = nil
+        notices.banner = nil
         reconnect()
     }
 
@@ -2272,11 +2122,11 @@ final class SessionViewModel: ObservableObject {
 
     /// The banner's button.
     func bannerAction() {
-        switch banner?.action ?? .retry {
+        switch notices.banner?.action ?? .retry {
         case .retry:
             retry()
         case .microphoneModes:
-            banner = nil
+            notices.banner = nil
             showMicrophoneModes()
         }
     }
@@ -2439,6 +2289,17 @@ final class SessionViewModel: ObservableObject {
         connect()
     }
 
+    /// The microphone was turned on in the demo: ask for speech recognition
+    /// and the microphone now (once), then listen; if the person says no,
+    /// the mic goes back off and questions stay by tap or typing.
+    private func demoListenOnFirstUse() {
+        guard let voice = demoVoice, !voice.listening, !voice.asking else { return }
+        Task {
+            guard let granted = await voice.listenOnFirstUse() else { return }
+            if !granted, !core.mic.muted { send(.muteTapped) }
+        }
+    }
+
     /// The session core's effects that would touch `/ws` or the audio
     /// engine, done on the device instead. False: run it the usual way.
     private func runDemo(_ effect: SessionEffect) -> Bool {
@@ -2453,8 +2314,9 @@ final class SessionViewModel: ObservableObject {
                     return
                 }
                 guard core.connection.wantsConnection else { return }
-                let canListen = demoSilent ? false : await DemoVoice.requestListening()
-                send(.probeSucceeded(micGranted: canListen))
+                // No permission prompt here: the demo asks when the person
+                // first taps the microphone (`demoListenOnFirstUse`).
+                send(.probeSucceeded(micGranted: !demoSilent))
             }
         case .openSocket:
             send(.socketOpened)
@@ -2466,8 +2328,13 @@ final class SessionViewModel: ObservableObject {
             break
         case .startAudio, .resumeAudio:
             do {
-                try demoVoice?.startListening()
+                // Listening starts at once only where the person already
+                // allowed it; otherwise the demo starts with the mic off
+                // and asks at the first tap on it.
+                let allowed = DemoVoice.listeningAllowed
+                if allowed { try demoVoice?.startListening() }
                 send(.audioStarted(gateClosed: true))
+                if !allowed, demoVoice != nil, !core.mic.muted { send(.muteTapped) }
             } catch {
                 send(.audioStartFailed(error.localizedDescription))
             }
@@ -2475,6 +2342,7 @@ final class SessionViewModel: ObservableObject {
             demoVoice?.stopListening()
         case let .setCaptureMuted(muted):
             demoVoice?.muted = muted
+            if !muted { demoListenOnFirstUse() }
         case .setManualGate:
             break
         case .flushPlayback:
@@ -2551,7 +2419,7 @@ final class SessionViewModel: ObservableObject {
             store.save(computer, address: address)
             settings.hasBeenConfigured = true
             _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
-            pairingProblem = nil
+            notices.setPairingProblem(nil)
             computersChanged()
             if repoint {
                 store.currentID = computer.daemonID
@@ -2647,9 +2515,9 @@ final class SessionViewModel: ObservableObject {
     /// The scan-again screen a refusal opens, from Settings or the main
     /// screen.
     func needsNewScan(_ problem: PairingProblem) {
-        pairingProblem = problem
+        notices.setPairingProblem(problem)
         if showSettings {
-            daemonNoticeProblem = problem
+            notices.daemonNoticeProblem = problem
             return
         }
         presentation.present(.pairing(.problem(problem)))

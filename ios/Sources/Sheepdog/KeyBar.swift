@@ -8,7 +8,7 @@ import SwiftUI
 /// window, a slot before ⏎) is ⌃, which latches for the next key or typed
 /// character.
 struct KeyBar: View {
-    @ObservedObject var window: AgentWindowController
+    let window: AgentWindowController
     /// A shell window: ⌃C on the bar.
     var shell = false
     let onMore: () -> Void
@@ -103,7 +103,7 @@ struct KeyCap: View {
 /// keyboard; a snippet goes into the composer (or the pane in typing
 /// mode) and closes it.
 struct MoreKeysSheet: View {
-    @ObservedObject var window: AgentWindowController
+    let window: AgentWindowController
     /// An agent window: ⌃C sits at the top, under Interrupt.
     var interrupt = false
     let onSnippet: (String) -> Void

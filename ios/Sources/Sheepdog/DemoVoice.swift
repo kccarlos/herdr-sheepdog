@@ -64,6 +64,34 @@ final class DemoVoice: NSObject {
         return await AudioEngine.requestMicrophone()
     }
 
+    /// Whether listening can start without asking: speech recognition and
+    /// the microphone are already allowed, and the device recognises
+    /// on-device.
+    static var listeningAllowed: Bool {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")), recognizer.supportsOnDeviceRecognition else { return false }
+        return SFSpeechRecognizer.authorizationStatus() == .authorized && AVAudioApplication.shared.recordPermission == .granted
+    }
+
+    /// True while `listenOnFirstUse` waits on a permission prompt.
+    private(set) var asking = false
+
+    /// The first tap on the microphone: ask (the system prompts show only
+    /// now) and start listening. Nil if it was already asking; false if the
+    /// person said no or the device cannot listen.
+    func listenOnFirstUse() async -> Bool? {
+        guard !asking else { return nil }
+        asking = true
+        defer { asking = false }
+        guard await Self.requestListening() else { return false }
+        do {
+            try startListening()
+            return true
+        } catch {
+            onListenerFailed(error.localizedDescription)
+            return false
+        }
+    }
+
     func startListening() throws {
         guard !listening else { return }
         guard let recognizer, recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else {

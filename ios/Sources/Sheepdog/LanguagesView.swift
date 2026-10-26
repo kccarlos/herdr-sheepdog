@@ -11,12 +11,12 @@ struct LanguagesView: View {
 
     var body: some View {
         List {
-            if let settings = model.daemonSettings, settings.supportsLanguages {
+            if let settings = model.settingsModel.daemonSettings, settings.supportsLanguages {
                 chosenSection(settings)
                 otherSection(settings)
             } else {
                 Section {
-                    Text(model.settingsError ?? (model.daemonSettings == nil
+                    Text(model.settingsModel.settingsError ?? (model.settingsModel.daemonSettings == nil
                         ? "Connect to the daemon to choose your languages."
                         : "This daemon is too old for the language setting. Update sheepdog on your computer."))
                         .foregroundStyle(.secondary)
@@ -27,11 +27,11 @@ struct LanguagesView: View {
         .navigationTitle("Languages")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if model.daemonSettings?.chosenLanguages.isEmpty == false {
+            if model.settingsModel.daemonSettings?.chosenLanguages.isEmpty == false {
                 EditButton().tint(Theme.primaryText)
             }
         }
-        .task { await model.loadDaemonSettings() }
+        .task { await model.settingsModel.loadDaemonSettings() }
     }
 
     private func chosenSection(_ settings: DaemonSettings) -> some View {
@@ -51,17 +51,17 @@ struct LanguagesView: View {
                 .accessibilityIdentifier("languages.chosen.\(option.code)")
             }
             .onMove { source, destination in
-                model.setLanguages(LanguagePreference.moving(fromOffsets: source, toOffset: destination, in: chosen.map(\.code)))
+                model.settingsModel.setLanguages(LanguagePreference.moving(fromOffsets: source, toOffset: destination, in: chosen.map(\.code)))
             }
             .onDelete { offsets in
-                model.setLanguages(LanguagePreference.removing(atOffsets: offsets, from: chosen.map(\.code)))
+                model.settingsModel.setLanguages(LanguagePreference.removing(atOffsets: offsets, from: chosen.map(\.code)))
             }
         } header: {
             Text("Your languages")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Most preferred first. The voice and the orchestrator are both told, and answer in the language you use, in its script. Tap Edit to reorder or remove.")
-                if let error = model.settingsError {
+                if let error = model.settingsModel.settingsError {
                     Text(error).foregroundStyle(Color(.systemRed))
                 }
             }
@@ -74,7 +74,7 @@ struct LanguagesView: View {
         return Section {
             ForEach(others) { option in
                 Button {
-                    model.setLanguages(LanguagePreference.adding(option.code, to: settings.chosenLanguages.map(\.code)))
+                    model.settingsModel.setLanguages(LanguagePreference.adding(option.code, to: settings.chosenLanguages.map(\.code)))
                 } label: {
                     HStack {
                         LanguageLabel(option: option, showProviders: !allBoth)
