@@ -10,10 +10,10 @@ final class PurposeStringsTests: XCTestCase {
 
     func testEveryPermissionSaysWhatItIsFor() throws {
         let expectations: [String: [String]] = [
-            "NSMicrophoneUsageDescription": ["talk", "daemon", "demo"],
+            "NSMicrophoneUsageDescription": ["talk", "daemon", "AI voice and orchestrator services", "demo"],
             "NSSpeechRecognitionUsageDescription": ["demo", "on-device"],
-            "NSCameraUsageDescription": ["pairing code", "attach", "your own computer", "Nothing is recorded"],
-            "NSLocalNetworkUsageDescription": ["daemon", "your own computer"],
+            "NSCameraUsageDescription": ["pairing code", "attach", "your own computer", "AI services", "Nothing is recorded"],
+            "NSLocalNetworkUsageDescription": ["daemon", "your own computer", "AI voice and orchestrator services"],
         ]
         for (key, words) in expectations {
             let text = try purpose(key)
