@@ -27,7 +27,7 @@ Limit: 4,000 characters.
 > entirely on the device, with no network. Four scripted agents work on a sample project. After
 > about 15 seconds, codex-payments asks for approval: tap "Yes, proceed". Open Agents for the
 > list, tap an agent and "Open window" to see its (scripted) terminal, and tap a suggested
-> question such as "What's going on?" to hear a spoken answer. iOS may ask for the microphone
+> question such as "What's going on?" to hear a spoken answer. The demo starts with the microphone off; iOS asks for the microphone
 > and speech recognition (on-device only). Both are optional; tap or type instead. "Leave"
 > returns to setup. A recording of real use with a computer: <VIDEO LINK>.
 >
