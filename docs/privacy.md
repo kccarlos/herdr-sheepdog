@@ -115,7 +115,7 @@ tracking code is in it.
 
 | Permission | Why | When asked |
 |---|---|---|
-| Microphone | To talk to your daemon. Audio goes only to the daemon you point the app at. | When a voice session starts |
+| Microphone | To talk to your daemon. The app sends audio only to the daemon you point it at; the daemon passes it to the voice provider you chose. | When a voice session starts |
 | Speech recognition | Demo mode only: your spoken questions are recognised on the phone (on-device); nothing is sent anywhere. | When the demo starts, on devices that support it |
 | Camera | Only to scan the pairing QR code that `sheepdog pair` shows. Nothing is recorded or kept. | When you tap Scan pairing code |
 | Local network | To reach the daemon on your Wi-Fi or Tailscale. | On the first connection |
