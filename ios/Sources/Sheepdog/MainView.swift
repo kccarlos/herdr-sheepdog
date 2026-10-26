@@ -429,8 +429,9 @@ struct SessionMenus {
             endpoint: model.endpointDisplay,
             connectionSymbol: connectionSymbol,
             computers: model.showsComputerLabels ? model.computerSnapshots.map { computer in
-                let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
-                return .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: offline, summary: computer.summary())
+                // Not offline yet (the quiet period still reads
+                // "Connecting…"), but backing off: not picked either.
+                .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: !computer.canTalkTo, summary: computer.summary())
             } : [],
             wantsConnection: model.wantsConnection,
             isConfigured: model.isConfigured

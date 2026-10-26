@@ -442,18 +442,36 @@ store is `ComputerStore` ("Settings" below).
 
 - **The session is the current computer's.** `SessionViewModel` keeps its
   `/ws`, `/events`, conversation, voice and approvals, as with one
-  computer. Every other paired computer is a `ComputerSession`
-  (`ComputerSession.swift`). It polls its own `/api/state` every 5 s,
-  fetches again at once on any `/events` event, and holds the agents, the
-  open questions and `Reachability` (connecting, online, offline since).
+  computer. Every other paired computer has its own runtime (Kit,
+  docs/dev/design/ios-state-architecture.md 3.1):
+  - `ComputerConnection`, an actor, does its I/O: one immutable
+    `DaemonClient` per address, `GET /api/state`, the answers and the
+    `/events` loop;
+  - `ComputerModel` (`@MainActor @Observable`) is what the views read: the
+    agents, the open questions with their tap phases, `reachability` and
+    `canTalkTo`, all from its own `ComputerLink`, which runs in a
+    `LinkRuntime` there.
+
   It has no voice and no conversation. Nothing from it reaches the current
   daemon or the voice.
-- `SessionViewModel+Computers.swift` keeps one started session per other
+- **Its link** works like the current computer's (see "The connection"):
+  in the foreground it streams `/events` and refreshes on each event and
+  every 30 s; in the background it is idle (decision 2). On a constrained
+  path (Low Data Mode) it keeps `/events` closed and refreshes on the 30 s
+  timer only (phase 5 adds the `NWPathMonitor` that feeds the path). While the voice
+  runs on the current computer it backs off up to 60 s. An answer in flight
+  keeps its link up until it finishes.
+- **Epochs.** Every reply carries the epoch it was asked in, and the model
+  applies it only while that epoch is still its own. Re-pairing a computer
+  or changing its address starts a new epoch (`renew`); removing it stops
+  its runtime. Switching computers does not: an answer already sent
+  finishes on its own computer (decision 6).
+- `SessionViewModel+Computers.swift` keeps one started model per other
   computer (`rebuildOthers`, on start and on every change to the list or
-  the current computer). Each session's changes are forwarded to the
-  model, so the views read only the model. `computerSnapshots`
-  (`ComputerSnapshot`, Kit) is every computer in the store's order, with
-  "4 agents · 1 waiting" or "Offline since 9:12".
+  the current computer). The views read the models through the session
+  view model, and SwiftUI observes each model's properties directly.
+  `computerSnapshots` (`ComputerSnapshot`, Kit) is every computer in the
+  store's order, with "4 agents · 1 waiting" or "Offline since 9:12".
 - **Questions.** `floatingQuestions` is the current computer's questions,
   then the others' oldest first across computers (`QuestionOrder.others`,
   by `created_at`). Another computer's card carries a namespaced id
@@ -465,7 +483,9 @@ store is `ComputerStore` ("Settings" below).
 - **Talk to** (`talk(to:)`, `switchComputer(to:)`) ends the voice session
   cleanly, loads the new computer's conversation, reconnects if the voice
   was running, and adds a "Talking to Home Mac" divider. A computer that
-  does not answer is not switched to; a banner says why. It is reached
+  does not answer is not switched to (`canTalkTo`: its link is backing
+  off, offline, not verified or refused, even while the quiet period
+  still reads "Connecting…"); a banner says why, and its link retries. It is reached
   from the voice menu, a section header on the Agents page, All agents and
   the iPad sidebar, a floating question, a computer's Settings page, and
   ⌘K.
@@ -495,7 +515,11 @@ store is `ComputerStore` ("Settings" below).
 - **The Live Activity** names the current computer, and its waiting rows
   continue with the other computers' rows (up to three in all), each
   naming its computer.
-- **Tests:** `ComputersTests` and `ComputerStoreTests` (Kit);
+- **Tests:** `ComputersTests`, `ComputerStoreTests`, `ComputerRuntimeTests`
+  (two computers on a scripted network and a manual clock) and
+  `ComputerRuntimePropertyTests` (seeded interleavings of refreshes,
+  answers, replies in any order, re-pairing and the app's phase: no reply
+  lands on the wrong computer or an older pairing) in Kit;
   `ComputersUITests` against `StubDaemon(.computer…)`: one computer
   shows no label, and two computers plus an offline one cover Talk to,
   the sections, a question answered on another computer, Settings and
@@ -1008,7 +1032,10 @@ for the current computer:
 - a probe's `/api/state` reply is applied as the data, so the 30 s
   safety-net refresh replaces the old 5 s poll;
 - it is rebuilt for another computer, address or credentials, and the old
-  one's late replies land nowhere.
+  one's late replies land nowhere;
+- a promoted pin or a certificate expiry learned at sign-in reaches it as
+  `credentialsChanged(.pinPromoted)` (`DeviceCredentials.certificateChanged`),
+  so the rotation window is current without a relaunch.
 
 Errors are classified per request (`LinkError(_:)`): a key that matches no
 pin is `DaemonError.untrusted`, never "scan again" by itself. The link
@@ -1029,7 +1056,8 @@ Foreground notifications stay quiet while the link is usable.
 Not yet the link's (phase 5): `VoiceSocket` and `TermSocket` keep their
 own reconnects and only report to it, and there is no `NWPathMonitor`, so
 the remembered winners stay empty and the race has one address (failover is
-phase 6). Other computers still use `ComputerSession` (phase 4a).
+phase 6). Other computers run the same link in their own `ComputerModel`
+("Several computers"); the current computer moves onto one in phase 4b.
 
 **The top bar** (`TopBar` in `MainView.swift`) is `Conversation | Agents`
 (`PaneSwitcher`, with the waiting badge; a menu at the accessibility sizes)
@@ -1101,9 +1129,10 @@ re-renders every view that observes it. The rules that keep that cheap:
 
 - **Assign only on change.** A poll or a refresh assigns a published
   property only when the value differs (`SessionViewModel.assign`,
-  `ComputerSession.set`); an equal value still announces a change. Each
-  other computer's changes are forwarded to the model, so an unchanged
-  5 s poll must announce nothing.
+  `ComputerModel.set`); an equal value still announces a change, and an
+  `@Observable` setter notifies its observers even for an equal value.
+  Another computer's refresh that found nothing new must notify nothing
+  (`ComputerRuntimeTests.testAnUnchangedRefreshAssignsNothing`).
 - **High-frequency values have one reader.** Terminal frames: the surface
   (above). Audio levels: `VoiceMeter` is `@Observable`, and only
   `MeteredOrb` and `MeteredMicButton` read `micLevel` and `outputLevel`, so

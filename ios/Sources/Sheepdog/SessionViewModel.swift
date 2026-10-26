@@ -240,8 +240,10 @@ final class SessionViewModel: ObservableObject {
     var showsComputerLabels: Bool { computerCount > 1 }
 
     /// The other paired computers (`SessionViewModel+Computers.swift`).
-    @Published var others: [ComputerSession] = []
-    var otherSinks: [String: AnyCancellable] = [:]
+    @Published var others: [ComputerModel] = []
+    /// What each other computer's runtime was made for (its address and
+    /// pairing): a change starts a new epoch (`rebuildOthers`).
+    var otherFingerprints: [String: String] = [:]
     /// The current computer's daemon id ("" for a bare address).
     var currentComputerID: String { settings.computers.currentID ?? "" }
 
@@ -332,7 +334,7 @@ final class SessionViewModel: ObservableObject {
     /// The address `linkRuntime` was built for.
     private var linkAddress: String?
     private var linkTransport: DaemonProbeTransport?
-    private var appPhase: AppPhase = .active
+    private(set) var appPhase: AppPhase = .active
     private var lastSeq: UInt64 = 0
 
     /// The session's state and decisions. Fed only through `send(_:)`.
@@ -394,6 +396,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     private var started = false
+    private var certificateObserver: NSObjectProtocol?
     #if DEBUG
     private var renderProbe: AnyCancellable?
     #endif
@@ -415,6 +418,14 @@ final class SessionViewModel: ObservableObject {
         SheepdogIntentBridge.install { [weak self] url in self?.open(url: url) }
         syncAway()
         rebuildOthers()
+        // A promoted pin or a newly learned certificate expiry reaches the
+        // computer's link (`credentialsChanged(.pinPromoted)`), so the
+        // rotation window is current without a relaunch.
+        certificateObserver = NotificationCenter.default.addObserver(forName: DeviceCredentials.certificateChanged, object: nil, queue: .main) { [weak self] note in
+            guard let credentials = note.object as? DeviceCredentials else { return }
+            let expires = note.userInfo?[DeviceCredentials.certExpiresKey] as? Date
+            MainActor.assumeIsolated { self?.certificateChanged(daemonID: credentials.daemonID, certExpires: expires) }
+        }
         if !isConfigured || !settings.hasBeenConfigured {
             // A cold launch from the Camera app's pairing link asks about
             // the link instead (and reopens Settings if declined).
@@ -1013,6 +1024,8 @@ final class SessionViewModel: ObservableObject {
             // The voice keeps the link up in the background (Keep
             // listening), and Settings says "Talking here".
             linkRuntime?.send(.demandChanged(linkDemand))
+            // The others back off further while the voice is on here.
+            updateOthersDemand()
             presentLink()
         }
         if handshake != core.connection.handshake { handshake = core.connection.handshake }
@@ -1125,6 +1138,14 @@ final class SessionViewModel: ObservableObject {
         linkRuntime?.send(.demandChanged(linkDemand))
         appPhase = phase
         linkRuntime?.send(.appPhase(phase))
+        // Other computers stream in the foreground and stop in the
+        // background (decision 2).
+        for other in others { other.setAppPhase(phase) }
+    }
+
+    /// The current computer's certificate changed under its credentials.
+    func currentCertificateChanged(certExpires: Date?) {
+        linkRuntime?.send(.credentialsChanged(.pinPromoted(certExpires: certExpires)))
     }
 
     /// A new link for the current computer (its address, its credentials),
