@@ -356,7 +356,10 @@ final class SessionViewModel: ObservableObject {
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
     private var historySyncTask: Task<Void, Never>?
-    private var syncingHistory = false
+    /// The computers whose newest page is being fetched: one sync per
+    /// computer, so a sync still in flight for the computer the app left
+    /// does not hold back the new one's.
+    private var syncingHistory: Set<String> = []
 
     private var ticker: Task<Void, Never>?
     private(set) var appPhase: AppPhase = .active
@@ -554,8 +557,13 @@ final class SessionViewModel: ObservableObject {
         if core.connection.wantsConnection {
             disconnect()
             connect()
-        } else {
-            Task { await syncHistory() }
+        }
+        // The new computer's stream may have been open all along (as
+        // another computer it only refreshed on its events), so nothing
+        // reopens to catch the conversation up: sync it here.
+        Task {
+            await syncHistory()
+            await backfillActivity()
         }
     }
 
@@ -1508,7 +1516,7 @@ final class SessionViewModel: ObservableObject {
     /// Loads the newest page and merges it: the server's copy wins, and the
     /// finished transcript bubbles it now has stop showing twice.
     func syncHistory() async {
-        guard settings.endpoint != nil, !syncingHistory else { return }
+        guard settings.endpoint != nil, let syncing = fleet.current?.id, !syncingHistory.contains(syncing) else { return }
         // A bubble still growing on /ws is already an item on the server
         // (from its first fragment); swapping now would show it twice. The
         // dog's `out` bubble often closes only when the next turn starts.
@@ -1516,8 +1524,8 @@ final class SessionViewModel: ObservableObject {
             scheduleHistorySync()
             return
         }
-        syncingHistory = true
-        defer { syncingHistory = false }
+        syncingHistory.insert(syncing)
+        defer { syncingHistory.remove(syncing) }
         let sent = Date()
         do {
             let page = try await current { try await $0.conversation(limit: 200) }

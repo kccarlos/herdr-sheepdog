@@ -76,6 +76,7 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(label.label.contains("Home Mac · blog"), label.label)
         XCTAssertTrue(app.staticTexts["Answers by tap go to Home Mac."].exists)
         XCTAssertTrue(app.buttons["computerLabel.talkTo.fixture-2"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.waitForExistence(timeout: 10), "Work Mac's conversation")
         shot(app, "conversation")
 
         // Talk to in the voice menu, with every computer.
@@ -122,6 +123,12 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(starting(app, "Talk to Work Mac").waitForExistence(timeout: 5))
         XCTAssertTrue(starting(app, "Home Mac, talking here").exists, "Home Mac is current now")
         closeMenu(app, item: "voice.manageComputers")
+
+        // The conversation is Home Mac's now, caught up at once, with
+        // nothing of Work Mac's.
+        tapWhenTappable(app.buttons.matching(identifier: "main.pane.conversation").firstMatch, "the Conversation tab")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Home Mac")).firstMatch.waitForExistence(timeout: 10), "Home Mac's conversation after the switch")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.exists, "nothing of Work Mac's conversation")
     }
 
     /// Settings ▸ Add a computer while the session view model re-renders

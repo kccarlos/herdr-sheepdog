@@ -1197,6 +1197,67 @@ Order and dependencies:
     answers, replies in any order, re-pairing, events and the app's
     phase). `ComputersUITests` waits up to 45 s for the offline row.
 
+- **Phase 4b (done).** The current computer runs on its runtime too.
+  - **`ComputerFleet`** (Kit, `@MainActor @Observable`) holds every
+    computer's `ComputerModel` (plus one for a bare address or the demo)
+    and `currentID`. Switching computers changes that id. The computer the
+    app left keeps running as one of the others: its link backs off as
+    another computer's, its answers in flight finish there, and its stream
+    goes on refreshing its badges.
+  - **The session attaches** (`attachCurrent`): the current model's link
+    is the chip, its state and its `/events` output feed the session view
+    model, and the stream's life is Health's Live updates. Each hook checks
+    that its model is still current. `rebuildLink`, the session's own
+    `/events` loop, `linkRuntime`, `requestFinished` and the repointed
+    `client` are gone; so is `endpointChanged`'s fan-out of `update(endpoint:)`.
+  - **Requests on the current computer** go through `current { … }`
+    (`ComputerFleet.onCurrent`, then `ComputerModel.request`). The reply is
+    returned only if the same computer is still current at the same epoch,
+    otherwise it throws `Moved` or `Stale` and nothing is applied. That
+    covers every REST call the session makes: state, history, health,
+    models, settings, typed lines, agent actions and the voice's probe.
+    Each outcome tells that computer's link, which replaces
+    `DaemonClient.onOutcome` for it.
+  - **Answers by tap** on the current computer's other questions go
+    through its model (`ComputerModel.answer`), like another computer's.
+    After a switch they finish and land on that computer's card
+    (decision 6). The voice's approval card still answers through
+    `approvalFlow` (phase 7).
+  - **The conversation is per computer** (`ComputerConversation` on the
+    model: history, live bubbles, activity, the last event id). Switching
+    back shows it again without reading the cache, and a switch syncs the
+    new computer's history at once, because its stream may have been open
+    all along. Switching away clears only that computer's live bubbles and
+    saves its conversation to its own cache. This also fixes a bug: a
+    switch used to save the old conversation under the new computer's
+    cache key, because it read the endpoint after the switch.
+  - **Per computer:** `hello` and the features from the last `bot-ready`
+    live on the model. `termAvailability` is a pure read now; the features
+    are recorded where the handshake lands.
+  - **The voice** is not yet a separate `VoiceEngine`: `VoiceSocket` and
+    the `TermHub` are still one object each, repointed on a switch, with
+    the voice ended before and reconnected after. Splitting the voice out
+    of the session view model is phase 8, and making `/ws` and `/term`
+    channels of the link is phase 5.
+  - **Tests.**
+    - `ComputerSwitchPropertyTests` runs 40 seeds × 50 steps. Each step is
+      one of: a switch, a request on the current computer, an answer on
+      any computer, re-pairing, or a reply in any order. After every step
+      it checks two things. A reply is applied only for the computer it
+      was asked of, while that computer is still current. Every answer
+      finishes on its own computer.
+    - `ComputerFleetTests`.
+    - `ComputersUITests` now checks that, after Talk to Home Mac, the
+      conversation is Home Mac's, caught up, with nothing of Work Mac's.
+  - **Left for later:**
+    - phase 5: `NWPathMonitor` feeds `setPath`, `/ws` and `/term` become
+      the link's channels, and a late `/ws` callback is guarded by epoch;
+    - phase 7: the approval card, typed lines and New agent go through an
+      `ActionRunner` with keys;
+    - phase 8: the voice leaves the session view model;
+    - the session's own `refreshState` does not update the current
+      model's copy of the state; the model's next probe does.
+
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on
