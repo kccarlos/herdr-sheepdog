@@ -16,8 +16,8 @@ struct ModelsView: View {
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            async let providers: Void = model.loadVoiceProviders()
-            async let brain: Void = model.loadBrainModels()
+            async let providers: Void = model.settingsModel.loadVoiceProviders()
+            async let brain: Void = model.settingsModel.loadBrainModels()
             _ = await (providers, brain)
         }
         .accessibilityIdentifier("models.list")
@@ -28,10 +28,10 @@ struct ModelsView: View {
     @ViewBuilder
     private var voiceSection: some View {
         Section {
-            if let list = model.voiceProviders, !list.providers.isEmpty {
+            if let list = model.settingsModel.voiceProviders, !list.providers.isEmpty {
                 ForEach(list.providers) { option in
                     Button {
-                        model.selectVoiceProvider(option.id)
+                        model.settingsModel.selectVoiceProvider(option.id)
                     } label: {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -52,11 +52,11 @@ struct ModelsView: View {
                         }
                         .frame(minHeight: 44)
                     }
-                    .disabled(!option.isAvailable || model.switchingProvider)
+                    .disabled(!option.isAvailable || model.settingsModel.switchingProvider)
                     .accessibilityIdentifier("settings.voiceProvider.\(option.id)")
                     .accessibilityAddTraits(option.id == list.provider ? .isSelected : [])
                 }
-                if model.switchingProvider {
+                if model.settingsModel.switchingProvider {
                     HStack {
                         ProgressView()
                         Text("Switching the live session…")
@@ -68,7 +68,7 @@ struct ModelsView: View {
                 LabeledContent("Voice", value: model.voiceProviderDisplay ?? "—")
                     .accessibilityIdentifier("models.voice.current")
             }
-            if let error = model.providerError {
+            if let error = model.settingsModel.providerError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(Color(.systemRed))
@@ -92,7 +92,7 @@ struct ModelsView: View {
     }
 
     private var voiceFooter: String {
-        guard let list = model.voiceProviders, !list.providers.isEmpty else {
+        guard let list = model.settingsModel.voiceProviders, !list.providers.isEmpty else {
             return "This daemon offers one voice; there is nothing to switch."
         }
         var text = "Which model \(model.voiceName) talks with. The daemon switches the live session at once; the conversation and your agents carry over."
@@ -107,18 +107,18 @@ struct ModelsView: View {
     @ViewBuilder
     private var brainSection: some View {
         Section {
-            if let models = model.brainModels {
+            if let models = model.settingsModel.brainModels {
                 Picker("Provider", selection: Binding(
                     get: { models.provider },
                     set: { provider in
                         // A provider's catalog first, then a model from it.
                         Task {
-                            await model.loadBrainModels(provider: provider)
-                            guard let catalog = model.brainModels, catalog.modelsProvider == provider else { return }
+                            await model.settingsModel.loadBrainModels(provider: provider)
+                            guard let catalog = model.settingsModel.brainModels, catalog.modelsProvider == provider else { return }
                             if let first = catalog.defaultModelForSwitch {
-                                model.selectBrain(provider: provider, model: first)
+                                model.settingsModel.selectBrain(provider: provider, model: first)
                             } else {
-                                model.brainError = "No model list for \(provider)" + (catalog.error.map { ": \($0)" } ?? "") + " — the orchestrator was left as it is."
+                                model.settingsModel.brainError = "No model list for \(provider)" + (catalog.error.map { ": \($0)" } ?? "") + " — the orchestrator was left as it is."
                             }
                         }
                     }
@@ -128,17 +128,17 @@ struct ModelsView: View {
                             .tag(provider.id)
                     }
                 }
-                .disabled(model.switchingBrain)
+                .disabled(model.settingsModel.switchingBrain)
                 .accessibilityIdentifier("models.brainProvider")
                 Picker("Model", selection: Binding(
                     get: { models.model },
-                    set: { model.selectBrain(provider: models.provider, model: $0) }
+                    set: { model.settingsModel.selectBrain(provider: models.provider, model: $0) }
                 )) {
                     ForEach(models.choices) { choice in
                         Text(choice.displayName ?? choice.name).tag(choice.name)
                     }
                 }
-                .disabled(model.switchingBrain)
+                .disabled(model.settingsModel.switchingBrain)
                 .accessibilityIdentifier("models.brainModel")
                 if let error = models.error, !error.isEmpty {
                     Text("Model list not fresh: \(error)").font(.caption).foregroundStyle(.secondary)
@@ -148,10 +148,10 @@ struct ModelsView: View {
             } else {
                 Text("Loading…").foregroundStyle(.secondary)
             }
-            if model.switchingBrain {
+            if model.settingsModel.switchingBrain {
                 HStack { ProgressView(); Text("Switching…").font(.caption).foregroundStyle(.secondary) }
             }
-            if let error = model.brainError {
+            if let error = model.settingsModel.brainError {
                 Text(error).font(.caption).foregroundStyle(Color(.systemRed))
             }
         } header: {

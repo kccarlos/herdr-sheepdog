@@ -82,7 +82,7 @@ struct HealthView: View {
                 .accessibilityIdentifier("health.brainModel")
             // Every stats line carries the field once the daemon can switch
             // voice (0 with Gemini): only worth a row when something billed.
-            if let billed = model.healthModel.health.billedSeconds, billed > 0 || model.voiceProviders?.provider == "openai" {
+            if let billed = model.healthModel.health.billedSeconds, billed > 0 || model.settingsModel.voiceProviders?.provider == "openai" {
                 LabeledContent("GPT-Live billed", value: Self.billed(billed))
                     .accessibilityIdentifier("health.billed")
             }
@@ -121,11 +121,11 @@ struct HealthView: View {
 
     @ViewBuilder
     private var chattinessSection: some View {
-        if let settings = model.daemonSettings {
+        if let settings = model.settingsModel.daemonSettings {
             Section {
                 let selection = Binding(
                     get: { settings.chattiness },
-                    set: { model.setChattiness($0) }
+                    set: { model.settingsModel.setChattiness($0) }
                 )
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
@@ -145,7 +145,7 @@ struct HealthView: View {
                     }
                 }
                 .accessibilityIdentifier("health.chattiness")
-                if let error = model.settingsError {
+                if let error = model.settingsModel.settingsError {
                     Text(error).font(.caption).foregroundStyle(Color(.systemRed))
                 }
             } header: {

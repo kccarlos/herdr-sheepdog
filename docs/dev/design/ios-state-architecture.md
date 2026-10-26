@@ -1469,10 +1469,16 @@ Order and dependencies:
     providers stays in `SessionViewModel.loadHealth` until those move.
     A problem count changing no longer announces on the session view
     model.
+  - **Done: Settings.** `SettingsModel` (`SettingsModel.swift`,
+    `@Observable`) holds `brainModels`, `daemonSettings`, `voiceProviders`,
+    the switching flags and their errors, with the loaders and pickers;
+    `loadAll()` is the Health pane's fan-out. It runs requests through the
+    session's `current` (a weak `session`), and tells the session when a
+    provider was picked (`voiceProviderSelected`) and, through
+    `onVoiceProvidersChange`, when the audio engine's profile must follow.
+    Views read `model.settingsModel`. A catalog or an error changing no
+    longer announces on the session view model.
   - **Left, in order** (sizes S/M/L):
-    1. Settings, models and providers: `brainModels`, `daemonSettings`,
-       `voiceProviders`, the switching flags and their errors, and the
-       loaders (M; also takes the rest of `loadHealth`'s fan-out).
     2. Notices: `update`, `pairingProblem`, `daemonNotice*`,
        `feedbackNotice`, `banner` (S).
     3. Link: `linkPresentation`, `addressRows`, `liveUpdates`,

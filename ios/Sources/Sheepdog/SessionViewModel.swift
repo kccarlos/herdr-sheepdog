@@ -152,14 +152,8 @@ final class SessionViewModel: ObservableObject {
     // The Health pane.
     /// Uptime, GPT-Live's billed seconds and the recent problems.
     let healthModel = HealthModel()
-    /// The orchestrator's catalog and choice; nil until loaded, and on a daemon
-    /// without the route.
-    @Published private(set) var brainModels: BrainModels?
-    @Published private(set) var switchingBrain = false
-    @Published var brainError: String?
-    /// The push chattiness; nil until loaded, and without an orchestrator.
-    @Published private(set) var daemonSettings: DaemonSettings?
-    @Published var settingsError: String?
+    /// Settings, models and providers (the Settings and Health panes).
+    let settingsModel = SettingsModel()
 
     // Mirrors of `core`, published for the views (see `publish()`).
     @Published private(set) var isMuted = false
@@ -178,13 +172,6 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var microphoneMode: MicrophoneModeName = .standard
     @Published private(set) var preferredMicrophoneMode: MicrophoneModeName = .standard
 
-    // The voice provider (GET/PUT /api/voice/provider[s]).
-    /// nil until loaded, and when the daemon has no provider API (404).
-    @Published private(set) var voiceProviders: VoiceProviders? {
-        didSet { audio.setProvider(resolvedVoiceProvider) }
-    }
-    @Published private(set) var switchingProvider = false
-    @Published var providerError: String?
     /// From the `/ws` status message, `/api/state` and `/api/hello`.
     @Published private(set) var liveVoiceProvider: String? {
         didSet { audio.setProvider(resolvedVoiceProvider) }
@@ -220,7 +207,7 @@ final class SessionViewModel: ObservableObject {
     /// "Gemini · gemini-3.5-flash": the orchestrator as the catalog names it, else
     /// as `/api/state` reports it.
     var brainDisplay: String? {
-        if let models = brainModels, !models.model.isEmpty {
+        if let models = settingsModel.brainModels, !models.model.isEmpty {
             let provider = models.providers.first { $0.id == models.provider }?.displayName ?? models.provider
             return [provider, models.model].filter { !$0.isEmpty }.joined(separator: " · ")
         }
@@ -266,14 +253,14 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello` — in that order of freshness. One resolver instead of
     /// this fallback chain copied at each of its two call sites.
     private var resolvedVoiceProvider: String? {
-        liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+        liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
     }
 
     /// "Gemini Live · gemini-3.8-live", from whichever source knows.
     var voiceProviderDisplay: String? {
         let id = resolvedVoiceProvider
-        let option = voiceProviders?.providers.first { $0.id == id }
-        let model = (id == voiceProviders?.provider ? voiceProviders?.model : nil)
+        let option = settingsModel.voiceProviders?.providers.first { $0.id == id }
+        let model = (id == settingsModel.voiceProviders?.provider ? settingsModel.voiceProviders?.model : nil)
             ?? (id == stateVoiceProvider ? stateVoiceModel : nil)
             ?? (id == hello?.voiceProvider ? hello?.voiceModel : nil)
             ?? option?.model
@@ -426,6 +413,11 @@ final class SessionViewModel: ObservableObject {
             renderProbe = objectWillChange.sink { _ in RenderProbe.hit("model") }
         }
         #endif
+        settingsModel.session = self
+        settingsModel.onVoiceProvidersChange = { [weak self] in
+            guard let self else { return }
+            audio.setProvider(resolvedVoiceProvider)
+        }
         wire()
         // Every computer's runtime, made now (started in `start`), so the
         // cached conversation loads into the current one.
@@ -596,8 +588,7 @@ final class SessionViewModel: ObservableObject {
             questions = []
             cardInbox.clear()
             healthModel.clear()
-            brainModels = nil
-            daemonSettings = nil
+            settingsModel.clear()
             update = nil
             approvalFlow.reset()
             if !conversation.loaded { loadCache() }
@@ -657,7 +648,7 @@ final class SessionViewModel: ObservableObject {
             let state = try await current { try await $0.state() }
             apply(state)
             await loadHello()
-            await loadVoiceProviders()
+            await settingsModel.loadVoiceProviders()
         } catch let error as DaemonError {
             send(.probeFailed(error))
             return
@@ -826,70 +817,8 @@ final class SessionViewModel: ObservableObject {
         AVCaptureDevice.showSystemUserInterface(.microphoneModes)
     }
 
-    // MARK: - Voice provider
-
-    func loadVoiceProviders() async {
-        guard settings.endpoint != nil else { return }
-        do {
-            let list = try await current { try await $0.voiceProviders() }
-            #if DEBUG
-            // The fixture daemon (`--voice=off`) lists no providers.
-            if list?.providers.isEmpty ?? true, DebugLaunch.fakeProviders {
-                voiceProviders = Self.fakeProviders(current: voiceProviders?.provider ?? "gemini")
-                return
-            }
-            #endif
-            voiceProviders = list
-        } catch {
-            // Hidden rather than an error: the picker is a convenience, and
-            // the connection itself reports what is wrong.
-            SheepdogLog.session.error("voice providers: \(String(describing: error), privacy: .public)")
-            voiceProviders = nil
-        }
-    }
-
-    func selectVoiceProvider(_ id: String) {
-        guard id != voiceProviders?.provider, !switchingProvider else { return }
-        switchingProvider = true
-        providerError = nil
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.switchingProvider = false }
-            do {
-                let list = try await self.current { try await $0.setVoiceProvider(id) }
-                self.voiceProviders = list
-                self.send(.providerSelected(list.provider))
-                Haptics.tap()
-            } catch let error as DaemonError {
-                #if DEBUG
-                if DebugLaunch.fakeProviders {
-                    self.voiceProviders = Self.fakeProviders(current: id)
-                    self.send(.providerSelected(id))
-                    return
-                }
-                #endif
-                self.providerError = error.message
-            } catch {
-                self.providerError = error.localizedDescription
-            }
-            await self.refreshState(quiet: true)
-        }
-    }
-
-    #if DEBUG
-    /// The contract's example, for screenshots against a daemon that lists
-    /// no voice providers (the `--voice=off` fixture daemon).
-    static func fakeProviders(current: String) -> VoiceProviders {
-        VoiceProviders(
-            provider: current,
-            model: current == "openai" ? "gpt-live-1" : "gemini-3.8-live",
-            providers: [
-                VoiceProviderOption(id: "gemini", label: "Gemini Live", model: "gemini-3.8-live", available: true),
-                VoiceProviderOption(id: "openai", label: "GPT-Live", model: "gpt-live-1", available: true, billing: "per_minute"),
-            ]
-        )
-    }
-    #endif
+    /// The provider picker changed it (`SettingsModel`): the core learns it.
+    func voiceProviderSelected(_ id: String?) { send(.providerSelected(id)) }
 
     /// Once per install: what Mute does and does not do.
     private func offerMuteHint() {
@@ -1688,9 +1617,7 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil, healthModel.begin() else { return }
         defer { healthModel.end() }
         async let state: Bool = refreshState(quiet: true)
-        async let models: Void = loadBrainModels()
-        async let chattiness: Void = loadDaemonSettings()
-        async let providers: Void = loadVoiceProviders()
+        async let settings: Void = settingsModel.loadAll()
         if hello == nil { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
         var next = healthModel.health
@@ -1701,90 +1628,7 @@ final class SessionViewModel: ObservableObject {
             for event in events { next.fold(event) }
         }
         healthModel.replace(with: next)
-        _ = await (state, models, chattiness, providers)
-    }
-
-    func loadBrainModels(provider: String? = nil) async {
-        do {
-            brainModels = try await current { try await $0.brainModels(provider: provider) }
-            brainError = nil
-        } catch let error as DaemonError {
-            brainError = error.message
-        } catch {
-            brainError = error.localizedDescription
-        }
-    }
-
-    /// The orchestrator picker: provider and model for the orchestrator's next turn.
-    func selectBrain(provider: String?, model: String) {
-        guard !switchingBrain else { return }
-        switchingBrain = true
-        brainError = nil
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.switchingBrain = false }
-            do {
-                self.brainModels = try await self.current { try await $0.setBrainModel(provider: provider, model: model) }
-                Haptics.tap()
-            } catch let error as DaemonError {
-                self.brainError = error.message
-            } catch {
-                self.brainError = error.localizedDescription
-            }
-            await self.refreshState(quiet: true)
-        }
-    }
-
-    func loadDaemonSettings() async {
-        do {
-            daemonSettings = try await current { try await $0.settings() }
-            settingsError = nil
-        } catch let error as DaemonError {
-            // No orchestrator is a 503: hide the control, say why.
-            daemonSettings = nil
-            settingsError = error.message
-        } catch {
-            settingsError = error.localizedDescription
-        }
-    }
-
-    func setChattiness(_ level: String) {
-        guard level != daemonSettings?.chattiness else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                self.daemonSettings = try await self.current { try await $0.setChattiness(level) }
-                self.settingsError = nil
-                Haptics.tap()
-            } catch let error as DaemonError {
-                self.settingsError = error.message
-            } catch {
-                self.settingsError = error.localizedDescription
-            }
-        }
-    }
-
-    /// Sends the language preference (most preferred first); the
-    /// daemon's reply replaces the local copy, so the screen shows what
-    /// it kept.
-    func setLanguages(_ codes: [String]) {
-        guard codes != (daemonSettings?.languages ?? []) else { return }
-        if var optimistic = daemonSettings {
-            optimistic.languages = codes
-            daemonSettings = optimistic
-        }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                self.daemonSettings = try await self.current { try await $0.setLanguages(codes) }
-                self.settingsError = nil
-                Haptics.tap()
-            } catch {
-                // Back to what the daemon has, then say why it refused.
-                await self.loadDaemonSettings()
-                self.settingsError = (error as? DaemonError)?.message ?? error.localizedDescription
-            }
-        }
+        _ = await (state, settings)
     }
 
     // MARK: - Typed input

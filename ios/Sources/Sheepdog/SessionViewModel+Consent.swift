@@ -45,6 +45,6 @@ extension SessionViewModel {
     /// "Google Gemini (voice) and DeepSeek (answers)", or the generic
     /// words when this computer has not said yet.
     var aiServicesSummary: String {
-        AIServices.summary(voice: hello?.voiceProvider ?? voiceProviders?.provider, brain: brain?.provider)
+        AIServices.summary(voice: hello?.voiceProvider ?? settingsModel.voiceProviders?.provider, brain: brain?.provider)
     }
 }

@@ -88,7 +88,7 @@ struct ConnectionDetailView: View {
                 }
             }
             .task {
-                async let providers: Void = model.loadVoiceProviders()
+                async let providers: Void = model.settingsModel.loadVoiceProviders()
                 await ping()
                 await providers
             }
