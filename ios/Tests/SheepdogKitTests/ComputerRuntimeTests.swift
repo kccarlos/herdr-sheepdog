@@ -204,7 +204,7 @@ final class ComputerRuntimeTests: XCTestCase {
 
     func makeModel(_ address: String, certExpires: Date? = nil, demand: LinkDemand = LinkDemand(isCurrent: false)) -> ComputerModel {
         let network = network!
-        let connection = ComputerConnection(computerID: address, address: address, makeRequests: { network.makeRequests($0) }, sleep: { _ in })
+        let connection = ComputerConnection(computerID: address, address: address, makeRequests: { network.makeRequests($0) })
         return ComputerModel(id: address, name: address, addresses: [address], certExpires: certExpires, connection: connection,
                              scheduler: clock, demand: demand, random: LinkRandom(seed: 7))
     }

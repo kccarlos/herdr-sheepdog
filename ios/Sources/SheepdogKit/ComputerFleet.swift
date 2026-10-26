@@ -15,8 +15,23 @@ import Observation
 public final class ComputerFleet {
     public private(set) var models: [ComputerModel] = []
     public private(set) var currentID: String?
+    /// The phone's network path, as the `NetworkPathSource` last said:
+    /// every model has it, including one added later.
+    @ObservationIgnored public private(set) var path: NetworkPath
 
-    public init() {}
+    public init(path: NetworkPath = NetworkPath()) {
+        self.path = path
+    }
+
+    /// The network changed: every computer's link hears it. No network
+    /// stops every retry; a network that comes back, or a new interface
+    /// (Wi-Fi to cellular), makes every link with demand try at once; Low
+    /// Data Mode keeps other computers' `/events` closed.
+    public func setPath(_ path: NetworkPath) {
+        guard path != self.path else { return }
+        self.path = path
+        for model in models { model.setPath(path) }
+    }
 
     public var current: ComputerModel? {
         guard let currentID else { return nil }
@@ -31,6 +46,7 @@ public final class ComputerFleet {
     /// The computers in this order. A model no longer listed is stopped.
     public func set(_ next: [ComputerModel]) {
         for gone in models where !next.contains(where: { $0 === gone }) { gone.stop() }
+        for added in next where added.link.path != path { added.setPath(path) }
         if !next.elementsEqual(models, by: ===) { models = next }
         if let currentID, model(currentID) == nil { self.currentID = nil }
     }

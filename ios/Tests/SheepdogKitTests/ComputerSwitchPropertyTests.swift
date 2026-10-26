@@ -30,7 +30,7 @@ final class ComputerSwitchPropertyTests: XCTestCase {
         let fleet = ComputerFleet()
         var models: [ComputerModel] = []
         for id in ids {
-            let connection = ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) }, sleep: { _ in })
+            let connection = ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) })
             models.append(ComputerModel(id: id, name: id, addresses: [id], certExpires: nil, connection: connection, scheduler: clock,
                                         demand: LinkDemand(isCurrent: id == "home"), random: LinkRandom(seed: seed)))
         }
@@ -120,7 +120,7 @@ final class ComputerFleetTests: XCTestCase {
         let fleet = ComputerFleet()
         let models = ["home", "work"].map { id in
             ComputerModel(id: id, name: id, addresses: [id], certExpires: nil,
-                          connection: ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) }, sleep: { _ in }),
+                          connection: ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) }),
                           scheduler: clock, demand: LinkDemand(isCurrent: id == "home"))
         }
         fleet.set(models)
@@ -147,7 +147,7 @@ final class ComputerFleetTests: XCTestCase {
         let fleet = ComputerFleet()
         let models = ["home", "work"].map { id in
             ComputerModel(id: id, name: id, addresses: [id], certExpires: nil,
-                          connection: ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) }, sleep: { _ in }),
+                          connection: ComputerConnection(computerID: id, address: id, makeRequests: { network.makeRequests($0) }),
                           scheduler: clock, demand: LinkDemand(isCurrent: id == "home"))
         }
         fleet.set(models)

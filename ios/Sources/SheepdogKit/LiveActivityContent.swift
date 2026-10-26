@@ -198,9 +198,11 @@ extension LiveActivityContent {
     public static func phase(state: SessionState, suspendedInBackground: Bool) -> Phase? {
         switch state {
         case .disconnected: return nil
+        // Paused in the background, the link closes `/ws` on purpose
+        // (Keep listening off): that is "paused", not "reconnecting".
+        case _ where suspendedInBackground: return .locked
         case .connecting: return .connecting
         case .reconnecting: return .reconnecting
-        case _ where suspendedInBackground: return .locked
         case .voiceOff: return .voiceOff
         case .audioPaused: return .paused
         case .noMicrophone: return .noMicrophone

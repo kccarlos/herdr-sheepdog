@@ -303,7 +303,11 @@ final class SessionViewModel: ObservableObject {
     /// Every computer's runtime, the current one included
     /// (docs/dev/design/ios-state-architecture.md 3.1): switching changes
     /// one id, and nothing is rebuilt or repointed.
-    let fleet = ComputerFleet()
+    let fleet: ComputerFleet
+    /// The phone's network path (`NWPathMonitor`), handed to every
+    /// computer's link through `fleet.setPath`. The demo is always on
+    /// Wi-Fi, whatever the Mac's network; `-sheepdogNoNetwork` has none.
+    let pathSource: NetworkPathSource
     /// What each computer's runtime was made for (its address and pairing);
     /// a change starts a new epoch. Each connection reads its computer's
     /// endpoint from `endpoints` when it makes a client.
@@ -375,6 +379,9 @@ final class SessionViewModel: ObservableObject {
         self.settings = settings
         self.cache = cache
         self.demo = demo
+        let pathSource = Self.makePathSource(demo: demo != nil)
+        self.pathSource = pathSource
+        fleet = ComputerFleet(path: pathSource.path)
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
         self.socket = VoiceSocket(endpoint: endpoint)
         self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
@@ -419,6 +426,16 @@ final class SessionViewModel: ObservableObject {
         conversationChanged(save: false)
     }
 
+    /// The network path's source: `NWPathMonitor`, or a fixed path for the
+    /// demo and the debug launch argument.
+    private static func makePathSource(demo: Bool) -> NetworkPathSource {
+        if demo { return ManualNetworkPath() }
+        #if DEBUG
+        if DebugLaunch.noNetwork { return ManualNetworkPath(NetworkPath(satisfied: false)) }
+        #endif
+        return SystemNetworkMonitor()
+    }
+
     /// Runs a request on the current computer. Its reply comes back only
     /// if that computer is still current at the same epoch; otherwise it
     /// throws and nothing is applied (a late reply from the computer the
@@ -441,6 +458,7 @@ final class SessionViewModel: ObservableObject {
         started = true
         attachCurrent()
         for model in fleet.models { model.start() }
+        pathSource.start { [weak self] path in self?.fleet.setPath(path) }
         if demo != nil {
             startDemo()
             return
@@ -582,6 +600,10 @@ final class SessionViewModel: ObservableObject {
     /// upgrade is almost unreadable, so find out here where the status code
     /// is plain — then the microphone permission.
     private func openSession() async {
+        if fleet.current?.link.state == .noNetwork {
+            send(.noNetwork)
+            return
+        }
         do {
             let state = try await current { try await $0.state() }
             apply(state)
@@ -892,8 +914,9 @@ final class SessionViewModel: ObservableObject {
     private func handle(socket event: VoiceSocket.Event) {
         switch event {
         case .opened:
+            // The socket tells the link itself (its reporter is tagged with
+            // the computer and epoch it was opened for).
             send(.socketOpened)
-            fleet.current?.send(.channelOpened(.ws))
             #if DEBUG
             // The UI tests start configured; a permission alert would sit
             // on top of everything they tap.
@@ -910,15 +933,20 @@ final class SessionViewModel: ObservableObject {
         case let .closed(reason, retrying):
             screenStream.socketClosed()
             cardVisibility.socketClosed()
+            // A lost socket has told the link, which probes once (to tell a
+            // restart from a refusal: a 401 on the upgrade is unreadable)
+            // and says when to open it again.
             send(.socketClosed(reason: reason, willRetry: retrying))
-            // A drop the socket retries: the link probes once to tell a
-            // restart from a refusal (a 401 on the upgrade is unreadable).
-            if retrying { fleet.current?.send(.channelLost(.ws, .transport)) }
         case let .failed(error, retrying):
             screenStream.socketClosed()
             cardVisibility.socketClosed()
             send(.socketFailed(error, willRetry: retrying))
-            if retrying { fleet.current?.send(.channelLost(.ws, LinkError(error))) }
+        case .paused:
+            // The link closed it (offline, no network, the background
+            // with Keep listening off); it reopens when the link allows.
+            screenStream.socketClosed()
+            cardVisibility.socketClosed()
+            send(.socketClosed(reason: "paused", willRetry: true))
         case let .handshake(state):
             send(.handshakeChanged(state))
             if let message = state.mismatchMessage {
@@ -1221,6 +1249,10 @@ final class SessionViewModel: ObservableObject {
         let current = fleet.current
         for model in fleet.models where model !== current { detach(model) }
         updateDemands()
+        // The voice's `/ws` and the terminal's `/term` are the current
+        // computer's channels: its link alone opens and reopens them.
+        current?.attach(.ws, socket)
+        current?.attach(.term, termHub)
         guard let model = current else {
             linkChanged(ComputerLink(addresses: []))
             setLiveUpdates(.idle)
@@ -1266,6 +1298,8 @@ final class SessionViewModel: ObservableObject {
         model.onStreamOpening = nil
         model.onLiveUpdates = nil
         model.eventsSince = nil
+        model.attach(.ws, nil)
+        model.attach(.term, nil)
     }
 
     /// `/api/hello` for the current computer, kept on its model.
@@ -2684,8 +2718,8 @@ extension SessionViewModel.Banner {
         switch banner {
         case let .connectionFailed(error):
             self.init(tone: .error, message: error.message, hint: error.hint, retryTitle: "Try again", help: SetupHelp.helpURL(for: error))
-        case let .stillReconnecting(error):
-            self.init(tone: .warning, message: error.message, hint: "Still trying every few seconds. Tap End to stop.", retryTitle: "Try now", help: SetupHelp.helpURL(for: error))
+        case .noNetwork:
+            self.init(tone: .warning, message: "This phone is offline.", hint: "Connect again when it is back on a network.", retryTitle: "Try again")
         case .replaced:
             self.init(
                 tone: .warning,

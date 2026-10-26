@@ -27,7 +27,7 @@ final class ComputerRuntimePropertyTests: XCTestCase {
         }
         var models: [String: ComputerModel] = [:]
         for address in addresses {
-            let connection = ComputerConnection(computerID: address, address: address, makeRequests: { network.makeRequests($0) }, sleep: { _ in })
+            let connection = ComputerConnection(computerID: address, address: address, makeRequests: { network.makeRequests($0) })
             let model = ComputerModel(id: address, name: address, addresses: [address], certExpires: nil, connection: connection,
                                       scheduler: clock, demand: LinkDemand(isCurrent: address == "home"), random: LinkRandom(seed: seed))
             models[address] = model

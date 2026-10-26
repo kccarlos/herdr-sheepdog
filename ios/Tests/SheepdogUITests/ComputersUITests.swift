@@ -139,19 +139,26 @@ final class ComputersUITests: XCTestCase {
         let stub = try StubDaemon(.daemon(update: nil))
         let host = try stub.start()
         defer { stub.stop() }
+        let churnAfter = 20.0
 
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)", "-sheepdogRenderChurn"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogComputers", "Work Mac=\(host)", "-sheepdogNoAnimations", "-sheepdogRenderChurnAfter", "\(churnAfter)"]
+        let launched = Date()
         app.launch()
 
-        tapMenuItem(app, menu: "voice.menu", item: "voice.manageComputers")
+        // Reach Settings first, with the session still: the churn starts
+        // later (as #407 did for the shell and Spaces), so a tap on the
+        // capsule or its menu is not lost to ten re-renders a second.
         let add = app.buttons["settings.addComputer"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10), "Settings ▸ Add a computer")
-        add.tap()
+        tapMenuItem(app, menu: "voice.menu", item: "voice.manageComputers", until: add)
+        tapWhenTappable(add, "Add a computer")
 
         let sheet = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pairing.'")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "the scan sheet opens")
         let id = sheet.identifier
+        // The churn is on from here on.
+        let wait = churnAfter - Date().timeIntervalSince(launched)
+        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         // Stays up, the same screen, for several seconds of re-renders.
         let done = app.buttons["settings.done"]
         for i in 0 ..< 40 {

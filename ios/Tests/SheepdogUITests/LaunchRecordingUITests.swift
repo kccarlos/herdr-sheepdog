@@ -142,7 +142,9 @@ final class LaunchRecordingUITests: XCTestCase {
         mark("ask")
         Thread.sleep(forTimeInterval: 4)
         mark("tap_approve")
-        tapVisible(app.buttons, "approval.option.1")
+        // Said, not tapped: the demo's "Yes, go ahead." chip is what the
+        // voice hands the demo once it has recognised the words.
+        tapVisible(app.buttons, "demo.sayYes")
         let approved = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved'")).firstMatch
         XCTAssertTrue(approved.waitForExistence(timeout: 10))
         mark("approved")
