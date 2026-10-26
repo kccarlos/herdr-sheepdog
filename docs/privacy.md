@@ -2,12 +2,19 @@
 
 **What stays on your computer, what leaves it, and what the project never collects.**
 
-sheepdog is open-source software that runs on your computer. There is no
-account and **no telemetry**. The project runs one small service: an
-optional **push relay** that forwards phone notifications to Apple (see
-"Phone notifications" below). It cannot read them, and nothing else is
-sent to the project or its author. This page also serves as the privacy policy of the iOS
-app "Sheepdog for herdr". Questions: kccarlos.opensource@gmail.com.
+sheepdog is open-source software that runs on your computer, and the Sheepdog
+iPhone app is its remote control. **The developer of the app collects nothing.**
+There is no account, no analytics, no advertising and no tracking, in the app
+or in the daemon. The project runs one small service: an optional **push
+relay** that forwards phone notifications to Apple (see "Phone notifications").
+It cannot read them. Nothing else is sent to the project or its author.
+This page is the privacy policy of the Sheepdog iPhone and iPad app and of the
+sheepdog daemon. Questions: kccarlos.opensource@gmail.com.
+
+**In short.** Your voice, what you say, your agents' screens and the photos you
+attach go from the app to *your own* computer, over TLS. Your computer passes
+them to the AI services you set up there with your own API keys. The developer
+never sees them.
 
 ## What goes to which provider
 
@@ -31,6 +38,39 @@ Anthropic's server-side fallback (on by default, `anthropic.fallbacks`) sends
 the same request to another Claude model inside Anthropic. Nothing else goes
 to Anthropic: the voice audio never does. Your API keys are used only to call those providers, and are never
 logged.
+
+## AI services
+
+The app itself talks to no AI service. In real use, the sheepdog daemon on
+your computer does, with the API keys you put in its configuration:
+
+| Service | What it receives | Chosen by |
+|---|---|---|
+| The **voice service**: Google Gemini Live or OpenAI GPT-Live | Your microphone audio, and short briefings about agent events | You, in the daemon's config |
+| The **orchestrator**: DeepSeek, Google Gemini, Anthropic, an OpenAI-compatible service, or a local model (Ollama) | What you said as text, the agents' screens, session records and command output the orchestrator reads | You, in the daemon's config |
+
+Photos you attach in the app go to your computer and are stored there (see
+"What is stored on your computer"); the agent receives only the file path, so
+a photo goes to an AI service only if the agent you ask to look at it sends it
+on. The demo uses no AI service and sends nothing.
+
+These services act under your own account and your own terms with them; the
+developer of sheepdog is not a party and cannot see the data. Choose providers
+whose terms you accept; a local model keeps the text on your machine. Each
+provider is expected to give the data the protection its own policy
+promises: read it, especially for free-tier keys.
+
+## Withdraw your consent
+
+- **Stop the AI sharing:** disconnect the app (Settings, remove the computer)
+  or stop the daemon (`sheepdog stop`); nothing is sent while either is off.
+  To cut a provider off, remove its key from `~/.config/sheepdog/.env`.
+- **Remove the phone:** delete the computer in the app's Settings (this
+  deletes its keys from the keychain and the Secure Enclave), or delete the
+  app. Delete the phone from the daemon with the device list on the setup page
+  or `sheepdog data clear --all`.
+- A switch in Settings that withdraws the AI-services consent inside the app
+  is planned and is not in the app yet. This page is updated when it ships.
 
 ## The daily update check
 
@@ -108,18 +148,35 @@ All three ask first. Deleting the plugin is `herdr plugin uninstall kccarlos.she
 
 ## The iPhone app
 
-The app has no server of its own and collects nothing. It talks to the sheepdog
-daemon you point it at (and to Apple for push notifications, which reach it
-through the push relay above unless you chose otherwise); no analytics or
-tracking code is in it.
+The app has no server of its own and collects nothing. It talks to the
+sheepdog daemon you pair it with, and to Apple for push notifications (these
+reach it through the push relay above unless you chose otherwise). No
+analytics or tracking code is in it, and it loads no web content.
+
+**The connection.** Pairing scans a code from `sheepdog pair` that holds your
+computer's address and the fingerprint of its self-signed TLS certificate. The
+app then connects over TLS and accepts only a certificate with that
+fingerprint, and it signs in with a key held in the phone's Secure Enclave
+([security.md](dev/design/security.md)). It refuses plain HTTP to any
+address except the phone itself (used in development). Because iOS cannot
+check a pinned self-signed certificate on a home or Tailscale IP address, the
+app turns off iOS's own certificate check (`NSAllowsArbitraryLoads`) and
+relies on that pin.
 
 | Permission | Why | When asked |
 |---|---|---|
-| Microphone | To talk to your daemon. The app sends audio only to the daemon you point it at; the daemon passes it to the voice provider you chose. | When a voice session starts |
-| Speech recognition | Demo mode only: your spoken questions are recognised on the phone (on-device); nothing is sent anywhere. | When the demo starts, on devices that support it |
-| Camera | Only to scan the pairing QR code that `sheepdog pair` shows. Nothing is recorded or kept. | When you tap Scan pairing code |
+| Microphone | Your voice goes to your daemon, which passes it to the voice service you chose ("AI services"). | When a voice session starts |
+| Speech recognition | Demo only: your spoken questions are recognised on the phone, on-device; nothing is sent anywhere. | When the demo starts, on devices that support it |
+| Camera | To scan the pairing QR code, and to take a photo you attach for an agent. A photo goes to your computer only when you send it; nothing is recorded or kept otherwise. | When you tap Scan pairing code or the camera in the attach menu |
+| Photos and files | You pick a photo or file to attach through the system picker; the app sees only what you pick, and has no access to your library. It goes to your computer. | When you tap attach |
 | Local network | To reach the daemon on your Wi-Fi or Tailscale. | On the first connection |
-| Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token** and receives the key that encrypts the alerts' content; the daemon keeps both in `push_devices.json`. | After the first connection to a daemon (never in the demo) |
+| Notifications | "An agent needs you" alerts, sent by your daemon. The app gives your daemon its **push token** and receives the key that encrypts the alerts' content; the daemon keeps both in `push_devices.json`. | Once, after the app connects to a daemon that can send notifications (never in the demo, never for a daemon that cannot send them) |
+
+**Live Activity.** While a voice session runs, the lock screen and Dynamic
+Island show whether the voice is listening and how many agents are waiting,
+working and done. Your daemon updates it, through the push relay when the
+app is away (the relay sees the counts and the Live Activity's push token, as
+the table in "Phone notifications" says). It ends with the session.
 
 The live agent window and the phone shell send your keystrokes to the daemon
 and show the pane's screen. The daemon passes them through without storing
@@ -127,14 +184,13 @@ them: its event log records only that a window or shell opened and closed
 (which pane, which folder, how long, how many bytes), never what was typed or
 shown.
 
-What the app stores on the phone: the daemon's address, your settings and a
+**What the app stores on the phone:** the daemon's address, your settings and a
 cache of the conversation. Each paired computer's entry (its id, addresses
 and certificate fingerprint) is in the iOS keychain, not synced to iCloud,
 and the phone's key for it is in the Secure Enclave: it cannot be copied
-off the phone and is not in backups. The demo runs entirely on the phone, with no network and a throwaway
-store. The app uses plain HTTP to your private address because the daemon has
-no TLS ([remote-access.md](remote-access.md)). Removing the app deletes its
-data; to delete a phone from the daemon, remove its entry in
-`push_devices.json` or run `sheepdog data clear --all`.
+off the phone and is not in backups. The demo runs entirely on the phone, with
+no network and a throwaway store. Removing the app deletes its data. To
+delete a phone from the daemon, revoke it on the setup page, remove its entry
+in `push_devices.json`, or run `sheepdog data clear --all`.
 
 Contact: kccarlos.opensource@gmail.com
