@@ -85,33 +85,20 @@ struct AddressesView: View {
             guard !row.isPreferred else { return }
             prefer(row.address)
         } label: {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.address)
-                        .font(.body.monospaced())
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    if let text = row.statusText {
-                        Label {
-                            Text(text)
-                        } icon: {
-                            Image(systemName: Self.icon(row.status))
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(Self.tint(row.status))
-                        .accessibilityIdentifier("addresses.status")
-                    }
+            // "Preferred" sits on the right while the address fits next to
+            // it, and under the address at the large text sizes.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    details(row, scales: false)
+                    Spacer(minLength: 8)
+                    if row.isPreferred { preferredLabel }
                 }
-                Spacer(minLength: 8)
-                if row.isPreferred {
-                    Text("Preferred")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityIdentifier("addresses.preferred")
+                VStack(alignment: .leading, spacing: 3) {
+                    details(row, scales: true)
+                    if row.isPreferred { preferredLabel }
                 }
             }
-            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .disabled(busy)
@@ -129,6 +116,33 @@ struct AddressesView: View {
                 }
             }
         }
+    }
+
+    /// The address and its status. `scales`: the address may shrink to
+    /// fit one line (an address does not wrap well).
+    private func details(_ row: AddressRow, scales: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(row.address)
+                .font(.body.monospaced())
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(scales ? 0.5 : 1)
+            if let text = row.statusText {
+                Label {
+                    Text(text).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: Self.icon(row.status))
+                }
+                .font(.footnote)
+                .foregroundStyle(Self.tint(row.status))
+            }
+        }
+    }
+
+    private var preferredLabel: some View {
+        Text("Preferred")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.muted)
     }
 
     /// Neither the preferred address nor the one in use is removed.

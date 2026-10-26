@@ -1379,9 +1379,15 @@ Order and dependencies:
     over pinned TLS. `AddressesUITests` checks the in-use and Preferred
     labels and that a tap moves them.
   - **Left for later:**
-    - phase 7: push registration (`PushCoordinator`) still goes to each
-      computer's preferred address, not the address in use; route it
-      through the computer's model like the other requests;
+    - phase 7: three callers still build a `DaemonClient` from a
+      computer's preferred address, not the address in use: push
+      registration and the push status (`PushCoordinator`), an answer
+      from a notification action (`PushNotifications.swift`), and the
+      unpair call when a computer is removed. Route them through the
+      computer's model like the other requests;
+    - `AddressesUITests` runs on a fixture (`AddressesFixture`) that
+      builds the rows itself, so `SessionViewModel.presentAddresses` is
+      covered by the Kit tests of `AddressRow` only;
     - phase 7: the voice's approval card, typed lines and New agent through
       `ActionRunner` with keys, and the 30 s background task;
     - a per-Wi-Fi-network memory stays out (decision 10).
