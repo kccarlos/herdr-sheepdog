@@ -143,6 +143,8 @@ final class SessionViewModel: ObservableObject {
     /// daemon's refusal if it had one.
     @Published private(set) var sendingTyped = false
     @Published var typedError: String?
+    /// The typed line in flight or last failed, with its idempotency key.
+    private var typedAttempt: (text: String, key: String)?
     /// Bumped on every typed line the daemon took: the conversation jumps
     /// to its end, where the words and the answer are about to land.
     @Published private(set) var typedSent = 0
@@ -445,6 +447,22 @@ final class SessionViewModel: ObservableObject {
     /// app left lands nowhere).
     func current<T>(_ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
         try await fleet.onCurrent(as: DaemonClient.self, body)
+    }
+
+    /// Runs a tap that changes something through the current computer's
+    /// `ActionRunner`, captured now: it finishes on that computer even if
+    /// the app switches meanwhile (decision 6), with its dedup key
+    /// (`key(computerID)`), timeout, idempotency key and safe retry.
+    func action<T>(_ key: (String) -> String, _ kind: ActionRunner.Kind, idempotencyKey: String? = nil,
+                   _ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
+        guard settings.endpoint != nil, let model = fleet.current else { throw DaemonError.malformed("no daemon address set") }
+        return try await model.actions.run(key(model.id), kind, as: DaemonClient.self, idempotencyKey: idempotencyKey, body)
+    }
+
+    /// Whether the current computer has an action under this key in flight.
+    func actionInFlight(_ key: (String) -> String) -> Bool {
+        guard let model = fleet.current else { return false }
+        return model.actions.isInFlight(key(model.id))
     }
 
     private(set) var started = false
@@ -1764,8 +1782,13 @@ final class SessionViewModel: ObservableObject {
         sendingTyped = true
         typedError = nil
         defer { sendingTyped = false }
+        // The same line sent again after a failure keeps its key: if the
+        // first did reach the computer, it is not said twice.
+        if typedAttempt?.text != text { typedAttempt = (text, UUID().uuidString) }
+        let computer = fleet.currentID
         do {
-            _ = try await current { try await $0.sendUtterance(text) }
+            _ = try await action(ActionRunner.Key.typedLine, .typedLine, idempotencyKey: typedAttempt?.key) { try await $0.sendUtterance(text) }
+            typedAttempt = nil
             typedSent += 1
             Haptics.tap()
             if !core.connection.wantsConnection {
@@ -1774,11 +1797,15 @@ final class SessionViewModel: ObservableObject {
                 await backfillActivity()
             }
             return true
-        } catch let error as DaemonError {
-            typedError = error.message
-            Haptics.answerFailed()
+        } catch is ComputerModel.Stale {
+            typedAttempt = nil
         } catch {
-            typedError = error.localizedDescription
+            // A reply (even a refusal) is final; only no reply keeps the key.
+            if !ActionRunner.isTransport(error) { typedAttempt = nil }
+            // The error shows in the composer it was typed in.
+            guard fleet.currentID == computer else { return false }
+            typedError = requestFailure(error).message
+            Haptics.answerFailed()
         }
         return false
     }
@@ -1808,16 +1835,21 @@ final class SessionViewModel: ObservableObject {
         return try await current { try await $0.agentScreen(paneID: paneID, hash: hash) }
     }
 
+    private var inputSeq = 0
+
     /// `POST /api/agents/{pane}/input` with a prompt.
     func agentInput(paneID: String, text: String) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await current { try await $0.agentInput(paneID: paneID, text: text) }
+        return try await action({ ActionRunner.Key.input($0, paneID) }, .input) { try await $0.agentInput(paneID: paneID, text: text) }
     }
 
     /// `POST /api/agents/{pane}/input` with keys.
     func agentInput(paneID: String, keys: [AgentKey]) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await current { try await $0.agentInput(paneID: paneID, keys: keys) }
+        // Keys are not idempotent: every press is its own action.
+        inputSeq += 1
+        let seq = inputSeq
+        return try await action({ ActionRunner.Key.input($0, paneID) + ":\(seq)" }, .input) { try await $0.agentInput(paneID: paneID, keys: keys) }
     }
 
     /// `GET /api/agents/{pane}/changes` (the changes view).
@@ -2126,24 +2158,31 @@ final class SessionViewModel: ObservableObject {
     func answer(option index: Int) {
         guard let pendingID = approvalFlow.card?.pending.id, let option = approvalFlow.tap(index: index) else { return }
         Haptics.tap()
+        let computer = fleet.currentID
         Task { [weak self] in
             guard let self else { return }
             do {
-                let spoken = try await self.current { try await $0.answerPending(id: pendingID, option: option.index) }
+                // The question's key: a notification's Approve for the same
+                // question joins this one.
+                let spoken = try await self.action({ ActionRunner.Key.answer($0, pendingID) }, .answer) { try await $0.answerPending(id: pendingID, option: option.index) }
+                // Sent to the computer the app has since left: it finished
+                // there, and its card follows that computer's next state.
+                guard self.fleet.currentID == computer else { return }
                 self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken))
                 Haptics.answered()
-            } catch DaemonError.pendingGone {
-                self.applyApproval(self.approvalFlow.gone(pendingID: pendingID))
-                Haptics.answerFailed()
-            } catch let error as DaemonError {
-                self.approvalFlow.failed(pendingID: pendingID, message: error.message)
-                Haptics.answerFailed()
             } catch is ComputerFleet.Moved, is ComputerModel.Stale {
-                // The answer went to the computer the app left; its card
-                // there follows that computer's next state.
+                // The computer was paired again or removed meanwhile.
                 return
             } catch {
-                self.approvalFlow.failed(pendingID: pendingID, message: error.localizedDescription)
+                guard self.fleet.currentID == computer else { return }
+                if case DaemonError.pendingGone = error {
+                    self.applyApproval(self.approvalFlow.gone(pendingID: pendingID))
+                } else {
+                    // Where it was tapped, in the link's words: a timeout
+                    // while the computer answers is one slow answer.
+                    self.approvalFlow.failed(pendingID: pendingID, message: self.requestFailure(error).message)
+                }
+                Haptics.answerFailed()
             }
             await self.refreshState(quiet: true)
             // Without the event stream (not connected), the answered
@@ -2551,9 +2590,13 @@ final class SessionViewModel: ObservableObject {
         let store = settings.computers
         let wasCurrent = store.currentID == id
         await PushCoordinator.shared.unregister(computer: id)
-        if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
-           let credentials = endpoint.credentials,
-           let ticket = try? await credentials.ticket(base: base) {
+        // Before the store forgets it, which stops its model: on the
+        // address its link uses now, not the stored one.
+        if let computer = fleet.model(id) {
+            _ = try? await computer.actions.run("unpair:\(id)", ActionRunner.Kind(timeout: 4), as: DaemonClient.self) { try await $0.unpairDevice() }
+        } else if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
+                  let credentials = endpoint.credentials,
+                  let ticket = try? await credentials.ticket(base: base) {
             await DeviceAuth(base: base, session: credentials.session(timeout: 4)).unpair(ticket: ticket)
         }
         if let endpoint = store.endpoint(for: id) { cache.clear(for: endpoint) }

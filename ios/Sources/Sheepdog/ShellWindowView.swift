@@ -200,11 +200,11 @@ private struct ShellWindowContent: View, Equatable {
         guard let pane = window.shellPane else { return }
         Task {
             do {
-                _ = try await model.daemon { try await $0.closeShell(paneID: pane) }
+                _ = try await model.action({ ActionRunner.Key.agent($0, pane, "closeShell") }, .agent) { try await $0.closeShell(paneID: pane) }
                 Haptics.answered()
                 dismiss()
             } catch {
-                closeError = (error as? DaemonError)?.message ?? error.localizedDescription
+                closeError = model.requestFailure(error).message
                 Haptics.answerFailed()
             }
         }

@@ -197,6 +197,17 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         return SettingsStore().endpoint.map { [(id: nil, endpoint: $0)] } ?? []
     }
 
+    /// A request to one computer through its runtime, on the address its
+    /// link uses now (not the stored preferred one). Before the models
+    /// exist (a launch, a notification action that woke the app) it goes
+    /// straight to the stored endpoint.
+    private func onComputer<T>(_ id: String?, endpoint: DaemonEndpoint, _ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
+        if let fleet = model?.fleet, let computer = id.flatMap({ fleet.model($0) }) ?? (id == nil ? fleet.current : nil) {
+            return try await computer.request(as: DaemonClient.self, body)
+        }
+        return try await body(DaemonClient(endpoint: endpoint))
+    }
+
     private func keys(for id: String?) -> PushContentKeyStore {
         id.map { PushContentKeyStore.forComputer($0) } ?? contentKeys
     }
@@ -217,7 +228,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         for target in targets {
             let isCurrent = target.endpoint.computerID == current?.computerID && target.endpoint.display == current?.display
             do {
-                let answer = try await DaemonClient(endpoint: target.endpoint).registerPushDevice(PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name))
+                let registration = PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name)
+                let answer = try await onComputer(target.id, endpoint: target.endpoint) { try await $0.registerPushDevice(registration) }
                 if let key = answer?.contentKey {
                     keys(for: target.id).store(base64: key)
                 } else {
@@ -249,14 +261,14 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         let store = ComputerStore.shared
         keys(for: id).remove()
         guard let token = deviceToken, let endpoint = store.endpoint(for: id) else { return }
-        _ = try? await DaemonClient(endpoint: endpoint).unregisterPush(token: token)
+        _ = try? await onComputer(id, endpoint: endpoint) { try await $0.unregisterPush(token: token) }
     }
 
     /// Takes the token off every computer, with their keys.
     private func unregisterEverywhere(token: String) async {
         for target in targets() {
             keys(for: target.id).remove()
-            _ = try? await DaemonClient(endpoint: target.endpoint).unregisterPush(token: token)
+            _ = try? await onComputer(target.id, endpoint: target.endpoint) { try await $0.unregisterPush(token: token) }
         }
         registeredWith = nil
         defaults.removeObject(forKey: Key.registeredWith)
@@ -282,7 +294,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     func loadDaemonStatus() async {
         guard let endpoint = SettingsStore().endpoint else { return }
         do {
-            daemonStatus = try await DaemonClient(endpoint: endpoint).pushStatus()
+            daemonStatus = try await onComputer(ComputerStore.shared.currentID, endpoint: endpoint) { try await $0.pushStatus() }
             daemonStatusError = daemonStatus == nil ? "This daemon predates notifications." : nil
         } catch let error as DaemonError {
             daemonStatusError = error.message
@@ -339,8 +351,18 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         }
         let task = UIApplication.shared.beginBackgroundTask(withName: "answer approval")
         defer { UIApplication.shared.endBackgroundTask(task) }
+        let pendingID = answer.pendingID
+        let option = answer.option.index
         do {
-            _ = try await DaemonClient(endpoint: endpoint).answerPending(id: answer.pendingID, option: answer.option.index)
+            if let computer = payload.computer.flatMap({ model?.fleet.model($0) }) ?? model?.fleet.current.flatMap({ payload.computer == nil ? $0 : nil }) {
+                // The running app: the question's own key, so a tap on its
+                // card joins this answer instead of sending a second.
+                _ = try await computer.actions.run(ActionRunner.Key.answer(computer.id, pendingID), .answer, as: DaemonClient.self) {
+                    try await $0.answerPending(id: pendingID, option: option)
+                }
+            } else {
+                _ = try await DaemonClient(endpoint: endpoint).answerPending(id: pendingID, option: option)
+            }
             center.removeDeliveredNotifications(withIdentifiers: [notificationID])
             Task { await model?.refreshState(quiet: true) }
         } catch DaemonError.pendingGone {

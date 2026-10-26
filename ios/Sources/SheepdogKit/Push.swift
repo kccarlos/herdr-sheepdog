@@ -255,6 +255,13 @@ extension DaemonClient {
         return try await sendPush(request)
     }
 
+    /// `DELETE /api/devices/self`: this computer forgets this phone (Remove).
+    /// Best effort; the reply's status is not checked.
+    public func unpairDevice() async throws {
+        let request = try request(path: "/api/devices/self", method: "DELETE")
+        _ = try await perform(request)
+    }
+
     /// `GET /api/push/status`; nil on a daemon without the route.
     public func pushStatus() async throws -> PushStatus? {
         let request = try request(path: "/api/push/status")

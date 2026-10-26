@@ -306,6 +306,12 @@ public final class DaemonClient: @unchecked Sendable {
         request.httpMethod = method
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        // An action from `ActionRunner`: its key (a POST only) and its
+        // timeout, a little past the runner's own so the runner decides.
+        if method == "POST", let key = DaemonClient.idempotencyKey {
+            request.setValue(key, forHTTPHeaderField: "Idempotency-Key")
+        }
+        if let timeout = DaemonClient.actionTimeout { request.timeoutInterval = timeout + 5 }
         endpoint.authorize(&request)
         return request
     }

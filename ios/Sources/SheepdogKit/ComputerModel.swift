@@ -88,7 +88,10 @@ public final class ComputerModel {
     @ObservationIgnored private var runtime: LinkRuntime!
     @ObservationIgnored private let scheduler: LinkScheduler
     @ObservationIgnored private var demand: LinkDemand
-    @ObservationIgnored private var answersInFlight = 0
+    /// Every tap that changes something here runs through this
+    /// (`ActionRunner`): dedup keys, the epoch at tap time, a timeout, a
+    /// safe retry, the background task.
+    @ObservationIgnored public private(set) var actions: ActionRunner!
     @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var eventsWanted = false
@@ -141,6 +144,12 @@ public final class ComputerModel {
             }
         }
         runtime.onRenewTicket = { [weak self] in self?.onRenewTicket?() }
+        actions = ActionRunner(model: self)
+        actions.onActiveChange = { [weak self] _ in
+            // An action in flight keeps the link up until it finishes.
+            guard let self, !self.stopped else { return }
+            self.runtime.send(.demandChanged(self.effectiveDemand))
+        }
         linkChanged(runtime.link)
     }
 
@@ -290,6 +299,46 @@ public final class ComputerModel {
         return try reply.value.get()
     }
 
+    /// One action's request, for `ActionRunner`: in the epoch it was tapped
+    /// in, on the address in use, with its `Idempotency-Key` and timeout.
+    /// No reply within `timeout` throws `DaemonError.timedOut` (the request
+    /// is cancelled; the daemon may still finish it, which is what the key
+    /// is for). The outcome of a reply tells the link.
+    func perform<Client, T>(epoch: Int, timeout: TimeInterval, idempotencyKey: String?, as type: Client.Type,
+                            _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
+        guard !stopped, epoch == self.epoch else { throw Stale() }
+        let target = targetAddress
+        let connection = connection
+        let work = Task { () -> ComputerReply<Result<T, Error>> in
+            await DaemonClient.$idempotencyKey.withValue(idempotencyKey) {
+                await DaemonClient.$actionTimeout.withValue(timeout) {
+                    await connection.request(epoch: epoch, address: target) { client -> T in
+                        guard let typed = client as? Client else { throw DaemonError.malformed("this computer's client cannot do that") }
+                        return try await body(typed)
+                    }
+                }
+            }
+        }
+        let once = Once<ComputerReply<Result<T, Error>>?>()
+        let scheduler = scheduler
+        let reply = await withCheckedContinuation { continuation in
+            once.continuation = continuation
+            let timer = scheduler.schedule(at: scheduler.now.addingTimeInterval(timeout)) {
+                work.cancel()
+                once.resume(nil)
+            }
+            Task { @MainActor in
+                let value = await work.value
+                timer.cancel()
+                once.resume(value)
+            }
+        }
+        guard let reply else { throw DaemonError.timedOut(endpoint: target ?? name) }
+        guard reply.epoch == self.epoch, !stopped else { throw Stale() }
+        report(reply)
+        return try reply.value.get()
+    }
+
     public func rename(_ name: String) {
         set(\.name, name)
     }
@@ -323,7 +372,7 @@ public final class ComputerModel {
 
     var effectiveDemand: LinkDemand {
         var demand = demand
-        demand.actionsInFlight = answersInFlight > 0
+        demand.actionsInFlight = (actions?.count ?? 0) > 0
         return demand
     }
 
@@ -462,44 +511,44 @@ public final class ComputerModel {
     }
 
     /// The same, for a question the caller holds (the current computer's
-    /// list may carry one the last state did not).
+    /// list may carry one the last state did not). It runs under the
+    /// question's key (`ActionRunner.Key.answer`), so a tap on another
+    /// surface for the same question joins it.
     public func answer(_ question: PendingAction, option index: Int) {
         let id = question.id
         guard !stopped, let option = question.options?.first(where: { $0.index == index }) else { return }
+        let key = ActionRunner.Key.answer(self.id, id)
         if case .sending = phases[id] { return }
+        if actions.isInFlight(key) { return }
         phases[id] = .sending(option)
         onAnswerFeedback?(.tapped)
-        answersInFlight += 1
-        if answersInFlight == 1 { runtime.send(.demandChanged(effectiveDemand)) }
-        let epoch = epoch
-        let target = targetAddress
         Task { [weak self] in
             guard let self else { return }
-            let reply = await self.connection.request(epoch: epoch, address: target) { try await $0.answerPending(id: id, option: index) }
-            self.answersInFlight -= 1
-            if self.answersInFlight == 0, !self.stopped { self.runtime.send(.demandChanged(self.effectiveDemand)) }
-            guard reply.epoch == self.epoch, !self.stopped else { return }
-            self.report(reply)
-            switch reply.value {
-            case let .success(spoken):
+            do {
+                let spoken = try await self.actions.run(key, .answer, as: ComputerRequests.self) { try await $0.answerPending(id: id, option: index) }
                 self.phases[id] = .answered(outcome: "Answered: \(option.label)", spoken: spoken.isEmpty ? nil : spoken)
                 self.onAnswerFeedback?(.answered)
-            case .failure(DaemonError.pendingGone):
+            } catch is ComputerModel.Stale {
+                return
+            } catch DaemonError.pendingGone {
                 self.phases[id] = .gone(message: ApprovalFlow.goneMessage)
                 self.onAnswerFeedback?(.failed)
-            case let .failure(error as DaemonError):
-                self.phases[id] = .open(error: error.message)
-                self.onAnswerFeedback?(.failed)
-            case let .failure(error):
-                self.phases[id] = .open(error: error.localizedDescription)
+            } catch {
+                self.phases[id] = .open(error: self.failure(error).message)
                 self.onAnswerFeedback?(.failed)
             }
             await self.refresh()
         }
     }
 
+    /// What a failed action says where it was tapped: one slow answer while
+    /// this computer's link is up is not an unreachable computer.
+    public func failure(_ error: Error) -> RequestFailure {
+        RequestFailure(error, linkUsable: link.isUsable, name: name)
+    }
+
     /// Answers in flight, for the tests.
-    public var answersPending: Int { answersInFlight }
+    public var answersPending: Int { actions.count }
 
     fileprivate func attachedToken(_ channel: LinkChannel) -> Int? { clients[channel]?.token }
 
@@ -633,5 +682,18 @@ public struct LinkChannelReporter {
 extension ComputerModel {
     fileprivate func isAttached(_ channel: LinkChannel, epoch: Int, token: Int) -> Bool {
         epoch == self.epoch && attachedToken(channel) == token
+    }
+}
+
+/// Resumes a continuation once, whichever comes first (the reply or the
+/// timeout).
+@MainActor
+private final class Once<Value> {
+    var continuation: CheckedContinuation<Value, Never>?
+
+    func resume(_ value: Value) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: value)
     }
 }

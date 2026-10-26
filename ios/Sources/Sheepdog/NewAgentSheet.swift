@@ -222,6 +222,10 @@ private struct NewAgentKindStep: View {
     @State private var branch = ""
     @State private var prompt = ""
     @State private var phase: Phase = .editing
+    /// The sheet's dedup key, and the idempotency key of this start: kept
+    /// across Start again only after no reply came (a timeout).
+    @State private var sheetID = UUID().uuidString
+    @State private var attemptKey = UUID().uuidString
 
     private enum Phase: Equatable {
         case editing
@@ -447,17 +451,25 @@ private struct NewAgentKindStep: View {
         let worktree = inWorktree ? branch : nil
         Task {
             do {
-                let reply = try await model.daemon {
+                // One sheet starts one agent at a time; Start again after a
+                // timeout keeps the key, so the daemon does not start a
+                // second one if the first did start.
+                let reply = try await model.action({ ActionRunner.Key.newAgent($0, sheetID) }, .newAgent, idempotencyKey: attemptKey) {
                     try await $0.newAgent(kind: kind, project: project, worktree: worktree, text: text)
                 }
+                attemptKey = UUID().uuidString
                 phase = .started(reply.spoken ?? "Started.")
                 Haptics.answered()
                 try? await Task.sleep(for: .milliseconds(reply.paneID?.isEmpty == false ? 300 : 1400))
                 started(reply.paneID?.isEmpty == false ? reply.paneID : nil)
             } catch let error as AgentStartError {
+                attemptKey = UUID().uuidString
                 phase = .failed(error, error.message)
                 Haptics.answerFailed()
             } catch {
+                // A reply (even a refusal) is final: a new start gets a new
+                // key. No reply keeps it.
+                if !ActionRunner.isTransport(error) { attemptKey = UUID().uuidString }
                 phase = .failed(nil, model.requestFailure(error).message)
                 Haptics.answerFailed()
             }
