@@ -82,12 +82,12 @@ struct FlockUnavailableView: View {
                 }
             case .tokenRefused:
                 ContentUnavailableView {
-                    Label((model.pairingProblem ?? .revoked).title, systemImage: "qrcode.viewfinder")
+                    Label((model.notices.pairingProblem ?? .revoked).title, systemImage: "qrcode.viewfinder")
                 } description: {
-                    Text((model.pairingProblem ?? .revoked).message)
+                    Text((model.notices.pairingProblem ?? .revoked).message)
                 } actions: {
                     Button("Scan again") {
-                        model.needsNewScan(model.pairingProblem ?? .revoked)
+                        model.needsNewScan(model.notices.pairingProblem ?? .revoked)
                     }
                     .accessibilityIdentifier("flock.tokenRefused.settings")
                 }
