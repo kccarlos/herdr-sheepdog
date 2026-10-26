@@ -33,19 +33,21 @@ struct AIConsentView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("consent.title")
+                    if withdrawn {
                     Text(lead)
                         .font(.body)
                         .foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("consent.lead")
+                    }
                     VStack(alignment: .leading, spacing: 16) {
                         fact("arrow.up.right", "What is sent",
                              "What you say and type, and what your agents' screens show. A photo you attach goes to your computer, and the coding agent you send it to passes it to its own AI service.")
                         fact("desktopcomputer", "Where it goes",
-                             "To your own computer, then to the AI services you set up on it. They have their own terms.")
+                             "To your own computer, then to \(model.aiServicesSummary). They have their own terms.")
                         fact("lock.shield", "What we get",
-                             "Sheepdog's developer never sees your voice, text, photos or screens. The one service we run, a push relay, only forwards notifications to Apple. It sees your phone's notification token, when one is sent and how many agents are waiting, working and done, and cannot read what a notification says.")
+                             "Sheepdog's developer never sees your voice, text, photos or screens. We run one small service, a push relay, which forwards notifications it cannot read.")
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,7 +114,7 @@ struct AIConsentView: View {
         if withdrawn {
             return "While this is off, Sheepdog starts no voice session and sends no typed lines. Your agents keep working, and the demo still works."
         }
-        return "Sheepdog passes what you say and type on to \(model.aiServicesSummary)."
+        return ""
     }
 
     private func fact(_ symbol: String, _ title: String, _ text: String) -> some View {
