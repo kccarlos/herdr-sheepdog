@@ -24,8 +24,15 @@ final class IPadUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"] + extra
         app.launch()
-        let header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
-        if !header { shot("launch-failed") }
+        var header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15)
+        if !header {
+            // A cold or overloaded simulator can leave the first process
+            // unresponsive (its UI query times out): start it afresh once.
+            shot("launch-failed")
+            app.terminate()
+            app.launch()
+            header = app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 30)
+        }
         XCTAssertTrue(header)
         return app
     }
@@ -203,9 +210,12 @@ final class IPadUITests: XCTestCase {
     }
 
     /// ⋯ ▸ Open in New Window gives the agent a window of its own, with the
-    /// mini capsule.
+    /// mini capsule. The demo is paused: this test is about the windows, and
+    /// a second scene whose terminal streams beside the first keeps the main
+    /// thread busy enough on a CI Mac for an accessibility snapshot to time
+    /// out ("Failed to get matching snapshots"), twice in a row on one run.
     func testOpenInNewWindow() throws {
-        let app = launchDemo()
+        let app = launchDemo(["-sheepdogDemoPaused"])
         let auth = element(app, "sidebar.agent.claude-auth")
         tapWhenTappable(auth, "claude-auth in the sidebar")
         XCTAssertTrue(element(app, "agentScreen.menu").waitForExistence(timeout: 10))
