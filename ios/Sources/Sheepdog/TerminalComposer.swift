@@ -134,13 +134,14 @@ extension AgentWindowController {
             sending = true
             inputError = nil
             do {
-                let reply = try await model.daemon { try await $0.interruptAgent(paneID: self.paneID) }
+                let pane = self.paneID
+                let reply = try await model.action({ ActionRunner.Key.agent($0, pane, "stop") }, .agent) { try await $0.interruptAgent(paneID: pane) }
                 sending = false
                 lastReply = reply.spoken?.trimmedOrNil
                 Haptics.stop()
             } catch {
                 sending = false
-                inputError = (error as? DaemonError)?.message ?? error.localizedDescription
+                inputError = model.requestFailure(error).message
                 Haptics.answerFailed()
             }
         }

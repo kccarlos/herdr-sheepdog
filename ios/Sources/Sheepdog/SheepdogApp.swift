@@ -18,6 +18,7 @@ struct SheepdogApp: App {
         #if DEBUG
         _ = DebugLaunch.launchedAt
         #endif
+        ActionRunner.background = AppActionBackground()
     }
 
     /// The UI walkthrough that drives this app against a `--voice=off`
@@ -161,5 +162,21 @@ struct DemoShell: View {
                 SceneCoordinator.shared.demoModel = demo
             }
             .onDisappear { SceneCoordinator.shared.demoModel = nil }
+    }
+}
+
+/// An action tapped just before the app leaves the foreground still lands:
+/// iOS gives it a short background task (about 30 s) while any is in flight.
+@MainActor
+final class AppActionBackground: ActionBackground {
+    func begin(_ name: String) -> () -> Void {
+        var id = UIBackgroundTaskIdentifier.invalid
+        let end = {
+            guard id != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(id)
+            id = .invalid
+        }
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { end() }
+        return end
     }
 }

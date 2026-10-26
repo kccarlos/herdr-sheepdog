@@ -679,9 +679,9 @@ sequenceDiagram
   | Action | Key | Idempotent on the daemon | Timeout | Retry |
   |---|---|---|---|---|
   | Answer a question | `answer:<computer>:<question>` | yes (`pendingGone`) | 10 s | once, on a transport error |
-  | Typed line (`/api/utterance`) | `utter:<computer>:<request id>` | **no**; needs an idempotency key (open question 3) | 10 s | no |
-  | New agent (`POST /api/agents`) | `spawn:<computer>:<request id>` | **no**, same | 60 s (herdr waits until the agent is ready) | no; show "Open the pane" on failure |
-  | Agent input, keys | `input:<computer>:<pane>:<seq>` | no; keys are not idempotent | 5 s | no |
+  | Typed line (`/api/utterance`) | `utter:<computer>` | with its `Idempotency-Key` (decision 3, built in phase 7) | 10 s | once, with the same key, on a daemon that says `idempotency_keys` |
+  | New agent (`POST /api/agents`) | `spawn:<computer>:<sheet>` | with its `Idempotency-Key` | 60 s (herdr waits until the agent is ready) | the same; show "Open the pane" on failure |
+  | Agent input, keys | `input:<computer>:<pane>` (keys add `:<seq>`) | with its `Idempotency-Key` | 5 s | the same |
   | Rename, settings toggles | `set:<computer>:<field>` | yes (last write wins) | 10 s | coalesce: the newest value replaces a queued one |
   | Refresh, history | `refresh:<computer>` | yes | 4 s | link backoff |
   | Talk to (switch) | `switch` | local | — | the latest tap wins |
@@ -1391,6 +1391,62 @@ Order and dependencies:
     - phase 7: the voice's approval card, typed lines and New agent through
       `ActionRunner` with keys, and the 30 s background task;
     - a per-Wi-Fi-network memory stays out (decision 10).
+
+- **Phase 7 (done, #429, #430).** The action pipeline, and the daemon's
+  `Idempotency-Key` (decision 3).
+  - **The daemon (#429).** Any `POST` from a paired device may carry
+    `Idempotency-Key`; the reply is kept 10 minutes per device, route and
+    key, a repeat gets it back without the action running again, and a
+    repeat while the first runs waits for it. Bounded: 256 replies per
+    device, 1024 in all, 64 KiB a reply. `GET /api/hello` says
+    `idempotency_keys` (docs/dev/ws-contract.md "Idempotency keys").
+  - **`ActionRunner`**, one per `ComputerModel` (`model.actions`). Every
+    tap that changes something runs through it: answers on every surface
+    (the voice's approval card, the question cards, a notification's
+    Approve while the app runs), the typed line, New agent, agent input
+    and keys, agent actions and the Spaces actions. A run under a key in
+    flight joins it (a key carries what is sent, so different words or
+    names are two actions); the epoch is the one at tap time, so a re-pairing
+    drops the reply and a switch does not (decision 6); a per-kind timeout
+    on the model's clock, also set on the URL request; one retry after no
+    reply, for answers always and for keyed actions only on a daemon that
+    keeps replies, with the same key. `ComputerModel.answer` is built on
+    it, and its `answersInFlight` is the runner's count.
+  - **Errors where the tap was**, through `RequestFailure` with that
+    computer's link: the composer, the approval card and question cards,
+    the agent window, Spaces, New agent.
+  - **The background task.** One short task (`AppActionBackground`) while
+    any action is in flight, injected into Kit as `ActionBackground`.
+  - **The three callers phase 6 named** go through the computer's model:
+    push registration and status (`PushCoordinator.onComputer`), a
+    notification's Approve (the runner, under the question's key), and the
+    unpair on Remove (`DaemonClient.unpairDevice`, before the store
+    forgets the computer). Before the models exist (a cold launch from a
+    notification) they use the stored endpoint as before.
+  - **Tests.** `ActionRunnerTests` on a scripted daemon that keeps one
+    effect per key and a manual clock: a double tap is one request, a
+    timeout retries with the same key and the daemon acts once, a second
+    timeout says "Taking longer than usual", no retry without
+    `idempotency_keys`, answers retry without a key, Try again reuses the
+    key, a switch mid-action lands on the original computer (runner and
+    `ComputerModel.answer`), a re-pairing drops the reply, an action
+    tapped before the background completes and ends the task, a reply is
+    never retried, and a property test of fast taps (25 seeds × 30 steps:
+    one request out per key, every tap gets its own request's reply, one
+    effect per request, no background task left open).
+    `ActionDedupUITests` double-taps Approve and Send against a slow
+    `StubDaemon` and counts one request each. Go:
+    `internal/web/idempotency_test.go`.
+  - **Left for later:**
+    - settings toggles (`set:<computer>:<field>`, last write wins) and
+      refresh still go through `current { … }`, which is right for reads;
+      coalescing settings writes is not built;
+    - the voice's approval card still keeps its own `ApprovalFlow` phase;
+      it now shares the question's key with the other surfaces, so a
+      second tap joins, but the card and the model's `phases` are not one
+      value yet (phase 8, with the voice leaving the session view model);
+    - another computer has no `hello` until it is current, so its keyed
+      actions are not retried (only answers happen there today).
 
 **What not to do:**
 

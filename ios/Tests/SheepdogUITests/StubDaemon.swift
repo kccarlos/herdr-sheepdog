@@ -27,6 +27,16 @@ final class StubDaemon {
     private let mode: Mode
     private let queue = DispatchQueue(label: "stub-daemon")
     private(set) var port: UInt16 = 0
+    /// How long a POST waits before its answer (a slow computer), so a
+    /// second tap lands while the first is in flight.
+    var postDelay: TimeInterval = 0
+    private let lock = NSLock()
+    private var seen: [String] = []
+
+    /// How many requests started with `prefix` ("POST /api/utterance").
+    func requests(_ prefix: String) -> Int {
+        lock.withLock { seen.filter { $0.hasPrefix(prefix) }.count }
+    }
 
     init(_ mode: Mode) throws {
         self.mode = mode
@@ -57,9 +67,15 @@ final class StubDaemon {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, _ in
             guard let self else { return }
             let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
+            let words = request.split(separator: " ")
+            let method = words.first.map(String.init) ?? "GET"
+            let path = words.dropFirst().first.map(String.init) ?? "/"
+            self.lock.withLock { self.seen.append("\(method) \(path)") }
             let response = self.response(for: path)
-            connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            let delay = method == "POST" ? self.postDelay : 0
+            self.queue.asyncAfter(deadline: .now() + delay) {
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
         }
     }
 
@@ -92,6 +108,9 @@ final class StubDaemon {
             }
             if path.hasPrefix("/api/pending/answer") {
                 return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
+            }
+            if path.hasPrefix("/api/utterance") {
+                return http(200, "application/json", #"{"ok":true,"via":"voice"}"#)
             }
             if path.hasPrefix("/api/conversation") {
                 // One line that says whose conversation this is.

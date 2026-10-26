@@ -166,23 +166,23 @@ struct SpacesSheet: View {
     private func rename(_ space: SpacesView.Space, to name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != space.name else { return }
-        await act { try await $0.renameSpace(id: space.id, name: trimmed) }
+        await act("rename:\(space.id):\(trimmed)") { try await $0.renameSpace(id: space.id, name: trimmed) }
     }
 
     private func close(_ space: SpacesView.Space) async {
-        await act { try await $0.closeSpace(id: space.id) }
+        await act("close:\(space.id)") { try await $0.closeSpace(id: space.id) }
     }
 
     private func newSpace(_ folder: SpacesView.Folder) async {
-        await act { try await $0.newSpace(dir: folder.path) }
+        await act("new:\(folder.path)") { try await $0.newSpace(dir: folder.path) }
     }
 
-    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> AgentActionReply) async {
+    private func act(_ what: String, _ body: @escaping @Sendable (DaemonClient) async throws -> AgentActionReply) async {
         do {
-            _ = try await model.daemon(body)
+            _ = try await model.action({ ActionRunner.Key.space($0, what) }, .space, body)
             Haptics.answered()
         } catch {
-            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            notice = model.requestFailure(error).message
             Haptics.answerFailed()
         }
         await fetch()
@@ -365,12 +365,12 @@ struct SpaceDetailView: View {
             CommandSheet(mode: mode, spaceName: space.name) { name, command, save in
                 switch mode {
                 case let .edit(old):
-                    await act { try await $0.updateCommand(space: space.id, command: old.id, name: name, command: command) }
+                    await act("command:\(space.id):\(old.id):\(name):\(command)") { try await $0.updateCommand(space: space.id, command: old.id, name: name, command: command) }
                 case .add:
-                    await act { try await $0.addCommand(space: space.id, name: name, command: command) }
+                    await act("addCommand:\(space.id):\(name):\(command)") { try await $0.addCommand(space: space.id, name: name, command: command) }
                 case .runOnce:
                     if save {
-                        await act { try await $0.addCommand(space: space.id, name: name, command: command) }
+                        await act("addCommand:\(space.id):\(name):\(command)") { try await $0.addCommand(space: space.id, name: name, command: command) }
                     }
                     await runLine(command)
                 }
@@ -381,14 +381,14 @@ struct SpaceDetailView: View {
             Button("Rename") {
                 let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { return }
-                Task { await act { _ = try await $0.renameSpace(id: space.id, name: name) } }
+                Task { await act("rename:\(space.id):\(name)") { _ = try await $0.renameSpace(id: space.id, name: name) } }
             }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog("Close \(space.name)?", isPresented: $confirmClose, titleVisibility: .visible) {
             Button("Close space", role: .destructive) {
                 Task {
-                    await act { _ = try await $0.closeSpace(id: space.id) }
+                    await act("close:\(space.id)") { _ = try await $0.closeSpace(id: space.id) }
                     dismiss()
                 }
             }
@@ -444,7 +444,7 @@ struct SpaceDetailView: View {
                     stableMenu(WorktreeMenuValue(canOpen: canOpen, canRemove: canRemove), probe: "spaces.worktree") { value in
                         if value.canOpen {
                             Button {
-                                Task { await act { _ = try await $0.openWorktree(space: space.id, path: tree.path) } }
+                                Task { await act("worktree:\(tree.path)") { _ = try await $0.openWorktree(space: space.id, path: tree.path) } }
                             } label: {
                                 Label("Open as a space", systemImage: "square.stack")
                             }
@@ -493,11 +493,11 @@ struct SpaceDetailView: View {
     private func run(_ command: SpacesView.WrapUp) async {
         running = command.id
         do {
-            _ = try await model.daemon { try await $0.runCommand(space: space.id, command: command.id) }
+            _ = try await model.action({ ActionRunner.Key.space($0, "run:\(space.id):\(command.id)") }, .space) { try await $0.runCommand(space: space.id, command: command.id) }
             notice = "\(command.name) is running in a new tab of \(space.name) on your computer."
             Haptics.answered()
         } catch {
-            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            notice = model.requestFailure(error).message
             Haptics.answerFailed()
         }
         running = nil
@@ -505,38 +505,38 @@ struct SpaceDetailView: View {
 
     private func runLine(_ command: String) async {
         do {
-            _ = try await model.daemon { try await $0.runLine(space: space.id, command: command) }
+            _ = try await model.action({ ActionRunner.Key.space($0, "runLine:\(space.id):\(command)") }, .space) { try await $0.runLine(space: space.id, command: command) }
             notice = "It is running in a new tab of \(space.name) on your computer."
             Haptics.answered()
         } catch {
-            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            notice = model.requestFailure(error).message
             Haptics.answerFailed()
         }
     }
 
     private func delete(_ id: String) async {
-        await act { try await $0.deleteCommand(space: space.id, command: id) }
+        await act("delete:\(space.id):\(id)") { try await $0.deleteCommand(space: space.id, command: id) }
     }
 
     private func remove(force: Bool) async {
         do {
-            _ = try await model.daemon { try await $0.removeWorktree(space: space.id, force: force) }
+            _ = try await model.action({ ActionRunner.Key.space($0, "removeWorktree:\(space.id)") }, .space) { try await $0.removeWorktree(space: space.id, force: force) }
             Haptics.answered()
             await reload()
             dismiss()
         } catch let DaemonError.rejected(status, message) where status == 409 && !force && message.contains("uncommitted") {
             confirmForce = true
         } catch {
-            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            notice = model.requestFailure(error).message
         }
     }
 
-    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> Void) async {
+    private func act(_ what: String, _ body: @escaping @Sendable (DaemonClient) async throws -> Void) async {
         do {
-            try await model.daemon(body)
+            try await model.action({ ActionRunner.Key.space($0, what) }, .space, body)
             Haptics.answered()
         } catch {
-            notice = (error as? DaemonError)?.message ?? error.localizedDescription
+            notice = model.requestFailure(error).message
             Haptics.answerFailed()
         }
         await reload()

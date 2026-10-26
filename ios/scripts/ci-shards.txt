@@ -38,6 +38,7 @@ shard-2  SheepdogUITests/FeedbackUITests               # 38
 shard-2  SheepdogUITests/UpdateNoticeUITests           # 29
 shard-2  SheepdogUITests/PrivacyLinksUITests            # 44
 shard-2  SheepdogUITests/RenderChurnUITests
+shard-2  SheepdogUITests/ActionDedupUITests
 
 # about 501
 shard-3  SheepdogUITests/SpacesDemoUITests             # 213

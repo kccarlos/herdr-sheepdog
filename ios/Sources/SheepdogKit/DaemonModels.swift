@@ -41,6 +41,10 @@ public struct Hello: Codable, Equatable, Sendable {
     /// This computer: its id (the daemon id the app keys everything by)
     /// and its name (the daemon's `computer.name`).
     public var computer: Computer?
+    /// The daemon keeps the reply to a POST sent with an `Idempotency-Key`
+    /// (docs/dev/ws-contract.md "Idempotency keys"), so a typed line or a
+    /// New agent may be retried after a timeout. Absent on older daemons.
+    public var idempotencyKeys: Bool?
 
     public struct Computer: Codable, Equatable, Sendable {
         public var id: String
@@ -58,6 +62,7 @@ public struct Hello: Codable, Equatable, Sendable {
         case voiceName = "voice_name"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
+        case idempotencyKeys = "idempotency_keys"
     }
 
     public var needsToken: Bool { auth == "token" }
