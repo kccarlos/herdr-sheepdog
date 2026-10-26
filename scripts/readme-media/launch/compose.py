@@ -102,10 +102,23 @@ def run(*a):
 
 # --- the take --------------------------------------------------------------
 T0 = float(open(os.path.join(PHONE, "rec.t0")).read())
+# On a loaded Mac the UI test notices things late, so its marks of the second
+# launch can trail the video by seconds. phone/shift.txt (optional, one
+# number) moves the marks from "launched" on by that many seconds; find it by
+# comparing a mark with the frame where the thing happens.
+SHIFT = float(open(os.path.join(PHONE, "shift.txt")).read()) if os.path.exists(os.path.join(PHONE, "shift.txt")) else 0.0
 MARKS = {}
+LATE = False
 for line in open(os.path.join(PHONE, "marks.txt")):
     k, v = line.split()
-    MARKS[k] = float(v) - T0
+    LATE = LATE or k == "launched"
+    MARKS[k] = float(v) - T0 + (SHIFT if LATE else 0.0)
+# phone/at.txt (optional, "<step> <video seconds>" lines) sets a step's time
+# straight from the frame where it happens, for marks that trail too much.
+if os.path.exists(os.path.join(PHONE, "at.txt")):
+    for line in open(os.path.join(PHONE, "at.txt")):
+        k, v = line.split()
+        MARKS[k] = float(v)
 
 
 def m(name, off=0.0):
@@ -119,26 +132,24 @@ SCENES = [
     ("title", 4.2, {}),
     ("phone", 5.0, {"from": m("agents", -0.2), "to": m("tap_window", -0.2),
                     "caption": "Four agents at work.\nYou go for a walk."}),
-    ("phone", 7.0, {"from": m("ask", -1.2), "to": m("tap_approve", -0.8),
+    ("phone", 7.0, {"from": m("ask", -1.2), "to": m("tap_approve", -1.9),
                     "caption": "An agent is blocked.\nYou hear it first.", "chime": 0.3,
                     "lines": [("s_ask", "sheepdog", "codex-payments wants to run npm install p-retry. Approve?", 1.0)]}),
-    # the clips skip the take's tap and the card's slide, so only the settled
-    # result shows; `voice` rewrites its "by tap" to "by voice" (retouch_by_voice)
-    ("phone", 5.4, {"clips": [(m("tap_approve", -0.8), m("tap_approve", 0.6)), (m("approved", -0.4), m("approved", 2.8))],
-                    "voice": m("approved", -0.4),
-                    "caption": "Approve with a tap,\nor just say it.",
+    # the take's own approval: the chip "Yes, go ahead." (the words the voice hands the demo)
+    ("phone", 5.4, {"from": m("tap_approve", -1.9), "to": m("approved", 2.8),
+                    "caption": "Say yes,\nor tap Approve.",
                     "lines": [("u_yes", "you", "Yes, go ahead.", 0.2),
                               ("s_ok", "sheepdog", "Approved. Installing it now.", 2.1)]}),
-    ("phone", 8.2, {"from": m("tap_status", -0.6), "to": m("status", 5.0),
+    ("phone", 8.2, {"from": m("tap_status", -1.8), "to": m("tap_status", 6.4),
                     "caption": "Ask what's going on.",
                     "lines": [("u_status", "you", "What's going on?", 0.2),
                               ("s_status", "sheepdog", "claude-auth is done, claude-migration failed, codex-docs is still writing.",
-                               m("status") - m("tap_status", -0.6) + 0.1)]}),
-    ("phone", 9.4, {"from": m("tap_card", -0.8), "to": m("end"),
+                               2.1)]}),
+    ("phone", 9.4, {"from": m("tap_card", -1.9), "to": m("end"),
                     "caption": "Ask to see it,\nand it's on your screen.",
-                    "lines": [("u_card", "you", "Show me the agents.", 0.0),
+                    "lines": [("u_card", "you", "Show me the agents.", 0.2),
                               ("s_card", "sheepdog", "It's on your screen: 3 done, 1 failed.",
-                               m("card") - m("tap_card", -0.8) + 0.3)]}),
+                               2.1)]}),
     ("devices", 6.4, {"caption": "Everything, on your phone."}),
     ("end", 6.5, {}),
 ]
@@ -250,23 +261,6 @@ class Phone:
             self._cache[i] = im
         return self._cache[i]
 
-    retouch = False
-
-    def retouch_by_voice(self, im):
-        """The settled card says "You approved ... by tap". When the user said
-        it, the daemon's log says by voice, so repaint that last word: same
-        row colour, same green, same type, in the take's own coordinates
-        (1320 px wide; x 745..862, baseline row 2228..2268)."""
-        sx = self.sw / 1320
-        im = im.copy()
-        px = im.getpixel((int(900 * sx), int(2250 * sx)))
-        green = max((im.getpixel((int(x * sx), int(2248 * sx))) for x in range(100, 130)), key=lambda c: c[1] - c[0])
-        d = ImageDraw.Draw(im)
-        d.rectangle((int(738 * sx), int(2226 * sx), int(905 * sx), int(2272 * sx)), fill=px)
-        f = font(INTER, int(round(40 * sx * 1.0)), 600)
-        d.text((int(745 * sx), int(2248 * sx)), "by voice", font=f, fill=green, anchor="lm")
-        return im
-
     def draw(self, im, xy, v, alpha=1.0):
         x, y = xy
         layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
@@ -274,8 +268,6 @@ class Phone:
         layer.alpha_composite(self.bezel, (x, y))
         if v is not None:
             fr = self.frame(v)
-            if self.retouch:
-                fr = self.retouch_by_voice(fr)
             layer.alpha_composite(fr, (x + self.bz, y + self.bz))
         blend(im, layer, alpha)
 
@@ -493,7 +485,6 @@ def draw_phone_scene(im, L, i, t, a, pa):
         tl -= a1 - a0
     if v is None:
         v = d["clips"][-1][1]
-    L.phone.retouch = d.get("voice") is not None and v >= d["voice"]
     L.phone.draw(im, L.phone_xy, v, pa)
     y = draw_caption(im, L, d["caption"], a)
     for id, who, text, at in d.get("lines", []):
