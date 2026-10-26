@@ -171,7 +171,7 @@ struct SpacesSheet: View {
         await act { try await $0.newSpace(dir: folder.path) }
     }
 
-    private func act(_ body: (DaemonClient) async throws -> AgentActionReply) async {
+    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> AgentActionReply) async {
         do {
             _ = try await model.daemon(body)
             Haptics.answered()
@@ -525,7 +525,7 @@ struct SpaceDetailView: View {
         }
     }
 
-    private func act(_ body: (DaemonClient) async throws -> Void) async {
+    private func act(_ body: @escaping @Sendable (DaemonClient) async throws -> Void) async {
         do {
             try await model.daemon(body)
             Haptics.answered()
