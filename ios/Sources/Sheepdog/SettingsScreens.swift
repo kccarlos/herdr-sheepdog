@@ -214,6 +214,8 @@ struct DaemonSettingsView: View {
                 }
                 .tint(Theme.primaryText)
                 .accessibilityIdentifier("settings.firstRun.guide")
+                PrivacyPolicyLink()
+                    .font(.subheadline)
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .contain)
@@ -429,6 +431,18 @@ struct AboutView: View {
                 LabeledContent("App", value: Bundle.appVersion)
                 LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
                 LabeledContent("Voice name", value: model.voiceName)
+            }
+
+            Section {
+                PrivacyPolicyLink()
+                NavigationLink {
+                    LicencesView()
+                } label: {
+                    Label("Licences", systemImage: "doc.text")
+                }
+                .accessibilityIdentifier("settings.licences")
+            } footer: {
+                Text("sheepdog collects nothing. Your voice goes to your own computer, which sends it to the AI services you set up there.")
             }
 
             Section {
