@@ -623,6 +623,26 @@ the composer stay open to the app. Typed text goes to
 `internal/web/routes_test.go` walks the route table: every route has
 exactly one of public, device, loopback or setup.
 
+### Idempotency keys
+
+Any `POST` a paired device makes may carry `Idempotency-Key: <key>`
+(1–128 visible ASCII characters; anything else is `400`). The daemon
+keeps the reply for 10 minutes per device, route and key. A repeat with
+the same key gets the same status and body, with
+`Idempotent-Replayed: true`, and the action does not run again
+(`web.idempotent_replay {path, status}`); a repeat that arrives while the
+first is still running waits for it. Another key, another device or
+another route runs as usual, and so does a request with no key.
+
+The app sends a fresh key with every action that is not idempotent on
+its own (a typed line, `POST /api/agents`, agent input, the Spaces
+actions) and reuses it only to retry after a timeout or a lost
+connection, so a retry never starts a second agent or types a line
+twice. Memory is bounded: at most 256 replies per device and 1024 in
+all, the oldest finished one going first, and a reply over 64 KiB is not
+kept (a later repeat runs again, and one that was waiting for it gets `409`). The replies live in memory only; a
+restart forgets them.
+
 ## Pairing
 
 The setup page (`/setup`) and `sheepdog pair` show a QR code holding one
