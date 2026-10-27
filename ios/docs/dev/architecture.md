@@ -1265,10 +1265,10 @@ consent objects are already `@Observable`, and so are the models split out
 of it so far: `HealthModel`, `SettingsModel` (models, chattiness, languages,
 voice providers), `NoticeModel` (banner, update and pairing notices),
 `LinkModel` (link presentation, address rows, stream life, handshake, hello),
-`NavigationModel` (pane, navigation path, Settings route, window request)
-and `AgentsModel` (agents, open questions, opened cards, screen covers,
-shell offer; views read them through the session, as in
-`model.settingsModel`), so anything the session itself announces
+`NavigationModel` (pane, navigation path, Settings route, window request),
+`AgentsModel` (agents, open questions, opened cards, screen covers, shell
+offer) and `ConversationModel` (rows, paging, the typed line; views read
+them through the session, as in `model.settingsModel`), so anything the session itself announces
 re-renders every view that observes it. The rules that keep that cheap:
 
 - **Assign only on change.** A poll or a refresh assigns a published

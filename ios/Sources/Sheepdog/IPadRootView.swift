@@ -594,11 +594,11 @@ struct IPadComposer: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
-    private var canSend: Bool { model.isConfigured && !model.sendingTyped && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canSend: Bool { model.isConfigured && !model.conversationModel.sendingTyped && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let error = model.typedError {
+            if let error = model.conversationModel.typedError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(Theme.danger)
@@ -619,7 +619,7 @@ struct IPadComposer: View {
                 Button(action: submit) {
                     ZStack {
                         Circle().fill(canSend ? Theme.ink : Theme.line)
-                        if model.sendingTyped {
+                        if model.conversationModel.sendingTyped {
                             ProgressView().tint(Theme.surface)
                         } else {
                             Image(systemName: "arrow.up")

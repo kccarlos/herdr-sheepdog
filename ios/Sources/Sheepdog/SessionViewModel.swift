@@ -49,13 +49,10 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var state: SessionState = .disconnected {
         didSet { if state != oldValue { offerListeningHints() } }
     }
-    /// The conversation as the screen lists it: history, live bubbles and
-    /// the dividers between them.
-    @Published private(set) var rows: [TimelineRow] = []
+    /// The conversation's rows, paging and typed line.
+    let conversationModel = ConversationModel()
     /// The approval card pinned above the controls, if a worker is asking.
     @Published private(set) var approval: ApprovalFlow.Card?
-    @Published private(set) var canLoadOlder = false
-    @Published private(set) var loadingOlder = false
     /// The one-time caption under the controls the first time Mute is used.
     @Published private(set) var showMuteHint = false
     /// The agents, the open questions and the view state with them.
@@ -111,15 +108,8 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var conversationResetSupported = true
     /// The banner, the feedback line, the update and pairing notices.
     let notices = NoticeModel()
-    /// Typed input (`POST /api/utterance`): in flight, and the
-    /// daemon's refusal if it had one.
-    @Published private(set) var sendingTyped = false
-    @Published var typedError: String?
     /// The typed line in flight or last failed, with its idempotency key.
     private var typedAttempt: (text: String, key: String)?
-    /// Bumped on every typed line the daemon took: the conversation jumps
-    /// to its end, where the words and the answer are about to land.
-    @Published private(set) var typedSent = 0
 
     // The Health pane.
     /// Uptime, GPT-Live's billed seconds and the recent problems.
@@ -1479,8 +1469,8 @@ final class SessionViewModel: ObservableObject {
             filled.card = card
             return filled
         }
-        rows = ConversationTimeline.rows(history: items, live: reducer.bubbles, activity: activity, cards: cardInbox.live)
-        canLoadOlder = history.canLoadOlder
+        conversationModel.setRows(ConversationTimeline.rows(history: items, live: reducer.bubbles, activity: activity, cards: cardInbox.live))
+        conversationModel.setCanLoadOlder(history.canLoadOlder)
         if save { saveCache(now: false) }
     }
 
@@ -1538,9 +1528,9 @@ final class SessionViewModel: ObservableObject {
 
     /// Pull-to-load-older: the page before the oldest item shown.
     func loadOlder() async {
-        guard let before = history.nextBefore, !loadingOlder else { return }
-        loadingOlder = true
-        defer { loadingOlder = false }
+        guard let before = history.nextBefore, !conversationModel.loadingOlder else { return }
+        conversationModel.setLoadingOlder(true)
+        defer { conversationModel.setLoadingOlder(false) }
         do {
             let page = try await current { try await $0.conversation(limit: 100, before: before) }
             history.applyOlder(page)
@@ -1599,14 +1589,14 @@ final class SessionViewModel: ObservableObject {
     /// not connected). Returns true when the daemon took it.
     func sendTyped(_ text: String) async -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, settings.endpoint != nil, !sendingTyped else { return false }
+        guard !text.isEmpty, settings.endpoint != nil, !conversationModel.sendingTyped else { return false }
         guard requireAIConsent() else {
-            if consent.decision == .withdrawn { typedError = Self.aiOffMessage }
+            if consent.decision == .withdrawn { conversationModel.setTypedError(Self.aiOffMessage) }
             return false
         }
-        sendingTyped = true
-        typedError = nil
-        defer { sendingTyped = false }
+        conversationModel.setSendingTyped(true)
+        conversationModel.setTypedError(nil)
+        defer { conversationModel.setSendingTyped(false) }
         // The same line sent again after a failure keeps its key: if the
         // first did reach the computer, it is not said twice.
         if typedAttempt?.text != text { typedAttempt = (text, UUID().uuidString) }
@@ -1614,7 +1604,7 @@ final class SessionViewModel: ObservableObject {
         do {
             _ = try await action(ActionRunner.Key.typedLine, .typedLine, idempotencyKey: typedAttempt?.key) { try await $0.sendUtterance(text) }
             typedAttempt = nil
-            typedSent += 1
+            conversationModel.typedLineSent()
             Haptics.tap()
             if !core.connection.wantsConnection {
                 // No event stream: the daemon has logged it by now.
@@ -1629,7 +1619,7 @@ final class SessionViewModel: ObservableObject {
             if !ActionRunner.isTransport(error) { typedAttempt = nil }
             // The error shows in the composer it was typed in.
             guard fleet.currentID == computer else { return false }
-            typedError = requestFailure(error).message
+            conversationModel.setTypedError(requestFailure(error).message)
             Haptics.answerFailed()
         }
         return false
@@ -1944,7 +1934,7 @@ final class SessionViewModel: ObservableObject {
     /// `POST /api/feedback`, then a haptic and "Noted". Works while the
     /// voice runs; nothing about the voice session changes.
     func markFeedback(_ tag: FeedbackTag, note: String? = nil, at: Date) {
-        let mark = FeedbackMark(tag: tag, note: note, at: at, conversationTurn: rows.last?.id)
+        let mark = FeedbackMark(tag: tag, note: note, at: at, conversationTurn: conversationModel.rows.last?.id)
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -2020,7 +2010,7 @@ final class SessionViewModel: ObservableObject {
         // that row at once (the motion pass); one without stays to say how
         // it ended.
         let settledVoice = approval.flatMap { card -> PendingAction? in
-            guard card.isSettled, !rows.contains(where: { row in
+            guard card.isSettled, !conversationModel.rows.contains(where: { row in
                 if case let .item(item) = row { return item.kind == .approval && item.pendingID == card.pending.id }
                 return false
             }) else { return nil }

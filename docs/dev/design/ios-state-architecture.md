@@ -1508,8 +1508,16 @@ Order and dependencies:
     event compares against the last list applied. `pendingAction` is the
     approval card's input and goes with phase 8's `ApprovalFlow` merge.
     Every setter assigns only on change.
+  - **Done: Conversation.** `ConversationModel` (`ConversationModel.swift`,
+    `@Observable`) holds `rows`, `canLoadOlder`, `loadingOlder`,
+    `sendingTyped`, `typedError` and `typedSent`; views read
+    `model.conversationModel`. `rows` is a mirror, not derived: it merges
+    the history with the live voice bubbles, the activity lines and the
+    cards this phone got, and the computer's conversation is
+    `@ObservationIgnored` on purpose. The typed line's logic and its
+    idempotency attempt stay in `sendTyped`; the model holds the state the
+    composer shows. Setters assign only on change.
   - **Left, in order** (sizes S/M/L):
-    6. Conversation: `rows`, paging, the typed line (M).
     7. The voice leaves: `VoiceEngine` owns `state`, mute, talk mode,
        hold, microphone modes, the coach mark, `wantsConnection` and the
        audio session (L, the hard part: the audio path is Swift 5 and
