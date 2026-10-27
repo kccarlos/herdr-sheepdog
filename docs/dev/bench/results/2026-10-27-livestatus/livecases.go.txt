@@ -1,0 +1,206 @@
+// Command livecases runs voice (assistant) eval cases through Gemini Live
+// itself, in client-content text turns, with the daemon's voice prompt and
+// tool declarations, and records whether the voice called to_supervisor.
+// The text-mode assistant set (`sheepdog eval --set assistant --live`) runs
+// gemini-3.5-flash, which hands off far more readily than Live does.
+//
+//	set -a; . ./.env; set +a
+//	go run ./_livecases -cases testdata/eval/assistant.jsonl -filter livestatus -repeat 3 -prompts-dir DIR -out runs.jsonl
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"google.golang.org/genai"
+
+	evalpkg "github.com/kccarlos/herdr-sheepdog/internal/eval"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
+)
+
+var (
+	casesPath  = flag.String("cases", "testdata/eval/assistant.jsonl", "assistant case file")
+	filter     = flag.String("filter", "livestatus", "only case ids containing this")
+	repeat     = flag.Int("repeat", 1, "runs per case")
+	promptsDir = flag.String("prompts-dir", "", "override dir for assistant.md (empty: embedded)")
+	extra      = flag.String("extra-context", "", "a line appended to every case's context (before the utterance)")
+	arm        = flag.String("arm", "", "label written into each record")
+	outPath    = flag.String("out", "", "JSONL output")
+	model      = flag.String("model", "gemini-3.8-live", "Live model")
+	location   = flag.String("location", "us-central1", "Vertex location")
+)
+
+type record struct {
+	Arm     string `json:"arm"`
+	ID      string `json:"id"`
+	Rep     int    `json:"rep"`
+	Want    string `json:"want"`
+	Tool    string `json:"tool"`
+	Text    string `json:"text,omitempty"`
+	Said    string `json:"said,omitempty"`
+	Pass    bool   `json:"pass"`
+	Err     string `json:"err,omitempty"`
+	Seconds float64 `json:"seconds"`
+}
+
+func main() {
+	flag.Parse()
+	key, project := os.Getenv("VERTEX_API_KEY"), os.Getenv("VERTEX_PROJECT")
+	if key == "" || project == "" {
+		fmt.Fprintln(os.Stderr, "VERTEX_API_KEY / VERTEX_PROJECT unset")
+		os.Exit(2)
+	}
+	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		Backend: genai.BackendVertexAI, APIKey: key, Project: project, Location: *location,
+		HTTPOptions: genai.HTTPOptions{BaseURL: fmt.Sprintf("https://%s-aiplatform.googleapis.com/", *location), Headers: http.Header{"X-Goog-Api-Key": []string{key}}},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "client:", err)
+		os.Exit(1)
+	}
+	cases, err := evalpkg.LoadAssistantCases(*casesPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	var out *os.File
+	if *outPath != "" {
+		out, _ = os.OpenFile(*outPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		defer out.Close()
+	}
+	pl := prompts.NewLoader(*promptsDir, nil)
+	pass, n := 0, 0
+	for _, c := range cases {
+		if !strings.Contains(c.ID, *filter) {
+			continue
+		}
+		for rep := 1; rep <= *repeat; rep++ {
+			r := runOne(client, pl, c)
+			r.Arm, r.Rep = *arm, rep
+			n++
+			if r.Pass {
+				pass++
+			}
+			fmt.Printf("%-40s rep %d want %-13s got %-13s pass %-5v %.1fs %s %s\n", c.ID, rep, r.Want, r.Tool, r.Pass, r.Seconds, r.Err, oneLine(r.Said))
+			if out != nil {
+				b, _ := json.Marshal(r)
+				out.Write(append(b, '\n'))
+			}
+		}
+	}
+	fmt.Printf("TOTAL %d/%d\n", pass, n)
+}
+
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len([]rune(s)) > 80 {
+		return string([]rune(s)[:80]) + "…"
+	}
+	return s
+}
+
+func tools() []*genai.Tool {
+	t := gemini.TextToolDeclarations()
+	for _, d := range t[0].FunctionDeclarations {
+		d.Behavior = genai.BehaviorNonBlocking
+	}
+	return t
+}
+
+func runOne(client *genai.Client, pl *prompts.Loader, c evalpkg.AssistantCase) record {
+	want := c.Expect.Tool
+	if want == "" && len(c.Expect.ToolAnyOf) > 0 {
+		want = strings.Join(c.Expect.ToolAnyOf, "|")
+	}
+	r := record{ID: c.ID, Want: want, Tool: "none"}
+	aliases := c.Aliases
+	if len(aliases) == 0 {
+		aliases = []string{"auth", "docs"}
+	}
+	sys, _ := pl.Render(prompts.Assistant, prompts.AssistantVars("", aliases))
+	cfg := &genai.LiveConnectConfig{
+		ResponseModalities:       []genai.Modality{genai.ModalityAudio},
+		SpeechConfig:             &genai.SpeechConfig{VoiceConfig: &genai.VoiceConfig{PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{VoiceName: "Puck"}}},
+		SystemInstruction:        &genai.Content{Parts: []*genai.Part{{Text: sys}}},
+		Tools:                    tools(),
+		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	t0 := time.Now()
+	sess, err := client.Live.Connect(ctx, *model, cfg)
+	if err != nil {
+		r.Err = "connect: " + err.Error()
+		return r
+	}
+	defer sess.Close()
+	var turns []*genai.Content
+	lines := append([]string{}, c.Context...)
+	if *extra != "" {
+		lines = append(lines, *extra)
+	}
+	for _, l := range lines {
+		if t, ok := strings.CutPrefix(l, "Dog: "); ok {
+			turns = append(turns, &genai.Content{Role: "model", Parts: []*genai.Part{{Text: t}}})
+		} else {
+			turns = append(turns, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: l}}})
+		}
+	}
+	turns = append(turns, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: c.Utterance}}})
+	tc := true
+	if err := sess.SendClientContent(genai.LiveClientContentInput{Turns: turns, TurnComplete: &tc}); err != nil {
+		r.Err = "send: " + err.Error()
+		return r
+	}
+	var mu sync.Mutex
+	var said strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			msg, err := sess.Receive()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			if msg.ToolCall != nil && len(msg.ToolCall.FunctionCalls) > 0 && r.Tool == "none" {
+				fc := msg.ToolCall.FunctionCalls[0]
+				r.Tool = fc.Name
+				if s, ok := fc.Args["text"].(string); ok {
+					r.Text = s
+				}
+				mu.Unlock()
+				return
+			}
+			if sc := msg.ServerContent; sc != nil {
+				if sc.OutputTranscription != nil {
+					said.WriteString(sc.OutputTranscription.Text)
+				}
+				if sc.TurnComplete {
+					mu.Unlock()
+					return
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		r.Err = "timeout"
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	r.Said = said.String()
+	r.Seconds = time.Since(t0).Seconds()
+	r.Pass = r.Err == "" && strings.Contains("|"+want+"|", "|"+r.Tool+"|")
+	return r
+}

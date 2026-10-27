@@ -1,0 +1,6 @@
+== eval --set svp (2 cases) ==
+  PASS  svp-why-voice-stopped-zh  4.463s  spoken=I can't see the sound side, only the text record, and that starts a minute ago with nothing before it, so there is no trace I can point to. What I can see is that auth is sitting at an approval prompt, waiting on you.
+  PASS  svp-why-cut-out-en        9.765s  tools_called=read_screen,recall spoken=I can't hear the audio and my notes of this conversation only start at this moment, so I can't see what was being said when it stopped. Nothing else came in for you either way; auth is sitting at a prompt right now, which may be where it broke off.
+-- 2 pass, 0 fail, 0 skipped (of 2) --
+-- spend brain    deepseek-flash           calls     3  in     21471  out     1563  reasoning     1213  ≈ $0.0081 --
+-- spend total ≈ $0.0081 (estimate at list prices) --

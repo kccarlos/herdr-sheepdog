@@ -1,0 +1,13 @@
+== eval --set assistant, repeat 3 ==
+  livestatus-zh-any-result         runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-zh-any-result-again   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-zh-saw-it-finish      runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-zh-what-state-now     runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-zh-why-voice-stopped  runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  –
+  livestatus-en-any-result-again   runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  –
+  livestatus-en-did-it-finish      runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-en-what-doing-now     runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-en-why-delay          runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  livestatus-zh-smalltalk-thanks   runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  –
+  livestatus-en-smalltalk-thanks   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                            runs 33  pass 30  fail  3  err  0  not_run  0  rate   91%  –
