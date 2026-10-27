@@ -373,15 +373,20 @@ destinations above.
 
 **Screens (5 per set, from the demo, light mode, in this order):**
 
-1. **Conversation with the voice speaking:** the orb, an announcement, the agent strip.
-   Caption: "Hear what your agents did."
-2. **Approval card** (codex-payments): "Yes, proceed". Caption: "Approve by tap or by voice."
-3. **All agents:** four agents with their states. Caption: "Every agent at a glance."
-4. **Agent window:** the scripted terminal and the key bar. Caption: "Open any agent's
+1. **Approval card** (codex-payments): "Yes, proceed". Caption: "Approve by tap or by voice."
+2. **All agents:** four agents with their states (iPad: the sidebar). Caption: "Every agent
+   at a glance."
+3. **Agent window:** the scripted terminal and the key bar. Caption: "Open any agent's
    terminal."
-5. **Lock Screen Live Activity** ([live-activity-light.png](../../ios/docs/screenshots/live-activity-light.png)
-   style). Caption: "Stays with you on the Lock Screen." On iPad, use the sidebar with the
-   agent list and a window side by side instead.
+4. **Card sheet:** "Your agents", with the agents in different states. Caption: "Ask for a
+   card, see it at once."
+5. **Conversation:** updates, an approval and the voice's answers. Caption: "Hear what your
+   agents did."
+
+There is no Live Activity shot: the debug gallery is a stand-in, not a real Lock Screen.
+`ios/scripts/appstore-shots.sh` takes all three sets: status bar 9:41 at full battery, not
+charging, and the demo's clock started at 9:38 (`-sheepdogDemoClock 09:38`, debug builds
+only) so the in-app times agree.
 
 Optional sixth: dark mode of shot 1.
 

@@ -324,7 +324,7 @@ struct IPadSidebar: View {
                         .foregroundStyle(Theme.blockedText)
                 } else {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
-                        Text(agent.timeInState(at: context.date) ?? Theme.word(for: agent.state))
+                        Text(agent.timeInState(at: DemoClock.shifted(context.date)) ?? Theme.word(for: agent.state))
                             .font(.caption)
                             .foregroundStyle(Theme.muted)
                             .contentTransition(.numericText())
@@ -578,7 +578,7 @@ struct IPadConversationDetail: View {
                     cards: cards,
                     voiceQuestionID: model.approval?.pending.id,
                     time: { question in
-                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
+                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
                     },
                     compact: false,
                     remote: { model.remoteQuestion($0) },

@@ -202,7 +202,7 @@ struct PhoneRootView: View {
                     cards: cards,
                     voiceQuestionID: model.approval?.pending.id,
                     time: { question in
-                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: Date())
+                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
                     },
                     compact: ui.typing,
                     remote: { model.remoteQuestion($0) },

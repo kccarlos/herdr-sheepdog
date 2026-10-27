@@ -365,7 +365,7 @@ struct AgentCard: View {
     private var stateText: some View {
         // Re-evaluated twice a minute, so "4 min" keeps up on its own.
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let since = agent.timeInState(at: context.date)
+            let since = agent.timeInState(at: DemoClock.shifted(context.date))
             let word = Theme.word(for: agent.state)
             Text(since.map { "\(word) · \($0)" } ?? word)
                 .font(.footnote.weight(waiting ? .semibold : .medium))
