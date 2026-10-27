@@ -20,7 +20,10 @@ final class StubDaemon {
         /// A computer of several: `/api/hello` names it, `/api/state`
         /// sends these agents and questions (JSON arrays), and an answer
         /// is accepted.
-        case computer(name: String, agents: String, questions: String)
+        ///
+        /// `history` is how many conversation lines it has; with more than
+        /// one, the last is "Latest from <name>."
+        case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0)
     }
 
     private let listener: NWListener
@@ -98,7 +101,7 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"agents":[],"# + voice + #","version":"v0.1.4""# + tail + "}")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
-        case let .computer(name, agents, questions):
+        case let .computer(name, agents, questions, history, idBase):
             if path.hasPrefix("/api/hello") {
                 return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}}"#)
             }
@@ -113,8 +116,13 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"ok":true,"via":"voice"}"#)
             }
             if path.hasPrefix("/api/conversation") {
-                // One line that says whose conversation this is.
-                return http(200, "application/json", #"{"items":[{"id":1790127618456893,"ts":"2026-10-23T09:00:00Z","kind":"dog","text":"Hi from "# + name + #"."}]}"#)
+                // The first line says whose conversation this is.
+                let lines = (0 ..< history).map { index -> String in
+                    let text = history > 1 && index == history - 1 ? "Latest from \(name)."
+                        : index == 0 ? "Hi from \(name)." : "Line \(index) from \(name)."
+                    return #"{"id":"# + String(1_790_127_618_456_893 + index + idBase) + #","ts":"2026-10-23T09:00:00Z","kind":"dog","text":""# + text + #""}"#
+                }
+                return http(200, "application/json", #"{"items":["# + lines.joined(separator: ",") + "]}")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
         }

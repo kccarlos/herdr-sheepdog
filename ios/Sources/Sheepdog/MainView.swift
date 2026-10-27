@@ -287,6 +287,11 @@ struct ConversationPane: View {
             followToken: model.conversationModel.typedSent,
             ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
         )
+        // One scroll view per computer: a switch swaps the rows under it,
+        // and the old computer's offset and "scrolled up" state would leave
+        // the new conversation's rows off screen (a blank page with only
+        // Jump to latest). A fresh view starts at the latest row.
+        .id(model.currentComputerID)
         // Mark this moment for debugging ("that paused"); only with a
         // daemon that takes marks.
         .overlay(alignment: .topTrailing) {
