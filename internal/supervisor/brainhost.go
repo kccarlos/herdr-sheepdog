@@ -200,7 +200,9 @@ func (h brainHost) Investigations() []brain.InvestigationInfo {
 // Prompt implements brain.Host: the instruction send path (D4:
 // sendInstruction), so the stop procedure can still interrupt it. The
 // worker gets the instruction with the SignOff trailer (journal.go); the
-// echo and the row's current task are the instruction alone.
+// echo and the row's current task are the instruction alone. A slash
+// command goes bare, without the trailer or trailing punctuation
+// (withSignOff).
 func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
@@ -208,7 +210,11 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 	}
 	text = withoutSignOff(text)
 	echo := "Telling " + aliasOr(state.Say(row)) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
-	h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
+	if isSlashCommand(text) {
+		text = trimCommandPunct(strings.TrimSpace(text)) // sent bare, no trailer
+	} else {
+		h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
+	}
 	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
 	if err == nil {
 		h.s.unsignTask(paneID)

@@ -487,7 +487,12 @@ ledger shows each agent's last three entries in one short line each;
 the screen: what changed; what needs a decision; what is next." — so
 that last message is written for the user; the trailer is never
 counted as the user's words (the echo, the pending action, the
-"started on" line and the journal use the instruction without it). agy
+"started on" line and the journal use the instruction without it). A slash
+command (one line starting with `/`, such as `/permissions` or `/compact`)
+is sent exactly as given, with no trailer and without trailing sentence
+punctuation (`/permissions.` becomes `/permissions`), so the worker's TUI
+recognises it; multi-line text that starts with `/` is prose and keeps the
+trailer. agy
 keeps no transcript the daemon can read (`worker.session_missing`).
 
 ## New conversation
