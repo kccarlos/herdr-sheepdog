@@ -1643,8 +1643,9 @@ final class SessionViewModel: ObservableObject {
         store.hasBeenConfigured = true
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SheepdogDemo-\(UUID().uuidString)", isDirectory: true)
         #if DEBUG
-        let start = Date()
-        let demo = DebugLaunch.demoPaused ? DemoDaemon(clock: { start }) : DemoDaemon()
+        DemoClock.offset = DebugLaunch.demoClockOffset
+        let start = DemoClock.now()
+        let demo = DebugLaunch.demoPaused ? DemoDaemon(clock: { start }) : DemoDaemon(clock: DemoClock.now)
         demo.update = DebugLaunch.demoUpdate
         demo.recording = DebugLaunch.demoRecording
         #else

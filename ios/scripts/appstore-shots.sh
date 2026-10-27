@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 out=${1:?output dir}; shift
 sets=("$@"); [ ${#sets[@]} -gt 0 ] || sets=(large medium ipad)
-derived=$(mktemp -d); trap 'rm -rf "$derived"' EXIT
+derived=${SHOTS_DERIVED:-$(mktemp -d)}; [ -n "${SHOTS_DERIVED:-}" ] || trap 'rm -rf "$derived"' EXIT
 xcodegen generate >/dev/null
 for set in "${sets[@]}"; do
   case $set in
@@ -22,7 +22,7 @@ for set in "${sets[@]}"; do
   xcrun simctl boot "$udid"
   xcrun simctl bootstatus "$udid" -b >/dev/null
   xcrun simctl ui "$udid" appearance light
-  xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 \
+  xcrun simctl status_bar "$udid" override --time 9:41 --batteryState discharging --batteryLevel 100 \
     --cellularMode active --cellularBars 4 --wifiMode active --wifiBars 3 --operatorName ""
   TEST_RUNNER_SHEEPDOG_LAUNCH_SHOTS="$out/$set" xcodebuild -scheme Sheepdog -destination "id=$udid" \
     -derivedDataPath "$derived" -skipPackagePluginValidation test \

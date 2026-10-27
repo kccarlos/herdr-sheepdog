@@ -46,6 +46,15 @@ enum DebugLaunch {
     /// stays at the start), so no agent finishes or asks: a UI test sees
     /// the opening state for as long as it needs, on a Mac of any speed.
     static var demoPaused: Bool { arguments.contains("-sheepdogDemoPaused") }
+    /// `-sheepdogDemoClock HH:mm`: the demo's clock starts at that time today
+    /// (its timestamps and "just now" durations follow), so the App Store
+    /// screenshots agree with their 9:41 status bar.
+    static var demoClockOffset: TimeInterval {
+        guard let i = arguments.firstIndex(of: "-sheepdogDemoClock"), i + 1 < arguments.count else { return 0 }
+        let parts = arguments[i + 1].split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, let target = Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date()) else { return 0 }
+        return target.timeIntervalSince(Date())
+    }
     /// `-sheepdogRenderChurn`: the session view model announces a change
     /// ten times a second, as it does during a live voice session, so a
     /// UI test catches a view whose identity changes on every re-render (a

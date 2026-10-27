@@ -95,24 +95,25 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
     /// The App Store set (docs/dev/app-store-review.md section 8): the offline
     /// demo, light mode, saved as `NN-name.png` with no prefix. Run once per
     /// device with the status bar overridden (`ios/scripts/appstore-shots.sh`).
+    /// The demo's clock starts at 9:38 so its timestamps agree with the 9:41
+    /// status bar.
     func testAppStoreSet() throws {
         func save(_ name: String) {
             let url = URL(fileURLWithPath: directory).appendingPathComponent("\(name).png")
             try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations",
+                               "-sheepdogDemoClock", "09:38"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 20))
         let gotIt = app.buttons["controls.coachMark.dismiss"].firstMatch
         if gotIt.waitForExistence(timeout: 3) { gotIt.tap() }
         // claude-auth finishes at 8 s, codex-payments asks at 16 s.
-        sleep(9)
-        save("01-conversation")
         let approve = app.buttons.matching(identifier: "approval.option.1").firstMatch
         XCTAssertTrue(approve.waitForExistence(timeout: 40), "codex-payments' question")
         sleep(1)
-        save("02-approval")
+        save("01-approval")
         tapVisible(app, "demo.sayYes")
         _ = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved'")).firstMatch.waitForExistence(timeout: 10)
         sleep(2)
@@ -126,23 +127,21 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
             tapVisible(app, "main.pane.flock", timeout: 3)
         }
         sleep(2)
-        save("03-agents")
+        save("02-agents")
         tapVisible(app, onIPad ? "sidebar.agent.claude-auth" : "flock.agent.claude-auth.window")
         _ = app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10)
         sleep(2)
-        save("04-agent-window")
-        app.terminate()
-
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogLiveActivityGallery", "one"]
-        app.launch()
-        sleep(2)
-        save("05-live-activity")
-        app.terminate()
-
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"]
-        app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 20))
-        if gotIt.waitForExistence(timeout: 3) { gotIt.tap() }
+        save("03-agent-window")
+        // Back to the conversation.
+        if onIPad {
+            if sidebarShow.exists, sidebarShow.isHittable { sidebarShow.tap() }
+            tapVisible(app, "sidebar.conversation", timeout: 5)
+        } else {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            tapVisible(app, "main.pane.conversation")
+        }
+        sleep(1)
+        // The card sheet, late in the script, when the agents are in different states.
         let chips = app.buttons.matching(identifier: "demo.question.0")
         for i in 0 ..< chips.count where chips.element(boundBy: i).isHittable {
             chips.element(boundBy: i).swipeLeft()
@@ -151,7 +150,19 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "demo.question.4")
         _ = app.descendants(matching: .any)["card.title"].waitForExistence(timeout: 10)
         sleep(2)
-        save("06-card")
+        save("04-card")
+        tapVisible(app, "card.done", timeout: 3)
+        sleep(1)
+        // The conversation, after the voice has answered two questions.
+        for i in 0 ..< chips.count where chips.element(boundBy: i).isHittable {
+            chips.element(boundBy: i).swipeRight()
+            break
+        }
+        tapVisible(app, "demo.question.0")
+        sleep(6)
+        tapVisible(app, "demo.question.1")
+        sleep(6)
+        save("05-conversation")
     }
 
     func testPairingLink() throws {

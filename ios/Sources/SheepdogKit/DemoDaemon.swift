@@ -1,5 +1,15 @@
 import Foundation
 
+/// The offline demo's wall clock. Normally the real one (offset 0); the debug
+/// launch argument `-sheepdogDemoClock 09:38` shifts it so the App Store
+/// screenshots' timestamps agree with their 9:41 status bar. Only
+/// `DebugLaunch` ever sets the offset, so a release build is unchanged.
+public enum DemoClock {
+    nonisolated(unsafe) public static var offset: TimeInterval = 0
+    public static func now() -> Date { Date().addingTimeInterval(offset) }
+    public static func shifted(_ date: Date) -> Date { date.addingTimeInterval(offset) }
+}
+
 /// The offline demo's daemon: `DemoWorld` behind the same HTTP routes and
 /// shapes the real daemon serves, inside the app. `DaemonClient` reaches it
 /// through `DemoURLProtocol` on a `URLSession` that never opens a socket,
