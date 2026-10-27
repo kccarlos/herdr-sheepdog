@@ -750,6 +750,8 @@ struct SessionChrome: ViewModifier {
             }
             .onChange(of: model.navigation.pane) { _, _ in model.warmUpTerm() }
             .environment(\.openCard) { card in model.openCard(card) }
+            // Only the window that shows the session's sheets shows it.
+            .overlay { if presents { CardLabelOverlay(model: model.cardLabel) { model.openCard($0) } } }
             #if DEBUG
             // Over the layout and any pushed window (the demo's too).
             .overlay(alignment: .topLeading) { RenderProbeReadout() }

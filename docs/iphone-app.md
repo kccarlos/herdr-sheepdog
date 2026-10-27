@@ -214,8 +214,11 @@ With one computer, none of this shows: no names and no Talk to.
   list, an agent's screen or a way into its window. It opens once by
   itself and stays in the conversation, so a tap opens it again. A card
   only shows things; you still answer approvals on the approval card. With
-  the phone locked, the app in the background, or another screen open
-  (Settings, the Agents pane, an agent window), the voice says it instead.
+  the phone locked or the app in the background, the voice says it
+  instead. With another screen open (the Agents pane, an agent window), a
+  small "Card: ..." label shows at the top for a few seconds without
+  taking the keyboard; tap it to open the card, which stays in the
+  conversation either way.
   Needs a daemon new enough to send cards; the demo's "Show me the agents"
   shows one.
 - **Settings** (⋯ ▸ Settings) has three parts. **Computer:** your computer

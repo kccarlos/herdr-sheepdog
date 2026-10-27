@@ -98,6 +98,14 @@ enum DebugLaunch {
     /// `-sheepdogDemoCard`: the demo asks "Show me the agents" by itself
     /// once the script has news (about 18 s in), so its card opens for screenshots.
     static var demoCard: Bool { arguments.contains("-sheepdogDemoCard") }
+    /// `-sheepdogDemoCardAfter <seconds>`: with `-sheepdogDemoCard`, when
+    /// the card comes (18 by default), so a test can first open another
+    /// screen.
+    static var demoCardDelay: Int {
+        guard let i = arguments.firstIndex(of: "-sheepdogDemoCardAfter"), i + 1 < arguments.count,
+              let seconds = Int(arguments[i + 1]) else { return 18 }
+        return seconds
+    }
     /// `-sheepdogDemoLiveActivity speaking|muted|listening`: show the voice
     /// session's Live Activity with two agents waiting, without a session,
     /// for the lock-screen and Dynamic Island screenshots.

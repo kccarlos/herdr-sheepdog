@@ -89,6 +89,9 @@ final class SessionViewModel: ObservableObject {
     var presentedCard: ScreenCard? { presentation.card }
     private var cardVisibility = CardVisibility()
     private var cardInbox = CardInbox()
+    /// The small "card waiting" label (a card that arrived as a row while
+    /// the app is on screen).
+    let cardLabel = CardLabelModel()
     /// The orchestrator's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
@@ -1441,6 +1444,8 @@ final class SessionViewModel: ObservableObject {
     func setScreen(visible: Bool, voiceScreen: Bool) {
         screenVisible = visible
         voiceScreenInFront = voiceScreen
+        // The conversation is in front: its rows are the card.
+        if voiceScreen || !visible { cardLabel.hide() }
         if demo == nil, let message = cardVisibility.update(visible: visible, voiceScreen: voiceScreen) {
             voice.send(message: message)
         }
@@ -1464,6 +1469,9 @@ final class SessionViewModel: ObservableObject {
             if presentedCard != nil { presentation.replace(shown) } else { presentation.present(shown) }
             Haptics.tap()
             AccessibilityNotification.Announcement("On your screen: \(card.displayTitle)").post()
+        } else {
+            // Another screen is in front: a small label points at the row.
+            cardLabel.show(cardInbox.card(id: card.cardID) ?? card, appActive: appPhase == .active)
         }
         // The card's own history item replaces the live row.
         scheduleHistorySync()
@@ -1486,6 +1494,7 @@ final class SessionViewModel: ObservableObject {
 
     /// A card row was tapped.
     func openCard(_ card: ScreenCard) {
+        cardLabel.hide()
         presentation.present(.card(card))
     }
 
@@ -1750,7 +1759,7 @@ final class SessionViewModel: ObservableObject {
         #if DEBUG
         if DebugLaunch.demoCard {
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(18))
+                try? await Task.sleep(for: .seconds(DebugLaunch.demoCardDelay))
                 self?.askDemo("Show me the agents")
             }
         }
