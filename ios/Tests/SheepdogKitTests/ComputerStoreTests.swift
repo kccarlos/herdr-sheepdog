@@ -135,29 +135,6 @@ final class ComputerStoreTests: XCTestCase {
         XCTAssertEqual(endpoint?.computerID, "fixture")
     }
 
-    // MARK: - The update from one computer
-
-    func testTheOldPairingMovesOverAndStaysCurrent() throws {
-        let secrets = InMemorySecretStore()
-        let defaults = UserDefaults(suiteName: "sheepdog.tests.\(UUID().uuidString)")!
-        let old = computer("d-old", name: "Studio", pin: "pinOld", addresses: ["192.168.1.20:7777", "100.101.1.1:7777"])
-        secrets.setSecret(String(data: try JSONEncoder().encode(old), encoding: .utf8), for: "daemon.computer")
-        defaults.set("100.101.1.1:7777", forKey: "daemon.address")
-
-        let (store, _, _) = fresh(secrets, defaults: defaults)
-        XCTAssertEqual(store.ids, ["d-old"])
-        XCTAssertEqual(store.currentID, "d-old")
-        XCTAssertEqual(store.current, old)
-        XCTAssertEqual(store.address(for: "d-old"), "100.101.1.1:7777", "the address in use is kept")
-        XCTAssertEqual(store.endpoint(for: "d-old")?.secure, true)
-        XCTAssertNil(secrets.values["daemon.computer"], "the old record is gone")
-        XCTAssertEqual(store.looseAddress, "", "the old address became the computer's")
-
-        // Runs once: a second launch finds nothing to move.
-        let again = ComputerStore(defaults: defaults, secrets: secrets)
-        XCTAssertEqual(again.ids, ["d-old"])
-    }
-
     func testNothingToMoveLeavesAFixtureAddressAlone() {
         let defaults = UserDefaults(suiteName: "sheepdog.tests.\(UUID().uuidString)")!
         defaults.set("127.0.0.1:7799", forKey: "daemon.address")

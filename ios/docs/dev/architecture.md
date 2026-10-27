@@ -1361,12 +1361,9 @@ the one real-time boundary is the explicit buffer copy in the tap.
   with `computerLabel.` (Talk to's with `voice.talkTo`), so
   `ComputersUITests.testOneComputerLooksExactlyAsItAlwaysDid` catches any
   label that shows with one computer.
-- **The update from one computer.** The app before several computers kept
-  one record (`daemon.computer`) and its address (`daemon.address`).
-  `ComputerStore.migrate` moves them once: that computer becomes the first
-  and current one, so an existing user stays paired. The device key was
-  already tagged by daemon id. The old conversation cache file is not
-  converted; the history comes back from the daemon.
+- **No update path from one computer.** The one-time move of the
+  pre-multi-computer record was removed in phase 10 (no backward
+  compatibility); a user of that old build pairs again.
 - `-sheepdogComputers "Work Mac=127.0.0.1:7801;Home Mac=…"` (DEBUG) starts
   with loopback fixture daemons as computers (plain HTTP, no pin, ids
   `fixture-1`, `fixture-2`, …).

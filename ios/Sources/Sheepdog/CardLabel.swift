@@ -67,9 +67,11 @@ struct CardLabelOverlay: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
+                    // No drop shadow: it drew a dark sliver outside the
+                    // capsule's left edge over a dark screen.
                     .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Theme.ink.opacity(0.12), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    .overlay(Capsule().strokeBorder(Theme.ink.opacity(0.16), lineWidth: 0.5))
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: 320)

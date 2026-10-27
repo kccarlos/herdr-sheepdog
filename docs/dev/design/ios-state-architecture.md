@@ -1588,14 +1588,30 @@ Order and dependencies:
       on the original card; re-pairing forgets every phase.
   - **Left** (sizes S/M/L):
     9. Delete `SessionViewModel`; `@EnvironmentObject` becomes
-       `@Environment(Type.self)` (S).
+       `@Environment(Type.self)` (S). **Shelved** by the CEO on 2026-10-27:
+       phase 8 stops after the approval slice (#447).
+
+- **Phase 9 (shelved, CEO decision 2026-10-27).** The fault-injecting
+  `StubDaemon` and the chaos lane are not built.
+- **Phase 10 (done).** Behaviour-preserving removal.
+  - **Removed:** `ComputerStore.migrate()`, the `daemon.computer` legacy
+    key and its test (a fresh install is unaffected); the unused
+    `-sheepdogShowStreamErrors` flag.
+  - **Already gone** by earlier phases: `otherSinks`.
+  - **Kept on purpose:** the manual `objectWillChange.send()` in
+    `computersChanged()` and `addressesChanged()`: the computer list is
+    read from `ComputerStore`, which is not observable, so renaming or
+    re-pairing a computer needs it. The `LinkModel` and `ConversationModel`
+    mirrors stay with `SessionViewModel`, which is shelved with slice 9.
+  - **Fixed:** the card label's faint sliver at its left edge (the drop
+    shadow); the capsule is clipped and has no shadow.
 
 **What not to do:**
 
 - **No rewrite** and no big-bang branch. Every PR ships to TestFlight on
   its own.
 - **No compatibility shims or data migrations.** Re-pairing once is fine
-  (app-redesign.md, "The rules for every phase"). Phase 10 deletes the one migration that exists.
+  (app-redesign.md, "The rules for every phase"). Phase 10 deleted the one migration that existed.
 - **No third-party architecture framework** (TCA and the like) and no new
   Combine pipelines. The existing reducer-plus-effects pattern is enough
   and the team knows it.
