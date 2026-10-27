@@ -1482,9 +1482,15 @@ Order and dependencies:
     holds `banner`, `feedbackNotice`, `update`, `pairingProblem`,
     `daemonNoticeProblem` and `daemonNotice`; views read `model.notices`.
     `update` and `pairingProblem` assign only on change.
+  - **Done: Link.** `LinkModel` (`LinkModel.swift`, `@Observable`) holds
+    the link presentation, the address rows, the `/events` life, the `/ws`
+    handshake and `/api/hello`, each assigned only on change; views read
+    `model.linkModel`. They are still mirrors the session writes, not
+    derived: `ComputerModel` keeps its link, hello and stream life
+    `@ObservationIgnored` on purpose (`lastSeen` moves on every request),
+    and the presentation also needs the voice and computer-count state.
+    Making `ComputerModel`'s link observable is a later, separate change.
   - **Left, in order** (sizes S/M/L):
-    3. Link: `linkPresentation`, `addressRows`, `liveUpdates`,
-       `handshake`, `hello` (S–M; mostly mirrors of `ComputerLink`).
     4. Navigation: `pane`, `navigationPath`, `settingsRoute`,
        `windowRequest`, `focusedAgentPaneID` (S).
     5. Agents and questions: `agents`, `pendingAction`, `questions`,

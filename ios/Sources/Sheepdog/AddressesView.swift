@@ -186,7 +186,7 @@ struct AddressesScreen: View {
     @EnvironmentObject private var model: SessionViewModel
 
     var body: some View {
-        AddressesView(rows: model.addressRows, add: { await model.addAddress($0) },
+        AddressesView(rows: model.linkModel.addressRows, add: { await model.addAddress($0) },
                       prefer: { model.preferAddress($0) }, remove: { model.removeAddress($0) })
             .onAppear { model.presentAddresses() }
     }

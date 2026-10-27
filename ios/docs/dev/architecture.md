@@ -1262,8 +1262,9 @@ hear it.
 The session view model is still one `ObservableObject` (until phase 8 of
 docs/dev/design/ios-state-architecture.md; the scene, window, push and
 consent objects, `HealthModel` and `SettingsModel` (models, chattiness,
-languages, voice providers) and `NoticeModel` (banner, update and
-pairing notices) are already `@Observable`, and views read them
+languages, voice providers) `NoticeModel` (banner, update and
+pairing notices) and `LinkModel` (link presentation, address rows, stream
+life, handshake, hello) are already `@Observable`, and views read them
 through the session, as in `model.settingsModel`), so anything it announces
 re-renders every view that observes it. The rules that keep that cheap:
 

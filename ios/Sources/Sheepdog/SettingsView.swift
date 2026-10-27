@@ -216,14 +216,14 @@ struct SettingsView: View {
     /// address", "Offline since 9:12 · address", or "Not paired yet".
     private var computerStatus: String {
         guard model.isConfigured else { return "Not paired yet" }
-        let presented = model.linkPresentation
+        let presented = model.linkModel.presentation
         let address = model.endpointDisplay
         return presented.status.hasSuffix(address) ? presented.status : "\(presented.status) · \(address)"
     }
 
     private var computerTint: Color {
         guard model.isConfigured else { return Theme.unknown }
-        return model.linkPresentation.tint.color
+        return model.linkModel.presentation.tint.color
     }
 
     private func row(_ title: String, _ symbol: String, _ page: SettingsPage, id: String) -> some View {

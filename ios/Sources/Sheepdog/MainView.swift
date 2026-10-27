@@ -425,7 +425,7 @@ struct SessionMenus {
 
     var voiceValue: VoiceValue {
         VoiceValue(
-            connectionWord: model.linkPresentation.chip,
+            connectionWord: model.linkModel.presentation.chip,
             endpoint: model.endpointDisplay,
             connectionSymbol: connectionSymbol,
             computers: model.showsComputerLabels ? model.computerSnapshots.map { computer in
@@ -506,7 +506,7 @@ struct SessionMenus {
         }
     }
 
-    private var connectionSymbol: String { model.linkPresentation.tint.symbol }
+    private var connectionSymbol: String { model.linkModel.presentation.tint.symbol }
 
     /// What `+` and `⋯` show.
     struct BarValue: Equatable {

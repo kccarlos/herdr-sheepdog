@@ -131,7 +131,7 @@ private struct AgentWindowView: View {
             actionsAvailable: model.agentActionsAvailable,
             others: model.flock.running.filter { $0.paneID != agent.paneID }
                 .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
-            handshake: model.handshake,
+            handshake: model.linkModel.handshake,
             pane: pane?.key
         )
     }

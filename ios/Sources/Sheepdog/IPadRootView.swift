@@ -374,7 +374,7 @@ struct IPadSidebar: View {
                     .accessibilityIdentifier("sidebar.scan")
             case .unreachable, .noNetwork, .untrusted, .updateNeeded:
                 // The link's own words, the same as the chip's sheet.
-                Text(model.linkPresentation.inline?.message ?? "Can't reach the computer.")
+                Text(model.linkModel.presentation.inline?.message ?? "Can't reach the computer.")
                 if paneState != .noNetwork {
                     Button("Try again") { model.retryLink() }
                         .fontWeight(.semibold)

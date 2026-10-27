@@ -82,13 +82,10 @@ final class SessionViewModel: ObservableObject {
     /// The permission primer on screen, while it waits for its answer.
     private var primer: PermissionPrimer?
     private var primerAnswer: CheckedContinuation<Bool, Never>?
-    /// Four sources feed `resolvedVoiceProvider`; each tells the audio
-    /// engine's jitter-buffer profile explicitly when it changes, rather
-    /// than re-deriving and re-setting it on every event regardless of
-    /// whether anything provider-related moved.
-    @Published private(set) var hello: Hello? {
-        didSet { audio.setProvider(resolvedVoiceProvider) }
-    }
+    /// The link's presentation, address rows, stream life, handshake and
+    /// `/api/hello`. Four sources feed `resolvedVoiceProvider`; each tells the
+    /// audio engine's jitter-buffer profile explicitly when it changes.
+    let linkModel = LinkModel()
     /// The input level, the audio metrics and the voice-detection
     /// diagnostics: everything that changes 10–25 times a second while
     /// audio is moving, split out so this object's own `@Published`
@@ -101,18 +98,6 @@ final class SessionViewModel: ObservableObject {
     /// one truth for the connection; not published, because `lastSeen`
     /// moves on every request.
     private(set) var link = ComputerLink(addresses: [])
-    /// What every status surface shows: the chip, Settings, the Agents
-    /// page, the capsule's menu, Health. Published only when it changes.
-    @Published private(set) var linkPresentation = LinkPresentation(ComputerLink(addresses: []))
-    /// Settings ▸ Connection ▸ Addresses: each address, the preferred one,
-    /// and the one in use and why. Published only when it changes.
-    @Published private(set) var addressRows: [AddressRow] = []
-    /// The `/events` stream's own life, for Health ▸ Live updates (the
-    /// chip does not follow it, decision 5).
-    @Published private(set) var liveUpdates: SocketLife = .idle
-    /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
-    /// the chip's sheet.
-    @Published private(set) var handshake: ProtocolHandshake.State = .idle
     /// What the daemon pushes about an open agent window over `/ws`,
     /// handed straight to that window (`ScreenStreamRouter`), never
     /// through a published property: a frame must not re-render the app.
@@ -211,7 +196,7 @@ final class SessionViewModel: ObservableObject {
         return parts.isEmpty ? "—" : parts.joined(separator: ", ")
     }
 
-    var voiceName: String { hello?.displayName ?? "Sheepdog" }
+    var voiceName: String { linkModel.hello?.displayName ?? "Sheepdog" }
 
     /// How many computers are paired (`ComputerStore`).
     @Published private(set) var computerCount = 0
@@ -228,7 +213,7 @@ final class SessionViewModel: ObservableObject {
 
     /// The current computer's name as the app shows it.
     var currentComputerName: String {
-        settings.computer?.displayName ?? hello?.computer?.name ?? "Your computer"
+        settings.computer?.displayName ?? linkModel.hello?.computer?.name ?? "Your computer"
     }
 
     /// The line above the voice bar: what to do, not only what is happening.
@@ -244,7 +229,7 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello` — in that order of freshness. One resolver instead of
     /// this fallback chain copied at each of its two call sites.
     private var resolvedVoiceProvider: String? {
-        liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+        liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? linkModel.hello?.voiceProvider
     }
 
     /// "Gemini Live · gemini-3.8-live", from whichever source knows.
@@ -253,21 +238,12 @@ final class SessionViewModel: ObservableObject {
         let option = settingsModel.voiceProviders?.providers.first { $0.id == id }
         let model = (id == settingsModel.voiceProviders?.provider ? settingsModel.voiceProviders?.model : nil)
             ?? (id == stateVoiceProvider ? stateVoiceModel : nil)
-            ?? (id == hello?.voiceProvider ? hello?.voiceModel : nil)
+            ?? (id == linkModel.hello?.voiceProvider ? linkModel.hello?.voiceModel : nil)
             ?? option?.model
         return VoiceProviders.display(provider: option?.displayName ?? id, model: model)
     }
-    var daemonVersion: String? { hello?.version }
+    var daemonVersion: String? { linkModel.hello?.version }
 
-    /// The `/ws` protocol for Health: the handshake's word once a socket
-    /// opened, otherwise what `/api/hello` says (nothing there: an older
-    /// daemon, protocol 1).
-    var protocolDisplay: String {
-        if handshake != .idle { return handshake.summary }
-        guard let hello else { return "—" }
-        guard let p = hello.protocol else { return "1 (older daemon)" }
-        return "\(p) (serves \(hello.minProtocol ?? p) and up)"
-    }
     /// The computer answers: notifications stay quiet in the foreground,
     /// the screen already shows what they would say.
     var sessionIsLive: Bool { link.isUsable }
@@ -405,6 +381,10 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         settingsModel.session = self
+        linkModel.onHelloChange = { [weak self] in
+            guard let self else { return }
+            audio.setProvider(resolvedVoiceProvider)
+        }
         settingsModel.onVoiceProvidersChange = { [weak self] in
             guard let self else { return }
             audio.setProvider(resolvedVoiceProvider)
@@ -565,7 +545,7 @@ final class SessionViewModel: ObservableObject {
             shellOffered = nil
         }
         notices.banner = nil
-        hello = fleet.current?.hello
+        linkModel.setHello(fleet.current?.hello)
         attachCurrent()
         if !sameDaemon {
             // Another computer, its own conversation. The one the app left
@@ -1079,11 +1059,11 @@ final class SessionViewModel: ObservableObject {
             updateDemands()
             presentLink()
         }
-        if handshake != core.connection.handshake {
-            handshake = core.connection.handshake
+        if linkModel.handshake != core.connection.handshake {
+            linkModel.setHandshake(core.connection.handshake)
             // The features are learned per computer, so a window opened
             // while the voice is off still knows about `term`.
-            if case let .ready(_, _, features) = handshake { fleet.current?.features = features }
+            if case let .ready(_, _, features) = linkModel.handshake { fleet.current?.features = features }
         }
         let next = core.sessionState
         if next != state { state = next }
@@ -1236,7 +1216,7 @@ final class SessionViewModel: ObservableObject {
         model.onState = { [weak self, weak model] state in
             guard let self, let model, self.fleet.current === model else { return }
             self.apply(state)
-            if self.hello == nil { Task { await self.loadHello() } }
+            if self.linkModel.hello == nil { Task { await self.loadHello() } }
         }
         model.onStreamOutput = { [weak self, weak model] output in
             guard let self, let model, self.fleet.current === model else { return }
@@ -1275,7 +1255,7 @@ final class SessionViewModel: ObservableObject {
     func loadHello() async {
         guard let model = fleet.current, let fetched = try? await current({ try await $0.hello() }) else { return }
         model.hello = fetched
-        hello = fetched
+        linkModel.setHello(fetched)
     }
 
     /// The link moved: what the screen shows follows, and the transitions
@@ -1297,11 +1277,11 @@ final class SessionViewModel: ObservableObject {
 
     private func presentLink() {
         let presented = LinkPresentation(link, name: showsComputerLabels ? currentComputerName : nil, voiceOn: wantsConnection)
-        if presented != linkPresentation { linkPresentation = presented }
+        linkModel.setPresentation(presented)
     }
 
     private func setLiveUpdates(_ life: SocketLife) {
-        if liveUpdates != life { liveUpdates = life }
+        linkModel.setLiveUpdates(life)
     }
 
     /// Where `/events` resumes: the last id seen (kept in the cache across
@@ -1429,7 +1409,7 @@ final class SessionViewModel: ObservableObject {
         guard settings.endpoint != nil else { return false }
         do {
             apply(try await current { try await $0.state() })
-            if hello == nil { await loadHello() }
+            if linkModel.hello == nil { await loadHello() }
             if !quiet { notices.banner = nil }
             return true
         } catch let error as DaemonError {
@@ -1609,7 +1589,7 @@ final class SessionViewModel: ObservableObject {
         defer { healthModel.end() }
         async let state: Bool = refreshState(quiet: true)
         async let settings: Void = settingsModel.loadAll()
-        if hello == nil { await loadHello() }
+        if linkModel.hello == nil { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
         var next = healthModel.health
         for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
@@ -1773,7 +1753,7 @@ final class SessionViewModel: ObservableObject {
     /// Rename, Stop, Close).
     var agentActionsAvailable: Bool {
         if demo != nil { return true }
-        if case let .ready(_, _, features) = handshake { return features.contains(AgentAction.feature) }
+        if case let .ready(_, _, features) = linkModel.handshake { return features.contains(AgentAction.feature) }
         return fleet.current?.features?.contains(AgentAction.feature) ?? false
     }
 
@@ -1794,7 +1774,7 @@ final class SessionViewModel: ObservableObject {
     /// features are remembered where the handshake lands (`publish`).
     var termAvailability: TermAvailability {
         if demo != nil { return .yes }
-        return TermAvailability.from(handshake: handshake, remembered: fleet.current?.features)
+        return TermAvailability.from(handshake: linkModel.handshake, remembered: fleet.current?.features)
     }
 
     // MARK: - New conversation
@@ -1978,7 +1958,7 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Feedback marks
 
     /// The daemon takes feedback marks: `bot-ready` listed `feedback`.
-    var feedbackSupported: Bool { handshake.features.contains(FeedbackTag.feature) }
+    var feedbackSupported: Bool { linkModel.handshake.features.contains(FeedbackTag.feature) }
 
     /// The user marked the moment `at` ("that paused", or another tag):
     /// `POST /api/feedback`, then a haptic and "Noted". Works while the
@@ -2508,7 +2488,7 @@ final class SessionViewModel: ObservableObject {
     /// Back to the first-run screen once no computer is left.
     private func showFirstRunIfNeeded() {
         guard !isConfigured else { return }
-        hello = nil
+        linkModel.setHello(nil)
         presentation.present(.settings)
     }
 
@@ -2567,7 +2547,7 @@ extension SessionViewModel {
         let rows = settings.computer.map {
             AddressRow.rows(addresses: Self.raceAddresses(preferred: settings.address, $0.addresses), preferred: settings.address, link: link)
         } ?? []
-        if rows != addressRows { addressRows = rows }
+        linkModel.setAddressRows(rows)
     }
 
     /// The address the current computer's link uses now, else the
