@@ -1490,9 +1490,11 @@ Order and dependencies:
     `@ObservationIgnored` on purpose (`lastSeen` moves on every request),
     and the presentation also needs the voice and computer-count state.
     Making `ComputerModel`'s link observable is a later, separate change.
+  - **Done: Navigation.** `NavigationModel` (`NavigationModel.swift`,
+    `@Observable`) holds `pane`, `focusedAgentPaneID`, the navigation
+    `path`, `settingsRoute` and `windowRequest`; views read
+    `model.navigation` and bind with `Bindable(model.navigation)`.
   - **Left, in order** (sizes S/M/L):
-    4. Navigation: `pane`, `navigationPath`, `settingsRoute`,
-       `windowRequest`, `focusedAgentPaneID` (S).
     5. Agents and questions: `agents`, `pendingAction`, `questions`,
        `expandedAgents`, `screenCovers`, `shellOffered` (M).
     6. Conversation: `rows`, paging, the typed line (M).

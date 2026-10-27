@@ -398,8 +398,8 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     private func applyPendingFocus() {
         guard let model, let id = pendingFocus else { return }
         pendingFocus = nil
-        model.pane = .flock
-        model.focusedAgentPaneID = id
+        model.navigation.pane = .flock
+        model.navigation.focusedAgentPaneID = id
     }
 }
 

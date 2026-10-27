@@ -20,7 +20,7 @@ struct MainView: View {
     private var voiceScreen: Bool {
         split
             ? ui.detail == .conversation && ui.detailPath.isEmpty
-            : model.pane == .conversation && model.navigationPath.isEmpty
+            : model.navigation.pane == .conversation && model.navigation.path.isEmpty
     }
 
     var body: some View {
@@ -32,10 +32,10 @@ struct MainView: View {
             }
         }
             .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen))
-            .onChange(of: model.windowRequest) { _, request in
+            .onChange(of: model.navigation.windowRequest) { _, request in
                 // The window that showed the sheet opens it, once.
                 guard let request, scenes.isPresenter(sceneID) else { return }
-                model.windowRequest = nil
+                model.navigation.windowRequest = nil
                 open(request)
             }
             .background { KeyboardShortcuts(commands: commands) }
@@ -80,9 +80,9 @@ struct MainView: View {
         }
         switch request {
         case let .agent(paneID), let .newAgent(paneID):
-            model.navigationPath.append(AgentWindowRoute(paneID: paneID))
+            model.navigation.path.append(AgentWindowRoute(paneID: paneID))
         case let .shell(cwd):
-            model.navigationPath.append(ShellRoute(cwd: cwd))
+            model.navigation.path.append(ShellRoute(cwd: cwd))
         }
     }
 }
@@ -109,7 +109,7 @@ struct PhoneRootView: View {
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
 
     var body: some View {
-        NavigationStack(path: $model.navigationPath) {
+        NavigationStack(path: Bindable(model.navigation).path) {
             VStack(spacing: 0) {
                 if model.isDemo {
                     DemoHeader()
@@ -117,17 +117,17 @@ struct PhoneRootView: View {
                 }
 
                 TopBar(
-                    pane: $model.pane,
+                    pane: Bindable(model.navigation).pane,
                     waiting: model.waitingEverywhere,
                     menus: menus
                 )
 
                 SessionBanners()
 
-                if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty || !model.blockedElsewhere.isEmpty {
+                if model.navigation.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty || !model.blockedElsewhere.isEmpty {
                     // Another computer's chip names it (several computers only).
                     AgentStrip(agents: model.flock.running, pending: model.pendingAction, computers: model.computerCount,
-                               elsewhere: model.blockedElsewhere, showElsewhere: { model.pane = .flock })
+                               elsewhere: model.blockedElsewhere, showElsewhere: { model.navigation.pane = .flock })
                         // Chrome: the chips grow up to the first
                         // accessibility size, then the strip stays one row.
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -137,7 +137,7 @@ struct PhoneRootView: View {
                 Rectangle().fill(Theme.line).frame(height: 1)
 
                 Group {
-                    switch model.pane {
+                    switch model.navigation.pane {
                     case .conversation:
                         ConversationPane()
                     case .flock where paneState != .content && model.otherSnapshots.isEmpty:
@@ -148,7 +148,7 @@ struct PhoneRootView: View {
                             question: { model.questionCard(for: $0) },
                             answer: { model.answer(question: $0, option: $1) },
                             expanded: $model.expandedAgents,
-                            focusedPaneID: $model.focusedAgentPaneID,
+                            focusedPaneID: Bindable(model.navigation).focusedAgentPaneID,
                             onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
                             voiceQuestionID: model.approval?.pending.id,
                             others: model.otherSnapshots,
@@ -169,7 +169,7 @@ struct PhoneRootView: View {
             .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
             .animation(Theme.ease, value: model.showMuteHint)
             .animation(Theme.ease, value: model.showCoachMark)
-            .animation(Theme.ease, value: model.pane)
+            .animation(Theme.ease, value: model.navigation.pane)
             .toolbar(.hidden, for: .navigationBar)
             .navigationTitle(model.voiceName)
             .navigationDestination(for: ShellRoute.self) { route in
@@ -196,7 +196,7 @@ struct PhoneRootView: View {
         VStack(spacing: 8) {
             // Every open question floats above the capsule; on the Agents
             // pane each sits on its agent's card instead.
-            let cards = model.pane != .flock ? model.floatingQuestions : []
+            let cards = model.navigation.pane != .flock ? model.floatingQuestions : []
             if !cards.isEmpty {
                 FloatingQuestions(
                     cards: cards,
@@ -691,7 +691,7 @@ struct SessionChrome: ViewModifier {
                 },
                 showModels: {
                     scenes.request(from: sceneID)
-                    model.settingsRoute = .models
+                    model.navigation.settingsRoute = .models
                     presentation.presentInstead(.settings)
                 }
             )
@@ -748,7 +748,7 @@ struct SessionChrome: ViewModifier {
                 default: break
                 }
             }
-            .onChange(of: model.pane) { _, _ in model.warmUpTerm() }
+            .onChange(of: model.navigation.pane) { _, _ in model.warmUpTerm() }
             .environment(\.openCard) { card in model.openCard(card) }
             #if DEBUG
             // Over the layout and any pushed window (the demo's too).

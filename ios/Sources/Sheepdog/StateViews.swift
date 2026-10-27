@@ -75,7 +75,7 @@ struct FlockUnavailableView: View {
                     Button("Try again") { model.retryLink() }
                         .accessibilityIdentifier("flock.untrusted.retry")
                     Button("Use another address") {
-                        model.settingsRoute = .daemon
+                        model.navigation.settingsRoute = .daemon
                         model.presentation.present(.settings)
                     }
                     .accessibilityIdentifier("flock.untrusted.addresses")
