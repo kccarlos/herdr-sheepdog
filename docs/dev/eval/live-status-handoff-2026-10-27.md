@@ -56,27 +56,54 @@ Each arm is a binary built from that arm's prompt and tool description.
 
 The 11 new `livestatus-*` cases in `testdata/eval/assistant.jsonl` cover
 Chinese and English, including a repeated "有结果了吗" after an "I'm
-checking" reply. The 3 small-talk cases there (`none-*`) are the
-over-hand-off control. Each case ran 3 times per arm.
+checking" reply. Three of the flipped cases echo the new prompt's own
+examples, so 6 **held-out** cases (`livestatus-heldout-*`) were written
+afterwards. They avoid its wording ("进展到哪了?", "它现在在忙什么?",
+"你刚才怎么卡住了?", "How far along is it?", "Is docs-codex still on the
+README?", "Why did you cut out?") and use the same stale-briefing
+contexts. The five existing `none-*` cases are controls: three the voice
+should answer itself and two "let me know" lines it should hand off. Each
+case ran 3 times per arm.
 
 | | main | fix |
 |---|---|---|
-| status questions handed off | 20/27 (74 %) | **27/27 (100 %)** |
+| status questions handed off (prompt-shaped cases) | 20/27 (74 %) | **27/27 (100 %)** |
 | · "现在是什么状态?" / "What is docs-codex doing right now?" after a "working" briefing | 2/3, 0/3 | 3/3, 3/3 |
-| · "刚才为什么你的语音突然停了?" | 0/3 (all three invented a cause: "网络延迟", "系统处理停顿") | 3/3 |
+| · "刚才为什么你的语音突然停了?" | 0/3: the voice invented a cause each time ("网络延迟", "系统处理停顿") | 3/3 handed off |
 | · repeated "有结果了吗" / "Any result yet?" after "I'm checking" | 3/3, 3/3 | 3/3, 3/3 |
-| small talk answered by the voice (`livestatus-*-thanks`) | 6/6 | 6/6 |
-| `none-*` self-answer controls | 12/15 | 12/15 (same miss both arms: "Okay, let's use that then." handed off) |
-| hand-off latency (to the tool call) | ~1.0 s | ~1.0 s |
+| **held-out** status and "why" questions handed off | 7/18 (39 %) | **17/18 (94 %)** |
+| · "你刚才怎么卡住了?" / "Why did you cut out?" | 0/3, 0/3: "I'm just waiting for the results…", "抱歉让您久等了…" | 3/3, 3/3 |
+| · "How far along is it?" | 0/3: answered "about half done" from the briefing | 2/3 |
+| small talk after a hand-off ("好的，谢谢。", "Okay, thanks.") answered by the voice | 6/6 | 6/6 |
+| `none-*` self-answer controls | 6/9 | 6/9 (same miss on both arms: "Okay, let's use that then." handed off) |
+| `none-let-me-know-*` handed off | 6/6 | 6/6 |
+| time to the tool call | ~1.0 s | ~1.0 s |
 
+- Fisher's exact test, two-sided: p ≈ 0.01 on the prompt-shaped cases
+  and p ≈ 0.001 on the held-out ones. The runs are clustered by case (3
+  repeats of each), so these p-values overstate the evidence. The
+  held-out set is the stronger evidence.
+- Two of main's held-out misses asked "which agent?", which the prompt
+  allows when two agents could be meant. They are counted as misses
+  anyway.
 - The repeated-question failure from the log did not reproduce in a
   short context: both arms hand it off 6/6. The log's session was long.
-  What did reproduce is answering from an old briefing and inventing a
-  cause, and the fix removes both in this set.
+  What did reproduce is answering from an old briefing and the voice
+  inventing a cause, and the fix removes both in this set.
+- The orchestrator's side of "why did you stop?" was checked with
+  DeepSeek (`deepseek-flash`, 2 scratch orchestrator cases ×3; the two
+  replies kept are in
+  [`orchestrator-why-deepseek.txt`](../bench/results/2026-10-27-livestatus/orchestrator-why-deepseek.txt)).
+  It says it cannot see the audio side and invents no cause; one reply
+  hedges that a waiting prompt "may be where it broke off". The cause
+  given in the final answer was not graded.
 - The text-mode set (`sheepdog eval --set assistant --live`, gemini-3.5-flash)
   passed 25/27 status runs on main
   ([`text-flash-main.txt`](../bench/results/2026-10-27-livestatus/text-flash-main.txt)).
   It is too lenient to show this effect, which is why Live was used.
+- The tier-1 workday gate has no voice model, so it cannot exercise a
+  voice-prompt change. It was not run, and there is no segment
+  Understood or Safe number. The orchestrator prompt is unchanged.
 - Four logged utterances are offline regressions in
   `testdata/eval/regressions.assistant.jsonl`
   (`livestatus-logged-*`). Their logged behaviour (no call) fails them,
@@ -85,9 +112,10 @@ over-hand-off control. Each case ran 3 times per arm.
   self-answer to a hand-off (10-04 measurement), only on status and
   "why" questions.
 
-Gemini spend: 97 short Live sessions (Vertex) and 33 gemini-3.5-flash
-calls. No tier-2 audio, TTS or judge was needed: the check is a tool
-call, graded in code.
+Gemini spend: 133 short Live sessions on Vertex (132 recorded in
+`live-runs.jsonl`, plus one smoke test) and 33 gemini-3.5-flash calls.
+No tier-2 audio, TTS or judge was needed: the check is a tool call,
+graded in code. DeepSeek cost about $0.03.
 
 ## Open
 
