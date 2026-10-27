@@ -24,12 +24,8 @@ public final class ComputerStore: @unchecked Sendable {
         static let current = "computers.current"
         static func address(_ id: String) -> String { "computers.address.\(id)" }
         /// The address with no paired computer behind it: a loopback
-        /// fixture daemon in the tests (`-sheepdogAddress`). Before
-        /// several computers it was also the paired computer's address in
-        /// use (moved by `migrate`).
+        /// fixture daemon in the tests (`-sheepdogAddress`).
         static let looseAddress = "daemon.address"
-        /// The one record the app kept before several computers.
-        static let legacyRecord = "daemon.computer"
     }
 
     private let defaults: UserDefaults
@@ -40,7 +36,6 @@ public final class ComputerStore: @unchecked Sendable {
     public init(defaults: UserDefaults, secrets: SecretStore) {
         self.defaults = defaults
         self.secrets = secrets
-        migrate()
     }
 
     // MARK: - The list
@@ -175,21 +170,5 @@ public final class ComputerStore: @unchecked Sendable {
         for index in source.sorted(by: >) { order.remove(at: index) }
         order.insert(contentsOf: moving, at: max(0, min(order.count, destination - before)))
         defaults.set(order, forKey: Key.order)
-    }
-
-    // MARK: - Migration
-
-    /// The app before several computers kept one record under one keychain
-    /// account and its address in use as the loose address. That computer
-    /// becomes the first and current one, so an existing user stays paired
-    /// after the update. The device key is already tagged by daemon id.
-    func migrate() {
-        guard let text = secrets.secret(for: Key.legacyRecord) else { return }
-        defer { secrets.setSecret(nil, for: Key.legacyRecord) }
-        guard let record = try? JSONDecoder().decode(PairedComputer.self, from: Data(text.utf8)), !record.daemonID.isEmpty else { return }
-        let address = looseAddress
-        save(record, address: address.isEmpty ? (record.addresses.first ?? "") : address)
-        if defaults.string(forKey: Key.current) == nil { currentID = record.daemonID }
-        looseAddress = ""
     }
 }
