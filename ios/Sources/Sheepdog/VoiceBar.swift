@@ -491,7 +491,7 @@ struct CapsuleMicButton: View {
         .disabled(!enabled)
         .accessibilityLabel(VoiceBarModel.muteLabel(muted: muted))
         .accessibilityValue(muted ? "Muted" : (noSignal ? "No microphone signal" : "Listening"))
-        .accessibilityHint(SessionViewModel.muteHint)
+        .accessibilityHint(VoiceEngine.muteHint)
     }
 }
 

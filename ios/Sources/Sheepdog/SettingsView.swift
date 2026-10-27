@@ -13,7 +13,7 @@ enum SettingsPage: Hashable {
 /// Settings: a short list of sections, each one screen deep.
 struct SettingsView: View {
     @EnvironmentObject private var model: SessionViewModel
-    /// Passed explicitly (not read off `model.meter` inside the body):
+    /// Passed explicitly (not read off `model.voice.meter` inside the body):
     /// an `@EnvironmentObject`'s own `@Published` changes are what
     /// re-renders a view, and a nested object's changes do not propagate
     /// through it, so Diagnostics' live numbers need their own subscription.
@@ -162,7 +162,7 @@ struct SettingsView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 // Back from Control Center's Mic Mode panel.
-                model.refreshMicrophoneMode()
+                model.voice.refreshMicrophoneMode()
             }
         }
         .interactiveDismissDisabled(firstRun && !model.isConfigured)

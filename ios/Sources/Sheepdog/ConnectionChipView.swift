@@ -46,7 +46,7 @@ struct ConnectionDetailView: View {
                         .accessibilityIdentifier("chip.protocol")
                     LabeledContent("Voice name", value: model.voiceName)
                         .accessibilityIdentifier("chip.voiceName")
-                    LabeledContent("Voice status", value: model.state.title)
+                    LabeledContent("Voice status", value: model.voice.state.title)
                         .accessibilityIdentifier("chip.voiceStatus")
                     if let voice = model.voiceProviderDisplay {
                         LabeledContent("Voice provider", value: voice)
@@ -60,7 +60,7 @@ struct ConnectionDetailView: View {
 
                 Section {
                     NavigationLink {
-                        HealthView(meter: model.meter, changeModels: showModels)
+                        HealthView(meter: model.voice.meter, changeModels: showModels)
                     } label: {
                         Text("Health")
                     }

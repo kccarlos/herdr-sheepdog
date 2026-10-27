@@ -254,11 +254,11 @@ struct VoiceSettingsView: View {
         Form {
             Section {
                 Button {
-                    model.showMicrophoneModes()
+                    model.voice.showMicrophoneModes()
                 } label: {
                     LabeledContent("Microphone mode") {
                         HStack(spacing: 4) {
-                            Text(model.microphoneMode.label)
+                            Text(model.voice.microphoneMode.label)
                             Image(systemName: "chevron.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.tertiary)
@@ -269,7 +269,7 @@ struct VoiceSettingsView: View {
                 .accessibilityIdentifier("settings.microphoneMode")
 
                 Toggle("Hold to talk", isOn: Binding(
-                    get: { model.talkMode == .holdToTalk },
+                    get: { model.voice.talkMode == .holdToTalk },
                     set: { model.setTalkMode($0 ? .holdToTalk : .openMic) }
                 ))
                 .accessibilityIdentifier("settings.holdToTalk")
@@ -277,8 +277,8 @@ struct VoiceSettingsView: View {
                 Text("Microphone")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.microphoneMode.advice + (model.preferredMicrophoneMode != model.microphoneMode ? " (Chosen: \(model.preferredMicrophoneMode.label) — it applies while the microphone is running.)" : ""))
-                    Text(model.talkMode == .holdToTalk
+                    Text(model.voice.microphoneMode.advice + (model.voice.preferredMicrophoneMode != model.voice.microphoneMode ? " (Chosen: \(model.voice.preferredMicrophoneMode.label) — it applies while the microphone is running.)" : ""))
+                    Text(model.voice.talkMode == .holdToTalk
                         ? "Hold to talk is on: hold the orb while you speak, let go to send. Nothing is sent otherwise."
                         : "Off: just talk. \(model.voiceName) listens all the time and ignores the room; the mic button only mutes.")
                 }
@@ -387,15 +387,15 @@ struct DiagnosticsView: View {
     }
 
     private func gateWord(_ d: CaptureGate.Diagnostics) -> String {
-        guard model.state.capturing || model.state == .muted else { return "—" }
-        if model.isMuted { return "Muted" }
+        guard model.voice.state.capturing || model.voice.state == .muted else { return "—" }
+        if model.voice.isMuted { return "Muted" }
         if let manual = d.manual { return manual ? "Open (holding)" : "Closed (hold to talk)" }
         return d.isOpen ? "Open — sending" : "Closed — room noise"
     }
 
     private var micSignalWord: String {
-        if !model.state.capturing { return "—" }
-        return model.noMicSignal ? "None — digital silence" : "OK"
+        if !model.voice.state.capturing { return "—" }
+        return model.voice.noMicSignal ? "None — digital silence" : "OK"
     }
 }
 
