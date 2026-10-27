@@ -230,10 +230,10 @@ belongs in the timeline, and its visual weight.
 | Category | Kinds | What you need | In the timeline? | Weight |
 |---|---|---|---|---|
 | **A. Dialogue** — you and the voice | 1–7 | to follow and scroll back the conversation | always; never folded | full: bubbles; the orchestrator reply as a light attachment |
-| **B. Needs you** — open questions | 8 (open), 13 while its question is open, 15 | to act, now | always; never folded; the floating card is the place to answer | the one accent (amber); one copy only |
-| **C. Agent outcomes** — what agents did | 9–12 (settled), 14, 17, 18, 19 | to know what finished, what was decided, what you missed | yes; consecutive outcomes may fold, but only with each other | medium: a quiet card with the agent's name |
+| **B. Needs you** — open questions | 8 (open), 13 while its question is open | to act, now | always; never folded; the floating card is the place to answer | the one accent (amber); one copy only |
+| **C. Agent outcomes** — what agents did | 9–12 (settled), 14, 15, 17, 18, 19 | to know what finished, what was decided, what you missed | yes; consecutive outcomes may fold, but only with each other | medium: a quiet card with the agent's name; its own icon (an agent glyph, not the bell) |
 | **D. Your context** — where you are | 20, 21, 22, 23 | to know when the conversation starts over or changes computer | yes, as thin dividers | low: a centred caption |
-| **E. System** — plumbing | 16, 24–36 | nothing, unless it changed what the voice heard or can do | no; a transient line where it needs action; full detail behind "Show system events" | none in the timeline |
+| **E. System** — plumbing | 16, 24–36 | nothing, unless it changed what the voice heard or can do | no; a transient line where it needs action; full detail behind "Show technical events" | none in the timeline |
 | **F. Screen helpers** | 37–40 | navigation | as needed | — |
 
 Rules that follow from the table:
@@ -241,7 +241,9 @@ Rules that follow from the table:
 1. **A row is in the timeline only if it is something said, something to
    act on, or something an agent did.** Plumbing is not.
 2. **Group only within a category.** "N updates" becomes "N agent
-   updates" and holds category C only.
+   updates" and holds category C only. One icon per category, so a
+   glance tells an outcome from a missed one from a question; the bell is
+   retired.
 3. **One question, one card.** A question is shown once whether it is
    open or settled; its other copies fold into it.
 4. **Something you missed is an outcome, not a deletion.** No
@@ -249,12 +251,12 @@ Rules that follow from the table:
 5. **Plumbing that needs your hand goes where your hand is**: the voice
    bar or a banner, not the scrollback.
 6. **Nothing is deleted.** Hidden rows stay in memory and on the daemon,
-   and "Show system events" brings every one back with its original text
+   and "Show technical events" brings every one back with its original text
    and time.
 
 ## 5. Handling per kind
 
-"Debug" means: shown only with **Settings ▸ Show system events** on
+"Debug" means: shown only with **Settings ▸ Health ▸ Show technical events** on
 (section 6).
 
 ### 5.1 Dialogue (A)
@@ -272,25 +274,29 @@ Rules that follow from the table:
 |---|---|---|
 | 8 | Open question | Unchanged: the floating card answers, the list shows a pointer. |
 | 13 | Interrupt push | While its question is open: pointer (today). Otherwise it is news: treat as kind 14. The Stop reply "Nothing was in flight." is a reply to you: show it as the voice's line (dialogue), not a bell card. |
-| 15 | Held push | One quiet line, "Will tell you when you're back" (hourglass), not an amber dashed card: it is not a question. If the daemon restarts before a fate arrives, show it as kind 17 once the app learns of the restart (the push is gone). |
 
 ### 5.3 Agent outcomes (C)
 
 | # | Kind | Handling |
 |---|---|---|
+| 15 | Held push | An outcome in transit, not a question: one quiet line, "Will tell you when you're back" (hourglass), not an amber dashed card. If the daemon restarts before a fate arrives, show it as kind 17 once the app learns of the restart (the push is gone). |
 | 9 | Answered | One line: "You approved Codex — Yes · by tap · 12:47". The full question opens on tap. |
-| 10–12 | Expired / cancelled / replaced | One muted line with the agent and the question's few words: "Codex's question (Finder access) — no longer needed". **Settled-question dedupe:** the push and the voice bubble that restated the question within 2 minutes before or after it fold into this line ("Said aloud · show"), the same rule as `QuestionFocus` but kept after the question settles. |
+| 10–12 | Expired / cancelled / replaced | One muted line with the agent and the question's few words: "Codex's question (Finder access) — closed · 12:49". The whole line is one tap target that opens the full card: the question, how it ended, and what the voice said about it. "Closed" rather than "No longer needed" until the daemon sends the cancel reason (section 8); then "Answered on the computer" or "Codex moved on". **Settled-question dedupe:** the push that announced the question folds into this line; the voice's bubble that restated it folds too, but **only if you did not reply to it** (a voice line you answered is dialogue and stays). Same matching as `QuestionFocus`, kept after the question settles, within 2 minutes. |
 | 14 | Push (news) | Quiet card: agent name first, then the line. Folds with neighbouring outcomes. |
-| 17 | Dropped push | **"Missed while you were away"** (bell-badge icon, not bell-slash), the text in full and **not** struck through, with the time. A run of them folds into "5 things you missed" with the newest line. Optional "Ask about this" chip that types "What happened with <agent>?" (open question 3). |
+| 17 | Dropped push | An update you missed, **not** struck through: a one-liner, "While you were away · forumind finished the design doc…", the full text on tap. A run folds into "6 updates while you were away" (below). One "Catch me up" chip on such a group asks the orchestrator for a summary, since the voice never said them (open question 3). |
 | 18–19 | Cards | Unchanged. A gone card (19) shows only in a group, never alone at full size. |
 
-**Grouping rule.** Fold a run of two or more consecutive category-C rows
-(pushes, dropped pushes, settled-question lines) into one row: "3 agent
-updates", or "5 things you missed" when every member is a missed push,
-with the newest line and the agent names ("slingshot, forumind"). A
-dialogue row, a question, a day or a boundary divider ends the run.
-Hidden system rows do **not** end a run, so a reconnect no longer splits
-two outcomes. Cards and an open question never fold.
+**Grouping rule.** Fold a run of **three** or more consecutive
+category-C rows (pushes, held and missed pushes, settled-question lines)
+into one row; two one-liners read faster than a row and a tap. The
+collapsed row shows the newest **two** lines and its label says what is
+in it: "3 agent updates", "6 updates while you were away" when every
+member was missed, "4 agent updates · 2 while you were away" when mixed.
+A dialogue row, a question or a day divider ends the run. A restart
+divider (23) does not: it shows inside the opened group, so a night away
+reads as one "8 updates while you were away". Hidden system rows do not
+end a run either, so a reconnect no longer splits two outcomes. Cards
+and an open question never fold.
 
 ### 5.4 Your context (D)
 
@@ -299,26 +305,26 @@ two outcomes. Cards and an open question never fold.
 | 20 | Day | Unchanged. |
 | 21 | New conversation | Unchanged divider. |
 | 22 | Talking to | Divider, not a card (the redesign already says "divider", [app-redesign.md](app-redesign.md) §3), with the name you gave the computer. When that name is the daemon's ComputerName and looks machine-made, the pairing screen offers to rename it (open question 4). Not grouped. |
-| 23 | Sheepdog restarted | Keep one divider, merged with the "Voice session closed: shutdown." just before it. Say what you need to know: "Sheepdog restarted · 12:51" — and, when the restart was an update, "Sheepdog updated to v0.1.9 · 12:51" (needs `daemon.start`'s version, section 8). |
+| 23 | Sheepdog restarted | Keep one divider, merged with the "Voice session closed: shutdown." just before it: "Sheepdog restarted · 12:51", or "Sheepdog updated · 12:51" when it was an update, with the version on tap (needs `daemon.start`'s version, section 8). Inside a run of outcomes it moves into the group (above). |
 
 ### 5.5 System (E)
 
 | # | Kind | Normal view | When it *is* worth showing |
 |---|---|---|---|
 | 24 | Voice closed: shutdown | hidden (merged into 23) | never on its own |
-| 25 + 26 | Context lost + fresh reconnect | hidden; the pair is one event | **one** divider, "Voice restarted — it may not remember the last minute", only when you were mid-conversation: a dialogue row in the 2 minutes before the reconnect *and* an app attached. The voice bar shows "Reconnecting…" while it happens, as today |
+| 25 + 26 | Context lost + fresh reconnect | hidden; the pair is one event | **one** divider, "Voice restarted — it may not remember the last minute", only when you were mid-conversation: a dialogue row in the 5 minutes before the reconnect *and* an app attached. The voice bar shows "Reconnecting…" while it happens, as today |
 | 27 | Resumed reconnect | hidden | never: nothing was lost |
 | 28 | Unknown | debug only | — |
-| 29 | Audio route | the voice bar status line shows "Now on Speaker" for 3 s; VoiceOver announces it | never in the list |
+| 29 | Audio route | a small, persistent route glyph in the voice bar (speaker, headphones, AirPods, car) that changes with the route; VoiceOver announces the change. A 3-second line would be missed with the phone in a pocket | never in the list |
 | 30–31 | Interruption, listening again | the voice bar's paused state (it exists, `onPausedChanged`) | never in the list |
 | 32–35 | Audio needs your tap | a banner with the action ("Tap to resume listening"), cleared when audio runs again | never in the list |
 | 36 | Voice off / closed | a banner (a state, not an event); "replaced" already is one | never in the list |
 | 16 | Released push | debug only | — |
 
-The 2-minute rule is from the log: on 10-27 one fresh reconnect in 34 met
-"attached and you spoke in the last 10 minutes"; the refresh waits for a
-quiet moment, so the rule shows the rare mid-sentence failure and nothing
-else.
+The 5-minute rule is from the log: on 10-27 one fresh reconnect in 34 met
+even "attached and you spoke in the last 10 minutes"; the refresh waits
+for a quiet moment, so the rule shows the rare mid-sentence failure and
+costs no rows otherwise.
 
 ## 6. Nothing is lost: where each kind can still be found
 
@@ -326,18 +332,20 @@ The CEO's constraint: everything hidden from the normal view stays
 reachable; nothing is deleted at the source; questions and outcomes are
 never hidden.
 
-**Show system events** (Settings ▸ Conversation section, off by default,
-per phone): the timeline shows every row of every kind, ungrouped, with
-the original text and its exact time (seconds), system rows as small
-monospaced lines in a muted colour so they are still easy to tell apart.
-A long press on any row copies its raw item or event as JSON. Turning it
-off returns to the normal view; nothing is refetched.
+**Show technical events** (Settings ▸ Health, next to Recent problems,
+off by default, per phone; "system events" would read as iOS's): the
+timeline shows every row of every kind, ungrouped, with the original text
+and its exact time (seconds); technical rows keep the normal font in a
+muted colour, so the page stays calm. A small "Technical events shown"
+tag sits at the top of the conversation while it is on, so a screenshot
+explains itself. A long press on any row copies its raw item or event as
+JSON. Turning it off returns to the normal view; nothing is refetched.
 
 | Kinds | Hidden or changed in the normal view | Still found |
 |---|---|---|
 | 1–12, 14, 17, 18, 21 | never hidden; 9–12 shortened, 17 reworded | full text on tap; the switch; the daemon's `GET /api/conversation`; `/debug` |
 | 5 | folded into "Details" | tap; the switch; `/debug` |
-| 13 (restating), and the voice's restatement of a settled question | folded into the question's line | "Said aloud · show"; the switch; `GET /api/conversation` |
+| 13 (restating), and the voice's unanswered restatement of a settled question | folded into the question's line | tap the line; the switch; `GET /api/conversation` |
 | 15, 17 | reworded, grouped | the group opens; Settings ▸ Health ▸ Recent problems (already lists held and dropped pushes, `DaemonHealth.swift:162-169`); the switch; `/events` |
 | 16 | hidden | the switch; Health; `/events` |
 | 23, 24 | merged | the switch shows both; `GET /api/conversation`; `/debug` |
@@ -390,25 +398,19 @@ Before (one screen, iPhone, about 12:46–12:52):
 After:
 
 ```
+    ◷ While you were away · forumind finished the design doc…   12:44 ›
           ── Talking to Work Mac · 12:47 ──
-  ┌──────────────────────────────────────────────┐
-  │ 🔔 2 agent updates                         ⌄ │
-  │    slingshot: stage Codex finished.          │
-  └──────────────────────────────────────────────┘
-  ┌──────────────────────────────────────────────┐
-  │ 🔔 Missed while you were away · 12:44        │
-  │ forumind finished the design doc and is      │
-  │ waiting for your OK to start.                │
-  └──────────────────────────────────────────────┘
-    ⏱ Codex's question (Finder access) — no longer
-      needed · 12:49 · Said aloud ›
+    ◆ slingshot · stage Codex finished.                         12:48
+    ⏱ Codex's question (Finder access) — closed                 12:49 ›
 ```
 
-Gone from view: "Voice context lost", both "Voice reconnected" lines,
-"Audio moved to Speaker." (shown for 3 s in the voice bar instead), and
-the voice's restatement of the settled question (one tap away). The
-"Talking to" divider uses the computer's own name. Two agent outcomes are
-easy to see at a glance; the missed one reads as news.
+Four one-line rows in two styles, one divider. Gone from view: "Voice
+context lost", both "Voice reconnected" lines, "Audio moved to Speaker."
+(the voice bar's route glyph shows the speaker instead), and the voice's
+unanswered restatement of the settled question (inside the question's
+line). The "Talking to" divider uses the computer's own name. With fewer
+than three outcomes nothing folds, so each is readable at a glance; the
+missed one reads as news.
 
 ### 7.2 A real hour from the log
 
@@ -437,20 +439,16 @@ Chinese and English; shortened here.)
 After:
 
 ```
-  ┌──────────────────────────────────────────────┐
-  │ 🔔 6 things you missed                      ⌄ │
-  │    Claude finished the forumind work and has │
-  │    published …                               │
-  └──────────────────────────────────────────────┘
-          ── Sheepdog updated to v0.1.9 · 12:51 ──
-  ┌──────────────────────────────────────────────┐
-  │ 🔔 2 things you missed                      ⌄ │
-  │    The two stuck waiting scripts are cleared…│
-  └──────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────┐
+  │ ◷ 8 updates while you were away   [Catch me up]  ⌄  │
+  │   The two stuck waiting scripts are cleared…        │
+  │   The local daemon is now the signed v0.1.9…        │
+  └─────────────────────────────────────────────────────┘
 ```
 
-Three rows. The two pushes orphaned by the restart join the first group
-as missed. The reconnect pair and the shutdown notice are behind the
+One row. The two pushes orphaned by the restart count as missed; the
+"Sheepdog updated · 12:51" divider sits inside the group when it is
+opened. The reconnect pair and the shutdown notice are behind the
 switch.
 
 ## 8. Implementation sketch (later)
@@ -470,10 +468,12 @@ the classification stays in the app.
   context lost + reconnect (within 10 s), and applies the settled-question
   dedupe. Pure; the view gets `[ConversationDisplayRow]` as today.
 - `grouped` folds only `outcome` runs; a new `.updates(kind:)` carries
-  "agent updates" or "things you missed".
+  "agent updates" or "updates while you were away"; the fold threshold
+  becomes 3 (`minimumGroup`, `ConversationTimeline.swift:203`).
 - `QuestionFocus` gains a settled mode (the pointer rule, kept after the
-  question settles, 2-minute window).
-- A `SettingsModel.showSystemEvents` flag (UserDefaults, per phone).
+  question settles, 2-minute window, and only for a restatement you did
+  not reply to).
+- A `SettingsModel.showTechnicalEvents` flag (UserDefaults, per phone).
 - Local notices: route kinds 29–36 to the voice bar / banner and also to
   `SheepdogLog`; keep appending them to the reducer so the switch shows
   them.
@@ -494,7 +494,7 @@ the classification stays in the app.
 **Phases.** One PR each, merged on green.
 
 1. `feat(ios)`: categories, hide system rows, group by category, the
-   "Show system events" switch. Pure-function tests first.
+   "Show technical events" switch. Pure-function tests first.
 2. `feat(ios)`: missed pushes as outcomes, settled-question dedupe,
    Talking-to divider, audio notices to the voice bar. Screenshots light
    and dark.
@@ -518,7 +518,7 @@ the classification stays in the app.
 
 **Risks.**
 
-- Hiding a reconnect that did matter. Mitigation: the 2-minute rule, the
+- Hiding a reconnect that did matter. Mitigation: the 5-minute rule, the
   voice bar's "Reconnecting…", and the switch.
 - String matching on notice text until phase 3 (it already exists today).
 - A view that differs between the switch on and off can confuse a bug
@@ -533,19 +533,43 @@ A draft of sections 4, 5 and 7 was given to a second reviewer (Fable)
 for a usability opinion. Its points and what this document does with
 them are below.
 
-*(Filled in after the review; see the PR.)*
+Adopted from the review:
+
+- Held pushes (15) move from B to C: only the floating question is
+  amber, which is the brand rule.
+- One icon per category; the bell, shared today by groups, pushes and
+  missed pushes, is retired.
+- "6 updates while you were away" instead of "things you missed"
+  (blames less); mixed groups say both counts.
+- Fold at three rows, not two, and show the newest two lines.
+- A restart divider does not split a run of outcomes; it sits inside the
+  opened group.
+- The settled question is one tap target, not a line with an inline
+  "Said aloud" link; "closed" until the daemon sends the cancel reason.
+- Fold the voice's restatement of a settled question only when you did
+  not reply to it, so rule A (dialogue never folded) holds.
+- The reconnect window is 5 minutes, not 2: the log shows it costs no
+  rows.
+- A persistent route glyph in the voice bar instead of a 3-second line,
+  which is missed with the phone in a pocket.
+- The switch is "Show technical events", in Health, with a "Technical
+  events shown" tag at the top of the conversation while on.
+- A single missed push is a one-liner, and "Sheepdog updated" keeps the
+  version behind a tap.
+- The review's most valuable change: hide the reconnect pairs and
+  shutdown notices (about 60 rows a day, 2 of 34 relevant) together with
+  un-striking dropped pushes, "turning the page from a log into news".
 
 ## 10. Open questions for the CEO
 
 1. **Reconnect row: when?** Recommendation: only when an app was attached
-   and you or the voice spoke in the 2 minutes before; otherwise hidden.
+   and you or the voice spoke in the 5 minutes before; otherwise hidden.
    Alternative: never in the timeline, voice bar only.
-2. **Where does the switch live?** Recommendation: Settings ▸
-   Conversation, "Show system events", off by default, with the footer
-   "Adds reconnects, audio changes and other plumbing to the
-   conversation, with exact times. For bug reports." Alternative: inside
-   Health.
-3. **"Ask about this" on a missed push?** Recommendation: yes, one chip
+2. **Where does the switch live?** Recommendation: Settings ▸ Health,
+   "Show technical events", off by default, with the footer "Adds
+   reconnects, audio changes and other plumbing to the conversation, with
+   exact times. For bug reports." Alternative: Settings ▸ Conversation.
+3. **"Catch me up" on missed updates?** Recommendation: yes, one chip
    on the group ("Catch me up") that asks the orchestrator for a summary
    of what you missed, since the voice never said them. Alternative: no
    chip; the group is read-only.
@@ -554,11 +578,12 @@ them are below.
    "Work Mac" and let you edit it; the divider uses your name.
    Alternative: always ask for a name on pairing.
 5. **Settled questions: one line or the full card?** Recommendation: one
-   line for expired, cancelled and replaced; the full card only for
-   answered ones on tap. Alternative: keep today's full card for all.
+   line for every settled question, answered ones included ("You
+   approved Codex — Yes"), the full card on tap. Alternative: keep today's full card for all.
 6. **Orchestrator reply cards.** Recommendation: fold into the voice's
    bubble as "Details" when adjacent (section 5.1). Alternative: keep the
    separate purple card.
 7. **Restart divider.** Recommendation: keep "Sheepdog restarted", and say
-   "updated to vX" when it was an update (needs a daemon field).
+   "Sheepdog updated" when it was an update, the version on tap (needs a
+   daemon field).
    Alternative: hide restarts too, like reconnects.
