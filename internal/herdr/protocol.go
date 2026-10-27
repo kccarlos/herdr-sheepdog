@@ -60,6 +60,11 @@ var (
 	ErrPaneNotFound  = errors.New("herdr: pane not found")
 	ErrAgentNotFound = errors.New("herdr: agent not found")
 	ErrTimeout       = errors.New("herdr: server-side timeout")
+	// ErrNoReply marks a request that was written to the socket but whose
+	// reply never arrived (read timeout, closed connection). The request
+	// most likely reached herdr: a caller must not repeat a request that
+	// is not idempotent (agent.prompt) as if it had not been sent.
+	ErrNoReply = errors.New("herdr: request written, no reply")
 )
 
 // Is maps well-known error codes onto the sentinel errors above.
