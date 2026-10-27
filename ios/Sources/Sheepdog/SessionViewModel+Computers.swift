@@ -142,7 +142,7 @@ extension SessionViewModel {
             if computer.daemonID == store.currentID {
                 return ComputerSnapshot(id: computer.daemonID, name: computer.displayName, isCurrent: true,
                                         reachability: Reachability(link),
-                                        agents: agents, questions: questions)
+                                        agents: agentsModel.agents, questions: agentsModel.questions)
             }
             return session(computer.daemonID)?.snapshot
                 ?? ComputerSnapshot(id: computer.daemonID, name: computer.displayName, isCurrent: false, reachability: .connecting)
