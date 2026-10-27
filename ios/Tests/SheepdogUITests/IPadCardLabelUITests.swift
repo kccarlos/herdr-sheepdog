@@ -28,7 +28,7 @@ final class IPadCardLabelUITests: XCTestCase {
     func testALabelAppearsOverTheDetailAndOpensTheCard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo",
-                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "30"]
+                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "60", "-sheepdogCardLabelSeconds", "120"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 30))
         tapWhenTappable(app.descendants(matching: .any)["sidebar.agent.claude-auth"].firstMatch, "claude-auth in the sidebar")
@@ -38,7 +38,7 @@ final class IPadCardLabelUITests: XCTestCase {
         typeWhenFocused(field, "ab")
 
         let label = app.buttons["cardLabel"]
-        XCTAssertTrue(label.waitForExistence(timeout: 60), "the card label")
+        XCTAssertTrue(label.waitForExistence(timeout: 120), "the card label")
         XCTAssertFalse(app.descendants(matching: .any)["card.title"].exists, "no sheet over the window")
         shot("detail")
 

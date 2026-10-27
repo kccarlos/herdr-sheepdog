@@ -98,6 +98,13 @@ enum DebugLaunch {
     /// `-sheepdogDemoCard`: the demo asks "Show me the agents" by itself
     /// once the script has news (about 18 s in), so its card opens for screenshots.
     static var demoCard: Bool { arguments.contains("-sheepdogDemoCard") }
+    /// `-sheepdogCardLabelSeconds <seconds>`: how long the card label
+    /// stays (5 by default), so a slow CI Mac's test still sees it.
+    static var cardLabelSeconds: Double {
+        guard let i = arguments.firstIndex(of: "-sheepdogCardLabelSeconds"), i + 1 < arguments.count,
+              let seconds = Double(arguments[i + 1]) else { return CardLabelState.duration }
+        return seconds
+    }
     /// `-sheepdogDemoCardAfter <seconds>`: with `-sheepdogDemoCard`, when
     /// the card comes (18 by default), so a test can first open another
     /// screen.

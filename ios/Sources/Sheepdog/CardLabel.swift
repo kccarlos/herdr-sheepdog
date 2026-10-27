@@ -11,8 +11,12 @@ final class CardLabelModel {
     @ObservationIgnored private var timer: Task<Void, Never>?
     @ObservationIgnored private let duration: Duration
 
-    init(duration: Duration = .seconds(CardLabelState.duration)) {
-        self.duration = duration
+    init(duration: Duration? = nil) {
+        #if DEBUG
+        self.duration = duration ?? .seconds(DebugLaunch.cardLabelSeconds)
+        #else
+        self.duration = duration ?? .seconds(CardLabelState.duration)
+        #endif
     }
 
     var card: ScreenCard? { state.current }

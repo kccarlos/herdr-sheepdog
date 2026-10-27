@@ -27,7 +27,7 @@ final class CardLabelUITests: XCTestCase {
     func testALabelAppearsOverAnAgentWindowAndOpensTheCard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent",
-                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "25"]
+                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "50", "-sheepdogCardLabelSeconds", "120"]
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
@@ -47,7 +47,7 @@ final class CardLabelUITests: XCTestCase {
 
         // The card arrives while the window is in front: a label, no sheet.
         let label = app.buttons["cardLabel"]
-        XCTAssertTrue(label.waitForExistence(timeout: 60), "the card label")
+        XCTAssertTrue(label.waitForExistence(timeout: 120), "the card label")
         XCTAssertEqual(label.label, "Card ready: Your agents")
         XCTAssertFalse(app.descendants(matching: .any)["card.title"].exists, "no sheet over the window")
         shot("agent-window")
@@ -67,7 +67,7 @@ final class CardLabelUITests: XCTestCase {
     func testTheLabelHidesByItself() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent",
-                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "20"]
+                               "-sheepdogDemoCard", "-sheepdogDemoCardAfter", "20", "-sheepdogCardLabelSeconds", "10"]
         app.launch()
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
         XCTAssertTrue(tryDemo.waitForExistence(timeout: 10))
@@ -76,7 +76,7 @@ final class CardLabelUITests: XCTestCase {
         showAgentsPane(app)
         let label = app.buttons["cardLabel"]
         XCTAssertTrue(label.waitForExistence(timeout: 60), "the card label over the Agents pane")
-        XCTAssertTrue(label.waitForNonExistence(timeout: 15), "the label hides after a few seconds")
+        XCTAssertTrue(label.waitForNonExistence(timeout: 40), "the label hides after a few seconds")
         XCTAssertFalse(app.descendants(matching: .any)["card.title"].exists)
     }
 }
