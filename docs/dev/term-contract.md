@@ -132,6 +132,9 @@ app, so it never has to know which one the pane is in. Consequences:
   scrolling back down by the same count (its "↓ Latest") undoes it in both.
 - One message is capped at **1000** notches (`herdr.MaxWheelNotches`); a drag
   frame is a few, so only a runaway client reaches it.
+- An app that accelerates fast wheel events (Claude Code's full-screen mode
+  does) still does, so a fast flick moves it further than the finger; a
+  slow drag is one line per notch. The daemon does not pace notches.
 - A TUI ignores a wheel outside its scrollable area and herdr's default cell
   is the top-left corner, so a scroll without `col` and `row` lands on the
   middle of the grid (kept current by `term-resize`).
