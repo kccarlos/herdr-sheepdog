@@ -179,7 +179,10 @@ expanded, waiting), `IPadSidebar`, `AgentPane` (the iPad window pane).
   `UpdatesGroup` ("N updates", latest line, chevron), user and dog bubbles,
   `BrainReplyCard` ("Orchestrator → Sheepdog", options, Detail),
   `ScreenCard` rows (icon, title, "Card · agent", chevron → a sheet), and
-  settled approvals ("You approved — Yes · by voice/tap").
+  settled approvals ("You approved — Yes · by voice/tap"). Which rows
+  belong in the conversation at all, how they group and what moves out
+  of sight is proposed in
+  [conversation-timeline.md](conversation-timeline.md).
 - **The open question floats** above the capsule (bottom 96 pt) and content
   scrolls under it. With several computers, a question from another
   computer is prefixed "Home Mac · blog" and has the footnote "Answers by
