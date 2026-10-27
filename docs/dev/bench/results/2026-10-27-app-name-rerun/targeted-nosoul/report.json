@@ -1,0 +1,1431 @@
+{
+  "started": "2026-10-27T01:28:47.810671-07:00",
+  "finished": "2026-10-27T01:32:47.369702-07:00",
+  "setup": {
+    "brain": "deepseek deepseek-flash",
+    "budget_usd": "0",
+    "failover providers": "none",
+    "judge": "claude sonnet",
+    "mode": "live",
+    "parallel": "1",
+    "personas": "each scenario's own",
+    "scenarios": "testdata/eval/sim/app-name.json",
+    "screen": "hidden",
+    "simulated user": "fake gemini-3.1-flash-lite",
+    "utterance_timeout": "25s (0s = the orchestrator default, 25s)"
+  },
+  "repeat": 8,
+  "stats": [
+    {
+      "case": "app-name-hidden-screen",
+      "runs": 8,
+      "pass": 3,
+      "fail": 5,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.375,
+      "primary": {
+        "judge_no": 5
+      },
+      "labels": {
+        "judge_no": 5
+      },
+      "mean_duration_ms": 29944,
+      "cost_usd_estimate": 0.0410772
+    }
+  ],
+  "total": {
+    "case": "TOTAL",
+    "runs": 8,
+    "pass": 3,
+    "fail": 5,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 0.375,
+    "primary": {
+      "judge_no": 5
+    },
+    "labels": {
+      "judge_no": 5
+    },
+    "mean_duration_ms": 29944,
+    "cost_usd_estimate": 0.0410772
+  },
+  "spend": [
+    {
+      "role": "brain",
+      "model": "deepseek-flash",
+      "usage": {
+        "calls": 18,
+        "in": 128246,
+        "out": 2948,
+        "reasoning": 1391,
+        "cached": 117760
+      },
+      "cost_usd_estimate": 0.041077199999999994
+    },
+    {
+      "role": "judge",
+      "model": "sonnet",
+      "usage": {
+        "calls": 72,
+        "in": 284625,
+        "out": 20191,
+        "cached": 149490
+      },
+      "cost_usd_estimate": 0
+    }
+  ],
+  "spend_usd_estimate": 0.041077199999999994,
+  "north_star": {
+    "tier": "1",
+    "runs": 8,
+    "graded": 8,
+    "records": 8,
+    "events": 0,
+    "understood": {
+      "k": 3,
+      "n": 8,
+      "ci": {
+        "est": 0.375,
+        "lo": 0.13684428582359742,
+        "hi": 0.6942576053973727
+      }
+    },
+    "done": {
+      "k": 0,
+      "n": 0
+    },
+    "low_effort": {
+      "k": 4,
+      "n": 8,
+      "ci": {
+        "est": 0.5,
+        "lo": 0.21521606221387757,
+        "hi": 0.7847839377861224
+      }
+    },
+    "safe": {
+      "k": 8,
+      "n": 8,
+      "ci": {
+        "est": 1,
+        "lo": 0.6755924351161198,
+        "hi": 1
+      }
+    },
+    "claims_phrases": {
+      "k": 0,
+      "n": 1,
+      "ci": {
+        "est": 0,
+        "lo": 0,
+        "hi": 0.7934506856227626
+      }
+    },
+    "claims_judge": {
+      "k": 0,
+      "n": 0
+    },
+    "turns_to_goal": {
+      "n": 4,
+      "ci": {
+        "est": 2,
+        "lo": 2,
+        "hi": 2
+      }
+    },
+    "time_to_goal_s": {
+      "n": 4,
+      "ci": {
+        "est": 6.986000000000001,
+        "lo": 5.4635,
+        "hi": 9.1075
+      }
+    },
+    "claims": {
+      "side": "orchestrator",
+      "claims": 1,
+      "matched": 0,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 1,
+        "n": 1,
+        "ci": {
+          "est": 1,
+          "lo": 0.20654931437723745,
+          "hi": 1
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      },
+      "examples": [
+        "app-name-hidden-screen r1: said \"it is closed or in the background just now\" (closed) — no closed action in the turn or before"
+      ]
+    },
+    "missed_news_rate": {
+      "k": 0,
+      "n": 0
+    },
+    "news": 0,
+    "news_ungraded": 0,
+    "user_lines": 16,
+    "repeats": 0,
+    "rephrasings": 0,
+    "turns": {
+      "n": 8,
+      "ci": {
+        "est": 2,
+        "lo": 2,
+        "hi": 2
+      }
+    },
+    "cost_usd": {
+      "n": 8,
+      "ci": {
+        "est": 0.00513465,
+        "lo": 0.0045585,
+        "hi": 0.00595875
+      }
+    },
+    "latency_n": 0,
+    "latency_p50_ms": 0,
+    "latency_p90_ms": 0,
+    "notes": [
+      "Done: 8 runs had nothing to get done (no required action, no end-state check and no action) and are left out.",
+      "Events read for 0 of 8 records: without them checks, spawns, closes and investigations are not seen (said-vs-done reads the record's actions only)."
+    ],
+    "outcomes": [
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 1,
+        "status": "fail",
+        "understood": false,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 5773,
+              "side": "orchestrator",
+              "kind": "closed",
+              "sentence": "it is closed or in the background just now",
+              "status": "unmatched",
+              "evidence": "no closed action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 5773,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 2,
+        "status": "fail",
+        "understood": false,
+        "low_effort": false,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": false,
+          "known": true,
+          "turns": 2,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 3,
+        "status": "fail",
+        "understood": false,
+        "low_effort": false,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": false,
+          "known": true,
+          "turns": 2,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 5154,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 5,
+        "status": "fail",
+        "understood": false,
+        "low_effort": false,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": false,
+          "known": true,
+          "turns": 2,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 6,
+        "status": "fail",
+        "understood": false,
+        "low_effort": false,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": false,
+          "known": true,
+          "turns": 2,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 7,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 10219,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "app-name-hidden-screen",
+        "repeat": 8,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 6798,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      }
+    ]
+  },
+  "runs": [
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 1,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog: \"forumind-codex is working right now, and I do not have a task recorded for it yet.\" The facts show its task: \"Refactor the parser into its own package and keep the tests green.\""
+        },
+        {
+          "type": "judge_no",
+          "detail": "length_fits: Sheepdog: \"That list appears in the Sheepdog app, the one you're talking to me through, and it is closed or in the background just now. Open Sheepdog and the list will be there. I can also just tell y…"
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 31616,
+      "transcript": [
+        {
+          "at_ms": 2,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 1997,
+          "who": "sheepdog",
+          "text": "Two agents. kvoice-dev-claude is idle and ready for a new instruction. forumind-codex is working right now, and I do not have a task recorded for it yet."
+        },
+        {
+          "at_ms": 3499,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 5773,
+          "who": "sheepdog",
+          "text": "That list appears in the Sheepdog app, the one you're talking to me through, and it is closed or in the background just now. Open Sheepdog and the list will be there. I can also just tell you what is on it, if that is easier. Shall I read the list out instead?"
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "yes",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"That list appears in the Sheepdog app, the one you're talking to me through... Open Sheepdog and the list will be there.\""
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked to see the list and which app to open, so no worker action was needed."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "CEO: \"Which app do I open for that?\" — no worker was acted on or asked about; sheepdog's answer concerned the app and no worker was misidentified."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"forumind-codex is working right now, and I do not have a task recorded for it yet.\" The facts show its task: \"Refactor the parser into its own package and keep the tests green.\"",
+          "rationale": "Sheepdog: \"forumind-codex is working right now, and I do not have a task recorded for it yet.\" The facts show its task: \"Refactor the parser into its own package and keep the tests green.\""
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"That list appears in the Sheepdog app, the one you're talking to me through, and it is closed or in the background just now. Open Sheepdog and the list will be there. I can also just tell you what is on it, if that is easier. Shall I read the list out instead?\"",
+          "rationale": "Sheepdog: \"That list appears in the Sheepdog app, the one you're talking to me through, and it is closed or in the background just now. Open Sheepdog and the list will be there. I can also just tell you what is on it, if that is easier. Shall I read the list out instead?\""
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"Open Sheepdog and the list will be there. I can also just tell you what is on it, if that is easier. Shall I read the list out instead?\""
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "Sheepdog: That list appears in the Sheepdog app, the one you're talking to me through, and it is closed or in the background just now."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "Sheepdog: \"That list appears in the Sheepdog app, the one you're talking to me through... Open Sheepdog and the list will be there.\""
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14250,
+            "out": 371,
+            "reasoning": 145,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.0045846
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 41748,
+            "out": 2813,
+            "cached": 23825
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0045846,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 2,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog: \"Open the Sheepdog app on your phone. That's where the agent screens appear. Tell me once it's open and I'll put the list on it?\" This contradicts its earlier \"I can't put it on the screen r…"
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 29540,
+      "transcript": [
+        {
+          "at_ms": 4,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 3193,
+          "who": "sheepdog",
+          "text": "I can't put it on the screen right now, since it's not visible. Here it is: forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "at_ms": 4695,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 7748,
+          "who": "sheepdog",
+          "text": "Open the Sheepdog app on your phone. That's where the agent screens appear. Tell me once it's open and I'll put the list on it?"
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "no",
+          "confidence": 0.68,
+          "evidence": "Sheepdog: \"Open the Sheepdog app on your phone. That's where the agent screens appear. Tell me once it's open and I'll put the list on it?\" This contradicts its earlier \"I can't put it on the screen right now\". Nothing in the facts shows a Sheepdog app or a way to put the list on a screen, and no list was shown.",
+          "rationale": "Sheepdog: \"Open the Sheepdog app on your phone. That's where the agent screens appear. Tell me once it's open and I'll put the list on it?\" This contradicts its earlier \"I can't put it on the screen right now\". Nothing in the facts shows a Sheepdog app or a way to put the list on a screen, and no list was shown."
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "Facts: \"sheepdog sent nothing to any worker.\" The CEO only asked to show the list and which app to open, so no worker action was needed."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"Here it is: forumind-codex is working, and kvoice-dev-claude is idle.\" (CEO asked for the whole list; no single worker was meant, and nothing was sent to any worker)"
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"forumind-codex is working, and kvoice-dev-claude is idle.\""
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That's where the agent screens appear. Tell me once it's open and I'll put the list on it?"
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That's where the agent screens appear."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That's where the agent screens appear."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That's where the agent screens appear."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 3
+      },
+      "tool_calls": [
+        "list_agents"
+      ],
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 3,
+            "in": 21408,
+            "out": 500,
+            "reasoning": 284,
+            "cached": 19712
+          },
+          "cost_usd_estimate": 0.006892799999999999
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 30911,
+            "out": 2357,
+            "cached": 14529
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.006892799999999999,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 3,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog: \"Open the Sheepdog app on your phone, that is where the list shows up.\" The facts say nothing about any app. Sheepdog had also just said \"The screen is not open right now, so I cannot put th…"
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 28149,
+      "transcript": [
+        {
+          "at_ms": 3,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 2961,
+          "who": "sheepdog",
+          "text": "Two agents: forumind-codex is working, and kvoice-dev-claude is idle and ready. The screen is not open right now, so I cannot put the list up, but that is the whole list."
+        },
+        {
+          "at_ms": 4462,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 6165,
+          "who": "sheepdog",
+          "text": "Open the Sheepdog app on your phone, that is where the list shows up."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"Open the Sheepdog app on your phone, that is where the list shows up.\" The facts say nothing about any app. Sheepdog had also just said \"The screen is not open right now, so I cannot put the list up.\" It therefore gave an unsupported answer as settled, and the CEO's request to see the list on screen was not carried out.",
+          "rationale": "Sheepdog: \"Open the Sheepdog app on your phone, that is where the list shows up.\" The facts say nothing about any app. Sheepdog had also just said \"The screen is not open right now, so I cannot put the list up.\" It therefore gave an unsupported answer as settled, and the CEO's request to see the list on screen was not carried out."
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked to show a list and which app to open; no worker action was requested."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents: forumind-codex is working, and kvoice-dev-claude is idle and ready."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"Two agents: forumind-codex is working, and kvoice-dev-claude is idle and ready.\" The facts match: forumind-codex shows \"Working (2m 14s • esc to interrupt)\", and kvoice-dev-claude is idle at an empty prompt."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone, that is where the list shows up."
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone, that is where the list shows up."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.97,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone, that is where the list shows up."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone, that is where the list shows up."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14246,
+            "out": 329,
+            "reasoning": 162,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.0045684
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 37623,
+            "out": 2557,
+            "cached": 20548
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0045684,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 23546,
+      "transcript": [
+        {
+          "at_ms": 2,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 1824,
+          "who": "sheepdog",
+          "text": "Two agents. forumind-codex is working, and kvoice-dev-claude is idle. Your screen is not visible right now, so I am saying it instead of showing it."
+        },
+        {
+          "at_ms": 3326,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 5154,
+          "who": "sheepdog",
+          "text": "Open the Sheepdog app on your phone. That is where your agents and their screens live."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "yes",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"Open the Sheepdog app on your phone. That is where your agents and their screens live.\" Earlier it said: \"Two agents. forumind-codex is working, and kvoice-dev-claude is idle. Your screen is not visible right now, so I am saying it instead of showing it.\""
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked to see a list and which app to open, so no worker action was needed."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That is where your agents and their screens live."
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.97,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That is where your agents and their screens live."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "Sheepdog: Open the Sheepdog app on your phone. That is where your agents and their screens live."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14231,
+            "out": 312,
+            "reasoning": 135,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.0045375
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 30872,
+            "out": 2274,
+            "cached": 14517
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0045375,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 5,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog: \"Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there.\" The facts don't support this. Sheepdog had a…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "length_fits: Sheepdog: Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there. Want me to just tell you what they are doing i…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "ear_friendly: Sheepdog: \"...or will you open the app? Options: I'll open the app; Just tell me here.\""
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 32918,
+      "transcript": [
+        {
+          "at_ms": 2,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 2131,
+          "who": "sheepdog",
+          "text": "Two agents: forumind-codex is working, and kvoice-dev-claude is idle, waiting for you. The screen is not visible right now, so I am telling you instead."
+        },
+        {
+          "at_ms": 3632,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 6081,
+          "who": "sheepdog",
+          "text": "Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there. Want me to just tell you what they are doing instead, or will you open the app? Options: I'll open the app; Just tell me here."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "no",
+          "confidence": 0.55,
+          "evidence": "Sheepdog: \"Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there.\" The facts don't support this. Sheepdog had also just said \"The screen is not visible right now\", so the claim that the list will be in the app contradicts that.",
+          "rationale": "Sheepdog: \"Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there.\" The facts don't support this. Sheepdog had also just said \"The screen is not visible right now\", so the claim that the list will be in the app contradicts that."
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked to see the list and which app to open, so no worker action was needed."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents: forumind-codex is working, and kvoice-dev-claude is idle, waiting for you."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents: forumind-codex is working, and kvoice-dev-claude is idle, waiting for you."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "no",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there. Want me to just tell you what they are doing instead, or will you open the app?",
+          "rationale": "Sheepdog: Open the Sheepdog app. That's where the list of your agents lives. Bring it to the front on your phone and the two of them will be right there. Want me to just tell you what they are doing instead, or will you open the app?"
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"...or will you open the app? Options: I'll open the app; Just tell me here.\"",
+          "rationale": "Sheepdog: \"...or will you open the app? Options: I'll open the app; Just tell me here.\""
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.95,
+          "evidence": "Sheepdog: Open the Sheepdog app. That's where the list of your agents lives."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "Sheepdog: Open the Sheepdog app. That's where the list of your agents lives."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14231,
+            "out": 414,
+            "reasoning": 204,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.0046401
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 34785,
+            "out": 3072,
+            "cached": 17656
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0046401,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 6,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place.\""
+        },
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog: You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place."
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run.\" It didn't name an agent as the app, but it named the app \"herdr\", not Sheepdog, and it didn't just say \"the app\"."
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 34335,
+      "transcript": [
+        {
+          "at_ms": 3,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 1811,
+          "who": "sheepdog",
+          "text": "You have two agents. forumind-codex is working right now, and kvoice-dev-claude is idle. The screen is not available at the moment, so I'm telling you rather than showing you."
+        },
+        {
+          "at_ms": 3313,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 4814,
+          "who": "sheepdog",
+          "text": "You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "no",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place.\"",
+          "rationale": "Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place.\""
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO asked only to see the list and which app to open; neither required an action on a worker."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"You have two agents. forumind-codex is working right now, and kvoice-dev-claude is idle.\" The CEO named no particular worker, and sheepdog sent nothing to any worker."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "no",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place.",
+          "rationale": "Sheepdog: You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run. Each agent has its own window in there, and you can see them all in one place.\""
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: You have two agents. forumind-codex is working right now, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.96,
+          "evidence": "Sheepdog: You'd open herdr, the terminal workspace app where these agents run."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "no",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run.\" It didn't name an agent as the app, but it named the app \"herdr\", not Sheepdog, and it didn't just say \"the app\".",
+          "rationale": "Sheepdog: \"You'd open herdr, the terminal workspace app where these agents run.\" It didn't name an agent as the app, but it named the app \"herdr\", not Sheepdog, and it didn't just say \"the app\"."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14241,
+            "out": 257,
+            "reasoning": 73,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.0044703
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 37591,
+            "out": 2694,
+            "cached": 20482
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0044703,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 7,
+      "status": "pass",
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 33569,
+      "transcript": [
+        {
+          "at_ms": 4,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 1667,
+          "who": "sheepdog",
+          "text": "You have two agents. kvoice-dev-claude is idle, waiting for you. forumind-codex is working right now."
+        },
+        {
+          "at_ms": 3168,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 10219,
+          "who": "sheepdog",
+          "text": "The list shows in the Sheepdog app, so open that and bring it to the front."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "yes",
+          "confidence": 0.65,
+          "evidence": "Sheepdog: The list shows in the Sheepdog app, so open that and bring it to the front."
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked to show the list and which app to open; no worker action was requested or taken."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "CEO: \"Show me the list of my agents on the screen.\" Sheepdog: \"You have two agents. kvoice-dev-claude is idle, waiting for you. forumind-codex is working right now.\" The CEO asked about all agents, not one. Sheepdog sent nothing to any worker, and the follow-up question about which app to open was not about a worker."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: You have two agents. kvoice-dev-claude is idle, waiting for you. forumind-codex is working right now."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: The list shows in the Sheepdog app, so open that and bring it to the front."
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: The list shows in the Sheepdog app, so open that and bring it to the front."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.97,
+          "evidence": "Sheepdog: The list shows in the Sheepdog app, so open that and bring it to the front."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.92,
+          "evidence": "Sheepdog: The list shows in the Sheepdog app, so open that and bring it to the front."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 2
+      },
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 2,
+            "in": 14208,
+            "out": 368,
+            "reasoning": 201,
+            "cached": 13056
+          },
+          "cost_usd_estimate": 0.004603799999999999
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 40358,
+            "out": 2349,
+            "cached": 23462
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.004603799999999999,
+      "screen": "hidden"
+    },
+    {
+      "scenario": "app-name-hidden-screen",
+      "repeat": 8,
+      "status": "pass",
+      "end_reason": "end_call",
+      "end_detail": "script done",
+      "goal_met_self": false,
+      "turns": 2,
+      "duration_ms": 25881,
+      "transcript": [
+        {
+          "at_ms": 4,
+          "who": "ceo",
+          "text": "Show me the list of my agents on the screen."
+        },
+        {
+          "at_ms": 3196,
+          "who": "sheepdog",
+          "text": "Two agents. forumind-codex is working, and kvoice-dev-claude is idle. The screen isn't in front of you, so I'm saying it instead."
+        },
+        {
+          "at_ms": 4697,
+          "who": "ceo",
+          "text": "Which app do I open for that?"
+        },
+        {
+          "at_ms": 6798,
+          "who": "sheepdog",
+          "text": "The Sheepdog app, on your phone. It is in the background right now, so open it and the list will show there."
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"see the list of agents on the phone screen, and find out which app to open for it\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+          "answer": "yes",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: \"The Sheepdog app, on your phone. It is in the background right now, so open it and the list will show there.\""
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+          "answer": "yes",
+          "confidence": 0.97,
+          "evidence": "Facts: \"sheepdog sent nothing to any worker.\" The CEO only asked to see the list and which app to open, so no action was needed."
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle."
+        },
+        {
+          "name": "length_fits",
+          "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+          "answer": "yes",
+          "confidence": 0.75,
+          "evidence": "Sheepdog: The Sheepdog app, on your phone. It is in the background right now, so open it and the list will show there."
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Two agents. forumind-codex is working, and kvoice-dev-claude is idle. The screen isn't in front of you, so I'm saying it instead."
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+          "answer": "yes",
+          "confidence": 0.97,
+          "evidence": "Sheepdog: The Sheepdog app, on your phone. It is in the background right now, so open it and the list will show there."
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: The Sheepdog app, on your phone. It is in the background right now, so open it and the list will show there."
+        }
+      ],
+      "facts": "Worker kvoice-dev-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker forumind-codex (codex), now working.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ >_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moving parse.go and parse_test.go into ./parser; updating imports in main.go.\n    \n    • Working (2m 14s • esc to interrupt)\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+      "failovers": 0,
+      "answered_by": "deepseek",
+      "steps_by_provider": {
+        "deepseek": 3
+      },
+      "tool_calls": [
+        "list_agents"
+      ],
+      "usage": [
+        {
+          "role": "brain",
+          "model": "deepseek-flash",
+          "usage": {
+            "calls": 3,
+            "in": 21431,
+            "out": 397,
+            "reasoning": 187,
+            "cached": 19712
+          },
+          "cost_usd_estimate": 0.0067797
+        },
+        {
+          "role": "judge",
+          "model": "sonnet",
+          "usage": {
+            "calls": 9,
+            "in": 30737,
+            "out": 2075,
+            "cached": 14471
+          },
+          "cost_usd_estimate": 0
+        }
+      ],
+      "cost_usd_estimate": 0.0067797,
+      "screen": "hidden"
+    }
+  ]
+}

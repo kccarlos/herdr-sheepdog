@@ -99,9 +99,6 @@ func TestShowNotVisible(t *testing.T) {
 	if !strings.Contains(h.model.Calls()[0].Text(), "Screen: not visible (the Sheepdog app is in the background") {
 		t.Error("state block lacks the not-visible line")
 	}
-	if !strings.Contains(h.model.Calls()[0].System(), "through the Sheepdog app on their phone") {
-		t.Error("role section does not name the app")
-	}
 }
 
 func TestShowAgentKinds(t *testing.T) {

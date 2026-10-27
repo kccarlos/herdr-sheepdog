@@ -40,3 +40,7 @@ Passes per scenario (before / after / nosoul, of 5):
 Reading: no CI excludes 0, so there is no statistically clear regression. The direction is the same in both runs (after below before), and the arm without the SOUL.md sentence matches before, so if there is a small effect it comes from that sentence, not from the string fixes. The `show` tool was called in none of the 180 runs, so the changed `show` strings cannot have mattered here. The failures are the usual length, hallucination and facts-current items; j2-deny fails the same way in `after` and `nosoul` (0/5 each), so that scenario is not tied to the sentence. Per-run `nosoul` vs `after` differences are within the +-15-25 pp noise that 60 runs give.
 
 Raw: `before/`, `after/`, `nosoul/` (`report.json`, `report.md`) and the `northstar-*.md` comparisons.
+
+## Decision and targeted case without the sentence
+
+The SOUL.md sentence is dropped. `targeted-nosoul/` re-ran `app-name.json` x8 (screen hidden, DeepSeek `deepseek-flash`, Sonnet judge) on the branch without it: the naming rubric item held in 7/8 runs (before: 1/8); one reply said "herdr". Strict judge pass was 3/8 (other items: contradiction with "not visible", length, unsupported claim).
