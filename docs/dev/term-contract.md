@@ -72,7 +72,9 @@ current size asks for a full repaint, the resync primitive.
 ```
 
 Scroll herdr's scrollback, or send wheel events to a TUI that asked for the
-mouse; `col` and `row` (together, optional) place the wheel. Mouse clicks
+mouse; `col` and `row` (together, optional) place the wheel. The app always
+sends the middle of the grid: a TUI such as Codex ignores a wheel outside its
+scrollable area, and herdr's default cell is the top-left corner. Mouse clicks
 are encoded by herdr for the app's mouse mode and dropped when the app did
 not ask for the mouse.
 

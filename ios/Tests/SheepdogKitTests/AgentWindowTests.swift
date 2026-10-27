@@ -217,6 +217,15 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertEqual(s.scrolledUp, 0, "never below the bottom")
     }
 
+    func testTheWheelLandsInTheMiddleOfTheGrid() {
+        var s = S(paneID: "p")
+        XCTAssertNil(s.wheelCell, "no grid yet")
+        s = live()
+        let cell = s.wheelCell
+        XCTAssertEqual(cell?.col, 29)
+        XCTAssertEqual(cell?.row, 20, "inside the transcript, never the top-left header corner Codex ignores")
+    }
+
     func testInputGoesBackToTheBottomFirst() {
         var s = live()
         _ = s.dragged(lines: 6)
