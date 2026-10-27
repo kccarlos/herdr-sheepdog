@@ -24,9 +24,6 @@ enum DebugLaunch {
     /// `-sheepdogFakeProviders`: the contract's example provider list,
     /// against a `--voice=off` daemon that reports none.
     static var fakeProviders: Bool { arguments.contains("-sheepdogFakeProviders") }
-    /// `-sheepdogShowStreamErrors`: `/events` failures become notices in the
-    /// conversation, instead of only a log line.
-    static var showStreamErrors: Bool { arguments.contains("-sheepdogShowStreamErrors") }
     /// `-sheepdogAskPush`: ask for notification permission after connecting
     /// even when started with `-sheepdogAddress` (the UI tests otherwise
     /// skip it, so no system alert covers what they tap).
