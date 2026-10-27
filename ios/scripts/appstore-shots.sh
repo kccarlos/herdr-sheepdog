@@ -31,5 +31,11 @@ for set in "${sets[@]}"; do
   # App Store Connect rejects an alpha channel: a JPEG round trip drops it.
   for f in "$out/$set"/*.png; do
     sips -s format jpeg "$f" --out "$f.tmp" >/dev/null && sips -s format png "$f.tmp" --out "$f" >/dev/null && rm "$f.tmp"
+    # The iPad is shot in landscape, but the simulator's framebuffer stays portrait (UI turned
+    # 90 degrees clockwise): turn it back to 2752x2064.
+    if [ "$set" = ipad ] && [ "$(sips -g pixelWidth "$f" | awk '/pixelWidth/{print $2}')" -lt "$(sips -g pixelHeight "$f" | awk '/pixelHeight/{print $2}')" ]; then
+      sips -r 270 "$f" --out "$f" >/dev/null
+    fi
+    [ "$set" != ipad ] || swift scripts/hide-resize-handle.swift "$f"
   done
 done
