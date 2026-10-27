@@ -49,12 +49,36 @@ const SignOff = "When you finish, end with three short lines for someone who can
 // byte and knew only ASCII, so a Chinese instruction reached the worker
 // as "请运行 shop 相关的测试。. When you finish, …" (tier-3 bench
 // 2026-10-03, finding 6; the H1 seam).
+//
+// A slash command (isSlashCommand: one line starting with "/", such as
+// "/permissions", "/model gpt-5" or "/compact") is sent exactly as given,
+// with no trailer: the worker's TUI only recognises it when the line
+// starts with the command and holds nothing after it. Sentence
+// punctuation the model added at the very end ("/permissions.",
+// "/permissions。") is stripped too (trimCommandPunct). Multi-line text
+// that starts with "/" is prose and keeps the trailer.
 func withSignOff(text string) string {
 	text = strings.TrimSpace(text)
+	if isSlashCommand(text) {
+		return trimCommandPunct(text)
+	}
 	if text == "" || strings.HasSuffix(text, SignOff) {
 		return text
 	}
 	return prose.Terminate(text) + " " + SignOff
+}
+
+// isSlashCommand reports whether an instruction is a worker slash
+// command: after trimming, a single line that starts with "/".
+func isSlashCommand(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n")
+}
+
+// trimCommandPunct drops sentence punctuation and quotes from the very
+// end of a slash command; its arguments stay as given.
+func trimCommandPunct(text string) string {
+	return strings.TrimRight(text, " .。,，!！?？;；:：\"'`”’」』")
 }
 
 // withoutSignOff strips SignOff from an instruction, wherever the

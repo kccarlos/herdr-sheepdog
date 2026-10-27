@@ -232,3 +232,26 @@ func TestSignOffJoinRespectsCJKTerminators(t *testing.T) {
 		}
 	}
 }
+
+// A slash command goes to the worker bare, without trailing punctuation;
+// prose, even starting with "/", keeps the trailer.
+func TestSignOffSkipsSlashCommands(t *testing.T) {
+	for in, want := range map[string]string{
+		"/permissions":         "/permissions",
+		"/permissions.":        "/permissions",
+		"/permissions。":        "/permissions",
+		"  /model gpt-5  ":     "/model gpt-5",
+		"/model gpt-5!":        "/model gpt-5",
+		"/compact":             "/compact",
+		"/compact\nthen go on": "/compact\nthen go on. " + SignOff,
+		"Run the tests":        "Run the tests. " + SignOff,
+		"  Run the tests  ":    "Run the tests. " + SignOff,
+	} {
+		if got := withSignOff(in); got != want {
+			t.Errorf("withSignOff(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if withoutSignOff(withSignOff("/permissions")) != "/permissions" {
+		t.Error("a slash command's task text is not the command")
+	}
+}

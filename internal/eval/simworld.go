@@ -490,7 +490,7 @@ func WorldFacts(ws WorldState) string {
 			}
 		}
 	}
-	b.WriteString("Notes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\n")
+	b.WriteString("Notes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends, except a one-line slash command such as /compact, which goes bare (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\n")
 	lines := append(append([]SimLine(nil), ws.Timeline...), ws.Actions...)
 	sortLines(lines)
 	if len(lines) == 0 {
