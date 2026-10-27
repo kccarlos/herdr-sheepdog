@@ -17,6 +17,7 @@ type displayHost struct {
 	*braintest.Host
 	mu      sync.Mutex
 	visible bool
+	placed  bool
 	shown   []brain.CardRequest
 }
 
@@ -33,7 +34,7 @@ func (d *displayHost) Show(_ context.Context, req brain.CardRequest) (brain.Card
 		return brain.CardResult{}, brain.ErrNotVisible
 	}
 	d.shown = append(d.shown, req)
-	return brain.CardResult{ID: "c1", Title: req.Title}, nil
+	return brain.CardResult{ID: "c1", Title: req.Title, Placed: d.placed}, nil
 }
 
 func newShowHarness(t *testing.T, visible bool, steps ...braintest.Step) (*harness, *displayHost) {
@@ -92,11 +93,14 @@ func TestShowNotVisible(t *testing.T) {
 	if len(dh.shown) != 0 || len(rep.Shown) != 0 {
 		t.Fatalf("shown = %v, reply.Shown = %v", dh.shown, rep.Shown)
 	}
-	if second := h.model.Calls()[1].Text(); !strings.Contains(second, "Not shown: the user's screen is not visible") {
+	if second := h.model.Calls()[1].Text(); !strings.Contains(second, "Not shown: the user's screen is not visible (the Sheepdog app on the user's phone or iPad is in the background, locked, or not open)") {
 		t.Errorf("result:\n%s", second)
 	}
-	if !strings.Contains(h.model.Calls()[0].Text(), "Screen: not visible") {
+	if !strings.Contains(h.model.Calls()[0].Text(), "Screen: not visible (the Sheepdog app is in the background") {
 		t.Error("state block lacks the not-visible line")
+	}
+	if !strings.Contains(h.model.Calls()[0].System(), "through the Sheepdog app on their phone") {
+		t.Error("role section does not name the app")
 	}
 }
 
@@ -138,5 +142,23 @@ func TestShowRefusedInEventTurn(t *testing.T) {
 		if decl.Name == brain.ToolShow {
 			t.Error("show declared in an event turn")
 		}
+	}
+}
+
+func TestShowPlaced(t *testing.T) {
+	h, dh := newShowHarness(t, true,
+		showCall(map[string]any{"kind": "card", "title": "Agents", "markdown": "- auth"}),
+		braintest.Step{Text: braintest.Reply("It is on your screen, tap the notice.", "")},
+	)
+	dh.placed = true
+	rep, err := h.ask("list the agents", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Shown) != 1 {
+		t.Errorf("reply.Shown = %v", rep.Shown)
+	}
+	if second := h.model.Calls()[1].Text(); !strings.Contains(second, "Placed on the user's screen as a notice") || !strings.Contains(second, "tap the notice") {
+		t.Errorf("result:\n%s", second)
 	}
 }

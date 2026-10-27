@@ -180,7 +180,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
-| `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible. |
+| `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible (`voice_screen` or not). |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -1329,8 +1329,11 @@ way to answer (the user answers through the existing approval card,
   says whether its screen can be seen. The iOS app sends it on every
   change of its scene phase and of the screen in front; `/voice` sends
   it on `visibilitychange` (its page is the voice screen). The daemon
-  shows a card only while the **attached** client's last report was
-  `visible: true` and `voice_screen: true`. A client starts not
+  sends a card only while the **attached** client's last report was
+  `visible: true`. With `voice_screen: true` the card is presented; with
+  `voice_screen: false` (the app is open on another screen) it is sent
+  all the same and the client files it as a conversation row (a notice
+  the user can tap), and the orchestrator is told so. A client starts not
   visible, and a replaced or disconnected client stops counting, so a
   client that never reports (an older app or page) never gets a card:
   the tool then answers "not visible" and the orchestrator speaks.
@@ -1361,7 +1364,7 @@ way to answer (the user answers through the existing approval card,
   only. `GET /api/conversation` has a `card` item at that point: `text`
   is the title, `card_id`, `agent`, and `card` (the card as above;
   absent, with a text that says so, once the store no longer has it).
-  A show refused because no screen was visible logs `card.refused
+  A show refused because the app was not visible logs `card.refused
   {kind, turn, reason}` (`not_visible`, or `not_delivered` when the
   client went away between the check and the send).
 

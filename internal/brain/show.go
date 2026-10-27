@@ -70,6 +70,9 @@ type CardRequest struct {
 type CardResult struct {
 	ID    string
 	Title string
+	// Placed: the app was open on another screen than the conversation,
+	// so the card was filed as a notice the user can tap, not presented.
+	Placed bool
 }
 
 // DisplayHost is a Host that can put a card on the user's screen. Show
@@ -106,7 +109,7 @@ func screenLine(visible bool) string {
 	if visible {
 		return "Screen: the user's screen is visible; show can put a list, table or long detail on it."
 	}
-	return "Screen: not visible (app in the background, locked or not open); show is refused, so speak."
+	return "Screen: not visible (the Sheepdog app is in the background, locked or not open); show is refused, so speak."
 }
 
 // show runs one show call against the DisplayHost.
@@ -163,7 +166,7 @@ func (b *Brain) show(ctx context.Context, t *turn, arg func(string) string, args
 	res, err := dh.Show(ctx, req)
 	switch {
 	case errors.Is(err, ErrNotVisible):
-		out.result = notShown("the user's screen is not visible (the app is in the background, locked, or not open)")
+		out.result = notShown("the user's screen is not visible (the Sheepdog app on the user's phone or iPad is in the background, locked, or not open)")
 		out.summary = "show: not visible"
 		return out
 	case err != nil:
@@ -171,6 +174,11 @@ func (b *Brain) show(ctx context.Context, t *turn, arg func(string) string, args
 		return out
 	}
 	out.shown = res.Title
+	if res.Placed {
+		out.result = fmt.Sprintf("Placed on the user's screen as a notice: %q (%s). The Sheepdog app is open on another screen, so it is not in front: say in one short sentence that it is on the screen and they can tap the notice to see it, plus the gist in a few words. Do not read the card aloud, and leave detail empty.", res.Title, kind)
+		out.summary = fmt.Sprintf("show %s %q (placed)", kind, res.Title)
+		return out
+	}
 	out.result = fmt.Sprintf("Shown on the user's screen: %q (%s). Now say one short sentence that it is on the screen, plus the gist in a few words. Do not read the card aloud, and leave detail empty.", res.Title, kind)
 	out.summary = fmt.Sprintf("show %s %q", kind, res.Title)
 	return out
