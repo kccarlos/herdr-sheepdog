@@ -33,7 +33,7 @@ struct AgentPanes: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let side = proxy.size.width > proxy.size.height
+            let side = !proxy.isPortrait
             Group {
                 if panes.count == 2 {
                     let total = (side ? proxy.size.width : proxy.size.height) - PaneDivider.thickness

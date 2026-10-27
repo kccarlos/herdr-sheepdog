@@ -33,7 +33,7 @@ struct IPadRootView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let portrait = proxy.size.height > proxy.size.width
+            let portrait = proxy.isPortrait
             NavigationSplitView(columnVisibility: Bindable(ui).columns) {
                 IPadSidebar(portrait: portrait)
                     .navigationSplitViewColumnWidth(390)
@@ -58,6 +58,18 @@ struct IPadRootView: View {
             }
         }
         .background(Theme.surface)
+    }
+}
+
+extension GeometryProxy {
+    /// Whether the area is taller than wide, measured with the safe area
+    /// added back: the keyboard is a bottom safe-area inset and shrinks
+    /// `size.height`, which on a portrait iPad made the layout look like
+    /// landscape the moment the keyboard came up (the sidebar returned and
+    /// the keyboard went away again).
+    var isPortrait: Bool {
+        size.height + safeAreaInsets.top + safeAreaInsets.bottom
+            > size.width + safeAreaInsets.leading + safeAreaInsets.trailing
     }
 }
 
