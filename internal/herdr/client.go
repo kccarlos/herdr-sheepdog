@@ -117,7 +117,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 
 	var resp response
 	if err := readJSONLine(bufio.NewReaderSize(conn, 64<<10), &resp); err != nil {
-		return fmt.Errorf("herdr: %s: read: %w", method, err)
+		return fmt.Errorf("herdr: %s: read: %w (%w)", method, ErrNoReply, err)
 	}
 	if resp.Error != nil {
 		return resp.Error

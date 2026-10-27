@@ -180,7 +180,10 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
 	_, err := s.herdr.Prompt(ctx, row.PaneID, text)
-	if err != nil {
+	if errors.Is(err, herdr.ErrNoReply) {
+		// The text may be typed already; the action's cancel has nothing to interrupt.
+		s.clearPending(p, "send_no_reply")
+	} else if err != nil {
 		s.clearPending(p, "send_failed")
 	} else {
 		now := s.cfg.Now()
@@ -191,6 +194,14 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	}
 	s.mu.Unlock()
 
+	if errors.Is(err, herdr.ErrNoReply) {
+		// Written, but herdr's reply never came: the text may well have
+		// arrived (live log 2026-10-27: it had, three times). Look at the
+		// screen ourselves; duplicates are acceptable, a lost instruction
+		// is not, so the model is told to send again if it is not there.
+		s.log.Log(logSource, "supervisor.propose_error", row.PaneID, map[string]any{"stage": "send_no_reply", "error": err.Error()})
+		return s.unconfirmedSend(ctx, row, text, alias), nil
+	}
 	if err != nil {
 		if errors.Is(err, herdr.ErrAgentBlocked) {
 			return s.reportBlocked(ctx, row), err
@@ -199,6 +210,21 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, err
 	}
 	return voice.ToolResult{Spoken: echo + " Sent.", Scheduling: voice.UrgencyInterrupt}, nil
+}
+
+// unconfirmedSend words the outcome of a prompt that was written to herdr
+// but never answered. It reads the pane and looks for the start of the
+// instruction: on the screen means it arrived; otherwise it may still have.
+func (s *Supervisor) unconfirmedSend(ctx context.Context, row state.Agent, text, alias string) voice.ToolResult {
+	probe := strings.Join(strings.Fields(withoutSignOff(text)), " ")
+	if len(probe) > 60 {
+		probe = probe[:60]
+	}
+	if read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines); err == nil && probe != "" &&
+		strings.Contains(strings.Join(strings.Fields(read.Text), " "), probe) {
+		return voice.ToolResult{Spoken: "Herdr did not confirm it, but the instruction is on " + alias + "'s screen, so it arrived. Do not send it again.", Scheduling: voice.UrgencyInterrupt}
+	}
+	return voice.ToolResult{Spoken: "Herdr did not confirm the send to " + alias + ", so the instruction may have arrived. Check its screen with read_screen; if the instruction is not there, send it again.", Scheduling: voice.UrgencyInterrupt}
 }
 
 // ErrMenuOnScreen is an instruction that was not typed because the
