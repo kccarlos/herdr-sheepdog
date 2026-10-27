@@ -7,27 +7,47 @@ import SheepdogKit
 /// shell. Split out of `SessionViewModel` (phase 8), so a poll that changes
 /// one agent re-renders the views that read agents and nothing else.
 ///
-/// `agents`, `pendingAction` and `questions` are mirrors that the session
-/// writes from each `/api/state` it applies, not values derived from the
-/// current `ComputerModel`: the session also applies a state it fetched
-/// straight (opening a session, a loud refresh, the demo's probe), which
-/// the computer's model never sees; the agents are sorted here and carry the
-/// DEBUG launch flags' extra agents; and the haptic cue for a question that
-/// arrived without its own event compares against the last list applied.
-/// Every setter assigns only when the value changed.
+/// `agents`, `pendingAction` and `questions` are read from the current
+/// `ComputerModel`, not copied: every state the app applies lands there
+/// first (the model's own refreshes and the ones the session fetched itself,
+/// through `accept`), so the views, the Live Activity and the answer phases
+/// read one copy. The agents are sorted here, and the DEBUG launch flags add
+/// their extra agent and question.
 @MainActor
 @Observable
 final class AgentsModel {
+    /// Where the current computer is.
+    @ObservationIgnored weak var fleet: ComputerFleet?
+
+    private var current: ComputerModel? { fleet?.current }
+
     /// The agents, blocked first, then working, idle and done; what is not
     /// running last (`Flock.sorted`).
-    private(set) var agents: [Agent] = []
+    var agents: [Agent] {
+        guard let current else { return [] }
+        var all = current.agents
+        #if DEBUG
+        if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
+        if DebugLaunch.demoSecondQuestion { all.append(DebugLaunch.secondQuestionAgent) }
+        #endif
+        return Flock.sorted(all)
+    }
+
     /// The voice's own open question (`/api/state` `pending_action`); it goes
     /// through the approval card.
-    private(set) var pendingAction: PendingAction?
+    var pendingAction: PendingAction? { current?.pendingAction }
+
     /// Every open question (`/api/state` `questions`), oldest first: each
     /// blocked agent gets its own answer buttons. The voice's question,
     /// `pendingAction`, is among them.
-    private(set) var questions: [PendingAction] = []
+    var questions: [PendingAction] {
+        guard let current else { return [] }
+        #if DEBUG
+        if DebugLaunch.demoSecondQuestion { return current.questions + [DebugLaunch.secondQuestion] }
+        #endif
+        return current.questions
+    }
+
     /// Agents cards the user opened, by pane id; kept for the session.
     var expandedAgents: Set<String> = []
     /// Sheets over the voice screen that the session cannot see itself (the
@@ -40,18 +60,6 @@ final class AgentsModel {
     /// The agents as the screen groups them: running (blocked, working, idle
     /// and done) and the rest.
     var flock: Flock { Flock(agents) }
-
-    func setAgents(_ next: [Agent]) {
-        if agents != next { agents = next }
-    }
-
-    func setPendingAction(_ next: PendingAction?) {
-        if pendingAction != next { pendingAction = next }
-    }
-
-    func setQuestions(_ next: [PendingAction]) {
-        if questions != next { questions = next }
-    }
 
     func setShellOffered(_ next: Bool?) {
         if shellOffered != next { shellOffered = next }
@@ -69,11 +77,5 @@ final class AgentsModel {
     func pendingQuestion(for agent: Agent) -> String? {
         guard let pending = pendingAction, pending.paneID == agent.paneID else { return nil }
         return pending.question ?? pending.spokenSummary
-    }
-
-    /// The computer switched: nothing of the old one stays on screen.
-    func clear() {
-        setAgents([])
-        setQuestions([])
     }
 }

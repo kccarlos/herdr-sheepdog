@@ -356,11 +356,11 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         let option = answer.option.index
         do {
             if let computer = payload.computer.flatMap({ model?.fleet.model($0) }) ?? model?.fleet.current.flatMap({ payload.computer == nil ? $0 : nil }) {
-                // The running app: the question's own key, so a tap on its
-                // card joins this answer instead of sending a second.
-                _ = try await computer.actions.run(ActionRunner.Key.answer(computer.id, pendingID), .answer, as: DaemonClient.self) {
-                    try await $0.answerPending(id: pendingID, option: option)
-                }
+                // The running app: through the question's phase on its
+                // computer, under the question's own key, so its cards show
+                // it on its way and a tap on one joins this answer instead
+                // of sending a second.
+                try await computer.answerFromNotification(question: pendingID, option: answer.option)
             } else {
                 _ = try await DaemonClient(endpoint: endpoint).answerPending(id: pendingID, option: option)
             }

@@ -1,0 +1,27 @@
+[1/3] workday-morning-standup r1: fail (end_call, judge_no) ≈ $0.1222, total ≈ $0.122
+[2/3] workday-morning-standup r3: fail (end_call, judge_no) ≈ $0.1122, total ≈ $0.234
+[3/3] workday-morning-standup r2: fail (end_call, judge_no) ≈ $0.1423, total ≈ $0.377
+  fail    workday-morning-standup r1  end_call  13 turns  460.4s  judge_no               ≈ $0.1222
+          judge_no: no_hallucination: Sheepdog: "机器在太平洋时间，凌晨那段换算成 UTC 已经跨天". The facts only say the machine's "local time zone" and that the test fails "between midnight and 1 a.m. UTC". They never say the machine is on …
+          judge_no: facts_current: Sheepdog: "机器在太平洋时间，凌晨那段换算成 UTC 已经跨天" — the facts say only "the machine's local time zone" and that it fails between midnight and 1 a.m. UTC. Pacific time appears nowhere in them.
+          judge_no: length_fits: Sheepdog [t+11s], answering the simple question "Which of them need me right now?": "Just one: infra-codex, still holding that read-only check on the staging database move. Everyone else …
+          judge_no: end_state: [t+56s] sheepdog sent tests-codex the prompt "Go ahead and fix the one failing test, the refund window test. ..." The criterion requires that nothing be sent to tests-codex.
+  fail    workday-morning-standup r2  end_call  14 turns  494.9s  judge_no               ≈ $0.1423
+          judge_no: no_hallucination: Sheepdog [t+10s]: "api, tests and billing are still working, and the sixth is idle with nothing to do." There are only six workers (api, web, tests, billing, docs, infra), and sheepd…
+          judge_no: facts_current: Sheepdog [t+10s]: "api, tests and billing are still working, and the sixth is idle with nothing to do."
+          judge_no: length_fits: Sheepdog [t+10s], answering the simple question "is that it?": "Just infra. ... Shall I let infra go ahead with the plan? Options: Yes, go ahead; Yes, and stop asking for this plan; No, t…
+          judge_no: ear_friendly: Sheepdog: "It wants to run the plan step for the staging database move, the one you asked it to show you first."
+          judge_no: end_state: sheepdog sent tests-codex the prompt "Go ahead and fix the failing test: make the date arithmetic timezone-independent..."
+  fail    workday-morning-standup r3  end_call  12 turns  462.1s  judge_no               ≈ $0.1122
+          judge_no: no_hallucination: Sheepdog: "It recommends the first, because it agrees with the accountant and keeps everyone reconciling against the same number." billing-claude's screen lists two options and "3. T…
+          judge_no: length_fits: Sheepdog (t+11s): "Only infra-codex. Everyone else is either working or finished, so nothing else is held up. Shall infra-codex go ahead with its dry run? Options: Yes, go ahead; Yes, and…
+          judge_no: ear_friendly: Sheepdog: "在新区里添三样东西,然后把预发布环境的数据库搬进去" and "只挂了一个退款相关的测试". "新区" is a vague stand-in for the new network. The three things (a subnet group, a security group and a route) are never named, a…
+-- 3 runs, spend ≈ $0.3766 (estimate at list prices) --
+reports: /private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/dda19d26-9a6f-43a3-b88b-66f64e63940c/scratchpad/promptfix/fix/report.json, /private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/dda19d26-9a6f-43a3-b88b-66f64e63940c/scratchpad/promptfix/fix/report.md
+== eval sim, repeat 3 ==
+  workday-morning-standup  runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  judge_no ×3
+  TOTAL                    runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  judge_no ×3
+-- spend brain    deepseek-flash           calls    88  in   1139336  out    14862  reasoning     4477  ≈ $0.3534 --
+-- spend judge    sonnet                   calls   108  in   1653446  out    97638  reasoning        0  ≈ $0.0000 --
+-- spend simuser  deepseek-flash           calls    38  in     75836  out      722  reasoning        0  ≈ $0.0232 --
+-- spend total ≈ $0.3766 (estimate at list prices) --
