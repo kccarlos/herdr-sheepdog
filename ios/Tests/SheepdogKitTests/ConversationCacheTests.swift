@@ -95,6 +95,30 @@ final class ConversationCacheTests: XCTestCase {
         XCTAssertNotNil(cache.load(for: work))
     }
 
+    /// A switch shows the new computer's cached rows at once (ending at its
+    /// own latest item), then the synced page replaces them: never a row of
+    /// the computer left.
+    func testASwitchYieldsTheNewComputersRowsCachedThenSynced() throws {
+        let cache = ConversationCache(directory: directory)
+        let home = DaemonEndpoint(text: "192.168.1.20:7777")!
+        let work = DaemonEndpoint(text: "100.64.0.2:7777")!
+        try cache.save(ConversationSnapshot(endpoint: home, history: ConversationHistory(items: [item(1), item(2)]), lastEventID: 2), for: home)
+        try cache.save(ConversationSnapshot(endpoint: work, history: ConversationHistory(items: [item(10), item(11)]), lastEventID: 11), for: work)
+
+        func ids(_ rows: [TimelineRow]) -> [String] {
+            rows.compactMap { if case let .item(item) = $0 { item.text } else { nil } }
+        }
+        // Talking to home: its cache.
+        var history = try XCTUnwrap(cache.load(for: home)).history
+        XCTAssertEqual(ids(ConversationTimeline.rows(history: history.items, live: [])), ["item 1", "item 2"])
+        // Switch to work: its cached rows, nothing of home's.
+        history = try XCTUnwrap(cache.load(for: work)).history
+        XCTAssertEqual(ids(ConversationTimeline.rows(history: history.items, live: [])), ["item 10", "item 11"])
+        // Then the synced newest page.
+        history.applyNewest(ConversationPage(items: [item(10), item(11), item(12)], nextBefore: nil))
+        XCTAssertEqual(ids(ConversationTimeline.rows(history: history.items, live: [])), ["item 10", "item 11", "item 12"])
+    }
+
     func testTheSnapshotKeepsTheNewest300AndPagesOnFromThere() {
         let endpoint = DaemonEndpoint(text: "mac.local:7777")!
         let history = ConversationHistory(items: (1 ... 450).map { item(Int64($0)) }, nextBefore: nil)

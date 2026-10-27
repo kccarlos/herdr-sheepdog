@@ -131,6 +131,39 @@ final class ComputersUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.exists, "nothing of Work Mac's conversation")
     }
 
+    /// Talk to from the voice menu while the Conversation is in front,
+    /// scrolled up in a long conversation: the new computer's conversation
+    /// shows at its latest row at once, with no Jump to latest tap and
+    /// nothing of the old computer's.
+    func testSwitchShowsTheNewConversationAtItsLatestRow() throws {
+        let workStub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", history: 60))
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]", history: 12, idBase: 5000))
+        let workHost = try workStub.start()
+        let homeHost = try homeStub.start()
+        defer { workStub.stop(); homeStub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launch()
+
+        func text(_ needle: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", needle)).firstMatch
+        }
+        XCTAssertTrue(text("Latest from Work Mac").waitForExistence(timeout: 20), "Work Mac's latest row")
+        // Scroll up, away from the latest row.
+        for _ in 0 ..< 2 { app.swipeDown() }
+
+        openMenu(app, "voice.menu", until: "voice.manageComputers")
+        let talk = starting(app, "Talk to Home Mac")
+        XCTAssertTrue(talk.waitForExistence(timeout: 5))
+        talk.tap()
+
+        let latest = text("Latest from Home Mac")
+        XCTAssertTrue(latest.waitForExistence(timeout: 10), "Home Mac's latest row")
+        XCTAssertTrue(latest.isHittable, "the latest row is on screen without tapping Jump to latest")
+        XCTAssertFalse(text("Work Mac.").exists, "nothing of Work Mac's conversation")
+    }
+
     /// Settings ▸ Add a computer while the session view model re-renders
     /// ten times a second (as during a live voice session): the scan sheet
     /// opens once and stays. It used to close and reopen on every
