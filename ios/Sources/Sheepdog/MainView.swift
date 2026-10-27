@@ -230,12 +230,12 @@ struct PhoneRootView: View {
                     if ui.typing {
                         CapsuleComposer(
                             voiceName: model.voiceName,
-                            sending: model.sendingTyped,
-                            error: model.typedError,
+                            sending: model.conversationModel.sendingTyped,
+                            error: model.conversationModel.typedError,
                             send: { await model.sendTyped($0) },
                             close: {
                                 withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = false }
-                                model.typedError = nil
+                                model.conversationModel.typedError = nil
                             }
                         )
                         .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
@@ -272,19 +272,19 @@ struct ConversationPane: View {
     /// Rows that fold to a pointer while their question floats.
     private var pointerIDs: Set<String> {
         let open = model.openQuestionIDs
-        return QuestionOrder.pointerRowIDs(rows: model.rows, open: model.agentsModel.questions.filter { open.contains($0.id) })
+        return QuestionOrder.pointerRowIDs(rows: model.conversationModel.rows, open: model.agentsModel.questions.filter { open.contains($0.id) })
     }
 
     var body: some View {
         ConversationView(
-            rows: model.rows,
+            rows: model.conversationModel.rows,
             voiceName: model.voiceName,
-            canLoadOlder: model.canLoadOlder,
-            loadingOlder: model.loadingOlder,
+            canLoadOlder: model.conversationModel.canLoadOlder,
+            loadingOlder: model.conversationModel.loadingOlder,
             openPendingIDs: model.openQuestionIDs,
             pointerIDs: pointerIDs,
             loadOlder: { await model.loadOlder() },
-            followToken: model.typedSent,
+            followToken: model.conversationModel.typedSent,
             ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
         )
         // Mark this moment for debugging ("that paused"); only with a
@@ -893,7 +893,7 @@ struct DemoHeader: View {
                             .buttonStyle(.borderedProminent)
                             .buttonBorderShape(.capsule)
                             .tint(Theme.primaryText)
-                            .disabled(model.sendingTyped)
+                            .disabled(model.conversationModel.sendingTyped)
                             .accessibilityIdentifier("demo.sayYes")
                     }
                     ForEach(Array(DemoWorld.suggestedQuestions.enumerated()), id: \.offset) { index, question in
@@ -902,7 +902,7 @@ struct DemoHeader: View {
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
                             .tint(Theme.primaryText)
-                            .disabled(model.sendingTyped)
+                            .disabled(model.conversationModel.sendingTyped)
                             .accessibilityIdentifier("demo.question.\(index)")
                     }
                 }
