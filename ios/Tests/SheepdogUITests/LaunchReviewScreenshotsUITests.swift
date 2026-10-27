@@ -102,6 +102,8 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
             let url = URL(fileURLWithPath: directory).appendingPathComponent("\(name).png")
             try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
         }
+        // iPad shots are landscape: the sidebar sits beside the detail.
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations",
                                "-sheepdogDemoClock", "09:38"]
@@ -117,12 +119,14 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         tapVisible(app, "demo.sayYes")
         _ = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved'")).firstMatch.waitForExistence(timeout: 10)
         sleep(2)
-        // iPad (portrait): the sidebar lists the agents; an iPhone has the Agents pane.
+        // iPad (landscape): the sidebar beside the detail lists the agents; an iPhone has the Agents pane.
         let sidebarShow = app.buttons["sidebar.show"].firstMatch
-        let onIPad = sidebarShow.exists
+        let onIPad = UIDevice.current.userInterfaceIdiom == .pad
         if onIPad {
-            sidebarShow.tap()
+            if sidebarShow.exists, sidebarShow.isHittable { sidebarShow.tap() }
             _ = app.descendants(matching: .any)["sidebar.agent.claude-auth"].waitForExistence(timeout: 5)
+            // The sidebar's agents beside the All agents overview.
+            tapVisible(app, "sidebar.allAgents", timeout: 5)
         } else {
             tapVisible(app, "main.pane.flock", timeout: 3)
         }

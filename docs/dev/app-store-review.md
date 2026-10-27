@@ -361,11 +361,11 @@ requires the large Face ID set unless the large Dynamic Island set is provided, 
 screenshot page also asks for at least one medium Dynamic Island screenshot. Providing both
 Dynamic Island sets covers every rule:
 
-| Set | Simulator (already exists; do not create one) | Pixels (portrait) |
+| Set | Simulator (already exists; do not create one) | Pixels (iPhone portrait; iPad landscape) |
 |---|---|---|
 | iPhone, Dynamic Island, large | iPhone Air (or any iPhone 17 Pro Max) | 1260 × 2736 (Air) / 1320 × 2868 (Pro Max) |
 | iPhone, Dynamic Island, medium | iPhone 17 | 1206 × 2622 |
-| iPad 13" | iPad Pro 13-inch (M5) | 2064 × 2752 |
+| iPad 13" | iPad Pro 13-inch (M5), landscape | 2752 × 2064 |
 
 Up to 10 per set. PNG or JPEG, with no alpha channel. Smaller devices are scaled from these.
 `LaunchReviewScreenshotsUITests` takes its shots on iPhone 17 Pro, so add the three
