@@ -30,6 +30,7 @@ smoke    SheepdogUITests/QuestionsUITests              # 16
 # iPad: about 367
 shard-1  SheepdogUITests/IPadUITests
 shard-1  SheepdogUITests/IPadRenderChurnUITests
+shard-1  SheepdogUITests/IPadCardLabelUITests
 shard-1  SheepdogUITests/IPadPortraitKeyboardUITests
 
 # about 495
@@ -57,6 +58,7 @@ shard-4  SheepdogUITests/FirstRunUITests               # 104
 shard-4  SheepdogUITests/WalkthroughUITests            # 101
 shard-4  SheepdogUITests/ChangesDemoUITests            # 77
 shard-4  SheepdogUITests/DemoUITests                   # 46
+shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2
