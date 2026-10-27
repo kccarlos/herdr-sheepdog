@@ -161,6 +161,15 @@ public struct AgentWindowState: Equatable, Sendable {
     /// Drags and taps go to herdr.
     public var acceptsPointer: Bool { (phase == .live || phase == .observing) && channelOpen }
 
+    /// Where a scroll's wheel lands: the middle of the grid. A TUI that
+    /// asked for the mouse (Codex, Claude Code) takes wheel events by cell
+    /// and ignores one outside its scrollable area; without a cell herdr
+    /// puts the wheel in the top-left corner (the header), so the TUI
+    /// never scrolls. herdr's own scrollback ignores the cell.
+    public var wheelCell: (col: Int, row: Int)? {
+        cols > 0 && rows > 0 ? (cols / 2, rows / 2) : nil
+    }
+
     // MARK: - Events
 
     /// The window appeared. `.no` goes straight to the snapshot; otherwise
