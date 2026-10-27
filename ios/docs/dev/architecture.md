@@ -15,7 +15,7 @@ accepted and built in phases (its section 6 says which are done).
 │              PinnedApprovalCard ── VoiceCapsule ── CapsuleComposer             │
 │  SettingsView ── ModelsView                  PushCoordinator (APNs)            │
 │        │                                                                      │
-│  SessionViewModel (@MainActor): adapts SessionCore, runs its effects          │
+│  SessionViewModel (@MainActor): orchestrates; VoiceEngine adapts SessionCore  │
 │        │                     │                    │                           │
 │  AudioEngine            VoiceSocket          DaemonClient                     │
 │  (AVAudioEngine,        (/ws)                (/api/*, /events)                │
@@ -1207,11 +1207,19 @@ chime through the audio session (`Haptics`).
 `SessionCore` (Kit) holds every decision the voice session makes, as a
 value: connecting and reconnecting, who owns mute, when the audio engine
 runs, hold-to-talk, playback, the thinking timeout, the background pause
-and the "paused by iOS" state. `SessionViewModel` only adapts it. Every
-callback (a tap, the socket, the event stream, the audio engine, the scene
-phase, the UI ticker) becomes a `SessionEvent`. `apply(_:now:)` updates the
-core and returns `[SessionEffect]`, and the view model runs those effects
-in order. `SessionCoreTests` pins the behaviour as event sequences with
+and the "paused by iOS" state. `VoiceEngine` (app target, `@Observable`)
+adapts it: it owns the core, the `AudioEngine`, the `/ws` `VoiceSocket` and
+the `VoiceMeter`, and publishes the orb, mute, talk mode, hold, the
+microphone modes and the one-time hints for the views (`model.voice`).
+Every callback (a tap, the socket, the event stream, the audio engine, the
+scene phase, the UI ticker) becomes a `SessionEvent`. `apply(_:now:)`
+updates the core and returns `[SessionEffect]`, and the engine runs those
+effects in order. Its host (`VoiceEngineHost`, today `SessionViewModel`)
+sees every effect first and runs the ones that are not the voice's: the
+probe (behind the AI consent gate), the conversation's lines, banners and
+refreshes, and the offline demo's on-device stand-ins. The socket's other
+traffic (transcripts, the agent window, cards) goes to the host too.
+`VoiceEngineTests` drive the engine with a host that runs every effect. `SessionCoreTests` pins the behaviour as event sequences with
 their exact effects.
 
 | Group | Fields |
@@ -1267,7 +1275,8 @@ voice providers), `NoticeModel` (banner, update and pairing notices),
 `LinkModel` (link presentation, address rows, stream life, handshake, hello),
 `NavigationModel` (pane, navigation path, Settings route, window request),
 `AgentsModel` (agents, open questions, opened cards, screen covers, shell
-offer) and `ConversationModel` (rows, paging, the typed line; views read
+offer), `ConversationModel` (rows, paging, the typed line) and
+`VoiceEngine` (the orb, mute, talk mode, hold, microphone modes, hints; views read
 them through the session, as in `model.settingsModel`), so anything the session itself announces
 re-renders every view that observes it. The rules that keep that cheap:
 

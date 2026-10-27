@@ -1517,11 +1517,28 @@ Order and dependencies:
     `@ObservationIgnored` on purpose. The typed line's logic and its
     idempotency attempt stay in `sendTyped`; the model holds the state the
     composer shows. Setters assign only on change.
+  - **Done: Voice.** `VoiceEngine` (`VoiceEngine.swift`, `@Observable`)
+    owns `SessionCore`, the `AudioEngine` (and with it the audio session),
+    the `/ws` `VoiceSocket`, the `VoiceMeter` and the ticker, and holds
+    `state`, `isMuted`, `talkMode`, `holding`, `noMicSignal`,
+    `wantsConnection`, the coach mark, the mute hint, both microphone
+    modes and the live provider; views read `model.voice`. The core, the
+    socket and the audio engine are `@ObservationIgnored`, and the audio
+    work stays where it was. The session is its `VoiceEngineHost`: it
+    sees every effect first (the demo's stand-ins, then the probe, the
+    conversation's lines, banners and refreshes) and gets the socket's
+    other traffic (transcripts, the agent window, cards, the push prompt),
+    so `conversationChanged` stays the one writer of `rows`. `connect()`
+    with its consent gate, `openSession`, the computer switch (end, move
+    `/ws`, connect again) and the demo stay in the session; the engine
+    attaches `/ws` to the computer the session makes current. The
+    publish order is unchanged: the mirrors, then `wantsConnection` (the
+    host updates the demands and the link presentation), the handshake,
+    `state` (its hints), and the Live Activity on every event. The tests
+    (`VoiceEngineTests`, in the Kit test bundle with `@testable import
+    Sheepdog`) drive the engine with a host that runs every effect, so no
+    microphone or socket is needed.
   - **Left, in order** (sizes S/M/L):
-    7. The voice leaves: `VoiceEngine` owns `state`, mute, talk mode,
-       hold, microphone modes, the coach mark, `wantsConnection` and the
-       audio session (L, the hard part: the audio path is Swift 5 and
-       its tests need a real engine).
     8. The approval card's `ApprovalFlow` phase becomes the model's
        per-question `phases` (M, hard: it changes who owns the answer
        key, see phase 7's left-for-later).

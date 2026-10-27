@@ -14,12 +14,11 @@ enum SettingsRoute: Hashable {
 
 /// Everything the main screen shows, in one place.
 ///
-/// It owns the socket, the audio engine, the event stream and the
-/// conversation. The session's decisions — connecting, reconnecting, mute,
-/// the audio lifecycle, hold-to-talk, what the orb says — are
-/// `SessionCore`'s: this adapts every callback into a `SessionEvent`, runs
-/// the `SessionEffect`s the core returns, and publishes what it derives.
-/// History, approvals, the provider picker and the hints are still here.
+/// It orchestrates the computers, the event stream and the conversation.
+/// The voice — the session core, the audio engine, `/ws`, the orb, mute,
+/// hold-to-talk and its hints — is `VoiceEngine`'s (`voice`); this is its
+/// host, running the effects that touch the conversation, banners and
+/// refreshes. History, approvals and the provider picker are still here.
 @MainActor
 final class SessionViewModel: ObservableObject {
     struct Banner: Identifiable, Equatable {
@@ -44,17 +43,14 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Published state
 
-    /// The orb, `SessionCore.sessionState` as of the last event.
-    /// `offerListeningHints()` reacts here, at the one place it changes.
-    @Published private(set) var state: SessionState = .disconnected {
-        didSet { if state != oldValue { offerListeningHints() } }
-    }
+    /// The voice: the session core, the audio engine, `/ws` and the meter,
+    /// with the orb, mute, talk mode, hold, the microphone modes and the
+    /// one-time hints the views read (`VoiceEngine`).
+    let voice: VoiceEngine
     /// The conversation's rows, paging and typed line.
     let conversationModel = ConversationModel()
     /// The approval card pinned above the controls, if a worker is asking.
     @Published private(set) var approval: ApprovalFlow.Card?
-    /// The one-time caption under the controls the first time Mute is used.
-    @Published private(set) var showMuteHint = false
     /// The agents, the open questions and the view state with them.
     let agentsModel = AgentsModel()
     /// The agents as the screen groups them: running (blocked, working,
@@ -75,12 +71,6 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello`. Four sources feed `resolvedVoiceProvider`; each tells the
     /// audio engine's jitter-buffer profile explicitly when it changes.
     let linkModel = LinkModel()
-    /// The input level, the audio metrics and the voice-detection
-    /// diagnostics: everything that changes 10–25 times a second while
-    /// audio is moving, split out so this object's own `@Published`
-    /// properties (and the views that only read those) stay quiet on every
-    /// tick. See `VoiceMeter`.
-    let meter = VoiceMeter()
     /// Can the app talk to the current computer right now, and if not, why
     /// and what it is doing about it: the computer's `ComputerLink`, run by
     /// `linkRuntime` (docs/dev/design/ios-state-architecture.md 3.2). The
@@ -117,29 +107,12 @@ final class SessionViewModel: ObservableObject {
     /// Settings, models and providers (the Settings and Health panes).
     let settingsModel = SettingsModel()
 
-    // Mirrors of `core`, published for the views (see `publish()`).
-    @Published private(set) var isMuted = false
-    @Published private(set) var talkMode: TalkMode = .openMic
-    /// Hold-to-talk: the orb is being held.
-    @Published private(set) var holding = false
-    /// The microphone delivers only digital zero while unmuted.
-    @Published private(set) var noMicSignal = false
     /// True from the moment Connect is tapped until Disconnect.
-    @Published private(set) var wantsConnection = false
+    var wantsConnection: Bool { voice.wantsConnection }
 
-    // Voice robustness: the coach mark, the microphone mode.
-    /// The first-run "just talk" coach mark.
-    @Published private(set) var showCoachMark = false
-    /// Control Center ▸ Mic Mode, as iOS reports it.
-    @Published private(set) var microphoneMode: MicrophoneModeName = .standard
-    @Published private(set) var preferredMicrophoneMode: MicrophoneModeName = .standard
-
-    /// From the `/ws` status message, `/api/state` and `/api/hello`.
-    @Published private(set) var liveVoiceProvider: String? {
-        didSet { audio.setProvider(resolvedVoiceProvider) }
-    }
+    /// From `/api/state` (the live `/ws` status is `voice.liveVoiceProvider`).
     @Published private(set) var stateVoiceProvider: String? {
-        didSet { audio.setProvider(resolvedVoiceProvider) }
+        didSet { voice.providerSourcesChanged() }
     }
     @Published private(set) var stateVoiceModel: String?
     /// Settings is the presentation on screen.
@@ -189,10 +162,10 @@ final class SessionViewModel: ObservableObject {
 
     /// The line above the voice bar: what to do, not only what is happening.
     var statusLine: String {
-        if demo != nil, state == .noMicrophone || state == .muted {
+        if demo != nil, voice.state == .noMicrophone || voice.state == .muted {
             return "Demo: tap a question above, or type"
         }
-        return VoiceBarModel.statusLine(state: state, talkMode: talkMode, holding: holding, noSignal: noMicSignal)
+        return VoiceBarModel.statusLine(state: voice.state, talkMode: voice.talkMode, holding: voice.holding, noSignal: voice.noMicSignal)
     }
 
     /// The voice provider id, from whichever source knows it right now: the
@@ -200,7 +173,7 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello` — in that order of freshness. One resolver instead of
     /// this fallback chain copied at each of its two call sites.
     private var resolvedVoiceProvider: String? {
-        liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? linkModel.hello?.voiceProvider
+        voice.liveVoiceProvider ?? settingsModel.voiceProviders?.provider ?? stateVoiceProvider ?? linkModel.hello?.voiceProvider
     }
 
     /// "Gemini Live · gemini-3.8-live", from whichever source knows.
@@ -243,8 +216,6 @@ final class SessionViewModel: ObservableObject {
     let endpoints = EndpointBook()
     /// The current computer's endpoint the session last attached to.
     private var attachedEndpoint: DaemonEndpoint?
-    private var socket: VoiceSocket
-    private let audio = AudioEngine()
     /// The Live Activity and the earbud remote (`AwayControls.swift`).
     let away = AwayControls()
     /// The conversation lives on the current computer's model
@@ -293,11 +264,7 @@ final class SessionViewModel: ObservableObject {
     /// does not hold back the new one's.
     private var syncingHistory: Set<String> = []
 
-    private var ticker: Task<Void, Never>?
     private(set) var appPhase: AppPhase = .active
-
-    /// The session's state and decisions. Fed only through `send(_:)`.
-    private var core: SessionCore
 
     /// Whether the person agreed to send their voice and words to AI
     /// services (`SessionViewModel+Consent.swift`).
@@ -313,10 +280,6 @@ final class SessionViewModel: ObservableObject {
         return false
     }
 
-    /// The core's clock: monotonic (uptime), as the reconnect quiet period
-    /// and the speaking hold always were.
-    private var now: Date { Date(timeIntervalSinceReferenceDate: ProcessInfo.processInfo.systemUptime) }
-
     init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard(), demo: DemoDaemon? = nil) {
         self.settings = settings
         self.cache = cache
@@ -326,14 +289,11 @@ final class SessionViewModel: ObservableObject {
         self.pathSource = pathSource
         fleet = ComputerFleet(path: pathSource.path)
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
-        self.socket = VoiceSocket(endpoint: endpoint)
-        self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
-        talkMode = settings.talkMode
+        voice = VoiceEngine(endpoint: endpoint, talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
         computerCount = settings.computers.count
-        if talkMode == .holdToTalk { audio.setManualGate(false) }
         #if DEBUG
         if DebugLaunch.resetHints || DebugLaunch.resetState {
-            for key in Self.hintKeys {
+            for key in VoiceEngine.hintKeys {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -351,15 +311,10 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         settingsModel.session = self
-        linkModel.onHelloChange = { [weak self] in
-            guard let self else { return }
-            audio.setProvider(resolvedVoiceProvider)
-        }
-        settingsModel.onVoiceProvidersChange = { [weak self] in
-            guard let self else { return }
-            audio.setProvider(resolvedVoiceProvider)
-        }
-        wire()
+        voice.resolveProvider = { [weak self] in self?.resolvedVoiceProvider }
+        linkModel.onHelloChange = { [weak self] in self?.voice.providerSourcesChanged() }
+        settingsModel.onVoiceProvidersChange = { [weak self] in self?.voice.providerSourcesChanged() }
+        voice.host = self
         // Every computer's runtime, made now (started in `start`), so the
         // cached conversation loads into the current one.
         syncFleet()
@@ -509,7 +464,7 @@ final class SessionViewModel: ObservableObject {
         attachedEndpoint = endpoint
         // The voice and the terminal follow the current computer, at the
         // address its link uses.
-        socket.update(endpoint: channelEndpoint(endpoint))
+        voice.update(endpoint: channelEndpoint(endpoint))
         if demo == nil {
             termHub.update(endpoint: channelEndpoint(endpoint))
             agentsModel.setShellOffered(nil)
@@ -539,7 +494,7 @@ final class SessionViewModel: ObservableObject {
             // What the new computer last said, at once.
             if let state = fleet.current?.lastState { apply(state) }
         }
-        if core.connection.wantsConnection {
+        if voice.core.connection.wantsConnection {
             disconnect()
             connect()
         }
@@ -560,7 +515,7 @@ final class SessionViewModel: ObservableObject {
             return
         }
         guard requireAIConsent(onAgree: { [weak self] in self?.connect() }) else { return }
-        socket.update(endpoint: channelEndpoint(endpoint))
+        voice.update(endpoint: channelEndpoint(endpoint))
         send(.connectTapped)
     }
 
@@ -600,7 +555,7 @@ final class SessionViewModel: ObservableObject {
             send(.probeFailed(.malformed(error.localizedDescription)))
             return
         }
-        guard core.connection.wantsConnection else { return }
+        guard voice.core.connection.wantsConnection else { return }
         // Why first, then the system prompt (only if the user goes on).
         let granted: Bool
         if AVAudioApplication.shared.recordPermission == .undetermined, !(await ask(.microphone)) {
@@ -644,14 +599,14 @@ final class SessionViewModel: ObservableObject {
 
     func disconnect() {
         send(.endTapped)
-        meter.setLevel(0)
+        voice.meter.setLevel(0)
     }
 
     /// A banner's Try again: the link tries now, and the voice starts over
     /// with a clean disconnect (if one is needed) and a fresh connect.
     func reconnect() {
         fleet.current?.retry()
-        if core.connection.wantsConnection { disconnect() }
+        if voice.core.connection.wantsConnection { disconnect() }
         connect()
     }
 
@@ -660,7 +615,7 @@ final class SessionViewModel: ObservableObject {
     /// starts over too; one that is off stays off.
     func retryLink() {
         fleet.current?.retry()
-        if core.connection.wantsConnection {
+        if voice.core.connection.wantsConnection {
             disconnect()
             connect()
         }
@@ -668,375 +623,22 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Controls
 
-    func toggleMute() {
-        let wasMuted = core.mic.muted
-        send(.muteTapped)
-        if !wasMuted, core.mic.muted { offerMuteHint() }
-    }
-
-    static let muteHint = "Mute stops your microphone; Sheepdog can still talk."
     /// The one-time caption in the bar's status line: the hint, short
     /// enough for two lines beside the orb.
     var muteCaption: String { "Mic off — \(voiceName) can still talk" }
-    private static let muteHintShownKey = "hint.mute.shown"
-    private static let coachShownKey = "hint.coach.shown"
-    private static let micTipShownKey = "hint.micmode.shown"
-    /// Every one-time hint, for `-sheepdogResetHints` / `-sheepdogResetState`.
-    static let hintKeys = [muteHintShownKey, coachShownKey, micTipShownKey]
-
-    // MARK: - Talk mode, hold to talk
 
     func setTalkMode(_ mode: TalkMode) {
-        guard mode != core.mic.talkMode else { return }
+        guard mode != voice.core.mic.talkMode else { return }
         settings.talkMode = mode
         send(.talkModeChanged(mode))
-    }
-
-    /// The orb went down in hold-to-talk. Talking over the voice stops it.
-    func pressToTalk() {
-        let wasHolding = core.mic.holding
-        send(.holdBegan)
-        #if DEBUG
-        if fakeVoice, !wasHolding, core.mic.holding { send(.simulatedGate(closed: false)) }
-        #endif
-    }
-
-    /// The orb came up: close the gate, the daemon hears the silence.
-    func releaseToTalk() {
-        let wasHolding = core.mic.holding
-        send(.holdEnded)
-        #if DEBUG
-        if fakeVoice, wasHolding, !core.mic.holding { send(.simulatedGate(closed: true)) }
-        #endif
-    }
-
-    // MARK: - Coach mark and the microphone-mode tip
-
-    /// Once per install, the first time the voice is actually listening:
-    /// "just talk". After that (the next time), the Voice Isolation tip.
-    private func offerListeningHints() {
-        guard core.mic.talkMode == .openMic, VoiceBarModel.isListening(state), core.connection.wantsConnection else { return }
-        let defaults = UserDefaults.standard
-        if !defaults.bool(forKey: Self.coachShownKey) {
-            guard !showCoachMark else { return }
-            defaults.set(true, forKey: Self.coachShownKey)
-            showCoachMark = true
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 9_000_000_000)
-                self?.dismissCoachMark()
-            }
-            return
-        }
-        guard !showCoachMark, notices.banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
-        refreshMicrophoneMode()
-        guard microphoneMode != .voiceIsolation else { return }
-        defaults.set(true, forKey: Self.micTipShownKey)
-        show(Banner(
-            tone: .info,
-            message: "Noisy room? Turn on Voice Isolation.",
-            hint: "iOS filters out the room before \(voiceName) hears it. It is in Control Center ▸ Mic Mode, or Settings ▸ Microphone mode.",
-            retryTitle: "Microphone mode",
-            action: .microphoneModes
-        ))
-    }
-
-    func dismissCoachMark() {
-        guard showCoachMark else { return }
-        showCoachMark = false
-    }
-
-    func refreshMicrophoneMode() {
-        let active = MicrophoneModeName(rawValue: AVCaptureDevice.activeMicrophoneMode.rawValue)
-        let preferred = MicrophoneModeName(rawValue: AVCaptureDevice.preferredMicrophoneMode.rawValue)
-        if active != microphoneMode { microphoneMode = active }
-        if preferred != preferredMicrophoneMode { preferredMicrophoneMode = preferred }
-    }
-
-    /// Control Center's Mic Mode panel, on top of the app.
-    func showMicrophoneModes() {
-        AVCaptureDevice.showSystemUserInterface(.microphoneModes)
     }
 
     /// The provider picker changed it (`SettingsModel`): the core learns it.
     func voiceProviderSelected(_ id: String?) { send(.providerSelected(id)) }
 
-    /// Once per install: what Mute does and does not do.
-    private func offerMuteHint() {
-        guard !UserDefaults.standard.bool(forKey: Self.muteHintShownKey) else { return }
-        UserDefaults.standard.set(true, forKey: Self.muteHintShownKey)
-        showMuteHint = true
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
-            self?.showMuteHint = false
-        }
-    }
-
-    func dismissMuteHint() {
-        showMuteHint = false
-    }
-
-    /// The Stop button: silence now, and ask the daemon to cancel. It
-    /// answers with a `flush`, which we also honour.
-    func stop() {
-        send(.stopTapped)
-    }
-
-    // MARK: - Wiring
-
-    private func wire() {
-        socket.onEvent = { [weak self] event in
-            self?.handle(socket: event)
-        }
-        audio.onFrame = { [weak self] frame in
-            self?.socket.send(frame: frame)
-        }
-        audio.onGate = { [weak self] closed in
-            self?.send(.gateChanged(closed: closed))
-        }
-        audio.onLevel = { [weak self] level in
-            self?.meter.setLevel(level)
-        }
-        audio.onOutputLevel = { [weak self] level in
-            self?.meter.setOutputLevel(level)
-        }
-        audio.onSpeakingChanged = { [weak self] speaking in
-            self?.send(.playbackChanged(speaking: speaking))
-        }
-        // What the player did, straight to the daemon (like the frames):
-        // "speaking" on the daemon means the user still hears it.
-        audio.onPlaybackReport = { [weak self] report in
-            self?.socket.send(report.message)
-        }
-        // Every dry ring, for diagnosing a marked pause: only to a daemon
-        // that takes it (an older one answers an unknown type with an error).
-        audio.onDrain = { [weak self] drain in
-            guard let self, self.feedbackSupported else { return }
-            self.socket.send(drain.message)
-        }
-        audio.onMicSignal = { [weak self] noSignal in
-            self?.send(.micSignal(ok: !noSignal))
-        }
-        audio.onStopped = { [weak self] message in
-            self?.send(.audioStopped(message))
-        }
-        audio.onPausedChanged = { [weak self] paused in
-            self?.send(.interruption(paused: paused))
-        }
-        audio.onNotice = { [weak self] notice in
-            guard let self else { return }
-            self.reducer.apply(.notice(notice))
-            self.conversationChanged()
-        }
-    }
-
-    private func handle(socket event: VoiceSocket.Event) {
-        switch event {
-        case .opened:
-            // The socket tells the link itself (its reporter is tagged with
-            // the computer and epoch it was opened for).
-            send(.socketOpened)
-            #if DEBUG
-            // The UI tests start configured; a permission alert would sit
-            // on top of everything they tap.
-            if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPush { break }
-            #endif
-            PushCoordinator.shared.sessionConnected()
-        case let .control(message):
-            handle(control: message)
-        case let .audio(data):
-            // Paused in the background: nothing plays, and nothing piles
-            // up to play stale on return.
-            guard core.acceptsPlayback else { break }
-            audio.enqueue(data)
-        case let .closed(reason, retrying):
-            screenStream.socketClosed()
-            cardVisibility.socketClosed()
-            // A lost socket has told the link, which probes once (to tell a
-            // restart from a refusal: a 401 on the upgrade is unreadable)
-            // and says when to open it again.
-            send(.socketClosed(reason: reason, willRetry: retrying))
-        case let .failed(error, retrying):
-            screenStream.socketClosed()
-            cardVisibility.socketClosed()
-            send(.socketFailed(error, willRetry: retrying))
-        case .paused:
-            // The link closed it (offline, no network, the background
-            // with Keep listening off); it reopens when the link allows.
-            screenStream.socketClosed()
-            cardVisibility.socketClosed()
-            send(.socketClosed(reason: "paused", willRetry: true))
-        case let .handshake(state):
-            send(.handshakeChanged(state))
-            if let message = state.mismatchMessage {
-                fleet.current?.send(.requestFailed(.incompatible(message)))
-            }
-            if let message = screenStream.handshake(state) { socket.send(message) }
-            if let message = cardVisibility.handshake(state) { socket.send(message) }
-        }
-    }
-
-    private func handle(control message: WSMessage) {
-        switch message.type {
-        case .status:
-            var message = message
-            #if DEBUG
-            if fakeVoice {
-                // Screenshots against a `--voice=off` daemon: pretend the
-                // live session is up, without touching the microphone.
-                message.voice = .connected
-                message.reason = nil
-            }
-            #endif
-            send(.status(message))
-        case .transcript:
-            guard let dir = message.dir, let text = message.text else { break }
-            reducer.apply(.transcript(dir, text: text, final: message.final ?? false))
-            conversationChanged()
-            if message.final == true { scheduleHistorySync() }
-        case .flush:
-            send(.flush)
-        case .error:
-            if let text = message.message { send(.daemonError(text)) }
-        case .screen, .screenError:
-            if let event = screenStream.receive(message), let pane = screenStream.paneID {
-                screenRouter.deliver(event, to: pane)
-            }
-        case .card:
-            if let card = message.card { receiveCard(card) }
-        case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
-             .screenSubscribe, .screenUnsubscribe, .visibility:
-            break
-        }
-    }
-
-    // MARK: - The core
-
-    /// Every session event goes through here: the core decides, then its
-    /// effects run in order, then the views get the result. Effects may
-    /// call back synchronously (`audio.setMuted` reports the gate), which
-    /// re-enters here — safe, since `apply` has returned by then.
+    /// Every session event, to the voice (`VoiceEngine.send`).
     private func send(_ event: SessionEvent) {
-        let effects = core.apply(event, now: now)
-        // What the socket says on every open.
-        socket.muted = core.connection.socketMuted
-        socket.gateClosed = core.connection.socketGateClosed
-        socket.speaking = core.connection.socketSpeaking
-        // The playback profile follows the provider before any effect runs.
-        if liveVoiceProvider != core.voice.provider { liveVoiceProvider = core.voice.provider }
-        for effect in effects { run(effect) }
-        publish()
-    }
-
-    private func run(_ effect: SessionEffect) {
-        if demo != nil, runDemo(effect) { return }
-        switch effect {
-        case .probe:
-            Task { await openSession() }
-        case .openSocket:
-            socket.connect()
-        case .closeSocket:
-            socket.disconnect()
-        case let .send(message):
-            socket.send(message)
-        case .startAudio:
-            startAudioIfNeeded()
-        case .stopAudio, .suspendAudio:
-            audio.stop()
-        case .resumeAudio:
-            do {
-                try audio.resume()
-            } catch {
-                send(.audioResumeFailed(error.localizedDescription))
-            }
-        case let .setCaptureMuted(muted):
-            audio.setMuted(muted)
-        case let .setManualGate(manual):
-            audio.setManualGate(manual)
-        case .flushPlayback:
-            audio.flushPlayback()
-        case .flushTranscript:
-            reducer.apply(.flush)
-            conversationChanged()
-        case .startTicker:
-            startTicking()
-        case .stopTicker:
-            ticker?.cancel(); ticker = nil
-        case let .showBanner(banner):
-            show(Banner(banner))
-        case .clearBanner:
-            notices.banner = nil
-        case let .notice(text):
-            reducer.apply(.notice(text))
-            conversationChanged()
-        case let .haptic(kind):
-            switch kind {
-            case .connected: Haptics.connected()
-            case .tap: Haptics.tap()
-            case .stop: Haptics.stop()
-            case .answerFailed: Haptics.answerFailed()
-            case .micLost: Haptics.warning()
-            }
-        case .refreshState:
-            refreshSoon()
-        case .syncHistory:
-            scheduleHistorySync()
-        case let .log(line):
-            switch line {
-            case let .reconnectRetry(message):
-                SheepdogLog.socket.info("reconnect attempt failed, retrying: \(message, privacy: .public)")
-            case let .muteDisagreement(daemonMuted, wanted):
-                SheepdogLog.session.error("daemon reports muted=\(daemonMuted, privacy: .public) but the app wants muted=\(wanted, privacy: .public); re-sending")
-            case .pausedInBackground:
-                SheepdogLog.session.info("paused in the background (keep listening when locked is off)")
-            case .resumedFromBackground:
-                SheepdogLog.session.info("resumed from the background")
-            }
-        }
-    }
-
-    /// The `startAudio` effect: the engine, unless it already runs.
-    private func startAudioIfNeeded() {
-        guard !audio.isRunning else { return }
-        #if DEBUG
-        if fakeVoice {
-            send(.simulatedGate(closed: core.mic.talkMode == .holdToTalk))
-            return
-        }
-        #endif
-        do {
-            try audio.start()
-            meter.setMetrics(audio.metrics)
-            send(.audioStarted(gateClosed: audio.gateIsClosed))
-        } catch {
-            send(.audioStartFailed((error as? LocalizedError)?.errorDescription ?? "The microphone would not start."))
-        }
-    }
-
-    /// The core's derived values, for the views. Assigned only on change,
-    /// so a quiet event does not re-render anything.
-    private func publish() {
-        if isMuted != core.mic.muted { isMuted = core.mic.muted }
-        if talkMode != core.mic.talkMode { talkMode = core.mic.talkMode }
-        if holding != core.mic.holding { holding = core.mic.holding }
-        if noMicSignal != core.mic.noSignal { noMicSignal = core.mic.noSignal }
-        if wantsConnection != core.connection.wantsConnection {
-            wantsConnection = core.connection.wantsConnection
-            // The voice keeps the link up in the background (Keep
-            // listening), and Settings says "Talking here".
-            // The voice keeps the current computer's link up in the
-            // background, and the others back off further while it is on.
-            updateDemands()
-            presentLink()
-        }
-        if linkModel.handshake != core.connection.handshake {
-            linkModel.setHandshake(core.connection.handshake)
-            // The features are learned per computer, so a window opened
-            // while the voice is off still knows about `term`.
-            if case let .ready(_, _, features) = linkModel.handshake { fleet.current?.features = features }
-        }
-        let next = core.sessionState
-        if next != state { state = next }
-        syncAway()
+        voice.send(event)
     }
 
     // MARK: - Away from the screen
@@ -1054,13 +656,13 @@ final class SessionViewModel: ObservableObject {
         #endif
         let activityState = wantsConnection
             ? LiveActivityContent.make(
-                state: state,
-                muted: isMuted,
+                state: voice.state,
+                muted: voice.isMuted,
                 agents: agentsModel.agents,
                 questions: agentsModel.questions,
                 computer: showsComputerLabels ? currentComputerName : nil,
                 others: otherSnapshots,
-                suspendedInBackground: core.suspension.backgroundSuspended
+                suspendedInBackground: voice.core.suspension.backgroundSuspended
             )
             : nil
         away.sync(activityState, voiceName: voiceName)
@@ -1097,16 +699,16 @@ final class SessionViewModel: ObservableObject {
     }
 
     func handle(route: AppRoute) {
-        for action in route.actions(wantsConnection: wantsConnection, muted: isMuted) {
+        for action in route.actions(wantsConnection: wantsConnection, muted: voice.isMuted) {
             switch action {
             case .showConversation:
                 navigation.pane = .conversation
             case .connect:
                 connect()
             case .toggleMute:
-                toggleMute()
+                voice.toggleMute()
             case .stop:
-                stop()
+                voice.stop()
             case .disconnect:
                 disconnect()
             case let .openAgent(id):
@@ -1169,7 +771,7 @@ final class SessionViewModel: ObservableObject {
         updateDemands()
         // The voice's `/ws` and the terminal's `/term` are the current
         // computer's channels: its link alone opens and reopens them.
-        current?.attach(.ws, socket)
+        voice.attach(to: current)
         current?.attach(.term, termHub)
         guard let model = current else {
             linkChanged(ComputerLink(addresses: []))
@@ -1216,7 +818,7 @@ final class SessionViewModel: ObservableObject {
         model.onStreamOpening = nil
         model.onLiveUpdates = nil
         model.eventsSince = nil
-        model.attach(.ws, nil)
+        voice.detach(from: model)
         model.attach(.term, nil)
     }
 
@@ -1338,9 +940,6 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// True while the microphone or the player is doing something.
-    private var audioIsBusy: Bool { audio.isRunning || core.playbackBusy }
-
     private var pendingRefresh: Task<Void, Never>?
 
     /// Debounced `/api/state` fetch: many events describe one change.
@@ -1351,34 +950,6 @@ final class SessionViewModel: ObservableObject {
             guard let self else { return }
             self.pendingRefresh = nil
             await self.refreshState(quiet: true)
-        }
-    }
-
-    /// One timer drives the playback release, the metrics and the thinking
-    /// timeout, so a missed event cannot leave the orb stuck. It runs fast
-    /// only while audio is actually moving; idle (or with the daemon's voice
-    /// off) it ticks once a second and leaves the CPU alone.
-    private func startTicking() {
-        ticker?.cancel()
-        ticker = Task { [weak self] in
-            while !Task.isCancelled {
-                let busy = self?.audioIsBusy ?? false
-                try? await Task.sleep(nanoseconds: busy ? 100_000_000 : 1_000_000_000)
-                guard let self, !Task.isCancelled, self.core.connection.wantsConnection else { return }
-                self.audio.tick()
-                let metrics = self.audio.metrics
-                self.meter.setMetrics(metrics)
-                self.socket.gatedFrames = self.audio.gatedFrames
-                self.socket.inputPeak = self.audio.inputPeak
-                self.socket.underruns = metrics.underruns
-                self.socket.drains = metrics.drains
-                self.socket.bufferMs = metrics.bufferedMilliseconds
-                self.socket.rate = metrics.playbackRate
-                self.socket.stretchedMs = metrics.stretchedMilliseconds
-                self.socket.audioState = self.audio.audioState
-                self.updateDiagnostics()
-                self.send(.tick)
-            }
         }
     }
 
@@ -1606,7 +1177,7 @@ final class SessionViewModel: ObservableObject {
             typedAttempt = nil
             conversationModel.typedLineSent()
             Haptics.tap()
-            if !core.connection.wantsConnection {
+            if !voice.core.connection.wantsConnection {
                 // No event stream: the daemon has logged it by now.
                 await syncHistory()
                 await backfillActivity()
@@ -1630,12 +1201,12 @@ final class SessionViewModel: ObservableObject {
     /// `AgentScreenView` opened `paneID`'s window: stream it over `/ws`
     /// when the daemon can (`AgentScreenStream`).
     func openAgentScreen(paneID: String) {
-        if let message = screenStream.open(paneID: paneID) { socket.send(message) }
+        if let message = screenStream.open(paneID: paneID) { voice.send(message: message) }
     }
 
     /// The window closed: stop its stream.
     func closeAgentScreen(paneID: String) {
-        if let message = screenStream.close(paneID: paneID) { socket.send(message) }
+        if let message = screenStream.close(paneID: paneID) { voice.send(message: message) }
     }
 
     /// Whether `paneID`'s window is pushed over `/ws` (else the view polls).
@@ -1871,7 +1442,7 @@ final class SessionViewModel: ObservableObject {
         screenVisible = visible
         voiceScreenInFront = voiceScreen
         if demo == nil, let message = cardVisibility.update(visible: visible, voiceScreen: voiceScreen) {
-            socket.send(message)
+            voice.send(message: message)
         }
     }
 
@@ -1987,7 +1558,7 @@ final class SessionViewModel: ObservableObject {
             await self.refreshState(quiet: true)
             // Without the event stream (not connected), the answered
             // approval item comes from the server.
-            if !self.core.connection.wantsConnection { await self.syncHistory() }
+            if !self.voice.core.connection.wantsConnection { await self.syncHistory() }
         }
     }
 
@@ -2077,38 +1648,11 @@ final class SessionViewModel: ObservableObject {
             retry()
         case .microphoneModes:
             notices.banner = nil
-            showMicrophoneModes()
+            voice.showMicrophoneModes()
         }
     }
 
     // MARK: - Diagnostics
-
-    private func updateDiagnostics() {
-        #if DEBUG
-        if fakeVoice {
-            fakeTick()
-            return
-        }
-        #endif
-        meter.setGateDiagnostics(audio.gateDiagnostics)
-        if core.mic.noSignal != audio.noSignal, !audio.isRunning { send(.micSignal(ok: true)) }
-        refreshMicrophoneMode()
-    }
-
-    #if DEBUG
-    /// `-sheepdogFakeVoice`: the voice states without a live session or a
-    /// microphone, for screenshots and UI tests against `--voice=off`.
-    let fakeVoice = DebugLaunch.fakeVoice
-    private var fakeVoiceDriver = FakeVoiceDriver()
-
-    private func fakeTick() {
-        guard core.connection.wantsConnection, core.voice.status == .connected else { return }
-        let (level, diagnostics) = fakeVoiceDriver.tick(talkMode: core.mic.talkMode, holding: core.mic.holding, isMuted: core.mic.muted)
-        meter.setLevel(level)
-        meter.setGateDiagnostics(diagnostics)
-        refreshMicrophoneMode()
-    }
-    #endif
 
     // MARK: - Connection chip popover
 
@@ -2226,7 +1770,7 @@ final class SessionViewModel: ObservableObject {
         voice.onListenerFailed = { [weak self] message in self?.send(.audioStartFailed(message)) }
         demoVoice = voice
         demo.onLines = { [weak self] lines in
-            guard let self, self.core.connection.wantsConnection else { return }
+            guard let self, self.voice.core.connection.wantsConnection else { return }
             for line in lines { voice.say(line.text) }
         }
         demo.start()
@@ -2243,10 +1787,10 @@ final class SessionViewModel: ObservableObject {
     /// and the microphone now (once), then listen; if the person says no,
     /// the mic goes back off and questions stay by tap or typing.
     private func demoListenOnFirstUse() {
-        guard let voice = demoVoice, !voice.listening, !voice.asking else { return }
+        guard let speaker = demoVoice, !speaker.listening, !speaker.asking else { return }
         Task {
-            guard let granted = await voice.listenOnFirstUse() else { return }
-            if !granted, !core.mic.muted { send(.muteTapped) }
+            guard let granted = await speaker.listenOnFirstUse() else { return }
+            if !granted, !voice.core.mic.muted { send(.muteTapped) }
         }
     }
 
@@ -2263,14 +1807,14 @@ final class SessionViewModel: ObservableObject {
                     send(.probeFailed(.malformed(error.localizedDescription)))
                     return
                 }
-                guard core.connection.wantsConnection else { return }
+                guard voice.core.connection.wantsConnection else { return }
                 // No permission prompt here: the demo asks when the person
                 // first taps the microphone (`demoListenOnFirstUse`).
                 send(.probeSucceeded(micGranted: !demoSilent))
             }
         case .openSocket:
             send(.socketOpened)
-            handle(control: WSMessage(type: .status, voice: .connected, muted: core.mic.muted))
+            voice.receive(control: WSMessage(type: .status, voice: .connected, muted: voice.core.mic.muted))
         case .closeSocket:
             demoVoice?.stop()
             send(.socketClosed(reason: "demo ended", willRetry: false))
@@ -2284,7 +1828,7 @@ final class SessionViewModel: ObservableObject {
                 let allowed = DemoVoice.listeningAllowed
                 if allowed { try demoVoice?.startListening() }
                 send(.audioStarted(gateClosed: true))
-                if !allowed, demoVoice != nil, !core.mic.muted { send(.muteTapped) }
+                if !allowed, demoVoice != nil, !voice.core.mic.muted { send(.muteTapped) }
             } catch {
                 send(.audioStartFailed(error.localizedDescription))
             }
@@ -2422,7 +1966,7 @@ final class SessionViewModel: ObservableObject {
         if store.count == 0 { settings.hasBeenConfigured = false }
         computersChanged()
         if wasCurrent {
-            if core.connection.wantsConnection { disconnect() }
+            if voice.core.connection.wantsConnection { disconnect() }
             endpointChanged()
             if store.count == 0 { showFirstRunIfNeeded() }
         }
@@ -2505,6 +2049,119 @@ final class SessionViewModel: ObservableObject {
         } catch {
             return Probe(ok: false, title: "Could not reach \(endpoint.display).", lines: [SetupHelp.unreachableFix], help: SetupHelp.remoteAccessURL)
         }
+    }
+}
+
+// MARK: - The voice's host
+
+/// What the voice hands back (`VoiceEngineHost`): the probe, the
+/// conversation, banners and refreshes, and what else rides `/ws`.
+extension SessionViewModel: VoiceEngineHost {
+    /// The core's effects that are not the voice's own; the demo's
+    /// on-device stand-ins come first.
+    func voiceEngine(_ engine: VoiceEngine, run effect: SessionEffect) -> Bool {
+        if demo != nil, runDemo(effect) { return true }
+        switch effect {
+        case .probe:
+            Task { await openSession() }
+        case .flushTranscript:
+            reducer.apply(.flush)
+            conversationChanged()
+        case let .showBanner(banner):
+            show(Banner(banner))
+        case .clearBanner:
+            notices.banner = nil
+        case let .notice(text):
+            reducer.apply(.notice(text))
+            conversationChanged()
+        case .refreshState:
+            refreshSoon()
+        case .syncHistory:
+            scheduleHistorySync()
+        default:
+            return false
+        }
+        return true
+    }
+
+    func voiceEngineWantsConnectionChanged(_ engine: VoiceEngine) {
+        // The voice keeps the current computer's link up in the
+        // background (Keep listening), the others back off further while
+        // it is on, and Settings says "Talking here".
+        updateDemands()
+        presentLink()
+    }
+
+    func voiceEngine(_ engine: VoiceEngine, handshakeChanged handshake: ProtocolHandshake.State) {
+        guard linkModel.handshake != handshake else { return }
+        linkModel.setHandshake(handshake)
+        // The features are learned per computer, so a window opened
+        // while the voice is off still knows about `term`.
+        if case let .ready(_, _, features) = linkModel.handshake { fleet.current?.features = features }
+    }
+
+    func voiceEngineDidPublish(_ engine: VoiceEngine) {
+        syncAway()
+    }
+
+    func voiceEngine(_ engine: VoiceEngine, socket event: VoiceSocket.Event) {
+        switch event {
+        case .opened:
+            #if DEBUG
+            // The UI tests start configured; a permission alert would sit
+            // on top of everything they tap.
+            if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPush { return }
+            #endif
+            PushCoordinator.shared.sessionConnected()
+        case .closed, .failed, .paused:
+            screenStream.socketClosed()
+            cardVisibility.socketClosed()
+        case let .handshake(state):
+            if let message = state.mismatchMessage {
+                fleet.current?.send(.requestFailed(.incompatible(message)))
+            }
+            if let message = screenStream.handshake(state) { engine.send(message: message) }
+            if let message = cardVisibility.handshake(state) { engine.send(message: message) }
+        case .control, .audio:
+            break
+        }
+    }
+
+    func voiceEngine(_ engine: VoiceEngine, control message: WSMessage) {
+        switch message.type {
+        case .transcript:
+            guard let dir = message.dir, let text = message.text else { break }
+            reducer.apply(.transcript(dir, text: text, final: message.final ?? false))
+            conversationChanged()
+            if message.final == true { scheduleHistorySync() }
+        case .screen, .screenError:
+            if let event = screenStream.receive(message), let pane = screenStream.paneID {
+                screenRouter.deliver(event, to: pane)
+            }
+        case .card:
+            if let card = message.card { receiveCard(card) }
+        default:
+            break
+        }
+    }
+
+    func voiceEngine(_ engine: VoiceEngine, notice: String) {
+        reducer.apply(.notice(notice))
+        conversationChanged()
+    }
+
+    var voiceEngineSendsDrains: Bool { feedbackSupported }
+
+    var voiceEngineCanShowTip: Bool { notices.banner == nil }
+
+    func voiceEngineShowMicrophoneTip(_ engine: VoiceEngine) {
+        show(Banner(
+            tone: .info,
+            message: "Noisy room? Turn on Voice Isolation.",
+            hint: "iOS filters out the room before \(voiceName) hears it. It is in Control Center ▸ Mic Mode, or Settings ▸ Microphone mode.",
+            retryTitle: "Microphone mode",
+            action: .microphoneModes
+        ))
     }
 }
 

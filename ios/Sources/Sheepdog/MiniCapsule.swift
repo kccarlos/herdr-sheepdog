@@ -13,10 +13,10 @@ struct MiniCapsule: View {
     @EnvironmentObject private var model: SessionViewModel
 
     private var mode: CapsuleMode {
-        CapsuleMode.resolve(state: model.state, talkMode: model.talkMode, holding: model.holding, questionOpen: !model.openQuestionIDs.isEmpty)
+        CapsuleMode.resolve(state: model.voice.state, talkMode: model.voice.talkMode, holding: model.voice.holding, questionOpen: !model.openQuestionIDs.isEmpty)
     }
 
-    private var bar: VoiceBarModel { VoiceBarModel(state: model.state, talkMode: model.talkMode) }
+    private var bar: VoiceBarModel { VoiceBarModel(state: model.voice.state, talkMode: model.voice.talkMode) }
 
     /// Listening (or muted): the orb is Mute. Otherwise the big orb's own
     /// action.
@@ -30,7 +30,7 @@ struct MiniCapsule: View {
     var body: some View {
         HStack(spacing: 6) {
             Button(action: tapOrb) {
-                MeteredOrb(meter: model.meter, mode: mode, size: 30)
+                MeteredOrb(meter: model.voice.meter, mode: mode, size: 30)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
@@ -79,12 +79,12 @@ struct MiniCapsule: View {
 
     private func tapOrb() {
         if orbMutes {
-            model.toggleMute()
+            model.voice.toggleMute()
             return
         }
         switch bar.orbAction {
         case .connect: model.connect()
-        case .stop: model.stop()
+        case .stop: model.voice.stop()
         case .resume: model.resumeAudio()
         case .holdToTalk, .none: break
         }
@@ -92,13 +92,13 @@ struct MiniCapsule: View {
 
     private var orbLabel: String {
         if orbMutes {
-            return model.isMuted ? "\(model.voiceName) is muted. Unmute" : "\(model.voiceName) is listening. Mute"
+            return model.voice.isMuted ? "\(model.voiceName) is muted. Unmute" : "\(model.voiceName) is listening. Mute"
         }
         switch mode {
         case .offline: return "Connect"
         case .speaking, .thinking, .stalled: return "Stop \(model.voiceName)"
         case .paused: return "Resume audio"
-        default: return model.state.accessibilityLabel(voiceName: model.voiceName)
+        default: return model.voice.state.accessibilityLabel(voiceName: model.voiceName)
         }
     }
 }

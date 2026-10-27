@@ -52,9 +52,9 @@ struct MainView: View {
                 scenes.request(from: sceneID)
                 model.presentation.present(.newAgent)
             } : nil,
-            toggleMute: VoiceBarModel(state: model.state, talkMode: model.talkMode).muteAvailability == .enabled
-                ? { model.toggleMute() } : nil,
-            muted: model.isMuted,
+            toggleMute: VoiceBarModel(state: model.voice.state, talkMode: model.voice.talkMode).muteAvailability == .enabled
+                ? { model.voice.toggleMute() } : nil,
+            muted: model.voice.isMuted,
             agents: SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]).agents,
             openAgent: { open(.agent($0)) },
             talkToNext: model.showsComputerLabels ? { model.talkToNext() } : nil
@@ -167,8 +167,8 @@ struct PhoneRootView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
             .animation(Theme.ease, value: model.notices.banner)
             .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
-            .animation(Theme.ease, value: model.showMuteHint)
-            .animation(Theme.ease, value: model.showCoachMark)
+            .animation(Theme.ease, value: model.voice.showMuteHint)
+            .animation(Theme.ease, value: model.voice.showCoachMark)
             .animation(Theme.ease, value: model.navigation.pane)
             .toolbar(.hidden, for: .navigationBar)
             .navigationTitle(model.voiceName)
@@ -214,9 +214,9 @@ struct PhoneRootView: View {
             }
 
             if scenes.isOwner(sceneID) {
-                if model.showCoachMark {
+                if model.voice.showCoachMark {
                     CoachMarkView(text: VoiceBarModel.coachMark(voiceName: model.voiceName)) {
-                        model.dismissCoachMark()
+                        model.voice.dismissCoachMark()
                     }
                     .padding(.horizontal, 4)
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -351,27 +351,27 @@ struct SessionCapsule: View {
 
     var body: some View {
         VoiceCapsule(
-            state: model.state,
-            meter: model.meter,
-            muted: model.isMuted,
+            state: model.voice.state,
+            meter: model.voice.meter,
+            muted: model.voice.isMuted,
             name: model.capsuleName,
-            talkMode: model.talkMode,
-            holding: model.holding,
-            noSignal: model.noMicSignal,
+            talkMode: model.voice.talkMode,
+            holding: model.voice.holding,
+            noSignal: model.voice.noMicSignal,
             // One accent per screen: any open question quiets the orb.
             questionOpen: !model.openQuestionIDs.isEmpty,
             // The one-time Mute caption takes the status line's place.
-            statusText: model.showMuteHint ? model.muteCaption : model.statusLine,
+            statusText: model.voice.showMuteHint ? model.muteCaption : model.statusLine,
             canType: model.isConfigured,
             onConnect: { model.connect() },
-            onStop: { model.stop() },
+            onStop: { model.voice.stop() },
             onMute: {
-                model.dismissCoachMark()
-                model.toggleMute()
+                model.voice.dismissCoachMark()
+                model.voice.toggleMute()
             },
             onResume: { model.resumeAudio() },
-            onPress: { model.pressToTalk() },
-            onRelease: { model.releaseToTalk() },
+            onPress: { model.voice.pressToTalk() },
+            onRelease: { model.voice.releaseToTalk() },
             onType: {
                 if let onType {
                     onType()
@@ -433,7 +433,7 @@ struct SessionMenus {
                 // "Connecting…"), but backing off: not picked either.
                 .init(id: computer.id, name: computer.name, isCurrent: computer.isCurrent, offline: !computer.canTalkTo, summary: computer.summary())
             } : [],
-            wantsConnection: model.wantsConnection,
+            wantsConnection: model.voice.wantsConnection,
             isConfigured: model.isConfigured
         )
     }
@@ -523,7 +523,7 @@ struct SessionMenus {
             shellShown: model.shellEntryShown,
             resetSupported: model.conversationResetSupported,
             voiceName: model.voiceName,
-            wantsConnection: model.wantsConnection
+            wantsConnection: model.voice.wantsConnection
         )
     }
 
@@ -554,7 +554,7 @@ struct SessionMenus {
         // The orb stops the voice while it talks; this is the same
         // Stop, reachable whatever the orb is doing.
         Button {
-            model.stop()
+            model.voice.stop()
         } label: {
             Label("Stop \(value.voiceName)", systemImage: "stop.circle")
         }
@@ -667,7 +667,7 @@ struct SessionChrome: ViewModifier {
     private func presented(_ item: Presentation) -> some View {
         switch item {
         case .settings:
-            SettingsView(meter: model.meter)
+            SettingsView(meter: model.voice.meter)
                 .environmentObject(model)
                 // A form sheet on iPad; the iPhone ignores it.
                 .presentationSizing(.form)

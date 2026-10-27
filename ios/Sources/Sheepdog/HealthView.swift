@@ -75,7 +75,7 @@ struct HealthView: View {
     @ViewBuilder
     private var modelsSection: some View {
         Section {
-            LabeledContent("Status", value: model.state.title)
+            LabeledContent("Status", value: model.voice.state.title)
             LabeledContent("Voice", value: model.voiceProviderDisplay ?? "—")
                 .accessibilityIdentifier("health.voiceModel")
             LabeledContent("Orchestrator", value: model.brainDisplay ?? "—")
