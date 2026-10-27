@@ -1275,6 +1275,15 @@ final class SessionViewModel: ObservableObject {
         // `/events`, and every open syncs the history.
     }
 
+    /// What the Agents pane shows when it has no agents, from the link.
+    /// `link` itself is not observable, so the view re-renders on the
+    /// presentation, which `presentLink` updates whenever the link's state
+    /// moves; reading it here is what registers that dependency.
+    var flockPaneState: FlockPaneState {
+        _ = linkModel.presentation
+        return FlockPaneState.resolve(link: link, hasAgents: !flock.isEmpty)
+    }
+
     private func presentLink() {
         let presented = LinkPresentation(link, name: showsComputerLabels ? currentComputerName : nil, voiceOn: wantsConnection)
         linkModel.setPresentation(presented)
@@ -2552,7 +2561,11 @@ extension SessionViewModel {
 
     /// The address the current computer's link uses now, else the
     /// preferred one (Settings' header).
-    var addressInUse: String { link.onlineAddress ?? settings.address }
+    /// Reads the presentation so a view re-renders when the link moves.
+    var addressInUse: String {
+        _ = linkModel.presentation
+        return link.onlineAddress ?? settings.address
+    }
 
     /// Checks a typed address by the computer's pin and, when it answers
     /// with the computer's key, keeps it (a router's port forward). The link

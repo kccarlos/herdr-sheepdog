@@ -103,7 +103,7 @@ struct PhoneRootView: View {
     private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
     private var paneState: FlockPaneState {
-        FlockPaneState.resolve(link: model.link, hasAgents: !model.flock.isEmpty)
+        model.flockPaneState
     }
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }

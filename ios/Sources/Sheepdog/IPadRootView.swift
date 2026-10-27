@@ -100,7 +100,7 @@ struct IPadSidebar: View {
     }
 
     private var paneState: FlockPaneState {
-        FlockPaneState.resolve(link: model.link, hasAgents: !model.flock.isEmpty)
+        model.flockPaneState
     }
 
     var body: some View {
