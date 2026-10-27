@@ -34,6 +34,13 @@ final class FakeComputerNetwork: @unchecked Sendable {
         set { lock.withLock { _questions = newValue } }
     }
     private var _questions: [String: [PendingAction]] = [:]
+    /// The id of the question each address reports as the voice's own
+    /// (`pending_action`).
+    var voiceQuestion: [String: String] {
+        get { lock.withLock { _voiceQuestion } }
+        set { lock.withLock { _voiceQuestion = newValue } }
+    }
+    private var _voiceQuestion: [String: String] = [:]
 
     func setMode(_ mode: Mode, for address: String) { lock.withLock { _mode[address] = mode } }
     func setFailure(_ error: Error?, for address: String) { lock.withLock { _failure[address] = error } }
@@ -50,8 +57,11 @@ final class FakeComputerNetwork: @unchecked Sendable {
     /// the address and the generation, so a reply that landed on the wrong
     /// model, or from an older pairing, is visible.
     func state(_ address: String, generation: Int) -> DaemonState {
-        DaemonState(agents: [Agent(paneID: "\(address):p1", alias: "\(address)#\(generation)", state: .blocked)],
-                    questions: questions[address] ?? [],
+        let questions = questions[address] ?? []
+        let voice = voiceQuestion[address].flatMap { id in questions.first { $0.id == id } }
+        return DaemonState(agents: [Agent(paneID: "\(address):p1", alias: "\(address)#\(generation)", state: .blocked)],
+                    pendingAction: voice,
+                    questions: questions,
                     voice: .init(mode: "live", status: "idle"))
     }
 
@@ -297,6 +307,171 @@ final class ComputerRuntimeTests: XCTestCase {
         XCTAssertEqual(feedback, [.tapped, .failed])
     }
 
+    // MARK: - One phase per question, every surface
+
+    func voiceQuestion(_ id: String, pane: String) -> PendingAction {
+        PendingAction(id: id, paneID: pane, kind: "answer_prompt", question: "Go?", options: [PendingOption(index: 1, label: "Yes"), PendingOption(index: 2, label: "No")])
+    }
+
+    /// A model online with the voice's question `q1` pinned.
+    func modelWithVoiceQuestion() async -> ComputerModel {
+        network.questions["home"] = [voiceQuestion("q1", pane: "home:p1")]
+        network.voiceQuestion["home"] = "q1"
+        let home = makeModel("home")
+        home.start()
+        await eventually("pinned") { home.approval?.pending.id == "q1" }
+        return home
+    }
+
+    func testTheVoiceCardAndTheQuestionCardsReadOnePhase() async throws {
+        let home = await modelWithVoiceQuestion()
+        var feedback: [ComputerModel.AnswerFeedback] = []
+        home.onAnswerFeedback = { feedback.append($0) }
+        network.setMode(.hang, for: "home")
+        // Tapped on the agent's card: the voice's card shows it too.
+        XCTAssertNotNil(home.answer(question: "q1", option: 1))
+        if case .sending = home.approval?.phase {} else { XCTFail("the voice's card is sending: \(String(describing: home.approval))") }
+        XCTAssertEqual(home.phase("q1"), home.approval?.phase)
+        // The voice's card tapped meanwhile: ignored, one request.
+        XCTAssertNil(home.answer(home.approval!.pending, option: 2))
+        await eventually("sent") { self.network.pending.contains { $0.kind == .answer("q1") } }
+        // The refresh after the answer answers at once.
+        network.setMode(.answer, for: "home")
+        network.resolve(network.pending.first { $0.kind == .answer("q1") }!.id)
+        await eventually("answered") { home.approval?.isSettled == true }
+        XCTAssertEqual(home.approval?.phase, .answered(outcome: "You approved — Yes · by tap", spoken: "home#0:q1"))
+        XCTAssertEqual(network.answerCalls("home"), 1)
+        XCTAssertEqual(feedback, [.tapped, .answered])
+    }
+
+    func testASettledVoiceCardLingersAndANewQuestionReplacesIt() async {
+        let home = await modelWithVoiceQuestion()
+        home.questionResolved("q1", as: .confirmed, answer: "Yes", via: "voice")
+        XCTAssertEqual(home.approval?.phase, .answered(outcome: "You approved — Yes · by voice", spoken: nil), "approved by voice")
+        // The next state no longer has it: the settled card keeps its moment.
+        network.questions["home"] = []
+        network.voiceQuestion["home"] = nil
+        await home.refresh()
+        XCTAssertEqual(home.approval?.pending.id, "q1")
+        clock.advance(ComputerModel.settledCardLinger - 0.1)
+        XCTAssertEqual(home.approval?.pending.id, "q1")
+        clock.advance(0.2)
+        XCTAssertNil(home.approval, "then it goes")
+        // A new question replaces a settled card at once.
+        network.questions["home"] = [voiceQuestion("q2", pane: "home:p1")]
+        network.voiceQuestion["home"] = "q2"
+        await home.refresh()
+        home.questionResolved("q2", as: .confirmed, answer: "Yes", via: "voice")
+        network.questions["home"] = [voiceQuestion("q3", pane: "home:p1")]
+        network.voiceQuestion["home"] = "q3"
+        home.questionCreated(voiceQuestion("q3", pane: "home:p1"))
+        XCTAssertEqual(home.approval?.pending.id, "q3")
+        XCTAssertEqual(home.approval?.phase, .open(error: nil))
+        clock.advance(ComputerModel.settledCardLinger + 0.1)
+        XCTAssertEqual(home.approval?.pending.id, "q3", "the old card's linger does not dismiss the new one")
+    }
+
+    func testANotificationAnswerShowsOnEveryCardAndATapJoinsIt() async throws {
+        let home = await modelWithVoiceQuestion()
+        var feedback: [ComputerModel.AnswerFeedback] = []
+        home.onAnswerFeedback = { feedback.append($0) }
+        network.setMode(.hang, for: "home")
+        let fromNotification = Task { try await home.answerFromNotification(question: "q1", option: PendingOption(index: 1, label: "Yes")) }
+        await eventually("sent") { self.network.pending.contains { $0.kind == .answer("q1") } }
+        if case .sending = home.approval?.phase {} else { XCTFail("the card shows the notification's answer on its way") }
+        // A tap on the card meanwhile is ignored; a second notification
+        // action joins.
+        XCTAssertNil(home.answer(home.approval!.pending, option: 1))
+        let second = Task { try await home.answerFromNotification(question: "q1", option: PendingOption(index: 1, label: "Yes")) }
+        await settle()
+        // The refresh after the answer answers at once.
+        network.setMode(.answer, for: "home")
+        network.resolve(network.pending.first { $0.kind == .answer("q1") }!.id)
+        let first = try await fromNotification.value
+        let joined = try await second.value
+        XCTAssertEqual(first, "home#0:q1")
+        XCTAssertEqual(joined, first, "the second answer got the first one's reply")
+        XCTAssertEqual(network.answerCalls("home"), 1)
+        XCTAssertEqual(home.approval?.isSettled, true)
+        XCTAssertEqual(feedback, [], "a notification answer plays no haptics")
+    }
+
+    func testATapJoinedByANotificationWhileInFlight() async throws {
+        let home = await modelWithVoiceQuestion()
+        network.setMode(.hang, for: "home")
+        let landed = try XCTUnwrap(home.answer(home.approval!.pending, option: 1))
+        await eventually("sent") { self.network.pending.contains { $0.kind == .answer("q1") } }
+        let fromNotification = Task { try await home.answerFromNotification(question: "q1", option: PendingOption(index: 1, label: "Yes")) }
+        await settle()
+        // The refresh after the answer answers at once.
+        network.setMode(.answer, for: "home")
+        network.resolve(network.pending.first { $0.kind == .answer("q1") }!.id)
+        await landed.value
+        let reply = try await fromNotification.value
+        XCTAssertEqual(reply, "home#0:q1")
+        XCTAssertEqual(network.answerCalls("home"), 1)
+        XCTAssertEqual(home.approval?.phase, .answered(outcome: "You approved — Yes · by tap", spoken: "home#0:q1"))
+    }
+
+    func testANotificationAnswerThatFoundTheQuestionGoneSaysSo() async {
+        let home = await modelWithVoiceQuestion()
+        network.setFailure(DaemonError.pendingGone, for: "home")
+        do {
+            try await home.answerFromNotification(question: "q1", option: PendingOption(index: 1, label: "Yes"))
+            XCTFail("a gone question throws")
+        } catch DaemonError.pendingGone {
+        } catch {
+            XCTFail("\(error)")
+        }
+        XCTAssertEqual(home.approval?.phase, .gone(message: ApprovalFlow.goneMessage))
+    }
+
+    func testTheVoiceCardSaysAFailureInTheSessionsWords() async {
+        let home = await modelWithVoiceQuestion()
+        network.questions["home"] = [voiceQuestion("q1", pane: "home:p1"), question("q2", pane: "home:p2")]
+        await home.refresh()
+        home.approvalErrorName = { nil }
+        network.setFailure(DaemonError.http(status: 500, endpoint: "home"), for: "home")
+        await home.answer(question: "q1", option: 1)?.value
+        await home.answer(question: "q2", option: 1)?.value
+        guard case let .open(voiceError?) = home.phase("q1"), case let .open(cardError?) = home.phase("q2") else {
+            return XCTFail("both reopen with an error: \(home.phases)")
+        }
+        XCTAssertEqual(voiceError, RequestFailure(DaemonError.http(status: 500, endpoint: "home"), linkUsable: home.link.isUsable, name: nil).message)
+        XCTAssertEqual(cardError, RequestFailure(DaemonError.http(status: 500, endpoint: "home"), linkUsable: home.link.isUsable, name: "home").message)
+    }
+
+    func testAnAnswerFinishesOnItsComputerAfterASwitch() async throws {
+        let home = await modelWithVoiceQuestion()
+        let work = makeModel("work")
+        let fleet = ComputerFleet()
+        fleet.set([home, work])
+        fleet.makeCurrent("home")
+        network.setMode(.hang, for: "home")
+        let landed = try XCTUnwrap(fleet.current!.answer(home.approval!.pending, option: 1))
+        await eventually("sent") { self.network.pending.contains { $0.kind == .answer("q1") } }
+        fleet.makeCurrent("work")
+        // The refresh after the answer answers at once.
+        network.setMode(.answer, for: "home")
+        network.resolve(network.pending.first { $0.kind == .answer("q1") }!.id)
+        await landed.value
+        XCTAssertEqual(home.approval?.isSettled, true, "it landed on home's card")
+        XCTAssertNil(work.approval)
+        // Back on home: the card still says how it ended.
+        fleet.makeCurrent("home")
+        XCTAssertEqual(fleet.current?.approval?.phase, .answered(outcome: "You approved — Yes · by tap", spoken: "home#0:q1"))
+    }
+
+    func testRepairingForgetsEveryPhase() async {
+        let home = await modelWithVoiceQuestion()
+        home.questionResolved("q1", as: .confirmed, answer: "Yes", via: "voice")
+        home.renew(addresses: ["home"], certExpires: nil)
+        XCTAssertNil(home.approval)
+        XCTAssertTrue(home.phases.isEmpty)
+        clock.advance(ComputerModel.settledCardLinger + 1)
+        XCTAssertNil(home.approval, "the old card's linger is gone too")
+    }
+
     func testLowDataModePollsInsteadOfStreaming() async {
         let work = makeModel("work")
         work.start()
@@ -401,6 +576,8 @@ final class ComputerRuntimeTests: XCTestCase {
             _ = home.agents
             _ = home.questions
             _ = home.phases
+            _ = home.approval
+            _ = home.pendingAction
             _ = home.reachability
             _ = home.canTalkTo
         } onChange: {

@@ -204,17 +204,29 @@ duplicate copies of a pinned question folded to one-line pointers
 
 ## Approvals
 
-`ApprovalFlow` is the state machine behind the pinned card. It goes from
-*open* to *sending* (one option, further taps ignored) to either
-*answered* (the daemon's `spoken`), *gone* (409) or back to *open* with the
-error shown. A `pending.confirmed` from somewhere else settles the card as
-answered by voice. `expired`, `cancelled`, `replaced`, or a state refresh
-without the question dismisses it. `/api/state`'s `pending_action` is the
-source of truth (refreshed by the link's probes, at least every 30 s, and
-on every `pending.*` event), and
-the event is the fast path. The POST to `/api/pending/answer` sends the
-option's 1-based `index`. On the Agents pane the card sits on its agent's
-card instead of above the voice capsule.
+`ApprovalFlow` (Kit) is each computer's answer state, kept on its
+`ComputerModel` (`model.flow`): one phase per question and the voice's
+pinned question. Every surface reads it (the pinned approval card through
+`model.approval`, the question cards and the floating questions through
+`model.phase(id)`), and every answer writes it under the question's one
+key: a tap anywhere (`ComputerModel.answer`) and a notification's Approve
+while the app runs (`answerFromNotification`, which joins a tap in
+flight). A question goes from *open* to *sending* (one option, further
+taps ignored) to either *answered* (the daemon's `spoken`), *gone* (409)
+or back to *open* with the error shown; a reply settles only a question
+still sending. The voice's card says the answer the conversation's way
+("You approved — Yes · by tap"), other cards "Answered: Yes". A
+`pending.confirmed` from somewhere else settles the pinned card as
+answered by voice; `expired`, `cancelled`, `replaced`, or a state refresh
+without the question dismisses it while open. A settled card stays 3.5 s
+(`settledCardLinger`, the model's clock), then the next question shows.
+`/api/state`'s `pending_action` is the source of truth (refreshed by the
+link's probes, at least every 30 s, and on every `pending.*` event), and
+the event is the fast path. The pinned question and its phase stay with
+their computer across a switch (decision 6). The POST to
+`/api/pending/answer` sends the option's 1-based `index`. On the Agents
+pane the card sits on its agent's card instead of above the voice
+capsule.
 
 ## New conversation
 
@@ -273,9 +285,9 @@ accessibility text sizes. The voice capsule stays in place.
   newest journal entry with its files and tools, the last answered
   question with the chosen answer (`Agent.answeredQuestion`), the space.
   **Every open question** (`/api/state` `questions`) puts its answer
-  buttons on its agent's card (`questionCard(for:)`): the voice's own goes
-  through `ApprovalFlow`, any other straight to `POST /api/pending/answer`
-  with its id. Options are the agent's labels verbatim, in an `OptionFlow`
+  buttons on its agent's card (`questionCard(for:)`): the voice's own shows
+  the pinned card, any other its own phase; both answer through the
+  computer's model (`POST /api/pending/answer` with its id). Options are the agent's labels verbatim, in an `OptionFlow`
   (a long label takes a row); only the screen's first question has the
   filled accent, the others are outlined in amber. The agent strip above
   the conversation shows the same running agents.
@@ -1274,8 +1286,8 @@ of it so far: `HealthModel`, `SettingsModel` (models, chattiness, languages,
 voice providers), `NoticeModel` (banner, update and pairing notices),
 `LinkModel` (link presentation, address rows, stream life, handshake, hello),
 `NavigationModel` (pane, navigation path, Settings route, window request),
-`AgentsModel` (agents, open questions, opened cards, screen covers, shell
-offer), `ConversationModel` (rows, paging, the typed line) and
+`AgentsModel` (agents, open questions and the voice's question, read from
+the current `ComputerModel`; opened cards, screen covers, shell offer), `ConversationModel` (rows, paging, the typed line) and
 `VoiceEngine` (the orb, mute, talk mode, hold, microphone modes, hints; views read
 them through the session, as in `model.settingsModel`), so anything the session itself announces
 re-renders every view that observes it. The rules that keep that cheap:
