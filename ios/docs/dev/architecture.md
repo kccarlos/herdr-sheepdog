@@ -1264,9 +1264,10 @@ docs/dev/design/ios-state-architecture.md; the scene, window, push and
 consent objects are already `@Observable`, and so are the models split out
 of it so far: `HealthModel`, `SettingsModel` (models, chattiness, languages,
 voice providers), `NoticeModel` (banner, update and pairing notices),
-`LinkModel` (link presentation, address rows, stream life, handshake, hello)
-and `NavigationModel` (pane, navigation path, Settings route, window
-request; views read them through the session, as in
+`LinkModel` (link presentation, address rows, stream life, handshake, hello),
+`NavigationModel` (pane, navigation path, Settings route, window request)
+and `AgentsModel` (agents, open questions, opened cards, screen covers,
+shell offer; views read them through the session, as in
 `model.settingsModel`), so anything the session itself announces
 re-renders every view that observes it. The rules that keep that cheap:
 

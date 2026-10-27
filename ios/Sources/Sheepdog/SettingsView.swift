@@ -43,7 +43,7 @@ struct SettingsView: View {
                     } footer: {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
-                    if model.shellOffered == false {
+                    if model.agentsModel.shellOffered == false {
                         Section {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
@@ -80,7 +80,7 @@ struct SettingsView: View {
                             MenuRow(title: "Languages", symbol: "globe", value: model.settingsModel.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
-                        if model.shellOffered == false {
+                        if model.agentsModel.shellOffered == false {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
                         }
@@ -90,7 +90,7 @@ struct SettingsView: View {
                     } header: {
                         Text("Computer")
                     } footer: {
-                        if model.shellOffered == false {
+                        if model.agentsModel.shellOffered == false {
                             Text(PhoneShell.offExplanation)
                         }
                     }
@@ -186,7 +186,7 @@ struct SettingsView: View {
         } header: {
             Text("Computers")
         } footer: {
-            if model.shellOffered == false {
+            if model.agentsModel.shellOffered == false {
                 Text(PhoneShell.offExplanation)
             }
         }

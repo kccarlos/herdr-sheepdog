@@ -58,21 +58,15 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var loadingOlder = false
     /// The one-time caption under the controls the first time Mute is used.
     @Published private(set) var showMuteHint = false
-    @Published private(set) var agents: [Agent] = []
+    /// The agents, the open questions and the view state with them.
+    let agentsModel = AgentsModel()
     /// The agents as the screen groups them: running (blocked, working,
     /// idle and done) and the rest.
-    var flock: Flock { Flock(agents) }
+    var flock: Flock { agentsModel.flock }
     /// The pane, navigation stack, Settings route and window request.
     let navigation = NavigationModel()
-    @Published private(set) var pendingAction: PendingAction?
-    /// Every open question (`/api/state` `questions`), oldest first: each
-    /// blocked agent gets its own answer buttons. The voice's question,
-    /// `pendingAction`, is among them and goes through `approval`.
-    @Published private(set) var questions: [PendingAction] = []
     /// A tapped answer to one of the other questions: its tap state, kept on the current computer's model.
     func questionPhase(_ id: String) -> ApprovalFlow.Phase { fleet.current?.phase(id) ?? .open(error: nil) }
-    /// Agents cards the user opened, by pane id; kept for the session.
-    @Published var expandedAgents: Set<String> = []
     /// Every sheet and cover over the main screen: Settings, New agent,
     /// Spaces, a card, the pairing flow, the primers, the demo
     /// (`PresentationCoordinator`).
@@ -108,9 +102,6 @@ final class SessionViewModel: ObservableObject {
     var presentedCard: ScreenCard? { presentation.card }
     private var cardVisibility = CardVisibility()
     private var cardInbox = CardInbox()
-    /// Sheets over the voice screen that this model cannot see itself
-    /// (the connection chip's, the feedback flag's), by name.
-    @Published private(set) var screenCovers: Set<String> = []
     /// The orchestrator's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
@@ -241,8 +232,7 @@ final class SessionViewModel: ObservableObject {
     var isConfigured: Bool { settings.endpoint != nil }
 
     func pendingQuestion(for agent: Agent) -> String? {
-        guard let pending = pendingAction, pending.paneID == agent.paneID else { return nil }
-        return pending.question ?? pending.spokenSummary
+        agentsModel.pendingQuestion(for: agent)
     }
 
     // MARK: - Collaborators
@@ -532,7 +522,7 @@ final class SessionViewModel: ObservableObject {
         socket.update(endpoint: channelEndpoint(endpoint))
         if demo == nil {
             termHub.update(endpoint: channelEndpoint(endpoint))
-            shellOffered = nil
+            agentsModel.setShellOffered(nil)
         }
         notices.banner = nil
         linkModel.setHello(fleet.current?.hello)
@@ -545,8 +535,7 @@ final class SessionViewModel: ObservableObject {
                 previous.conversation.reducer.clear()
                 saveCache(now: true, model: previous)
             }
-            agents = []
-            questions = []
+            agentsModel.clear()
             cardInbox.clear()
             healthModel.clear()
             settingsModel.clear()
@@ -1077,8 +1066,8 @@ final class SessionViewModel: ObservableObject {
             ? LiveActivityContent.make(
                 state: state,
                 muted: isMuted,
-                agents: agents,
-                questions: questions,
+                agents: agentsModel.agents,
+                questions: agentsModel.questions,
                 computer: showsComputerLabels ? currentComputerName : nil,
                 others: otherSnapshots,
                 suspendedInBackground: core.suspension.backgroundSuspended
@@ -1442,14 +1431,14 @@ final class SessionViewModel: ObservableObject {
         let debugQuestions: [PendingAction] = []
         #endif
         let sorted = Flock.sorted(all)
-        let agentsChanged = sorted != agents
-        if agentsChanged { agents = sorted }
+        let agentsChanged = sorted != agentsModel.agents
+        agentsModel.setAgents(sorted)
         // Each assignment only on a change: this runs on every poll, and an
         // equal value would still re-render every view of the model.
-        assign(\.pendingAction, state.pendingAction)
+        agentsModel.setPendingAction(state.pendingAction)
         applyApproval(approvalFlow.present(state.pendingAction))
         let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
-        let questionsChanged = open != questions
+        let questionsChanged = open != agentsModel.questions
         if questionsChanged {
             // A question that arrived without its own event (another
             // agent's, read from the state) rises with a light tap; the
@@ -1461,7 +1450,7 @@ final class SessionViewModel: ObservableObject {
             } else {
                 for q in open { cuedPendingIDs.insert(q.id) }
             }
-            questions = open
+            agentsModel.setQuestions(open)
         }
         questionsSeen = true
         // The Live Activity's rows and counts.
@@ -1713,22 +1702,19 @@ final class SessionViewModel: ObservableObject {
     private(set) lazy var termHub: TermHub = {
         let hub = makeTermHub()
         hub.onReady = { [weak self] ready in
-            if self?.shellOffered != ready.shell { self?.shellOffered = ready.shell }
+            self?.agentsModel.setShellOffered(ready.shell)
         }
         return hub
     }()
 
-    /// `term-ready.shell` from this daemon: whether it offers the phone
-    /// shell to this phone on this network. nil until `/term` answered.
-    @Published private(set) var shellOffered: Bool?
 
     /// Whether to show the shell's entry points: the daemon has `/term` and
     /// has not said the shell is off.
-    var shellEntryShown: Bool { termAvailability == .yes && shellOffered != false }
+    var shellEntryShown: Bool { termAvailability == .yes && agentsModel.shellOffered != false }
 
     /// Learns `term-ready.shell` before any window opens (the Agents tab).
     func warmUpTerm() {
-        guard termAvailability == .yes, shellOffered == nil else { return }
+        guard termAvailability == .yes, agentsModel.shellOffered == nil else { return }
         termHub.warmUp()
     }
 
@@ -1876,7 +1862,7 @@ final class SessionViewModel: ObservableObject {
             guard let self else { return }
             self.approvalFlow.dismiss(pendingID: id)
             // A newer question may be waiting behind the settled card.
-            if self.approvalFlow.card == nil, let pending = self.pendingAction, pending.id != id {
+            if self.approvalFlow.card == nil, let pending = self.agentsModel.pendingAction, pending.id != id {
                 self.applyApproval(self.approvalFlow.present(pending))
             }
         }
@@ -1901,7 +1887,7 @@ final class SessionViewModel: ObservableObject {
 
     /// A sheet the model cannot see opened or closed over the voice screen.
     func setScreenCover(_ name: String, _ covering: Bool) {
-        if covering { screenCovers.insert(name) } else { screenCovers.remove(name) }
+        agentsModel.setScreenCover(name, covering)
     }
 
     /// A card from the daemon (or the demo): once, as a sheet when the
@@ -2019,7 +2005,7 @@ final class SessionViewModel: ObservableObject {
     /// `approval`) or another open one, with its tap state.
     func questionCard(for paneID: String) -> ApprovalFlow.Card? {
         if let approval, approval.pending.paneID == paneID { return approval }
-        guard let question = questions.first(where: { $0.paneID == paneID }) else { return nil }
+        guard let question = agentsModel.questions.first(where: { $0.paneID == paneID }) else { return nil }
         return ApprovalFlow.Card(pending: question, phase: questionPhase(question.id))
     }
 
@@ -2029,7 +2015,7 @@ final class SessionViewModel: ObservableObject {
     /// own one through `approval`, kept in front while it shows how it
     /// ended.
     var floatingQuestions: [ApprovalFlow.Card] {
-        let open = QuestionOrder.ordered(questions) { _ in true }
+        let open = QuestionOrder.ordered(agentsModel.questions) { _ in true }
         // A settled question with a row in the conversation collapses into
         // that row at once (the motion pass); one without stays to say how
         // it ended.
@@ -2053,7 +2039,7 @@ final class SessionViewModel: ObservableObject {
 
     /// The ids of the questions still open, for the rows that point at them.
     var openQuestionIDs: Set<String> {
-        var ids = Set(questions.map(\.id))
+        var ids = Set(agentsModel.questions.map(\.id))
         if let approval, approval.isSettled { ids.remove(approval.pending.id) }
         return ids
     }
@@ -2071,7 +2057,7 @@ final class SessionViewModel: ObservableObject {
             answer(option: index)
             return
         }
-        guard let question = questions.first(where: { $0.id == id }) else { return }
+        guard let question = agentsModel.questions.first(where: { $0.id == id }) else { return }
         // Through the current computer's model, like another computer's:
         // the answer finishes there and lands on its card even if the app
         // switches meanwhile (decision 6), and its refresh follows.

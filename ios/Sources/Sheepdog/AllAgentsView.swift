@@ -21,7 +21,7 @@ struct AllAgentsView: View {
 
     private var allExpanded: Bool {
         let open = shown.filter { model.questionCard(for: $0.paneID) == nil }
-        return !open.isEmpty && open.allSatisfy { model.expandedAgents.contains($0.paneID) }
+        return !open.isEmpty && open.allSatisfy { model.agentsModel.expandedAgents.contains($0.paneID) }
     }
 
     private var subtitle: String {
@@ -133,9 +133,9 @@ struct AllAgentsView: View {
     private func toggleAll() {
         let ids = shown.filter { model.questionCard(for: $0.paneID) == nil }.map(\.paneID)
         if allExpanded {
-            model.expandedAgents.subtract(ids)
+            model.agentsModel.expandedAgents.subtract(ids)
         } else {
-            model.expandedAgents.formUnion(ids)
+            model.agentsModel.expandedAgents.formUnion(ids)
         }
     }
 
@@ -199,9 +199,9 @@ struct AllAgentsView: View {
                     showsEarlier: true,
                     showsWindowButton: computer == nil,
                     expanded: Binding(
-                        get: { model.expandedAgents.contains(key) },
+                        get: { model.agentsModel.expandedAgents.contains(key) },
                         set: { open in
-                            if open { model.expandedAgents.insert(key) } else { model.expandedAgents.remove(key) }
+                            if open { model.agentsModel.expandedAgents.insert(key) } else { model.agentsModel.expandedAgents.remove(key) }
                         }
                     ),
                     answer: { model.answer(question: $0, option: $1) }

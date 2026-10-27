@@ -1494,9 +1494,21 @@ Order and dependencies:
     `@Observable`) holds `pane`, `focusedAgentPaneID`, the navigation
     `path`, `settingsRoute` and `windowRequest`; views read
     `model.navigation` and bind with `Bindable(model.navigation)`.
+  - **Done: Agents and questions.** `AgentsModel` (`AgentsModel.swift`,
+    `@Observable`) holds `agents`, `pendingAction`, `questions`,
+    `expandedAgents`, `screenCovers` and `shellOffered`; views read
+    `model.agentsModel` (and bind `expandedAgents` with
+    `Bindable(model.agentsModel)`). `agents`, `pendingAction` and
+    `questions` are mirrors the session writes from each state it applies,
+    not derived from the current `ComputerModel`, for three reasons: the
+    session also applies a state it fetched straight (opening a session, a
+    loud refresh, the demo's probe) which the computer's model never sees;
+    the list is sorted (`Flock.sorted`) and carries the DEBUG flags' extra
+    agents; and the haptic cue for a question that arrived without its own
+    event compares against the last list applied. `pendingAction` is the
+    approval card's input and goes with phase 8's `ApprovalFlow` merge.
+    Every setter assigns only on change.
   - **Left, in order** (sizes S/M/L):
-    5. Agents and questions: `agents`, `pendingAction`, `questions`,
-       `expandedAgents`, `screenCovers`, `shellOffered` (M).
     6. Conversation: `rows`, paging, the typed line (M).
     7. The voice leaves: `VoiceEngine` owns `state`, mute, talk mode,
        hold, microphone modes, the coach mark, `wantsConnection` and the

@@ -126,7 +126,7 @@ struct PhoneRootView: View {
 
                 if model.navigation.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty || !model.blockedElsewhere.isEmpty {
                     // Another computer's chip names it (several computers only).
-                    AgentStrip(agents: model.flock.running, pending: model.pendingAction, computers: model.computerCount,
+                    AgentStrip(agents: model.flock.running, pending: model.agentsModel.pendingAction, computers: model.computerCount,
                                elsewhere: model.blockedElsewhere, showElsewhere: { model.navigation.pane = .flock })
                         // Chrome: the chips grow up to the first
                         // accessibility size, then the strip stays one row.
@@ -147,7 +147,7 @@ struct PhoneRootView: View {
                             flock: model.flock,
                             question: { model.questionCard(for: $0) },
                             answer: { model.answer(question: $0, option: $1) },
-                            expanded: $model.expandedAgents,
+                            expanded: Bindable(model.agentsModel).expandedAgents,
                             focusedPaneID: Bindable(model.navigation).focusedAgentPaneID,
                             onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
                             voiceQuestionID: model.approval?.pending.id,
@@ -272,7 +272,7 @@ struct ConversationPane: View {
     /// Rows that fold to a pointer while their question floats.
     private var pointerIDs: Set<String> {
         let open = model.openQuestionIDs
-        return QuestionOrder.pointerRowIDs(rows: model.rows, open: model.questions.filter { open.contains($0.id) })
+        return QuestionOrder.pointerRowIDs(rows: model.rows, open: model.agentsModel.questions.filter { open.contains($0.id) })
     }
 
     var body: some View {
@@ -639,7 +639,7 @@ struct SessionChrome: ViewModifier {
         let shown = voiceScreen
             && !model.showSettings
             && !model.demoActive
-            && model.screenCovers.isEmpty
+            && model.agentsModel.screenCovers.isEmpty
         return ScreenReport(visible: appPhase == .active, voiceScreen: shown)
     }
 
