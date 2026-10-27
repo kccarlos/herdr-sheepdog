@@ -1012,7 +1012,7 @@ final class AgentWindowController {
             case .stopSnapshot:
                 stopSnapshot()
             case let .scroll(dir, lines):
-                if let channel { model?.termHub.scroll(ch: channel, dir, lines: lines, at: state.wheelCell) }
+                if let channel { model?.termHub.scroll(ch: channel, dir, lines: lines) }
             }
         }
     }

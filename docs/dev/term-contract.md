@@ -71,12 +71,11 @@ current size asks for a full repaint, the resync primitive.
 {"type":"term-resize","ch":1,"cols":44,"rows":28}
 ```
 
-Scroll herdr's scrollback, or send wheel events to a TUI that asked for the
-mouse; `col` and `row` (together, optional) place the wheel. The app always
-sends the middle of the grid: a TUI such as Codex ignores a wheel outside its
-scrollable area, and herdr's default cell is the top-left corner. Mouse clicks
-are encoded by herdr for the app's mouse mode and dropped when the app did
-not ask for the mouse.
+Scroll: `lines` of scrolling in direction `dir`. The daemon turns it into
+that many **wheel notches** (see [below](#wheel-notches)). `col` and `row`
+(together, optional) place the wheel; without them it lands on the middle of
+the channel's grid. Mouse clicks are encoded by herdr for the app's mouse mode
+and dropped when the app did not ask for the mouse.
 
 ```json
 {"type":"term-scroll","ch":1,"dir":"up","lines":3}
@@ -118,6 +117,24 @@ now, without `takeover`. A controller outside the daemon gives no signal.
 | `refused:not_tracked` | Not an agent the daemon tracks | Back to the agent list |
 | `refused:shell_off` | No plain shell on this connection | Do not offer it |
 | `refused:outside_projects` | The shell's folder is outside `supervisor.project_roots` and is no tracked agent's folder | Open it from the agent instead |
+
+## Wheel notches
+
+A scroll is `lines` wheel notches, one per line, whatever the pane runs. herdr
+moves its own scrollback by a `terminal.scroll` command's `lines`, but sends a
+full-screen app that asked for the mouse (Codex, on the alternate screen with
+mouse reporting) exactly **one** wheel event per command, whatever `lines`
+says. The daemon (`Bridge.Scroll`) therefore sends one command per line:
+the same distance in the scrollback and the right number of notches for the
+app, so it never has to know which one the pane is in. Consequences:
+
+- The client counts lines, not modes: a drag of N lines is `lines: N`, and
+  scrolling back down by the same count (its "↓ Latest") undoes it in both.
+- One message is capped at **1000** notches (`herdr.MaxWheelNotches`); a drag
+  frame is a few, so only a runaway client reaches it.
+- A TUI ignores a wheel outside its scrollable area and herdr's default cell
+  is the top-left corner, so a scroll without `col` and `row` lands on the
+  middle of the grid (kept current by `term-resize`).
 
 ## Binary frames
 

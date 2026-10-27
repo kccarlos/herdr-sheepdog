@@ -126,7 +126,9 @@ public struct AgentWindowState: Equatable, Sendable {
     public private(set) var hasFrame = false
     /// Lines scrolled up from the bottom, as far as the app knows: herdr
     /// owns the scrollback and never says, so this counts the app's own
-    /// scrolls and resets on Latest and on input.
+    /// scrolls and resets on Latest and on input. The daemon turns each line
+    /// into one wheel notch, so the same count of lines scrolled back down
+    /// undoes it, for the scrollback and for a full-screen app alike.
     public private(set) var scrolledUp = 0
     /// The grid the surface reports.
     public private(set) var cols = 0
@@ -160,15 +162,6 @@ public struct AgentWindowState: Equatable, Sendable {
     public var showsSkeleton: Bool { phase == .connecting && !hasFrame }
     /// Drags and taps go to herdr.
     public var acceptsPointer: Bool { (phase == .live || phase == .observing) && channelOpen }
-
-    /// Where a scroll's wheel lands: the middle of the grid. A TUI that
-    /// asked for the mouse (Codex, Claude Code) takes wheel events by cell
-    /// and ignores one outside its scrollable area; without a cell herdr
-    /// puts the wheel in the top-left corner (the header), so the TUI
-    /// never scrolls. herdr's own scrollback ignores the cell.
-    public var wheelCell: (col: Int, row: Int)? {
-        cols > 0 && rows > 0 ? (cols / 2, rows / 2) : nil
-    }
 
     // MARK: - Events
 

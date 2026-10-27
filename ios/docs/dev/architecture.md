@@ -738,7 +738,11 @@ SwiftTermSurface   TermHub (one /term connection, held by SessionViewModel)
   `keyboardEnabled`).
 - **"Latest".** herdr never reports its scroll position, so the window
   counts its own scrolls; Latest and any raw input scroll back down by that
-  count.
+  count. That works in every kind of pane because the daemon sends one wheel
+  notch per line (the contract's "Wheel notches"): herdr alone would send a
+  full-screen app such as Codex one notch per message, so a long drag would
+  move it far less than the finger and Latest would stop short. The app
+  sends no cell; the daemon puts the wheel in the middle of the grid.
 - **`term-free`.** When the controller this daemon ran lets go, an
   observing window closes its `observe` channel and opens `control`
   without a takeover; a refusal (`busy`) puts it back to observing.
