@@ -78,9 +78,9 @@ type simScreen struct {
 func (s *simScreen) ScreenVisible() bool { return s.visible }
 
 // SendCard implements supervisor.CardSink: the card is seen at once.
-func (s *simScreen) SendCard(c supervisor.Card) bool {
+func (s *simScreen) SendCard(c supervisor.Card) supervisor.Delivery {
 	if !s.visible {
-		return false
+		return supervisor.NotDelivered
 	}
 	text := simScreenText(c)
 	card := SimCard{AtMS: s.w.since(), Kind: c.Kind, Title: c.Title, Agent: c.Agent, Bytes: len(c.Markdown) + len(c.Text), Text: text}
@@ -91,7 +91,7 @@ func (s *simScreen) SendCard(c supervisor.Card) bool {
 	case s.w.push.ch <- SimLine{AtMS: card.AtMS, Who: "screen", Text: text, Agent: c.Agent}:
 	default:
 	}
-	return true
+	return supervisor.Presented
 }
 
 // shown returns the cards shown so far.

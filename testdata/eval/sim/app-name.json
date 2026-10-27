@@ -1,0 +1,25 @@
+{
+  "scenarios": [
+    {
+      "id": "app-name-hidden-screen",
+      "note": "Live log 2026-10-27: the user asked to see the agents list while the app was in the background; show was refused, and the orchestrator told the user to open an app named after one of their agents. Run with --screen hidden.",
+      "goal": "see the list of agents on the phone screen, and find out which app to open for it",
+      "persona": "Plain and short. Asks to see the agents on the screen, then which app to open.",
+      "opening": "Show me the list of my agents on the screen.",
+      "fixed": true,
+      "script": ["Show me the list of my agents on the screen.", "Which app do I open for that?"],
+      "agents": [
+        {"alias": "kvoice-dev-claude", "kind": "claude", "state": "idle", "screen": "bench-claude-idle.txt"},
+        {"alias": "forumind-codex", "kind": "codex", "state": "working", "screen": "bench-codex-working.txt"}
+      ],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 30},
+      "expect": {
+        "no_actions": true,
+        "skip": ["facts_current"],
+        "rubric": [
+          "The user's screen is not visible. Did the replies avoid naming any agent (kvoice-dev-claude, forumind-codex, 'kvoice', 'forumind') as an app to open or as the name of the app, and did they either name the app as Sheepdog or just say 'the app' / 'the Sheepdog app'?"
+        ]
+      }
+    }
+  ]
+}

@@ -36,11 +36,11 @@ func TestWSCards(t *testing.T) {
 	}
 
 	// The page in the background: still not visible.
-	c.send(wsproto.Visibility(true, false))
+	c.send(wsproto.Visibility(false, true))
 	c.send(wsproto.Ping())
 	c.expect(wsproto.TypePong)
 	if h.sup.ScreenVisible() {
-		t.Fatal("visible without the voice screen in front")
+		t.Fatal("visible while in the background")
 	}
 
 	c.send(wsproto.Visibility(true, true))
@@ -117,4 +117,27 @@ func TestWSCardsVisibilityNotInherited(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool { return !h.sup.ScreenVisible() }, "a replacement starts not visible")
 	c2.send(wsproto.Visibility(true, true))
 	waitFor(t, 2*time.Second, h.sup.ScreenVisible, "the replacement's own report")
+}
+
+// The app active but on another screen than the conversation still gets
+// the card, filed as a notice (Placed); with the conversation in front
+// it is presented.
+func TestWSCardsPlacedOnOtherScreen(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	c, _ := readyClient(t, h)
+	c.send(wsproto.Visibility(true, false))
+	waitFor(t, 2*time.Second, h.sup.ScreenVisible, "visible on another screen")
+	ctx := context.Background()
+	res, err := h.sup.Show(ctx, brain.CardRequest{Kind: brain.ShowCard, Title: "Agents", Markdown: "- auth"})
+	if err != nil || !res.Placed {
+		t.Fatalf("show on another screen = %+v, %v; want Placed", res, err)
+	}
+	if m := c.expect(wsproto.TypeCard); m.Card.ID != res.ID {
+		t.Fatalf("card = %+v", m.Card)
+	}
+	c.send(wsproto.Visibility(true, true))
+	waitFor(t, 2*time.Second, func() bool {
+		r, err := h.sup.Show(ctx, brain.CardRequest{Kind: brain.ShowCard, Title: "Again", Markdown: "- auth"})
+		return err == nil && !r.Placed
+	}, "presented with the conversation in front")
 }

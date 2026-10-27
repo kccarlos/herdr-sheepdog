@@ -32,7 +32,7 @@ func TestScreenFor(t *testing.T) {
 func TestSimScreenCard(t *testing.T) {
 	w := &simWorld{push: &simPusher{ch: make(chan SimLine, 4)}}
 	s := &simScreen{w: w, visible: true}
-	if !s.SendCard(supervisor.Card{Kind: "card", Title: "Agents", Markdown: "- auth: working"}) {
+	if s.SendCard(supervisor.Card{Kind: "card", Title: "Agents", Markdown: "- auth: working"}) != supervisor.Presented {
 		t.Fatal("not delivered")
 	}
 	l := <-w.push.ch
@@ -46,7 +46,7 @@ func TestSimScreenCard(t *testing.T) {
 		t.Error("not counted")
 	}
 	hidden := &simScreen{w: w}
-	if hidden.SendCard(supervisor.Card{Kind: "card", Title: "x"}) {
+	if hidden.SendCard(supervisor.Card{Kind: "card", Title: "x"}) != supervisor.NotDelivered {
 		t.Error("a hidden screen took a card")
 	}
 }

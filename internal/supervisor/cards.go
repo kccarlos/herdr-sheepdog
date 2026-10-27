@@ -69,8 +69,21 @@ type Card struct {
 // reports false when the card did not reach a visible screen.
 type CardSink interface {
 	ScreenVisible() bool
-	SendCard(Card) bool
+	SendCard(Card) Delivery
 }
+
+// Delivery is what SendCard did with a card.
+type Delivery int
+
+const (
+	// NotDelivered: no client could take the card.
+	NotDelivered Delivery = iota
+	// Presented: the card went to a client with its conversation in front.
+	Presented
+	// Placed: the client is active but on another screen; the card went
+	// to it anyway and is filed there as a notice.
+	Placed
+)
 
 // cardState is the supervisor's card side: the sink and the store.
 type cardState struct {
@@ -138,7 +151,8 @@ func (s *Supervisor) Show(ctx context.Context, req brain.CardRequest) (brain.Car
 	card.ID = "c" + strconv.FormatInt(s.cfg.Now().UnixMilli(), 36) + strconv.FormatUint(s.cards.seq, 36)
 	s.cards.mu.Unlock()
 	card.At = s.cfg.Now().UTC()
-	if !sink.SendCard(card) {
+	delivery := sink.SendCard(card)
+	if delivery == NotDelivered {
 		s.log.Log(logSource, "card.refused", req.PaneID, map[string]any{"kind": req.Kind, "turn": req.Turn, "reason": "not_delivered"})
 		return brain.CardResult{}, brain.ErrNotVisible
 	}
@@ -147,7 +161,7 @@ func (s *Supervisor) Show(ctx context.Context, req brain.CardRequest) (brain.Car
 		"card_id": card.ID, "kind": card.Kind, "agent": card.Agent, "turn": req.Turn,
 		"title_chars": utf8.RuneCountInString(card.Title), "bytes": len(card.Markdown) + len(card.Text), "options": len(card.Options),
 	})
-	return brain.CardResult{ID: card.ID, Title: card.Title}, nil
+	return brain.CardResult{ID: card.ID, Title: card.Title, Placed: delivery == Placed}, nil
 }
 
 // buildCard makes the card for req from the daemon's own facts: the

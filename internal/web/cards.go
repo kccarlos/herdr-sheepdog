@@ -34,28 +34,40 @@ func (s *Server) cardHost() (CardHost, bool) {
 type cardSink struct{ h *hub }
 
 // ScreenVisible implements supervisor.CardSink: the attached client said
-// its screen is visible with its voice screen in front.
+// its screen is visible (its app is active), on any screen.
 func (k cardSink) ScreenVisible() bool {
 	c := k.h.current()
 	return c != nil && c.screenVisible()
 }
 
 // SendCard implements supervisor.CardSink: the card goes to the attached
-// client while its screen is visible.
-func (k cardSink) SendCard(card supervisor.Card) bool {
+// client while its screen is visible, presented when its voice screen is
+// in front and placed (filed as a notice, same frame) when another screen is.
+func (k cardSink) SendCard(card supervisor.Card) supervisor.Delivery {
 	c := k.h.current()
 	if c == nil || !c.screenVisible() {
-		return false
+		return supervisor.NotDelivered
+	}
+	d := supervisor.Placed
+	if c.voiceScreenFront() {
+		d = supervisor.Presented
 	}
 	c.enqueue(controlFrame(wsproto.CardFrame(cardWire(card))))
-	return true
+	return d
+}
+
+// voiceScreenFront reports that the client's voice screen is in front.
+func (c *client) voiceScreenFront() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.voiceScreen
 }
 
 // screenVisible reports the client's last visibility report.
 func (c *client) screenVisible() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return !c.closing && c.visible && c.voiceScreen
+	return !c.closing && c.visible
 }
 
 // setVisibility records a visibility report, logging a change.
