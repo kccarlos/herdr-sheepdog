@@ -101,14 +101,11 @@ struct IPadSidebar: View {
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
 
-    /// The current computer first, then the others that answer (several
-    /// computers only; with one there is no computer level).
+    /// Every computer in the store's order, the current one in its place
+    /// (several computers only; with one there is no computer level).
     private var sections: SidebarSections {
-        var computers: [SidebarSections.Computer] = [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]
-        for other in model.otherSnapshots {
-            computers.append(.computer(id: other.id, name: other.name, agents: other.reachability.isOnline ? other.agents : []))
-        }
-        return SidebarSections(computers: computers)
+        SidebarSections(snapshots: model.computerSnapshots, currentID: model.currentComputerID,
+                        currentName: model.currentComputerName, currentAgents: model.flock.all)
     }
 
     private var paneState: FlockPaneState {

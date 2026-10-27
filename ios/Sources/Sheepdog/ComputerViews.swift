@@ -24,6 +24,10 @@ struct ComputerSectionHeader: View {
                 talkButton
             }
         }
+        // Every header is leading-aligned: the stacked form (a long name,
+        // a large text size) is as wide as its content, so without this
+        // the list would centre it.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
         .padding(.bottom, 2)
     }
@@ -53,7 +57,10 @@ struct ComputerSectionHeader: View {
                 Text("Talk to \(name)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
                     .frame(minHeight: 36)
                     .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
                     .frame(minHeight: 44)

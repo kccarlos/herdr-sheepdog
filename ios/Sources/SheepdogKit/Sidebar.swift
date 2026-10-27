@@ -33,6 +33,25 @@ public struct SidebarSections: Equatable, Sendable {
     public init(computers: [Computer]) {
         self.computers = computers
     }
+
+    /// Every paired computer in the store's order (the order they were
+    /// paired, or the user's), whichever one is current: Talk to never
+    /// moves a section. The current computer shows its own agents, the
+    /// others what they last reported (none while offline). A current
+    /// computer with no snapshot (a loopback fixture, nothing paired) goes
+    /// first.
+    public init(snapshots: [ComputerSnapshot], currentID: String, currentName: String, currentAgents: [Agent]) {
+        var computers = snapshots.map { snapshot -> Computer in
+            if snapshot.id == currentID {
+                return .computer(id: snapshot.id, name: snapshot.name, agents: currentAgents)
+            }
+            return .computer(id: snapshot.id, name: snapshot.name, agents: snapshot.reachability.isOnline ? snapshot.agents : [])
+        }
+        if !snapshots.contains(where: { $0.id == currentID }) {
+            computers.insert(.computer(id: currentID, name: currentName, agents: currentAgents), at: 0)
+        }
+        self.computers = computers
+    }
 }
 
 extension SidebarSections.Computer {

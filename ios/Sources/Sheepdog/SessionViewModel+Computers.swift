@@ -149,6 +149,12 @@ extension SessionViewModel {
         }
     }
 
+    /// Every computer for the Agents page's sections, in the store's order
+    /// (the current one included, in its place); none with one computer.
+    var sectionSnapshots: [ComputerSnapshot] {
+        showsComputerLabels ? computerSnapshots : []
+    }
+
     /// The other computers' snapshots for their sections; none with one
     /// computer.
     var otherSnapshots: [ComputerSnapshot] {

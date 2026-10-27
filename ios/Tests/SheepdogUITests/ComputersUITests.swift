@@ -92,10 +92,11 @@ final class ComputersUITests: XCTestCase {
         shot(app, "voice-menu")
         closeMenu(app, item: "voice.manageComputers")
 
-        // The Agents page: one section per computer, the current first.
+        // The Agents page: one section per computer, in the store's order.
         showAgentsPane(app)
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.current").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.fixture-2").firstMatch.exists)
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-1")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 45), "Studio's dashed row, after the 30 s quiet period")
         shot(app, "agents")
 
@@ -129,6 +130,47 @@ final class ComputersUITests: XCTestCase {
         tapWhenTappable(app.buttons.matching(identifier: "main.pane.conversation").firstMatch, "the Conversation tab")
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Home Mac")).firstMatch.waitForExistence(timeout: 10), "Home Mac's conversation after the switch")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.exists, "nothing of Work Mac's conversation")
+
+        // Talk to did not reorder anything: Work Mac is still above Home
+        // Mac on the Agents page, Home Mac (current) in its place, and the
+        // headers still start at the same x.
+        showAgentsPane(app)
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-2")
+        shot(app, "agents-after-talk-to")
+    }
+
+    /// At a large text size Talk to drops under the name (the stacked
+    /// header): it is still leading-aligned with the current computer's.
+    func testStackedSectionHeadersAreLeadingAligned() throws {
+        let workStub = try StubDaemon(.computer(name: "Work Mac", agents: #"[{"pane_id":"w1:p1","alias":"api","kind":"claude","state":"working","workspace_label":"webapp"}]"#, questions: "[]"))
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]"))
+        let workHost = try workStub.start()
+        let homeHost = try homeStub.start()
+        defer { workStub.stop(); homeStub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        app.launch()
+        showAgentsPane(app)
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-1")
+        XCTAssertTrue(app.buttons["computerLabel.sectionTalkTo.fixture-2"].exists)
+    }
+
+    /// The Agents page's section headers (ids as in
+    /// `computerLabel.section.<id>`; the current one is "current"): leading
+    /// aligned (same minX) and top to bottom in `order`, wherever the
+    /// current computer is.
+    private func assertHeadersAlignedAndInOrder(_ app: XCUIApplication, _ order: [String], current: String, file: StaticString = #filePath, line: UInt = #line) {
+        let frames = order.map { id -> CGRect in
+            let element = app.descendants(matching: .any).matching(identifier: "computerLabel.section.\(id == current ? "current" : id)").firstMatch
+            XCTAssertTrue(element.waitForExistence(timeout: 10), "header \(id)", file: file, line: line)
+            return element.frame
+        }
+        for frame in frames.dropFirst() {
+            XCTAssertEqual(frame.minX, frames[0].minX, accuracy: 0.5, "headers are leading-aligned", file: file, line: line)
+        }
+        XCTAssertEqual(frames.map(\.minY), frames.map(\.minY).sorted(), "sections keep the store's order", file: file, line: line)
     }
 
     /// Settings ▸ Add a computer while the session view model re-renders

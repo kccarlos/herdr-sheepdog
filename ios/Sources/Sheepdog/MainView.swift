@@ -151,7 +151,7 @@ struct PhoneRootView: View {
                             focusedPaneID: Bindable(model.navigation).focusedAgentPaneID,
                             onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
                             voiceQuestionID: model.approval?.pending.id,
-                            others: model.otherSnapshots,
+                            computers: model.sectionSnapshots,
                             currentName: model.currentComputerName,
                             remoteCard: { model.remoteCard(computer: $0, paneID: $1) },
                             talkTo: { model.talk(to: $0) },

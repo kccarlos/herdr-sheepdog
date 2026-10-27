@@ -264,8 +264,8 @@ final class IPadUITests: XCTestCase {
         shot("new-agent-sheet")
     }
 
-    /// Several computers: the sidebar's computer level (the current one
-    /// first, Talk to on the other), and All agents' sections. With one
+    /// Several computers: the sidebar's computer level (in the store's
+    /// order, Talk to on the other), and All agents' sections. With one
     /// computer there is no computer row (`testSidebarAndDetail`).
     func testSidebarComputerLevel() throws {
         let home = StubDaemon.blocked(alias: "writer", space: "blog", pane: "h1:p1", question: "Publish the post now?")
@@ -287,5 +287,6 @@ final class IPadUITests: XCTestCase {
         shot("several-computers")
         element(app, "computerLabel.sidebarTalkTo.fixture-2").tap()
         XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-1").waitForExistence(timeout: 10), "Home Mac is current: Talk to Work Mac")
+        XCTAssertLessThan(element(app, "computerLabel.sidebar.fixture-1").frame.minY, element(app, "computerLabel.sidebar.fixture-2").frame.minY, "Work Mac stays above Home Mac after Talk to")
     }
 }

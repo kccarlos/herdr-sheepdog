@@ -24,7 +24,7 @@ struct FlockView: View {
     /// Several computers only: the other computers, each a section after
     /// this one's (app-redesign.md 5.2). Empty with one computer, and then
     /// the page is one list as it always was.
-    var others: [ComputerSnapshot] = []
+    var computers: [ComputerSnapshot] = []
     /// The current computer's name, for its section header.
     var currentName = ""
     /// Another computer's question on an agent's card: (computer, pane).
@@ -35,39 +35,23 @@ struct FlockView: View {
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
 
-    private var sectioned: Bool { !others.isEmpty }
+    private var sectioned: Bool { computers.count > 1 }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
                     if sectioned {
-                        ComputerSectionHeader(id: "current", name: currentName, detail: "You're talking here", talkTo: nil)
-                    }
-                    if flock.running.isEmpty {
-                        if sectioned {
-                            Text("No agents running here.")
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.muted)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        } else {
-                            NoAgentsView(onNewAgent: onNewAgent)
-                                .padding(.top, 40)
-                        }
-                    }
-                    ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
-                        card(agent, primary: isFirstQuestion(agent))
-                    }
-                    if !flock.notRunning.isEmpty {
-                        notRunningRow
-                        if showNotRunning {
-                            ForEach(flock.notRunning) { agent in
-                                card(agent, primary: false)
+                        // The store's order: Talk to never moves a section.
+                        ForEach(computers) { computer in
+                            if computer.isCurrent {
+                                currentSection
+                            } else {
+                                otherSection(computer)
                             }
                         }
-                    }
-                    ForEach(others) { computer in
-                        otherSection(computer)
+                    } else {
+                        currentSection
                     }
                 }
                 .padding(.horizontal, 16)
@@ -78,6 +62,43 @@ struct FlockView: View {
             .onChange(of: focusedPaneID) { _, _ in scrollToFocus(proxy) }
         }
         .accessibilityIdentifier("flock.list")
+    }
+
+    /// The current computer: its header (several computers only), then its
+    /// running agents and the closed Not running row.
+    @ViewBuilder
+    private var currentSection: some View {
+        if sectioned {
+            ComputerSectionHeader(id: "current", name: currentName, detail: "You're talking here", talkTo: nil)
+                .padding(.top, headerTopPadding("current"))
+        }
+        if flock.running.isEmpty {
+            if sectioned {
+                Text("No agents running here.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            } else {
+                NoAgentsView(onNewAgent: onNewAgent)
+                    .padding(.top, 40)
+            }
+        }
+        ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
+            card(agent, primary: isFirstQuestion(agent))
+        }
+        if !flock.notRunning.isEmpty {
+            notRunningRow
+            if showNotRunning {
+                ForEach(flock.notRunning) { agent in
+                    card(agent, primary: false)
+                }
+            }
+        }
+    }
+
+    /// Space above a section header: none for the first section.
+    private func headerTopPadding(_ id: String) -> CGFloat {
+        computers.first.map { ($0.isCurrent ? "current" : $0.id) == id } == true ? 0 : 14
     }
 
     /// One accent per screen: only the first open question gets the filled
@@ -111,7 +132,7 @@ struct FlockView: View {
         let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
         ComputerSectionHeader(id: computer.id, name: computer.name, detail: offline ? nil : computer.summary(),
                               talkTo: offline ? nil : { talkTo(computer.id) })
-            .padding(.top, 14)
+            .padding(.top, headerTopPadding(computer.id))
         if offline {
             OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { retry(computer.id) }
         } else {

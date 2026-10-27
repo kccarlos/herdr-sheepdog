@@ -168,7 +168,7 @@ struct SettingsView: View {
         .interactiveDismissDisabled(firstRun && !model.isConfigured)
     }
 
-    /// Several computers: each with its status, the current one first in
+    /// Several computers: each with its status, in the store order; the current one is marked in
     /// what it says ("Talking here"), and Add a computer.
     private var computersSection: some View {
         Section {
