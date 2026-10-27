@@ -239,13 +239,13 @@ struct SettingsView: View {
         firstRun = !model.settings.hasBeenConfigured
         // Health's "Change in Settings" opens straight on Models; the first
         // run opens on the Daemon screen.
-        if let route = model.settingsRoute {
+        if let route = model.navigation.settingsRoute {
             switch route {
             case .models: path = [.models]
             case .languages: path = [.languages]
             case .daemon: path = [.daemon]
             }
-            model.settingsRoute = nil
+            model.navigation.settingsRoute = nil
         } else if firstRun {
             path = [.daemon]
         }

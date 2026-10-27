@@ -62,10 +62,8 @@ final class SessionViewModel: ObservableObject {
     /// The agents as the screen groups them: running (blocked, working,
     /// idle and done) and the rest.
     var flock: Flock { Flock(agents) }
-    /// Which pane the main screen shows; a notification tap switches it.
-    @Published var pane: MainPane = .conversation
-    /// The agent the Agents pane should scroll to (a notification tap).
-    @Published var focusedAgentPaneID: String?
+    /// The pane, navigation stack, Settings route and window request.
+    let navigation = NavigationModel()
     @Published private(set) var pendingAction: PendingAction?
     /// Every open question (`/api/state` `questions`), oldest first: each
     /// blocked agent gets its own answer buttons. The voice's question,
@@ -108,7 +106,6 @@ final class SessionViewModel: ObservableObject {
     /// screen's navigation (a card's "Open window" pushes onto it), the
     /// `visibility` reports and the cards this phone got.
     var presentedCard: ScreenCard? { presentation.card }
-    @Published var navigationPath = NavigationPath()
     private var cardVisibility = CardVisibility()
     private var cardInbox = CardInbox()
     /// Sheets over the voice screen that this model cannot see itself
@@ -166,17 +163,10 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var stateVoiceModel: String?
     /// Settings is the presentation on screen.
     var showSettings: Bool { presentation.isShowing(.settings) }
-    /// Where Settings opens: nil for its top, `.models` from Health's
-    /// "Change in Settings ›". Consumed (reset) by SettingsView.
-    @Published var settingsRoute: SettingsRoute?
-    /// Why Settings ▸ Daemon was opened for the user (a refused token, a
-    /// pairing code nothing answered), shown there where the fix is. A
-    /// banner on the main screen would sit under the Settings sheet.
-    /// Consumed by DaemonSettingsView.
 
     /// Health's "Change in Settings ›": Settings, pushed to Models.
     func openModels() {
-        settingsRoute = .models
+        navigation.settingsRoute = .models
         presentation.present(.settings)
     }
 
@@ -397,7 +387,7 @@ final class SessionViewModel: ObservableObject {
         attachedEndpoint = settings.endpoint
         presentation.onFollowup = { [weak self] followup in
             switch followup {
-            case let .openWindow(request): self?.windowRequest = request
+            case let .openWindow(request): self?.navigation.windowRequest = request
             }
         }
         presentation.onClosed = { [weak self] closed in self?.presentationClosed(closed) }
@@ -1131,7 +1121,7 @@ final class SessionViewModel: ObservableObject {
         for action in route.actions(wantsConnection: wantsConnection, muted: isMuted) {
             switch action {
             case .showConversation:
-                pane = .conversation
+                navigation.pane = .conversation
             case .connect:
                 connect()
             case .toggleMute:
@@ -1148,7 +1138,7 @@ final class SessionViewModel: ObservableObject {
                 // the Agents page, with Talk to; the app never switches on
                 // its own.
                 if let computer, computer != currentComputerID, session(computer) != nil {
-                    pane = .flock
+                    navigation.pane = .flock
                 } else {
                     openAgentWindow(paneID: id)
                 }
@@ -1952,15 +1942,10 @@ final class SessionViewModel: ObservableObject {
         presentation.present(.card(card))
     }
 
-    /// An agent's window the session asked for (a card's Open window, a
-    /// Live Activity row): the presenting window's layout opens it (a push
-    /// on iPhone, the detail on iPad), then clears it.
-    @Published var windowRequest: WindowRequest?
-
     /// A card's "Open window": close the sheet, then open the agent's
     /// window (a push made under a sheet that is closing is lost).
     func openAgentWindow(paneID: String) {
-        pane = .conversation
+        navigation.pane = .conversation
         presentation.dismiss(then: .openWindow(.agent(paneID)))
     }
 

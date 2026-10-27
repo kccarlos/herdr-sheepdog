@@ -1261,11 +1261,13 @@ hear it.
 
 The session view model is still one `ObservableObject` (until phase 8 of
 docs/dev/design/ios-state-architecture.md; the scene, window, push and
-consent objects, `HealthModel` and `SettingsModel` (models, chattiness,
-languages, voice providers) `NoticeModel` (banner, update and
-pairing notices) and `LinkModel` (link presentation, address rows, stream
-life, handshake, hello) are already `@Observable`, and views read them
-through the session, as in `model.settingsModel`), so anything it announces
+consent objects are already `@Observable`, and so are the models split out
+of it so far: `HealthModel`, `SettingsModel` (models, chattiness, languages,
+voice providers), `NoticeModel` (banner, update and pairing notices),
+`LinkModel` (link presentation, address rows, stream life, handshake, hello)
+and `NavigationModel` (pane, navigation path, Settings route, window
+request; views read them through the session, as in
+`model.settingsModel`), so anything the session itself announces
 re-renders every view that observes it. The rules that keep that cheap:
 
 - **Assign only on change.** A poll or a refresh assigns a published
