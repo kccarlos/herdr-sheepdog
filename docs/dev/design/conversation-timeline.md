@@ -1,7 +1,8 @@
 # Conversation timeline: what shows and how
 
-*Proposal, 2026-10-27. Nothing here is built yet. Code references are
-`file:line` at commit `44d6ee33` (app 0.2.0). Log figures are from the
+*Proposal, 2026-10-27, approved by the CEO the same day (section 10).
+Phase 1 is built; phases 2 and 3 are not. Code references are
+`file:line` at commit `44d6ee33` (app 0.2.0), before phase 1. Log figures are from the
 author's own daemon (`~/.local/share/sheepdog/events/`), read-only.*
 
 The Conversation page reads cluttered. What you and the voice said, the
@@ -32,7 +33,7 @@ resume".
 7. [Before and after](#7-before-and-after)
 8. [Implementation sketch (later)](#8-implementation-sketch-later)
 9. [Usability review](#9-usability-review)
-10. [Open questions for the CEO](#10-open-questions-for-the-ceo)
+10. [Decisions by the CEO](#10-decisions-by-the-ceo)
 
 ## 1. How the timeline is built today
 
@@ -560,30 +561,32 @@ Adopted from the review:
   shutdown notices (about 60 rows a day, 2 of 34 relevant) together with
   un-striking dropped pushes, "turning the page from a log into news".
 
-## 10. Open questions for the CEO
+## 10. Decisions by the CEO
 
-1. **Reconnect row: when?** Recommendation: only when an app was attached
-   and you or the voice spoke in the 5 minutes before; otherwise hidden.
-   Alternative: never in the timeline, voice bar only.
-2. **Where does the switch live?** Recommendation: Settings ▸ Health,
-   "Show technical events", off by default, with the footer "Adds
-   reconnects, audio changes and other plumbing to the conversation, with
-   exact times. For bug reports." Alternative: Settings ▸ Conversation.
-3. **"Catch me up" on missed updates?** Recommendation: yes, one chip
-   on the group ("Catch me up") that asks the orchestrator for a summary
-   of what you missed, since the voice never said them. Alternative: no
-   chip; the group is read-only.
-4. **Computer names like "M944QD4VY".** Recommendation: on pairing, if the
+The CEO approved all seven recommendations on 2026-10-27, as recommended.
+The alternatives were not taken. Phase 1 (section 8) is built; the parts of
+these decisions that belong to phases 2 and 3 are still to build.
+
+1. **Reconnect row: when?** Decided: only when an app was attached and you
+   or the voice spoke in the 5 minutes before; otherwise hidden. (Phase 1
+   hides every reconnect row; the exception comes with phase 2, which pairs
+   the rows.)
+2. **Where does the switch live?** Decided: Settings ▸ Health, "Show
+   technical events", off by default, with the footer "Adds reconnects,
+   audio changes and other plumbing to the conversation, with exact times.
+   For bug reports." (Built in phase 1.)
+3. **"Catch me up" on missed updates?** Decided: yes, one chip on the
+   group ("Catch me up") that asks the orchestrator for a summary of what
+   you missed, since the voice never said them.
+4. **Computer names like "M944QD4VY".** Decided: on pairing, if the
    ComputerName has no space and mixes letters and digits, suggest
    "Work Mac" and let you edit it; the divider uses your name.
-   Alternative: always ask for a name on pairing.
-5. **Settled questions: one line or the full card?** Recommendation: one
-   line for every settled question, answered ones included ("You
-   approved Codex — Yes"), the full card on tap. Alternative: keep today's full card for all.
-6. **Orchestrator reply cards.** Recommendation: fold into the voice's
-   bubble as "Details" when adjacent (section 5.1). Alternative: keep the
-   separate purple card.
-7. **Restart divider.** Recommendation: keep "Sheepdog restarted", and say
+5. **Settled questions: one line or the full card?** Decided: one line for
+   every settled question, answered ones included ("You approved Codex —
+   Yes"), the full card on tap.
+6. **Orchestrator reply cards.** Decided: fold into the voice's bubble as
+   "Details" when adjacent (section 5.1).
+7. **Restart divider.** Decided: keep "Sheepdog restarted", and say
    "Sheepdog updated" when it was an update, the version on tap (needs a
    daemon field).
-   Alternative: hide restarts too, like reconnects.
+

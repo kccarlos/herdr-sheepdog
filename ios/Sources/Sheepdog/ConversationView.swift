@@ -22,19 +22,35 @@ struct ConversationView: View {
     var followToken = 0
     /// The empty conversation's example questions.
     var ask: ((String) -> Void)?
+    /// Settings ▸ Health ▸ Show technical events: every row, ungrouped,
+    /// with its exact time.
+    var showTechnical = false
 
     @State private var atBottom = true
     /// The list's own height on screen.
     @State private var visibleHeight: CGFloat = 1000
     @State private var lastSeenID: String?
-    /// The "N updates" rows the user opened, by their id.
+    /// The "N agent updates" rows the user opened, by their id.
     @State private var openGroups: Set<String> = []
 
-    private var hasContent: Bool {
-        rows.contains { if case .day = $0 { return false } else { return true } }
+    /// What the list shows: without the plumbing unless asked for.
+    private var shown: [TimelineRow] {
+        ConversationTimeline.visibleRows(rows, showTechnical: showTechnical)
+    }
+
+    /// The list as drawn. The technical view is the raw rows, ungrouped.
+    private func display(_ shown: [TimelineRow]) -> [ConversationDisplayRow] {
+        showTechnical
+            ? shown.map(ConversationDisplayRow.row)
+            : ConversationTimeline.grouped(shown, keepVisible: pointerIDs)
+    }
+
+    private func hasContent(_ shown: [TimelineRow]) -> Bool {
+        shown.contains { if case .day = $0 { return false } else { return true } }
     }
 
     var body: some View {
+        let visible = shown
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -43,17 +59,19 @@ struct ConversationView: View {
                             Task { await loadKeepingPosition(proxy) }
                         }
                     }
-                    if !hasContent {
+                    if !hasContent(visible) {
                         EmptyConversation(voiceName: voiceName, ask: ask)
                             .padding(.top, 60)
                     }
-                    // Runs of the daemon's pushes and notices fold into one
-                    // "N updates" row; what was said stays in the open.
-                    ForEach(ConversationTimeline.grouped(rows, keepVisible: pointerIDs)) { display in
+                    // Runs of the agents' updates fold into one "N agent
+                    // updates" row; what was said stays in the open.
+                    ForEach(display(visible)) { display in
                         Group {
                             switch display {
                             case let .row(row):
-                                if pointerIDs.contains(row.id) {
+                                if showTechnical {
+                                    TechnicalRow(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                                } else if pointerIDs.contains(row.id) {
                                     QuestionPointer(row: row)
                                 } else {
                                     RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
@@ -94,7 +112,7 @@ struct ConversationView: View {
                         .onAppear {
                             DispatchQueue.main.async {
                                 atBottom = true
-                                lastSeenID = rows.last?.id
+                                lastSeenID = visible.last?.id
                             }
                         }
                         .onDisappear {
@@ -117,7 +135,7 @@ struct ConversationView: View {
             .overlay(alignment: .bottom) {
                 // Not when the list is a sliver (keyboard and question up):
                 // the pill would sit on the agent strip.
-                if !atBottom, visibleHeight > 160, let newest = rows.last?.id, newest != lastSeenID {
+                if !atBottom, visibleHeight > 160, let newest = visible.last?.id, newest != lastSeenID {
                     Button {
                         withAnimation { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
                     } label: {
@@ -131,13 +149,20 @@ struct ConversationView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            // One handler, not two: `rows.last?.id` and `rows.last` change
+            .overlay(alignment: .topLeading) {
+                if showTechnical {
+                    TechnicalEventsTag()
+                        .padding(.top, 8)
+                        .padding(.leading, 10)
+                }
+            }
+            // One handler, not two:`visible.last?.id` and `visible.last` change
             // together on every new message, and two separate `onChange`s
             // each calling `proxy.scrollTo` inside the same SwiftUI
             // transaction — cheap on a short list — became a reliable
             // main-thread hang once the conversation was long enough (seen
             // while testing this bar with a pre-populated history).
-            .onChange(of: rows.last) { _, newest in
+            .onChange(of: visible.last) { _, newest in
                 guard atBottom else { return }
                 if let id = newest?.id, id != lastSeenID { lastSeenID = id }
                 withAnimation(Theme.ease) {
@@ -168,7 +193,7 @@ struct ConversationView: View {
     private func loadKeepingPosition(_ proxy: ScrollViewProxy) async {
         // A display row's id: the first update of a folded run is not on
         // screen under its own id.
-        let anchor = ConversationTimeline.grouped(rows, keepVisible: pointerIDs)
+        let anchor = display(shown)
             .first { if case .row(.day) = $0 { return false } else { return true } }?.id
         await loadOlder()
         if let anchor {
@@ -223,7 +248,7 @@ struct RowView: View {
             case .shepherd, .dog:
                 SpeechBubble(text: item.text, isShepherd: item.kind == .shepherd, isFinal: true, voiceName: voiceName)
             case .push:
-                SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), voiceName: voiceName)
+                SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), category: row.category, voiceName: voiceName)
             case .approval:
                 ApprovalItemCard(item: item, isPinned: item.pendingID.map { openPendingIDs.contains($0) } ?? false)
             case .card:
@@ -243,8 +268,78 @@ struct RowView: View {
     }
 }
 
-/// Consecutive pushes and notices folded into one quiet row: "3 updates"
-/// and the newest one's words; a tap lists them all.
+/// The per-phone switch in Settings ▸ Health (`@AppStorage`).
+enum TechnicalEvents {
+    static let key = "showTechnicalEvents"
+}
+
+/// "Technical events shown": on top of the conversation while the switch
+/// is on, so a screenshot explains itself.
+private struct TechnicalEventsTag: View {
+    var body: some View {
+        Label("Technical events shown", systemImage: TimelineCategory.system.symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.regularMaterial, in: Capsule())
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("conversation.technicalTag")
+    }
+}
+
+/// A row in the technical view: its original text, muted when it is
+/// plumbing, under the exact time and category. A long press copies the
+/// row's raw JSON.
+struct TechnicalRow: View {
+    let row: TimelineRow
+    let voiceName: String
+    let openPendingIDs: Set<String>
+
+    /// "12:46:03 · System". A card this phone has no time for says only its
+    /// category.
+    private var caption: String {
+        row.date == .distantFuture
+            ? row.category.title
+            : "\(row.date.formatted(date: .omitted, time: .standard)) · \(row.category.title)"
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if case .day = row {
+                RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+            } else {
+                Text(caption)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 6)
+                if case let .divider(item, _) = row {
+                    // The daemon's own words, not the divider's tidied title.
+                    NoticeDivider(title: item.text)
+                } else {
+                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                }
+            }
+        }
+        .opacity(row.category == .system ? 0.7 : 1)
+    }
+
+    var body: some View {
+        content
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Copy raw JSON", systemImage: "doc.on.doc") { copy() }
+            }
+            .accessibilityAction(named: "Copy raw JSON") { copy() }
+    }
+
+    private func copy() {
+        UIPasteboard.general.string = row.rawJSON
+    }
+}
+
+/// Three or more consecutive agent updates folded into one quiet row:
+/// "3 agent updates" and the newest two; a tap lists them all.
 struct UpdatesGroup: View {
     let rows: [TimelineRow]
     let isOpen: Bool
@@ -254,14 +349,15 @@ struct UpdatesGroup: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var title: String { ConversationTimeline.updatesTitle(rows.count) }
-    private var latest: String { rows.last.map(ConversationTimeline.updateText) ?? "" }
+    private var count: Int { ConversationTimeline.updateCount(rows) }
+    private var title: String { ConversationTimeline.updatesTitle(count) }
+    private var latest: [String] { ConversationTimeline.previewLines(rows) }
 
     var body: some View {
         VStack(spacing: 8) {
             Button(action: toggle) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "bell")
+                    Image(systemName: TimelineCategory.outcome.symbol)
                         .font(.subheadline)
                         .foregroundStyle(Theme.muted)
                         .padding(.top, 1)
@@ -271,13 +367,15 @@ struct UpdatesGroup: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.muted)
                             .contentTransition(.numericText())
-                            .animation(Theme.ease, value: rows.count)
-                        if !isOpen, !latest.isEmpty {
-                            Text(latest)
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.ink)
-                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                                .truncationMode(.tail)
+                            .animation(Theme.ease, value: count)
+                        if !isOpen {
+                            ForEach(Array(latest.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.ink)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                    .truncationMode(.tail)
+                            }
                         }
                     }
                     Spacer(minLength: 0)
@@ -296,7 +394,7 @@ struct UpdatesGroup: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(isOpen ? title : "\(title). Latest: \(latest)")
+            .accessibilityLabel(isOpen || latest.isEmpty ? title : "\(title). Latest: \(latest.joined(separator: ". "))")
             .accessibilityHint(isOpen ? "Hides them" : "Shows them all")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("conversation.updates")
@@ -577,7 +675,7 @@ struct BubbleView: View {
         case .shepherd, .sheepdog:
             SpeechBubble(text: bubble.text, isShepherd: bubble.speaker == .shepherd, isFinal: bubble.isFinal, voiceName: voiceName)
         case .system:
-            SystemCard(text: bubble.text, kind: bubble.kind, voiceName: voiceName)
+            SystemCard(text: bubble.text, kind: bubble.kind, category: ConversationTimeline.classify(bubble).category, voiceName: voiceName)
         }
     }
 }
@@ -630,6 +728,8 @@ struct SpeechBubble: View {
 struct SystemCard: View {
     let text: String
     let kind: ConversationReducer.Bubble.Kind
+    /// Picks the icon: one per category.
+    let category: TimelineCategory
     let voiceName: String
 
     var body: some View {
@@ -639,7 +739,7 @@ struct SystemCard: View {
         }()
 
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isPush ? "bell" : "info.circle")
+            Image(systemName: category.symbol)
                 .font(.subheadline)
                 .foregroundStyle(Theme.muted)
                 .padding(.top, 1)
@@ -677,7 +777,7 @@ struct QuestionPointer: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "arrow.down.circle")
+            Image(systemName: TimelineCategory.needsYou.symbol)
                 .foregroundStyle(Theme.blockedText)
             Text(text)
                 .foregroundStyle(Theme.muted)

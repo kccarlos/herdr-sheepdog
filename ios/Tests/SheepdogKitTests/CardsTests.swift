@@ -173,8 +173,8 @@ final class CardsTests: XCTestCase {
         let item = cardItem(id: 1_800_000_001_000_000, cardID: "c1")
         let push2 = ConversationItem(id: 1_800_000_002_000_000, ts: t0.addingTimeInterval(2), kind: .push, text: "docs finished")
         let rows = ConversationTimeline.rows(history: [push1, item, push2], live: [])
-        XCTAssertFalse(ConversationTimeline.isUpdate(.item(item)))
-        XCTAssertFalse(ConversationTimeline.isUpdate(.card(card("c2"))))
+        XCTAssertFalse(TimelineRow.item(item).classification.folds)
+        XCTAssertFalse(TimelineRow.card(card("c2")).classification.folds)
         let grouped = ConversationTimeline.grouped(rows)
         XCTAssertTrue(grouped.contains { $0.id == "item.\(item.id)" })
     }
