@@ -1441,10 +1441,9 @@ Order and dependencies:
     - settings toggles (`set:<computer>:<field>`, last write wins) and
       refresh still go through `current { … }`, which is right for reads;
       coalescing settings writes is not built;
-    - the voice's approval card still keeps its own `ApprovalFlow` phase;
-      it now shares the question's key with the other surfaces, so a
-      second tap joins, but the card and the model's `phases` are not one
-      value yet (phase 8, with the voice leaving the session view model);
+    - the voice's approval card still kept its own `ApprovalFlow` phase
+      (it shared the question's key, so a second tap joined, but the card
+      and the model's `phases` were two values); phase 8 made them one;
     - another computer has no `hello` until it is current, so its keyed
       actions are not retried (only answers happen there today).
 
@@ -1499,15 +1498,9 @@ Order and dependencies:
     `expandedAgents`, `screenCovers` and `shellOffered`; views read
     `model.agentsModel` (and bind `expandedAgents` with
     `Bindable(model.agentsModel)`). `agents`, `pendingAction` and
-    `questions` are mirrors the session writes from each state it applies,
-    not derived from the current `ComputerModel`, for three reasons: the
-    session also applies a state it fetched straight (opening a session, a
-    loud refresh, the demo's probe) which the computer's model never sees;
-    the list is sorted (`Flock.sorted`) and carries the DEBUG flags' extra
-    agents; and the haptic cue for a question that arrived without its own
-    event compares against the last list applied. `pendingAction` is the
-    approval card's input and goes with phase 8's `ApprovalFlow` merge.
-    Every setter assigns only on change.
+    `questions` started as mirrors the session wrote from each state; the
+    answers slice below made them derived from the current
+    `ComputerModel`. Every setter assigns only on change.
   - **Done: Conversation.** `ConversationModel` (`ConversationModel.swift`,
     `@Observable`) holds `rows`, `canLoadOlder`, `loadingOlder`,
     `sendingTyped`, `typedError` and `typedSent`; views read
@@ -1538,10 +1531,62 @@ Order and dependencies:
     (`VoiceEngineTests`, in the Kit test bundle with `@testable import
     Sheepdog`) drive the engine with a host that runs every effect, so no
     microphone or socket is needed.
-  - **Left, in order** (sizes S/M/L):
-    8. The approval card's `ApprovalFlow` phase becomes the model's
-       per-question `phases` (M, hard: it changes who owns the answer
-       key, see phase 7's left-for-later).
+  - **Done: Answers, one phase per question.** `ApprovalFlow` (Kit) is
+    no longer the voice card's own machine: it is one computer's answer
+    state, owned by its `ComputerModel` (`model.flow`), with each
+    question's phase (open, sending, answered, gone; a failure is open
+    with its error) and the voice's pinned question (`pending_action`).
+    Every surface reads it: the voice's approval card
+    (`model.approval`), the question cards and the floating questions
+    (`model.phase(id)`); the Live Activity reads the same model's
+    questions. Every answer writes it, under the question's one key
+    (`answer:<computer>:<question>`): a tap anywhere goes through
+    `ComputerModel.answer` (a second tap while one is on its way is
+    ignored), and a notification's Approve while the app runs through
+    `answerFromNotification`, which joins a tap in flight and shows on
+    every card (no haptics; a cold launch still answers with the stored
+    endpoint). The pinned question's `pending.*` events
+    (`questionCreated`, `questionResolved`) come from the current
+    computer's `/events` through the session, as before, so a voice
+    approval still goes transcript → host → reducer →
+    `conversationChanged` for the rows, and the event settles the card
+    ("· by voice"). A settled card lingers 3.5 s on the model's clock
+    (`settledCardLinger`), then the question behind it shows. A reply
+    only settles a question that is still sending, so a late 200 does
+    not overwrite a `gone`. The session's own approval flow, its
+    dismiss timer and `answer(option:)` are gone; `approval` is read
+    from the current model.
+    - **Kept as it was:** the voice's card says an answer the
+      conversation's way ("You approved — Yes · by tap") and other cards
+      "Answered: Yes"; the voice's card names the computer in an error
+      only while several are paired (`approvalErrorName`), other cards
+      always; only the pinned question follows `pending.*` events; with
+      `/ws` closed, the voice's answer syncs the history.
+    - **Changed on purpose (decision 6):** the pinned question and its
+      phase stay with their computer, so a switch no longer resets the
+      voice's card: an answer tapped before a switch lands on the old
+      computer's card, and switching back shows how it ended.
+    - **The mirrors are derived.** The states the session fetched itself
+      (opening the voice session, a loud refresh, the demo's probe) now
+      land on the current model (`accept`), which hands them back
+      through `onState`. So `AgentsModel.agents` (sorted, plus the DEBUG
+      flags' extras), `questions` and `pendingAction` are read from
+      `fleet.current`; the cue and the Live Activity compare against the
+      last lists the session applied (unobserved). One visible
+      difference: re-pairing the current computer empties its agents
+      until the new pairing's first state, as other computers' rows
+      already did.
+    - **Tests.** `ApprovalFlowTests` (the machine: taps, a tap on the
+      voice's question from another card, wording per card, a late reply,
+      events, what a state forgets) and `ComputerRuntimeTests` on the
+      scripted network and manual clock: the voice card and question
+      cards read one phase and a second tap is one request; a
+      notification answer shows on the card, a tap meanwhile is ignored
+      and a second notification joins; a tap joined by a notification; a
+      gone answer from a notification; error wording per card; approve by
+      voice, the linger and the next question; a switch mid-answer lands
+      on the original card; re-pairing forgets every phase.
+  - **Left** (sizes S/M/L):
     9. Delete `SessionViewModel`; `@EnvironmentObject` becomes
        `@Environment(Type.self)` (S).
 

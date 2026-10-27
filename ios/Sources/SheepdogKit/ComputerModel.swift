@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// One paired computer as the views see it (docs/dev/design/ios-state-architecture.md
-/// 3.1): its link, agents and open questions with their tap phases. Its
+/// 3.1): its link, agents and open questions with their answer phases. Its
 /// I/O is a `ComputerConnection` (an actor); the link's machine runs here,
 /// in a `LinkRuntime`, on the main actor.
 ///
@@ -28,8 +28,19 @@ public final class ComputerModel {
     public private(set) var canTalkTo = true
     public private(set) var agents: [Agent] = []
     public private(set) var questions: [PendingAction] = []
-    /// Each question's tap state (by the daemon's own question id).
-    public private(set) var phases: [String: ApprovalFlow.Phase] = [:]
+    /// The voice's own question (`/api/state` `pending_action`).
+    public private(set) var pendingAction: PendingAction?
+    /// Each question's answer phase and the voice's pinned question: the
+    /// one value every surface reads (the voice's approval card, the
+    /// question cards, the floating questions) and every answer writes
+    /// (a tap anywhere, a notification's Approve, an event).
+    public private(set) var flow = ApprovalFlow()
+    /// Each question's phase (by the daemon's own question id).
+    public var phases: [String: ApprovalFlow.Phase] { flow.phases }
+    /// The voice's approval card: its question and phase.
+    public var approval: ApprovalFlow.Card? { flow.card }
+    /// How long a settled approval card stays before it is dismissed.
+    public static let settledCardLinger: TimeInterval = 3.5
 
     /// The link as a value. Not observed: `lastSeen` moves on every
     /// request. `onLinkChange` hears every change.
@@ -46,6 +57,10 @@ public final class ComputerModel {
     @ObservationIgnored public var onAnswerFeedback: ((AnswerFeedback) -> Void)?
     /// A verified computer wants a fresh ticket.
     @ObservationIgnored public var onRenewTicket: (() -> Void)?
+    /// The computer the voice's card names in an error ("Couldn't reach
+    /// …"): the session's rule (nil: "your computer" while one computer is
+    /// paired). Unset, the model's name.
+    @ObservationIgnored public var approvalErrorName: (() -> String?)?
 
     // MARK: The current computer
     //
@@ -101,6 +116,8 @@ public final class ComputerModel {
     @ObservationIgnored private var clients: [LinkChannel: (client: LinkChannelClient, token: Int)] = [:]
     @ObservationIgnored private var nextClientToken = 0
     @ObservationIgnored private var lastAddress: String?
+    /// The settled approval card's linger.
+    @ObservationIgnored private var linger: (id: String, handle: LinkHandle)?
 
     /// - Parameters:
     ///   - addresses: the addresses the link races (the one in use first).
@@ -165,6 +182,7 @@ public final class ComputerModel {
         guard !stopped else { return }
         stopped = true
         epoch += 1
+        endLinger()
         runtime.stop()
         let connection = connection
         Task { await connection.stop() }
@@ -367,7 +385,9 @@ public final class ComputerModel {
         runtime.send(.credentialsChanged(.newPairing(certExpires: certExpires)))
         set(\.agents, [])
         set(\.questions, [])
-        set(\.phases, [:])
+        set(\.pendingAction, nil)
+        endLinger()
+        updateFlow { $0.reset() }
     }
 
     var effectiveDemand: LinkDemand {
@@ -484,20 +504,80 @@ public final class ComputerModel {
         } while refreshAgain && !stopped
     }
 
+    /// A state the session fetched itself for this (the current) computer:
+    /// opening the voice session, a loud refresh, the demo's probe. Applied
+    /// like the model's own, so every surface reads one copy.
+    public func accept(_ state: DaemonState) {
+        guard !stopped else { return }
+        apply(state)
+    }
+
     private func apply(_ state: DaemonState) {
         lastState = state
         set(\.agents, state.agents)
         set(\.questions, state.questions ?? state.pendingAction.map { [$0] } ?? [])
-        // Forget the tap state of questions that closed.
+        set(\.pendingAction, state.pendingAction)
+        // Forget the phase of open questions that closed, and follow the
+        // voice's question.
         let ids = Set(questions.map(\.id))
-        set(\.phases, phases.filter { ids.contains($0.key) || $0.value.isSettledPhase })
+        updateFlow {
+            $0.retain(open: ids)
+            $0.present(state.pendingAction)
+        }
         onState?(state)
+    }
+
+    // MARK: - The voice's question (the current computer's `/events`)
+
+    /// `pending.created`: the voice's new question, before the state that
+    /// carries it.
+    public func questionCreated(_ pending: PendingAction) {
+        guard !stopped else { return }
+        updateFlow { $0.present(pending) }
+    }
+
+    /// `pending.confirmed` / `expired` / `cancelled` / `replaced` (for
+    /// `replaced`, the old id).
+    public func questionResolved(_ id: String, as resolution: ConversationItem.Resolution, answer: String?, via: String?) {
+        guard !stopped else { return }
+        updateFlow { $0.resolved(pendingID: id, as: resolution, answer: answer, via: via) }
+    }
+
+    /// Changes the flow, assigning it only when it changed, and starts the
+    /// approval card's linger when its question settled.
+    private func updateFlow(_ change: (inout ApprovalFlow) -> Void) {
+        var next = flow
+        change(&next)
+        if next != flow { flow = next }
+        guard let card = flow.card, card.isSettled else { return }
+        let id = card.pending.id
+        guard linger?.id != id else { return }
+        endLinger()
+        let handle = scheduler.schedule(at: scheduler.now.addingTimeInterval(Self.settledCardLinger)) { [weak self] in
+            self?.lingerOver(id)
+        }
+        linger = (id, handle)
+    }
+
+    private func lingerOver(_ id: String) {
+        guard linger?.id == id, !stopped else { return }
+        linger = nil
+        updateFlow { $0.dismiss(pendingID: id) }
+        // A newer question may be waiting behind the settled card.
+        if flow.card == nil, let pending = pendingAction, pending.id != id {
+            updateFlow { $0.present(pending) }
+        }
+    }
+
+    private func endLinger() {
+        linger?.handle.cancel()
+        linger = nil
     }
 
     // MARK: - Answers
 
     public func phase(_ questionID: String) -> ApprovalFlow.Phase {
-        phases[questionID] ?? .open(error: nil)
+        flow.phase(questionID)
     }
 
     /// Answers one of this computer's questions by tap, through its own
@@ -505,39 +585,77 @@ public final class ComputerModel {
     /// ignored. The answer finishes on this computer whatever the app
     /// switches to meanwhile (decision 6), and a reply from an older epoch
     /// is dropped.
-    public func answer(question id: String, option index: Int) {
-        guard let question = questions.first(where: { $0.id == id }) else { return }
-        answer(question, option: index)
+    @discardableResult
+    public func answer(question id: String, option index: Int) -> Task<Void, Never>? {
+        guard let question = questions.first(where: { $0.id == id }) else { return nil }
+        return answer(question, option: index)
     }
 
     /// The same, for a question the caller holds (the current computer's
-    /// list may carry one the last state did not). It runs under the
-    /// question's key (`ActionRunner.Key.answer`), so a tap on another
-    /// surface for the same question joins it.
-    public func answer(_ question: PendingAction, option index: Int) {
+    /// list may carry one the last state did not, the voice's card one
+    /// from its event). It runs under the question's key
+    /// (`ActionRunner.Key.answer`), so an answer from another surface for
+    /// the same question joins it. The returned task ends when the answer
+    /// has landed (nil: the tap was ignored).
+    @discardableResult
+    public func answer(_ question: PendingAction, option index: Int) -> Task<Void, Never>? {
         let id = question.id
-        guard !stopped, let option = question.options?.first(where: { $0.index == index }) else { return }
-        let key = ActionRunner.Key.answer(self.id, id)
-        if case .sending = phases[id] { return }
-        if actions.isInFlight(key) { return }
-        phases[id] = .sending(option)
+        guard !stopped, !actions.isInFlight(ActionRunner.Key.answer(self.id, id)) else { return nil }
+        var option: PendingOption?
+        updateFlow { option = $0.tap(question, index: index) }
+        guard let option else { return nil }
         onAnswerFeedback?(.tapped)
-        Task { [weak self] in
+        return Task { [weak self] in
             guard let self else { return }
             do {
-                let spoken = try await self.actions.run(key, .answer, as: ComputerRequests.self) { try await $0.answerPending(id: id, option: index) }
-                self.phases[id] = .answered(outcome: "Answered: \(option.label)", spoken: spoken.isEmpty ? nil : spoken)
-                self.onAnswerFeedback?(.answered)
-            } catch is ComputerModel.Stale {
+                _ = try await self.send(id, option: option, feedback: true)
+            } catch is Stale {
                 return
-            } catch DaemonError.pendingGone {
-                self.phases[id] = .gone(message: ApprovalFlow.goneMessage)
-                self.onAnswerFeedback?(.failed)
-            } catch {
-                self.phases[id] = .open(error: self.failure(error).message)
-                self.onAnswerFeedback?(.failed)
-            }
+            } catch {}
             await self.refresh()
+        }
+    }
+
+    /// A notification's Approve or Decline while the app runs: the
+    /// question's phase shows it on every card, and a tap on a card meanwhile
+    /// joins it. Throws what the answer threw (the caller says it in a
+    /// notification); no haptics.
+    @discardableResult
+    public func answerFromNotification(question id: String, option: PendingOption) async throws -> String {
+        guard !stopped else { throw Stale() }
+        let key = ActionRunner.Key.answer(self.id, id)
+        if !actions.isInFlight(key) {
+            let question = questions.first { $0.id == id } ?? (flow.pinned?.id == id ? flow.pinned : nil)
+                ?? PendingAction(id: id, paneID: "", kind: "answer_prompt", options: [option])
+            updateFlow { _ = $0.tap(question, index: option.index) }
+        }
+        return try await send(id, option: option, feedback: false)
+    }
+
+    /// Sends one answer under its question's key (joining one in flight)
+    /// and settles the question's phase with the outcome.
+    private func send(_ id: String, option: PendingOption, feedback: Bool) async throws -> String {
+        let key = ActionRunner.Key.answer(self.id, id)
+        let pinned = flow.pinned?.id == id
+        do {
+            let spoken = try await actions.run(key, .answer, as: ComputerRequests.self) { try await $0.answerPending(id: id, option: option.index) }
+            updateFlow { $0.succeeded(pendingID: id, spoken: spoken) }
+            if feedback { onAnswerFeedback?(.answered) }
+            return spoken
+        } catch let error as Stale {
+            throw error
+        } catch DaemonError.pendingGone {
+            updateFlow { $0.gone(pendingID: id) }
+            if feedback { onAnswerFeedback?(.failed) }
+            throw DaemonError.pendingGone
+        } catch {
+            let errorName: String? = approvalErrorName.map { $0() } ?? name
+            let message = pinned
+                ? RequestFailure(error, linkUsable: link.isUsable, name: errorName).message
+                : failure(error).message
+            updateFlow { $0.failed(pendingID: id, message: message) }
+            if feedback { onAnswerFeedback?(.failed) }
+            throw error
         }
     }
 
@@ -572,15 +690,6 @@ public final class ComputerModel {
     /// every observer.
     private func set<Value: Equatable>(_ key: ReferenceWritableKeyPath<ComputerModel, Value>, _ value: Value) {
         if self[keyPath: key] != value { self[keyPath: key] = value }
-    }
-}
-
-private extension ApprovalFlow.Phase {
-    var isSettledPhase: Bool {
-        switch self {
-        case .answered, .gone: return true
-        case .open, .sending: return false
-        }
     }
 }
 
