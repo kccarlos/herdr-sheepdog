@@ -49,8 +49,9 @@ final class SessionViewModel: ObservableObject {
     let voice: VoiceEngine
     /// The conversation's rows, paging and typed line.
     let conversationModel = ConversationModel()
-    /// The approval card pinned above the controls, if a worker is asking.
-    @Published private(set) var approval: ApprovalFlow.Card?
+    /// The approval card pinned above the controls, if a worker is asking:
+    /// the current computer's pinned question with its phase.
+    var approval: ApprovalFlow.Card? { fleet.current?.approval }
     /// The agents, the open questions and the view state with them.
     let agentsModel = AgentsModel()
     /// The agents as the screen groups them: running (blocked, working,
@@ -58,7 +59,7 @@ final class SessionViewModel: ObservableObject {
     var flock: Flock { agentsModel.flock }
     /// The pane, navigation stack, Settings route and window request.
     let navigation = NavigationModel()
-    /// A tapped answer to one of the other questions: its tap state, kept on the current computer's model.
+    /// A question's answer phase, kept on the current computer's model.
     func questionPhase(_ id: String) -> ApprovalFlow.Phase { fleet.current?.phase(id) ?? .open(error: nil) }
     /// Every sheet and cover over the main screen: Settings, New agent,
     /// Spaces, a card, the pairing flow, the primers, the demo
@@ -250,12 +251,6 @@ final class SessionViewModel: ObservableObject {
         get { conversation.lastSeq }
         set { conversation.lastSeq = newValue }
     }
-    /// `approval` (the one thing the views read) is derived from this on
-    /// every mutation — a single `didSet`, not a copy hand-written at each
-    /// of the half-dozen call sites that used to change `approvalFlow`.
-    private var approvalFlow = ApprovalFlow() {
-        didSet { assign(\.approval, approvalFlow.card) }
-    }
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
     private var historySyncTask: Task<Void, Never>?
@@ -311,6 +306,7 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         settingsModel.session = self
+        agentsModel.fleet = fleet
         voice.resolveProvider = { [weak self] in self?.resolvedVoiceProvider }
         linkModel.onHelloChange = { [weak self] in self?.voice.providerSourcesChanged() }
         settingsModel.onVoiceProvidersChange = { [weak self] in self?.voice.providerSourcesChanged() }
@@ -480,12 +476,10 @@ final class SessionViewModel: ObservableObject {
                 previous.conversation.reducer.clear()
                 saveCache(now: true, model: previous)
             }
-            agentsModel.clear()
             cardInbox.clear()
             healthModel.clear()
             settingsModel.clear()
             notices.clearForSwitch()
-            approvalFlow.reset()
             if !conversation.loaded { loadCache() }
             conversationChanged(save: false)
             // Learned per daemon: a different one gets the benefit of the
@@ -540,8 +534,7 @@ final class SessionViewModel: ObservableObject {
             return
         }
         do {
-            let state = try await current { try await $0.state() }
-            apply(state)
+            accept(try await current { try await $0.state() })
             await loadHello()
             await settingsModel.loadVoiceProviders()
         } catch let error as DaemonError {
@@ -807,6 +800,12 @@ final class SessionViewModel: ObservableObject {
             self.setLiveUpdates(life)
         }
         model.eventsSince = { [weak model] in model.map { Self.resumeID($0.conversation) } ?? 0 }
+        // The voice's card names the computer in an error only while
+        // several are paired, like the rest of the current computer's errors.
+        model.approvalErrorName = { [weak self] in
+            guard let self, self.showsComputerLabels else { return nil }
+            return self.currentComputerName
+        }
         linkChanged(model.link)
         setLiveUpdates(model.liveUpdates)
     }
@@ -818,6 +817,7 @@ final class SessionViewModel: ObservableObject {
         model.onStreamOpening = nil
         model.onLiveUpdates = nil
         model.eventsSince = nil
+        model.approvalErrorName = nil
         voice.detach(from: model)
         model.attach(.term, nil)
     }
@@ -909,7 +909,7 @@ final class SessionViewModel: ObservableObject {
             send(.toolResult)
         case "pending.created":
             if let pending = PendingAction(event: event) {
-                applyApproval(approvalFlow.present(pending))
+                fleet.current?.questionCreated(pending)
                 // The needs-you cue: a new open question with options, once
                 // per question, and only when it is news (not a replay).
                 if pending.isAnswerPrompt, isFresh(event), cuedPendingIDs.insert(pending.id).inserted {
@@ -929,7 +929,7 @@ final class SessionViewModel: ObservableObject {
             let resolution = ConversationItem.Resolution(rawValue: String(event.type.dropFirst("pending.".count))) ?? .unknown
             let id = event.type == "pending.replaced" ? event.string("old_id") : event.string("id")
             if let id {
-                applyApproval(approvalFlow.resolved(pendingID: id, as: resolution, answer: event.string("answer"), via: event.string("via")))
+                fleet.current?.questionResolved(id, as: resolution, answer: event.string("answer"), via: event.string("via"))
             }
             refreshSoon()
         default:
@@ -957,7 +957,7 @@ final class SessionViewModel: ObservableObject {
     func refreshState(quiet: Bool) async -> Bool {
         guard settings.endpoint != nil else { return false }
         do {
-            apply(try await current { try await $0.state() })
+            accept(try await current { try await $0.state() })
             if linkModel.hello == nil { await loadHello() }
             if !quiet { notices.banner = nil }
             return true
@@ -977,29 +977,27 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    /// A state fetched straight from the current computer: it lands on
+    /// that computer's model, which hands it back through `onState`.
+    private func accept(_ state: DaemonState) {
+        if let model = fleet.current { model.accept(state) } else { apply(state) }
+    }
+
+    /// The agents and questions the last applied state showed, to tell
+    /// what changed (the cue, the Live Activity).
+    private var appliedAgents: [Agent] = []
+    private var appliedQuestions: [PendingAction] = []
+
+    /// The current computer applied a state: its agents, questions and
+    /// answer phases are already on its model; here the cues, the Live
+    /// Activity and the rest of the state follow.
     private func apply(_ state: DaemonState) {
-        // Blocked first (waiting on a person), then working, then idle
-        // and done; what is not running last.
-        var all = state.agents
-        #if DEBUG
-        if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
-        var debugQuestions: [PendingAction] = []
-        if DebugLaunch.demoSecondQuestion {
-            all.append(DebugLaunch.secondQuestionAgent)
-            debugQuestions.append(DebugLaunch.secondQuestion)
-        }
-        #else
-        let debugQuestions: [PendingAction] = []
-        #endif
-        let sorted = Flock.sorted(all)
-        let agentsChanged = sorted != agentsModel.agents
-        agentsModel.setAgents(sorted)
-        // Each assignment only on a change: this runs on every poll, and an
-        // equal value would still re-render every view of the model.
-        agentsModel.setPendingAction(state.pendingAction)
-        applyApproval(approvalFlow.present(state.pendingAction))
-        let open = (state.questions ?? state.pendingAction.map { [$0] } ?? []) + debugQuestions
-        let questionsChanged = open != agentsModel.questions
+        let agents = agentsModel.agents
+        let agentsChanged = agents != appliedAgents
+        appliedAgents = agents
+        let open = agentsModel.questions
+        let questionsChanged = open != appliedQuestions
+        appliedQuestions = open
         if questionsChanged {
             // A question that arrived without its own event (another
             // agent's, read from the state) rises with a light tap; the
@@ -1011,7 +1009,6 @@ final class SessionViewModel: ObservableObject {
             } else {
                 for q in open { cuedPendingIDs.insert(q.id) }
             }
-            agentsModel.setQuestions(open)
         }
         questionsSeen = true
         // The Live Activity's rows and counts.
@@ -1404,31 +1401,6 @@ final class SessionViewModel: ObservableObject {
     /// The first state has been read: questions open before it are not news.
     private var questionsSeen = false
 
-    private func applyApproval(_ effect: ApprovalFlow.Effect) {
-        switch effect {
-        case .appeared:
-            // The cue itself comes from `pending.created` only.
-            break
-        case .settled:
-            scheduleApprovalDismiss()
-        case .dismissed, .none:
-            break
-        }
-    }
-
-    private func scheduleApprovalDismiss() {
-        guard let id = approvalFlow.card?.pending.id else { return }
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            guard let self else { return }
-            self.approvalFlow.dismiss(pendingID: id)
-            // A newer question may be waiting behind the settled card.
-            if self.approvalFlow.card == nil, let pending = self.agentsModel.pendingAction, pending.id != id {
-                self.applyApproval(self.approvalFlow.present(pending))
-            }
-        }
-    }
-
     // MARK: - Cards
 
     /// The app is in the foreground.
@@ -1525,43 +1497,6 @@ final class SessionViewModel: ObservableObject {
 
     private func showFeedbackNotice(_ text: String) { notices.showFeedback(text) }
 
-    /// The user tapped an option on the approval card.
-    func answer(option index: Int) {
-        guard let pendingID = approvalFlow.card?.pending.id, let option = approvalFlow.tap(index: index) else { return }
-        Haptics.tap()
-        let computer = fleet.currentID
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                // The question's key: a notification's Approve for the same
-                // question joins this one.
-                let spoken = try await self.action({ ActionRunner.Key.answer($0, pendingID) }, .answer) { try await $0.answerPending(id: pendingID, option: option.index) }
-                // Sent to the computer the app has since left: it finished
-                // there, and its card follows that computer's next state.
-                guard self.fleet.currentID == computer else { return }
-                self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken))
-                Haptics.answered()
-            } catch is ComputerFleet.Moved, is ComputerModel.Stale {
-                // The computer was paired again or removed meanwhile.
-                return
-            } catch {
-                guard self.fleet.currentID == computer else { return }
-                if case DaemonError.pendingGone = error {
-                    self.applyApproval(self.approvalFlow.gone(pendingID: pendingID))
-                } else {
-                    // Where it was tapped, in the link's words: a timeout
-                    // while the computer answers is one slow answer.
-                    self.approvalFlow.failed(pendingID: pendingID, message: self.requestFailure(error).message)
-                }
-                Haptics.answerFailed()
-            }
-            await self.refreshState(quiet: true)
-            // Without the event stream (not connected), the answered
-            // approval item comes from the server.
-            if !self.voice.core.connection.wantsConnection { await self.syncHistory() }
-        }
-    }
-
     /// The question an agent's card shows: the voice's own (through
     /// `approval`) or another open one, with its tap state.
     func questionCard(for paneID: String) -> ApprovalFlow.Card? {
@@ -1605,24 +1540,29 @@ final class SessionViewModel: ObservableObject {
         return ids
     }
 
-    /// Answers a question by tap, whichever it is: the voice's question
-    /// goes through the approval flow, any other straight to
-    /// `POST /api/pending/answer` with its id.
+    /// Answers a question by tap, whichever it is and wherever it was
+    /// tapped (the voice's card, a question card, the floating stack):
+    /// through its computer's model, under the question's key, so every
+    /// surface reads one phase. The answer finishes on that computer even
+    /// if the app switches meanwhile (decision 6), and its refresh follows.
     func answer(question id: String, option index: Int) {
         if let remote = RemoteQuestion.parse(id) {
             // Another computer's: answered through its own daemon.
             session(remote.computer)?.answer(question: remote.question, option: index)
             return
         }
-        if approval?.pending.id == id {
-            answer(option: index)
-            return
+        guard let model = fleet.current else { return }
+        let voiceQuestion = approval.map(\.pending).flatMap { $0.id == id ? $0 : nil }
+        guard let question = voiceQuestion ?? agentsModel.questions.first(where: { $0.id == id }),
+              let landed = model.answer(question, option: index) else { return }
+        guard voiceQuestion != nil else { return }
+        Task { [weak self, weak model] in
+            await landed.value
+            // Without the event stream (not connected), the voice's answered
+            // approval item comes from the server.
+            guard let self, let model, self.fleet.current === model, !self.voice.core.connection.wantsConnection else { return }
+            await self.syncHistory()
         }
-        guard let question = agentsModel.questions.first(where: { $0.id == id }) else { return }
-        // Through the current computer's model, like another computer's:
-        // the answer finishes there and lands on its card even if the app
-        // switches meanwhile (decision 6), and its refresh follows.
-        fleet.current?.answer(question, option: index)
     }
 
     // MARK: - Banners
@@ -1801,7 +1741,7 @@ final class SessionViewModel: ObservableObject {
         case .probe:
             Task {
                 do {
-                    apply(try await current { try await $0.state() })
+                    accept(try await current { try await $0.state() })
                     await loadHello()
                 } catch {
                     send(.probeFailed(.malformed(error.localizedDescription)))
