@@ -92,6 +92,68 @@ final class LaunchReviewScreenshotsUITests: XCTestCase {
         shot("08-demo-settings")
     }
 
+    /// The App Store set (docs/dev/app-store-review.md section 8): the offline
+    /// demo, light mode, saved as `NN-name.png` with no prefix. Run once per
+    /// device with the status bar overridden (`ios/scripts/appstore-shots.sh`).
+    func testAppStoreSet() throws {
+        func save(_ name: String) {
+            let url = URL(fileURLWithPath: directory).appendingPathComponent("\(name).png")
+            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 20))
+        let gotIt = app.buttons["controls.coachMark.dismiss"].firstMatch
+        if gotIt.waitForExistence(timeout: 3) { gotIt.tap() }
+        // claude-auth finishes at 8 s, codex-payments asks at 16 s.
+        sleep(9)
+        save("01-conversation")
+        let approve = app.buttons.matching(identifier: "approval.option.1").firstMatch
+        XCTAssertTrue(approve.waitForExistence(timeout: 40), "codex-payments' question")
+        sleep(1)
+        save("02-approval")
+        tapVisible(app, "demo.sayYes")
+        _ = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'You approved'")).firstMatch.waitForExistence(timeout: 10)
+        sleep(2)
+        // iPad (portrait): the sidebar lists the agents; an iPhone has the Agents pane.
+        let sidebarShow = app.buttons["sidebar.show"].firstMatch
+        let onIPad = sidebarShow.exists
+        if onIPad {
+            sidebarShow.tap()
+            _ = app.descendants(matching: .any)["sidebar.agent.claude-auth"].waitForExistence(timeout: 5)
+        } else {
+            tapVisible(app, "main.pane.flock", timeout: 3)
+        }
+        sleep(2)
+        save("03-agents")
+        tapVisible(app, onIPad ? "sidebar.agent.claude-auth" : "flock.agent.claude-auth.window")
+        _ = app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10)
+        sleep(2)
+        save("04-agent-window")
+        app.terminate()
+
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogLiveActivityGallery", "one"]
+        app.launch()
+        sleep(2)
+        save("05-live-activity")
+        app.terminate()
+
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 20))
+        if gotIt.waitForExistence(timeout: 3) { gotIt.tap() }
+        let chips = app.buttons.matching(identifier: "demo.question.0")
+        for i in 0 ..< chips.count where chips.element(boundBy: i).isHittable {
+            chips.element(boundBy: i).swipeLeft()
+            break
+        }
+        tapVisible(app, "demo.question.4")
+        _ = app.descendants(matching: .any)["card.title"].waitForExistence(timeout: 10)
+        sleep(2)
+        save("06-card")
+    }
+
     func testPairingLink() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState"]
