@@ -17,9 +17,9 @@ struct ConnectionDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent("Status", value: model.linkPresentation.chip)
+                    LabeledContent("Status", value: model.linkModel.presentation.chip)
                         .accessibilityIdentifier("chip.status")
-                    if let inline = model.linkPresentation.inline {
+                    if let inline = model.linkModel.presentation.inline {
                         Text(inline.message)
                             .font(.footnote)
                             .foregroundStyle(Theme.muted)
@@ -42,7 +42,7 @@ struct ConnectionDetailView: View {
                 Section {
                     LabeledContent("Daemon", value: model.daemonVersion ?? "—")
                         .accessibilityIdentifier("chip.daemonVersion")
-                    LabeledContent("Protocol", value: model.protocolDisplay)
+                    LabeledContent("Protocol", value: model.linkModel.protocolDisplay)
                         .accessibilityIdentifier("chip.protocol")
                     LabeledContent("Voice name", value: model.voiceName)
                         .accessibilityIdentifier("chip.voiceName")

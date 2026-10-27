@@ -14,7 +14,7 @@ struct AllAgentsView: View {
     @State private var filter: AgentFilter = .all
 
     private var paneState: FlockPaneState {
-        FlockPaneState.resolve(link: model.link, hasAgents: !model.flock.isEmpty)
+        model.flockPaneState
     }
 
     private var shown: [Agent] { model.flock.running.filter(filter.matches) }

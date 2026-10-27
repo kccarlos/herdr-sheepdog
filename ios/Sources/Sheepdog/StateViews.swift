@@ -51,7 +51,7 @@ struct FlockUnavailableView: View {
                 } description: {
                     // The rest of the link's words: the title already says
                     // the first sentence.
-                    Text(Self.dropping("\(title).", from: model.linkPresentation.inline?.message ?? SetupHelp.unreachableFix))
+                    Text(Self.dropping("\(title).", from: model.linkModel.presentation.inline?.message ?? SetupHelp.unreachableFix))
                 } actions: {
                     Button("Try now") { model.retryLink() }
                         .accessibilityIdentifier("flock.unreachable.retry")
@@ -63,14 +63,14 @@ struct FlockUnavailableView: View {
                 ContentUnavailableView {
                     Label("No network", systemImage: "wifi.exclamationmark")
                 } description: {
-                    Text(model.linkPresentation.inline?.message ?? "")
+                    Text(model.linkModel.presentation.inline?.message ?? "")
                 }
                 .accessibilityIdentifier("flock.noNetwork")
             case .untrusted:
                 ContentUnavailableView {
                     Label("Not verified", systemImage: "exclamationmark.shield")
                 } description: {
-                    Text(model.linkPresentation.inline?.message ?? "")
+                    Text(model.linkModel.presentation.inline?.message ?? "")
                 } actions: {
                     Button("Try again") { model.retryLink() }
                         .accessibilityIdentifier("flock.untrusted.retry")
