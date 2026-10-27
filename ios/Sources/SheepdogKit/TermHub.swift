@@ -96,9 +96,7 @@ public final class TermHub: LinkChannelClient {
     @discardableResult
     public func send(input: [UInt8], ch: Int) -> Bool { socket.send(input: input, ch: ch) }
 
-    public func scroll(ch: Int, _ dir: TermMessage.ScrollDirection, lines: Int, at cell: (col: Int, row: Int)? = nil) {
-        socket.scroll(ch: ch, dir, lines: lines, col: cell?.col, row: cell?.row)
-    }
+    public func scroll(ch: Int, _ dir: TermMessage.ScrollDirection, lines: Int) { socket.scroll(ch: ch, dir, lines: lines) }
 
     public func click(ch: Int, col: Int, row: Int) {
         socket.mouse(ch: ch, .down, button: "left", col: col, row: row)

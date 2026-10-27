@@ -305,7 +305,7 @@ func TestBridgeCommandsReachHerdr(t *testing.T) {
 		t.Fatal(err)
 	}
 	col, row := 3, 4
-	for _, err := range []error{b.Resize(58, 30), b.Scroll(true, 5, &col, &row), b.Scroll(false, 2, nil, nil), b.Mouse("down", "", 12, 5), b.Mouse("up", "right", 12, 5)} {
+	for _, err := range []error{b.Resize(58, 30), b.Scroll(true, 2, &col, &row), b.Scroll(false, 2, nil, nil), b.Mouse("down", "", 12, 5), b.Mouse("up", "right", 12, 5)} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,8 +329,12 @@ func TestBridgeCommandsReachHerdr(t *testing.T) {
 	want := []string{
 		`{"bytes":"bHMN","type":"terminal.input"}`,
 		`{"cols":58,"rows":30,"type":"terminal.resize"}`,
-		`{"column":3,"direction":"up","lines":5,"row":4,"type":"terminal.scroll"}`,
-		`{"direction":"down","lines":2,"type":"terminal.scroll"}`,
+		// A scroll is one wheel notch per line, at the given cell or at the
+		// middle of the pane (58x30 after the resize).
+		`{"column":3,"direction":"up","lines":1,"row":4,"type":"terminal.scroll"}`,
+		`{"column":3,"direction":"up","lines":1,"row":4,"type":"terminal.scroll"}`,
+		`{"column":29,"direction":"down","lines":1,"row":15,"type":"terminal.scroll"}`,
+		`{"column":29,"direction":"down","lines":1,"row":15,"type":"terminal.scroll"}`,
 		`{"action":"down","column":12,"row":5,"type":"terminal.mouse"}`,
 		`{"action":"up","button":"right","column":12,"row":5,"type":"terminal.mouse"}`,
 		`{"type":"terminal.release"}`,
@@ -515,5 +519,35 @@ func TestResolveBin(t *testing.T) {
 	_ = os.WriteFile(onPath, []byte("#!/bin/sh\n"), 0o700)
 	if got, _ := ResolveBin(""); got != onPath {
 		t.Errorf("PATH = %q", got)
+	}
+}
+
+func TestBridgeScrollIsOneWheelNotchPerLineUpToTheCap(t *testing.T) {
+	f := newFake(t, map[string]string{"script.jsonl": `
+{"emit": {"type": "terminal.frame", "seq": 1, "width": 44, "height": 30, "full": true, "bytes": "G1s/MjAyNmg="}}
+{"echo_input": true}
+`})
+	o := f.opts() // 44x30
+	s := newSink()
+	s.wire(&o)
+	b, err := StartBridge(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Scroll(true, MaxWheelNotches+500, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Scroll(true, 0, nil, nil); err == nil {
+		t.Error("a scroll of no lines should be refused")
+	}
+	b.Release()
+	s.waitClosed(t)
+	got := f.stdin(1)
+	if len(got) != MaxWheelNotches+1 { // the notches, then the release
+		t.Fatalf("stdin has %d lines, want %d notches and a release", len(got), MaxWheelNotches)
+	}
+	enc, _ := json.Marshal(got[0])
+	if want := `{"column":22,"direction":"up","lines":1,"row":15,"type":"terminal.scroll"}`; string(enc) != want {
+		t.Errorf("first notch = %s, want %s (middle of 44x30)", enc, want)
 	}
 }

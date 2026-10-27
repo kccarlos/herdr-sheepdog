@@ -178,12 +178,10 @@ final class TermSocketTests: XCTestCase {
     func testScrollMouseAndClose() throws {
         let (rig, ch) = try openRig()
         rig.socket.scroll(ch: ch, .up, lines: 5)
-        rig.socket.scroll(ch: ch, .down, lines: 2, col: 29, row: 20)
         rig.socket.mouse(ch: ch, .down, button: "left", col: 3, row: 4)
         rig.socket.close(ch: ch)
-        XCTAssertEqual(Array(try rig.last!.messages().suffix(4)),
-                       [.scroll(ch: ch, .up, lines: 5), .scroll(ch: ch, .down, lines: 2, col: 29, row: 20),
-                        .mouse(ch: ch, .down, button: "left", col: 3, row: 4), .close(ch: ch)])
+        XCTAssertEqual(Array(try rig.last!.messages().suffix(3)),
+                       [.scroll(ch: ch, .up, lines: 5), .mouse(ch: ch, .down, button: "left", col: 3, row: 4), .close(ch: ch)])
         XCTAssertEqual(rig.socket.openChannels, [])
         rig.frame(ch, seq: 9, full: true)
         XCTAssertEqual(rig.frames, [], "frames for a closed channel are ignored")

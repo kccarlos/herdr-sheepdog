@@ -215,6 +215,9 @@ type Bridge struct {
 	wmu      sync.Mutex
 	released bool
 
+	smu        sync.Mutex // guards cols, rows: the pane size the wheel centres on
+	cols, rows int
+
 	done   chan struct{}
 	once   sync.Once
 	closed Closed
@@ -304,7 +307,8 @@ func startOnce(ctx context.Context, opts BridgeOptions) (*Bridge, TerminalFrame,
 		return nil, TerminalFrame{}, err
 	}
 	b := &Bridge{opts: opts, cmd: cmd, stdin: stdin, out: bufio.NewReaderSize(stdout, 64<<10),
-		done: make(chan struct{}), stderr: &tailBuffer{max: 2048}}
+		done: make(chan struct{}), stderr: &tailBuffer{max: 2048},
+		cols: opts.Cols, rows: opts.Rows}
 	cmd.Stderr = b.stderr
 	if err := cmd.Start(); err != nil {
 		return nil, TerminalFrame{}, &AttachError{Closed{CloseHerdr, err.Error()}}
@@ -466,13 +470,20 @@ func (b *Bridge) Closed() Closed {
 // Mode is the bridge's attach mode.
 func (b *Bridge) Mode() BridgeMode { return b.opts.Mode }
 
-func (b *Bridge) send(v any) error {
+func (b *Bridge) send(v any) error { return b.sendAll(v) }
+
+// sendAll writes the commands as one batch of lines, in order.
+func (b *Bridge) sendAll(vs ...any) error {
 	if b.opts.Mode != BridgeControl {
 		return ErrObserveOnly
 	}
-	line, err := json.Marshal(v)
-	if err != nil {
-		return err
+	var batch []byte
+	for _, v := range vs {
+		line, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		batch = append(append(batch, line...), '\n')
 	}
 	b.wmu.Lock()
 	defer b.wmu.Unlock()
@@ -484,7 +495,7 @@ func (b *Bridge) send(v any) error {
 	if b.released {
 		return ErrBridgeClosed
 	}
-	if _, err := b.stdin.Write(append(line, '\n')); err != nil {
+	if _, err := b.stdin.Write(batch); err != nil {
 		return ErrBridgeClosed
 	}
 	return nil
@@ -505,25 +516,54 @@ func (b *Bridge) Resize(cols, rows int) error {
 	if cols <= 0 || rows <= 0 || cols > 1000 || rows > 1000 {
 		return fmt.Errorf("herdr: resize %dx%d", cols, rows)
 	}
+	b.smu.Lock()
+	b.cols, b.rows = cols, rows
+	b.smu.Unlock()
 	return b.send(map[string]any{"type": "terminal.resize", "cols": cols, "rows": rows})
 }
 
-// Scroll moves herdr's scrollback, or sends wheel events to a TUI that
-// asked for the mouse (terminal.scroll). up is the direction; col and
-// row, when not nil, place the wheel.
+// MaxWheelNotches is the most wheel notches one Scroll sends. A notch is
+// cheap (a thousand cost herdr about 10 ms in the shell), so the cap only
+// bounds a runaway client; a drag frame is a few notches, and "↓ Latest"
+// from a deep scrollback is the largest honest request.
+const MaxWheelNotches = 1000
+
+// Scroll turns `lines` of scrolling into that many wheel notches, one per
+// line (docs/dev/term-contract.md#wheel-notches). herdr's terminal.scroll
+// moves its own scrollback by `lines`, but sends a full-screen app that
+// asked for the mouse (Codex) exactly ONE wheel event whatever `lines`
+// says. One line per message is the same distance in the scrollback and
+// the right number of notches for the app, so the daemon never has to
+// know which of the two the pane is in.
+//
+// up is the direction. The wheel lands on col,row, or on the middle of the
+// pane when either is nil: a TUI ignores a wheel outside its scrollable
+// area, and herdr's own default cell is the top-left corner.
 func (b *Bridge) Scroll(up bool, lines int, col, row *int) error {
 	if lines <= 0 {
 		return errors.New("herdr: scroll lines must be positive")
+	}
+	if col == nil || row == nil {
+		c, r := b.middleCell()
+		col, row = &c, &r
 	}
 	dir := "down"
 	if up {
 		dir = "up"
 	}
-	m := map[string]any{"type": "terminal.scroll", "direction": dir, "lines": min(lines, 1000)}
-	if col != nil && row != nil {
-		m["column"], m["row"] = *col, *row
+	notch := map[string]any{"type": "terminal.scroll", "direction": dir, "lines": 1, "column": *col, "row": *row}
+	notches := make([]any, min(lines, MaxWheelNotches))
+	for i := range notches {
+		notches[i] = notch
 	}
-	return b.send(m)
+	return b.sendAll(notches...)
+}
+
+// middleCell is the centre of the pane at its current size.
+func (b *Bridge) middleCell() (col, row int) {
+	b.smu.Lock()
+	defer b.smu.Unlock()
+	return b.cols / 2, b.rows / 2
 }
 
 // Mouse sends a click or drag (terminal.mouse): action is down, up or
