@@ -1,0 +1,132 @@
+{"arm":"main","id":"livestatus-zh-any-result","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":1.242163708}
+{"arm":"main","id":"livestatus-zh-any-result","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":0.972138583}
+{"arm":"main","id":"livestatus-zh-any-result","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":1.176439709}
+{"arm":"main","id":"livestatus-zh-any-result-again","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"此时已经有结果了。","pass":true,"seconds":1.183930125}
+{"arm":"main","id":"livestatus-zh-any-result-again","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"此时已经有结果了。","pass":true,"seconds":1.301116167}
+{"arm":"main","id":"livestatus-zh-any-result-again","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"此时已经有结果了。","pass":true,"seconds":0.860107125}
+{"arm":"main","id":"livestatus-zh-saw-it-finish","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":1.145917666}
+{"arm":"main","id":"livestatus-zh-saw-it-finish","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":1.025969125}
+{"arm":"main","id":"livestatus-zh-saw-it-finish","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":0.961813125}
+{"arm":"main","id":"livestatus-zh-what-state-now","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"现在是什么状态?","pass":true,"seconds":0.86707825}
+{"arm":"main","id":"livestatus-zh-what-state-now","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"现在是什么状态?","pass":true,"seconds":1.026335792}
+{"arm":"main","id":"livestatus-zh-what-state-now","rep":3,"want":"to_supervisor","tool":"none","said":"sheepdog-claude 正在排查测 试失败的原因， docs-codex 正在重写 README，已经完成了大约一半。","pass":false,"seconds":13.373933667}
+{"arm":"main","id":"livestatus-zh-why-voice-stopped","rep":1,"want":"to_supervisor","tool":"none","said":"刚才是在等待系统处理信息，现在我已经准备好继续回答您了。","pass":false,"seconds":6.647873542}
+{"arm":"main","id":"livestatus-zh-why-voice-stopped","rep":2,"want":"to_supervisor","tool":"none","said":"刚才只是系统处理稍微停顿了一下，现在一切都正常了。","pass":false,"seconds":6.076493}
+{"arm":"main","id":"livestatus-zh-why-voice-stopped","rep":3,"want":"to_supervisor","tool":"none","said":"刚才可能有些网络延迟，我已经准备好随时为您服务了，请问有什么可以帮您的吗?","pass":false,"seconds":7.41062975}
+{"arm":"main","id":"livestatus-en-any-result-again","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.884339417}
+{"arm":"main","id":"livestatus-en-any-result-again","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.895593875}
+{"arm":"main","id":"livestatus-en-any-result-again","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.961826625}
+{"arm":"main","id":"livestatus-en-did-it-finish","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":0.8193575}
+{"arm":"main","id":"livestatus-en-did-it-finish","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":0.838000333}
+{"arm":"main","id":"livestatus-en-did-it-finish","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":0.895756333}
+{"arm":"main","id":"livestatus-en-what-doing-now","rep":1,"want":"to_supervisor","tool":"none","said":"docs-codex is currently rewriting the README and has finished about half of the sections.","pass":false,"seconds":5.577701166}
+{"arm":"main","id":"livestatus-en-what-doing-now","rep":2,"want":"to_supervisor","tool":"none","said":"docs-codex is currently rewriting the README file, and about half of the sections are finished.","pass":false,"seconds":5.959003}
+{"arm":"main","id":"livestatus-en-what-doing-now","rep":3,"want":"to_supervisor","tool":"none","said":"docs-codex is currently working on the README rewrite, with about half of the sections finished.","pass":false,"seconds":6.033850625}
+{"arm":"main","id":"livestatus-en-why-delay","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":1.06395325}
+{"arm":"main","id":"livestatus-en-why-delay","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":1.080366583}
+{"arm":"main","id":"livestatus-en-why-delay","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":1.3676874589999999}
+{"arm":"main","id":"livestatus-zh-smalltalk-thanks","rep":1,"want":"none","tool":"none","said":"不客气，请稍等一下。","pass":true,"seconds":5.214833084}
+{"arm":"main","id":"livestatus-zh-smalltalk-thanks","rep":2,"want":"none","tool":"none","said":"I'll let you know as soon as there's an update.","pass":true,"seconds":2.701966583}
+{"arm":"main","id":"livestatus-zh-smalltalk-thanks","rep":3,"want":"none","tool":"none","said":"不客气，请稍等。","pass":true,"seconds":2.827284042}
+{"arm":"main","id":"livestatus-en-smalltalk-thanks","rep":1,"want":"none","tool":"none","said":"\u003cno speech\u003e{pause}","pass":true,"seconds":1.8969616249999999}
+{"arm":"main","id":"livestatus-en-smalltalk-thanks","rep":2,"want":"none","tool":"none","said":"You're welcome. I will reach out as soon as I have an update.","pass":true,"seconds":3.842794375}
+{"arm":"main","id":"livestatus-en-smalltalk-thanks","rep":3,"want":"none","tool":"none","said":"\u003cno speech\u003e{pause}","pass":true,"seconds":1.596827792}
+{"arm":"fix","id":"livestatus-zh-any-result","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":1.099402}
+{"arm":"fix","id":"livestatus-zh-any-result","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":0.955021959}
+{"arm":"fix","id":"livestatus-zh-any-result","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":0.828415458}
+{"arm":"fix","id":"livestatus-zh-any-result-again","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"此时已经有结果了。","pass":true,"seconds":0.860927333}
+{"arm":"fix","id":"livestatus-zh-any-result-again","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"此时已经有结果了。","pass":true,"seconds":1.011175959}
+{"arm":"fix","id":"livestatus-zh-any-result-again","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"有结果了吗?","pass":true,"seconds":0.922496458}
+{"arm":"fix","id":"livestatus-zh-saw-it-finish","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":1.210127209}
+{"arm":"fix","id":"livestatus-zh-saw-it-finish","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":1.047424792}
+{"arm":"fix","id":"livestatus-zh-saw-it-finish","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"我都看到他结束了, 你确定还没有反馈吗?","pass":true,"seconds":0.947877041}
+{"arm":"fix","id":"livestatus-zh-what-state-now","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"现在是什么状态?","pass":true,"seconds":1.1111355}
+{"arm":"fix","id":"livestatus-zh-what-state-now","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"现在是什么状态?","pass":true,"seconds":1.318586083}
+{"arm":"fix","id":"livestatus-zh-what-state-now","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"现在是什么状态?","pass":true,"seconds":0.945714167}
+{"arm":"fix","id":"livestatus-zh-why-voice-stopped","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"刚才为什么你的语音突然停了?","pass":true,"seconds":1.031100042}
+{"arm":"fix","id":"livestatus-zh-why-voice-stopped","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"刚才为什么你的语音突然停了?","pass":true,"seconds":1.054664333}
+{"arm":"fix","id":"livestatus-zh-why-voice-stopped","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"刚才为什么你的语音突然停了?","pass":true,"seconds":1.269335125}
+{"arm":"fix","id":"livestatus-en-any-result-again","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.97631875}
+{"arm":"fix","id":"livestatus-en-any-result-again","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.817882375}
+{"arm":"fix","id":"livestatus-en-any-result-again","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Any result yet?","pass":true,"seconds":0.73606175}
+{"arm":"fix","id":"livestatus-en-did-it-finish","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":1.136627375}
+{"arm":"fix","id":"livestatus-en-did-it-finish","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":0.925743167}
+{"arm":"fix","id":"livestatus-en-did-it-finish","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Did it finish?","pass":true,"seconds":1.28772225}
+{"arm":"fix","id":"livestatus-en-what-doing-now","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"What is docs-codex doing right now?","pass":true,"seconds":1.158295083}
+{"arm":"fix","id":"livestatus-en-what-doing-now","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"What is docs-codex doing right now?","pass":true,"seconds":1.000826625}
+{"arm":"fix","id":"livestatus-en-what-doing-now","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"What is docs-codex doing right now?","pass":true,"seconds":0.969319292}
+{"arm":"fix","id":"livestatus-en-why-delay","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":0.957639375}
+{"arm":"fix","id":"livestatus-en-why-delay","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":0.99422775}
+{"arm":"fix","id":"livestatus-en-why-delay","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Why is it taking so long?","pass":true,"seconds":0.911900625}
+{"arm":"fix","id":"livestatus-zh-smalltalk-thanks","rep":1,"want":"none","tool":"none","said":"不用客气。一有消息，我会马上告诉您。","pass":true,"seconds":4.481378583}
+{"arm":"fix","id":"livestatus-zh-smalltalk-thanks","rep":2,"want":"none","tool":"none","said":"不客气，请稍等一下。","pass":true,"seconds":3.587083292}
+{"arm":"fix","id":"livestatus-zh-smalltalk-thanks","rep":3,"want":"none","tool":"none","said":"不客气。","pass":true,"seconds":1.671623625}
+{"arm":"fix","id":"livestatus-en-smalltalk-thanks","rep":1,"want":"none","tool":"none","said":"I'll let you know as soon as sheepdog-claude finishes checking on that.","pass":true,"seconds":4.19380125}
+{"arm":"fix","id":"livestatus-en-smalltalk-thanks","rep":2,"want":"none","tool":"none","said":"I'll let you know the moment the results come in.","pass":true,"seconds":3.458963667}
+{"arm":"fix","id":"livestatus-en-smalltalk-thanks","rep":3,"want":"none","tool":"none","said":"You're welcome. I'll update you as soon as I hear back.","pass":true,"seconds":3.642713625}
+{"arm":"main","id":"none-let-me-know-bare","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":0.882267542}
+{"arm":"main","id":"none-let-me-know-bare","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":0.861654292}
+{"arm":"main","id":"none-let-me-know-bare","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":0.920663}
+{"arm":"main","id":"none-let-me-know-if-he-responds","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Okay, please let me know if he responds.","pass":true,"seconds":0.852818583}
+{"arm":"main","id":"none-let-me-know-if-he-responds","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"please let me know if he responds","pass":true,"seconds":0.828584959}
+{"arm":"main","id":"none-let-me-know-if-he-responds","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Okay, please let me know if he responds.","pass":true,"seconds":1.020821375}
+{"arm":"main","id":"none-how-say-repo-name","rep":1,"want":"none","tool":"none","said":"It's pronounced just like the word \"herder,\" like someone who takes care of a flock.","pass":true,"seconds":4.93778325}
+{"arm":"main","id":"none-how-say-repo-name","rep":2,"want":"none","tool":"none","said":"It's pronounced just like the word \"herder,\" as in someone who looks after a flock.","pass":true,"seconds":5.815158125}
+{"arm":"main","id":"none-how-say-repo-name","rep":3,"want":"none","tool":"none","said":"It's pronounced just like the word \"herder,\" like someone who takes care of a flock.","pass":true,"seconds":5.988239958}
+{"arm":"main","id":"none-okay-use-that","rep":1,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":0.709513125}
+{"arm":"main","id":"none-okay-use-that","rep":2,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":0.826562542}
+{"arm":"main","id":"none-okay-use-that","rep":3,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":0.940880833}
+{"arm":"main","id":"none-hello-can-you-respond","rep":1,"want":"none","tool":"none","said":"Hello! I'm here and ready to help. What's on your mind? \u003c\u003cwait\u003e\u003e","pass":true,"seconds":4.272557584}
+{"arm":"main","id":"none-hello-can-you-respond","rep":2,"want":"none","tool":"none","said":"Hello! Yes, I'm here and ready to help with your projects. What do you need?","pass":true,"seconds":5.391570458}
+{"arm":"main","id":"none-hello-can-you-respond","rep":3,"want":"none","tool":"none","said":"Hello! I'm here and ready to help. What's on your mind?","pass":true,"seconds":4.1972255}
+{"arm":"fix","id":"none-let-me-know-bare","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":1.095561084}
+{"arm":"fix","id":"none-let-me-know-bare","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":1.143673292}
+{"arm":"fix","id":"none-let-me-know-bare","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Let me know when it's done.","pass":true,"seconds":0.776803583}
+{"arm":"fix","id":"none-let-me-know-if-he-responds","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Okay, please let me know if he responds.","pass":true,"seconds":0.833690709}
+{"arm":"fix","id":"none-let-me-know-if-he-responds","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Okay, please let me know if he responds.","pass":true,"seconds":0.741927708}
+{"arm":"fix","id":"none-let-me-know-if-he-responds","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"please let me know if he responds","pass":true,"seconds":1.086669916}
+{"arm":"fix","id":"none-how-say-repo-name","rep":1,"want":"none","tool":"none","said":"It's pronounced just like the word \"herder.\"","pass":true,"seconds":3.9728283749999997}
+{"arm":"fix","id":"none-how-say-repo-name","rep":2,"want":"none","tool":"none","said":"It is pronounced like \"herder,\" just like someone who herds sheep.","pass":true,"seconds":4.949220167}
+{"arm":"fix","id":"none-how-say-repo-name","rep":3,"want":"none","tool":"none","said":"It is pronounced just like the word \"herder,\" as if you are tending a flock.","pass":true,"seconds":5.614146791}
+{"arm":"fix","id":"none-okay-use-that","rep":1,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":0.84379575}
+{"arm":"fix","id":"none-okay-use-that","rep":2,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":0.808127}
+{"arm":"fix","id":"none-okay-use-that","rep":3,"want":"none","tool":"to_supervisor","text":"Okay, let's use that then.","pass":false,"seconds":1.146220875}
+{"arm":"fix","id":"none-hello-can-you-respond","rep":1,"want":"none","tool":"none","said":"Hello! Yes, I'm here and ready to help. What's on your mind?","pass":true,"seconds":4.812145167}
+{"arm":"fix","id":"none-hello-can-you-respond","rep":2,"want":"none","tool":"none","said":"Hello! Yes, I'm here and ready to help. What's on your mind?","pass":true,"seconds":5.050647708}
+{"arm":"fix","id":"none-hello-can-you-respond","rep":3,"want":"none","tool":"none","said":"Hello! I am here and ready to help. What's on your mind?","pass":true,"seconds":8.667269166}
+{"arm":"main","id":"livestatus-heldout-zh-how-far","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"进展到哪了?","pass":true,"seconds":1.24580925}
+{"arm":"main","id":"livestatus-heldout-zh-how-far","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"进展到哪了?","pass":true,"seconds":1.153779625}
+{"arm":"main","id":"livestatus-heldout-zh-how-far","rep":3,"want":"to_supervisor","tool":"none","said":"请问您是指哪一个代理的进度呢？是正在排查测试失败的 sheepdog-claude，还是负责重写 README 的 docs-codex？","pass":false,"seconds":9.461255458}
+{"arm":"main","id":"livestatus-heldout-zh-busy-with","rep":1,"want":"to_supervisor","tool":"none","said":"您是指哪一个 agent 呢？","pass":false,"seconds":2.6982362909999997}
+{"arm":"main","id":"livestatus-heldout-zh-busy-with","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"它现在在忙什么?","pass":true,"seconds":1.025768625}
+{"arm":"main","id":"livestatus-heldout-zh-busy-with","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"它现在在忙什么?","pass":true,"seconds":1.189255792}
+{"arm":"main","id":"livestatus-heldout-zh-why-stuck","rep":1,"want":"to_supervisor","tool":"none","said":"抱歉让您久等了，我一直在随时待命，我们可以继续了。","pass":false,"seconds":3.952261875}
+{"arm":"main","id":"livestatus-heldout-zh-why-stuck","rep":2,"want":"to_supervisor","tool":"none","said":"别担心，我一直在这儿盯着呢。 sheepdog-claude 还在查，一有消息我就通知您。","pass":false,"seconds":7.130207}
+{"arm":"main","id":"livestatus-heldout-zh-why-stuck","rep":3,"want":"to_supervisor","tool":"none","said":"抱歉让您久等了，我刚才正在确认 sheepdog-claude 的工作进度。","pass":false,"seconds":5.888329167}
+{"arm":"main","id":"livestatus-heldout-en-how-far","rep":1,"want":"to_supervisor","tool":"none","said":"docs-codex is about halfway through rewriting the README.","pass":false,"seconds":4.415165666}
+{"arm":"main","id":"livestatus-heldout-en-how-far","rep":2,"want":"to_supervisor","tool":"none","said":"About half of the sections are finished.","pass":false,"seconds":3.099008}
+{"arm":"main","id":"livestatus-heldout-en-how-far","rep":3,"want":"to_supervisor","tool":"none","said":"docs-codex is about half done with the README rewrite.","pass":false,"seconds":3.808920958}
+{"arm":"main","id":"livestatus-heldout-en-still-on-readme","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":1.0721235}
+{"arm":"main","id":"livestatus-heldout-en-still-on-readme","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":0.864718958}
+{"arm":"main","id":"livestatus-heldout-en-still-on-readme","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":0.968853}
+{"arm":"main","id":"livestatus-heldout-en-why-cut-out","rep":1,"want":"to_supervisor","tool":"none","said":"I'm still here and monitoring the progress. I'll let you know as soon as sheepdog-claude finishes checking the tests.","pass":false,"seconds":6.832360125}
+{"arm":"main","id":"livestatus-heldout-en-why-cut-out","rep":2,"want":"to_supervisor","tool":"none","said":"I'm just waiting for the results from sheepdog-claude and will let you know as soon as they're ready.","pass":false,"seconds":5.454486875}
+{"arm":"main","id":"livestatus-heldout-en-why-cut-out","rep":3,"want":"to_supervisor","tool":"none","said":"I'm just waiting for sheepdog-claude to finish investigating the tests and provide an update.","pass":false,"seconds":5.987270209}
+{"arm":"fix","id":"livestatus-heldout-zh-how-far","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"进展到哪了?","pass":true,"seconds":0.947963334}
+{"arm":"fix","id":"livestatus-heldout-zh-how-far","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"进展到哪了?","pass":true,"seconds":0.950752083}
+{"arm":"fix","id":"livestatus-heldout-zh-how-far","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"进展到哪了?","pass":true,"seconds":0.926185334}
+{"arm":"fix","id":"livestatus-heldout-zh-busy-with","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"它现在在忙什么?","pass":true,"seconds":1.049424875}
+{"arm":"fix","id":"livestatus-heldout-zh-busy-with","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"它现在在忙什么?","pass":true,"seconds":0.928085958}
+{"arm":"fix","id":"livestatus-heldout-zh-busy-with","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"它现在在忙什么?","pass":true,"seconds":1.043672417}
+{"arm":"fix","id":"livestatus-heldout-zh-why-stuck","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"你刚才怎么卡住了?","pass":true,"seconds":0.899937417}
+{"arm":"fix","id":"livestatus-heldout-zh-why-stuck","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"你刚才怎么卡住了?","pass":true,"seconds":0.942557208}
+{"arm":"fix","id":"livestatus-heldout-zh-why-stuck","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"你刚才怎么卡住了?","pass":true,"seconds":0.99081825}
+{"arm":"fix","id":"livestatus-heldout-en-how-far","rep":1,"want":"to_supervisor","tool":"none","said":"It's about fifty percent finished with the rewrite.","pass":false,"seconds":4.162578958}
+{"arm":"fix","id":"livestatus-heldout-en-how-far","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"How far along is it?","pass":true,"seconds":1.026206875}
+{"arm":"fix","id":"livestatus-heldout-en-how-far","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"How far along is it?","pass":true,"seconds":0.713485375}
+{"arm":"fix","id":"livestatus-heldout-en-still-on-readme","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":0.804084584}
+{"arm":"fix","id":"livestatus-heldout-en-still-on-readme","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":0.762524833}
+{"arm":"fix","id":"livestatus-heldout-en-still-on-readme","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Is docs-codex still on the README?","pass":true,"seconds":0.876527791}
+{"arm":"fix","id":"livestatus-heldout-en-why-cut-out","rep":1,"want":"to_supervisor","tool":"to_supervisor","text":"Why did you cut out?","pass":true,"seconds":1.147806417}
+{"arm":"fix","id":"livestatus-heldout-en-why-cut-out","rep":2,"want":"to_supervisor","tool":"to_supervisor","text":"Why did you cut out?","pass":true,"seconds":0.795212416}
+{"arm":"fix","id":"livestatus-heldout-en-why-cut-out","rep":3,"want":"to_supervisor","tool":"to_supervisor","text":"Why did you cut out?","pass":true,"seconds":0.926096667}

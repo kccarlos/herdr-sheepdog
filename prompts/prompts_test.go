@@ -85,9 +85,11 @@ func TestRenderAssistant(t *testing.T) {
 	// 540 until v6; unified roles (2026-10-07) added the herdr
 	// explanation and the voice / orchestrator parts; 630 since the
 	// never-compress rule (harness iteration 1, 2026-10-12), which is
-	// measured as written.
-	if words := len(strings.Fields(s)); words > 630 {
-		t.Errorf("prompt is %d words; keep it short (<= 630)", words)
+	// measured as written; 680 since the live-status hand-off sentence
+	// (docs/dev/eval/live-status-handoff-2026-10-27.md), also measured as
+	// written.
+	if words := len(strings.Fields(s)); words > 680 {
+		t.Errorf("prompt is %d words; keep it short (<= 680)", words)
 	}
 	// Harness iteration 1 (docs/dev/eval/iteration-1-nc-2026-10-12.md).
 	if !strings.Contains(s, "Never compress or shorten the orchestrator's spoken text") {

@@ -185,6 +185,31 @@ func TestClientTimeoutAndDialErrors(t *testing.T) {
 	}
 }
 
+// A reply that never comes after the request was written is ErrNoReply:
+// the prompt probably reached herdr (live log 2026-10-27), unlike a
+// dial failure where nothing was written.
+func TestPromptWrittenButNoReplyIsErrNoReply(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.Handle("agent.prompt", func(json.RawMessage) (any, error) {
+		time.Sleep(400 * time.Millisecond)
+		return map[string]any{}, nil
+	})
+	c := herdr.NewClient(srv.Path)
+	c.Timeout = 80 * time.Millisecond
+	_, err := c.Prompt(context.Background(), "w5:p1", "Create hello.txt")
+	if !errors.Is(err, herdr.ErrNoReply) {
+		t.Fatalf("Prompt err = %v, want ErrNoReply", err)
+	}
+	if n := len(srv.RequestsFor("agent.prompt")); n != 1 {
+		t.Errorf("server saw %d agent.prompt requests, want 1", n)
+	}
+
+	dead := herdr.NewClient(filepath.Join(t.TempDir(), "none.sock"))
+	if _, err := dead.Prompt(context.Background(), "w5:p1", "x"); err == nil || errors.Is(err, herdr.ErrNoReply) {
+		t.Errorf("dial failure err = %v, want an error that is not ErrNoReply", err)
+	}
+}
+
 func TestParseEventFixture(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(fixtureDir, "events-agent-status.jsonl"))
 	if err != nil {
