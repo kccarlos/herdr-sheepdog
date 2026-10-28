@@ -156,7 +156,9 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         case .expired:
             return "Expired without an answer"
         case .cancelled:
-            return "No longer needed"
+            // The daemon does not say why the prompt left the screen
+            // (answered in the terminal, or the agent moved on).
+            return "Closed"
         case .replaced:
             return "Replaced by a newer question"
         case .unknown:

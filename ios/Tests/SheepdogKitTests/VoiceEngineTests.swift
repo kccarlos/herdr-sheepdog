@@ -13,7 +13,7 @@ final class VoiceEngineTests: XCTestCase {
         var handshakes: [ProtocolHandshake.State] = []
         var publishes = 0
         var controls: [WSMessage.Kind] = []
-        var notices: [String] = []
+        var notices: [LocalNotice] = []
         var canShowTip = true
         var tipsShown = 0
 
@@ -33,7 +33,7 @@ final class VoiceEngineTests: XCTestCase {
         func voiceEngineDidPublish(_ engine: VoiceEngine) { publishes += 1 }
         func voiceEngine(_ engine: VoiceEngine, socket event: VoiceSocket.Event) {}
         func voiceEngine(_ engine: VoiceEngine, control message: WSMessage) { controls.append(message.type) }
-        func voiceEngine(_ engine: VoiceEngine, notice: String) { notices.append(notice) }
+        func voiceEngine(_ engine: VoiceEngine, notice: LocalNotice) { notices.append(notice) }
         var voiceEngineSendsDrains: Bool { false }
         var voiceEngineCanShowTip: Bool { canShowTip }
         func voiceEngineShowMicrophoneTip(_ engine: VoiceEngine) { tipsShown += 1 }

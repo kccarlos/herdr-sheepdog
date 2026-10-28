@@ -62,8 +62,12 @@ final class AudioEngine {
     var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
     /// Every time the player ran dry, for the daemon's `drain` message.
     var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?
-    /// An interruption (a call, Siri) or a route change the user should see.
-    var onNotice: ((String) -> Void)?
+    /// An interruption (a call, Siri) or a route change: the voice bar, a
+    /// banner or the log say it, not the conversation (`LocalNotice`).
+    var onNotice: ((LocalNotice) -> Void)?
+    /// Where the sound goes now, when the engine starts and on each route
+    /// change; nil once it stops.
+    var onRoute: ((AudioRoute?) -> Void)?
     /// The microphone stopped (true) or resumed (false) delivering signal.
     var onMicSignal: ((Bool) -> Void)?
     /// iOS paused the audio and would not resume it (true), or it was
@@ -186,6 +190,7 @@ final class AudioEngine {
         restartedForSignal = false
         if !isMuted { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
         recordVoiceProcessing()
+        reportRoute()
         SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, echo cancellation \(self.metrics.voiceProcessing.summary, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
     }
 
@@ -247,6 +252,7 @@ final class AudioEngine {
         isGateClosed = false
         interrupted = false
         setNeedsResume(false)
+        onRoute?(nil)
         watchdog.disarm()
         reportSignal()
         setSpeaking(false)
@@ -587,7 +593,7 @@ final class AudioEngine {
             MainActor.assumeIsolated { self?.restartCapture() }
         })
         observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onNotice?("Audio was reset by iOS — reconnect to start listening again.") }
+            MainActor.assumeIsolated { self?.onNotice?(.mediaServicesReset) }
         })
     }
 
@@ -603,7 +609,7 @@ final class AudioEngine {
             // not a broken microphone.
             watchdog.disarm()
             reportSignal()
-            onNotice?("Paused for a call or Siri.")
+            onNotice?(.pausedForInterruption)
         case .ended:
             guard interrupted else { return }
             interrupted = false
@@ -612,7 +618,7 @@ final class AudioEngine {
                 // Still "running" but paused: say so, and let the orb take
                 // it back.
                 setNeedsResume(true)
-                onNotice?("iOS kept the audio for something else. Tap the orb to resume.")
+                onNotice?(.audioNotGivenBack)
                 return
             }
             resumeAfterInterruption()
@@ -631,20 +637,26 @@ final class AudioEngine {
             // tap, so rebuild the capture chain rather than convert from a
             // rate that no longer exists.
             restartCapture()
-            let output = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName
-            onNotice?(output.map { "Audio moved to \($0)." } ?? "The audio route changed.")
+            onNotice?(.routeChanged(output: AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName))
+            reportRoute()
         default:
             break
         }
     }
 
+    /// Tells the voice bar where the sound goes now.
+    private func reportRoute() {
+        let port = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portType
+        onRoute?(port.map(AudioRoute.init(output:)) ?? .speaker)
+    }
+
     private func resumeAfterInterruption() {
         do {
             try reactivate()
-            onNotice?("Listening again.")
+            onNotice?(.listeningAgain)
         } catch {
             setNeedsResume(true)
-            onNotice?("Could not pick the audio back up (\(error.localizedDescription)). Tap the orb to try again.")
+            onNotice?(.audioFailedToResume(error.localizedDescription))
         }
     }
 
@@ -690,7 +702,7 @@ final class AudioEngine {
         guard format.channelCount > 0, format.sampleRate > 0, let converter = try? PCMConverter(inputFormat: format) else {
             isRunning = false
             stopSteering()
-            onStopped?("The microphone went away with the route change.")
+            onStopped?(LocalNotice.microphoneWentAway)
             return
         }
         self.converter = converter
@@ -708,7 +720,7 @@ final class AudioEngine {
         } catch {
             isRunning = false
             stopSteering()
-            onStopped?("Audio stopped after the route change (\(error.localizedDescription)).")
+            onStopped?(LocalNotice.audioStoppedAfterRouteChange(error.localizedDescription))
         }
     }
 }

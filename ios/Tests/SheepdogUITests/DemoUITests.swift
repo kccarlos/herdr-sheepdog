@@ -116,6 +116,53 @@ final class DemoUITests: XCTestCase {
         XCTAssertTrue(approved.waitForExistence(timeout: 10), "the approval says it was given by voice")
     }
 
+    /// Settings ▸ Health ▸ Show technical events brings back the plumbing
+    /// the conversation hides: the demo's seeded reconnect that lost
+    /// nothing is absent, shown with the switch on, and gone again with it
+    /// off (docs/dev/design/conversation-timeline.md, section 6).
+    func testShowTechnicalEventsRevealsAHiddenReconnect() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        dismissPermissionAlerts()
+        tapVisible(app.buttons, "main.pane.conversation")
+
+        let reconnect = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'divider.notice' AND label CONTAINS 'Voice reconnected'")).firstMatch
+        let restart = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'divider.notice' AND label CONTAINS 'Sheepdog started'")).firstMatch
+        XCTAssertTrue(restart.waitForExistence(timeout: 15), "the conversation loaded, with the daemon's start")
+        XCTAssertFalse(reconnect.exists, "a reconnect that lost nothing is plumbing")
+
+        func setSwitch() {
+            tapMenuItem(app, menu: "voice.menu", item: "chip.connection")
+            tapWhenTappable(app.buttons["chip.health"], "Health in the chip's popover")
+            let toggle = app.switches["health.technicalEvents"]
+            let list = app.collectionViews["health.list"].exists ? app.collectionViews["health.list"] : app.collectionViews.firstMatch
+            for _ in 0 ..< 6 where !(toggle.exists && toggle.isTappable) {
+                list.swipeUp()
+            }
+            XCTAssertTrue(toggle.waitForExistence(timeout: 10), "Show technical events")
+            // The switch is at the row's right end; the middle is its label.
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            // Back to Connection, then Done.
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            tapWhenTappable(app.buttons["Done"], "Done")
+        }
+
+        setSwitch()
+        XCTAssertTrue(app.descendants(matching: .any)["conversation.technicalTag"].waitForExistence(timeout: 10), "the tag says the view is technical")
+        XCTAssertTrue(reconnect.waitForExistence(timeout: 10), "Show technical events adds the reconnect")
+        shot("technical-on")
+
+        setSwitch()
+        XCTAssertTrue(waitForGone(reconnect, timeout: 10), "off again: the reconnect is hidden")
+    }
+
+    private func waitForGone(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+    }
+
     /// Opening the demo asks for nothing: the microphone and speech
     /// recognition prompts wait for the first tap on the microphone.
     func testOpeningTheDemoShowsNoMicrophonePrompt() throws {

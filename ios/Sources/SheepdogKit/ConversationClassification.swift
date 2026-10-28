@@ -88,6 +88,29 @@ public enum ConversationDisplayRow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// What the conversation screen draws: the display rows, and the rows
+/// folded into another row (by that row's id): the orchestrator's replies
+/// under the voice's bubble, and the push and unanswered restatement under
+/// a settled question's line.
+public struct ConversationLayout: Equatable, Sendable {
+    public var rows: [ConversationDisplayRow]
+    public var attached: [String: [TimelineRow]]
+
+    public init(rows: [ConversationDisplayRow], attached: [String: [TimelineRow]]) {
+        self.rows = rows
+        self.attached = attached
+    }
+}
+
+extension TimelineRow {
+    /// A push the voice held or dropped because nobody was listening: an
+    /// update the user missed, shown as "While you were away · …".
+    public var isMissed: Bool {
+        if case .held = self { return true }
+        return false
+    }
+}
+
 extension ConversationTimeline {
     /// A run needs at least this many updates to fold.
     public static let minimumGroup = 3
@@ -104,7 +127,10 @@ extension ConversationTimeline {
             return classify(bubble)
         case .brain:
             return .plain(.dialogue)
-        case .held, .card:
+        case .held:
+            // Held or dropped: an update the user missed (`isMissed`).
+            return RowClass(category: .outcome, folds: true)
+        case .card:
             return .plain(.outcome)
         }
     }
@@ -121,10 +147,13 @@ extension ConversationTimeline {
         case .card:
             return .plain(.outcome)
         case .notice, .unknown:
-            if item.isResetNotice { return .plain(.context) }
-            if isRestart(item) { return RowClass(category: .context, bridgesRuns: true) }
+            switch DaemonNotice(item) {
+            case .reset, .voiceRestarted: return .plain(.context)
+            case .restarted: return RowClass(category: .context, bridgesRuns: true)
             // The daemon's reconnects, context losses and shutdowns.
-            return RowClass(category: .system, shownByDefault: false)
+            case .contextLost, .freshReconnect, .resumedReconnect, .closed, .other:
+                return RowClass(category: .system, shownByDefault: false)
+            }
         }
     }
 
@@ -136,10 +165,14 @@ extension ConversationTimeline {
             return classifyPush(needsUser: needsUser)
         case .notice:
             // This phone's own notices, text-matched until they are tagged
-            // (design doc, phase 3). One not recognised stays visible: it
-            // may be asking for a tap.
-            if bubble.text.hasPrefix("Talking to ") { return .plain(.context) }
-            return RowClass(category: .system, shownByDefault: !isInformationalNotice(bubble.text))
+            // (design doc, phase 3). The timeline keeps the context ones
+            // and any it does not recognise (it may be asking for a tap);
+            // the rest are the voice bar's or a banner's.
+            switch LocalNotice(text: bubble.text) {
+            case .talkingTo: return .plain(.context)
+            case .unrecognised: return RowClass(category: .system)
+            default: return RowClass(category: .system, shownByDefault: false)
+            }
         }
     }
 
@@ -147,23 +180,47 @@ extension ConversationTimeline {
         needsUser ? .plain(.needsYou) : RowClass(category: .outcome, folds: true)
     }
 
-    /// Audio notices that ask nothing of the user.
-    private static func isInformationalNotice(_ text: String) -> Bool {
-        text.hasPrefix("Audio moved to ") || text == "The audio route changed."
-            || text == "Paused for a call or Siri." || text == "Listening again."
-    }
-
     /// The rows without the plumbing, and without a day heading left over
-    /// it. With `showTechnical` every row comes back unchanged.
+    /// it. With `showTechnical` every row comes back unchanged. Rows the
+    /// neighbours decide (`TimelineContext`) are applied: a reconnect that
+    /// matters is shown, a reply or restatement folded into its bubble or
+    /// question is not listed on its own.
     public static func visibleRows(_ rows: [TimelineRow], showTechnical: Bool) -> [TimelineRow] {
         guard !showTechnical else { return rows }
-        let shown = rows.filter { classify($0).shownByDefault }
+        return visibleRows(rows, context: context(of: rows))
+    }
+
+    static func visibleRows(_ rows: [TimelineRow], context: TimelineContext) -> [TimelineRow] {
+        var shown: [TimelineRow] = []
+        shown.reserveCapacity(rows.count)
+        for row in rows where !context.absorbed.contains(row.id) {
+            if let promoted = context.promoted[row.id] {
+                shown.append(promoted)
+            } else if classify(row).shownByDefault {
+                shown.append(row)
+            }
+        }
         return shown.enumerated().compactMap { i, row in
             guard case .day = row else { return row }
             guard i + 1 < shown.count else { return nil }
             if case .day = shown[i + 1] { return nil }
             return row
         }
+    }
+
+    /// Everything the screen lists, in one pass: the normal view (the
+    /// plumbing out, the neighbours' decisions applied, runs of updates
+    /// folded) or, with `showTechnical`, every row as it is.
+    public static func layout(
+        _ rows: [TimelineRow],
+        showTechnical: Bool,
+        keepVisible: Set<String> = [],
+        timeFormatter: DateFormatter = defaultTimeFormatter
+    ) -> ConversationLayout {
+        guard !showTechnical else { return ConversationLayout(rows: rows.map(ConversationDisplayRow.row), attached: [:]) }
+        let context = context(of: rows, timeFormatter: timeFormatter)
+        let shown = visibleRows(rows, context: context)
+        return ConversationLayout(rows: grouped(shown, keepVisible: keepVisible), attached: context.attached)
     }
 
     /// Folds every run of three or more consecutive agent updates into one
@@ -214,12 +271,6 @@ extension ConversationTimeline {
         rows.filter { classify($0).folds }.count
     }
 
-    /// The daemon's "Sheepdog started." notice.
-    static func isRestart(_ item: ConversationItem) -> Bool {
-        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text == "Sheepdog started." || text == "Sheepdog started"
-    }
-
     /// The lines a folded run shows: its newest two updates, oldest first.
     public static func previewLines(_ rows: [TimelineRow]) -> [String] {
         rows.filter { classify($0).folds }.suffix(2).map(updateText).filter { !$0.isEmpty }
@@ -231,6 +282,7 @@ extension ConversationTimeline {
         case let .divider(_, title): return title
         case let .item(item): return item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         case let .live(bubble): return bubble.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let .held(push): return push.text.trimmingCharacters(in: .whitespacesAndNewlines)
         default: return ""
         }
     }
@@ -238,6 +290,17 @@ extension ConversationTimeline {
     /// "3 agent updates".
     public static func updatesTitle(_ count: Int) -> String {
         count == 1 ? "1 agent update" : "\(count) agent updates"
+    }
+
+    /// What a folded run says it holds: "3 agent updates", "6 updates
+    /// while you were away" when every one was missed, "4 agent updates ·
+    /// 2 while you were away" when mixed.
+    public static func updatesTitle(_ rows: [TimelineRow]) -> String {
+        let updates = rows.filter { classify($0).folds }
+        let missed = updates.filter(\.isMissed).count
+        if missed == 0 { return updatesTitle(updates.count) }
+        if missed == updates.count { return "\(updates.count) updates while you were away" }
+        return "\(updatesTitle(updates.count)) · \(missed) while you were away"
     }
 }
 

@@ -103,6 +103,7 @@ struct SheepdogApp: App {
         case "confirm": return .confirm(PairingCode(daemonID: "d", name: "Studio Mac", pin: "p", code: "c", addresses: ["192.168.1.20:7777"]))
         case "working": return .working("Studio Mac")
         case "paired": return .paired("Studio Mac")
+        case "pairedMachineID": return .paired("M944QD4VY")
         case "expired": return .problem(.codeUsed)
         case "revoked": return .problem(.revoked)
         case "pinMismatch": return .problem(.pinMismatch)

@@ -25,8 +25,9 @@ protocol VoiceEngineHost: AnyObject {
     /// A control message that is not the voice's: transcripts, the agent
     /// window, cards.
     func voiceEngine(_ engine: VoiceEngine, control message: WSMessage)
-    /// The audio engine's own line for the conversation.
-    func voiceEngine(_ engine: VoiceEngine, notice: String)
+    /// A notice from the audio engine: the host decides where it shows
+    /// (the voice bar, a banner, the log).
+    func voiceEngine(_ engine: VoiceEngine, notice: LocalNotice)
     /// The daemon takes the player's drain records (feature `feedback`).
     var voiceEngineSendsDrains: Bool { get }
     /// No banner is up, so the Voice Isolation tip may show.
@@ -60,6 +61,8 @@ final class VoiceEngine {
     private(set) var holding = false
     /// The microphone delivers only digital zero while unmuted.
     private(set) var noMicSignal = false
+    /// Where the sound goes while audio runs: the voice bar's route glyph.
+    private(set) var audioRoute: AudioRoute?
     /// True from the moment Connect is tapped until Disconnect.
     private(set) var wantsConnection = false
     /// The one-time caption under the controls the first time Mute is used.
@@ -283,6 +286,10 @@ final class VoiceEngine {
         audio.onNotice = { [weak self] notice in
             guard let self else { return }
             self.host?.voiceEngine(self, notice: notice)
+        }
+        audio.onRoute = { [weak self] route in
+            guard let self, self.audioRoute != route else { return }
+            self.audioRoute = route
         }
     }
 
