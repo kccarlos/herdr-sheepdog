@@ -120,4 +120,17 @@ final class VoiceBarModelTests: XCTestCase {
         XCTAssertFalse(VoiceBarModel.isListening(.muted))
         XCTAssertFalse(VoiceBarModel.isListening(.voiceOff))
     }
+
+    func testStoppedOrbConnectsAndAnotherWindowControlsNothing() {
+        // Stopped is `.disconnected` with the computer reachable: the orb starts the session.
+        let stopped = VoiceBarModel(state: .disconnected)
+        XCTAssertEqual(stopped.orbAction, .connect)
+        XCTAssertEqual(stopped.muteAvailability, .hidden)
+        for state in SessionState.allCases {
+            let m = VoiceBarModel(state: state, audioElsewhere: true)
+            XCTAssertEqual(m.orbAction, .none, "\(state)")
+            XCTAssertEqual(m.muteAvailability, .hidden, "\(state)")
+            XCTAssertFalse(m.endVisible, "\(state)")
+        }
+    }
 }

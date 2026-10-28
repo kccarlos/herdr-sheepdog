@@ -117,8 +117,10 @@ With one computer, none of this shows: no names and no Talk to.
   button turns off only the microphone. While the voice talks or thinks,
   the orb wears a small stop badge: tap it to stop. Tap the name for the
   voice menu: the connection (tap it for the details and Health), Manage
-  computers… and **End voice session** (your agents keep working). "Hold to
-  talk" is an option. The keyboard turns the capsule into a text field
+  computers… and **End voice session** (your agents keep working). After
+  you end it the capsule says "Not talking": tap the orange orb to start
+  again; agents, typing and answering keep working. "Hold to talk" is an
+  option. The keyboard turns the capsule into a text field
   when you cannot talk; the orb on its left goes back to voice.
 - **The conversation.** What you and the voice said, the questions agents
   ask and what agents did. Three or more agent updates in a row fold into

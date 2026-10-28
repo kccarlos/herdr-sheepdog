@@ -66,6 +66,16 @@ public struct ComputerLink: Equatable, Sendable {
         /// The app and the daemon cannot talk; an update, then Retry or
         /// coming to the foreground, leaves it.
         case incompatible(message: String)
+
+        /// The computer cannot be used right now, as opposed to idle, still
+        /// connecting, or briefly reconnecting (within the quiet period).
+        public var isUnreachable: Bool {
+            switch self {
+            case .offline, .noNetwork, .untrustedAnswer, .refused, .incompatible: return true
+            case let .connecting(_, outage): return outage?.long == true
+            case .idle, .online, .degraded, .waiting: return false
+            }
+        }
     }
 
     /// What a new pairing or a certificate rotation changed.
