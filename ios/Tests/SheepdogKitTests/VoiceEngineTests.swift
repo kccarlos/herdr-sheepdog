@@ -137,6 +137,32 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertEqual(engine.talkMode, .openMic)
     }
 
+    func testLockScreenTalkToggleOpensThenSends() {
+        let engine = engine(talkMode: .holdToTalk, host: Host())
+        connect(engine)
+        engine.toggleTalk()
+        XCTAssertTrue(engine.holding, "the first tap opens the gate")
+        engine.toggleTalk()
+        XCTAssertFalse(engine.holding, "the second tap closes it and sends")
+    }
+
+    func testLockScreenTalkClosesByItselfAfterTheLimit() async throws {
+        let engine = engine(talkMode: .holdToTalk, host: Host())
+        engine.lockScreenTalkLimit = .milliseconds(50)
+        connect(engine)
+        engine.toggleTalk()
+        XCTAssertTrue(engine.holding)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(engine.holding, "a forgotten tap does not leave the mic open")
+    }
+
+    func testLockScreenTalkDoesNothingInOpenMic() {
+        let engine = engine(host: Host())
+        connect(engine)
+        engine.toggleTalk()
+        XCTAssertFalse(engine.holding)
+    }
+
     func testAnEngineMadeInHoldToTalkStartsThere() {
         let engine = engine(talkMode: .holdToTalk, host: Host())
         XCTAssertEqual(engine.talkMode, .holdToTalk)

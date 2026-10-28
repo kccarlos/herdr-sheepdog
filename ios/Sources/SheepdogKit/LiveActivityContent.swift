@@ -78,6 +78,11 @@ public struct LiveActivityContent: Codable, Hashable, Sendable {
     /// The microphone is muted (labels the Mute button; speaking and
     /// thinking outrank `muted` as the phase).
     public var muted: Bool
+    /// Hold-to-talk is on: the lock screen's mic button is tap-to-talk
+    /// (tap to open the gate, tap again to send), not Mute.
+    public var holdToTalk: Bool
+    /// Hold-to-talk with the gate open: the user is talking.
+    public var talking: Bool
     /// The current computer's name, only when several are paired.
     public var computer: String?
     /// Up to `maxRows` waiting agents: the current computer's first, then
@@ -103,9 +108,11 @@ public struct LiveActivityContent: Codable, Hashable, Sendable {
         }
     }
 
-    public init(phase: Phase, muted: Bool = false, computer: String? = nil, rows: [Row] = [], waiting: Int? = nil, working: Int = 0, done: Int = 0, sealed: Sealed? = nil) {
+    public init(phase: Phase, muted: Bool = false, holdToTalk: Bool = false, talking: Bool = false, computer: String? = nil, rows: [Row] = [], waiting: Int? = nil, working: Int = 0, done: Int = 0, sealed: Sealed? = nil) {
         self.phase = phase
         self.muted = muted
+        self.holdToTalk = holdToTalk
+        self.talking = holdToTalk && talking
         self.computer = computer
         self.rows = Array(rows.prefix(Self.maxRows))
         self.waiting = max(waiting ?? rows.count, self.rows.count)
@@ -162,6 +169,8 @@ extension LiveActivityContent {
     public static func make(
         state: SessionState,
         muted: Bool,
+        holdToTalk: Bool = false,
+        talking: Bool = false,
         agents: [Agent] = [],
         questions: [PendingAction] = [],
         computer: String? = nil,
@@ -187,6 +196,8 @@ extension LiveActivityContent {
         return LiveActivityContent(
             phase: phase,
             muted: muted,
+            holdToTalk: holdToTalk,
+            talking: talking,
             computer: computer.flatMap { clip($0, to: nameLimit) },
             rows: Array(rows.prefix(maxRows)),
             waiting: waiting,
@@ -255,6 +266,7 @@ extension LiveActivityContent {
 extension LiveActivityContent {
     /// The headline: "Listening", "Muted", "Reconnecting…".
     public var title: String {
+        if let line = holdToTalkLine { return line }
         switch phase {
         case .connecting: return "Connecting…"
         case .reconnecting: return "Reconnecting…"
@@ -267,6 +279,18 @@ extension LiveActivityContent {
         case .noMicrophone: return "No microphone"
         case .voiceOff: return "Voice is off"
         case .away: return "Not listening"
+        }
+    }
+
+    /// Hold-to-talk's own headline: the lock screen cannot hold a button,
+    /// so it says what a tap does. nil outside that mode and while the
+    /// voice is not ready to listen.
+    var holdToTalkLine: String? {
+        guard holdToTalk else { return nil }
+        switch phase {
+        case .listening, .muted: return talking ? "Talking — tap to send" : "Tap to talk"
+        case .speaking, .thinking: return talking ? "Talking — tap to send" : nil
+        default: return nil
         }
     }
 
@@ -330,6 +354,9 @@ extension LiveActivityContent {
         case .voiceOff: sentence = "The computer has no voice session"
         case .away: sentence = "\(voiceName) is not listening. Open Sheepdog to talk"
         }
+        if holdToTalkLine != nil, phase == .listening || phase == .muted || talking {
+            sentence = talking ? "Talking. Tap to send" : "Tap to talk to \(voiceName)"
+        }
         if let computer { sentence += ", on \(computer)" }
         if muted, phase == .speaking || phase == .thinking { sentence += ". Microphone muted" }
         if let waitingText = Self.waitingText(waiting) { sentence += ". \(waitingText)" }
@@ -353,7 +380,7 @@ extension LiveActivityContent {
 
 extension LiveActivityContent {
     enum CodingKeys: String, CodingKey {
-        case phase, muted, computer, rows, waiting, working, done, sealed
+        case phase, muted, holdToTalk = "hold", talking, computer, rows, waiting, working, done, sealed
     }
 
     /// Lenient where it costs nothing: ActivityKit drops a whole update
@@ -365,6 +392,8 @@ extension LiveActivityContent {
         self.init(
             phase: Phase(rawValue: raw) ?? .listening,
             muted: try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false,
+            holdToTalk: try c.decodeIfPresent(Bool.self, forKey: .holdToTalk) ?? false,
+            talking: try c.decodeIfPresent(Bool.self, forKey: .talking) ?? false,
             computer: try c.decodeIfPresent(String.self, forKey: .computer),
             rows: try c.decodeIfPresent([Row].self, forKey: .rows) ?? [],
             waiting: try c.decodeIfPresent(Int.self, forKey: .waiting),

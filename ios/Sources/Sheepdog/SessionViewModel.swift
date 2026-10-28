@@ -657,6 +657,8 @@ final class SessionViewModel: ObservableObject {
             ? LiveActivityContent.make(
                 state: voice.state,
                 muted: voice.isMuted,
+                holdToTalk: voice.talkMode == .holdToTalk,
+                talking: voice.holding,
                 agents: agentsModel.agents,
                 questions: agentsModel.questions,
                 computer: showsComputerLabels ? currentComputerName : nil,
@@ -698,7 +700,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     func handle(route: AppRoute) {
-        for action in route.actions(wantsConnection: wantsConnection, muted: voice.isMuted) {
+        for action in route.actions(wantsConnection: wantsConnection, muted: voice.isMuted, talkMode: voice.talkMode) {
             switch action {
             case .showConversation:
                 navigation.pane = .conversation
@@ -706,6 +708,8 @@ final class SessionViewModel: ObservableObject {
                 connect()
             case .toggleMute:
                 voice.toggleMute()
+            case .toggleTalk:
+                voice.toggleTalk()
             case .stop:
                 voice.stop()
             case .disconnect:

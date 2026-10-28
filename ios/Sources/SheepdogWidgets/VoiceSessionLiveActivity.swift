@@ -41,7 +41,7 @@ struct VoiceSessionLiveActivity: Widget {
                         .accessibilityLabel(context.isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: context.attributes.voiceName))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    SessionButtons(muted: state.muted)
+                    SessionButtons(state: state)
                 }
             } compactLeading: {
                 Image(systemName: look.symbol)
@@ -121,7 +121,7 @@ struct VoiceSessionLockScreenView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: voiceName))
-            SessionButtons(muted: state.muted)
+            SessionButtons(state: state)
         }
     }
 }
@@ -183,23 +183,20 @@ struct MoreWaitingLine: View {
     }
 }
 
-/// Mute / Unmute and End, run in the app's process (`LiveActivityIntent`).
-/// 44 pt targets.
+/// Mute / Unmute (or, in hold-to-talk, tap-to-talk / send) and End, run in
+/// the app's process (`LiveActivityIntent`). 44 pt targets.
 struct SessionButtons: View {
-    let muted: Bool
+    let state: LiveActivityContent
+
+    private var muted: Bool { state.muted }
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(intent: SetVoiceMuteIntent(muted: !muted)) {
-                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .foregroundStyle(muted ? Color.white : ActivityPalette.ink)
-                    .background(Circle().fill(muted ? ActivityPalette.danger : ActivityPalette.button))
+            if state.holdToTalk {
+                talkButton
+            } else {
+                muteButton
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(muted ? "Unmute" : "Mute")
-            .accessibilityHint(muted ? "Turns the microphone back on" : "Turns the microphone off; Sheepdog can still talk")
 
             Button(intent: EndVoiceSessionIntent()) {
                 Image(systemName: "xmark")
@@ -212,6 +209,35 @@ struct SessionButtons: View {
             .accessibilityLabel("End session")
             .accessibilityHint("Ends the voice session. Your agents keep working.")
         }
+    }
+}
+
+extension SessionButtons {
+    @ViewBuilder fileprivate var muteButton: some View {
+        Button(intent: SetVoiceMuteIntent(muted: !muted)) {
+            Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .foregroundStyle(muted ? Color.white : ActivityPalette.ink)
+                .background(Circle().fill(muted ? ActivityPalette.danger : ActivityPalette.button))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(muted ? "Unmute" : "Mute")
+        .accessibilityHint(muted ? "Turns the microphone back on" : "Turns the microphone off; Sheepdog can still talk")
+    }
+
+    /// Tap to open the mic gate, tap again to send.
+    @ViewBuilder fileprivate var talkButton: some View {
+        Button(intent: ToggleTalkIntent()) {
+            Image(systemName: state.talking ? "arrow.up" : "mic.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .foregroundStyle(state.talking ? ActivityPalette.onAccent : ActivityPalette.ink)
+                .background(Circle().fill(state.talking ? ActivityPalette.accent : ActivityPalette.button))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(state.talking ? "Send" : "Talk")
+        .accessibilityHint(state.talking ? "Sends what you said" : "Starts talking. Tap again to send.")
     }
 }
 

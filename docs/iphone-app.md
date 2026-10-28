@@ -285,7 +285,11 @@ With one computer, none of this shows: no names and no Talk to.
   the voice is doing, up to three agents waiting for an answer with their
   questions, and how many agents are working and done. Tap an agent to open
   its window; **Mute** and **End** work without opening the app (ending the
-  voice session leaves your agents working). The banner starts and ends with the voice
+  voice session leaves your agents working). With **Hold to talk** on, the
+  lock screen cannot hold a button, so the mic button becomes tap to talk:
+  the banner says "Tap to talk"; tap once to start talking ("Talking — tap
+  to send"), tap again to send. A tap you forget closes and sends by itself
+  after 60 seconds. The Dynamic Island works the same way. The banner starts and ends with the voice
   session. The app updates it while it runs; when the app has been away
   for half a minute (the phone locked with the voice paused, or the app
   closed), your computer keeps it current through the same push service as
