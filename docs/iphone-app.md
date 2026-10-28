@@ -123,14 +123,26 @@ With one computer, none of this shows: no names and no Talk to.
 - **The conversation.** What you and the voice said, the questions agents
   ask and what agents did. Three or more agent updates in a row fold into
   one "N agent updates" row (it shows the newest two; tap to open it).
+  - You are a bubble on the right (a "Typed" caption if you typed it), the
+    voice a bubble on the left; nothing else in the list is a bubble. What
+    agents did are full-width lines with a round icon: blue for news (the
+    moon for what came while you were away), green for an answer you
+    approved, grey for one you declined or that closed by itself. Lines in
+    a row share one card. An open question is one line, "Codex asked —
+    answer below"; you answer on the card above the voice bar. At the
+    largest text sizes that card is a bar, "Codex asked" and **Answer**,
+    that opens the question. Day headings stay at the top while their day
+    scrolls.
   - Updates that came while no phone was listening read "While you were
     away · …" and fold into the same row ("6 updates while you were
     away"). That row has a **Catch me up** button: it asks the
-    orchestrator what you missed, the same as typing it.
+    orchestrator what you missed, the same as typing it, and says
+    "Asking…" until the voice starts to answer.
   - A question that has ended is one line, for example "Codex's question
     (allow Computer Use to use Finder) — closed", or the answer you gave.
     Tap the line for the whole question, how it ended and what the voice
-    said about it.
+    said about it. Until the computer says why, a closed question reads "It
+    was closed on the computer."
   - The orchestrator's reply sits under the voice's bubble as **Details**.
   - "Talking to Work Mac" marks where you switched computers. If a
     computer's own name looks like a machine ID ("M944QD4VY"), pairing
@@ -145,8 +157,9 @@ With one computer, none of this shows: no names and no Talk to.
     orb to resume", the voice being off, audio stopped).
 
   For a bug report, turn on **Settings ▸ Health ▸ Show technical events**:
-  every row comes back with its original text and exact time, a "Technical
-  events shown" tag marks the page, and a long press on a row copies its
+  every row comes back with its original text, the exact time and a
+  three-letter code (DLG, ASK, UPD, CTX, SYS) in a gutter, plumbing in
+  monospaced grey, a "Technical events shown" tag marks the page, and a long press on a row copies its
   raw JSON. The phone's own audio notices are also written to the system
   log.
 - **Approvals.** A card shows who is asking, the command and one button per

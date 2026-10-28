@@ -2,10 +2,12 @@ import SheepdogKit
 import SwiftUI
 
 /// Errors in plain words, with the one button that helps (app-redesign.md
-/// 8.6): a card on the warm surface with a hairline in the tone's colour,
+/// 8.6): a card on the warm surface with a hairline border,
 /// the tone's glyph in a soft disc, the message, a quiet hint, and pill
 /// actions. The accent stays with the screen's question or orb: the
-/// banner's buttons are outlined.
+/// banner's buttons are outlined. Error is a red disc, warning an ink
+/// triangle on a Fill disc, info and updates blue; the border is always a
+/// hairline.
 struct BannerView: View {
     let banner: SessionViewModel.Banner
     let retry: () -> Void
@@ -14,6 +16,7 @@ struct BannerView: View {
     var body: some View {
         NoticeCard(
             tint: tint,
+            disc: banner.tone == .warning ? Theme.fill : nil,
             symbol: symbol,
             message: banner.message,
             hint: banner.hint.map { LocalizedStringKey($0) },
@@ -37,7 +40,8 @@ struct BannerView: View {
     private var tint: Color {
         switch banner.tone {
         case .error: return Theme.danger
-        case .warning: return Theme.blockedText
+        // Amber stays with the question that needs you; a warning is ink.
+        case .warning: return Theme.ink
         case .info: return Theme.working
         }
     }
@@ -60,7 +64,7 @@ struct UpdateBanner: View {
     @State private var copied = false
 
     var body: some View {
-        NoticeCard(tint: Theme.working, symbol: "arrow.down", message: notice.text, hint: notice.after.map { LocalizedStringKey($0) }, dismiss: dismiss) {
+        NoticeCard(tint: Theme.working, disc: nil, symbol: "arrow.down", message: notice.text, hint: notice.after.map { LocalizedStringKey($0) }, dismiss: dismiss) {
             if let command = notice.command {
                 Button {
                     UIPasteboard.general.string = command
@@ -90,20 +94,22 @@ struct UpdateBanner: View {
 /// The shared shape of a banner.
 private struct NoticeCard<Actions: View>: View {
     let tint: Color
+    /// The disc's fill when it is not the tint's wash.
+    let disc: Color?
     let symbol: String
     let message: String
     let hint: LocalizedStringKey?
     let dismiss: () -> Void
     @ViewBuilder let actions: () -> Actions
-    @ScaledMetric(relativeTo: .subheadline) private var disc: CGFloat = 28
+    @ScaledMetric(relativeTo: .subheadline) private var discSize: CGFloat = 28
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(tint)
-                .frame(width: min(disc, 36), height: min(disc, 36))
-                .background(Circle().fill(tint.opacity(0.14)))
+                .frame(width: min(discSize, 36), height: min(discSize, 36))
+                .background(Circle().fill(disc ?? tint.opacity(0.14)))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(message)
@@ -138,7 +144,7 @@ private struct NoticeCard<Actions: View>: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Theme.card))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(tint.opacity(0.45), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
         .accessibilityElement(children: .contain)
     }
