@@ -27,6 +27,13 @@ struct ConversationView: View {
     /// Settings ▸ Health ▸ Show technical events: every row, ungrouped,
     /// with its exact time.
     var showTechnical = false
+    /// Sends a tapped suggested reply; nil where nothing can be sent (the
+    /// options are plain text then).
+    var replySender: SuggestedReplySender?
+    /// The computer whose conversation this is.
+    var computer = ""
+    /// A typed line is on its way: the options wait for it.
+    var sendingTyped = false
 
     @State private var atBottom = true
     /// The list's own height on screen.
@@ -157,6 +164,14 @@ struct ConversationView: View {
                 .padding(.top, sections.first?.day == nil ? 12 : 0)
                 .padding(.bottom, 12)
             }
+            // Which reply's options are live, from the whole timeline (a
+            // reply folded into Details is not a drawn row).
+            .environment(\.suggestedReplies, replySender.map { sender in
+                SuggestedReplyContext(
+                    replies: ConversationTimeline.suggestedReplies(rows), tap: sender.tap(on: computer),
+                    busy: sendingTyped, computer: computer, sender: sender
+                )
+            })
             .defaultScrollAnchor(.bottom)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
                 let rounded = h.rounded()
