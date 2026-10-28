@@ -84,6 +84,8 @@ final class QuestionPresentationUITests: XCTestCase {
         sleep(1)
         shot("sheet")
 
+        // At the largest sizes the options are further down the sheet.
+        scrollToVisible(app, first)
         tapWhenTappable(first, "the recommended option")
         let gone = NSPredicate(format: "exists == false")
         expectation(for: gone, evaluatedWith: app.buttons["questions.answer"])
