@@ -58,6 +58,8 @@ struct CapsuleGallery: View {
             HourGallery(technical: false)
         } else if ProcessInfo.processInfo.arguments.contains("hourTech") {
             HourGallery(technical: true)
+        } else if ProcessInfo.processInfo.arguments.contains("replies") {
+            SuggestedRepliesGallery()
         } else {
             capsules
         }
@@ -119,6 +121,60 @@ private struct BannerGallery: View {
         }
         .background(Theme.surface)
         .accessibilityIdentifier("capsule.gallery")
+    }
+}
+
+/// The orchestrator's suggested replies in each state on one screen
+/// (`-sheepdogCapsuleGallery replies`): live, one on its way, sent, a
+/// failed send, answered and stale.
+private struct SuggestedRepliesGallery: View {
+    @State private var sender = SuggestedReplySender(sendTyped: { _ in false })
+
+    private static let options = ["Yes, start the logging", "Not yet"]
+
+    private struct Sample: Identifiable {
+        let id: Int64
+        let title: String
+        let status: SuggestedReplies.Status
+        var phase: SuggestedReplyTap.Phase?
+    }
+
+    private let samples: [Sample] = [
+        Sample(id: 1, title: "Live", status: .live),
+        Sample(id: 2, title: "Sending", status: .live, phase: .sending),
+        Sample(id: 3, title: "Sent", status: .live, phase: .sent),
+        Sample(id: 4, title: "Failed", status: .live, phase: .failed(message: "Couldn't reach Work Mac. Check that it is awake.")),
+        Sample(id: 5, title: "Answered", status: .stale(chosen: "Not yet")),
+        Sample(id: 6, title: "Stale", status: .stale(chosen: nil)),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(samples) { sample in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(sample.title).font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+                        BrainReplyCard(
+                            reply: .init(id: sample.id, ts: Date(), spoken: "Shall I tell it to go ahead and start the echo logging?",
+                                         options: Self.options, raw: "{}"),
+                            compact: false, voiceName: "Sheepdog"
+                        )
+                        .environment(\.suggestedReplies, context(sample))
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(Theme.surface)
+        .accessibilityIdentifier("capsule.gallery")
+    }
+
+    private func context(_ sample: Sample) -> SuggestedReplyContext {
+        let tap = sample.phase.map { SuggestedReplyTap(replyID: sample.id, option: Self.options[0], computer: "gallery", phase: $0) }
+        return SuggestedReplyContext(
+            replies: [sample.id: SuggestedReplies(replyID: sample.id, options: Self.options, status: sample.status)],
+            tap: tap, busy: false, computer: "gallery", sender: sender
+        )
     }
 }
 
