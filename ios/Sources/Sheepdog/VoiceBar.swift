@@ -28,6 +28,12 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     /// a glyph after the status, which VoiceOver announces when it changes.
     var route: AudioRoute?
     var canType = true
+    /// The link says the computer cannot be reached: "no session" then
+    /// reads as offline (retry), not as stopped.
+    var computerUnreachable = false
+    /// Another window holds the audio (iPad): this capsule offers "Use
+    /// here" in place of the keyboard.
+    var audioElsewhere = false
     let onConnect: () -> Void
     let onStop: () -> Void
     let onMute: () -> Void
@@ -35,6 +41,8 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
     var onType: () -> Void = {}
+    /// "Use here": move the voice session to this window.
+    var onUseHere: () -> Void = {}
     /// What the voice menu shows, and its items drawn from it: the menu
     /// re-renders only when this (or the name and status) changes
     /// (`StableMenu`).
@@ -47,9 +55,15 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     @State private var rowHeight: CGFloat = 0
 
     private var mode: CapsuleMode {
-        CapsuleMode.resolve(state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen)
+        CapsuleMode.resolve(
+            state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen,
+            computerUnreachable: computerUnreachable, audioElsewhere: audioElsewhere
+        )
     }
-    private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
+    private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode, audioElsewhere: audioElsewhere) }
+    /// The status the capsule shows: the mode's own words where the state
+    /// cannot say them (stopped, in another window).
+    private var shownStatus: String { mode.statusOverride ?? statusText }
     private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
     private var height: CGFloat { min(max(scaledHeight, 60), cap) }
     /// Past this the capsule would cover the conversation it serves: the
@@ -86,7 +100,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                         micSlot
                         orb
                         Spacer(minLength: 0)
-                        typeButton
+                        trailingButton
                     }
                     voiceMenu
                 }
@@ -98,7 +112,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     micSlot
                     orb
                     voiceMenu
-                    typeButton
+                    trailingButton
                 }
             }
         }
@@ -110,7 +124,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
         // it, so VoiceOver (and the UI tests) read it as its own text;
         // touches pass through it to the menu.
         stableMenu(
-            CapsuleMenuLabel(items: menuValue, name: name, status: statusText, mode: mode, noSignal: noSignal, size: dynamicTypeSize),
+            CapsuleMenuLabel(items: menuValue, name: name, status: shownStatus, mode: mode, noSignal: noSignal, size: dynamicTypeSize),
             probe: "voice",
             content: { menu($0.items) },
             label: { _ in nameAndStatus(showsName: true) }
@@ -120,6 +134,26 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
             .accessibilityLabel("Voice: \(name)")
             .accessibilityHint("Shows the connection and End voice session")
             .accessibilityIdentifier("voice.menu")
+    }
+
+    /// The keyboard, or "Use here" in a window that does not hold the audio.
+    @ViewBuilder
+    private var trailingButton: some View {
+        if mode.showsUseHere {
+            Button(action: onUseHere) {
+                Text("Use here")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Moves the voice session to this window")
+            .accessibilityIdentifier("controls.useHere")
+        } else {
+            typeButton
+        }
     }
 
     private var typeButton: some View {
@@ -181,6 +215,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     private var orbLabel: String {
         switch mode {
         case .offline: return "Connect"
+        case .stopped, .stoppedQuiet: return "Start talking"
         case .speaking, .thinking, .stalled: return "Stop \(name)"
         case .paused: return "Resume audio"
         default: return state.accessibilityLabel(voiceName: name)
@@ -211,7 +246,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     .fill(dotColor)
                     .frame(width: 6, height: 6)
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                Text(statusText)
+                Text(shownStatus)
                     .font(.caption)
                     .foregroundStyle(statusColor)
                     // Wraps at the accessibility sizes; never cut there.
@@ -243,7 +278,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
         case .speaking: return Theme.working
         case .thinking: return Theme.thinking
         case .stalled, .paused, .noMicrophone, .reconnecting: return Theme.blocked
-        case .offline, .voiceOff, .hold: return Theme.unknown
+        case .offline, .voiceOff, .hold, .stopped, .stoppedQuiet, .elsewhere: return Theme.unknown
         }
     }
 
@@ -337,30 +372,31 @@ struct CapsuleOrb: View {
 
     private var fill: Color {
         switch mode {
-        case .live: return .accentColor
+        case .live, .stopped: return .accentColor
         case .speaking: return Theme.workingSoft
         case .thinking: return Theme.thinkingSoft
         case .stalled, .paused, .reconnecting: return Theme.accentSoft
         case .holding: return Theme.doneSoft
-        case .quiet, .muted, .offline, .voiceOff, .hold, .noMicrophone: return Theme.fill
+        case .quiet, .muted, .offline, .voiceOff, .hold, .noMicrophone, .stoppedQuiet, .elsewhere: return Theme.fill
         }
     }
 
     private var glyphColor: Color {
         switch mode {
-        case .live: return Theme.onAccent
+        case .live, .stopped: return Theme.onAccent
+        case .stoppedQuiet: return .accentColor
         case .speaking: return Theme.working
         case .thinking: return Theme.thinking
         case .stalled, .paused, .reconnecting: return Theme.blockedText
         case .holding: return Theme.done
-        case .muted, .voiceOff, .noMicrophone: return Theme.muted
+        case .muted, .voiceOff, .noMicrophone, .elsewhere: return Theme.muted
         case .quiet, .offline, .hold: return Theme.ink
         }
     }
 
     private var stroke: (Color, CGFloat)? {
         switch mode {
-        case .live: return nil
+        case .live, .stopped: return nil
         case .speaking: return (Theme.working, 1.5)
         case .thinking: return (Theme.thinking, 1.5)
         case .stalled, .paused, .reconnecting: return (Theme.blocked, 1.5)
@@ -375,6 +411,7 @@ struct CapsuleOrb: View {
         case .thinking: return "ellipsis"
         case .stalled: return "hourglass"
         case .paused: return "play.fill"
+        case .stopped, .stoppedQuiet, .elsewhere: return "mic.fill"
         case .noMicrophone, .voiceOff: return "mic.slash"
         case .reconnecting: return "arrow.clockwise"
         case .offline: return "wifi.slash"

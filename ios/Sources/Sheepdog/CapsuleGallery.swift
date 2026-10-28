@@ -15,6 +15,8 @@ struct CapsuleGallery: View {
         var holding = false
         var question = false
         var muted = false
+        var unreachable = false
+        var elsewhere = false
         var route: AudioRoute?
         let status: String
         var id: String { title }
@@ -30,7 +32,10 @@ struct CapsuleGallery: View {
         Tile(title: "Audio paused", state: .audioPaused, status: "Paused by a call — tap to resume"),
         Tile(title: "No microphone", state: .noMicrophone, status: "Can’t use the microphone"),
         Tile(title: "Reconnecting", state: .reconnecting, status: "Reconnecting…"),
-        Tile(title: "Offline", state: .disconnected, status: "Offline — tap the orb to connect"),
+        Tile(title: "Stopped", state: .disconnected, status: "Not talking · tap the orb"),
+        Tile(title: "Stopped, question open", state: .disconnected, question: true, status: "Not talking · tap the orb"),
+        Tile(title: "In another window", state: .listening, elsewhere: true, status: "In another window"),
+        Tile(title: "Offline", state: .disconnected, unreachable: true, status: "Tap the orb to connect"),
         Tile(title: "Voice off", state: .voiceOff, status: "Voice is off on this computer"),
         Tile(title: "On the speaker", state: .listening, route: .speaker, status: "Listening — just talk"),
         Tile(title: "On headphones", state: .listening, route: .headphones, status: "Listening — just talk"),
@@ -66,6 +71,7 @@ struct CapsuleGallery: View {
                         state: tile.state, meter: meter, muted: tile.muted, name: "Sheepdog",
                         talkMode: tile.talkMode, holding: tile.holding, questionOpen: tile.question,
                         statusText: tile.status, route: tile.route,
+                        computerUnreachable: tile.unreachable, audioElsewhere: tile.elsewhere,
                         onConnect: {}, onStop: {}, onMute: {},
                         menuValue: 0,
                         menu: { _ in Button("End voice session") {} }

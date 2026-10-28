@@ -40,7 +40,15 @@ public struct VoiceBarModel: Equatable, Sendable {
     public var muteAvailability: MuteAvailability
     public var endVisible: Bool
 
-    public init(state: SessionState, talkMode: TalkMode = .openMic) {
+    /// - Parameter audioElsewhere: another window holds the audio: this
+    ///   window's bar controls nothing (only "Use here", `CapsuleMode`).
+    public init(state: SessionState, talkMode: TalkMode = .openMic, audioElsewhere: Bool = false) {
+        if audioElsewhere {
+            orbAction = .none
+            muteAvailability = .hidden
+            endVisible = false
+            return
+        }
         switch state {
         case .disconnected:
             orbAction = .connect

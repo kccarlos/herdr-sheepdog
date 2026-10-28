@@ -47,6 +47,10 @@ public struct LinkPresentation: Equatable, Sendable {
     }
 
     public var chip: String
+    /// The computer cannot be reached now (offline, no network, not
+    /// verified, refused, incompatible): the voice capsule says offline and
+    /// its orb retries, instead of offering to start the voice.
+    public var computerUnreachable: Bool
     public var tint: Tint
     /// A spinner belongs next to the chip's word.
     public var isBusy: Bool
@@ -195,6 +199,7 @@ public struct LinkPresentation: Equatable, Sendable {
             statusLine = chip
         }
         status = statusLine
+        computerUnreachable = link.state.isUnreachable
         if let name { statusLine = "\(name) · \(statusLine)" }
     }
 
