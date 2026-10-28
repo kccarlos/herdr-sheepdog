@@ -70,12 +70,20 @@ final class ComputersUITests: XCTestCase {
         app.launch()
 
         // The conversation: Work Mac's question first, then Home Mac's,
-        // labelled, with Talk to.
+        // labelled, with Talk to. Two cards may not fit above the capsule:
+        // then the "2 questions" bar opens them in the sheet.
         let label = app.descendants(matching: .any).matching(identifier: "computerLabel.question.fixture-2").firstMatch
-        XCTAssertTrue(label.waitForExistence(timeout: 20), "Home Mac's question is labelled")
+        let bar = app.buttons["questions.answer"]
+        let shown = NSPredicate { _, _ in label.exists || bar.exists }
+        expectation(for: shown, evaluatedWith: NSNull())
+        waitForExpectations(timeout: 20)
+        let inSheet = !label.exists
+        if inSheet { tapWhenTappable(bar, "the Answer bar") }
+        XCTAssertTrue(label.waitForExistence(timeout: 10), "Home Mac's question is labelled")
         XCTAssertTrue(label.label.contains("Home Mac · blog"), label.label)
         XCTAssertTrue(app.staticTexts["Answers by tap go to Home Mac."].exists)
         XCTAssertTrue(app.buttons["computerLabel.talkTo.fixture-2"].exists)
+        if inSheet { tapWhenTappable(app.buttons["questions.sheet.close"], "Close") }
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.waitForExistence(timeout: 10), "Work Mac's conversation")
         shot(app, "conversation")
 
@@ -85,7 +93,8 @@ final class ComputersUITests: XCTestCase {
         // (A menu drops its items' identifiers, so these go by label.)
         openMenu(app, "voice.menu", until: "voice.manageComputers")
         XCTAssertTrue(starting(app, "Work Mac, talking here").waitForExistence(timeout: 5), "the current computer, checked")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Talk to Home Mac'")).count >= 2, "the menu's and the question's")
+        // The menu's, and the floating question's when it is inline.
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Talk to Home Mac'")).count >= (inSheet ? 1 : 2), "the menu's and the question's")
         let studio = starting(app, "Talk to Studio")
         XCTAssertTrue(studio.exists)
         XCTAssertFalse(studio.isEnabled, "an offline computer cannot be picked")
