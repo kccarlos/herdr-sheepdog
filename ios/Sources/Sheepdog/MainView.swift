@@ -292,7 +292,10 @@ struct ConversationPane: View {
             loadOlder: { await model.loadOlder() },
             followToken: model.conversationModel.typedSent,
             ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil,
-            showTechnical: showTechnical
+            showTechnical: showTechnical,
+            replySender: model.isConfigured ? model.replySender : nil,
+            computer: model.currentComputerID,
+            sendingTyped: model.conversationModel.sendingTyped
         )
         // One scroll view per computer: a switch swaps the rows under it,
         // and the old computer's offset and "scrolled up" state would leave

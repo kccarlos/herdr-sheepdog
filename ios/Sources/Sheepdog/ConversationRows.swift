@@ -151,7 +151,8 @@ extension View {
 
 /// The orchestrator's replies the voice's bubble just said: one "Details"
 /// line under the bubble. Open, a 2 pt purple rule, what the orchestrator
-/// told the voice, the choices (display only) and, behind one more tap, the
+/// told the voice, its suggested replies (`SuggestedReplyOptions`: buttons
+/// while it is the latest unanswered reply) and, behind one more tap, the
 /// raw payload. Purple is the orchestrator's colour; never a card here.
 struct ReplyDetails: View {
     let replies: [BrainActivity.Reply]
@@ -181,6 +182,7 @@ struct ReplyDetails: View {
             .buttonStyle(.plain)
             .accessibilityHint("Shows what the orchestrator told \(voiceName)")
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("reply.details")
 
             if expanded {
                 HStack(alignment: .top, spacing: 0) {
@@ -204,7 +206,7 @@ struct ReplyDetails: View {
                                         .accessibilityIdentifier("brain.detail")
                                 }
                                 if !reply.options.isEmpty {
-                                    FlowOptions(options: reply.options, fill: Theme.thinkingSoft)
+                                    SuggestedReplyOptions(replyID: reply.id, options: reply.options, fill: Theme.thinkingSoft, voiceName: voiceName)
                                 }
                             }
                         }
@@ -296,7 +298,7 @@ struct BrainReplyCard: View {
                     .textSelection(.enabled)
             }
             if !reply.options.isEmpty {
-                FlowOptions(options: reply.options, fill: Theme.card)
+                SuggestedReplyOptions(replyID: reply.id, options: reply.options, fill: Theme.card, voiceName: voiceName)
             }
             if reply.detail != nil || !reply.raw.isEmpty {
                 Button { withAnimation(Theme.ease) { expanded.toggle() } } label: {
@@ -332,7 +334,9 @@ struct BrainReplyCard: View {
     }
 }
 
-/// The choices an orchestrator reply offered, as chips (display only).
+/// A card's choices, as chips (display only: the question card above the
+/// voice bar answers it). An orchestrator reply's options are
+/// `SuggestedReplyOptions`.
 struct FlowOptions: View {
     let options: [String]
     var fill = Theme.thinkingSoft

@@ -83,7 +83,7 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(label.label.contains("Home Mac · blog"), label.label)
         XCTAssertTrue(app.staticTexts["Answers by tap go to Home Mac."].exists)
         XCTAssertTrue(app.buttons["computerLabel.talkTo.fixture-2"].exists)
-        if inSheet { tapWhenTappable(app.buttons["questions.sheet.close"], "Close") }
+        if inSheet { tapWhenTappable(app.buttons["questions.sheet.close"], "Done") }
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.waitForExistence(timeout: 10), "Work Mac's conversation")
         shot(app, "conversation")
 

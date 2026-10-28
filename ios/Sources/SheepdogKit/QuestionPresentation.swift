@@ -49,7 +49,7 @@ public enum QuestionPresentation: Equatable, Sendable {
     /// and the rest of the safe area keeps the capsule and the latest
     /// lines of the conversation in view. Measured on an iPhone in portrait
     /// at the default text size (docs/dev/design/conversation-timeline.md
-    /// §14): Codex's three-option command approval, the most common
+    /// §15): Codex's three-option command approval, the most common
     /// prompt, stays inline; a question whose options carry descriptions
     /// goes to the sheet.
     public static let budgetShare = 0.55

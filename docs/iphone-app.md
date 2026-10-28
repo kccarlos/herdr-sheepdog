@@ -146,6 +146,12 @@ With one computer, none of this shows: no names and no Talk to.
     said about it. Until the computer says why, a closed question reads "It
     was closed on the computer."
   - The orchestrator's reply sits under the voice's bubble as **Details**.
+    When it suggests next steps ("Yes, start the logging", "Not yet"), tap
+    one to send it: it is the same as typing those words, and it shows as
+    your typed line. Only the newest reply you have not answered has
+    buttons. Once you reply, or the conversation moves on (a newer reply,
+    a new conversation, a restart, another computer), its suggestions turn
+    into plain text, with the one you chose ticked.
   - "Talking to Work Mac" marks where you switched computers. If a
     computer's own name looks like a machine ID ("M944QD4VY"), pairing
     suggests a name you can edit.

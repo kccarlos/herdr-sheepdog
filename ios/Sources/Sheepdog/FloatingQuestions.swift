@@ -160,30 +160,32 @@ struct FloatingQuestions: View {
         .onChange(of: cards.map(\.pending.id)) { _, _ in announce(cards) }
     }
 
-    /// Every card in full, scrolling, with a Close button.
+    /// Every card in full, scrolling, under a system navigation bar with
+    /// Done (the card sheet's pattern, `CardSheet`).
     private var sheet: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(cards.count > 1 ? "\(cards.count) questions" : "Question")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.ink)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 8)
-                    Button("Close") { showSheet = false }
-                        .font(.body.weight(.semibold))
-                        .frame(minWidth: 44, minHeight: 44)
+        NavigationStack {
+            ScrollView {
+                cardList(questionLines: nil, inSheet: true)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Theme.surface)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(cards.count > 1 ? "\(cards.count) questions" : "Question")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showSheet = false }
+                        .fontWeight(.semibold)
                         .accessibilityIdentifier("questions.sheet.close")
                 }
-                cardList(questionLines: nil, inSheet: true)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
         }
-        .background(Theme.surface)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.resizes)
+        .presentationBackground(Theme.surface)
         .accessibilityIdentifier("questions.sheet")
         // The cards in the sheet do not fly to their conversation rows.
         .environment(\.motionNamespace, nil)
