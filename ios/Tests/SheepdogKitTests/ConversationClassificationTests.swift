@@ -78,31 +78,28 @@ final class ConversationClassificationTests: XCTestCase {
             notice(3, "Voice session closed: shutdown."), .item(item(4, .unknown, "")),
             local(1, .notice, "Audio moved to Speaker."), local(2, .notice, "The audio route changed."),
             local(3, .notice, "Paused for a call or Siri."), local(4, .notice, "Listening again."),
+            // The ones that need a tap are a banner's now (`LocalNotice`).
+            local(5, .notice, "iOS kept the audio for something else. Tap the orb to resume."),
+            local(6, .notice, "Could not pick the audio back up (x). Tap the orb to try again."),
+            local(7, .notice, "Audio was reset by iOS — reconnect to start listening again."),
+            local(8, .notice, "The microphone went away with the route change."),
+            local(9, .notice, "Voice is off on the daemon (`--voice=off`), so it cannot hear the microphone."),
         ]
         for row in hidden {
             XCTAssertFalse(ConversationTimeline.classify(row).shownByDefault, row.id)
             XCTAssertEqual(category(row), .system, row.id)
         }
-        // Whatever needs a tap stays on the page until the voice bar takes it over.
-        let actionable = [
-            "iOS kept the audio for something else. Tap the orb to resume.",
-            "Could not pick the audio back up (x). Tap the orb to try again.",
-            "Audio was reset by iOS — reconnect to start listening again.",
-            "The microphone went away with the route change.",
-            "Voice is off on the daemon (`--voice=off`), so it cannot hear the microphone.",
-            "A notice this build has never seen",
-        ]
-        for text in actionable {
-            XCTAssertTrue(ConversationTimeline.classify(local(9, .notice, text)).shownByDefault, text)
-        }
+        // A notice this build has never seen may be asking for a tap: it stays.
+        XCTAssertTrue(ConversationTimeline.classify(local(10, .notice, "A notice this build has never seen")).shownByDefault)
         for category in [TimelineCategory.dialogue, .needsYou, .outcome, .context] {
             XCTAssertTrue(RowClass.plain(category).shownByDefault)
         }
     }
 
-    func testOnlyNewsPushesFoldAndOnlyRestartsBridge() {
+    func testOnlyNewsAndMissedPushesFoldAndOnlyRestartsBridge() {
         XCTAssertTrue(ConversationTimeline.classify(.item(item(1, .push))).folds)
         XCTAssertTrue(ConversationTimeline.classify(local(1, .push(needsUser: false), "x")).folds)
+        XCTAssertTrue(ConversationTimeline.classify(.held(.init(key: "k", id: 12, ts: Date(), text: "x"))).folds, "a missed push is an update")
         let others: [TimelineRow] = [
             .item(item(2, .push, urgency: "interrupt")), .item(item(3, .approval)), .item(item(4, .approval, resolution: .confirmed)),
             .item(item(5, .card)), .item(item(6, .dog)), .item(item(7, .shepherd)), .day(Date()),
@@ -148,7 +145,7 @@ final class ConversationClassificationTests: XCTestCase {
 
     func testQuestionsAndOutcomesAreNeverHiddenOrFolded() {
         let rows: [TimelineRow] = [
-            .item(item(1, .approval)), .item(item(2, .approval, resolution: .confirmed)),
+            .item(item(1, .approval, "Allow it?")), .item(item(2, .approval, "Allow it?", resolution: .confirmed)),
             .item(item(3, .push, urgency: "interrupt")), .item(item(4, .card)),
             .held(.init(key: "k", id: 5, ts: Date(timeIntervalSince1970: 1_790_000_005), text: "x")),
             .item(item(6, .push)),

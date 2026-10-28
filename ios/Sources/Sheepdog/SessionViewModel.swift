@@ -37,6 +37,9 @@ final class SessionViewModel: ObservableObject {
         /// A page in the daemon's docs that explains the fix (same Wi-Fi,
         /// Tailscale, pairing again), shown as a link.
         var help: URL?
+        /// The notice about this phone's audio or the voice that raised
+        /// it, so the banner can clear itself once it is no longer true.
+        var audioNotice: LocalNotice?
 
         enum Action: Equatable { case retry, microphoneModes }
     }
@@ -1932,8 +1935,7 @@ final class SessionViewModel: ObservableObject {
         computersChanged()
         endpointChanged()
         // A divider marks whom the conversation is with now.
-        reducer.apply(.notice("Talking to \(currentComputerName)"))
-        conversationChanged(save: false)
+        record(.talkingTo(currentComputerName), save: false)
         AccessibilityNotification.Announcement("Talking to \(currentComputerName)").post()
     }
 
@@ -2022,8 +2024,7 @@ extension SessionViewModel: VoiceEngineHost {
         case .clearBanner:
             notices.banner = nil
         case let .notice(text):
-            reducer.apply(.notice(text))
-            conversationChanged()
+            record(LocalNotice(text: text))
         case .refreshState:
             refreshSoon()
         case .syncHistory:
@@ -2052,6 +2053,9 @@ extension SessionViewModel: VoiceEngineHost {
 
     func voiceEngineDidPublish(_ engine: VoiceEngine) {
         syncAway()
+        // iOS gave the audio back, or the voice returned: the banner that
+        // said otherwise is no longer true.
+        if let notice = notices.banner?.audioNotice, !notice.bannerStillApplies(in: engine.state) { clearAudioBanner() }
     }
 
     func voiceEngine(_ engine: VoiceEngine, socket event: VoiceSocket.Event) {
@@ -2095,9 +2099,46 @@ extension SessionViewModel: VoiceEngineHost {
         }
     }
 
-    func voiceEngine(_ engine: VoiceEngine, notice: String) {
-        reducer.apply(.notice(notice))
-        conversationChanged()
+    func voiceEngine(_ engine: VoiceEngine, notice: LocalNotice) {
+        record(notice)
+    }
+
+    /// Where a notice about this phone goes (design doc, section 5.5).
+    /// Every one is kept in the reducer, for the technical view, and in the
+    /// unified log, so a sysdiagnose has what the daemon never saw. The
+    /// timeline lists only the context ones; a banner carries the ones that
+    /// need a tap; the route glyph in the voice bar shows the rest.
+    private func record(_ notice: LocalNotice, save: Bool = true) {
+        switch notice {
+        case .talkingTo, .voiceOff, .voiceClosed, .unrecognised:
+            SheepdogLog.session.notice("notice: \(notice.logText, privacy: .public)")
+        default:
+            SheepdogLog.audio.notice("notice: \(notice.logText, privacy: .public)")
+        }
+        reducer.apply(.notice(notice.text))
+        conversationChanged(save: save)
+        switch notice {
+        case let .routeChanged(output):
+            // The voice bar's glyph changes; VoiceOver hears it too.
+            AccessibilityNotification.Announcement(output.map { "Audio moved to \($0)" } ?? "The audio route changed").post()
+        case .listeningAgain:
+            clearAudioBanner()
+        default:
+            if let words = notice.banner { showAudioBanner(notice, words) }
+        }
+    }
+
+    /// Raised only over nothing or an earlier audio banner: a connection
+    /// error keeps the screen.
+    private func showAudioBanner(_ notice: LocalNotice, _ words: (message: String, hint: String)) {
+        guard notices.banner == nil || notices.banner?.audioNotice != nil else { return }
+        var banner = Banner(tone: notice == .voiceOff ? .info : .warning, message: words.message, hint: words.hint, retryTitle: nil)
+        banner.audioNotice = notice
+        show(banner)
+    }
+
+    private func clearAudioBanner() {
+        if notices.banner?.audioNotice != nil { notices.banner = nil }
     }
 
     var voiceEngineSendsDrains: Bool { feedbackSupported }

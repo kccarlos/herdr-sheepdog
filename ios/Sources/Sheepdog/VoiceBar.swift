@@ -23,6 +23,9 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     /// A question is open: the orb goes quiet so the answer has the accent.
     var questionOpen = false
     var statusText = ""
+    /// Where the sound goes while audio runs (speaker, headphones, car):
+    /// a glyph after the status, which VoiceOver announces when it changes.
+    var route: AudioRoute?
     var canType = true
     let onConnect: () -> Void
     let onStop: () -> Void
@@ -187,6 +190,13 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
                     .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.85)
                     .accessibilityIdentifier("controls.statusLine")
+                if let route {
+                    Image(systemName: route.symbol)
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityLabel("Audio plays through \(route.title)")
+                        .accessibilityIdentifier("controls.route")
+                }
             }
             .opacity(showsName ? 0 : 1)
             .accessibilityHidden(showsName)

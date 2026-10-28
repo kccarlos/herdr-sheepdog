@@ -15,6 +15,7 @@ struct CapsuleGallery: View {
         var holding = false
         var question = false
         var muted = false
+        var route: AudioRoute?
         let status: String
         var id: String { title }
     }
@@ -31,6 +32,9 @@ struct CapsuleGallery: View {
         Tile(title: "Reconnecting", state: .reconnecting, status: "Reconnecting…"),
         Tile(title: "Offline", state: .disconnected, status: "Offline — tap the orb to connect"),
         Tile(title: "Voice off", state: .voiceOff, status: "Voice is off on this computer"),
+        Tile(title: "On the speaker", state: .listening, route: .speaker, status: "Listening — just talk"),
+        Tile(title: "On headphones", state: .listening, route: .headphones, status: "Listening — just talk"),
+        Tile(title: "In the car", state: .listening, route: .car, status: "Listening — just talk"),
         Tile(title: "Hold to talk", state: .listening, talkMode: .holdToTalk, status: "Hold the orb to talk"),
         Tile(title: "Holding", state: .listening, talkMode: .holdToTalk, holding: true, status: "Talking — release to send"),
     ]
@@ -39,6 +43,8 @@ struct CapsuleGallery: View {
         // `-sheepdogCapsuleGallery banners`: the banners instead.
         if ProcessInfo.processInfo.arguments.contains("banners") {
             BannerGallery()
+        } else if ProcessInfo.processInfo.arguments.contains("timeline") {
+            TimelineGallery()
         } else {
             capsules
         }
@@ -55,7 +61,7 @@ struct CapsuleGallery: View {
                     VoiceCapsule(
                         state: tile.state, meter: meter, muted: tile.muted, name: "Sheepdog",
                         talkMode: tile.talkMode, holding: tile.holding, questionOpen: tile.question,
-                        statusText: tile.status,
+                        statusText: tile.status, route: tile.route,
                         onConnect: {}, onStop: {}, onMute: {},
                         menuValue: 0,
                         menu: { _ in Button("End voice session") {} }
@@ -83,12 +89,63 @@ private struct BannerGallery: View {
                                          hint: "Its key may be out of quota. Typing still works.", retryTitle: "Try again"), retry: {}, dismiss: {})
                 BannerView(banner: .init(tone: .warning, message: "Couldn't send your answer.",
                                          hint: "The question is still open; tap an option again.", retryTitle: nil), retry: {}, dismiss: {})
+                // The audio notices that need a tap (`LocalNotice.banner`).
+                ForEach(
+                    [LocalNotice.audioNotGivenBack, .audioFailedToResume("x"), .voiceOff],
+                    id: \.text
+                ) { notice in
+                    if let words = notice.banner {
+                        BannerView(banner: .init(tone: notice == .voiceOff ? .info : .warning, message: words.message, hint: words.hint, retryTitle: nil),
+                                   retry: {}, dismiss: {})
+                    }
+                }
                 UpdateBanner(notice: UpdateInfo(current: "0.9.1", latest: "0.9.2", available: true, how: "brew upgrade sheepdog").notice!, dismiss: {})
             }
             .padding(16)
         }
         .background(Theme.surface)
         .accessibilityIdentifier("capsule.gallery")
+    }
+}
+
+/// The conversation's phase-2 rows on one screen, for screenshots: a
+/// missed run, a settled question with its folded push, a voice bubble with
+/// its Details, and the dividers.
+private struct TimelineGallery: View {
+    private static let base = Date(timeIntervalSince1970: 1_790_000_000)
+
+    private static func item(_ id: Int64, _ kind: ConversationItem.Kind, _ text: String, agent: String? = nil, urgency: String? = nil,
+                             resolution: ConversationItem.Resolution? = nil, answer: String? = nil) -> TimelineRow {
+        .item(ConversationItem(id: id, ts: base.addingTimeInterval(TimeInterval(id) * 20), kind: kind, text: text, via: "tap", agent: agent,
+                               urgency: urgency, pendingID: kind == .approval ? "q\(id)" : nil, answer: answer, resolution: resolution))
+    }
+
+    private static func missed(_ id: Int64, _ text: String) -> TimelineRow {
+        .held(.init(key: "k\(id)", id: id, ts: base.addingTimeInterval(TimeInterval(id) * 20), text: text, fate: .dropped(ageMilliseconds: 300_000)))
+    }
+
+    private static let summary = "Codex is asking allow Computer Use to use Finder."
+
+    private static var rows: [TimelineRow] {
+        [
+            missed(1, "forumind finished the design doc and is waiting for your OK to start."),
+            missed(2, "The daemon fix built and is now waiting on you to approve the release."),
+            missed(3, "Claude finished the forumind work and has published the branch."),
+            .live(.init(id: 1, speaker: .system, kind: .notice, text: "Talking to Work Mac", isFinal: true, at: base.addingTimeInterval(100))),
+            missed(6, "slingshot stage Codex finished."),
+            item(7, .push, summary, agent: "Codex", urgency: "interrupt"),
+            item(8, .approval, summary, agent: "Codex", resolution: .cancelled),
+            item(9, .approval, "Claude wants to run npm test", agent: "Claude", resolution: .confirmed, answer: "Yes, proceed"),
+            item(10, .shepherd, "What did I miss?"),
+            .brain(.init(id: 11, ts: base.addingTimeInterval(210), spoken: "Two agents finished.", detail: "forumind and slingshot are done.", raw: "{}"), compact: false),
+            item(12, .dog, "Two agents finished. Want the details?"),
+        ]
+    }
+
+    var body: some View {
+        ConversationView(rows: Self.rows, voiceName: "Sheepdog", ask: { _ in })
+            .background(Theme.surface)
+            .accessibilityIdentifier("capsule.gallery")
     }
 }
 #endif

@@ -86,6 +86,9 @@ public struct DemoWorld: Sendable {
         // after it has news (done, failed, still writing).
         steps = [(8, .finishAuth), (12, .failMigration), (16, .askPayments), (36, .finishDocs)]
         log(source: "daemon", type: "daemon.start", payload: [:])
+        // A reconnect that lost nothing: plumbing the conversation hides
+        // and "Show technical events" shows.
+        log(source: "voice", type: "voice.resume", payload: ["resumed": .bool(true)])
         say(Self.greeting, urgency: "normal")
     }
 

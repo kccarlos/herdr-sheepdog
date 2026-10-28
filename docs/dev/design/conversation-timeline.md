@@ -1,7 +1,7 @@
 # Conversation timeline: what shows and how
 
 *Proposal, 2026-10-27, approved by the CEO the same day (section 10).
-Phase 1 is built; phases 2 and 3 are not. Code references are
+Phases 1 and 2 are built (section 11); phase 3 is not. Code references are
 `file:line` at commit `44d6ee33` (app 0.2.0), before phase 1. Log figures are from the
 author's own daemon (`~/.local/share/sheepdog/events/`), read-only.*
 
@@ -34,6 +34,7 @@ resume".
 8. [Implementation sketch (later)](#8-implementation-sketch-later)
 9. [Usability review](#9-usability-review)
 10. [Decisions by the CEO](#10-decisions-by-the-ceo)
+11. [Phase 2: what was built, and where it differs](#11-phase-2-what-was-built-and-where-it-differs)
 
 ## 1. How the timeline is built today
 
@@ -590,3 +591,43 @@ these decisions that belong to phases 2 and 3 are still to build.
    "Sheepdog updated" when it was an update, the version on tap (needs a
    daemon field).
 
+
+## 11. Phase 2: what was built, and where it differs
+
+Built in the app, no daemon change. The context pass is `TimelineContext`
+(`ConversationContext.swift`): one linear pass over the rows that decides
+what the neighbours decide; `ConversationTimeline.layout` applies it, and
+`classify` stays the one table of categories and flags.
+
+- **Missed pushes.** Held and dropped pushes are outcomes that fold, shown
+  as "While you were away · …" with no strikethrough. Both use that label
+  (a held push has had no listener either); a group says "N updates while
+  you were away", or "N agent updates · M while you were away" when mixed.
+  "Catch me up" sends "Catch me up on what I missed." through the
+  composer's path (`sendTyped`); there is no new endpoint.
+- **Settled questions** are one line, tap for the full card with the push
+  and the unanswered restatement under it (2-minute window; only the push
+  with the question's words, or an interrupt from the same agent, folds).
+  "Closed" replaces "No longer needed" everywhere. **Difference from 5.3:**
+  settled-question lines do not fold into update groups, so a question is
+  never folded away.
+- **Reconnects.** Context lost is hidden and the fresh reconnect after it
+  becomes the one "Voice restarted" row when dialogue (you or the voice)
+  came in the 5 minutes before. The history does not say whether an app
+  was attached; dialogue implies a client, which is the proxy used. The
+  true signal is phase 3 (daemon field).
+- **Restart.** "Voice session closed: shutdown." is plumbing, so the
+  restart divider alone is shown; the version waits for phase 3.
+- **Orchestrator replies** fold into a "Details" line under the voice's
+  bubble (next or previous bubble within 2 minutes); pending or unvoiced
+  replies stay cards.
+- **Talking to** is a divider with the time; pairing suggests "Work Mac"
+  for a machine-ID name (`ComputerNaming`), prefilled and editable.
+- **Audio notices** are `LocalNotice` (words defined once). The route glyph
+  is in the voice bar, a banner carries the ones that need a tap and clears
+  when no longer true, and every notice is written to `os.Logger` (names
+  redacted).
+
+Left for phase 3: notice `subkind`/`reason`, the cancel reason, the start
+version ("Sheepdog updated"), and the daemon resolving held pushes at a
+restart.

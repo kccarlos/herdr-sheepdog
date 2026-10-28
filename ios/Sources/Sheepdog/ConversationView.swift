@@ -33,24 +33,19 @@ struct ConversationView: View {
     /// The "N agent updates" rows the user opened, by their id.
     @State private var openGroups: Set<String> = []
 
-    /// What the list shows: without the plumbing unless asked for.
-    private var shown: [TimelineRow] {
-        ConversationTimeline.visibleRows(rows, showTechnical: showTechnical)
+    /// The list as drawn: without the plumbing unless asked for, the
+    /// neighbours' decisions applied, runs of updates folded. The technical
+    /// view is every row, ungrouped.
+    private var layout: ConversationLayout {
+        ConversationTimeline.layout(rows, showTechnical: showTechnical, keepVisible: pointerIDs)
     }
 
-    /// The list as drawn. The technical view is the raw rows, ungrouped.
-    private func display(_ shown: [TimelineRow]) -> [ConversationDisplayRow] {
-        showTechnical
-            ? shown.map(ConversationDisplayRow.row)
-            : ConversationTimeline.grouped(shown, keepVisible: pointerIDs)
-    }
-
-    private func hasContent(_ shown: [TimelineRow]) -> Bool {
-        shown.contains { if case .day = $0 { return false } else { return true } }
+    private func hasContent(_ display: [ConversationDisplayRow]) -> Bool {
+        display.contains { if case .row(.day) = $0 { return false } else { return true } }
     }
 
     var body: some View {
-        let visible = shown
+        let layout = layout
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -59,13 +54,13 @@ struct ConversationView: View {
                             Task { await loadKeepingPosition(proxy) }
                         }
                     }
-                    if !hasContent(visible) {
+                    if !hasContent(layout.rows) {
                         EmptyConversation(voiceName: voiceName, ask: ask)
                             .padding(.top, 60)
                     }
                     // Runs of the agents' updates fold into one "N agent
                     // updates" row; what was said stays in the open.
-                    ForEach(display(visible)) { display in
+                    ForEach(layout.rows) { display in
                         Group {
                             switch display {
                             case let .row(row):
@@ -74,14 +69,15 @@ struct ConversationView: View {
                                 } else if pointerIDs.contains(row.id) {
                                     QuestionPointer(row: row)
                                 } else {
-                                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs, attached: layout.attached[row.id] ?? [])
                                 }
                             case let .updates(id, members):
                                 UpdatesGroup(
                                     rows: members,
                                     isOpen: openGroups.contains(id),
                                     voiceName: voiceName,
-                                    openPendingIDs: openPendingIDs
+                                    openPendingIDs: openPendingIDs,
+                                    catchMeUp: ask
                                 ) {
                                     withAnimation(Theme.ease) {
                                         if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
@@ -112,7 +108,7 @@ struct ConversationView: View {
                         .onAppear {
                             DispatchQueue.main.async {
                                 atBottom = true
-                                lastSeenID = visible.last?.id
+                                lastSeenID = layout.rows.last?.id
                             }
                         }
                         .onDisappear {
@@ -135,7 +131,7 @@ struct ConversationView: View {
             .overlay(alignment: .bottom) {
                 // Not when the list is a sliver (keyboard and question up):
                 // the pill would sit on the agent strip.
-                if !atBottom, visibleHeight > 160, let newest = visible.last?.id, newest != lastSeenID {
+                if !atBottom, visibleHeight > 160, let newest = layout.rows.last?.id, newest != lastSeenID {
                     Button {
                         withAnimation { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
                     } label: {
@@ -156,13 +152,13 @@ struct ConversationView: View {
                         .padding(.leading, 10)
                 }
             }
-            // One handler, not two:`visible.last?.id` and `visible.last` change
+            // One handler, not two:`layout.rows.last?.id` and `layout.rows.last` change
             // together on every new message, and two separate `onChange`s
             // each calling `proxy.scrollTo` inside the same SwiftUI
             // transaction — cheap on a short list — became a reliable
             // main-thread hang once the conversation was long enough (seen
             // while testing this bar with a pre-populated history).
-            .onChange(of: visible.last) { _, newest in
+            .onChange(of: layout.rows.last) { _, newest in
                 guard atBottom else { return }
                 if let id = newest?.id, id != lastSeenID { lastSeenID = id }
                 withAnimation(Theme.ease) {
@@ -193,7 +189,7 @@ struct ConversationView: View {
     private func loadKeepingPosition(_ proxy: ScrollViewProxy) async {
         // A display row's id: the first update of a folded run is not on
         // screen under its own id.
-        let anchor = display(shown)
+        let anchor = layout.rows
             .first { if case .row(.day) = $0 { return false } else { return true } }?.id
         await loadOlder()
         if let anchor {
@@ -236,6 +232,13 @@ struct RowView: View {
     let row: TimelineRow
     let voiceName: String
     let openPendingIDs: Set<String>
+    /// The rows folded into this one (`ConversationLayout.attached`): the
+    /// orchestrator's replies under the voice's bubble, the push and the
+    /// voice's restatement under a settled question.
+    var attached: [TimelineRow] = []
+    /// The technical view: every row as the daemon sent it, nothing
+    /// shortened.
+    var technical = false
 
     var body: some View {
         switch row {
@@ -245,25 +248,53 @@ struct RowView: View {
             NoticeDivider(title: title)
         case let .item(item):
             switch item.kind {
-            case .shepherd, .dog:
-                SpeechBubble(text: item.text, isShepherd: item.kind == .shepherd, isFinal: true, voiceName: voiceName)
+            case .shepherd:
+                SpeechBubble(text: item.text, isShepherd: true, isFinal: true, voiceName: voiceName)
+            case .dog:
+                SpeechBubble(text: item.text, isShepherd: false, isFinal: true, voiceName: voiceName)
+                    .detailsUnder(attached)
             case .push:
                 SystemCard(text: item.text, kind: .push(needsUser: item.needsUser), category: row.category, voiceName: voiceName)
             case .approval:
-                ApprovalItemCard(item: item, isPinned: item.pendingID.map { openPendingIDs.contains($0) } ?? false)
+                if item.approvalOutcome != nil, !technical {
+                    SettledQuestionLine(item: item, said: attached, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                } else {
+                    ApprovalItemCard(item: item, isPinned: item.pendingID.map { openPendingIDs.contains($0) } ?? false)
+                }
             case .card:
                 CardRow(card: item.card, text: item.text, at: item.card?.at ?? item.ts)
             case .notice, .unknown:
                 NoticeDivider(title: item.text)
             }
         case let .live(bubble):
-            BubbleView(bubble: bubble, voiceName: voiceName)
+            BubbleView(bubble: bubble, voiceName: voiceName, attached: attached)
         case let .brain(reply, compact):
             BrainReplyCard(reply: reply, compact: compact, voiceName: voiceName)
         case let .held(push):
-            HeldPushCard(push: push)
+            if technical {
+                HeldPushCard(push: push)
+            } else {
+                MissedPushRow(push: push)
+            }
         case let .card(card):
             CardRow(card: card, text: card.displayTitle, at: card.at ?? Date())
+        }
+    }
+}
+
+private extension View {
+    /// The orchestrator's replies the voice's bubble just said, as one
+    /// "Details" line under it.
+    @ViewBuilder
+    func detailsUnder(_ attached: [TimelineRow]) -> some View {
+        let replies: [BrainActivity.Reply] = attached.compactMap { if case let .brain(reply, _) = $0 { return reply } else { return nil } }
+        if replies.isEmpty {
+            self
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                self
+                ReplyDetails(replies: replies)
+            }
         }
     }
 }
@@ -307,7 +338,7 @@ struct TechnicalRow: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 2) {
             if case .day = row {
-                RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs, technical: true)
             } else {
                 Text(caption)
                     .font(.caption2.monospacedDigit())
@@ -317,7 +348,7 @@ struct TechnicalRow: View {
                     // The daemon's own words, not the divider's tidied title.
                     NoticeDivider(title: item.text)
                 } else {
-                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs, technical: true)
                 }
             }
         }
@@ -339,19 +370,27 @@ struct TechnicalRow: View {
 }
 
 /// Three or more consecutive agent updates folded into one quiet row:
-/// "3 agent updates" and the newest two; a tap lists them all.
+/// "3 agent updates" and the newest two; a tap lists them all. When some
+/// were missed, a "Catch me up" chip beside it asks the orchestrator for a
+/// summary, since the voice never said them.
 struct UpdatesGroup: View {
     let rows: [TimelineRow]
     let isOpen: Bool
     let voiceName: String
     let openPendingIDs: Set<String>
+    /// Sends a line to the orchestrator as if typed (the composer's path);
+    /// nil without a daemon, and then there is no chip.
+    var catchMeUp: ((String) -> Void)?
     let toggle: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var count: Int { ConversationTimeline.updateCount(rows) }
-    private var title: String { ConversationTimeline.updatesTitle(count) }
+    private var title: String { ConversationTimeline.updatesTitle(rows) }
     private var latest: [String] { ConversationTimeline.previewLines(rows) }
+    private var hasMissed: Bool { rows.contains(where: \.isMissed) }
+    /// What "Catch me up" asks.
+    static let catchMeUpRequest = "Catch me up on what I missed."
 
     var body: some View {
         VStack(spacing: 8) {
@@ -398,6 +437,11 @@ struct UpdatesGroup: View {
             .accessibilityHint(isOpen ? "Hides them" : "Shows them all")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("conversation.updates")
+
+            // Outside the toggle: its own button, for VoiceOver and touch.
+            if hasMissed, let catchMeUp {
+                CatchMeUpChip { catchMeUp(Self.catchMeUpRequest) }
+            }
 
             if isOpen {
                 ForEach(rows) { row in
@@ -530,7 +574,6 @@ struct HeldPushCard: View {
             Text(push.text)
                 .font(.footnote)
                 .foregroundStyle(dropped ? .secondary : .primary)
-                .strikethrough(dropped, color: .secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
@@ -613,6 +656,10 @@ struct ApprovalItemCard: View {
     let item: ConversationItem
     /// The pinned card above the controls is showing this question.
     let isPinned: Bool
+    var identifier = "bubble.approval"
+    /// Collapses the floating question into this card once settled; off
+    /// when a one-line row already does.
+    var matchesFloating = true
 
     private var outcome: String? { item.approvalOutcome }
     private var confirmed: Bool { item.resolution == .confirmed }
@@ -640,9 +687,9 @@ struct ApprovalItemCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .rowCard(border: outcome == nil && isPinned ? Theme.blocked : Theme.line)
         // The floating question collapses into this row once settled.
-        .modifier(SettledMatch(id: outcome == nil ? nil : item.pendingID))
+        .modifier(SettledMatch(id: outcome == nil || !matchesFloating ? nil : item.pendingID))
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("bubble.approval")
+        .accessibilityIdentifier(identifier)
     }
 
     @ViewBuilder
@@ -665,17 +712,223 @@ struct ApprovalItemCard: View {
     }
 }
 
+/// A settled question as one line, "Codex's question (Finder access) —
+/// closed" or the answer you gave. The whole line is the tap target; it
+/// opens the full card, how it ended and what the voice said about it.
+struct SettledQuestionLine: View {
+    let item: ConversationItem
+    /// The push that announced it and the voice's unanswered restatement.
+    let said: [TimelineRow]
+    let voiceName: String
+    let openPendingIDs: Set<String>
+
+    @State private var isOpen = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var confirmed: Bool { item.resolution == .confirmed }
+    private var declined: Bool { confirmed && PendingOption(index: 0, label: item.answer ?? "").isNegative }
+    private var line: String { item.settledLine ?? item.text }
+    private var time: String { ConversationTimeline.defaultTimeFormatter.string(from: item.ts) }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: confirmed ? (declined ? "xmark" : "checkmark") : "clock.badge.xmark")
+                    .font(.subheadline)
+                    .foregroundStyle(confirmed ? (declined ? Theme.danger : Theme.done) : Theme.muted)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(line)
+                        .font(.subheadline.weight(confirmed ? .semibold : .regular))
+                        .foregroundStyle(confirmed ? Theme.ink : Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if confirmed {
+                        Text(item.questionTitle)
+                            .font(.caption)
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(isOpen || dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+                Text(time)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Theme.muted)
+                    .padding(.top, 2)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.muted)
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+                    .padding(.top, 3)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .rowCard()
+            // The floating question collapses into this row once settled.
+            .modifier(SettledMatch(id: item.pendingID))
+            .contentShape(Rectangle())
+            .onTapGesture { toggle() }
+            // One element, as the full card was: read as a sentence, and
+            // the default action opens it.
+            .accessibilityElement(children: .combine)
+            .accessibilityHint(isOpen ? "Hides the question" : "Shows the question")
+            .accessibilityAction { toggle() }
+            .accessibilityIdentifier("bubble.approval")
+
+            if isOpen {
+                ApprovalItemCard(item: item, isPinned: false, identifier: "bubble.approval.full", matchesFloating: false)
+                ForEach(said) { row in
+                    RowView(row: row, voiceName: voiceName, openPendingIDs: openPendingIDs)
+                }
+            }
+        }
+    }
+
+    private func toggle() {
+        withAnimation(Theme.ease) { isOpen.toggle() }
+    }
+}
+
+/// A push nobody heard, held or dropped, as an update like any other:
+/// "While you were away · forumind finished the design doc…". Not struck
+/// through: it was true. A tap shows all of it.
+struct MissedPushRow: View {
+    let push: BrainActivity.HeldPush
+
+    @State private var isOpen = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var time: String { ConversationTimeline.defaultTimeFormatter.string(from: push.ts) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: TimelineCategory.outcome.symbol)
+                .font(.subheadline)
+                .foregroundStyle(Theme.muted)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+            (Text("While you were away · ").foregroundStyle(Theme.muted) + Text(push.text).foregroundStyle(Theme.ink))
+                .font(.subheadline)
+                .lineLimit(isOpen || dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Text(time)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.muted)
+                .padding(.top, 2)
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.muted)
+                .rotationEffect(.degrees(isOpen ? 180 : 0))
+                .padding(.top, 3)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .rowCard()
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(Theme.ease) { isOpen.toggle() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("While you were away, \(time). \(push.text)")
+        .accessibilityHint(isOpen ? "Shows less" : "Shows all of it")
+        .accessibilityAction { withAnimation(Theme.ease) { isOpen.toggle() } }
+        .accessibilityIdentifier("bubble.pushMissed")
+    }
+}
+
+/// "Catch me up": asks the orchestrator what the user missed.
+struct CatchMeUpChip: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Catch me up", systemImage: "sparkles")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .background(Capsule().fill(Theme.card))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityHint("Asks the orchestrator to summarise what you missed")
+        .accessibilityIdentifier("conversation.catchMeUp")
+    }
+}
+
+/// The orchestrator's replies the voice's bubble just said: one
+/// "Details" line under the bubble that opens to what the orchestrator
+/// told the voice, the choices, and the raw payload.
+struct ReplyDetails: View {
+    let replies: [BrainActivity.Reply]
+
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(replies) { reply in
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !reply.spoken.isEmpty {
+                            MarkdownText(reply.spoken)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        if let detail = reply.detail {
+                            MarkdownText(detail)
+                                .font(.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .accessibilityIdentifier("brain.detail")
+                        }
+                        if !reply.options.isEmpty {
+                            FlowOptions(options: reply.options)
+                        }
+                        RawJSONView(json: reply.raw)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Details", systemImage: "info.circle")
+                .font(.footnote.weight(.semibold))
+        }
+        .tint(Theme.thinking)
+        .padding(.leading, 6)
+        .padding(.trailing, 44)
+        .accessibilityIdentifier("bubble.brain")
+    }
+}
+
 /// A live bubble of this session.
 struct BubbleView: View {
     let bubble: ConversationReducer.Bubble
     let voiceName: String
+    /// The orchestrator's replies folded under the voice's bubble.
+    var attached: [TimelineRow] = []
 
     var body: some View {
         switch bubble.speaker {
-        case .shepherd, .sheepdog:
-            SpeechBubble(text: bubble.text, isShepherd: bubble.speaker == .shepherd, isFinal: bubble.isFinal, voiceName: voiceName)
+        case .shepherd:
+            SpeechBubble(text: bubble.text, isShepherd: true, isFinal: bubble.isFinal, voiceName: voiceName)
+        case .sheepdog:
+            SpeechBubble(text: bubble.text, isShepherd: false, isFinal: bubble.isFinal, voiceName: voiceName)
+                .detailsUnder(attached)
         case .system:
-            SystemCard(text: bubble.text, kind: bubble.kind, category: ConversationTimeline.classify(bubble).category, voiceName: voiceName)
+            if case let .talkingTo(name) = LocalNotice(text: bubble.text), bubble.kind == .notice {
+                // Where the conversation is now: a divider, with the time.
+                NoticeDivider(title: "Talking to \(name) · \(ConversationTimeline.defaultTimeFormatter.string(from: bubble.at))")
+            } else {
+                SystemCard(text: bubble.text, kind: bubble.kind, category: ConversationTimeline.classify(bubble).category, voiceName: voiceName)
+            }
         }
     }
 }

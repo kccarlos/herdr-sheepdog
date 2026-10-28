@@ -123,11 +123,32 @@ With one computer, none of this shows: no names and no Talk to.
 - **The conversation.** What you and the voice said, the questions agents
   ask and what agents did. Three or more agent updates in a row fold into
   one "N agent updates" row (it shows the newest two; tap to open it).
-  Reconnects, audio changes and other plumbing stay out of the list. For a
-  bug report, turn on **Settings ▸ Health ▸ Show technical events**: every
-  row comes back with its original text and exact time, a "Technical
+  - Updates that came while no phone was listening read "While you were
+    away · …" and fold into the same row ("6 updates while you were
+    away"). That row has a **Catch me up** button: it asks the
+    orchestrator what you missed, the same as typing it.
+  - A question that has ended is one line, for example "Codex's question
+    (allow Computer Use to use Finder) — closed", or the answer you gave.
+    Tap the line for the whole question, how it ended and what the voice
+    said about it.
+  - The orchestrator's reply sits under the voice's bubble as **Details**.
+  - "Talking to Work Mac" marks where you switched computers. If a
+    computer's own name looks like a machine ID ("M944QD4VY"), pairing
+    suggests a name you can edit.
+  - "Sheepdog restarted" marks a restart of the daemon. "Voice restarted —
+    it may not remember the last minute" appears only when the voice
+    reconnected within five minutes of something said; other reconnects
+    stay out of the list.
+  - Audio changes are not in the list either. A small glyph after the
+    status in the voice bar shows where the sound goes (speaker,
+    headphones, car); a banner appears for what needs your tap ("Tap the
+    orb to resume", the voice being off, audio stopped).
+
+  For a bug report, turn on **Settings ▸ Health ▸ Show technical events**:
+  every row comes back with its original text and exact time, a "Technical
   events shown" tag marks the page, and a long press on a row copies its
-  raw JSON.
+  raw JSON. The phone's own audio notices are also written to the system
+  log.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
 - **Agents.** One compact card per agent: its state and for how long, and

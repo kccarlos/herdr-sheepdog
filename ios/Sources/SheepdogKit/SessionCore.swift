@@ -562,10 +562,10 @@ public struct SessionCore: Equatable, Sendable {
             // say it twice.
             if !voice.saidVoiceIsOff, voice.closedReason != "replaced" {
                 voice.saidVoiceIsOff = true
-                let why = voice.closedReason == "voice_off"
-                    ? "Voice is off on the daemon (`--voice=off`), so it cannot hear the microphone. Status, transcripts and pushes still work."
-                    : "The daemon's voice session closed (\(voice.closedReason ?? "no reason given"))."
-                effects.append(.notice(why))
+                let why: LocalNotice = voice.closedReason == "voice_off"
+                    ? .voiceOff
+                    : .voiceClosed(reason: voice.closedReason ?? "no reason given")
+                effects.append(.notice(why.text))
             }
             return
         }

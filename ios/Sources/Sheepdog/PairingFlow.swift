@@ -57,6 +57,10 @@ struct PairingFlowView: View {
     @State var stage: PairingStage
     /// Runs after "Done" on the paired screen.
     var onPaired: () -> Void = {}
+    /// The computer just paired, for naming it.
+    @State private var pairedID: String?
+    /// What the user typed over the suggested name; nil: the suggestion.
+    @State private var typedName: String?
 
     var body: some View {
         NavigationStack {
@@ -221,6 +225,9 @@ struct PairingFlowView: View {
                     .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                if case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name) {
+                    nameSuggestion(for: name, suggestion: suggestion)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
@@ -260,6 +267,36 @@ struct PairingFlowView: View {
         .background(Theme.surface.ignoresSafeArea())
     }
 
+    /// A computer named like a machine ID ("M944QD4VY") gets a plain
+    /// suggestion, prefilled and editable. Clearing it keeps the name.
+    private func nameSuggestion(for name: String, suggestion: String) -> some View {
+        VStack(spacing: 8) {
+            Text("This computer calls itself “\(name)”. Name it something you will recognise, or clear this to keep that.")
+                .font(.footnote)
+                .foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Name", text: Binding(get: { typedName ?? suggestion }, set: { typedName = $0 }))
+                .font(.body)
+                .multilineTextAlignment(.center)
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .background(Capsule().fill(Theme.card))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                .accessibilityIdentifier("pairing.name")
+        }
+        .padding(.top, 6)
+    }
+
+    /// Saves the name on this phone, if there is one to save.
+    private func applySuggestedName() {
+        guard case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name), let pairedID else { return }
+        let chosen = (typedName ?? suggestion).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !chosen.isEmpty, chosen != name { model.renameComputer(pairedID, to: chosen) }
+    }
+
     // MARK: - Actions
 
     private func primary() {
@@ -276,6 +313,7 @@ struct PairingFlowView: View {
         case let .confirm(code):
             run(code)
         case .paired:
+            applySuggestedName()
             dismiss()
             onPaired()
         case .problem, .failed:
@@ -299,6 +337,8 @@ struct PairingFlowView: View {
             switch await model.pair(code) {
             case let .paired(computer):
                 Haptics.connected()
+                pairedID = computer.daemonID
+                typedName = nil
                 stage = .paired(computer.name.isEmpty ? computer.addresses[0] : computer.name)
             case let .problem(problem):
                 stage = .problem(problem)

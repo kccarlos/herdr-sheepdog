@@ -120,6 +120,32 @@ final class RedesignShotsUITests: XCTestCase {
         shot("conversation-top")
     }
 
+    /// Phase 2 of the conversation timeline: missed updates, a settled
+    /// question, Details, dividers.
+    func testTimelineRows() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogCapsuleGallery", "timeline", "-sheepdogNoAnimations"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["capsule.gallery"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot("timeline")
+        let group = app.descendants(matching: .any)["conversation.updates"].firstMatch
+        if group.exists { group.tap() }
+        sleep(1)
+        shot("timeline-open")
+    }
+
+    /// A machine-ID computer name gets a suggestion when pairing ends.
+    func testPairingNameSuggestion() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogPairingScreen", "pairedMachineID", "-sheepdogNoAnimations"]
+        app.launch()
+        XCTAssertTrue(app.textFields["pairing.name"].waitForExistence(timeout: 10), "the suggested name")
+        XCTAssertEqual(app.textFields["pairing.name"].value as? String, "Work Mac")
+        sleep(1)
+        shot("pairing-name")
+    }
+
     func testBanners() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogCapsuleGallery", "banners"]

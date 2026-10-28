@@ -369,6 +369,7 @@ struct SessionCapsule: View {
             questionOpen: !model.openQuestionIDs.isEmpty,
             // The one-time Mute caption takes the status line's place.
             statusText: model.voice.showMuteHint ? model.muteCaption : model.statusLine,
+            route: model.voice.audioRoute,
             canType: model.isConfigured,
             onConnect: { model.connect() },
             onStop: { model.voice.stop() },
