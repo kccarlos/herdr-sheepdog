@@ -22,20 +22,21 @@ final class SuggestedRepliesUITests: XCTestCase {
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(host)"]
         app.launch()
 
-        // The reply folds under the voice's bubble: open its Details.
+        // The reply folds under the voice's bubble once the history is in
+        // (before, it is a panel of its own with the options showing):
+        // open its Details until the options show, since the first sync
+        // can redraw the row closed.
         let details = app.buttons["reply.details"]
-        XCTAssertTrue(details.waitForExistence(timeout: 20), "the reply's Details")
         let notYet = app.buttons["Reply: Not yet"]
         let yes = app.buttons["Reply: Yes, start the logging"]
-        // The first sync after launch can redraw the row and close it
-        // again: open it until the options show.
-        let opened = Date().addingTimeInterval(20)
+        let opened = Date().addingTimeInterval(30)
         while !notYet.exists, Date() < opened {
-            if details.exists, details.value as? String == "Collapsed" { tapWhenTappable(details, "Details") }
+            if details.exists, details.isHittable, details.value as? String == "Collapsed" { details.tap() }
             _ = notYet.waitForExistence(timeout: 2)
         }
         XCTAssertTrue(notYet.exists, "the options are buttons")
         XCTAssertTrue(yes.exists)
+
         tapWhenTappable(notYet, "Not yet")
 
         // Your line, as a typed bubble.

@@ -74,21 +74,44 @@ final class StubDaemon {
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, _ in
+        receiveRequest(connection, so: Data())
+    }
+
+    /// Reads until the head and the body its Content-Length announces are
+    /// in (a body can come in a packet of its own), then answers.
+    private func receiveRequest(_ connection: NWConnection, so far: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, done, error in
             guard let self else { return }
-            let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            let words = request.split(separator: " ")
-            let method = words.first.map(String.init) ?? "GET"
-            let path = words.dropFirst().first.map(String.init) ?? "/"
-            self.lock.withLock {
-                self.seen.append("\(method) \(path)")
-                if method == "POST", path.hasPrefix("/api/utterance") { self.typed.append(Self.typedText(request)) }
+            let received = far + (data ?? Data())
+            if !done, error == nil, !Self.isComplete(received) {
+                self.receiveRequest(connection, so: received)
+                return
             }
-            let response = self.response(for: path)
-            let delay = method == "POST" ? self.postDelay : 0
-            self.queue.asyncAfter(deadline: .now() + delay) {
-                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
-            }
+            self.answer(connection, String(decoding: received, as: UTF8.self))
+        }
+    }
+
+    private static func isComplete(_ request: Data) -> Bool {
+        guard let end = request.range(of: Data("\r\n\r\n".utf8)) else { return false }
+        let head = String(decoding: request[..<end.lowerBound], as: UTF8.self).lowercased()
+        let length = head.components(separatedBy: "\r\n")
+            .first { $0.hasPrefix("content-length:") }
+            .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+        return request.count - end.upperBound >= length
+    }
+
+    private func answer(_ connection: NWConnection, _ request: String) {
+        let words = request.split(separator: " ")
+        let method = words.first.map(String.init) ?? "GET"
+        let path = words.dropFirst().first.map(String.init) ?? "/"
+        lock.withLock {
+            seen.append("\(method) \(path)")
+            if method == "POST", path.hasPrefix("/api/utterance") { typed.append(Self.typedText(request)) }
+        }
+        let reply = response(for: path)
+        let delay = method == "POST" ? postDelay : 0
+        queue.asyncAfter(deadline: .now() + delay) {
+            connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
         }
     }
 
