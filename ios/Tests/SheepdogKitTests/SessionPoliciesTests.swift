@@ -47,6 +47,7 @@ final class SessionPoliciesTests: XCTestCase {
         XCTAssertTrue(AudioLifecycle.watchdogShouldRun(running: true, muted: false, interrupted: false))
         XCTAssertFalse(AudioLifecycle.watchdogShouldRun(running: true, muted: true, interrupted: false))
         XCTAssertFalse(AudioLifecycle.watchdogShouldRun(running: true, muted: false, interrupted: true))
+        XCTAssertFalse(AudioLifecycle.watchdogShouldRun(running: true, muted: false, interrupted: false, gateClosed: true), "hold-to-talk with the orb up expects no audio")
         XCTAssertFalse(AudioLifecycle.watchdogShouldRun(running: false, muted: false, interrupted: false))
     }
 

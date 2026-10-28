@@ -69,4 +69,31 @@ final class MicSignalWatchdogTests: XCTestCase {
         XCTAssertNil(dog.tick(at: 12), "the 9 s muted do not count")
         XCTAssertEqual(dog.tick(at: 13), true)
     }
+
+    /// Hold-to-talk: the engine disarms when the gate closes and re-arms
+    /// (fresh grace period) when it opens.
+    func testClosedGateForTenSecondsIsNoAlarm() {
+        var dog = MicSignalWatchdog()
+        dog.arm(at: 0)
+        dog.disarm() // gate closed
+        var t = 0.0
+        while t < 10 {
+            XCTAssertNil(dog.observe(peak: 0, at: t))
+            XCTAssertNil(dog.tick(at: t))
+            t += 0.1
+        }
+        XCTAssertFalse(dog.noSignal)
+    }
+
+    func testOpenedGateWithZeroSamplesAlarmsAfterAFreshThreeSeconds() {
+        var dog = MicSignalWatchdog()
+        dog.arm(at: 0)
+        dog.tick(at: 5)
+        XCTAssertTrue(dog.noSignal)
+        dog.disarm() // released: state cleared
+        XCTAssertFalse(dog.noSignal)
+        dog.arm(at: 100) // pressed again
+        XCTAssertNil(dog.observe(peak: 0, at: 102.9))
+        XCTAssertEqual(dog.observe(peak: 0, at: 103.0), true)
+    }
 }
