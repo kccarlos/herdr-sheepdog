@@ -33,6 +33,8 @@ public struct ConversationReducer: Sendable {
         public var text: String
         public var isFinal: Bool
         public var at: Date
+        /// When the last fragment arrived; what `settle` measures idleness by.
+        public var updatedAt: Date
 
         public init(id: Int, speaker: Speaker, kind: Kind = .speech, text: String, isFinal: Bool, at: Date = Date()) {
             self.id = id
@@ -41,6 +43,7 @@ public struct ConversationReducer: Sendable {
             self.text = text
             self.isFinal = isFinal
             self.at = at
+            self.updatedAt = at
         }
     }
 
@@ -58,6 +61,11 @@ public struct ConversationReducer: Sendable {
         /// nothing itself; the divider comes from history (`kind: .notice,
         /// subkind: "reset"`).
         case reset
+        /// Nothing guarantees a closing `final` for the voice's reply (and a
+        /// phone that was away misses the next `in` that would close it).
+        /// Closes every speech bubble that got no fragment for `idle`
+        /// seconds; `0` closes them all (the socket closed or reconnected).
+        case settle(idle: TimeInterval)
     }
 
     /// How many bubbles are kept. Far more than a phone screen shows; the
@@ -83,6 +91,11 @@ public struct ConversationReducer: Sendable {
         case .reset:
             closeOpen(.shepherd)
             closeOpen(.sheepdog)
+        case let .settle(idle):
+            let at = now()
+            for index in bubbles.indices where bubbles[index].kind == .speech && !bubbles[index].isFinal {
+                if at.timeIntervalSince(bubbles[index].updatedAt) >= idle { bubbles[index].isFinal = true }
+            }
         }
     }
 
@@ -114,6 +127,7 @@ public struct ConversationReducer: Sendable {
         if merge, var last = bubbles.last, last.speaker == speaker, !last.isFinal, last.kind == .speech {
             last.text += text
             last.isFinal = final
+            last.updatedAt = now()
             bubbles[bubbles.count - 1] = last
             return
         }

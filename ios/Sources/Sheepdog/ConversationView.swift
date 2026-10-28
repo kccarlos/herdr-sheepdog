@@ -109,9 +109,14 @@ struct ConversationView: View {
                             }
                         } header: {
                             if let day = section.day {
-                                DayDivider(date: day, topInset: index == 0 ? 0 : 18)
+                                DayDivider(date: day)
                                     .id(section.id)
                             }
+                        } footer: {
+                            // The gap before the next day lives here, not in
+                            // the next heading, so a heading sits at the same
+                            // depth pinned and at rest.
+                            if index < sections.count - 1 { Color.clear.frame(height: 8) }
                         }
                     }
                     Color.clear
@@ -146,7 +151,11 @@ struct ConversationView: View {
                 .frame(maxWidth: sizeClass == .regular ? 680 : .infinity)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                // The top 12 pt live inside the first day heading (its own
+                // inset), so a pinned heading covers the strip above it
+                // without reaching up over the row above it when it is not.
+                .padding(.top, sections.first?.day == nil ? 12 : 0)
+                .padding(.bottom, 12)
             }
             .defaultScrollAnchor(.bottom)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
@@ -330,7 +339,7 @@ struct RowView: View {
     var body: some View {
         switch row {
         case let .day(date):
-            DayDivider(date: date)
+            DayDivider(date: date, topInset: 0)
         case let .divider(item, title):
             NoticeDivider(title: title, symbol: DaemonNotice(item).symbol)
         case let .item(item):

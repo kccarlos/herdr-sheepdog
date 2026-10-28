@@ -89,6 +89,9 @@ func TestWSCutTranscriptReachesTheBrainNotThePage(t *testing.T) {
 	var captions []string
 	for len(captions) < 2 {
 		m := c.expect(wsproto.TypeTranscript)
+		if m.Text == "" && m.Final != nil && *m.Final {
+			continue // the turn's end closing the open reply
+		}
 		captions = append(captions, m.Text)
 	}
 	if captions[0] != full || captions[1] != "next" {

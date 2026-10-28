@@ -614,3 +614,23 @@ func TestWSModelAudioWithNoClientIsLoggedUnheard(t *testing.T) {
 		t.Fatalf("audio to an attached client logged as unheard")
 	}
 }
+
+// TestWSTurnCompleteClosesTheOpenReply: output fragments carry no final, so
+// the turn's end sends an empty final `out` fragment (once, and only when a
+// reply is open) for the clients that have no other boundary.
+func TestWSTurnCompleteClosesTheOpenReply(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	h.session.emit(voice.EventTurnComplete{}) // nothing open: nothing sent
+	h.session.emit(voice.EventTranscript{Dir: voice.DirOut, Text: "All idle."})
+	if m := c.expect(wsproto.TypeTranscript); m.Text != "All idle." || (m.Final != nil && *m.Final) {
+		t.Fatalf("fragment = %+v", m)
+	}
+	h.session.emit(voice.EventTurnComplete{})
+	m := c.expect(wsproto.TypeTranscript)
+	if m.Dir != "out" || m.Text != "" || m.Final == nil || !*m.Final {
+		t.Fatalf("turn end = %+v, want an empty final out fragment", m)
+	}
+}
