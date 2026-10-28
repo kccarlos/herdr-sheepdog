@@ -123,7 +123,7 @@ struct FloatingQuestions: View {
                 : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
             layout {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    HStack(spacing: 7) {
                         Circle().fill(Theme.blocked).frame(width: 7, height: 7)
                         Text(barTitle)
                             .font(.body.weight(.semibold))

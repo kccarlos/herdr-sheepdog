@@ -11,6 +11,12 @@ import XCTest
 /// saves `question-<screen>-<suffix>.png` there.
 final class QuestionPresentationUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
+    /// `TEST_RUNNER_SHEEPDOG_SHOTS_LARGE_TEXT=1`: run at the largest text
+    /// size, for the screenshots.
+    private var largestText: Bool { environment["SHEEPDOG_SHOTS_LARGE_TEXT"] == "1" }
+    private var textSize: [String] {
+        largestText ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
+    }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -19,14 +25,47 @@ final class QuestionPresentationUITests: XCTestCase {
     func testShortQuestionFloatsInline() throws {
         let app = launchDemo([])
         // codex-payments asks after about 16 s.
-        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40), "the approval floats inline")
-        XCTAssertFalse(app.buttons["questions.answer"].exists, "no compact bar for a short question")
+        if largestText {
+            XCTAssertTrue(app.buttons["questions.answer"].waitForExistence(timeout: 40), "the largest sizes always use the bar")
+        } else {
+            XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 40), "the approval floats inline")
+            XCTAssertFalse(app.buttons["questions.answer"].exists, "no compact bar for a short question")
+        }
         sleep(1)
-        shot("inline")
+        shot("short")
+    }
+
+    /// The largest text sizes: even the short approval goes to the bar
+    /// (the accessibility rule, folded into the same decision).
+    func testLargestTextUsesTheBar() throws {
+        let app = launchDemo(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let bar = app.buttons["questions.answer"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 40))
+        XCTAssertFalse(app.buttons["approval.option.1"].exists)
+        tapWhenTappable(bar, "the Answer bar")
+        XCTAssertTrue(app.buttons["approval.option.1"].waitForExistence(timeout: 10), "the sheet shows the options")
     }
 
     func testLongQuestionGoesCompactAndTheSheetAnswers() throws {
         let app = launchDemo(["-sheepdogDemoLongQuestion"])
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // The iPad's taller column has room: the same question stays
+            // inline, unless the text is at the largest sizes.
+            let first = app.buttons["approval.option.1"]
+            let bar = app.buttons["questions.answer"]
+            let deadline = Date().addingTimeInterval(40)
+            while !first.exists, !bar.exists, Date() < deadline { usleep(200_000) }
+            sleep(1)
+            shot("long")
+            if bar.exists {
+                tapWhenTappable(bar, "the Answer bar")
+                XCTAssertTrue(first.waitForExistence(timeout: 10))
+                sleep(1)
+                shot("sheet")
+            }
+            XCTAssertTrue(first.label.hasPrefix("Approve: Retry with backoff, recommended."), first.label)
+            return
+        }
         let bar = app.buttons["questions.answer"]
         XCTAssertTrue(bar.waitForExistence(timeout: 40), "the long question collapses to the bar")
         XCTAssertTrue(bar.label.hasPrefix("codex-payments asked: codex-payments asks how the payment webhook"), bar.label)
@@ -54,7 +93,7 @@ final class QuestionPresentationUITests: XCTestCase {
 
     private func launchDemo(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"] + extra
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent", "-sheepdogOpenDemo", "-sheepdogNoAnimations"] + textSize + extra
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15), "the demo opened")
         return app
