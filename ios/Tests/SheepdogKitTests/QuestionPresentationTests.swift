@@ -9,18 +9,19 @@ final class QuestionPresentationTests: XCTestCase {
     private typealias P = QuestionPresentation
 
     func testTable() {
-        // budget = 0.4 × area: 288 on the phone, 160 with the keyboard,
-        // 132 in landscape, 440 on the iPad.
+        // budget = 0.55 × area: 396 on the phone, 220 with the keyboard,
+        // 181.5 in landscape, 605 on the iPad.
         let cases: [(name: String, input: P.Input, current: P?, want: P)] = [
-            ("yes/no approval, phone", .init(cardHeights: [190], area: 720), nil, .inline),
-            ("three-option command approval, phone", .init(cardHeights: [280], area: 720), nil, .inline),
+            ("yes/no approval, phone", .init(cardHeights: [230], area: 720), nil, .inline),
+            ("three-option command approval, phone", .init(cardHeights: [380], area: 720), nil, .inline),
             ("three long options with descriptions, phone", .init(cardHeights: [520], area: 720), nil, .compact),
             ("the same question on an iPad", .init(cardHeights: [400], area: 1100), nil, .inline),
             ("free-text question (no options)", .init(cardHeights: [110], area: 720), nil, .inline),
-            ("yes/no with the keyboard up", .init(cardHeights: [190], area: 400), nil, .compact),
+            ("yes/no with the keyboard up", .init(cardHeights: [190], area: 400), nil, .inline),
+            ("command approval with the keyboard up", .init(cardHeights: [380], area: 400), nil, .compact),
             ("yes/no in landscape", .init(cardHeights: [190], area: 330), nil, .compact),
             ("two short questions fit together", .init(cardHeights: [130, 140], area: 720), nil, .inline),
-            ("two approvals do not", .init(cardHeights: [190, 190], area: 720), nil, .compact),
+            ("two command approvals do not", .init(cardHeights: [280, 280], area: 720), nil, .compact),
             ("largest text sizes, even a short one", .init(cardHeights: [100], area: 1100, largestText: true), nil, .compact),
             ("largest text wins over held", .init(cardHeights: [100], area: 1100, largestText: true, held: true), .inline, .compact),
             ("not measured yet: inline", .init(cardHeights: [0], area: 720), nil, .inline),
@@ -38,11 +39,11 @@ final class QuestionPresentationTests: XCTestCase {
     /// Back from compact only well inside the budget: the keyboard going
     /// down by a little, or a card a few points shorter, does not flip it.
     func testHysteresis() {
-        let area = 720.0 // budget 288, back to inline at or under 244.8
-        XCTAssertEqual(P.decide(.init(cardHeights: [280], area: area), current: .inline), .inline)
-        XCTAssertEqual(P.decide(.init(cardHeights: [280], area: area), current: .compact), .compact, "near the line stays compact")
-        XCTAssertEqual(P.decide(.init(cardHeights: [240], area: area), current: .compact), .inline, "well inside goes back")
-        XCTAssertEqual(P.decide(.init(cardHeights: [290], area: area), current: .inline), .compact, "over the budget goes compact")
+        let area = 720.0 // budget 396, back to inline at or under 336.6
+        XCTAssertEqual(P.decide(.init(cardHeights: [380], area: area), current: .inline), .inline)
+        XCTAssertEqual(P.decide(.init(cardHeights: [380], area: area), current: .compact), .compact, "near the line stays compact")
+        XCTAssertEqual(P.decide(.init(cardHeights: [330], area: area), current: .compact), .inline, "well inside goes back")
+        XCTAssertEqual(P.decide(.init(cardHeights: [400], area: area), current: .inline), .compact, "over the budget goes compact")
     }
 
     /// Rotation, the keyboard and Dynamic Type change the inputs, never
@@ -60,6 +61,6 @@ final class QuestionPresentationTests: XCTestCase {
 
     func testNaturalHeightAddsTheGaps() {
         XCTAssertEqual(P.Input(cardHeights: [100, 100, 100], spacing: 8, area: 720).natural, 316)
-        XCTAssertEqual(P.budget(area: 1000), 400)
+        XCTAssertEqual(P.budget(area: 1000), 550)
     }
 }

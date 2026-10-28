@@ -758,7 +758,7 @@ card in full in a scrolling sheet). One pure function decides:
    presentation stays (inline on first appearance).
 4. **Otherwise: inline when the cards fit the budget.** The cards' natural
    height is their sum plus the gaps between them. The budget is
-   `budgetShare` (0.4) of the area.
+   `budgetShare` (0.55) of the area.
    - Coming back from compact, the cards must fit `returnShare` (0.85) of
      the budget. This hysteresis stops a size near the line, such as the
      keyboard or a rotation, from flipping the screen back and forth.
@@ -774,14 +774,26 @@ stack: the phone's screen, the iPad's conversation column, or the agent
 window. It is the safe area above the keyboard. The cards' own size cannot
 feed back into it, and it shrinks when the keyboard is up.
 
-**Why 0.4.** On a phone in portrait, 0.4 of the safe area is about half of
-what is left once the top bar and the capsule are drawn, so the latest
-dialogue stays in view.
+**Why 0.55.** It is about the old cap, half the screen, so every routine
+approval that floated before still floats and stays one tap away. The rest
+of the safe area keeps the capsule and the latest dialogue in view.
 
-- **Inline:** a yes/no approval and a three-option command approval with a
-  one-line command, at the default text size.
-- **Compact:** a question whose options carry descriptions.
-- **iPad:** the same question fits in the taller column and stays inline.
+A first try at 0.4 sent Codex's real three-option command approval to the
+bar on an iPhone. That is the most common prompt, so it would have cost an
+extra tap every time. `QuestionsUITests.testCommandApprovalFloatsInline`
+now guards it.
+
+Measured on an iPhone 18 Pro in portrait and an iPad Air 11-inch in
+portrait, at the default text size:
+
+- **Inline:** a yes/no approval, and Codex's three-option command approval
+  (testdata/herdr/codex-approval-prompt.screen.txt), whose middle option
+  wraps. It measures 332 pt on the iPhone, against a budget of about 428 pt
+  in a safe area of about 778 pt; 0.4 would have given about 311 pt.
+- **Compact on a phone:** a question whose three options carry
+  descriptions.
+- **iPad:** the same described question fits in the taller column and stays
+  inline. Codex's approval measures 291 pt in a 1180 pt window there.
 
 **The cases.**
 
@@ -790,7 +802,7 @@ dialogue stays in view.
 | Number of options, long descriptions | Each adds its measured height. Long ones go compact on a phone. |
 | Free-text question (no options) | Measures small, stays inline. No special case. |
 | Several agents asking at once | The stack must fit as a whole, else the bar says "2 questions" and the sheet lists them in `QuestionOrder`. |
-| Keyboard up | The area shrinks, so most cards go compact while typing. They come back when the keyboard goes. |
+| Keyboard up | The area shrinks. A yes/no card can stay, a command approval goes compact while typing, and it comes back when the keyboard goes. |
 | Phone in landscape | The area is small, so cards are compact. |
 | iPad, including split view | The column's own width and height are measured. A narrow split behaves like a phone. |
 | Rotation, a Dynamic Type change, a second question | Each is a new input. The hysteresis and the held rule keep it from flip-flopping. |

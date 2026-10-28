@@ -44,13 +44,15 @@ public enum QuestionPresentation: Equatable, Sendable {
         }
     }
 
-    /// The share of `area` the inline cards may take. 0.4 of the safe area
-    /// is about half of what is left once the top bar and the capsule are
-    /// drawn, so the latest lines of the conversation stay in view; it
-    /// keeps a three-option command approval inline on an iPhone in
-    /// portrait at the default text size, and sends a question whose
-    /// options carry descriptions to the sheet.
-    public static let budgetShare = 0.4
+    /// The share of `area` the inline cards may take: about the old cap
+    /// (half the screen), so everything that fitted before still floats,
+    /// and the rest of the safe area keeps the capsule and the latest
+    /// lines of the conversation in view. Measured on an iPhone in portrait
+    /// at the default text size (docs/dev/design/conversation-timeline.md
+    /// §14): Codex's three-option command approval, the most common
+    /// prompt, stays inline; a question whose options carry descriptions
+    /// goes to the sheet.
+    public static let budgetShare = 0.55
 
     /// Hysteresis: back from compact to inline only once the cards fit in
     /// this share of the budget, so a size near the line (the keyboard,

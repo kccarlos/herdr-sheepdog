@@ -114,13 +114,16 @@ final class QuestionsUITests: XCTestCase {
 
         ❯ 1. Keep the file store (Recommended)
              Nothing to migrate; the files stay under the data directory and
-             the current backup script keeps working.
+             the current backup script keeps working, but two machines cannot
+             share them and a crash in the middle of a write can lose a session.
           2. Move everything into SQLite
              One database file with transactions; needs a migration step and
-             a new backup command before the switch.
+             a new backup command before the switch, and every test that reads
+             the files directly has to move to the store's own API first.
           3. Use the existing Redis
              Fast and shared between machines, but the store is lost when Redis
-             restarts without persistence.
+             restarts without persistence, and the login flow then fails until
+             the user signs in again on every device they use.
           4. Type something.
         \(rule)
           5. Chat about this
@@ -134,12 +137,17 @@ final class QuestionsUITests: XCTestCase {
         app.launch()
 
         let bar = app.buttons["questions.answer"]
-        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the long question collapses to the bar")
-        tapWhenTappable(bar, "the Answer bar")
         let first = app.buttons["approval.option.1"]
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // The iPad's column has room for it inline.
+            XCTAssertTrue(first.waitForExistence(timeout: 20), "the question floats inline on an iPad")
+        } else {
+            XCTAssertTrue(bar.waitForExistence(timeout: 20), "the long question collapses to the bar")
+            tapWhenTappable(bar, "the Answer bar")
+        }
         XCTAssertTrue(first.waitForExistence(timeout: 10), "the sheet shows the options")
-        XCTAssertEqual(first.label, "Approve: Keep the file store, recommended. Nothing to migrate; the files stay under the data directory and the current backup script keeps working.")
-        XCTAssertEqual(app.buttons["approval.option.2"].label, "Approve: Move everything into SQLite. One database file with transactions; needs a migration step and a new backup command before the switch.")
+        XCTAssertEqual(first.label, "Approve: Keep the file store, recommended. Nothing to migrate; the files stay under the data directory and the current backup script keeps working, but two machines cannot share them and a crash in the middle of a write can lose a session.")
+        XCTAssertEqual(app.buttons["approval.option.2"].label, "Approve: Move everything into SQLite. One database file with transactions; needs a migration step and a new backup command before the switch, and every test that reads the files directly has to move to the store's own API first.")
         XCTAssertFalse(app.buttons["approval.option.4"].exists, "Type something. is not an answer")
 
         first.tap()
