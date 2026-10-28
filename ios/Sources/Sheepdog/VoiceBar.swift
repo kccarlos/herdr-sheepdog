@@ -6,8 +6,9 @@ import SwiftUI
 /// keyboard, which morphs the capsule into the composer.
 ///
 /// Every control sits in a fixed 44 pt slot, so a hidden one never shifts
-/// the others. The capsule grows with the text size up to a cap (the
-/// status wraps to two lines at the accessibility sizes). It is Liquid
+/// the others. The capsule grows with the text size up to a cap. At the
+/// accessibility sizes it stacks: the controls on one row, the name and
+/// the status (which wraps at word boundaries) full width below. It is Liquid
 /// Glass, or a solid card under Reduce Transparency. The look comes from
 /// `CapsuleMode`; what the orb does from `VoiceBarModel`.
 struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
@@ -49,10 +50,12 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
         CapsuleMode.resolve(state: state, talkMode: talkMode, holding: holding, questionOpen: questionOpen)
     }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
-    private var height: CGFloat { min(max(scaledHeight, 60), Self.cap) }
+    private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
+    private var height: CGFloat { min(max(scaledHeight, 60), cap) }
     /// Past this the capsule would cover the conversation it serves: the
-    /// name and status scroll inside it instead.
-    static var cap: CGFloat { 150 }
+    /// name and status scroll inside it instead. The stacked layout has
+    /// two rows, so it gets more room.
+    private var cap: CGFloat { stacked ? 240 : 150 }
 
     var body: some View {
         // As tall as its text up to the cap, then the row scrolls inside.
@@ -65,10 +68,10 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     if rounded != rowHeight { rowHeight = rounded }
                 }
         }
-        .scrollDisabled(rowHeight <= Self.cap)
+        .scrollDisabled(rowHeight <= cap)
         .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(rowHeight > Self.cap ? .visible : .hidden)
-        .frame(height: min(max(rowHeight, height), Self.cap))
+        .scrollIndicators(rowHeight > cap ? .visible : .hidden)
+        .frame(height: min(max(rowHeight, height), cap))
         .padding(.horizontal, 7)
         .capsuleSurface()
         .accessibilityElement(children: .contain)
@@ -76,36 +79,61 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     }
 
     private var row: some View {
-        HStack(spacing: 8) {
-            micSlot
-            orb
-            // The status is drawn over the menu button rather than inside
-            // it, so VoiceOver (and the UI tests) read it as its own text;
-            // touches pass through it to the menu.
-            stableMenu(
-                CapsuleMenuLabel(items: menuValue, name: name, status: statusText, mode: mode, noSignal: noSignal, size: dynamicTypeSize),
-                probe: "voice",
-                content: { menu($0.items) },
-                label: { _ in nameAndStatus(showsName: true) }
-            )
-                .menuOrder(.fixed)
-                .overlay { nameAndStatus(showsName: false).allowsHitTesting(false) }
-                .accessibilityLabel("Voice: \(name)")
-                .accessibilityHint("Shows the connection and End voice session")
-                .accessibilityIdentifier("voice.menu")
-            Button(action: onType) {
-                Image(systemName: "keyboard")
-                    .font(.system(size: 19, weight: .regular))
-                    .foregroundStyle(canType ? Theme.muted : Theme.muted.opacity(0.4))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
+        Group {
+            if stacked {
+                VStack(spacing: 2) {
+                    HStack(spacing: 8) {
+                        micSlot
+                        orb
+                        Spacer(minLength: 0)
+                        typeButton
+                    }
+                    voiceMenu
+                }
+                // Clear of the capsule's rounded ends.
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            } else {
+                HStack(spacing: 8) {
+                    micSlot
+                    orb
+                    voiceMenu
+                    typeButton
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(!canType)
-            .accessibilityLabel("Type instead")
-            .accessibilityIdentifier("controls.type")
         }
         .frame(minHeight: height)
+    }
+
+    private var voiceMenu: some View {
+        // The status is drawn over the menu button rather than inside
+        // it, so VoiceOver (and the UI tests) read it as its own text;
+        // touches pass through it to the menu.
+        stableMenu(
+            CapsuleMenuLabel(items: menuValue, name: name, status: statusText, mode: mode, noSignal: noSignal, size: dynamicTypeSize),
+            probe: "voice",
+            content: { menu($0.items) },
+            label: { _ in nameAndStatus(showsName: true) }
+        )
+            .menuOrder(.fixed)
+            .overlay { nameAndStatus(showsName: false).allowsHitTesting(false) }
+            .accessibilityLabel("Voice: \(name)")
+            .accessibilityHint("Shows the connection and End voice session")
+            .accessibilityIdentifier("voice.menu")
+    }
+
+    private var typeButton: some View {
+        Button(action: onType) {
+            Image(systemName: "keyboard")
+                .font(.system(size: 19, weight: .regular))
+                .foregroundStyle(canType ? Theme.muted : Theme.muted.opacity(0.4))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canType)
+        .accessibilityLabel("Type instead")
+        .accessibilityIdentifier("controls.type")
     }
 
     // MARK: - Mic
@@ -170,6 +198,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.7 : 1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.ink)
