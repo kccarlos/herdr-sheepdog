@@ -66,8 +66,10 @@ extension ScreenCard {
 
 // MARK: - The conversation row
 
-/// A card in the conversation: its icon, title and agent. A tap opens it
-/// again. A card the daemon no longer stores shows its words only.
+/// A card in the conversation: an object you open, so a square well with
+/// the card's own symbol, its title and agent. A tap opens it again. A card
+/// the daemon no longer stores shows its words in a dashed well. Always its
+/// own card, never in a ledger run.
 struct CardRow: View {
     let card: ScreenCard?
     /// The item's text: the title, or the daemon's "no longer stored".
@@ -77,64 +79,42 @@ struct CardRow: View {
     @Environment(\.openCard) private var openCard
 
     private var title: String { card?.displayTitle ?? text }
+    private var time: String { ConversationTimeline.defaultTimeFormatter.string(from: at) }
 
     private var subtitle: String {
         var parts = [card?.kindWord ?? "Card"]
         if let agent = card?.agentName { parts.append(agent) }
-        parts.append(ConversationTimeline.defaultTimeFormatter.string(from: at))
+        parts.append(time)
         return parts.joined(separator: " · ")
     }
 
     var body: some View {
         if let card {
-            Button { openCard(card) } label: { content(symbol: card.symbol, chevron: true) }
+            Button { openCard(card) } label: { content(card: card) }
                 .buttonStyle(CardRowButtonStyle())
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(card.kindWord): \(title)" + (card.agentName.map { ", \($0)" } ?? ""))
+                .accessibilityLabel("\(card.kindWord), \(title)" + (card.agentName.map { ", from \($0)" } ?? "") + ", \(time)")
                 .accessibilityHint("Opens the card")
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("bubble.card")
         } else {
-            content(symbol: "rectangle.on.rectangle", chevron: false)
+            content(card: nil)
                 .accessibilityElement(children: .combine)
+                .accessibilityLabel("A card was shown; it is no longer stored.")
                 .accessibilityIdentifier("bubble.cardMissing")
         }
     }
 
-    private func content(symbol: String, chevron: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.ink)
-                .frame(width: 32, height: 32)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(chevron ? .subheadline.weight(.semibold) : .footnote)
-                    .foregroundStyle(chevron ? Theme.ink : Theme.muted)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                if chevron {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
-            if chevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
+    private func content(card: ScreenCard?) -> some View {
+        LedgerCard {
+            if let card {
+                LedgerLine(look: .card(card.symbol), text: title, weight: .semibold, sub: subtitle, disclosure: .push)
+            } else {
+                LedgerLine(look: .cardGone, text: title, color: Theme.muted, sub: "Card · \(time)")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .rowCard()
-        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        // Not part of a run: its own card.
+        .environment(\.ledgerPosition, .single)
     }
 }
 

@@ -57,8 +57,19 @@ enum Theme {
     static let accentSoft = Color("AccentSoft")
     static let workingSoft = Color("WorkingSoft")
     static let thinkingSoft = Color("ThinkingSoft")
+    /// Words on `thinkingSoft` (the reply header, option chips).
+    static let thinkingText = Color("ThinkingText")
+    /// The 2 pt rule beside open Details, the "asks you to say more" tag.
+    static let thinkingRule = Color("ThinkingRule")
+    /// Captions inside `fill` blocks (and on `bubble`): `muted` is 4.4:1 there.
+    static let mutedOnFill = Color("MutedOnFill")
+    /// Dashed outlines: system notices, a card that is gone, held pushes.
+    static let dash = Color("Dash")
+    /// Disclosure chevrons on a card.
+    static let chevron = Color("Chevron")
     static let doneSoft = Color("DoneSoft")
-    /// Red for words and the muted mic: "No" options, destructive rows.
+    /// Red for errors and destructive actions only, never a declined
+    /// question (a neutral choice).
     static let danger = Color("Danger")
     /// Ink on an orange fill, in both modes. Text on orange is never white.
     static let onAccent = Color("OnAccent")

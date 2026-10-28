@@ -30,6 +30,18 @@ public enum TimelineCategory: String, CaseIterable, Sendable {
         }
     }
 
+    /// The technical view's three-letter code in the time gutter.
+    public var code: String {
+        switch self {
+        case .dialogue: return "DLG"
+        case .needsYou: return "ASK"
+        case .outcome: return "UPD"
+        case .context: return "CTX"
+        case .system: return "SYS"
+        case .screen: return "SCR"
+        }
+    }
+
     /// For the technical view's per-row caption.
     public var title: String {
         switch self {
@@ -52,6 +64,9 @@ public struct RowClass: Equatable, Sendable {
     public var folds = false
     /// A run of updates continues across it (a restart divider).
     public var bridgesRuns = false
+    /// Drawn as a line of the ledger: consecutive ledger rows share one
+    /// card. A card shown is an outcome but an object of its own, so no.
+    public var ledger = false
 
     static func plain(_ category: TimelineCategory) -> RowClass { RowClass(category: category) }
 }
@@ -84,6 +99,14 @@ public enum ConversationDisplayRow: Identifiable, Equatable, Sendable {
         switch self {
         case let .row(row): return row.category
         case .updates: return .screen
+        }
+    }
+
+    /// A line of the ledger (`RowClass.ledger`); a folded group is one.
+    public var joinsLedger: Bool {
+        switch self {
+        case let .row(row): return row.classification.ledger
+        case .updates: return true
         }
     }
 }
@@ -129,7 +152,7 @@ extension ConversationTimeline {
             return .plain(.dialogue)
         case .held:
             // Held or dropped: an update the user missed (`isMissed`).
-            return RowClass(category: .outcome, folds: true)
+            return RowClass(category: .outcome, folds: true, ledger: true)
         case .card:
             return .plain(.outcome)
         }
@@ -143,7 +166,7 @@ extension ConversationTimeline {
             return classifyPush(needsUser: item.needsUser)
         case .approval:
             // Open: a question. Settled: what happened to it.
-            return .plain(item.approvalOutcome == nil ? .needsYou : .outcome)
+            return item.approvalOutcome == nil ? .plain(.needsYou) : RowClass(category: .outcome, ledger: true)
         case .card:
             return .plain(.outcome)
         case .notice, .unknown:
@@ -177,7 +200,7 @@ extension ConversationTimeline {
     }
 
     private static func classifyPush(needsUser: Bool) -> RowClass {
-        needsUser ? .plain(.needsYou) : RowClass(category: .outcome, folds: true)
+        needsUser ? .plain(.needsYou) : RowClass(category: .outcome, folds: true, ledger: true)
     }
 
     /// The rows without the plumbing, and without a day heading left over

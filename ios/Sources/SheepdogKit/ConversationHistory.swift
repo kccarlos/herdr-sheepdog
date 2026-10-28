@@ -135,6 +135,10 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     /// A push that interrupts is the one that must stand out.
     public var needsUser: Bool { kind == .push && urgency == "interrupt" }
 
+    /// The voice did not say this aloud: the text router answered a typed
+    /// line, so VoiceOver says "wrote" rather than "said".
+    public var isWritten: Bool { kind == .dog && via == "text_router" }
+
     /// A "New conversation" divider.
     public var isResetNotice: Bool { kind == .notice && subkind == "reset" }
 
@@ -332,7 +336,7 @@ public struct ConversationHistory: Equatable, Sendable {
         case "voice.tool_result":
             let via = event.string("via") ?? ""
             guard !via.isEmpty, via != "voice", event.bool("cancelled") != true else { return nil }
-            made = ConversationItem(id: id, ts: ts, kind: .dog, text: text("spoken"))
+            made = ConversationItem(id: id, ts: ts, kind: .dog, text: text("spoken"), via: via)
         case "voice.push":
             guard event.string("urgency") != "silent" else { return nil }
             made = ConversationItem(id: id, ts: ts, kind: .push, text: text("text"), agent: event.string("agent"), urgency: event.string("urgency"))

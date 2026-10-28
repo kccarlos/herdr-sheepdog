@@ -128,7 +128,7 @@ final class DemoUITests: XCTestCase {
         dismissPermissionAlerts()
         tapVisible(app.buttons, "main.pane.conversation")
 
-        let reconnect = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'divider.notice' AND label CONTAINS 'Voice reconnected'")).firstMatch
+        let reconnect = app.descendants(matching: .any).matching(NSPredicate(format: "(identifier == 'divider.notice' OR identifier == 'bubble.plumbing') AND label CONTAINS 'Voice reconnected'")).firstMatch
         let restart = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'divider.notice' AND label CONTAINS 'Sheepdog started'")).firstMatch
         XCTAssertTrue(restart.waitForExistence(timeout: 15), "the conversation loaded, with the daemon's start")
         XCTAssertFalse(reconnect.exists, "a reconnect that lost nothing is plumbing")

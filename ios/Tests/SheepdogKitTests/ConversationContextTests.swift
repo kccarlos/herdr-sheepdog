@@ -187,7 +187,7 @@ final class ConversationContextTests: XCTestCase {
     func testMissedPushesAreAgentOutcomesThatFold() {
         let rows: [TimelineRow] = [held(1, .dropped(ageMilliseconds: 300_000)), held(2, .held), held(3, .dropped(ageMilliseconds: 300_000))]
         for row in rows {
-            XCTAssertEqual(ConversationTimeline.classify(row), RowClass(category: .outcome, folds: true))
+            XCTAssertEqual(ConversationTimeline.classify(row), RowClass(category: .outcome, folds: true, ledger: true))
             XCTAssertTrue(row.isMissed)
         }
         let layout = ConversationTimeline.layout(rows, showTechnical: false)

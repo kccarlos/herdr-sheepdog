@@ -45,6 +45,10 @@ struct CapsuleGallery: View {
             BannerGallery()
         } else if ProcessInfo.processInfo.arguments.contains("timeline") {
             TimelineGallery()
+        } else if ProcessInfo.processInfo.arguments.contains("hour") {
+            HourGallery(technical: false)
+        } else if ProcessInfo.processInfo.arguments.contains("hourTech") {
+            HourGallery(technical: true)
         } else {
             capsules
         }
@@ -146,6 +150,96 @@ private struct TimelineGallery: View {
         ConversationView(rows: Self.rows, voiceName: "Sheepdog", ask: { _ in })
             .background(Theme.surface)
             .accessibilityIdentifier("capsule.gallery")
+    }
+}
+
+/// A busy hour on one screen (`-sheepdogCapsuleGallery hour`, or `hourTech`
+/// for the technical view), the visual spec's "ChatHour": every kind of row
+/// the conversation can show, for screenshots in light, dark and the
+/// largest text, on the iPhone and the iPad.
+private struct HourGallery: View {
+    let technical: Bool
+
+    private static let base = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 3600)
+
+    private static func at(_ minutes: Double, _ seconds: Double = 0) -> Date { base.addingTimeInterval(minutes * 60 + seconds) }
+
+    private static func item(_ id: Int64, _ kind: ConversationItem.Kind, _ text: String, _ time: Date, via: String? = nil, agent: String? = nil,
+                             urgency: String? = nil, pending: String? = nil, resolution: ConversationItem.Resolution? = nil, answer: String? = nil) -> TimelineRow {
+        .item(ConversationItem(id: id, ts: time, kind: kind, text: text, via: via, agent: agent, urgency: urgency, pendingID: pending,
+                               answer: answer, resolution: resolution))
+    }
+
+    private static func missed(_ id: Int64, _ text: String, _ time: Date, dropped: Bool = true) -> TimelineRow {
+        .held(.init(key: "k\(id)", id: id, ts: time, text: text, fate: dropped ? .dropped(ageMilliseconds: 300_000) : .held))
+    }
+
+    private static let finder = "Codex is asking allow Computer Use to use Finder."
+
+    private static var rows: [TimelineRow] {
+        let day = TimelineRow.day(Calendar.current.startOfDay(for: base))
+        var rows: [TimelineRow] = [day]
+        let news = [
+            "forumind finished the design doc and is waiting for your OK to start.",
+            "Both releases are underway. The daemon fix is waiting on CI.",
+            "Claude finished the forumind work and has published it.",
+            "The two stuck waiting scripts are cleared.",
+            "slingshot stage Claude finished.",
+            "The WordPress version of forumind is on TestFlight.",
+            "The sheepdog agent has finished. The slash command is in.",
+            "The local daemon is now the signed v0.1.9.",
+        ]
+        for (i, text) in news.enumerated() { rows.append(missed(Int64(i + 1), text, at(Double(i * 5 + 2)))) }
+        rows += [
+            .live(.init(id: 1, speaker: .system, kind: .notice, text: "Talking to Work Mac", isFinal: true, at: at(62))),
+            item(20, .shepherd, "What did I miss?", at(62, 40)),
+            item(21, .dog, "Eight things finished while you were away. The forumind design doc is waiting for your OK. Want the details?", at(62, 47)),
+            .brain(.init(id: 22, ts: at(62, 48), spoken: "Eight things finished while you were away. forumind's design doc waits for your OK.",
+                         detail: "Both releases are out (app 0.2.1 to TestFlight, daemon v0.1.9 signed). The two stuck waiting scripts were cleared after the restart. forumind wants an OK before it starts on the design.",
+                         options: ["Read the design doc", "Not now"], raw: "{ \"name\": \"to_supervisor\" }"), compact: false),
+            item(23, .shepherd, "Is anyone stuck?", at(62, 55), via: "typed"),
+            item(24, .dog, "Codex wants to use Finder. Its question is below.", at(63)),
+            item(25, .approval, finder, at(63, 5), agent: "Codex", pending: "q25", resolution: .open),
+            item(26, .approval, "Claude is asking to run npm test in webapp.", at(63, 20), via: "tap", agent: "Claude", pending: "q26", resolution: .confirmed, answer: "Yes, proceed"),
+            item(27, .approval, "Claude is asking to run rm -rf .build in sheepdog.", at(63, 40), agent: "Claude", pending: "q27", resolution: .cancelled),
+            item(28, .push, "slingshot stage Codex finished.", at(64)),
+            .card(ScreenCard(cardID: "c1", kind: .card, at: at(64, 30), title: "Test results", markdown: "- 41 passed")),
+            .live(.init(id: 2, speaker: .shepherd, kind: .speech, text: "Tell Codex it can use Finder but nothing", isFinal: false, at: at(65))),
+        ]
+        return rows
+    }
+
+    private static var technicalRows: [TimelineRow] {
+        [
+            .day(Calendar.current.startOfDay(for: base)),
+            item(1, .notice, "Voice context lost.", at(0, 4)),
+            item(2, .notice, "Voice reconnected with a fresh session; earlier context was lost.", at(0, 11)),
+            missed(3, "The WordPress version of forumind is on TestFlight.", at(5, 40)),
+            missed(4, "The sheepdog agent has finished. The slash command is in.", at(9, 13), dropped: false),
+            item(5, .notice, "Voice session closed: shutdown.", at(51)),
+            item(6, .notice, "Sheepdog started.", at(51, 3)),
+            .live(.init(id: 1, speaker: .system, kind: .notice, text: "Talking to Work Mac", isFinal: true, at: at(62, 10))),
+            .live(.init(id: 2, speaker: .system, kind: .notice, text: "Audio moved to Speaker.", isFinal: true, at: at(62, 30))),
+            item(20, .shepherd, "What did I miss?", at(62, 40)),
+            item(21, .dog, "Eight things finished while you were away. The forumind design doc is waiting for your OK.", at(62, 47)),
+            .brain(.init(id: 22, ts: at(62, 48), spoken: "Eight things finished while you were away.", detail: "Both releases are out.", options: ["Read the design doc", "Not now"], raw: "{}"), compact: false),
+            item(25, .approval, finder, at(63, 2), agent: "Codex", pending: "q25", resolution: .open),
+            item(26, .approval, "Claude is asking to run npm test in webapp.", at(63, 21), via: "tap", agent: "Claude", pending: "q26", resolution: .confirmed, answer: "Yes, proceed"),
+        ]
+    }
+
+    var body: some View {
+        ConversationView(
+            rows: technical ? Self.technicalRows : Self.rows,
+            voiceName: "Sheepdog",
+            canLoadOlder: !technical,
+            openPendingIDs: ["q25"],
+            pointerIDs: technical ? [] : ["item.25"],
+            ask: { _ in },
+            showTechnical: technical
+        )
+        .background(Theme.surface)
+        .accessibilityIdentifier("capsule.gallery")
     }
 }
 #endif

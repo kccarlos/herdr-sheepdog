@@ -35,6 +35,7 @@ resume".
 9. [Usability review](#9-usability-review)
 10. [Decisions by the CEO](#10-decisions-by-the-ceo)
 11. [Phase 2: what was built, and where it differs](#11-phase-2-what-was-built-and-where-it-differs)
+12. [The visual system](#12-the-visual-system)
 
 ## 1. How the timeline is built today
 
@@ -631,3 +632,41 @@ what the neighbours decide; `ConversationTimeline.layout` applies it, and
 Left for phase 3: notice `subkind`/`reason`, the cancel reason, the start
 version ("Sheepdog updated"), and the daemon resolving held pushes at a
 restart.
+
+## 12. The visual system
+
+Phases 1 and 2 decide what shows; this is how each row looks. Shape tells
+the kinds apart and colour confirms. One place per concern:
+
+- **What is a line of the ledger** is `RowClass.ledger` in the
+  classification table; `ConversationTimeline.ledgerPositions` turns it into
+  who joins the card above or below, and `gap` is the spacing (6 within an
+  exchange, 14 divider to dialogue, 18 between categories, 0 in a run, 8
+  next to a card, 6 in the technical view). The gutter's code is
+  `TimelineCategory.code` (DLG, ASK, UPD, CTX, SYS, SCR).
+- **How it looks** is in `ConversationRowStyle.swift` (`BubbleWidth`,
+  `LedgerCard`, `LedgerLine`, `LedgerLook`, `ContextDivider`, `PlumbingLine`,
+  `FloatingPill`); `ConversationRows.swift` only picks a look per kind.
+- **Dialogue** is a bubble with one 6 pt corner (you right, 80 %; voice
+  left, 86 %; iPad 70 %; whole width at the accessibility sizes). Orchestrator
+  and Details are purple (`Thinking`, `ThinkingSoft`, `ThinkingText`, a 2 pt
+  `ThinkingRule` when Details is open). **Needs you** is the only amber: a
+  one-line pointer, the card above the voice bar answers. **Outcomes** have a
+  28 pt round well (blue news with `terminal.fill`, `moon.zzz.fill` for
+  missed, green approved, neutral declined with `xmark`, a hollow ring and a
+  clock for closed); a card shown has a square well. **Context** is a hairline
+  with a glyph; a notice this build does not know is a `Dash` outline.
+- **Tokens added:** `ThinkingText`, `ThinkingRule`, `MutedOnFill` (captions
+  inside `Fill` blocks), `Dash`, `Chevron`. `Danger` is for errors and
+  destructive actions only.
+- **Four behaviours** were added with the design, each small enough to revert
+  alone: a declined answer is neutral (`LedgerLook.declined`); "Catch me up"
+  shows "Asking…" until the voice answers or 20 s pass
+  (`ConversationTimeline.voiceAnswered`); the floating question collapses to
+  "Codex asked" and **Answer** from the third accessibility size
+  (`FloatingQuestions.collapsed`); day headings are pinned section headers.
+- **Differences from the mockups.** "Sheepdog wrote" is used for answers the
+  text router gave (`via: text_router`); the "Typed" caption exists for items
+  the history marks typed. A row's VoiceOver label is its visible words
+  combined, not the mockup's sentence. The pointer's tap pulses the card with a
+  short border flash; the card does not scroll.
