@@ -738,7 +738,10 @@ nothing happened. Now they are buttons.
     (`context_lost`, a fresh reconnect, the app's "Voice restarted" row).
     In those cases the voice no longer knows the question it asked, so a
     bare "Yes" would mean nothing to it;
-  - a switch to another computer ("Talking to …").
+  - a switch to another computer ("Talking to …"). That row is not
+    saved, so after a relaunch a reply that went stale only because of a
+    switch is live again. This is on purpose: that computer's conversation
+    did not move on.
 
   The voice saying the reply, agent updates, questions, a resumed
   reconnect and a new day do not end it. At most one reply is live. The
