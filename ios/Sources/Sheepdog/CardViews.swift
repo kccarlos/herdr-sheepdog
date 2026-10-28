@@ -143,54 +143,55 @@ struct CardSheet: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(card.displayTitle)
-                    .font(.title2.weight(.bold))
-                    .fontDesign(.rounded)
-                    .foregroundStyle(Theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("card.title")
-                content
-                    .foregroundStyle(Theme.ink)
+        // A system navigation bar: its scroll-edge effect separates the
+        // header from content scrolling under it, in light and dark.
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    content
+                        .foregroundStyle(Theme.ink)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
-            .padding(.bottom, 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Theme.surface)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(card.displayTitle)
+            .toolbar {
+                ToolbarItem(placement: .principal) { titleBlock }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("card.done")
+                }
+            }
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .top, spacing: 12) { header }
-        .background(Theme.surface)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationContentInteraction(.scrolls)
+        // Scrolling up at the top of the content grows the sheet; the
+        // navigation bar and the grabber drag it too.
+        .presentationContentInteraction(.resizes)
         .presentationBackground(Theme.surface)
     }
 
-    /// The card's icon in its tile, what it is and whose, and Done.
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: card.symbol)
-                .font(.subheadline.weight(.medium))
+    /// The title, and under it what the card is and when.
+    private var titleBlock: some View {
+        VStack(spacing: 1) {
+            Text(card.displayTitle)
+                .font(.headline)
                 .foregroundStyle(Theme.ink)
-                .frame(width: 32, height: 32)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .accessibilityHidden(true)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("card.title")
             Text(meta)
-                .font(.footnote.weight(.semibold))
+                .font(.caption)
                 .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button("Done") { dismiss() }
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.primaryText)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityIdentifier("card.done")
+                .lineLimit(1)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
