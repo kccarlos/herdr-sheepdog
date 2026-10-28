@@ -802,9 +802,12 @@ struct DayDivider: View {
             .padding(.vertical, 4)
             .padding(.top, topInset)
             .frame(maxWidth: .infinity)
-            // Opaque enough that rows scrolling under it do not show
-            // through; the same as the page when nothing is under it.
-            .background(Theme.surface.opacity(0.94))
+            // Opaque, so rows scrolling under the pinned heading do not
+            // show through; it is the page colour, so there is no visible
+            // box while it is not pinned. It bleeds through the 16 pt gutter
+            // and the 12 pt above (the list's top padding), where the
+            // pinned heading would otherwise leave a strip of rows.
+            .background(Theme.surface.padding(.horizontal, -16).padding(.top, -12))
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("divider.day")
     }
