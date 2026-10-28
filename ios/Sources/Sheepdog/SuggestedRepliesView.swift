@@ -82,22 +82,40 @@ struct SuggestedReplyOptions: View {
 
     @ViewBuilder
     private func items(_ states: [SuggestedReplies.OptionState], live: Bool) -> some View {
-        ForEach(Array(zip(options, states).enumerated()), id: \.offset) { _, pair in
+        if !live {
+            // Plain words in a row read as one sentence without a lead.
+            Text("Suggested:")
+                .font(.footnote)
+                .foregroundStyle(Theme.muted)
+                .padding(.vertical, 4)
+                .accessibilityHidden(true)
+        }
+        ForEach(Array(zip(options, states).enumerated()), id: \.offset) { index, pair in
             let (option, state) = pair
-            switch state {
-            case .available, .disabled, .sending:
-                if live, let context {
-                    SuggestedReplyButton(text: option, state: state, fill: fill, voiceName: voiceName) {
-                        Task { await context.sender.send(option, of: replies, to: context.computer) }
-                    }
-                } else {
-                    StaleOption(text: option)
+            HStack(spacing: 6) {
+                if !live, index > 0 {
+                    Text("·").font(.footnote).foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
-            case .sent:
-                SentOption(text: option)
-            case .stale:
+                optionView(option, state: state, live: live)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func optionView(_ option: String, state: SuggestedReplies.OptionState, live: Bool) -> some View {
+        switch state {
+        case .available, .disabled, .sending:
+            if live, let context {
+                SuggestedReplyButton(text: option, state: state, fill: fill, voiceName: voiceName) {
+                    Task { await context.sender.send(option, of: replies, to: context.computer) }
+                }
+            } else {
                 StaleOption(text: option)
             }
+        case .sent:
+            SentOption(text: option)
+        case .stale:
+            StaleOption(text: option)
         }
     }
 }

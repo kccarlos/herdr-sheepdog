@@ -25,11 +25,16 @@ final class SuggestedRepliesUITests: XCTestCase {
         // The reply folds under the voice's bubble: open its Details.
         let details = app.buttons["reply.details"]
         XCTAssertTrue(details.waitForExistence(timeout: 20), "the reply's Details")
-        tapWhenTappable(details, "Details")
-
         let notYet = app.buttons["Reply: Not yet"]
         let yes = app.buttons["Reply: Yes, start the logging"]
-        XCTAssertTrue(notYet.waitForExistence(timeout: 5), "the options are buttons")
+        // The first sync after launch can redraw the row and close it
+        // again: open it until the options show.
+        let opened = Date().addingTimeInterval(20)
+        while !notYet.exists, Date() < opened {
+            if details.exists, details.value as? String == "Collapsed" { tapWhenTappable(details, "Details") }
+            _ = notYet.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(notYet.exists, "the options are buttons")
         XCTAssertTrue(yes.exists)
         tapWhenTappable(notYet, "Not yet")
 
