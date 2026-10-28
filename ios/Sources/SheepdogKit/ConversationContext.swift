@@ -1,7 +1,8 @@
 import Foundation
 
-/// The daemon's notice items, told apart by their words until the daemon
-/// tags them (design doc, phase 3). The one place that matches the text.
+/// The daemon's notice items, told apart by the `subkind` the daemon sends
+/// (design doc, phase 3), or by their words when it sends none (an older
+/// daemon). The one place that matches the text.
 public enum DaemonNotice: Equatable, Sendable {
     /// "Sheepdog started."
     case restarted
@@ -31,6 +32,10 @@ public enum DaemonNotice: Equatable, Sendable {
             self = .voiceRestarted
             return
         }
+        if let subkind = item.subkind, let tagged = DaemonNotice(subkind: subkind) {
+            self = tagged
+            return
+        }
         var text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasSuffix(".") { text.removeLast() }
         switch text {
@@ -39,6 +44,22 @@ public enum DaemonNotice: Equatable, Sendable {
         case "Voice reconnected with a fresh session; earlier context was lost": self = .freshReconnect
         case "Voice reconnected; the conversation continues": self = .resumedReconnect
         default: self = text.hasPrefix("Voice session closed") ? .closed : .other
+        }
+    }
+}
+
+extension DaemonNotice {
+    /// The daemon's `subkind` tags; nil for one this build does not know
+    /// (the words decide then).
+    init?(subkind: String) {
+        switch subkind {
+        case "start": self = .restarted
+        case "reset": self = .reset
+        case "context_lost": self = .contextLost
+        case "fresh": self = .freshReconnect
+        case "resumed": self = .resumedReconnect
+        case "closed": self = .closed
+        default: return nil
         }
     }
 }
@@ -266,6 +287,21 @@ extension ConversationItem {
         case .expired: return "expired"
         case .cancelled, .unknown: return "closed"
         case .replaced: return "replaced"
+        }
+    }
+
+    /// Why a closed question closed, for its expanded card: from the
+    /// daemon's `reason` when it sends one (an older daemon sends none, and
+    /// a reason this build does not know falls back the same way).
+    public var closedReasonText: String {
+        switch (resolution, reason) {
+        case (.expired, _), (_, "expired"?): return "It expired before anyone answered."
+        case (.replaced, _), (_, "replaced"?): return "A newer question replaced it."
+        case (_, "prompt_gone"?): return "It left the agent's screen, probably answered on the computer."
+        case (_, "agent_exited"?): return "The agent exited."
+        case (_, "pane_closed"?), (_, "closed"?): return "The agent's window was closed."
+        case (_, "brain_interrupt"?): return "The agent was interrupted."
+        default: return "It was closed on the computer."
         }
     }
 

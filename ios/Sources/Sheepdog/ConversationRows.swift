@@ -501,15 +501,9 @@ struct SettledQuestionLine: View {
 
     private var look: LedgerLook { confirmed ? (declined ? .declined : .approved) : .closed }
 
-    /// Until the daemon says why a prompt left the screen, the plain
-    /// fallback (design doc, phase 3).
-    private var reason: String {
-        switch item.resolution {
-        case .expired: return "It expired before anyone answered."
-        case .replaced: return "A newer question replaced it."
-        default: return "It was closed on the computer."
-        }
-    }
+    /// Why it closed, from the daemon's reason; the plain fallback for an
+    /// older daemon (design doc, phase 3).
+    private var reason: String { item.closedReasonText }
 
     private var blocks: [(label: String, text: String)] {
         var question = item.text
