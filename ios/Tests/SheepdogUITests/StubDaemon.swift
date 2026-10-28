@@ -23,7 +23,12 @@ final class StubDaemon {
         ///
         /// `history` is how many conversation lines it has; with more than
         /// one, the last is "Latest from <name>."
-        case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0)
+        ///
+        /// `reply`, when given, is an orchestrator reply with these options
+        /// (`voice.tool_result` from `to_supervisor` in `/api/events`), half
+        /// a minute after the first line; every line typed
+        /// (`POST /api/utterance`) is then added to the conversation.
+        case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0, reply: (spoken: String, options: [String])? = nil)
     }
 
     private let listener: NWListener
@@ -35,6 +40,8 @@ final class StubDaemon {
     var postDelay: TimeInterval = 0
     private let lock = NSLock()
     private var seen: [String] = []
+    /// The lines typed so far (`POST /api/utterance`'s `text`).
+    private var typed: [String] = []
 
     /// How many requests started with `prefix` ("POST /api/utterance").
     func requests(_ prefix: String) -> Int {
@@ -73,7 +80,10 @@ final class StubDaemon {
             let words = request.split(separator: " ")
             let method = words.first.map(String.init) ?? "GET"
             let path = words.dropFirst().first.map(String.init) ?? "/"
-            self.lock.withLock { self.seen.append("\(method) \(path)") }
+            self.lock.withLock {
+                self.seen.append("\(method) \(path)")
+                if method == "POST", path.hasPrefix("/api/utterance") { self.typed.append(Self.typedText(request)) }
+            }
             let response = self.response(for: path)
             let delay = method == "POST" ? self.postDelay : 0
             self.queue.asyncAfter(deadline: .now() + delay) {
@@ -101,7 +111,7 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"agents":[],"# + voice + #","version":"v0.1.4""# + tail + "}")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
-        case let .computer(name, agents, questions, history, idBase):
+        case let .computer(name, agents, questions, history, idBase, reply):
             if path.hasPrefix("/api/hello") {
                 return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}}"#)
             }
@@ -122,7 +132,20 @@ final class StubDaemon {
                         : index == 0 ? "Hi from \(name)." : "Line \(index) from \(name)."
                     return #"{"id":"# + String(1_790_127_618_456_893 + index + idBase) + #","ts":"2026-10-23T09:00:00Z","kind":"dog","text":""# + text + #""}"#
                 }
-                return http(200, "application/json", #"{"items":["# + lines.joined(separator: ",") + "]}")
+                let typed = reply == nil ? [] : lock.withLock { self.typed }
+                let said = typed.enumerated().map { index, text -> String in
+                    let ts = "2026-10-23T09:01:" + String(format: "%02d", min(index, 59)) + "Z"
+                    return #"{"id":"# + String(1_790_127_718_456_893 + index + idBase) + #","ts":""# + ts + #"","kind":"shepherd","via":"typed","text":"# + Self.json(text) + "}"
+                }
+                return http(200, "application/json", #"{"items":["# + (lines + said).joined(separator: ",") + "]}")
+            }
+            if path.hasPrefix("/api/events"), let reply {
+                // The orchestrator's reply; no held pushes.
+                guard path.contains("voice.tool_result") else { return http(200, "application/json", "[]") }
+                let options = reply.options.map(Self.json).joined(separator: ",")
+                let payload = #"{"name":"to_supervisor","spoken":"# + Self.json(reply.spoken) + #","options":["# + options + "]}"
+                let event = #"{"id":"# + String(1_790_127_648_456_893 + idBase) + #","ts":"2026-10-23T09:00:30.000Z","source":"voice","type":"voice.tool_result","payload":"# + payload + "}"
+                return http(200, "application/json", "[" + event + "]")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
         }
@@ -133,6 +156,20 @@ final class StubDaemon {
         let agent = #"{"pane_id":""# + pane + #"","alias":""# + alias + #"","kind":"claude","state":"blocked","workspace_label":""# + space + #""}"#
         let q = #"{"id":"q-"# + pane + #"","pane_id":""# + pane + #"","kind":"answer_prompt","agent":""# + alias + #"","summary":""# + question + #"","created_at":""# + created + #"","options":[{"index":1,"label":"Yes"},{"index":2,"label":"No"}]}"#
         return (agent, q)
+    }
+
+    /// A string as a JSON literal, quotes included.
+    private static func json(_ text: String) -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: [text])) ?? Data(#"[""]"#.utf8)
+        return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
+    }
+
+    /// `{"text": …}` from a request's body, when it came with the head.
+    private static func typedText(_ request: String) -> String {
+        guard let range = request.range(of: "\r\n\r\n"),
+              let object = try? JSONSerialization.jsonObject(with: Data(request[range.upperBound...].utf8)) as? [String: Any],
+              let text = object["text"] as? String else { return "(typed)" }
+        return text
     }
 
     private func http(_ status: Int, _ type: String, _ body: String) -> Data {

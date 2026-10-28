@@ -52,6 +52,12 @@ final class SessionViewModel: ObservableObject {
     let voice: VoiceEngine
     /// The conversation's rows, paging and typed line.
     let conversationModel = ConversationModel()
+    /// The orchestrator's suggested replies: a tap is the user typing that
+    /// line (`sendTyped(_:)`), so every rail on the daemon applies.
+    private(set) lazy var replySender = SuggestedReplySender(
+        sendTyped: { [weak self] text in await self?.sendTyped(text) ?? false },
+        lastError: { [weak self] in self?.conversationModel.typedError }
+    )
     /// The approval card pinned above the controls, if a worker is asking:
     /// the current computer's pinned question with its phase.
     var approval: ApprovalFlow.Card? { fleet.current?.approval }
