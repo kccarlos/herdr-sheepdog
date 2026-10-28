@@ -282,7 +282,7 @@ second computer is paired.
 | Element | One computer | Several computers |
 |---|---|---|
 | Voice menu | Manage computers… and End voice session | Adds Talk to, with every computer |
-| Agents page | One list | One section per computer, the current one first |
+| Agents page | One list | One section per computer, in the order they were paired, the current one marked |
 | Agent window title | Agent name | Agent name, plus "Work Mac · webapp" underneath |
 | Floating question | As today | Labelled "Home Mac · blog" when it is not on the current computer, with "Answers by tap go to Home Mac." and **Talk to Home Mac** |
 | Voice | Never names a computer | Never names a computer (section 4) |
@@ -394,7 +394,7 @@ iPhone 17 Pro and the iPad a 13-inch iPad Pro.
 |---|---|
 | ![Agents page, several computers, light](app-redesign/agents-several-light.jpg) | ![Agents page, several computers, dark](app-redesign/agents-several-dark.jpg) |
 
-- One section per computer. The current computer comes first, marked
+- One section per computer. In the order the computers were paired (Talk to never moves a section); the current one stays in place, marked
   "You're talking here".
 - Inside a section, blocked agents come first, as today.
 - The Agents badge counts waiting agents on every computer.
@@ -613,7 +613,7 @@ row out of the app to make a window is wired (the row carries an
 `AgentWindowRoute`) but not verified; Open in New Window is.
 
 **As built (phase 11, several computers):** the sidebar's computer rows
-(the current one first, "Talking here"; Talk to or Retry on the others),
+(in the store order, the current one marked "Talking here"; Talk to or Retry on the others),
 All agents' sections, and ⌘K, which talks to the next computer that
 answers. Another computer's agent has no window yet: its row opens All
 agents, and its card has Talk to instead of a window button. The voice
