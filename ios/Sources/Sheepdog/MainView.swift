@@ -268,6 +268,7 @@ struct PhoneRootView: View {
 struct ConversationPane: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(TechnicalEvents.key) private var showTechnical = false
 
     /// Rows that fold to a pointer while their question floats.
     private var pointerIDs: Set<String> {
@@ -285,7 +286,8 @@ struct ConversationPane: View {
             pointerIDs: pointerIDs,
             loadOlder: { await model.loadOlder() },
             followToken: model.conversationModel.typedSent,
-            ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil
+            ask: model.isConfigured ? { text in Task { _ = await model.sendTyped(text) } } : nil,
+            showTechnical: showTechnical
         )
         // One scroll view per computer: a switch swaps the rows under it,
         // and the old computer's offset and "scrolled up" state would leave

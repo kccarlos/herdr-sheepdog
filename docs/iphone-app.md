@@ -120,6 +120,14 @@ With one computer, none of this shows: no names and no Talk to.
   computers… and **End voice session** (your agents keep working). "Hold to
   talk" is an option. The keyboard turns the capsule into a text field
   when you cannot talk; the orb on its left goes back to voice.
+- **The conversation.** What you and the voice said, the questions agents
+  ask and what agents did. Three or more agent updates in a row fold into
+  one "N agent updates" row (it shows the newest two; tap to open it).
+  Reconnects, audio changes and other plumbing stay out of the list. For a
+  bug report, turn on **Settings ▸ Health ▸ Show technical events**: every
+  row comes back with its original text and exact time, a "Technical
+  events shown" tag marks the page, and a long press on a row copies its
+  raw JSON.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
 - **Agents.** One compact card per agent: its state and for how long, and

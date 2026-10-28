@@ -14,6 +14,7 @@ struct HealthView: View {
     /// row (Settings already has the Models screen one tap away).
     var changeModels: (() -> Void)?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(TechnicalEvents.key) private var showTechnical = false
 
     var body: some View {
         List {
@@ -22,6 +23,7 @@ struct HealthView: View {
             chattinessSection
             audioSection
             problemsSection
+            technicalEventsSection
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Health")
@@ -170,6 +172,17 @@ struct HealthView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: - Technical events
+
+    private var technicalEventsSection: some View {
+        Section {
+            Toggle("Show technical events", isOn: $showTechnical)
+                .accessibilityIdentifier("health.technicalEvents")
+        } footer: {
+            Text("Adds reconnects, audio changes and other plumbing to the conversation, with exact times. For bug reports.")
         }
     }
 
