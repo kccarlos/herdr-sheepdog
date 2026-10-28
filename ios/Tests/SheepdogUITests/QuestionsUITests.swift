@@ -64,6 +64,42 @@ final class QuestionsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["approval.option.1"].exists, "the voice's question is still open")
     }
 
+    /// The common case stays one tap: Codex's real three-option command
+    /// approval (testdata/herdr/codex-approval-prompt.screen.txt), whose
+    /// middle option wraps, floats inline at the default text size.
+    func testCommandApprovalFloatsInline() throws {
+        let screen = """
+        • Running printf '%s\\n' 'hello from codex.' > hello.txt
+
+
+          Would you like to run the following command?
+
+          Environment: local
+
+          Reason: May I create the requested hello.txt file in the current workspace?
+
+          $ printf '%s\\n' 'hello from codex.' > hello.txt
+
+        › 1. Yes, proceed (y)
+          2. Yes, and don't ask again for commands that start with `printf '%s\\n' 'hello from codex.' > hello.txt` (p)
+          3. No, and tell Codex what to do differently (esc)
+
+          Press enter to confirm or esc to cancel
+        """
+        XCTAssertEqual(post("/api/inject/blocked", ["pane_id": "p-qa", "alias": "qa", "kind": "codex", "screen": screen]), 200)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogAddress", Fixture.host]
+        app.launch()
+
+        let first = app.buttons["approval.option.1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 20), "the approval floats inline")
+        XCTAssertTrue(app.buttons["approval.option.3"].exists)
+        XCTAssertFalse(app.buttons["questions.answer"].exists, "no bar for a command approval")
+        let card = app.descendants(matching: .any)["approval.card"].firstMatch
+        XCTContext.runActivity(named: "card \(card.frame.height) pt in a \(app.windows.firstMatch.frame.height) pt window") { _ in }
+    }
+
     /// Claude Code's AskUserQuestion with three described options, read by
     /// the daemon's own parser: each description reaches the app as its own
     /// field, the long question goes to the compact bar, and the sheet
