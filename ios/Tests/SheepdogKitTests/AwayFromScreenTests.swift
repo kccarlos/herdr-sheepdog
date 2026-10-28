@@ -47,6 +47,17 @@ final class AppRouteTests: XCTestCase {
         XCTAssertEqual(route("sheepdog://end"), .end)
     }
 
+    func testToggleTalkIsHoldToTalkOnly() {
+        XCTAssertEqual(route("sheepdog://toggle-talk"), .toggleTalk)
+        XCTAssertEqual(AppRoute.toggleTalk.url.absoluteString, "sheepdog://toggle-talk")
+        XCTAssertEqual(AppRoute.toggleTalk.actions(wantsConnection: true, muted: false, talkMode: .holdToTalk), [.toggleTalk])
+        XCTAssertEqual(AppRoute.toggleTalk.actions(wantsConnection: true, muted: false, talkMode: .openMic), [])
+        XCTAssertEqual(AppRoute.toggleTalk.actions(wantsConnection: false, muted: false, talkMode: .holdToTalk), [])
+        // End works in both modes.
+        XCTAssertEqual(AppRoute.end.actions(wantsConnection: true, muted: false, talkMode: .holdToTalk), [.disconnect])
+        // Mute stays a no-op in hold mode: the core never mutes there.
+    }
+
     func testTalkStartsTheSessionOrUnmutesIt() {
         XCTAssertEqual(AppRoute.talk.actions(wantsConnection: false, muted: false), [.showConversation, .connect])
         XCTAssertEqual(AppRoute.talk.actions(wantsConnection: false, muted: true), [.showConversation, .connect])

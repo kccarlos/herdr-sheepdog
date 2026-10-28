@@ -13,6 +13,8 @@ import Foundation
 ///   window (a Live Activity row); `computer` names the computer the
 ///   agent runs on, when there are several
 /// - `sheepdog://mute?on=true|false`, `sheepdog://mute` (toggle)
+/// - `sheepdog://toggle-talk` — the Live Activity's tap-to-talk button in
+///   hold-to-talk mode: open the mic gate, or close it and send
 /// - `sheepdog://stop` — the Stop button: silence the voice now
 /// - `sheepdog://end` — end the voice session
 public enum AppRoute: Equatable, Sendable {
@@ -21,6 +23,7 @@ public enum AppRoute: Equatable, Sendable {
     case window(String, computer: String?)
     case mute(Bool)
     case toggleMute
+    case toggleTalk
     case stop
     case end
 
@@ -59,6 +62,8 @@ public enum AppRoute: Equatable, Sendable {
             case "false", "0", "no": self = .mute(false)
             default: return nil
             }
+        case "toggle-talk":
+            self = .toggleTalk
         case "stop":
             self = .stop
         case "end":
@@ -84,6 +89,7 @@ public enum AppRoute: Equatable, Sendable {
             c.host = "mute"
             c.queryItems = [URLQueryItem(name: "on", value: on ? "true" : "false")]
         case .toggleMute: c.host = "mute"
+        case .toggleTalk: c.host = "toggle-talk"
         case .stop: c.host = "stop"
         case .end: c.host = "end"
         }
@@ -98,13 +104,15 @@ public enum AppRoute: Equatable, Sendable {
         case showConversation
         case connect
         case toggleMute
+        /// Hold-to-talk from the lock screen: press if not talking, else release.
+        case toggleTalk
         case stop
         case disconnect
         case openAgent(String)
         case openWindow(String, computer: String?)
     }
 
-    public func actions(wantsConnection: Bool, muted: Bool) -> [Action] {
+    public func actions(wantsConnection: Bool, muted: Bool, talkMode: TalkMode = .openMic) -> [Action] {
         switch self {
         case .talk:
             // "Talk to Sheepdog" means the user wants to be heard: start
@@ -119,6 +127,9 @@ public enum AppRoute: Equatable, Sendable {
             return wantsConnection && muted != on ? [.toggleMute] : []
         case .toggleMute:
             return wantsConnection ? [.toggleMute] : []
+        case .toggleTalk:
+            // Open mic has no gate to toggle; a stale button does nothing.
+            return wantsConnection && talkMode == .holdToTalk ? [.toggleTalk] : []
         case .stop:
             return wantsConnection ? [.stop] : []
         case .end:
