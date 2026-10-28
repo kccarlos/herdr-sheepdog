@@ -63,6 +63,7 @@ shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2
 shard-4  SheepdogUITests/RedesignShotsUITests          # 1
+shard-4  SheepdogUITests/SuggestedRepliesUITests
 shard-4  SheepdogUITests/LaunchReviewScreenshotsUITests
 shard-4  SheepdogUITests/ReviewScreenshotsUITests
 shard-4  SheepdogUITests/LaunchRecordingUITests

@@ -37,6 +37,7 @@ resume".
 11. [Phase 2: what was built, and where it differs](#11-phase-2-what-was-built-and-where-it-differs)
 12. [The visual system](#12-the-visual-system)
 13. [Phase 3: what was built, and where it differs](#13-phase-3-what-was-built-and-where-it-differs)
+14. [Suggested replies are tappable](#14-suggested-replies-are-tappable)
 
 ## 1. How the timeline is built today
 
@@ -714,3 +715,58 @@ bumped: the app reads each field when it is there.
   **Difference from section 8:** the true attached-client signal for the
   reconnect row (section 11) is not part of this change; the dialogue proxy
   stays.
+
+## 14. Suggested replies are tappable
+
+An orchestrator reply can carry `options` (`voice.tool_result {spoken,
+detail?, options?}`, `BrainActivity.Reply.options`): next steps such as
+"Yes, start the logging" and "Not yet". Section 12 drew them as purple
+pills that did nothing. They looked like buttons, so people tapped them and
+nothing happened. Now they are buttons.
+
+- **A tap is the user typing that line.** It goes through `sendTyped`
+  (`POST /api/utterance`, with the action key and the idempotency key the
+  composer uses), the same path as "Catch me up". The daemon sees an
+  ordinary typed utterance, so the approval rule and every other rail apply
+  unchanged. Nothing new is sent and the daemon is not changed.
+- **Only the latest unanswered reply is live.** A reply's options are
+  buttons until something after it in the timeline makes them stale:
+  - the user's words (said, typed or a tapped option; a transcript still
+    in progress counts);
+  - a newer orchestrator reply, pending or not;
+  - a new conversation, a daemon restart, or the voice losing its context
+    (`context_lost`, a fresh reconnect, the app's "Voice restarted" row).
+    In those cases the voice no longer knows the question it asked, so a
+    bare "Yes" would mean nothing to it;
+  - a switch to another computer ("Talking to …"). That row is not
+    saved, so after a relaunch a reply that went stale only because of a
+    switch is live again. This is on purpose: that computer's conversation
+    did not move on.
+
+  The voice saying the reply, agent updates, questions, a resumed
+  reconnect and a new day do not end it. At most one reply is live. The
+  rule is `ConversationTimeline.suggestedReplies` (pure, in
+  `SuggestedReplies.swift`), computed once per list from the whole
+  timeline. It is not computed from the drawn rows, where Details has
+  folded the reply away.
+- **A stale option is plain muted text, not a pill**, so nobody taps a
+  choice that no longer answers anything. When the user's next line repeats
+  an option (trimmed, ignoring case and a final full stop), that option
+  is ticked ("You replied: Not yet"). This is derived from the timeline,
+  so it is still there after a relaunch.
+- **One tap at a time** (`SuggestedReplySender`). While the line is on its
+  way, the chosen pill shows a spinner and the others are disabled. Once
+  the daemon takes it, the chosen pill is ticked. Then the typed bubble
+  arrives and the rule above takes over. A failure leaves the options live
+  again and shows the typed path's error under them, because the composer
+  that normally shows it is closed. A tap is remembered only for the
+  computer it went to.
+- **One component** (`SuggestedReplyOptions`, `SuggestedRepliesView.swift`)
+  draws them under Details and on the purple panel of a reply the voice did
+  not say. `ConversationView` hands the state down in one environment
+  value. The technical view draws the same rows and keeps the raw JSON.
+- **Accessibility.** A live option is a button labelled "Reply: <option>"
+  with the hint "Sends this to <voice>" and a 44 pt target. Its words wrap
+  at every text size, and the pills stack when they do not fit side by
+  side. A stale option is static text ("Suggested: …"). State changes use
+  the Reduce Motion easing.
