@@ -99,6 +99,8 @@ struct PhoneRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motionNamespace) private var motionNamespace
     @Namespace private var fallbackNamespace
+    /// The screen's height above the keyboard (`FloatingQuestions.area`).
+    @State private var questionArea: CGFloat = 0
 
     private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
@@ -165,6 +167,9 @@ struct PhoneRootView: View {
             // The question, the coach mark and the capsule float over the
             // content, which scrolls under them.
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
+            // The whole screen above the keyboard, outside the floating
+            // stack: what the questions decide inline or compact against.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }
             .animation(Theme.ease, value: model.notices.banner)
             .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
             .animation(Theme.ease, value: model.voice.showMuteHint)
@@ -204,7 +209,7 @@ struct PhoneRootView: View {
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
                     },
-                    compact: ui.typing,
+                    area: questionArea,
                     remote: { model.remoteQuestion($0) },
                     talkTo: { model.talk(to: $0) }
                 ) { id, index in

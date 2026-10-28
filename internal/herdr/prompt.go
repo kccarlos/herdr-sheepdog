@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/width"
 )
 
 // Approval prompts are parsed here, in code (docs/dev/roles.md "Hot paths
@@ -23,6 +25,10 @@ const (
 	promptQuestionLines  = 12
 	promptCommandWords   = 4
 	promptMaxOptionLabel = 200
+	// promptMaxOptionDescription caps the description an option may carry
+	// (AskUserQuestion's line under each label): screen text, never
+	// trusted to be short.
+	promptMaxOptionDescription = 400
 )
 
 var (
@@ -47,6 +53,10 @@ var (
 	// then the label (Claude Code 2.1.288's trust dialog draws
 	// "❯ No, exit" over "  Yes, I trust this folder", agy "> Yes, …").
 	reCursorRow = regexp.MustCompile(`^(\s*)([›❯>])\s+(\S.*?)\s*$`)
+	// reRecommended is the marker an agent puts after the option it
+	// recommends: Claude Code's AskUserQuestion asks for "(Recommended)"
+	// at the end of the label, and a model writing Chinese translates it.
+	reRecommended = regexp.MustCompile(`(?i)^(.*?)\s*[(（]\s*(recommended|推荐|推薦)\s*[)）]$`)
 )
 
 // Unnumbered menus are read more strictly than numbered ones, since the
@@ -84,6 +94,16 @@ type Option struct {
 	// Prompt.Answers for those. "Chat about this" is not an option at all
 	// (see isChatOption): it is dropped.
 	Meta bool
+	// Description is the text the prompt draws under the label
+	// (AskUserQuestion's), its wrapped lines joined; empty when there is
+	// none. It is never part of Label.
+	Description string
+	// Recommended marks an option whose label ends in the agent's
+	// recommendation marker ("(Recommended)", "(推荐)"). Label keeps the
+	// marker, as the screen shows it (the voice and the orchestrator read
+	// it); Title is the label without it, set only when Recommended.
+	Recommended bool
+	Title       string
 }
 
 // Prompt is a worker's approval prompt, as parsed from its screen.
@@ -270,7 +290,7 @@ func findOptions(lines []string) (opts []Option, first, cursor int, ok bool) {
 		if m == nil || m[2] != "1" {
 			continue
 		}
-		block, at, cursors := parseOptions(lines[i:])
+		block, at, cursors := parseOptions(lines[i:], screenCols(lines))
 		if len(block) >= 2 && cursors == 1 {
 			return block, i, at, true
 		}
@@ -281,17 +301,20 @@ func findOptions(lines []string) (opts []Option, first, cursor int, ok bool) {
 // parseOptions reads the numbered options starting at lines[0]
 // (numbered 1, 2, 3, …); cursor is the index of the marked option and
 // cursors how many carry a marker. A non-numbered line indented at least
-// as deep as the current option's label is that option's continuation.
-// A continuation that does not start with a capital letter is the label
-// wrapped (a narrow pane: the phone's live window resizes it to 44–58
-// columns) and is joined to it; one that does is a description (Claude
-// Code's AskUserQuestion draws one under each label) and is skipped, with
-// the lines after it. Any other line — a blank, a rule (AskUserQuestion's
-// "Chat about this" sits below one), prose — ends the block.
-func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
+// as deep as the current option's label is that option's continuation:
+// either the label wrapped (a narrow pane: the phone's live window resizes
+// it to 44–58 columns), joined to the label, or a description (Claude
+// Code's AskUserQuestion draws one under each label), kept in Description
+// with the lines after it. A line is a wrap only when its first word could
+// not have fitted on the line above in a pane cols wide (wrapped); its
+// letter case says nothing, since Chinese has none. Any other line — a
+// blank, a rule (AskUserQuestion's "Chat about this" sits below one),
+// prose — ends the block.
+func parseOptions(lines []string, cols int) (opts []Option, cursor, cursors int) {
 	cursor = -1
 	labelCol := 0
-	label, desc := "", false
+	label, desc, prev := "", "", ""
+	inDesc := false
 	for _, line := range lines {
 		m := reOption.FindStringSubmatchIndex(line)
 		if m != nil && line[m[4]:m[5]] == strconv.Itoa(len(opts)+1) {
@@ -299,7 +322,7 @@ func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 				cursor, cursors = len(opts), cursors+1
 			}
 			labelCol = utf8.RuneCountInString(line[:m[6]])
-			label, desc = line[m[6]:m[7]], false
+			label, desc, prev, inDesc = line[m[6]:m[7]], "", line, false
 			opts = append(opts, option(len(opts)+1, label))
 			continue
 		}
@@ -310,14 +333,80 @@ func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 			break
 		}
 		next := strings.TrimSpace(line)
-		if first, _ := utf8.DecodeRuneInString(next); desc || unicode.IsUpper(first) {
-			desc = true
+		if !inDesc && !wrapped(prev, next, cols) {
+			inDesc = true
+		}
+		prev = line
+		if inDesc {
+			desc = joinLines(desc, next)
+			opts[len(opts)-1].Description = truncate(desc, promptMaxOptionDescription)
 			continue
 		}
-		label = strings.TrimSpace(label) + " " + next
+		label = joinLines(strings.TrimSpace(label), next)
 		opts[len(opts)-1] = option(len(opts), label)
 	}
 	return opts, cursor, cursors
+}
+
+// wrapped reports whether next, the line under prev, can be prev wrapped
+// by a terminal cols wide: next's first word (its first character when
+// that is a wide one, since a terminal breaks Chinese anywhere) would not
+// have fitted after prev. A line that would have fitted was broken on
+// purpose: a new paragraph, such as an option's description.
+func wrapped(prev, next string, cols int) bool {
+	word := next
+	if r, _ := utf8.DecodeRuneInString(next); cellWidth(r) == 2 {
+		word = string(r)
+	} else if i := strings.IndexAny(next, " \t"); i >= 0 {
+		word = next[:i]
+	}
+	return displayWidth(strings.TrimRight(prev, " \t"))+1+displayWidth(word) > cols
+}
+
+// joinLines joins a wrapped line to the text before it: with a space,
+// except between two wide characters (Chinese and Japanese text has no
+// spaces to break at).
+func joinLines(text, next string) string {
+	if text == "" {
+		return next
+	}
+	last, _ := utf8.DecodeLastRuneInString(text)
+	first, _ := utf8.DecodeRuneInString(next)
+	if cellWidth(last) == 2 && cellWidth(first) == 2 {
+		return text + next
+	}
+	return text + " " + next
+}
+
+// screenCols is the pane's width as the screen shows it: its widest line
+// (the TUIs draw rules across the whole pane). A screen without a
+// full-width line gives a narrower guess, so more continuations read as
+// wraps and a description is joined to its label, as it was before
+// descriptions were read.
+func screenCols(lines []string) int {
+	cols := 0
+	for _, l := range lines {
+		cols = max(cols, displayWidth(strings.TrimRight(l, " \t")))
+	}
+	return cols
+}
+
+// displayWidth is s's width in terminal cells.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		n += cellWidth(r)
+	}
+	return n
+}
+
+// cellWidth is two for East Asian wide and fullwidth characters, else one.
+func cellWidth(r rune) int {
+	switch width.LookupRune(r).Kind() {
+	case width.EastAsianWide, width.EastAsianFullwidth:
+		return 2
+	}
+	return 1
 }
 
 // findCursorMenu reads an unnumbered menu: rows of choices with the
@@ -388,7 +477,7 @@ func findCursorMenu(lines []string) (opts []Option, first, cursor int, ok bool) 
 		if i != c {
 			text, _ = row(lines[i])
 		}
-		opts = append(opts, Option{Number: i - first + 1, Label: truncate(text, promptMaxOptionLabel), Keys: navKeys(i - c)})
+		opts = append(opts, recommended(Option{Number: i - first + 1, Label: truncate(text, promptMaxOptionLabel), Keys: navKeys(i - c)}))
 	}
 	return opts, first, c - first, true
 }
@@ -416,7 +505,16 @@ func option(number int, label string) Option {
 	if m := reHint.FindStringSubmatch(label); m != nil && reKeyHint.MatchString(strings.ToLower(m[2])) {
 		label, keys = strings.TrimSpace(m[1]), []string{strings.ToLower(m[2])}
 	}
-	return Option{Number: number, Label: label, Keys: keys}
+	return recommended(Option{Number: number, Label: label, Keys: keys})
+}
+
+// recommended sets Recommended and Title when o's label ends in the
+// agent's recommendation marker.
+func recommended(o Option) Option {
+	if m := reRecommended.FindStringSubmatch(o.Label); m != nil && strings.TrimSpace(m[1]) != "" {
+		o.Recommended, o.Title = true, strings.TrimSpace(m[1])
+	}
+	return o
 }
 
 // above reads what stands over the options: the question (the nearest

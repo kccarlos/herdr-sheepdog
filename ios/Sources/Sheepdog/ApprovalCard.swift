@@ -2,12 +2,14 @@ import SheepdogKit
 import SwiftUI
 
 /// A worker's question: who is asking, the summary, the command (three
-/// lines, tap for all) and the agent's own option labels, verbatim. It
-/// never folds. Floating above the capsule on the Conversation, or inside
+/// lines, tap for all) and the agent's options as full-width rows (label,
+/// then its description; the agent's recommendation as a tag). Floating
+/// above the capsule on the Conversation, in the question sheet, or inside
 /// the agent's card on the Agents page (`embedded`).
 ///
-/// One accent per screen: only the screen's first question has the filled
-/// primary (`primary`); the others are outlined in amber.
+/// No option is filled: all look the same until one is tapped, so none
+/// reads as already chosen. The screen's first question (`primary`) has
+/// the amber border; the others a plain one.
 struct ApprovalCardView: View {
     let card: ApprovalFlow.Card
     /// Inside an Agents card, which draws the frame and the name.
@@ -23,12 +25,23 @@ struct ApprovalCardView: View {
     var remote: RemoteQuestion?
     /// Talk to that computer.
     var talkTo: (() -> Void)?
+    /// How many lines of the question show before a fade and "More"; nil
+    /// for all of it (the sheet, the Agents page).
+    var questionLines: Int?
     let answer: (Int) -> Void
 
     @State private var commandExpanded = false
+    @State private var questionExpanded = false
+    /// The question's height cut to `questionLines`, and in full: "More"
+    /// shows only when they differ.
+    @State private var questionShown: CGFloat = 0
+    @State private var questionFull: CGFloat = 0
+    @ScaledMetric(relativeTo: .body) private var fadeHeight: CGFloat = 22
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pending: PendingAction { card.pending }
     private var agent: String { pending.agent?.isEmpty == false ? pending.agent! : "An agent" }
+    private var questionCut: Bool { questionLines != nil && !questionExpanded && questionFull > questionShown + 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -41,11 +54,7 @@ struct ApprovalCardView: View {
                     .accessibilityIdentifier("computerLabel.question.\(remote.computerID)")
             }
             if !embedded { header }
-            Text(pending.displaySummary)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("\(idPrefix).summary")
+            question
             if let command = pending.command?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
                 // Up to three lines, never cut in the middle (where the
                 // dangerous part of a command usually is); a tap shows all.
@@ -90,6 +99,59 @@ struct ApprovalCardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(idPrefix).card")
+    }
+
+    /// The question from its first word: cut to `questionLines` with a fade
+    /// and "More" when it is longer, never clipped from the top.
+    @ViewBuilder private var question: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            questionText
+                .lineLimit(questionLines.map { questionExpanded ? nil : $0 } ?? nil)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionShown = $0 }
+                .background(alignment: .top) {
+                    if questionLines != nil {
+                        // The same text uncut, hidden: tells a cut question
+                        // from one that just fits.
+                        questionText
+                            .hidden()
+                            .accessibilityHidden(true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionFull = $0 }
+                    }
+                }
+                .mask {
+                    VStack(spacing: 0) {
+                        Rectangle()
+                        if questionCut {
+                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                                .frame(height: fadeHeight)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("\(idPrefix).summary")
+            if questionCut || questionExpanded {
+                Button {
+                    withAnimation(Theme.ease(reduceMotion: reduceMotion)) { questionExpanded.toggle() }
+                } label: {
+                    Text(questionExpanded ? "Less" : "More")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.blockedText)
+                        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(questionExpanded ? "Shows less of the question" : "Shows the whole question")
+                .accessibilityIdentifier("\(idPrefix).more")
+            }
+        }
+    }
+
+    private var questionText: some View {
+        Text(pending.displaySummary)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Theme.ink)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// "Answers by tap go to Home Mac." and Talk to Home Mac: the voice
@@ -209,76 +271,116 @@ struct ApprovalCardView: View {
         }
     }
 
+    /// The options as full-width rows, in the screen's order; none stands
+    /// out until it is tapped.
     private func buttons(sending: PendingOption?) -> some View {
-        let options = pending.options ?? []
-        // The option that gets the accent: the prompt's default, else the
-        // first.
-        let lead = options.first(where: \.isDefault)?.index ?? options.first?.index
-        return OptionFlow(spacing: 8) {
-            ForEach(options, id: \.index) { option in
-                OptionButton(
+        VStack(spacing: 8) {
+            ForEach(pending.options ?? [], id: \.index) { option in
+                OptionRow(
                     option: option,
-                    style: OptionButton.Style(lead: option.index == lead, primary: primary, negative: option.isNegative),
                     sending: sending?.index == option.index,
                     enabled: sending == nil,
-                    fullRow: option.label.count > 18,
                     identifier: "\(idPrefix).option.\(option.index)"
                 ) {
                     answer(option.index)
                 }
-                .layoutValue(key: FullRow.self, value: option.label.count > 18)
             }
         }
     }
 }
 
-/// One option, a pill at least 44 pt tall: the lead option filled with the
-/// accent (ink text) on the screen's first question, else outlined in
-/// amber; a "No…" option in red; the rest plain. The label is never cut.
-private struct OptionButton: View {
-    struct Style {
-        var lead: Bool
-        var primary: Bool
-        var negative: Bool
-    }
-
+/// One option: a rounded row as wide as the card, at least 44 pt tall and
+/// as tall as its text. The label in semibold, a "Recommended" tag after
+/// it when the agent recommends it, and the description below in smaller,
+/// muted text; nothing is cut. A "No…" option's label is red.
+private struct OptionRow: View {
     let option: PendingOption
-    let style: Style
     let sending: Bool
     let enabled: Bool
-    var fullRow = false
     let identifier: String
     let action: () -> Void
 
-    private var filled: Bool { style.lead && style.primary && !style.negative }
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                if sending { ProgressView().controlSize(.small).tint(filled ? Theme.onAccent : Theme.ink) }
-                Text(option.label)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.body.weight(style.lead ? .semibold : .regular))
-            .foregroundStyle(filled ? Theme.onAccent : (style.negative ? Theme.danger : Theme.ink))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(maxWidth: fullRow ? .infinity : nil, minHeight: 44, alignment: .leading)
-            .background(Capsule().fill(filled ? Color.accentColor : Theme.card))
-            .overlay {
-                if !filled {
-                    Capsule().strokeBorder(style.lead ? Theme.blocked : Theme.line, lineWidth: 1)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    title
+                    if let detail = option.displayDetail {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if sending { ProgressView().controlSize(.small).tint(Theme.ink) }
             }
-            .contentShape(Capsule())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(OptionRowStyle(sending: sending))
         .opacity(enabled || sending ? 1 : 0.5)
         .disabled(!enabled)
         .accessibilityLabel(option.accessibilityLabel)
         .accessibilityHint(sending ? "Sending" : "")
         .accessibilityIdentifier(identifier)
+    }
+
+    /// The label, and the tag after it on the same line when both fit,
+    /// else under it.
+    @ViewBuilder private var title: some View {
+        if option.isRecommended {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    label.fixedSize()
+                    RecommendedTag()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    label
+                    RecommendedTag()
+                }
+            }
+        } else {
+            label
+        }
+    }
+
+    private var label: some View {
+        Text(option.displayLabel)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(option.isNegative ? Theme.danger : Theme.ink)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// "Recommended": a small tag, never a fill, so the option does not read
+/// as chosen.
+private struct RecommendedTag: View {
+    var body: some View {
+        Text("Recommended")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.blockedText)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.accentSoft))
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+}
+
+/// The row's frame: the card's fill with a hairline, a darker fill while
+/// pressed, the amber line while its answer is sending.
+private struct OptionRowStyle: ButtonStyle {
+    var sending: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        configuration.label
+            .background(shape.fill(configuration.isPressed ? Theme.fill : Theme.card))
+            .overlay(shape.strokeBorder(sending ? Theme.blocked : Theme.line, lineWidth: 1))
     }
 }
 

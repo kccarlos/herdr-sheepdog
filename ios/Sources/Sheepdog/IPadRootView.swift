@@ -530,6 +530,8 @@ struct IPadConversationDetail: View {
     private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The detail's height above the keyboard (`FloatingQuestions.area`).
+    @State private var questionArea: CGFloat = 0
 
     static let column: CGFloat = 720
 
@@ -563,6 +565,9 @@ struct IPadConversationDetail: View {
                 .frame(maxWidth: .infinity)
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
         }
+        // The detail above the keyboard, outside the floating stack: what
+        // the questions decide inline or compact against.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }
         .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
         .animation(Theme.ease, value: model.notices.banner)
     }
@@ -577,7 +582,7 @@ struct IPadConversationDetail: View {
                     time: { question in
                         model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
                     },
-                    compact: false,
+                    area: questionArea,
                     remote: { model.remoteQuestion($0) },
                     talkTo: { model.talk(to: $0) }
                 ) { id, index in

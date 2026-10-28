@@ -596,12 +596,18 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 
 // PendingOption is one choice of a pending question as the pages and a
 // tap see it: Index is 1-based (what POST /api/pending/answer takes),
-// Default marks the option the cursor is on.
+// Default marks the option the cursor is on. Description, Recommended and
+// Title are additive (older clients show Label alone): the text under the
+// label, the agent's recommendation, and the label without its marker
+// (only with Recommended).
 type PendingOption struct {
-	Index   int      `json:"index"`
-	Label   string   `json:"label"`
-	Keys    []string `json:"keys"`
-	Default bool     `json:"default"`
+	Index       int      `json:"index"`
+	Label       string   `json:"label"`
+	Keys        []string `json:"keys"`
+	Default     bool     `json:"default"`
+	Description string   `json:"description,omitempty"`
+	Recommended bool     `json:"recommended,omitempty"`
+	Title       string   `json:"title,omitempty"`
 }
 
 // PendingOptions lists p's options for /api/state and pending.created.
@@ -611,7 +617,8 @@ func PendingOptions(p state.PendingAction) []PendingOption {
 		if o.Meta {
 			continue
 		}
-		out = append(out, PendingOption{Index: i + 1, Label: o.Label, Keys: append([]string{}, o.Keys...), Default: o.Default})
+		out = append(out, PendingOption{Index: i + 1, Label: o.Label, Keys: append([]string{}, o.Keys...), Default: o.Default,
+			Description: o.Description, Recommended: o.Recommended, Title: o.Title})
 	}
 	return out
 }

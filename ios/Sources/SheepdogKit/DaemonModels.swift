@@ -312,17 +312,32 @@ public struct PendingOption: Codable, Equatable, Hashable, Sendable {
     public var keys: [String]
     /// The option the prompt's cursor is on (what enter selects).
     public var isDefault: Bool
+    /// The text the prompt draws under the label (`description`: Claude
+    /// Code's AskUserQuestion); nil from older daemons and for options
+    /// without one.
+    public var detail: String?
+    /// The agent recommends this one (`recommended`): its label ended in
+    /// "(Recommended)" on the screen.
+    public var isRecommended: Bool
+    /// The label without the recommendation marker (`title`, sent only
+    /// with `recommended`).
+    public var title: String?
 
     enum CodingKeys: String, CodingKey {
-        case index, label, keys
+        case index, label, keys, title
         case isDefault = "default"
+        case detail = "description"
+        case isRecommended = "recommended"
     }
 
-    public init(index: Int, label: String, keys: [String] = [], isDefault: Bool = false) {
+    public init(index: Int, label: String, keys: [String] = [], isDefault: Bool = false, detail: String? = nil, isRecommended: Bool = false, title: String? = nil) {
         self.index = index
         self.label = label
         self.keys = keys
         self.isDefault = isDefault
+        self.detail = detail
+        self.isRecommended = isRecommended
+        self.title = title
     }
 
     public init(from decoder: Decoder) throws {
@@ -331,6 +346,33 @@ public struct PendingOption: Codable, Equatable, Hashable, Sendable {
         label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
         keys = try c.decodeIfPresent([String].self, forKey: .keys) ?? []
         isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        isRecommended = try c.decodeIfPresent(Bool.self, forKey: .isRecommended) ?? false
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(index, forKey: .index)
+        try c.encode(label, forKey: .label)
+        try c.encode(keys, forKey: .keys)
+        try c.encode(isDefault, forKey: .isDefault)
+        try c.encodeIfPresent(detail, forKey: .detail)
+        if isRecommended { try c.encode(true, forKey: .isRecommended) }
+        try c.encodeIfPresent(title, forKey: .title)
+    }
+
+    /// The label to show: without the recommendation marker when the
+    /// daemon split it off (the card shows a "Recommended" tag instead).
+    public var displayLabel: String {
+        if let title = title?.trimmed, !title.isEmpty { return title }
+        return label
+    }
+
+    /// The description, when there is one worth showing.
+    public var displayDetail: String? {
+        guard let d = detail?.trimmed, !d.isEmpty else { return nil }
+        return d
     }
 
     /// "No, and tell Codex what to do differently" — the one to style as
@@ -340,9 +382,13 @@ public struct PendingOption: Codable, Equatable, Hashable, Sendable {
         return l == "no" || l.hasPrefix("no,") || l.hasPrefix("no ") || l.hasPrefix("no.") || l.hasPrefix("deny") || l.hasPrefix("reject")
     }
 
-    /// What VoiceOver reads on the button: "Approve: Yes, proceed".
+    /// What VoiceOver reads on the button: "Approve: Yes, proceed", then
+    /// ", recommended" and the description when the option has them.
     public var accessibilityLabel: String {
-        "\(isNegative ? "Decline" : "Approve"): \(label)"
+        var text = "\(isNegative ? "Decline" : "Approve"): \(displayLabel)"
+        if isRecommended { text += ", recommended" }
+        if let d = displayDetail { text += ". \(d)" }
+        return text
     }
 
     /// Older daemons (and older log lines) send options without an index:

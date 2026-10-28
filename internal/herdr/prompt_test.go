@@ -424,3 +424,63 @@ func TestSummaryInChinese(t *testing.T) {
 		t.Errorf("chinese question: %q", got)
 	}
 }
+
+// TestParsePromptDescriptions: the text AskUserQuestion draws under each
+// label is the option's Description, never part of its Label, whatever
+// its script or letter case; a wrap is told from a description by the
+// pane's width. The Chinese fixture is reconstructed from a phone
+// screenshot (2026-10-28, where a description starting with a Han
+// character was joined to its label), not captured from a pane.
+func TestParsePromptDescriptions(t *testing.T) {
+	p, ok := herdr.ParsePrompt(screen(t, "claude-askuserquestion-zh.screen.txt"))
+	if !ok {
+		t.Fatal("not a prompt")
+	}
+	type want struct{ label, title, desc string }
+	wants := []want{
+		{"点一下开始，再点发送 (推荐)", "点一下开始，再点发送", "按住说话模式下，锁屏按钮改成：点一下开始说，再点一下发送。"},
+		{"锁屏上隐藏麦克风按钮", "", "按住说话只能在 app 里用；锁屏上只留结束按钮。"},
+		{"锁屏上临时改成直接对讲", "", "锁屏时自动切到常开麦克风，回到 app 再恢复按住说话。"},
+		{"Type something.", "", ""},
+	}
+	if len(p.Options) != len(wants) {
+		t.Fatalf("options = %+v", p.Options)
+	}
+	for i, w := range wants {
+		o := p.Options[i]
+		if o.Label != w.label || o.Title != w.title || o.Description != w.desc || o.Recommended != (w.title != "") {
+			t.Errorf("option %d = %+v, want %+v", i+1, o, w)
+		}
+	}
+	if p.Question != "在按住说话模式下，锁屏 Live Activity 的麦克风按钮怎么用？" {
+		t.Errorf("question = %q", p.Question)
+	}
+
+	// The English capture: capitalised descriptions, now kept.
+	p, _ = herdr.ParsePrompt(screen(t, "claude-askuserquestion.screen.txt"))
+	if d := p.Options[0].Description; d != "Acceptance scenario 2 test: approve. Nothing real happens." {
+		t.Errorf("description = %q", d)
+	}
+
+	// A lower-case description, a recommended option, and a label that
+	// wraps in a 40-column pane before its description starts.
+	const narrow = "────────────────────────────────────────\n" +
+		"Which store?\n\n" +
+		"❯ 1. Keep files (Recommended)\n" +
+		"     simplest; nothing to migrate.\n" +
+		"  2. Move everything into one SQLite\n" +
+		"     database\n" +
+		"     needs a migration and a backup step\n" +
+		"     before the switch.\n" +
+		"  3. Type something.\n"
+	p, ok = herdr.ParsePrompt(narrow)
+	if !ok || len(p.Options) != 3 {
+		t.Fatalf("narrow = %+v ok=%v", p, ok)
+	}
+	if o := p.Options[0]; o.Label != "Keep files (Recommended)" || o.Title != "Keep files" || !o.Recommended || o.Description != "simplest; nothing to migrate." {
+		t.Errorf("option 1 = %+v", o)
+	}
+	if o := p.Options[1]; o.Label != "Move everything into one SQLite database" || o.Recommended || o.Title != "" || o.Description != "needs a migration and a backup step before the switch." {
+		t.Errorf("option 2 = %+v", o)
+	}
+}
