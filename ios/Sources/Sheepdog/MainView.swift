@@ -359,7 +359,9 @@ struct SessionCapsule: View {
     var onType: (() -> Void)?
     @EnvironmentObject private var model: SessionViewModel
     @Environment(SceneUI.self) private var ui
+    @Environment(\.sceneID) private var sceneID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let scenes = SceneCoordinator.shared
 
     var body: some View {
         VoiceCapsule(
@@ -376,6 +378,8 @@ struct SessionCapsule: View {
             statusText: model.voice.showMuteHint ? model.muteCaption : model.statusLine,
             route: model.voice.audioRoute,
             canType: model.isConfigured,
+            computerUnreachable: model.linkModel.presentation.computerUnreachable,
+            audioElsewhere: !scenes.isOwner(sceneID),
             onConnect: { model.connect() },
             onStop: { model.voice.stop() },
             onMute: {
@@ -392,6 +396,7 @@ struct SessionCapsule: View {
                     withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true }
                 }
             },
+            onUseHere: { scenes.claimAudio(for: sceneID) },
             menuValue: menus.voiceValue,
             menu: { menus.voiceItems($0) }
         )

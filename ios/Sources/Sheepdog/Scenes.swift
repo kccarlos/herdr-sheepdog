@@ -4,7 +4,8 @@ import SwiftUI
 /// model and so one voice session for the whole app; what differs per
 /// window is who shows its controls and its sheets:
 ///
-/// - **The audio owner** is the oldest main window still open. It shows
+/// - **The audio owner** is the oldest main window still open, until
+///   another window taps "Use here" (`claimAudio`). It shows
 ///   the full voice capsule, reports what is on screen (`visibility`) and
 ///   drives the session's foreground and background. Every other window
 ///   shows the mini capsule.
@@ -39,6 +40,13 @@ final class SceneCoordinator {
     func unregister(_ id: UUID) {
         scenes.removeAll { $0 == id }
         if requester == id { requester = nil }
+    }
+
+    /// "Use here": this window takes the audio from whichever holds it. The
+    /// same single-owner rule, with the claimant first.
+    func claimAudio(for id: UUID?) {
+        guard let id, let index = scenes.firstIndex(of: id), index != 0 else { return }
+        scenes.move(fromOffsets: IndexSet(integer: index), toOffset: 0)
     }
 
     /// A window's own menu is about to open a session sheet: it shows there.

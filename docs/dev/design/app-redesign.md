@@ -132,10 +132,12 @@ expanded, waiting), `IPadSidebar`, `AgentPane` (the iPad window pane).
   | noMicrophone | mic hidden, orb with an amber "!" |
   | connecting, reconnecting | amber spinner, mic dimmed |
   | voiceOff | mic-slash orb, mic hidden |
-  | disconnected, offline | wifi-slash, mic and End hidden |
+  | disconnected, computer reachable (stopped) | orange mic orb starts the session ("quiet" while a question is open), grey dot, "Not talking · tap the orb", mic and End hidden; agents, typing and tap-to-answer keep working |
+  | disconnected, computer unreachable (offline) | wifi-slash orb retries, mic and End hidden |
+  | another window holds the audio (iPad) | quiet mic orb, grey dot, "In another window", "Use here" in place of the keyboard moves the session to this window |
   | hold-to-talk | the orb is the talk button, with a green ring while held |
 
-  The canvas draws 15 capsule states in all; every one is built. The stop
+  The canvas draws 15 capsule states plus stopped, stopped quiet and in another window; every one is built. The stop
   badge is 22 pt, ink fill, at the orb's bottom right. Tapping the orb while
   speaking, thinking or stalled stops (cancels). Hold-to-talk already stops
   on press.

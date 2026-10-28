@@ -1063,12 +1063,21 @@ four fixed 44 pt slots: the mic (mute) button, the orb, the name and status
 (the voice menu) and the keyboard. It grows with the text size up to a cap,
 and the status wraps to two lines at the accessibility sizes.
 
-- **Its look** is one of 13 `CapsuleMode`s (SheepdogKit, table-tested), from
-  the session state, the talk mode, holding, and whether a question is
-  open: live (orange orb with the cream ring), quiet (a question has the
-  accent), speaking, thinking and stalled (with the stop badge), muted (the
-  red mic), paused, no microphone, reconnecting, offline, voice off, hold
-  and holding. `-sheepdogCapsuleGallery` shows them all on one screen.
+- **Its look** is one of 16 `CapsuleMode`s (SheepdogKit, table-tested), from
+  the session state, the talk mode, holding, whether a question is open,
+  whether the link says the computer is unreachable
+  (`LinkPresentation.computerUnreachable`) and whether another window holds
+  the audio: live (orange orb with the cream ring), quiet (a question has
+  the accent), speaking, thinking and stalled (with the stop badge), muted
+  (the red mic), paused, no microphone, reconnecting, stopped and stopped
+  quiet (the voice ended by choice, the computer answers: an orange mic orb
+  starts it, "Not talking · tap the orb"), elsewhere (iPad, another window
+  holds the audio: "In another window", and "Use here" replaces the
+  keyboard), offline (no session and the computer unreachable: wifi-slash,
+  the orb retries), voice off, hold and holding. `-sheepdogCapsuleGallery`
+  shows them all on one screen. `SceneCoordinator.claimAudio` is "Use
+  here": it puts the window first in the one owner order, the only audio
+  ownership there is.
 - **What the orb does** is `VoiceBarModel`: Connect when disconnected,
   Stop while the voice is thinking or speaking, Resume after an audio
   interruption, otherwise nothing. Its words too: "Tap the orb to connect",

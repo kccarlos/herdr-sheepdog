@@ -44,6 +44,15 @@ final class LinkPresentationTests: XCTestCase {
         XCTAssertNil(p.inline)
     }
 
+    func testOnlyAnOutageMakesTheComputerUnreachableForTheVoiceCapsule() {
+        XCTAssertFalse(present(LinkDriver(demand: LinkDemand(phase: .background))).computerUnreachable, "idle")
+        var d = LinkDriver()
+        d.online()
+        XCTAssertFalse(present(d).computerUnreachable, "online")
+        XCTAssertFalse(present(waiting()).computerUnreachable, "reconnecting within the quiet period")
+        XCTAssertTrue(present(offline()).computerUnreachable, "offline past the quiet period")
+    }
+
     func testOnlineAndTalkingHere() {
         var d = LinkDriver()
         d.online()
