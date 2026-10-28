@@ -260,6 +260,12 @@ final class SessionViewModel: ObservableObject {
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
     private var historySyncTask: Task<Void, Never>?
+    private var settleTask: Task<Void, Never>?
+    /// How long a bubble may sit without a fragment before it counts as
+    /// finished: the daemon closes the voice's reply only at turn end
+    /// (and older daemons not at all), so this is the guard that a bubble
+    /// can never stay open for good.
+    static let bubbleIdleSeconds: TimeInterval = 4
     /// The computers whose newest page is being fetched: one sync per
     /// computer, so a sync still in flight for the computer the app left
     /// does not hold back the new one's.
@@ -1055,6 +1061,7 @@ final class SessionViewModel: ObservableObject {
         // A bubble still growing on /ws is already an item on the server
         // (from its first fragment); swapping now would show it twice. The
         // dog's `out` bubble often closes only when the next turn starts.
+        reducer.apply(.settle(idle: Self.bubbleIdleSeconds))
         guard reducer.openBubble == nil else {
             scheduleHistorySync()
             return
@@ -1097,6 +1104,18 @@ final class SessionViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled, let self else { return }
             await self.syncHistory()
+        }
+    }
+
+    /// Closes the bubbles that went quiet, then lets the history swap them.
+    private func scheduleSettle() {
+        settleTask?.cancel()
+        settleTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.bubbleIdleSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.reducer.apply(.settle(idle: Self.bubbleIdleSeconds))
+            self.conversationChanged()
+            self.scheduleHistorySync()
         }
     }
 
@@ -2068,6 +2087,9 @@ extension SessionViewModel: VoiceEngineHost {
             #endif
             PushCoordinator.shared.sessionConnected()
         case .closed, .failed, .paused:
+            // No more fragments will come for what was open.
+            reducer.apply(.settle(idle: 0))
+            conversationChanged(save: false)
             screenStream.socketClosed()
             cardVisibility.socketClosed()
         case let .handshake(state):
@@ -2087,7 +2109,7 @@ extension SessionViewModel: VoiceEngineHost {
             guard let dir = message.dir, let text = message.text else { break }
             reducer.apply(.transcript(dir, text: text, final: message.final ?? false))
             conversationChanged()
-            if message.final == true { scheduleHistorySync() }
+            if message.final == true { scheduleHistorySync() } else { scheduleSettle() }
         case .screen, .screenError:
             if let event = screenStream.receive(message), let pane = screenStream.paneID {
                 screenRouter.deliver(event, to: pane)

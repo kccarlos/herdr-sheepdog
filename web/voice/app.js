@@ -523,6 +523,8 @@ function addTranscript(dir, text, final) {
   // Output fragments may never carry final (contract): the other
   // direction starting is the boundary, and so is a flush.
   closeTranscript(dir === 'in' ? 'out' : 'in');
+  // An empty final closes an open line; with none open there is nothing to show.
+  if (text === '' && final && !(last && last.dir === dir && !last.final)) return;
   if (last && last.dir === dir && !last.final) {
     last.text += text;
     last.final = final;

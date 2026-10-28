@@ -786,22 +786,24 @@ struct CatchMeUpChip: View {
 /// sticks to the top while its day scrolls under it.
 struct DayDivider: View {
     let date: Date
-    /// Space above the heading (between days); inside its background.
-    var topInset: CGFloat = 0
+    /// Space above the heading text, inside its background: the list's top
+    /// margin, so the heading sits at the same depth pinned and at rest.
+    var topInset: CGFloat = 12
 
     var body: some View {
         Text(ConversationTimeline.dayTitle(date))
             .font(.caption.weight(.semibold))
             .foregroundStyle(Theme.muted)
-            .padding(.vertical, 4)
-            .padding(.top, topInset)
+            .padding(.top, topInset + 4)
+            .padding(.bottom, 8)
             .frame(maxWidth: .infinity)
             // Opaque, so rows scrolling under the pinned heading do not
             // show through; it is the page colour, so there is no visible
-            // box while it is not pinned. It bleeds through the 16 pt gutter
-            // and the 12 pt above (the list's top padding), where the
-            // pinned heading would otherwise leave a strip of rows.
-            .background(Theme.surface.padding(.horizontal, -16).padding(.top, -12))
+            // box while it is not pinned. It bleeds sideways through the
+            // 16 pt gutter only: section headers draw above rows, so any
+            // upward bleed would cut the row above the heading. The strip
+            // above the pinned text is `topInset`, inside the heading.
+            .background(Theme.surface.padding(.horizontal, -16))
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("divider.day")
     }

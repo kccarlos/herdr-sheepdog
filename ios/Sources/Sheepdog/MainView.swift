@@ -301,7 +301,7 @@ struct ConversationPane: View {
                 FeedbackButton { tag, note, at in
                     model.markFeedback(tag, note: note, at: at)
                 }
-                .padding(.top, 8)
+                .padding(.top, 4)
                 .padding(.trailing, 10)
             }
         }

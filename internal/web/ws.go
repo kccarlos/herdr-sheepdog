@@ -71,6 +71,10 @@ type hub struct {
 	// current run (web.audio_unheard is logged once per run; a client
 	// attaching or the model's turn completing starts a new run).
 	unheard bool
+	// outOpen: an `out` transcript went to the client without final, so
+	// the turn's end owes it an empty final fragment (the clients' only
+	// boundary for the voice's reply besides the next `in` and a flush).
+	outOpen bool
 }
 
 func newHub(s *Server) *hub {
@@ -275,10 +279,20 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.s.audio.EndRun()
 		h.mu.Lock()
 		h.unheard = false // the next unheard audio is another turn
+		closeOut := h.outOpen
+		h.outOpen = false
 		h.mu.Unlock()
+		if closeOut {
+			h.send(wsproto.Transcript(wsproto.DirOut, "", true))
+		}
 	case voice.EventTranscript:
 		if e.Cut != nil {
 			return // a correction for the orchestrator, not a caption
+		}
+		if e.Dir == voice.DirOut {
+			h.mu.Lock()
+			h.outOpen = !e.Final
+			h.mu.Unlock()
 		}
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
 	case voice.EventError:
