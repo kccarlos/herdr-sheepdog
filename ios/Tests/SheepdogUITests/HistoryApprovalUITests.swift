@@ -92,7 +92,7 @@ final class HistoryApprovalUITests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// A combined element is an `other` or a `staticText` depending on
+    /// A combined element is an `other`, a `staticText` or (a tappable row) a `button` depending on
     /// what SwiftUI merged; look in both, by identifier.
     private func find(_ app: XCUIApplication, _ identifier: String, labelBeginsWith prefix: String? = nil, labelContains part: String? = nil, timeout: TimeInterval) -> XCUIElement? {
         var format = "identifier == %@"
@@ -102,7 +102,7 @@ final class HistoryApprovalUITests: XCTestCase {
         let predicate = NSPredicate(format: format, argumentArray: args)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            for query in [app.otherElements, app.staticTexts] {
+            for query in [app.otherElements, app.staticTexts, app.buttons] {
                 let match = query.matching(predicate).firstMatch
                 if match.exists { return match }
             }
