@@ -78,4 +78,76 @@ final class ConversationReducerTests: XCTestCase {
         r.clear()
         XCTAssertTrue(r.bubbles.isEmpty)
     }
+
+    // MARK: - A bubble never stays open for good
+
+    private final class Clock: @unchecked Sendable {
+        var t: TimeInterval = 0
+    }
+
+    /// The stuck state of TestFlight 0.2.2: the voice's reply never carries
+    /// `final` and no `in` follows, so it stayed open ("...") forever.
+    func testReplyWithoutFinalStaysOpenUntilSettled() {
+        let clock = Clock()
+        var r = ConversationReducer(now: { Date(timeIntervalSince1970: clock.t) })
+        r.apply(.transcript(.incoming, text: "status?", final: true))
+        r.apply(.transcript(.outgoing, text: "All idle.", final: false))
+        XCTAssertNotNil(r.openBubble)
+
+        clock.t = 2
+        r.apply(.settle(idle: 4))
+        XCTAssertNotNil(r.openBubble, "still talking: a fragment came 2 s ago")
+
+        clock.t = 5
+        r.apply(.settle(idle: 4))
+        XCTAssertNil(r.openBubble)
+        XCTAssertTrue(r.bubbles.allSatisfy(\.isFinal))
+    }
+
+    func testFragmentsKeepTheBubbleOpenPastItsStart() {
+        let clock = Clock()
+        var r = ConversationReducer(now: { Date(timeIntervalSince1970: clock.t) })
+        r.apply(.transcript(.outgoing, text: "One ", final: false))
+        clock.t = 10
+        r.apply(.transcript(.outgoing, text: "two", final: false))
+        clock.t = 12
+        r.apply(.settle(idle: 4))
+        XCTAssertNotNil(r.openBubble)
+    }
+
+    func testEmptyFinalFromTheDaemonClosesTheReply() {
+        var r = reducer()
+        r.apply(.transcript(.outgoing, text: "Done.", final: false))
+        r.apply(.transcript(.outgoing, text: "", final: true))
+        XCTAssertEqual(r.bubbles.count, 1)
+        XCTAssertEqual(r.bubbles[0].text, "Done.")
+        XCTAssertNil(r.openBubble)
+    }
+
+    func testSettleZeroClosesEveryOpenBubbleNotJustTheLast() {
+        var r = reducer()
+        r.apply(.transcript(.outgoing, text: "Old reply", final: false))
+        // A turn this phone only half saw: a notice lands in between.
+        r.apply(.notice("Talking to Mac"))
+        r.apply(.transcript(.outgoing, text: "New reply", final: false))
+        r.apply(.settle(idle: 0))
+        XCTAssertTrue(r.bubbles.allSatisfy(\.isFinal))
+    }
+
+    /// Live partial + the history's final for the same turn: once settled,
+    /// the sync drops the live copy (one row). Two identical turns are two
+    /// rows: the swap goes by time, never by matching text.
+    func testSettledReplyIsDroppedByHistoryButALaterIdenticalTurnStays() {
+        let clock = Clock()
+        var r = ConversationReducer(now: { Date(timeIntervalSince1970: clock.t) })
+        r.apply(.transcript(.outgoing, text: "Codex is idle.", final: false))
+        clock.t = 10
+        r.apply(.settle(idle: 4))
+        // History fetched at t = 20 has the first turn.
+        clock.t = 30
+        r.apply(.transcript(.outgoing, text: "Codex is idle.", final: false)) // same words, a new turn
+        r.dropSettledSpeech(before: Date(timeIntervalSince1970: 20))
+        XCTAssertEqual(r.bubbles.count, 1)
+        XCTAssertEqual(r.bubbles[0].at, Date(timeIntervalSince1970: 30))
+    }
 }

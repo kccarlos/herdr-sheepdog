@@ -50,6 +50,10 @@ struct CapsuleGallery: View {
             BannerGallery()
         } else if ProcessInfo.processInfo.arguments.contains("timeline") {
             TimelineGallery()
+        } else if ProcessInfo.processInfo.arguments.contains("daysPinned") {
+            DaysGallery(manyYesterday: true)
+        } else if ProcessInfo.processInfo.arguments.contains("daysRest") {
+            DaysGallery(manyYesterday: false)
         } else if ProcessInfo.processInfo.arguments.contains("hour") {
             HourGallery(technical: false)
         } else if ProcessInfo.processInfo.arguments.contains("hourTech") {
@@ -245,6 +249,67 @@ private struct HourGallery: View {
             showTechnical: technical
         )
         .background(Theme.surface)
+        .accessibilityIdentifier("capsule.gallery")
+    }
+}
+
+/// Two days under pinned day headings (`-sheepdogCapsuleGallery daysPinned`
+/// or `daysRest`), with the flag button over the corner as in the real
+/// screen: where the heading sits pinned, at rest, and what it covers.
+private struct DaysGallery: View {
+    let manyYesterday: Bool
+
+    private static let today = Calendar.current.startOfDay(for: Date())
+
+    private static func item(_ id: Int64, _ kind: ConversationItem.Kind, _ text: String, _ time: Date) -> TimelineRow {
+        .item(ConversationItem(id: id, ts: time, kind: kind, text: text))
+    }
+
+    private var rows: [TimelineRow] {
+        let yesterday = Self.today.addingTimeInterval(-86_400 + 12 * 3600)
+        let now = Self.today.addingTimeInterval(10 * 3600 + 31 * 60)
+        var rows: [TimelineRow] = []
+        if manyYesterday {
+            rows.append(.day(Self.today.addingTimeInterval(-86_400)))
+            for i in 0..<5 {
+                let t = yesterday.addingTimeInterval(Double(i) * 120)
+                rows.append(Self.item(Int64(10 + i * 2), .shepherd, "What's the current status \(i + 1)?", t))
+                rows.append(Self.item(Int64(11 + i * 2), .dog, "Both agents are idle. Codex has installed the updated menu bar app, and Slingshot stage Codex has finished its investigation into the issue. Would you like me to share what it found?", t.addingTimeInterval(20)))
+            }
+            // A context divider right above the next day's heading: the
+            // heading's band must not touch it.
+            rows.append(.live(.init(id: 9, speaker: .system, kind: .notice, text: "Talking to Work Mac", isFinal: true, at: yesterday.addingTimeInterval(3600))))
+        }
+        rows.append(.day(Self.today))
+        rows += [
+            .live(.init(id: 1, speaker: .system, kind: .notice, text: "Talking to Work Mac", isFinal: true, at: now)),
+            Self.item(100, .shepherd, "Hey, what is the status of my agents?", now.addingTimeInterval(20)),
+            Self.item(101, .dog, "Codex is currently idle and ready for input, while the slingshot stage Codex has exited.", now.addingTimeInterval(30)),
+        ]
+        if !manyYesterday {
+            // Fills the screen so the heading rests at the very top.
+            let args = ProcessInfo.processInfo.arguments
+            let pairs = args.firstIndex(of: "pairs").flatMap { Int(args[$0 + 1]) } ?? 0
+            for i in 0..<pairs {
+                let t = now.addingTimeInterval(Double(60 + i * 60))
+                rows.append(Self.item(Int64(200 + i * 2), .shepherd, "Status \(i + 1)?", t))
+                rows.append(Self.item(Int64(201 + i * 2), .dog, "All idle.", t.addingTimeInterval(10)))
+            }
+        }
+        return rows
+    }
+
+    var body: some View {
+        ConversationView(
+            rows: rows, voiceName: "Sheepdog", canLoadOlder: false, openPendingIDs: [], pointerIDs: [],
+            ask: { _ in }, showTechnical: false
+        )
+        .background(Theme.surface)
+        .overlay(alignment: .topTrailing) {
+            FeedbackButton { _, _, _ in }
+                .padding(.top, 4)
+                .padding(.trailing, 10)
+        }
         .accessibilityIdentifier("capsule.gallery")
     }
 }
