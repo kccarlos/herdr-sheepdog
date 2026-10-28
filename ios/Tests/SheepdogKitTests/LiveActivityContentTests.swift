@@ -20,6 +20,36 @@ final class LiveActivityContentTests: XCTestCase {
         LiveActivityContent.make(state: state, muted: muted, agents: agents, questions: questions, computer: computer, suspendedInBackground: suspended)
     }
 
+    // MARK: - Hold to talk
+
+    func testHoldToTalkSaysWhatATapDoes() {
+        let idle = LiveActivityContent.make(state: .listening, muted: false, holdToTalk: true)
+        XCTAssertEqual(idle?.title, "Tap to talk")
+        XCTAssertEqual(idle?.accessibilityLabel(voiceName: "Sheepdog"), "Tap to talk to Sheepdog")
+        let talking = LiveActivityContent.make(state: .listening, muted: false, holdToTalk: true, talking: true)
+        XCTAssertEqual(talking?.title, "Talking — tap to send")
+        XCTAssertEqual(talking?.accessibilityLabel(voiceName: "Sheepdog"), "Talking. Tap to send")
+        // Talking over the voice reads as talking; the voice's own phase otherwise.
+        XCTAssertEqual(LiveActivityContent.make(state: .speaking, muted: false, holdToTalk: true, talking: true)?.title, "Talking — tap to send")
+        XCTAssertEqual(LiveActivityContent.make(state: .speaking, muted: false, holdToTalk: true)?.title, "Speaking")
+        XCTAssertEqual(LiveActivityContent.make(state: .reconnecting, muted: false, holdToTalk: true, talking: true)?.title, "Reconnecting…")
+    }
+
+    func testOpenMicKeepsListeningAndIgnoresTalking() {
+        let open = LiveActivityContent.make(state: .listening, muted: false, holdToTalk: false, talking: true)
+        XCTAssertEqual(open?.title, "Listening")
+        XCTAssertEqual(open?.talking, false)
+    }
+
+    func testHoldToTalkSurvivesEncodingAndOldPayloadsDecode() throws {
+        let c = LiveActivityContent(phase: .listening, holdToTalk: true, talking: true)
+        let back = try JSONDecoder().decode(LiveActivityContent.self, from: JSONEncoder().encode(c))
+        XCTAssertEqual(back, c)
+        let old = try JSONDecoder().decode(LiveActivityContent.self, from: Data(#"{"phase":"listening","muted":false}"#.utf8))
+        XCTAssertFalse(old.holdToTalk)
+        XCTAssertFalse(old.talking)
+    }
+
     // MARK: - Phase and words
 
     func testNoSessionMeansNoActivity() {

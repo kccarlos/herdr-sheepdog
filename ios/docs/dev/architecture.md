@@ -1042,7 +1042,11 @@ one-time tip suggests it after the first listening session.
 
 **No microphone signal.** `MicSignalWatchdog` watches for 3 s in which the
 app is unmuted and capturing but every sample is digital zero (or no
-buffers arrive). That means the capture path is broken. The status line
+buffers arrive). In hold-to-talk it judges only while the gate is open
+(orb held, or the lock-screen tap-to-talk): releasing the orb disarms it
+and clears the state, and the next press starts a fresh 3 s grace period,
+so an idle orb never raises a false alarm (or its haptic and restart).
+That means the capture path is broken. The status line
 then says "No microphone signal — check the mic", the engine logs the input
 format, the voice-processing state and both input mutes, and it rebuilds
 the capture chain once. At start, the engine clears the voice-processing

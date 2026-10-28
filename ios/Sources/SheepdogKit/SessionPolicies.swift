@@ -65,9 +65,10 @@ public enum AudioLifecycle {
 
     /// The watchdog expects signal only from a running, unmuted microphone
     /// that iOS has not paused (a call, Siri, or an interruption iOS would
-    /// not let us resume from).
-    public static func watchdogShouldRun(running: Bool, muted: Bool, interrupted: Bool) -> Bool {
-        running && !muted && !interrupted
+    /// not let us resume from). In hold-to-talk the microphone is only meant
+    /// to be live while the gate is open, so a closed gate expects nothing.
+    public static func watchdogShouldRun(running: Bool, muted: Bool, interrupted: Bool, gateClosed: Bool = false) -> Bool {
+        running && !muted && !interrupted && !gateClosed
     }
 
     /// Whether going to the background pauses the session.

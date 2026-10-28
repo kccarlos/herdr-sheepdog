@@ -73,6 +73,23 @@ struct SetVoiceMuteIntent: LiveActivityIntent {
     }
 }
 
+/// The Live Activity's mic button in hold-to-talk mode. The lock screen
+/// cannot hold a button, so it is tap-to-talk: the first tap opens the mic
+/// gate, the next closes it and sends (as releasing the orb does).
+struct ToggleTalkIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Talk to Sheepdog"
+    static let description = IntentDescription("Starts talking; tap again to send.")
+    static let isDiscoverable = false
+
+    init() {}
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        SheepdogIntentBridge.send(SheepdogIntentBridge.route("toggle-talk"))
+        return .result()
+    }
+}
+
 /// The Live Activity's End button: ends the voice session.
 struct EndVoiceSessionIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "End the Sheepdog session"

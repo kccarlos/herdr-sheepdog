@@ -188,7 +188,7 @@ final class AudioEngine {
         isRunning = true
         startSteering()
         restartedForSignal = false
-        if !isMuted { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
+        if !isMuted, gate.manual != false { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
         recordVoiceProcessing()
         reportRoute()
         SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, echo cancellation \(self.metrics.voiceProcessing.summary, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
@@ -274,7 +274,7 @@ final class AudioEngine {
                 onGate?(false)
             }
             onLevel?(0)
-        } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: interrupted || needsResume) {
+        } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: interrupted || needsResume, gateClosed: gate.manual == false) {
             watchdog.arm(at: CFAbsoluteTimeGetCurrent())
             restartedForSignal = false
         }
@@ -285,7 +285,18 @@ final class AudioEngine {
     /// Hold-to-talk: `true` pressed, `false` released, `nil` open mic. The
     /// transition reaches the caller through `onGate` with the next frame.
     func setManualGate(_ manual: Bool?) {
+        let wasClosed = gate.manual == false
         gate.manual = manual
+        // Hold-to-talk expects audio only while the gate is open: closing it
+        // clears any no-signal state, opening it starts a fresh grace period.
+        if manual == false {
+            watchdog.disarm()
+            reportSignal()
+        } else if wasClosed,
+                  AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume, gateClosed: false) {
+            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
+            restartedForSignal = false
+        }
     }
 
     var gateDiagnostics: CaptureGate.Diagnostics { gate.diagnostics }
@@ -447,7 +458,7 @@ final class AudioEngine {
     /// releasing) before `start()` — and that is the one case `steer()`
     /// never sees.
     func tick() {
-        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume),
+        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume, gateClosed: gate.manual == false),
            let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
             signalChanged(change)
         }
@@ -672,7 +683,7 @@ final class AudioEngine {
         try engine.start()
         player.play()
         setNeedsResume(false)
-        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false) {
+        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false, gateClosed: gate.manual == false) {
             watchdog.arm(at: CFAbsoluteTimeGetCurrent())
             restartedForSignal = false
         }

@@ -59,6 +59,7 @@ final class VoiceEngine {
     private(set) var talkMode: TalkMode = .openMic
     /// Hold-to-talk: the orb is being held.
     private(set) var holding = false
+    @ObservationIgnored private var talkLimit: Task<Void, Never>?
     /// The microphone delivers only digital zero while unmuted.
     private(set) var noMicSignal = false
     /// Where the sound goes while audio runs: the voice bar's route glyph.
@@ -162,6 +163,31 @@ final class VoiceEngine {
         let wasMuted = core.mic.muted
         send(.muteTapped)
         if !wasMuted, core.mic.muted { offerMuteHint() }
+    }
+
+    /// The longest the mic gate stays open when the Live Activity opened it:
+    /// its tap-to-talk button has no release, so a forgotten tap (phone in a
+    /// pocket) closes and sends by itself.
+    var lockScreenTalkLimit: Duration = .seconds(60)
+
+    /// The Live Activity's tap-to-talk button (hold-to-talk): the first tap
+    /// opens the gate, the next closes it and sends, as releasing the orb
+    /// does. An open gate closes by itself after `lockScreenTalkLimit`.
+    func toggleTalk() {
+        guard core.mic.talkMode == .holdToTalk else { return }
+        if core.mic.holding {
+            releaseToTalk()
+            return
+        }
+        pressToTalk()
+        guard core.mic.holding else { return }
+        talkLimit?.cancel()
+        let limit = lockScreenTalkLimit
+        talkLimit = Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            guard !Task.isCancelled else { return }
+            self?.releaseToTalk()
+        }
     }
 
     /// The orb went down in hold-to-talk. Talking over the voice stops it.
@@ -448,7 +474,10 @@ final class VoiceEngine {
     private func publish() {
         if isMuted != core.mic.muted { isMuted = core.mic.muted }
         if talkMode != core.mic.talkMode { talkMode = core.mic.talkMode }
-        if holding != core.mic.holding { holding = core.mic.holding }
+        if holding != core.mic.holding {
+            holding = core.mic.holding
+            if !holding { talkLimit?.cancel(); talkLimit = nil }
+        }
         if noMicSignal != core.mic.noSignal { noMicSignal = core.mic.noSignal }
         if wantsConnection != core.connection.wantsConnection {
             wantsConnection = core.connection.wantsConnection
