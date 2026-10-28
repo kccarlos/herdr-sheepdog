@@ -65,11 +65,13 @@ public enum ConversationTimeline {
         var h = 0, l = 0
         var previousApproval: ConversationItem?
         var sawContent = false
+        var lastVersion: String?
 
         func emitItem(_ item: ConversationItem) {
             switch item.kind {
             case .notice, .unknown:
-                merged.append(.divider(item, title: dividerTitle(item, afterContent: sawContent, timeFormatter: timeFormatter)))
+                merged.append(.divider(item, title: dividerTitle(item, afterContent: sawContent, previousVersion: lastVersion, timeFormatter: timeFormatter)))
+                if DaemonNotice(item) == .restarted, let version = item.version?.trimmed, !version.isEmpty { lastVersion = version }
             case .push:
                 // The daemon announces a new approval as a push with the same
                 // words; the approval card already says it.
@@ -145,15 +147,31 @@ public enum ConversationTimeline {
         }
     }
 
-    /// "Sheepdog restarted · 5:42 PM".
-    public static func dividerTitle(_ item: ConversationItem, afterContent: Bool, timeFormatter: DateFormatter = defaultTimeFormatter) -> String {
+    /// "Sheepdog restarted · 5:42 PM", or "Sheepdog updated to v0.9.1 ·
+    /// 5:42 PM" when the daemon says a version and the one before it (the
+    /// previous start in the history) said another. An older daemon sends
+    /// no version, so its restart is just "restarted".
+    public static func dividerTitle(
+        _ item: ConversationItem,
+        afterContent: Bool,
+        previousVersion: String? = nil,
+        timeFormatter: DateFormatter = defaultTimeFormatter
+    ) -> String {
         var text = item.text.trimmed
-        if text == "Sheepdog started." || text == "Sheepdog started" {
+        if DaemonNotice(item) == .restarted {
             text = afterContent ? "Sheepdog restarted" : "Sheepdog started"
+            if let version = item.version?.trimmed, !version.isEmpty, let previous = previousVersion, previous != version {
+                text = "Sheepdog updated to \(displayVersion(version))"
+            }
         }
         while text.hasSuffix(".") { text.removeLast() }
         if text.isEmpty { text = "Notice" }
         return "\(text) · \(timeFormatter.string(from: item.ts))"
+    }
+
+    /// "v0.9.1" for "0.9.1"; a name such as "dev" is left as it is.
+    static func displayVersion(_ version: String) -> String {
+        version.first?.isNumber == true ? "v\(version)" : version
     }
 
     /// "Today", "Yesterday", or "Monday 21 September" (with the year when

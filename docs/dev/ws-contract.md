@@ -905,7 +905,8 @@ answer a question by tap. All three need a paired device under "Auth".
   1 000) older than `before` (omit it for the newest page); pass
   `next_before` as the next `before` to page back, until it is `null`.
   Each item is `{id, ts, kind, text, via?, agent?, urgency?, pending_id?,
-  options?, answered?, answer?, resolution?}` with `kind`:
+  options?, answered?, answer?, resolution?, subkind?, reason?, version?}`
+  with `kind`:
   - `shepherd` — what the user said (voice transcript fragments
     merged per turn, `via: "voice"`) or typed (`via: "typed"`);
   - `dog` — what the voice said (output transcript merged per turn, or the
@@ -916,12 +917,20 @@ answer a question by tap. All three need a paired device under "Auth".
     `agent`, `pending_id`, `options` `[{index, label, keys, default}]`,
     `answered`, `answer` and `via` (`tap`, `fast_path`, `brain`) once
     answered, `resolution` `open` | `confirmed` | `expired` |
-    `cancelled` | `replaced`;
+    `cancelled` | `replaced`; once closed unanswered, `reason` says how:
+    `expired`, `replaced`, or the cancel reason (`prompt_gone`,
+    `agent_exited`, `pane_closed`, `closed`, `brain_interrupt`; absent on
+    lines logged before the reason was);
   - `card` — a card the orchestrator showed (*Cards*): `text` its title,
     `card_id`, `agent`, and `card`;
-  - `notice` — a divider: the daemon started, the voice reconnected (with
-    or without its context), the voice session closed, or (`subkind:
-    "reset"`, `text: "New conversation"`) a "New conversation" reset.
+  - `notice` — a divider, told apart by `subkind`: `start` (the daemon
+    started; `version` is its version), `reset` (`text: "New
+    conversation"`), `closed` (the voice session closed; `reason` the
+    event's), `context_lost` (the voice dropped its resumption handle;
+    `reason` the handle drop's), `fresh` (reconnected with a fresh session,
+    earlier context lost) or `resumed` (reconnected, the conversation
+    continues). A client that sees no `subkind` (an older daemon) or one it
+    does not know reads `text`.
 
   `id` is the first event's id, so items sort and page with the SSE
   stream's ids.

@@ -42,10 +42,19 @@ type ConversationItem struct {
 	ID   int64     `json:"id"`
 	TS   time.Time `json:"ts"`
 	Kind string    `json:"kind"`
-	// Subkind narrows a notice: "reset" for a New-conversation divider
-	// (conversation.reset), "" for the others (daemon start, voice
-	// reconnects/closes).
+	// Subkind narrows a notice: "start" (daemon.start), "reset" (a
+	// New-conversation divider), "closed" (the voice session closed),
+	// "context_lost" (the voice dropped its resumption handle), "resumed"
+	// (reconnected, conversation continues) or "fresh" (reconnected
+	// without the earlier context). Absent from daemons that predate it.
 	Subkind string `json:"subkind,omitempty"`
+	// Reason is why: for a "closed" or "context_lost" notice the event's
+	// own reason (shutdown, session_refresh, ...); for an approval that
+	// ended unanswered, how it left (expired, replaced, or the cancel
+	// reason: prompt_gone, agent_exited, pane_closed, closed, ...).
+	Reason string `json:"reason,omitempty"`
+	// Version is the daemon's version on a "start" notice.
+	Version string `json:"version,omitempty"`
 	Text    string `json:"text"`
 	// Via is how the user spoke (voice | typed) or how an approval
 	// was answered (tap | fast_path | orchestrator; confirm in logs from before
@@ -236,6 +245,7 @@ type convoPayload struct {
 	OldID     string          `json:"old_id"`
 	Kind      string          `json:"kind"`
 	Summary   string          `json:"summary"`
+	Version   string          `json:"version"`
 	Question  string          `json:"question"`
 	Answer    string          `json:"answer"`
 	Reason    string          `json:"reason"`
@@ -252,27 +262,30 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 	switch ev.Type {
 	case "daemon.start":
 		b.closeAll()
-		b.push(ev, "notice", "Sheepdog started.")
+		it := b.push(ev, "notice", "Sheepdog started.")
+		it.Subkind, it.Version = "start", p.Version
 	case "conversation.reset":
 		b.closeAll()
 		b.push(ev, "notice", "New conversation").Subkind = "reset"
 	case "voice.resume":
 		b.closeAll()
 		if p.Resumed {
-			b.push(ev, "notice", "Voice reconnected; the conversation continues.")
+			b.push(ev, "notice", "Voice reconnected; the conversation continues.").Subkind = "resumed"
 		} else {
-			b.push(ev, "notice", "Voice reconnected with a fresh session; earlier context was lost.")
+			b.push(ev, "notice", "Voice reconnected with a fresh session; earlier context was lost.").Subkind = "fresh"
 		}
 	case "voice.handle_dropped":
 		b.closeAll()
-		b.push(ev, "notice", "Voice context lost.")
+		it := b.push(ev, "notice", "Voice context lost.")
+		it.Subkind, it.Reason = "context_lost", p.Reason
 	case "voice.closed":
 		b.closeAll()
 		text := "Voice session closed."
 		if p.Reason != "" {
 			text = "Voice session closed: " + p.Reason + "."
 		}
-		b.push(ev, "notice", text)
+		it := b.push(ev, "notice", text)
+		it.Subkind, it.Reason = "closed", p.Reason
 	case "voice.connect", "voice.connect_error", "voice.recycle", "voice.stalled", "voice.disconnected", "voice.goaway", "voice.handover":
 		b.closeAll() // dividers in /debug; not items here
 	case "voice.transcript.in":
@@ -344,11 +357,11 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 			it.Answered, it.Answer, it.Via, it.Resolution = &answered, p.Answer, p.Via, "confirmed"
 		}
 	case "pending.expired":
-		b.resolve(p.ID, "expired")
+		b.resolve(p.ID, "expired", "expired")
 	case "pending.cancelled":
-		b.resolve(p.ID, "cancelled")
+		b.resolve(p.ID, "cancelled", p.Reason)
 	case "pending.replaced":
-		b.resolve(p.OldID, "replaced")
+		b.resolve(p.OldID, "replaced", "replaced")
 	}
 }
 
@@ -373,10 +386,11 @@ func (s *Server) attachCards(items []ConversationItem) {
 	}
 }
 
-// resolve marks an open approval with how it ended unanswered.
-func (b *convoBuilder) resolve(id, how string) {
+// resolve marks an open approval with how it ended unanswered, and why
+// (empty on lines from before the reason was logged).
+func (b *convoBuilder) resolve(id, how, reason string) {
 	if it := b.approvals[id]; it != nil && it.Resolution == "open" {
-		it.Resolution = how
+		it.Resolution, it.Reason = how, reason
 	}
 }
 

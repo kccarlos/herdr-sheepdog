@@ -58,6 +58,13 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     /// A finer tag on a `notice`: `"reset"` for "New conversation". Absent
     /// on every other notice (a restart, a voice reconnect).
     public var subkind: String?
+    /// Why, from a daemon that says: a notice's own reason (`shutdown`,
+    /// `session_expired`, ...), or how an approval ended unanswered
+    /// (`expired`, `replaced`, `prompt_gone`, `agent_exited`, `pane_closed`,
+    /// `closed`, ...). Absent from an older daemon.
+    public var reason: String?
+    /// The daemon's version on a restart notice (`subkind: "start"`).
+    public var version: String?
     /// The reset's own id (`POST /api/conversation/reset`'s `reset_id`, and
     /// the `conversation.reset` event's), when the item came from one of
     /// those rather than a plain `/api/conversation` page — a second key
@@ -69,7 +76,7 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     public var card: ScreenCard?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution, subkind, card
+        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution, subkind, reason, version, card
         case pendingID = "pending_id"
         case resetID = "reset_id"
         case cardID = "card_id"
@@ -89,6 +96,8 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         answer: String? = nil,
         resolution: Resolution? = nil,
         subkind: String? = nil,
+        reason: String? = nil,
+        version: String? = nil,
         resetID: String? = nil,
         cardID: String? = nil,
         card: ScreenCard? = nil
@@ -106,6 +115,8 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         self.answer = answer
         self.resolution = resolution
         self.subkind = subkind
+        self.reason = reason
+        self.version = version
         self.resetID = resetID
         self.cardID = cardID ?? card?.cardID
         self.card = card
@@ -126,6 +137,8 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         answer = try c.decodeIfPresent(String.self, forKey: .answer)
         resolution = try c.decodeIfPresent(Resolution.self, forKey: .resolution)
         subkind = try c.decodeIfPresent(String.self, forKey: .subkind)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        version = try c.decodeIfPresent(String.self, forKey: .version)
         resetID = try c.decodeIfPresent(String.self, forKey: .resetID)
         // One card this build cannot read must not lose the whole page.
         card = (try? c.decodeIfPresent(ScreenCard.self, forKey: .card)) ?? nil

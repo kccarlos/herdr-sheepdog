@@ -1,7 +1,7 @@
 # Conversation timeline: what shows and how
 
 *Proposal, 2026-10-27, approved by the CEO the same day (section 10).
-Phases 1 and 2 are built (section 11); phase 3 is not. Code references are
+Phases 1, 2 and 3 are built (sections 11 and 13). Code references are
 `file:line` at commit `44d6ee33` (app 0.2.0), before phase 1. Log figures are from the
 author's own daemon (`~/.local/share/sheepdog/events/`), read-only.*
 
@@ -36,6 +36,7 @@ resume".
 10. [Decisions by the CEO](#10-decisions-by-the-ceo)
 11. [Phase 2: what was built, and where it differs](#11-phase-2-what-was-built-and-where-it-differs)
 12. [The visual system](#12-the-visual-system)
+13. [Phase 3: what was built, and where it differs](#13-phase-3-what-was-built-and-where-it-differs)
 
 ## 1. How the timeline is built today
 
@@ -629,7 +630,7 @@ what the neighbours decide; `ConversationTimeline.layout` applies it, and
   when no longer true, and every notice is written to `os.Logger` (names
   redacted).
 
-Left for phase 3: notice `subkind`/`reason`, the cancel reason, the start
+Left for phase 3 (built, section 13): notice `subkind`/`reason`, the cancel reason, the start
 version ("Sheepdog updated"), and the daemon resolving held pushes at a
 restart.
 
@@ -670,3 +671,46 @@ the kinds apart and colour confirms. One place per concern:
   the history marks typed. A row's VoiceOver label is its visible words
   combined, not the mockup's sentence. The pointer's tap pulses the card with a
   short border flash; the card does not scroll.
+
+## 13. Phase 3: what was built, and where it differs
+
+Built: the small additive daemon change and the app using it. Nothing is
+required of either side: an old app ignores the new fields, and a new app
+works with an old daemon (it falls back to the words, as in phases 1 and
+2). `/api/hello` has no capability list and the protocol number is not
+bumped: the app reads each field when it is there.
+
+- **`subkind` on every notice** (`ConversationItem.Subkind`,
+  `internal/web/conversation.go`): `start` (`daemon.start`), `reset`,
+  `closed` (`voice.closed`), `context_lost` (`voice.handle_dropped`),
+  `fresh` and `resumed` (`voice.resume` without and with its context).
+  `DaemonNotice` reads it first and the text only when it is absent or a
+  value this build does not know.
+- **`reason`** on the same item: a `closed` notice carries the event's
+  reason (`shutdown`, ...), a `context_lost` one the handle drop's
+  (`session_expired`, `resumed_twice`).
+- **Why a question closed**, in the same `reason` field on an `approval`
+  item: `expired`, `replaced`, or the cancel reason (`prompt_gone`,
+  `agent_exited`, `pane_closed`, `closed`, `brain_interrupt`). A closed
+  question's expanded card says it (`ConversationItem.closedReasonText`);
+  no reason, or one this build does not know, keeps "It was closed on the
+  computer." **Difference from section 8:** "No longer needed" had
+  already become "Closed" (section 11), and `prompt_gone` is worded "It
+  left the agent's screen, probably answered on the computer", because the
+  daemon sees only that the prompt is gone, not who answered it.
+- **`version`** on the `start` notice (from `daemon.start`'s existing
+  `version`). The divider reads "Sheepdog updated to v0.9.1" when the
+  version differs from the previous start in the loaded history, else
+  "Sheepdog restarted" (or "Sheepdog started" for the first). The first
+  start in a page has nothing to compare with, so it never says "updated".
+- **Held pushes at a restart** (`internal/app/heldpushes.go`): right after
+  `daemon.start` the daemon reads today's and yesterday's event files and
+  logs `voice.push_dropped {reason: "restart", push_id, text, urgency,
+  agent, age_ms}` for every non-silent `voice.push_held` without a
+  released or dropped after it. The app already settles a held push on
+  `voice.push_dropped`, so it shows "Dropped" instead of "Waiting for a
+  listener". The app's wording ("nobody was listening for 5 minutes") is
+  unchanged for this reason; reading the `reason` there is left for later.
+  **Difference from section 8:** the true attached-client signal for the
+  reconnect row (section 11) is not part of this change; the dialogue proxy
+  stays.
