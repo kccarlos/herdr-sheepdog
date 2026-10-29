@@ -73,7 +73,7 @@ struct AgentPanes: View {
         if let agent = model.flock.all.first(where: { $0.paneID == id }) {
             let two = panes.count == 2
             AgentScreenView(agent: agent, pane: PaneChrome(
-                // Show sidebar and the mini capsule sit in the first pane.
+                // Show sidebar sits in the first pane.
                 leading: index == 0 ? leading : nil,
                 onClose: two ? { withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.close(pane: index) } } : nil,
                 splitCandidates: two ? [] : model.flock.running.filter { $0.paneID != id },
@@ -185,8 +185,8 @@ struct PaneDivider: View {
 }
 
 /// An agent opened in its own window (Open in New Window, or a sidebar row
-/// dragged out): the pane alone, with the mini capsule. It never owns the
-/// voice.
+/// dragged out): the pane alone, with no capsule yet (agent windows are a
+/// later task). It never owns the voice.
 struct AgentWindowScene: View {
     let route: AgentWindowRoute?
     @EnvironmentObject private var app: SessionViewModel
@@ -203,14 +203,12 @@ private struct AgentWindowContent: View {
     let route: AgentWindowRoute?
     @EnvironmentObject private var model: SessionViewModel
     @State private var ui = SceneUI()
-    private let scenes = SceneCoordinator.shared
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         Group {
             if let route, let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
                 AgentScreenView(agent: agent, pane: PaneChrome(
-                    leading: AnyView(MiniCapsule(menus: SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: nil))),
                     onGone: { dismissWindow() },
                     extraMenu: AnyView(
                         Button {

@@ -51,6 +51,29 @@ final class IPadPortraitKeyboardUITests: XCTestCase {
         shot("ipad-portrait-keyboard")
     }
 
+    /// The chat's keyboard on an iPad held upright with the sidebar hidden:
+    /// the capsule's keyboard button turns it into the composer (it used to
+    /// have no keyboard button there, and the toolbar's mini capsule showed
+    /// one circle).
+    func testChatKeyboardWithTheSidebarHiddenInPortrait() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(element(app, "demo.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "sidebar.show").waitForExistence(timeout: 10), "the sidebar is hidden in portrait")
+        XCTAssertTrue(element(app, "controls.orb").exists, "the capsule's orb")
+        XCTAssertTrue(element(app, "controls.mute").exists, "and its mic slot")
+        shot("ipad-capsule-portrait")
+        tapWhenTappable(element(app, "controls.type"), "the capsule's keyboard button")
+        let field = app.textFields.matching(identifier: "type.field").firstMatch
+        typeWhenFocused(field, "status please")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "the keyboard comes up")
+        sleep(1)
+        shot("ipad-capsule-portrait-composer")
+        tapWhenTappable(element(app, "type.close"), "Back to voice")
+        XCTAssertTrue(element(app, "voice.capsule").waitForExistence(timeout: 5), "the capsule comes back")
+    }
+
     func testShellWindowTypesInPortrait() throws {
         let app = openAgent()
         tapWhenTappable(app.buttons.matching(identifier: "agentScreen.menu").firstMatch, "the window menu")

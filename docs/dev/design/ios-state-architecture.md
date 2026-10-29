@@ -1004,8 +1004,8 @@ Order and dependencies:
     the meter whole, which redrew its voice menu per level tick.
   - **Menus:** `StableMenu` draws a menu from one `Equatable` value. Every
     menu #402 left is one now:
-    - the voice menu in the capsule and the mini capsule, and `+` and
-      `⋯` on the iPhone and the iPad sidebar;
+    - the voice menu in the capsule, and `+` and `⋯` on the iPhone and
+      the iPad sidebar;
     - the pane switcher, the iPad split menu, Spaces' New space and
       worktree menus, and Attach.
 

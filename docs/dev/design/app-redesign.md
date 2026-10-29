@@ -583,11 +583,12 @@ The lock screen comes first.
   - An offline computer shows one row with **Retry**.
   - With one computer, the computer row disappears and spaces sit at the
     top level.
-  - The voice capsule sits at the foot.
+  - No capsule here: it floats over the detail (below).
 - **Detail** is one of:
   - an agent pane: the terminal, the question pinned above the key bar,
     the key bar `esc ⇥ ↑ ↓ ⏎ ⌨ ···`, and a composer;
-  - the Conversation, in a 720 pt centred column with a composer
+  - the Conversation, in a 720 pt centred column; the capsule's keyboard
+    button is its composer, as on iPhone
     ([light](app-redesign/ipad-conversation-light.jpg),
     [dark](app-redesign/ipad-conversation-dark.jpg));
   - **All agents:** a two-column AgentCard grid with the filters All,
@@ -597,10 +598,24 @@ The lock screen comes first.
   drags. At most 2 panes in landscape; stacked vertically in portrait.
 - **Multiple scenes:** "Open in New Window" and dragging from the sidebar
   give an agent its own window, for Split View or Stage Manager. Only one
-  scene owns the audio session; the others show a mini capsule in the
-  toolbar.
-- **Portrait with the sidebar hidden:** a mini capsule in the toolbar (orb
-  and "Work Mac ⌄ / Listening"; with one computer, the voice's name).
+  scene owns the audio session (`SceneCoordinator`); another window's
+  capsule shows "In another window" with **Use here**, which moves the
+  session to it.
+- **The capsule on iPad (2026-10-28):** it floats like on iPhone. One per
+  window, 366×60 pt, at the bottom centre of the *content* area (the
+  window less the sidebar, never over the sidebar), 4 pt above the bottom
+  safe area. Narrower than 390 pt of content it is the width less 24 pt.
+  It slides to the new centre in 200 ms (the brand ease) when the sidebar
+  shows or hides or the window rotates or resizes, and jumps under Reduce
+  Motion. The keyboard button morphs it into the composer (the same
+  `CapsuleComposer` and dock as iPhone: there is no iPad text field), and
+  the floating question card sits above it. There is no toolbar mini
+  capsule. An agent's terminal (a pane, or its own window) has none yet:
+  its composer and key bar must never be covered, as on iPhone, where the
+  terminal is a screen without a capsule; the terminal's voice controls
+  are a later task. Rule and tests: `CapsuleFrame`.
+- **Portrait with the sidebar hidden:** the capsule at the window's
+  centre; the header keeps only Show sidebar.
 - **Keyboard:** a hardware keyboard types straight into the focused pane.
   Shortcuts: ⌘N new agent, ⌘1…9 jump to agents, ⌘⇧M mute, ⌘K Talk to
   (only with several computers). Start in New agent is ⌘↩.
@@ -611,8 +626,7 @@ Dark variants: [main](app-redesign/ipad-main-dark.jpg),
 [side by side](app-redesign/ipad-split-dark.jpg).
 
 **As built (2026-10-22, one computer):** no computer row in the sidebar,
-no "Talking to …" subtitle, no computer sections in All agents, and the
-mini capsule shows the voice's name. ⌘K is not bound until there are
+no "Talking to …" subtitle, no computer sections in All agents. ⌘K is not bound until there are
 several computers. The iPhone keeps its Agents tab rather than a separate
 All agents page. The sheets use the system form size. Dragging a sidebar
 row out of the app to make a window is wired (the row carries an

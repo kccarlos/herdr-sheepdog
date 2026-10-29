@@ -7,15 +7,15 @@ import SwiftUI
 /// - **The audio owner** is the oldest main window still open, until
 ///   another window taps "Use here" (`claimAudio`). It shows
 ///   the full voice capsule, reports what is on screen (`visibility`) and
-///   drives the session's foreground and background. Every other window
-///   shows the mini capsule.
+///   drives the session's foreground and background. Every other window's
+///   capsule says "In another window", with Use here.
 /// - **The presenter** shows the session's sheets (Settings, New agent,
 ///   Spaces, a card, the pairing flow): the window whose menu asked for
 ///   one, else the owner. Without it every window would open the same
 ///   sheet at once.
 ///
-/// An agent window opened with Open in New Window never registers: it is
-/// always a mini-capsule window.
+/// An agent window opened with Open in New Window never registers and has
+/// no capsule.
 @MainActor
 @Observable
 final class SceneCoordinator {
@@ -56,7 +56,7 @@ final class SceneCoordinator {
     }
 
     /// Before any window registered (its first frame), the window is
-    /// taken for the owner, so the capsule does not flash mini.
+    /// taken for the owner, so the capsule does not flash "elsewhere".
     func isOwner(_ id: UUID?) -> Bool {
         guard let id else { return true }
         return owner == nil || owner == id
@@ -82,8 +82,6 @@ final class SceneUI {
     var columns: NavigationSplitViewVisibility = .all
     /// A shell pushed over the detail.
     var detailPath = NavigationPath()
-    /// Bumped to focus the Conversation's composer (the capsule's keyboard).
-    var focusComposer = 0
     /// Of two panes, the one keys and ⌘ shortcuts act on.
     var focusedPane = 0
     /// The first of two panes' share of the room.

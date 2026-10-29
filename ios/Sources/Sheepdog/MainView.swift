@@ -99,10 +99,9 @@ struct PhoneRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motionNamespace) private var motionNamespace
     @Namespace private var fallbackNamespace
+    private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
     /// The screen's height above the keyboard (`FloatingQuestions.area`).
     @State private var questionArea: CGFloat = 0
-
-    private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
     private var paneState: FlockPaneState {
         model.flockPaneState
@@ -200,74 +199,10 @@ struct PhoneRootView: View {
     // MARK: - Bottom: the question, the coach mark, the capsule
 
     private var bottomStack: some View {
-        VStack(spacing: 8) {
-            // Every open question floats above the capsule; on the Agents
-            // pane each sits on its agent's card instead.
-            let cards = model.navigation.pane != .flock ? model.floatingQuestions : []
-            if !cards.isEmpty {
-                FloatingQuestions(
-                    cards: cards,
-                    voiceQuestionID: model.approval?.pending.id,
-                    time: { question in
-                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
-                    },
-                    area: questionArea,
-                    remote: { model.remoteQuestion($0) },
-                    talkTo: { model.talk(to: $0) }
-                ) { id, index in
-                    model.answer(question: id, option: index)
-                }
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-            }
-
-            if scenes.isOwner(sceneID) {
-                if model.voice.showCoachMark {
-                    CoachMarkView(text: VoiceBarModel.coachMark(voiceName: model.voiceName)) {
-                        model.voice.dismissCoachMark()
-                    }
-                    .padding(.horizontal, 4)
-                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-                    .onAppear {
-                        AccessibilityNotification.Announcement(VoiceBarModel.coachMark(voiceName: model.voiceName)).post()
-                    }
-                }
-
-                ZStack {
-                    if ui.typing {
-                        CapsuleComposer(
-                            voiceName: model.voiceName,
-                            sending: model.conversationModel.sendingTyped,
-                            error: model.conversationModel.typedError,
-                            send: { await model.sendTyped($0) },
-                            close: {
-                                withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = false }
-                                model.conversationModel.typedError = nil
-                            }
-                        )
-                        .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
-                        .transition(morph)
-                    } else {
-                        SessionCapsule(menus: menus)
-                            .modifier(MorphSurface(namespace: motion, reduceMotion: reduceMotion))
-                            .transition(morph)
-                    }
-                }
-                // Grows with the text at every size; the capsule caps its own
-                // height and scrolls inside past it.
-            } else {
-                // Another window owns the voice: this one gets the mini
-                // capsule.
-                MiniCapsule(menus: menus)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
+        FloatingDock(menus: menus, questionArea: questionArea, showsQuestions: model.navigation.pane != .flock)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
     }
-
-    /// The capsule turns into the composer and back: the shared frame
-    /// morphs (`MorphSurface`) while the two cross-fade.
-    private var morph: AnyTransition { .opacity }
 }
 
 /// The Conversation with the feedback flag and its notice: the same on
@@ -359,9 +294,6 @@ struct SessionBanners: View {
 /// The full voice capsule, wired to the session.
 struct SessionCapsule: View {
     let menus: SessionMenus
-    /// The keyboard button: the iPhone morphs the capsule into the
-    /// composer; the iPad focuses the Conversation's composer.
-    var onType: (() -> Void)?
     @EnvironmentObject private var model: SessionViewModel
     @Environment(SceneUI.self) private var ui
     @Environment(\.sceneID) private var sceneID
@@ -394,13 +326,7 @@ struct SessionCapsule: View {
             onResume: { model.resumeAudio() },
             onPress: { model.voice.pressToTalk() },
             onRelease: { model.voice.releaseToTalk() },
-            onType: {
-                if let onType {
-                    onType()
-                } else {
-                    withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true }
-                }
-            },
+            onType: { withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true } },
             onUseHere: { scenes.claimAudio(for: sceneID) },
             menuValue: menus.voiceValue,
             menu: { menus.voiceItems($0) }
@@ -946,7 +872,7 @@ struct DemoHeader: View {
 /// The capsule and the composer share one frame, so one morphs into the
 /// other (its size and corners) while their contents cross-fade. A fade
 /// only under Reduce Motion.
-private struct MorphSurface: ViewModifier {
+struct MorphSurface: ViewModifier {
     let namespace: Namespace.ID
     let reduceMotion: Bool
 

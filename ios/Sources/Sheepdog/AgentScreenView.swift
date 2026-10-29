@@ -35,8 +35,7 @@ struct AgentScreenView: View {
 /// An agent window as an iPad pane (canvas "AgentPane"): its header is
 /// drawn in the pane, not in a navigation bar, so two panes each have one.
 struct PaneChrome {
-    /// Before the title: Show sidebar and the mini capsule, when the
-    /// sidebar is hidden.
+    /// Before the title: Show sidebar, when the sidebar is hidden.
     var leading: AnyView?
     /// The pane's ✕ (only when there are two).
     var onClose: (() -> Void)?
@@ -333,7 +332,7 @@ private struct AgentWindowContent: View, Equatable {
     // MARK: - Pane header (iPad)
 
     /// Canvas "AgentPane": the dot and name over the space, centred; the
-    /// sidebar button and mini capsule before; ✕, split and ⋯ after.
+    /// sidebar button before; ✕, split and ⋯ after.
     private func paneHeader(_ pane: PaneChrome) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
