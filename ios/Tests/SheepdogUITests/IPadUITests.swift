@@ -265,7 +265,7 @@ final class IPadUITests: XCTestCase {
     }
 
     /// Several computers: the sidebar's computer level (in the store's
-    /// order, Talk to on the other), and All agents' sections. With one
+    /// order, with voice markers), and All agents' sections. With one
     /// computer there is no computer row (`testSidebarAndDetail`).
     func testSidebarComputerLevel() throws {
         let home = StubDaemon.blocked(alias: "writer", space: "blog", pane: "h1:p1", question: "Publish the post now?")
@@ -279,14 +279,21 @@ final class IPadUITests: XCTestCase {
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
         app.launch()
         XCTAssertTrue(element(app, "computerLabel.sidebar.fixture-1").waitForExistence(timeout: 15), "the current computer's row")
-        XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-2").waitForExistence(timeout: 15), "Talk to Home Mac")
+        XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Voice is on Work Mac")
+        let homeMarker = element(app, "computer.sidebarVoiceMarker.fixture-2")
+        XCTAssertTrue(homeMarker.waitForExistence(timeout: 15), "Move the voice to Home Mac")
+        XCTAssertEqual(homeMarker.label, "Move the voice to Home Mac")
         XCTAssertTrue(element(app, "computerLabel.sidebarAgent.writer").waitForExistence(timeout: 15), "Home Mac's waiting agent")
         element(app, "sidebar.allAgents").tap()
+        XCTAssertTrue(element(app, "computerLabel.section.fixture-1").waitForExistence(timeout: 10), "All agents: Work Mac's section")
         XCTAssertTrue(element(app, "computerLabel.section.fixture-2").waitForExistence(timeout: 10), "All agents: Home Mac's section")
+        XCTAssertLessThan(element(app, "computerLabel.section.fixture-1").frame.minY, element(app, "computerLabel.section.fixture-2").frame.minY, "All agents keeps pairing order")
+        XCTAssertTrue(element(app, "computer.voiceMarker.fixture-2").exists, "All agents: Home Mac's marker")
         sleep(1)
         shot("several-computers")
-        element(app, "computerLabel.sidebarTalkTo.fixture-2").tap()
-        XCTAssertTrue(element(app, "computerLabel.sidebarTalkTo.fixture-1").waitForExistence(timeout: 10), "Home Mac is current: Talk to Work Mac")
-        XCTAssertLessThan(element(app, "computerLabel.sidebar.fixture-1").frame.minY, element(app, "computerLabel.sidebar.fixture-2").frame.minY, "Work Mac stays above Home Mac after Talk to")
+        tapWhenTappable(element(app, "computer.sidebarVoiceMarker.fixture-2"), "Home Mac's voice marker")
+        XCTAssertTrue(element(app, "computer.sidebarVoiceMarker.fixture-1").waitForExistence(timeout: 10))
+        XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Move the voice to Work Mac")
+        XCTAssertLessThan(element(app, "computerLabel.sidebar.fixture-1").frame.minY, element(app, "computerLabel.sidebar.fixture-2").frame.minY, "Work Mac stays above Home Mac after moving the voice")
     }
 }

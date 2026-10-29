@@ -284,7 +284,7 @@ second computer is paired.
 | Element | One computer | Several computers |
 |---|---|---|
 | Voice menu | Manage computers… and End voice session | Adds Talk to, with every computer |
-| Agents page | One list | One section per computer, in the order they were paired, the current one marked |
+| Agents page | One list | One section per computer, in the order they were paired, with a voice marker on every section |
 | Agent window title | Agent name | Agent name, plus "Work Mac · webapp" underneath |
 | Floating question | As today | Labelled "Home Mac · blog" when it is not on the current computer, with "Answers by tap go to Home Mac." and **Talk to Home Mac** |
 | Voice | Never names a computer | Never names a computer (section 4) |
@@ -356,8 +356,9 @@ and questions appear as cards, badges and pushes; a tap switches.
   paired first.
 - The app never switches on its own. If the voice moved to wherever
   something happened, the user would not know who is listening.
-- Ways to switch: Talk to in the voice menu; the iPad sidebar; ⌘K; the
-  floating question's **Talk to Home Mac**; a Live Activity or
+- Ways to switch: the voice marker in a computer section header on the
+  Agents page, iPad sidebar or iPad All agents; Talk to in the voice menu;
+  ⌘K; the floating question's **Talk to Home Mac**; a Live Activity or
   notification row from another computer, which offers "Talk to Home Mac"
   but does not switch on its own; an App Intent, "Talk to Home Mac", for
   Siri and Shortcuts.
@@ -396,8 +397,11 @@ iPhone 17 Pro and the iPad a 13-inch iPad Pro.
 |---|---|
 | ![Agents page, several computers, light](app-redesign/agents-several-light.jpg) | ![Agents page, several computers, dark](app-redesign/agents-several-dark.jpg) |
 
-- One section per computer. In the order the computers were paired (Talk to never moves a section); the current one stays in place, marked
-  "You're talking here".
+- One section per computer. In the order the computers were paired (moving
+  the voice never moves a section); the current one stays in place and has
+  a filled ink marker, "Voice is here". Other available computers have a
+  hollow marker; an offline one has a dashed marker that retries. Tapping a
+  computer's name only expands or collapses its agents.
 - Inside a section, blocked agents come first, as today.
 - The Agents badge counts waiting agents on every computer.
 - An offline computer shows one dashed row: "Can't reach Studio mini. Last
@@ -615,8 +619,8 @@ row out of the app to make a window is wired (the row carries an
 `AgentWindowRoute`) but not verified; Open in New Window is.
 
 **As built (phase 11, several computers):** the sidebar's computer rows
-(in the store order, the current one marked "Talking here"; Talk to or Retry on the others),
-All agents' sections, and ⌘K, which talks to the next computer that
+(in the store order, with one voice marker each: filled here, hollow to
+move, dashed to retry), All agents' sections, and ⌘K, which talks to the next computer that
 answers. Another computer's agent has no window yet: its row opens All
 agents, and its card has Talk to instead of a window button. The voice
 menu cannot show a Talk to row's second line ("4 agents · 1 waiting"),

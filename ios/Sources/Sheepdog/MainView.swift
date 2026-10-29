@@ -155,7 +155,9 @@ struct PhoneRootView: View {
                             currentName: model.currentComputerName,
                             remoteCard: { model.remoteCard(computer: $0, paneID: $1) },
                             talkTo: { model.talk(to: $0) },
-                            retry: { model.session($0)?.retry() }
+                            retry: { model.session($0)?.retry() },
+                            collapsedComputers: model.agentsModel.collapsedComputers,
+                            toggleComputer: { model.agentsModel.toggleComputer($0) }
                         )
                     }
                 }
@@ -484,9 +486,11 @@ struct SessionMenus {
                             Text(computer.isCurrent ? "Talking here · \(computer.summary)" : computer.summary)
                         } icon: {
                             Image(systemName: computer.isCurrent ? "checkmark" : (computer.offline ? "wifi.slash" : "desktopcomputer"))
+                                .foregroundStyle(computer.isCurrent ? Theme.ink : Theme.muted)
                         }
                     }
                     .disabled(computer.offline && !computer.isCurrent)
+                    .tint(Theme.ink)
                     .accessibilityLabel(computer.isCurrent ? "\(computer.name), talking here, \(computer.summary)" : "Talk to \(computer.name), \(computer.summary)")
                     .accessibilityIdentifier("voice.talkTo.\(computer.id)")
                 }

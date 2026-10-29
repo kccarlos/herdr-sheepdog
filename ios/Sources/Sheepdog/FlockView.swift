@@ -31,6 +31,9 @@ struct FlockView: View {
     var remoteCard: (String, String) -> ApprovalFlow.Card? = { _, _ in nil }
     var talkTo: (String) -> Void = { _ in }
     var retry: (String) -> Void = { _ in }
+    /// Closed computer sections, owned by `AgentsModel`.
+    var collapsedComputers: Set<String> = []
+    var toggleComputer: (String) -> Void = { _ in }
 
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
@@ -68,29 +71,43 @@ struct FlockView: View {
     /// running agents and the closed Not running row.
     @ViewBuilder
     private var currentSection: some View {
+        let current = computers.first(where: \.isCurrent)
+        let id = current?.id ?? "current"
         if sectioned {
-            ComputerSectionHeader(id: "current", name: currentName, detail: "You're talking here", talkTo: nil)
-                .padding(.top, headerTopPadding("current"))
+            let marker = marker(for: current, id: id)
+            ComputerSectionHeader(
+                id: id,
+                name: currentName,
+                detail: nil,
+                marker: marker,
+                isExpanded: isExpanded(id),
+                toggleExpanded: { withAnimation(Theme.ease) { toggleComputer(id) } },
+                moveVoice: { talkTo(id) },
+                retry: { retry(id) }
+            )
+            .padding(.top, headerTopPadding(id))
         }
-        if flock.running.isEmpty {
-            if sectioned {
-                Text("No agents running here.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            } else {
-                NoAgentsView(onNewAgent: onNewAgent)
-                    .padding(.top, 40)
+        if isExpanded(id) {
+            if flock.running.isEmpty {
+                if sectioned {
+                    Text("No agents running here.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                } else {
+                    NoAgentsView(onNewAgent: onNewAgent)
+                        .padding(.top, 40)
+                }
             }
-        }
-        ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
-            card(agent, primary: isFirstQuestion(agent))
-        }
-        if !flock.notRunning.isEmpty {
-            notRunningRow
-            if showNotRunning {
-                ForEach(flock.notRunning) { agent in
-                    card(agent, primary: false)
+            ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
+                card(agent, primary: isFirstQuestion(agent))
+            }
+            if !flock.notRunning.isEmpty {
+                notRunningRow
+                if showNotRunning {
+                    ForEach(flock.notRunning) { agent in
+                        card(agent, primary: false)
+                    }
                 }
             }
         }
@@ -98,7 +115,7 @@ struct FlockView: View {
 
     /// Space above a section header: none for the first section.
     private func headerTopPadding(_ id: String) -> CGFloat {
-        computers.first.map { ($0.isCurrent ? "current" : $0.id) == id } == true ? 0 : 14
+        computers.first?.id == id ? 0 : 14
     }
 
     /// One accent per screen: only the first open question gets the filled
@@ -124,37 +141,61 @@ struct FlockView: View {
         .id(agent.paneID)
     }
 
-    /// Another computer: its header with Talk to, then its running agents
+    /// Another computer: its header and voice marker, then its running agents
     /// (blocked first) with their questions, or one dashed row when it does
     /// not answer. Its last-known agents are not shown as if they were live.
     @ViewBuilder
     private func otherSection(_ computer: ComputerSnapshot) -> some View {
         let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
-        ComputerSectionHeader(id: computer.id, name: computer.name, detail: offline ? nil : computer.summary(),
-                              talkTo: offline ? nil : { talkTo(computer.id) })
-            .padding(.top, headerTopPadding(computer.id))
-        if offline {
-            OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { retry(computer.id) }
-        } else {
-            let running = Flock(computer.agents).running
-            ForEach(running, id: \.paneID) { agent in
-                AgentCard(
-                    agent: agent,
-                    question: remoteCard(computer.id, agent.paneID),
-                    primary: false,
-                    voiceQuestion: false,
-                    showsWindowButton: false,
-                    expanded: Binding(
-                        get: { expanded.contains("\(computer.id)|\(agent.paneID)") },
-                        set: { open in
-                            let key = "\(computer.id)|\(agent.paneID)"
-                            if open { expanded.insert(key) } else { expanded.remove(key) }
-                        }
-                    ),
-                    answer: answer
-                )
+        let marker = marker(for: computer, id: computer.id)
+        ComputerSectionHeader(
+            id: computer.id,
+            name: computer.name,
+            detail: offline ? nil : computer.summary(),
+            marker: marker,
+            isExpanded: isExpanded(computer.id),
+            toggleExpanded: { withAnimation(Theme.ease) { toggleComputer(computer.id) } },
+            moveVoice: { talkTo(computer.id) },
+            retry: { retry(computer.id) }
+        )
+        .padding(.top, headerTopPadding(computer.id))
+        if isExpanded(computer.id) {
+            if offline {
+                OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { retry(computer.id) }
+            } else {
+                let running = Flock(computer.agents).running
+                ForEach(running, id: \.paneID) { agent in
+                    AgentCard(
+                        agent: agent,
+                        question: remoteCard(computer.id, agent.paneID),
+                        primary: false,
+                        voiceQuestion: false,
+                        showsWindowButton: false,
+                        expanded: Binding(
+                            get: { expanded.contains("\(computer.id)|\(agent.paneID)") },
+                            set: { open in
+                                let key = "\(computer.id)|\(agent.paneID)"
+                                if open { expanded.insert(key) } else { expanded.remove(key) }
+                            }
+                        ),
+                        answer: answer
+                    )
+                }
             }
         }
+    }
+
+    private func marker(for computer: ComputerSnapshot?, id: String) -> ComputerVoiceMarkerState {
+        ComputerVoiceMarkerState.resolve(
+            computerID: id,
+            currentComputerID: computers.first(where: \.isCurrent)?.id ?? id,
+            reachability: computer?.reachability ?? .online,
+            showsComputers: sectioned
+        )
+    }
+
+    private func isExpanded(_ id: String) -> Bool {
+        !sectioned || !collapsedComputers.contains(id)
     }
 
     private var notRunningRow: some View {

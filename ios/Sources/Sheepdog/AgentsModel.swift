@@ -50,6 +50,9 @@ final class AgentsModel {
 
     /// Agents cards the user opened, by pane id; kept for the session.
     var expandedAgents: Set<String> = []
+    /// Computer sections the user closed. Kept for the session; a section
+    /// starts expanded and pairing order never changes.
+    private(set) var collapsedComputers: Set<String> = []
     /// Sheets over the voice screen that the session cannot see itself (the
     /// connection chip's, the feedback flag's), by name.
     private(set) var screenCovers: Set<String> = []
@@ -60,6 +63,18 @@ final class AgentsModel {
     /// The agents as the screen groups them: running (blocked, working, idle
     /// and done) and the rest.
     var flock: Flock { Flock(agents) }
+
+    func isComputerExpanded(_ id: String) -> Bool {
+        !collapsedComputers.contains(id)
+    }
+
+    func toggleComputer(_ id: String) {
+        if collapsedComputers.contains(id) {
+            collapsedComputers.remove(id)
+        } else {
+            collapsedComputers.insert(id)
+        }
+    }
 
     func setShellOffered(_ next: Bool?) {
         if shellOffered != next { shellOffered = next }

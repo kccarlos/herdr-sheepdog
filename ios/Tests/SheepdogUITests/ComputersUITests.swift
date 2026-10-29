@@ -4,7 +4,7 @@ import XCTest
 /// computer"), against `StubDaemon`s on loopback (no daemon checkout).
 ///
 /// The one-computer snapshot: with one computer paired, nothing names a
-/// computer and there is no Talk to. Every computer label in the app
+/// computer and there is no computer-level switch. Every computer label in the app
 /// carries an identifier starting with `computerLabel.`, so this test
 /// catches any new one.
 final class ComputersUITests: XCTestCase {
@@ -52,7 +52,7 @@ final class ComputersUITests: XCTestCase {
         shot(app, "agents-one")
     }
 
-    /// Two computers that answer and one that does not: Talk to, the
+    /// Two computers that answer and one that does not: the markers, the
     /// sections, the labelled question from another computer answered there
     /// by tap, Settings ▸ Computers, and switching.
     func testSeveralComputers() throws {
@@ -94,10 +94,17 @@ final class ComputersUITests: XCTestCase {
 
         // The Agents page: one section per computer, in the store's order.
         showAgentsPane(app)
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.current").firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.fixture-1").firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.section.fixture-2").firstMatch.exists)
-        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-1")
+        let workMarker = app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-1").firstMatch
+        let homeMarker = app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-2").firstMatch
+        XCTAssertTrue(workMarker.exists)
+        XCTAssertTrue(workMarker.isSelected)
+        XCTAssertEqual(workMarker.label, "Voice is on Work Mac")
+        XCTAssertEqual(homeMarker.label, "Move the voice to Home Mac")
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"])
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computerLabel.offline.Studio").firstMatch.waitForExistence(timeout: 45), "Studio's dashed row, after the 30 s quiet period")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-3").firstMatch.label, "Retry Studio")
         shot(app, "agents")
 
         // Answer Home Mac's question by tap: it goes to Home Mac.
@@ -131,16 +138,16 @@ final class ComputersUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Home Mac")).firstMatch.waitForExistence(timeout: 10), "Home Mac's conversation after the switch")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Hi from Work Mac")).firstMatch.exists, "nothing of Work Mac's conversation")
 
-        // Talk to did not reorder anything: Work Mac is still above Home
-        // Mac on the Agents page, Home Mac (current) in its place, and the
-        // headers still start at the same x.
+        // Moving the voice did not reorder anything: Work Mac is still above
+        // Home Mac on the Agents page, Home Mac (current) in its place, and
+        // the headers still start at the same x.
         showAgentsPane(app)
-        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-2")
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"])
         shot(app, "agents-after-talk-to")
     }
 
-    /// At a large text size Talk to drops under the name (the stacked
-    /// header): it is still leading-aligned with the current computer's.
+    /// At a large text size the voice marker stays at the trailing edge and
+    /// every header is still leading-aligned.
     func testStackedSectionHeadersAreLeadingAligned() throws {
         let workStub = try StubDaemon(.computer(name: "Work Mac", agents: #"[{"pane_id":"w1:p1","alias":"api","kind":"claude","state":"working","workspace_label":"webapp"}]"#, questions: "[]"))
         let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]"))
@@ -153,17 +160,61 @@ final class ComputersUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
         app.launch()
         showAgentsPane(app)
-        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"], current: "fixture-1")
-        XCTAssertTrue(app.buttons["computerLabel.sectionTalkTo.fixture-2"].exists)
+        assertHeadersAlignedAndInOrder(app, ["fixture-1", "fixture-2"])
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-2").firstMatch.exists)
+    }
+
+    /// A section's name folds only its agents; its marker is the switch.
+    func testSectionNameCollapsesAgentsAndMarkerMovesVoice() throws {
+        let workStub = try StubDaemon(.computer(
+            name: "Work Mac",
+            agents: #"[{"pane_id":"w1:p1","alias":"api","kind":"claude","state":"working","workspace_label":"webapp"}]"#,
+            questions: "[]"
+        ))
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]"))
+        let workHost = try workStub.start()
+        let homeHost = try homeStub.start()
+        defer { workStub.stop(); homeStub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launch()
+        showAgentsPane(app)
+
+        let workName = app.buttons["computerLabel.section.fixture-1"]
+        let workCard = app.descendants(matching: .any).matching(identifier: "flock.agent.api").firstMatch
+        XCTAssertTrue(workName.waitForExistence(timeout: 10))
+        XCTAssertTrue(workCard.waitForExistence(timeout: 10))
+        tapWhenTappable(workName, "Work Mac's section name")
+        XCTAssertTrue(workCard.waitForNonExistence(timeout: 5), "the name folds the current computer's agents")
+        tapWhenTappable(workName, "Work Mac's section name")
+        XCTAssertTrue(workCard.waitForExistence(timeout: 5), "the name expands them again")
+
+        let homeMarker = app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-2").firstMatch
+        XCTAssertEqual(homeMarker.label, "Move the voice to Home Mac")
+        tapWhenTappable(homeMarker, "Home Mac's voice marker")
+
+        let current = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@",
+            "computer.voiceMarker.fixture-2",
+            "Voice is on Home Mac"
+        )).firstMatch
+        let previous = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@",
+            "computer.voiceMarker.fixture-1",
+            "Move the voice to Work Mac"
+        )).firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        XCTAssertTrue(current.isSelected)
+        XCTAssertTrue(previous.waitForExistence(timeout: 10))
     }
 
     /// The Agents page's section headers (ids as in
-    /// `computerLabel.section.<id>`; the current one is "current"): leading
-    /// aligned (same minX) and top to bottom in `order`, wherever the
-    /// current computer is.
-    private func assertHeadersAlignedAndInOrder(_ app: XCUIApplication, _ order: [String], current: String, file: StaticString = #filePath, line: UInt = #line) {
+    /// `computerLabel.section.<id>`): leading aligned (same minX) and top to
+    /// bottom in `order`, wherever the current computer is.
+    private func assertHeadersAlignedAndInOrder(_ app: XCUIApplication, _ order: [String], file: StaticString = #filePath, line: UInt = #line) {
         let frames = order.map { id -> CGRect in
-            let element = app.descendants(matching: .any).matching(identifier: "computerLabel.section.\(id == current ? "current" : id)").firstMatch
+            let element = app.descendants(matching: .any).matching(identifier: "computerLabel.section.\(id)").firstMatch
             XCTAssertTrue(element.waitForExistence(timeout: 10), "header \(id)", file: file, line: line)
             return element.frame
         }
