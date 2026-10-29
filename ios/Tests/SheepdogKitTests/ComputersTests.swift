@@ -54,6 +54,29 @@ final class ComputersTests: XCTestCase {
         XCTAssertEqual(c.summary(now: now, calendar: utc), "Offline")
     }
 
+    func testTheVoiceMarkerTable() {
+        let rows: [(computer: String, reachability: Reachability, several: Bool, marker: ComputerVoiceMarkerState)] = [
+            ("Work Mac", .online, false, .hidden),
+            ("Work Mac", .online, true, .voice),
+            ("Home Mac", .online, true, .available),
+            ("Home Mac", .offline(since: nil), true, .offline),
+            ("Work Mac", .offline(since: nil), true, .offline),
+        ]
+
+        for row in rows {
+            XCTAssertEqual(
+                ComputerVoiceMarkerState.resolve(
+                    computerID: row.computer,
+                    currentComputerID: "Work Mac",
+                    reachability: row.reachability,
+                    showsComputers: row.several
+                ),
+                row.marker,
+                "\(row.computer), \(row.reachability), \(row.several ? "several" : "one")"
+            )
+        }
+    }
+
     func testARemoteQuestionIsLabelledAndRoutedToItsComputer() {
         let q = PendingAction(id: "pa-3", paneID: "h1:p1", kind: "answer_prompt", options: [PendingOption(index: 1, label: "Yes")], agent: "writer")
         let remote = RemoteQuestion(computerID: "home", computerName: "Home Mac", place: "blog", pending: q)

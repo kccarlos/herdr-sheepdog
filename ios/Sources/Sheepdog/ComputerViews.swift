@@ -1,75 +1,145 @@
 import SheepdogKit
 import SwiftUI
 
-/// A computer's section header on the Agents page and All agents
-/// (several computers only): its name, a line under it ("You're talking
-/// here", "4 agents · 1 waiting") and, for another computer, Talk to.
+/// A computer's section header on the Agents page, All agents and the iPad
+/// sidebar (several computers only): its name, status and one voice marker.
 struct ComputerSectionHeader: View {
+    enum Style: Equatable {
+        case section
+        case sidebar
+    }
+
     let id: String
     let name: String
     let detail: String?
-    let talkTo: (() -> Void)?
+    let marker: ComputerVoiceMarkerState
+    let style: Style
+    let isExpanded: Bool
+    let toggleExpanded: () -> Void
+    let moveVoice: () -> Void
+    let retry: () -> Void
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    init(
+        id: String,
+        name: String,
+        detail: String?,
+        marker: ComputerVoiceMarkerState,
+        style: Style = .section,
+        isExpanded: Bool,
+        toggleExpanded: @escaping () -> Void,
+        moveVoice: @escaping () -> Void,
+        retry: @escaping () -> Void
+    ) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+        self.marker = marker
+        self.style = style
+        self.isExpanded = isExpanded
+        self.toggleExpanded = toggleExpanded
+        self.moveVoice = moveVoice
+        self.retry = retry
+    }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 12) {
-                titles
-                Spacer(minLength: 8)
-                talkButton
+        HStack(alignment: .center, spacing: 8) {
+            Button(action: toggleExpanded) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    titles
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.muted)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
             }
-            VStack(alignment: .leading, spacing: 8) {
-                titles
-                talkButton
-            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded ? "Hide its agents" : "Show its agents")
+            .accessibilityIdentifier(style == .sidebar ? "computerLabel.sidebar.\(id)" : "computerLabel.section.\(id)")
+            Spacer(minLength: 8)
+            markerView
         }
-        // Every header is leading-aligned: the stacked form (a long name,
-        // a large text size) is as wide as its content, so without this
-        // the list would centre it.
+        // Every header is leading-aligned, including when a long name wraps.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
+        .padding(.top, style == .section ? 4 : 12)
         .padding(.bottom, 2)
+    }
+
+    /// Unique per surface: the iPad shows the sidebar and All agents together.
+    private var markerIdentifier: String {
+        style == .sidebar ? "computer.sidebarVoiceMarker.\(id)" : "computer.voiceMarker.\(id)"
+    }
+
+    private var subtitle: String? {
+        marker == .voice ? "Voice is here" : detail
     }
 
     private var titles: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(name)
-                .font(.title3.weight(.semibold))
+                .font(style == .section ? .title3.weight(.semibold) : .subheadline.weight(.semibold))
                 .fontDesign(.rounded)
                 .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            if let detail {
-                Text(detail)
-                    .font(.footnote)
+            if let subtitle {
+                Text(subtitle)
+                    .font(style == .section ? .footnote : .caption)
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("computerLabel.section.\(id)")
     }
 
-    @ViewBuilder private var talkButton: some View {
-        if let talkTo {
-            Button(action: talkTo) {
-                Text("Talk to \(name)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.ink)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .frame(minHeight: 36)
-                    .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-                    .frame(minHeight: 44)
-                    .contentShape(Capsule())
+    @ViewBuilder private var markerView: some View {
+        switch marker {
+        case .hidden:
+            EmptyView()
+        case .voice:
+            markerCircle {
+                Circle().fill(Theme.ink)
+                Image(systemName: "waveform")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(style == .sidebar ? Theme.fill : Theme.surface)
+            }
+            .accessibilityElement()
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityLabel("Voice is on \(name)")
+            .accessibilityIdentifier(markerIdentifier)
+        case .available:
+            Button(action: moveVoice) {
+                markerCircle {
+                    Circle().strokeBorder(Theme.dash, lineWidth: 1.5)
+                }
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .hoverEffect()
-            .accessibilityIdentifier("computerLabel.sectionTalkTo.\(id)")
+            .accessibilityLabel("Move the voice to \(name)")
+            .accessibilityIdentifier(markerIdentifier)
+        case .offline:
+            Button(action: retry) {
+                markerCircle {
+                    Circle().strokeBorder(Theme.dash, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                }
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .hoverEffect()
+            .accessibilityLabel("Retry \(name)")
+            .accessibilityIdentifier(markerIdentifier)
         }
+    }
+
+    private func markerCircle<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ZStack { content() }
+            .frame(width: 28, height: 28)
+            .frame(width: 44, height: 44)
     }
 }
 

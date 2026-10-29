@@ -93,12 +93,15 @@ instead of adding it twice.
 
 - The voice talks to one computer at a time, the one you picked last (at
   first, the one you paired first). The app never switches on its own.
-  To switch, tap the capsule's name ▸ **Talk to**, a section's **Talk to**
-  on the Agents page, or **Talk to Home Mac** on a question. On iPad, ⌘K
-  moves to the next computer. The voice never talks about the other
-  computers.
-- The Agents page has one section per computer, the one you are talking to
-  first. A computer that does not answer shows one row with **Retry**.
+  To switch, tap the hollow ring beside a computer's name on the Agents
+  page, iPad sidebar or iPad All agents; tap the capsule's name ▸ **Talk
+  to**; or tap **Talk to Home Mac** on a question. The filled ring shows
+  where the voice is, and a dashed ring retries an offline computer. On
+  iPad, ⌘K moves to the next computer. The voice never talks about the
+  other computers.
+- The Agents page has one section per computer in the order you paired
+  them. Tapping a computer's name expands or collapses its agents. A
+  computer that does not answer shows one row with **Retry**.
 - A question from another computer floats under the current one's,
   labelled "Home Mac · blog". Tapping an answer sends it to that computer.
 - Notifications from another computer carry its name.

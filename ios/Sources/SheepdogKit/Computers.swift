@@ -30,6 +30,32 @@ public enum Reachability: Equatable, Sendable {
     }
 }
 
+/// What a computer section's voice marker shows.
+public enum ComputerVoiceMarkerState: Equatable, Sendable {
+    /// With one computer there is no computer section or marker.
+    case hidden
+    /// The voice is on this computer.
+    case voice
+    /// Tapping moves the voice to this computer.
+    case available
+    /// Tapping retries this computer.
+    case offline
+
+    /// The marker is a single choice: a computer that does not answer is
+    /// Retry (the current one too, since the voice cannot reach it), else
+    /// the current computer holds the voice and the rest can take it.
+    public static func resolve(
+        computerID: String,
+        currentComputerID: String,
+        reachability: Reachability,
+        showsComputers: Bool
+    ) -> Self {
+        guard showsComputers else { return .hidden }
+        if case .offline = reachability { return .offline }
+        return computerID == currentComputerID ? .voice : .available
+    }
+}
+
 /// One paired computer as the several-computers UI shows it: the Talk to
 /// rows, the Agents page's sections, the iPad sidebar and Settings ▸
 /// Computers. Each comes from its computer's `ComputerModel`; the current

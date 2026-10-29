@@ -220,73 +220,62 @@ struct IPadSidebar: View {
             if sections.showsComputerHeaders {
                 computerHeader(computer.id, name: computer.name)
             }
-            ForEach(computer.spaces) { space in
-                Text(space.name.isEmpty ? "Other" : space.name)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 12)
-                    .padding(.bottom, 2)
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(space.agents) { agent in
-                    if remote {
-                        agentRow(agent, remote: true)
-                    } else {
-                        agentRow(agent)
-                            // Drag it beside the current pane, or out of the
-                            // app for a window of its own.
-                            .draggable(AgentWindowRoute(paneID: agent.paneID)) {
-                                Label(agent.alias, systemImage: "terminal")
-                                    .font(.body.weight(.semibold))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(Capsule().fill(Theme.card))
-                            }
+            if model.agentsModel.isComputerExpanded(computer.id) {
+                ForEach(computer.spaces) { space in
+                    Text(space.name.isEmpty ? "Other" : space.name)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 12)
+                        .padding(.bottom, 2)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(space.agents) { agent in
+                        if remote {
+                            agentRow(agent, remote: true)
+                        } else {
+                            agentRow(agent)
+                                // Drag it beside the current pane, or out of the
+                                // app for a window of its own.
+                                .draggable(AgentWindowRoute(paneID: agent.paneID)) {
+                                    Label(agent.alias, systemImage: "terminal")
+                                        .font(.body.weight(.semibold))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .background(Capsule().fill(Theme.card))
+                                }
+                        }
                     }
                 }
             }
         }
     }
 
-    /// A computer's row (several computers only): its name and status,
-    /// Talk to for another one, Retry for one that does not answer.
-    @ViewBuilder
+    /// A computer's row (several computers only), collapsed or expanded by
+    /// its name and moved or retried by its voice marker.
     private func computerHeader(_ id: String, name: String) -> some View {
         let snapshot = model.computerSnapshots.first { $0.id == id }
         let isCurrent = id == model.currentComputerID
-        let offline: Bool = { if case .offline = snapshot?.reachability { return true }; return false }()
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Label(name, systemImage: "desktopcomputer")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.ink)
-                Text(isCurrent ? "Talking here" : (snapshot?.summary() ?? ""))
-                    .font(.caption)
-                    .foregroundStyle(Theme.muted)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier("computerLabel.sidebar.\(id)")
-            Spacer(minLength: 4)
-            if !isCurrent {
-                Button(offline ? "Retry" : "Talk to") {
-                    if offline { model.session(id)?.retry() } else { model.talk(to: id) }
+        let marker = ComputerVoiceMarkerState.resolve(
+            computerID: id,
+            currentComputerID: model.currentComputerID,
+            reachability: snapshot?.reachability ?? .connecting,
+            showsComputers: model.showsComputerLabels
+        )
+        return ComputerSectionHeader(
+            id: id,
+            name: name,
+            detail: isCurrent ? nil : snapshot?.summary(),
+            marker: marker,
+            style: .sidebar,
+            isExpanded: model.agentsModel.isComputerExpanded(id),
+            toggleExpanded: {
+                withAnimation(Theme.ease) {
+                    model.agentsModel.toggleComputer(id)
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.ink)
-                .padding(.horizontal, 10)
-                .frame(minHeight: 30)
-                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-                .frame(minHeight: 44)
-                .contentShape(Capsule())
-                .buttonStyle(.plain)
-                .hoverEffect()
-                .accessibilityLabel(offline ? "Retry \(name)" : "Talk to \(name)")
-                .accessibilityIdentifier("computerLabel.sidebarTalkTo.\(id)")
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 16)
+            },
+            moveVoice: { model.talk(to: id) },
+            retry: { model.session(id)?.retry() }
+        )
     }
 
     private func agentRow(_ agent: Agent, remote: Bool = false) -> some View {

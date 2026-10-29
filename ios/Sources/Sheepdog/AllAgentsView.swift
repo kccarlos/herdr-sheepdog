@@ -145,21 +145,37 @@ struct AllAgentsView: View {
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                let others = model.otherSnapshots
-                if !others.isEmpty {
-                    ComputerSectionHeader(id: "current", name: model.currentComputerName, detail: "You're talking here", talkTo: nil)
-                }
-                columns(shown, computer: nil)
-                // Several computers: one section per other computer.
-                ForEach(others) { computer in
-                    let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
-                    ComputerSectionHeader(id: computer.id, name: computer.name, detail: offline ? nil : computer.summary(),
-                                          talkTo: offline ? nil : { model.talk(to: computer.id) })
-                        .padding(.top, 10)
-                    if offline {
-                        OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
-                    } else {
-                        columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
+                let sections = model.sectionSnapshots
+                if sections.isEmpty {
+                    columns(shown, computer: nil)
+                } else {
+                    ForEach(sections) { computer in
+                        let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                        let marker = marker(for: computer)
+                        ComputerSectionHeader(
+                            id: computer.id,
+                            name: computer.name,
+                            detail: offline ? nil : computer.summary(),
+                            marker: marker,
+                            isExpanded: model.agentsModel.isComputerExpanded(computer.id),
+                            toggleExpanded: {
+                                withAnimation(Theme.ease(reduceMotion: reduceMotion)) {
+                                    model.agentsModel.toggleComputer(computer.id)
+                                }
+                            },
+                            moveVoice: { model.talk(to: computer.id) },
+                            retry: { model.session(computer.id)?.retry() }
+                        )
+                        .padding(.top, computer.id == sections.first?.id ? 0 : 10)
+                        if model.agentsModel.isComputerExpanded(computer.id) {
+                            if computer.isCurrent {
+                                columns(shown, computer: nil)
+                            } else if offline {
+                                OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
+                            } else {
+                                columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
+                            }
+                        }
                     }
                 }
             }
@@ -167,6 +183,15 @@ struct AllAgentsView: View {
             .padding(.vertical, 14)
         }
         .accessibilityIdentifier("allAgents.grid")
+    }
+
+    private func marker(for computer: ComputerSnapshot) -> ComputerVoiceMarkerState {
+        ComputerVoiceMarkerState.resolve(
+            computerID: computer.id,
+            currentComputerID: model.currentComputerID,
+            reachability: computer.reachability,
+            showsComputers: model.showsComputerLabels
+        )
     }
 
     /// Two columns of independent heights (no row gaps), one at the

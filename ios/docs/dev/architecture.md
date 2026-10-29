@@ -554,9 +554,11 @@ store is `ComputerStore` ("Settings" below).
   ⌘K.
 - **Order.** Computers keep the store's order (pairing order unless the
   user reorders) on the Agents page, the iPad sidebar
-  (`SidebarSections(snapshots:…)`), the voice menu and Settings. Talk to
-  never moves a section; the current one is marked "You're talking here".
-  Every section header is leading-aligned (`ComputerSectionHeader`).
+  (`SidebarSections(snapshots:…)`), All agents, the voice menu and
+  Settings. Moving the voice never moves a section. Every section header
+  is leading-aligned (`ComputerSectionHeader`) and has a filled voice
+  marker, a hollow move marker or a dashed retry marker; tapping only the
+  name expands or collapses its list.
 - **Where they show** (several computers only): the voice menu's Talk to;
   a section per computer on the Agents page and All agents (another
   computer's cards have no window button; an offline computer is one
