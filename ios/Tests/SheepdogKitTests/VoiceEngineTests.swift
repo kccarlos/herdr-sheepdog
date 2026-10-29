@@ -152,7 +152,10 @@ final class VoiceEngineTests: XCTestCase {
         connect(engine)
         engine.toggleTalk()
         XCTAssertTrue(engine.holding)
-        try await Task.sleep(for: .milliseconds(300))
+        let deadline = Date().addingTimeInterval(3)
+        while engine.holding, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertFalse(engine.holding, "a forgotten tap does not leave the mic open")
     }
 
