@@ -85,7 +85,7 @@ struct SheepdogApp: App {
         }
 
         // iPad: an agent in a window of its own (Open in New Window, or a
-        // sidebar row dragged out). It shows the mini capsule.
+        // sidebar row dragged out). It has no capsule yet.
         WindowGroup("Agent", id: "agent", for: AgentWindowRoute.self) { $route in
             AgentWindowScene(route: route)
                 .environmentObject(model)

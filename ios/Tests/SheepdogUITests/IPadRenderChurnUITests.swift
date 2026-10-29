@@ -2,7 +2,7 @@ import XCTest
 
 /// The iPad's menus under a re-render storm (`RenderChurnUITests` has the
 /// iPhone's and the helpers): the sidebar's `+` and `⋯`, the capsule's and
-/// the mini capsule's voice menu, a pane's split and ⋯ menus. Skipped on
+/// the floating capsule's voice menu in portrait, a pane's split and ⋯ menus. Skipped on
 /// iPhone; ios.yml runs these on an iPad simulator.
 final class IPadRenderChurnUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -32,9 +32,10 @@ final class IPadRenderChurnUITests: XCTestCase {
     func testSidebarAndPaneMenusStayOpenWhileTheSessionRerenders() throws {
         let app = launchDemo()
         XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10))
+        // First: closing a menu taps the sidebar in landscape, which may open an agent, and a terminal has no capsule.
+        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "voice.menu"), item: app.buttons["voice.manageComputers"], probe: "voice")
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "toolbar.new"), item: app.buttons["new.agent"], probe: "new")
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "toolbar.more"), item: app.buttons["toolbar.settings"], probe: "more")
-        assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "voice.menu"), item: app.buttons["voice.manageComputers"], probe: "voice")
 
         // An agent in the detail: its split and ⋯ menus.
         tapWhenTappable(element(app, "sidebar.agent.claude-auth"), "claude-auth in the sidebar")
@@ -43,12 +44,12 @@ final class IPadRenderChurnUITests: XCTestCase {
         assertMenuStaysOpen(app, menu: app.buttons.matching(identifier: "agentScreen.menu"), item: app.buttons["agentScreen.menu.copy"], probe: "agent")
     }
 
-    /// Portrait: the mini capsule's voice menu.
-    func testMiniCapsuleMenuStaysOpenWhileTheSessionRerenders() throws {
+    /// Portrait, sidebar hidden: the floating capsule's voice menu.
+    func testPortraitCapsuleMenuStaysOpenWhileTheSessionRerenders() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = launchDemo()
-        let mini = app.buttons.matching(identifier: "mini.menu")
-        XCTAssertTrue(mini.firstMatch.waitForExistence(timeout: 10), "the mini capsule")
-        assertMenuStaysOpen(app, menu: mini, item: app.buttons["voice.manageComputers"], probe: "mini")
+        let menu = app.buttons.matching(identifier: "voice.menu")
+        XCTAssertTrue(menu.firstMatch.waitForExistence(timeout: 10), "the capsule")
+        assertMenuStaysOpen(app, menu: menu, item: app.buttons["voice.manageComputers"], probe: "voice")
     }
 }

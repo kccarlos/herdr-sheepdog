@@ -378,9 +378,9 @@ section 6.
     Sheets local to one screen (Changes, More keys, Add a computer inside
     Settings) stay `@State`, with ids from their content too
     (`PairingSheet.id`).
-  - every other window shows the **mini capsule** (`MiniCapsule`): a 30 pt
-    orb (Mute while listening, else the big orb's action) and the voice
-    menu.
+  - every other window's capsule is in the `elsewhere` mode ("In another
+    window"), whose **Use here** calls `SceneCoordinator.claimAudio` (the
+    window goes first in the owner order). There is no mini capsule.
   - `SessionViewModel.start()` runs once, whichever window appears first.
 - **Layouts** (`MainView.swift`). `MainView` picks the layout and wraps it
   in `SessionChrome` (the sheets, dialogs and lifecycle every layout
@@ -392,12 +392,12 @@ section 6.
   - `IPadSidebar` (390 pt): the title with `+` and `⋯`, Conversation, All
     agents with the waiting count, then the agents under their spaces
     (`SidebarSections` in Kit: spaces by name, agents by alias, running
-    only; no computer row with one computer), and the capsule at the foot.
-    Its keyboard button selects the Conversation and focuses its composer.
-    No agents: one line with the action that helps (New agent, Connect,
+    only; no computer row with one computer). No capsule: it floats over
+    the detail. No agents: one line with the action that helps (New agent, Connect,
     Pair, Retry).
-  - The detail (`SceneUI.detail`): the Conversation in a 720 pt column
-    with the open questions pinned above `IPadComposer`; All agents
+  - The detail (`SceneUI.detail`): the Conversation in a 720 pt column;
+    the open questions, the coach mark and the capsule are the floating
+    dock (below); All agents
     (`AllAgentsView`: `AgentCard`s in two independent columns, one at the
     accessibility sizes; `AgentFilter` All / Waiting / Working with a
     plain empty state and Show all; Expand all fills `expandedAgents` with
@@ -407,7 +407,22 @@ section 6.
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.
   - With the sidebar not beside the detail, the detail's header carries
-    Show sidebar and the `MiniCapsule`, so one capsule is on screen.
+    Show sidebar.
+  - **The floating dock** (`FloatingDock.swift`): the open questions, the
+    coach mark and the capsule, which the keyboard button morphs into
+    `CapsuleComposer` (`SceneUI.typing`). One view for both layouts:
+    `PhoneRootView` puts it in a bottom safe-area inset across the screen,
+    `IPadDetailView` in the detail's through `IPadDock`, which sizes and
+    places the capsule by `CapsuleFrame` (SheepdogKit: 366 pt, or the
+    content less 24 pt under 390 pt; centred in the window less the
+    sidebar when the sidebar lies over the detail in portrait; beside it
+    the detail's own bounds already exclude the sidebar). The offset
+    animates with `Theme.ease`, none under Reduce Motion. The dock shows
+    only on the Conversation and All agents (`IPadDetail.showsCapsule`;
+    the questions only on the Conversation, as on iPhone, where they sit on
+    the Agents cards): an agent's terminal has its own composer and key
+    bar, which a floating capsule must never cover, so, as on iPhone, a
+    terminal has no capsule (its voice controls are a later task).
 - **Two panes** (`AgentPanes.swift`): `IPadDetail.pair` puts two agents
   side by side in landscape and stacks them in portrait, each with its own
   question, keys and composer. `SceneUI` holds the rules: a sidebar row
@@ -423,7 +438,7 @@ section 6.
   project.yml). Over the detail a dashed drop target shows where it lands.
 - **Open in New Window** (pane ⋯, only with `supportsMultipleWindows`)
   opens the `agent` `WindowGroup` with that route: `AgentWindowScene`, the
-  pane alone with the mini capsule and ⋯ ▸ Close Window. It never
+  pane alone (no capsule yet) and ⋯ ▸ Close Window. It never
   registers with `SceneCoordinator`. While the demo is open it shows the
   demo's view model (`SceneCoordinator.demoModel`).
 - New agent, Spaces and Settings are form sheets on iPad
@@ -438,8 +453,10 @@ section 6.
 - **Pointer:** sidebar rows, the filters and the round and header buttons
   have hover effects; the pane divider highlights.
 - **Tests:** `IPadUITests` (offline demo, skipped on iPhone) covers the
-  sidebar and detail, portrait, All agents, two panes with drag and drop,
-  Open in New Window and the shortcuts. ios.yml runs only these on an iPad
+  sidebar and detail, the floating capsule (clear of the sidebar, centred
+  in portrait, gone from a terminal), All agents, two panes with drag and
+  drop, Open in New Window and the shortcuts; `IPadPortraitKeyboardUITests`
+  the chat's keyboard with the sidebar hidden. ios.yml runs only these on an iPad
   simulator, from the same build as the iPhone run.
 - **Opening a window** goes through one seam: `\.openAgentWindow`
   (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout

@@ -55,14 +55,18 @@ final class IPadUITests: XCTestCase {
     }
 
     /// Landscape: the sidebar with Conversation, All agents and the agents
-    /// by space, the capsule at its foot; the Conversation in the detail.
-    /// A sidebar row opens the agent's window in the detail.
+    /// by space; the Conversation in the detail with the capsule floating at
+    /// its foot, clear of the sidebar. A sidebar row opens the agent's
+    /// window in the detail.
     func testSidebarAndDetail() throws {
         let app = launchDemo()
         XCTAssertTrue(element(app, "sidebar.conversation").waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, "voice.capsule").exists, "the capsule sits at the sidebar's foot")
-        XCTAssertTrue(element(app, "type.field").exists, "the Conversation's composer")
-        XCTAssertFalse(element(app, "mini.capsule").exists, "one capsule on screen")
+        let capsule = element(app, "voice.capsule")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 10), "the capsule floats over the detail")
+        XCTAssertGreaterThanOrEqual(capsule.frame.minX, element(app, "sidebar.conversation").frame.maxX, "never over the sidebar")
+        // The element is the capsule's content inside its 7 pt side padding.
+        XCTAssertEqual(capsule.frame.width, 366 - 14, accuracy: 2, "366 pt wide")
+        XCTAssertFalse(element(app, "type.field").exists, "the composer is the capsule's keyboard button, not a field of its own")
         let agent = element(app, "sidebar.agent.claude-auth")
         XCTAssertTrue(agent.waitForExistence(timeout: 10))
         sleep(2)
@@ -131,26 +135,33 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(element(app, "allAgents.filter.all").isSelected, "the All filter is on")
     }
 
-    /// Portrait: the sidebar hides, and the detail's header carries Show
-    /// sidebar and the mini capsule.
+    /// Portrait: the sidebar hides, the detail's header carries Show
+    /// sidebar and the capsule floats at the window's centre; it moves to
+    /// the content's centre when the sidebar slides over.
     func testPortraitHidesTheSidebar() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = launchDemo()
-        let mini = element(app, "mini.capsule")
-        XCTAssertTrue(mini.waitForExistence(timeout: 10), "the mini capsule stands in for the sidebar's")
+        let capsule = element(app, "voice.capsule")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 10), "the capsule floats over the detail")
         XCTAssertTrue(element(app, "sidebar.show").exists)
+        XCTAssertEqual(capsule.frame.midX, app.windows.firstMatch.frame.midX, accuracy: 2, "centred with the sidebar hidden")
         sleep(2)
         shot("portrait-conversation")
         element(app, "sidebar.show").tap()
         let agent = element(app, "sidebar.agent.claude-migration")
         XCTAssertTrue(agent.waitForExistence(timeout: 5))
         sleep(1)
+        let sidebarEdge = element(app, "sidebar.conversation").frame.maxX
+        XCTAssertGreaterThanOrEqual(capsule.frame.minX, sidebarEdge, "the capsule moved clear of the sidebar")
         shot("portrait-sidebar")
         agent.tap()
         XCTAssertTrue(element(app, "agentScreen.terminal").waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, "mini.capsule").exists)
-        sleep(2)
         shot("portrait-agent")
+        // Nothing floats over the terminal's key bar: its keys take the touch.
+        let keyboardKey = app.buttons.matching(identifier: "agentScreen.key.typing").firstMatch
+        XCTAssertTrue(keyboardKey.waitForExistence(timeout: 10), "the key bar")
+        XCTAssertTrue(keyboardKey.isHittable, "a terminal's key bar is never covered")
+        sleep(2)
     }
 
     /// Two agents side by side: the split menu puts one beside the other,
@@ -209,9 +220,8 @@ final class IPadUITests: XCTestCase {
         shot("split-portrait")
     }
 
-    /// ⋯ ▸ Open in New Window gives the agent a window of its own, with the
-    /// mini capsule. The demo is paused: this test is about the windows, and
-    /// a second scene whose terminal streams beside the first keeps the main
+    /// ⋯ ▸ Open in New Window gives the agent a window of its own. The demo
+    /// is paused: this test is about the windows, and a second scene whose terminal streams beside the first keeps the main
     /// thread busy enough on a CI Mac for an accessibility snapshot to time
     /// out ("Failed to get matching snapshots"), twice in a row on one run.
     func testOpenInNewWindow() throws {
@@ -219,9 +229,12 @@ final class IPadUITests: XCTestCase {
         let auth = element(app, "sidebar.agent.claude-auth")
         tapWhenTappable(auth, "claude-auth in the sidebar")
         XCTAssertTrue(element(app, "agentScreen.menu").waitForExistence(timeout: 10))
-        let capsule = element(app, "mini.capsule")
-        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.newWindow", until: capsule)
-        XCTAssertTrue(capsule.waitForExistence(timeout: 10), "the new window has the mini capsule")
+        // Each window has its own ⋯ menu: two once the new window is open.
+        let menus = app.buttons.matching(identifier: "agentScreen.menu")
+        tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.newWindow")
+        let deadline = Date().addingTimeInterval(15)
+        while menus.count < 2, Date() < deadline { usleep(300_000) }
+        XCTAssertEqual(menus.count, 2, "the agent has a window of its own")
         sleep(2)
         shot("new-window")
         // Close it, so the next launch does not restore it.
@@ -243,6 +256,8 @@ final class IPadUITests: XCTestCase {
         let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'agentScreen.header' AND label BEGINSWITH 'claude-auth'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 10), "⌘1 works from the terminal too")
 
+        // The capsule floats over the Conversation, not over a terminal.
+        tapWhenTappable(element(app, "sidebar.conversation"), "Conversation in the sidebar")
         // Any status line that says so: the real main view stays under the
         // demo's cover with its own (unmuted) one, and `firstMatch` was
         // sometimes that one. A key press sent while the window was still

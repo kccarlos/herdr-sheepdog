@@ -9,6 +9,18 @@ enum IPadDetail: Hashable {
     /// Two agents side by side (stacked in portrait).
     case pair(String, String)
 
+    /// Whether the floating voice capsule is over this detail. An agent's
+    /// terminal has its own composer and key bar at the foot, and the
+    /// capsule must never cover them: as on iPhone, where the terminal is a
+    /// screen of its own without one (a terminal's voice controls are a
+    /// later task).
+    var showsCapsule: Bool {
+        switch self {
+        case .conversation, .allAgents: return true
+        case .agent, .pair: return false
+        }
+    }
+
     /// The agents on screen, in pane order.
     var panes: [String] {
         switch self {
@@ -21,10 +33,10 @@ enum IPadDetail: Hashable {
 
 /// The iPad layout at regular width (docs/dev/design/app-redesign.md
 /// section 6): a `NavigationSplitView` with the sidebar (Conversation, All
-/// agents, the agents by space, the capsule at the foot) and the detail
-/// (an agent's window, the Conversation in a 720 pt column, or All agents).
-/// In portrait the sidebar hides and the detail's header carries the mini
-/// capsule.
+/// agents, the agents by space) and the detail (an agent's window, the
+/// Conversation in a 720 pt column, or All agents). The voice capsule
+/// floats at the foot of the detail (`IPadDock`), centred in what the
+/// sidebar leaves, as on iPhone.
 struct IPadRootView: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(SceneUI.self) private var ui
@@ -90,8 +102,9 @@ private struct SplitStyle: ViewModifier {
 // MARK: - Sidebar
 
 /// Canvas "IPadSidebar": the title with `+` and `⋯`, Conversation and All
-/// agents, then the agents under their spaces, and the voice capsule at
-/// the foot. With one computer there is no computer row.
+/// agents, then the agents under their spaces. With one computer there is
+/// no computer row. The voice capsule is not here: it floats over the
+/// detail.
 struct IPadSidebar: View {
     let portrait: Bool
     @EnvironmentObject private var model: SessionViewModel
@@ -126,7 +139,6 @@ struct IPadSidebar: View {
                 .padding(.vertical, 4)
             }
             .scrollBounceBehavior(.basedOnSize)
-            foot
         }
         // The sidebar is a 390 pt column: it grows up to the largest
         // non-accessibility size, as the iPhone's chrome does; the detail
@@ -400,26 +412,6 @@ struct IPadSidebar: View {
         .accessibilityIdentifier("sidebar.empty")
     }
 
-    // MARK: Foot
-
-    @ViewBuilder
-    private var foot: some View {
-        Group {
-            if scenes.isOwner(sceneID) {
-                SessionCapsule(menus: menus, onType: {
-                    select(.conversation)
-                    ui.focusComposer += 1
-                })
-            } else {
-                MiniCapsule(menus: menus)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 14)
-    }
-
     private func select(_ detail: IPadDetail) {
         withAnimation(Theme.ease) {
             ui.detail = detail
@@ -434,13 +426,16 @@ struct IPadSidebar: View {
 
 struct IPadDetailView: View {
     /// The sidebar is not beside the detail: the header shows Show
-    /// sidebar and the mini capsule.
+    /// sidebar.
     let sidebarHidden: Bool
     let portrait: Bool
     @EnvironmentObject private var model: SessionViewModel
     @Environment(SceneUI.self) private var ui
     private let scenes = SceneCoordinator.shared
     @Environment(\.sceneID) private var sceneID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The detail's height above the keyboard (`FloatingQuestions.area`).
+    @State private var questionArea: CGFloat = 0
 
     private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
 
@@ -460,11 +455,27 @@ struct IPadDetailView: View {
             }
         }
         .background(Theme.surface)
+        // The question, the coach mark and the capsule float over the
+        // detail, which scrolls under them.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if ui.detail.showsCapsule {
+                IPadDock(
+                    menus: menus,
+                    questionArea: questionArea,
+                    showsQuestions: ui.detail == .conversation,
+                    // In portrait the sidebar slides over the detail
+                    // instead of beside it.
+                    sidebarOverlays: portrait && ui.columns != .detailOnly
+                )
+            }
+        }
+        // The detail above the keyboard, outside the floating stack: what
+        // the questions decide inline or compact against.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }
+        .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
     }
 
-    /// Show sidebar and the mini capsule, when the sidebar is not beside
-    /// the detail. Only one capsule is ever on screen: when the sidebar's
-    /// own is hidden, this one stands in.
+    /// Show sidebar, when the sidebar is not beside the detail.
     private var leading: AnyView? {
         guard sidebarHidden else { return nil }
         return AnyView(HStack(spacing: 6) {
@@ -480,7 +491,6 @@ struct IPadDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Show sidebar")
             .accessibilityIdentifier("sidebar.show")
-            MiniCapsule(menus: menus)
         })
     }
 }
@@ -522,20 +532,14 @@ struct DetailHeader<Leading: View, Trailing: View>: View {
 }
 
 /// Canvas "iPad — Conversation": the conversation in a 720 pt centred
-/// column, the open questions pinned above a composer.
+/// column. The open questions and the composer are the floating dock's
+/// (`IPadDock`), as on iPhone.
 struct IPadConversationDetail: View {
     let leading: AnyView?
     @EnvironmentObject private var model: SessionViewModel
     @Environment(SceneUI.self) private var ui
-    private let scenes = SceneCoordinator.shared
-    @Environment(\.sceneID) private var sceneID
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The detail's height above the keyboard (`FloatingQuestions.area`).
-    @State private var questionArea: CGFloat = 0
 
     static let column: CGFloat = 720
-
-    private var menus: SessionMenus { SessionMenus(model: model, ui: ui, scenes: scenes, sceneID: sceneID) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -563,109 +567,8 @@ struct IPadConversationDetail: View {
             ConversationPane()
                 .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
-                .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
         }
-        // The detail above the keyboard, outside the floating stack: what
-        // the questions decide inline or compact against.
-        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }
-        .animation(Theme.ease(reduceMotion: reduceMotion), value: model.floatingQuestions.map(\.pending.id))
         .animation(Theme.ease, value: model.notices.banner)
-    }
-
-    private var bottom: some View {
-        VStack(spacing: 10) {
-            let cards = model.floatingQuestions
-            if !cards.isEmpty {
-                FloatingQuestions(
-                    cards: cards,
-                    voiceQuestionID: model.approval?.pending.id,
-                    time: { question in
-                        model.flock.all.first { $0.paneID == question.paneID }?.timeInState(at: DemoClock.now())
-                    },
-                    area: questionArea,
-                    remote: { model.remoteQuestion($0) },
-                    talkTo: { model.talk(to: $0) }
-                ) { id, index in
-                    model.answer(question: id, option: index)
-                }
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-            }
-            IPadComposer()
-        }
-        .frame(maxWidth: Self.column)
-        .padding(.horizontal, 24)
-        .padding(.top, 10)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity)
-    }
-}
-
-/// The Conversation's composer on iPad: a field and the ink send button.
-/// The capsule's keyboard button focuses it.
-struct IPadComposer: View {
-    @EnvironmentObject private var model: SessionViewModel
-    @Environment(SceneUI.self) private var ui
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    private var canSend: Bool { model.isConfigured && !model.conversationModel.sendingTyped && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let error = model.conversationModel.typedError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Theme.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("type.error")
-            }
-            HStack(spacing: 8) {
-                TextField("Type to \(model.voiceName), or just talk", text: $text, axis: .vertical)
-                    .font(.body)
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1 ... 5)
-                    .submitLabel(.send)
-                    .focused($focused)
-                    .onSubmit(submit)
-                    .disabled(!model.isConfigured)
-                    .accessibilityLabel("Message to \(model.voiceName)")
-                    .accessibilityIdentifier("type.field")
-                Button(action: submit) {
-                    ZStack {
-                        Circle().fill(canSend ? Theme.ink : Theme.line)
-                        if model.conversationModel.sendingTyped {
-                            ProgressView().tint(Theme.surface)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(Theme.surface)
-                        }
-                    }
-                    .frame(width: 36, height: 36)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .accessibilityLabel("Send")
-                .accessibilityIdentifier("type.send")
-            }
-            .padding(.leading, 18)
-            .padding(.trailing, 4)
-            .padding(.vertical, 2)
-            .frame(minHeight: 48)
-            .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.card))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
-        }
-        .onChange(of: ui.focusComposer) { _, _ in focused = true }
-    }
-
-    private func submit() {
-        guard canSend else { return }
-        let sent = text
-        Task {
-            if await model.sendTyped(sent) { text = "" }
-        }
     }
 }
 
