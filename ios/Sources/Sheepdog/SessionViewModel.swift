@@ -1680,6 +1680,7 @@ final class SessionViewModel: ObservableObject {
         let demo = DebugLaunch.demoPaused ? DemoDaemon(clock: { start }) : DemoDaemon(clock: DemoClock.now)
         demo.update = DebugLaunch.demoUpdate
         demo.recording = DebugLaunch.demoRecording
+        demo.longQuestion = DebugLaunch.demoLongQuestion
         #else
         let demo = DemoDaemon()
         #endif

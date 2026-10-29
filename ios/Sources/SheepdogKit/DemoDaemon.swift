@@ -56,6 +56,12 @@ public final class DemoDaemon: @unchecked Sendable {
         world = DemoWorld(now: clock())
     }
 
+    /// `DemoWorld.longQuestion`; set before `start()`.
+    public var longQuestion: Bool {
+        get { lock.withLock { world.longQuestion } }
+        set { lock.withLock { world.longQuestion = newValue } }
+    }
+
     /// A `URLSession` whose every request is answered by this daemon.
     public static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral

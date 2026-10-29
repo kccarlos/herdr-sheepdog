@@ -955,7 +955,13 @@ answer a question by tap. All three need a paired device under "Auth".
   short line ("Fresh start. What's next?").
 - **Approve by tap.** `GET /api/state`'s `pending_action` (and the
   `pending.created` event) carries `agent`, `summary`, `question`,
-  `command` and `options: [{index, label, keys, default}]`. It is the
+  `command` and `options: [{index, label, keys, default, description?,
+  recommended?, title?}]`. `label` is the option as the screen shows it;
+  `description` is the text the prompt draws under it (Claude Code's
+  AskUserQuestion), never part of `label`; `recommended` is true when the
+  label ends in the agent's recommendation marker ("(Recommended)",
+  "(推荐)"), and `title` is then the label without it. The three are
+  optional additions: an older client shows `label` alone. It is the
   question the voice is on. `questions` lists **every** open question
   in the same shape, oldest first: one per blocked agent whose prompt
   was read, `pending_action`'s among them, so each blocked agent gets

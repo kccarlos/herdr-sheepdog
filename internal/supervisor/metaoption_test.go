@@ -49,3 +49,28 @@ func TestMetaOptionReachesTheBrainFlagged(t *testing.T) {
 		t.Error("a real answer is flagged")
 	}
 }
+
+// The phone card gets each option's description and the agent's
+// recommendation as their own fields; the label stays the screen's, so
+// the voice and the roster read what they read before.
+func TestPendingOptionsCarryDescriptions(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p2", "docs", "claude", herdr.StateWorking)
+	h.block("w5:p2", "claude-askuserquestion-zh.screen.txt")
+	p, ok := h.pending()
+	if !ok {
+		t.Fatal("no pending prompt")
+	}
+	opts := PendingOptions(p)
+	if len(opts) != 3 {
+		t.Fatalf("options = %+v", opts)
+	}
+	first := opts[0]
+	if first.Label != "点一下开始，再点发送 (推荐)" || first.Title != "点一下开始，再点发送" || !first.Recommended ||
+		first.Description != "按住说话模式下，锁屏按钮改成：点一下开始说，再点一下发送。" {
+		t.Errorf("first option = %+v", first)
+	}
+	if opts[1].Recommended || opts[1].Title != "" || opts[1].Description == "" {
+		t.Errorf("second option = %+v", opts[1])
+	}
+}

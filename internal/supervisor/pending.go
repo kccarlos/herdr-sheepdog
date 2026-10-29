@@ -39,7 +39,8 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		CreatedAt: now,
 	}
 	for i, o := range prompt.Options {
-		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta})
+		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta,
+			Description: o.Description, Recommended: o.Recommended, Title: o.Title})
 	}
 	// Remembered so the post-answer poll and the reconciler can tell a
 	// new prompt from this one (docs/dev/roles.md "blocked -> blocked is a

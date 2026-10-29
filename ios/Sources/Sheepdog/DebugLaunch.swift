@@ -136,6 +136,10 @@ enum DebugLaunch {
     /// `-sheepdogDemoSecondQuestion`: a second agent waits too, so two
     /// questions float at once (screenshots; its answer goes nowhere).
     static var demoSecondQuestion: Bool { arguments.contains("-sheepdogDemoSecondQuestion") }
+    /// `-sheepdogDemoLongQuestion`: codex-payments asks a three-option
+    /// question with descriptions instead of its command approval
+    /// (`DemoWorld.longQuestion`), which goes to the compact bar on a phone.
+    static var demoLongQuestion: Bool { arguments.contains("-sheepdogDemoLongQuestion") }
     static let secondQuestionAgent = Agent(
         paneID: "demo-blog", alias: "blog", kind: "claude", state: .blocked, stateSince: Date().addingTimeInterval(-60)
     )

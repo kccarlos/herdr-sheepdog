@@ -62,6 +62,7 @@ shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2
+shard-4  SheepdogUITests/QuestionPresentationUITests
 shard-4  SheepdogUITests/RedesignShotsUITests          # 1
 shard-4  SheepdogUITests/SuggestedRepliesUITests
 shard-4  SheepdogUITests/LaunchReviewScreenshotsUITests

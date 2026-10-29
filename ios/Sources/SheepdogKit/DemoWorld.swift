@@ -50,6 +50,10 @@ public struct DemoWorld: Sendable {
     private var steps: [(at: TimeInterval, step: Step)]
     private var pendingCount = 0
     private var startedCount = 0
+    /// codex-payments asks a long multiple-choice question instead of its
+    /// command approval (`-sheepdogDemoLongQuestion`, for the compact
+    /// question bar's tests and screenshots).
+    public var longQuestion = false
 
     enum Step: Sendable {
         case finishAuth, askPayments, failMigration, finishDocs, finishPayments
@@ -137,7 +141,7 @@ public struct DemoWorld: Sendable {
             say("claude-migration failed: the column users.plan already exists. Nothing was changed.", urgency: "interrupt")
         case .askPayments:
             pendingCount += 1
-            let action = PendingAction(
+            let action = longQuestion ? longAction : PendingAction(
                 id: "demo-ap-\(pendingCount)", paneID: Self.paymentsPane, kind: "answer_prompt",
                 spokenSummary: "codex-payments asks to run npm install p-retry.",
                 question: "Do you want to run this command?",
@@ -158,6 +162,30 @@ public struct DemoWorld: Sendable {
             log(source: "supervisor", type: "pending.created", pane: Self.paymentsPane, payload: Self.json(action))
             say(Self.askLine, urgency: "interrupt")
         }
+    }
+
+    /// codex-payments' question when `longQuestion` is set: an
+    /// AskUserQuestion-style choice, three options each with a description
+    /// and the first recommended, the shape that does not fit inline on a
+    /// phone. Option 1 approves, like the command approval.
+    private var longAction: PendingAction {
+        PendingAction(
+            id: "demo-ap-\(pendingCount)", paneID: Self.paymentsPane, kind: "answer_prompt",
+            spokenSummary: "codex-payments asks how the payment webhook should retry.",
+            question: "How should the payment webhook retry when the provider times out?",
+            options: [
+                PendingOption(index: 1, label: "Retry with backoff (Recommended)", keys: ["1"], isDefault: true,
+                              detail: "Install p-retry and wrap the handler in three retries with exponential backoff, so a slow provider gets time to recover before the order fails.",
+                              isRecommended: true, title: "Retry with backoff"),
+                PendingOption(index: 2, label: "Queue and retry later", keys: ["2"],
+                              detail: "Put failed webhooks on the existing job queue and retry them every five minutes for an hour; needs a migration for the queue table."),
+                PendingOption(index: 3, label: "Fail fast and alert", keys: ["3"],
+                              detail: "Do not retry: return an error at once and send an alert, so a person decides what happens to the order."),
+            ],
+            agent: "codex-payments",
+            summary: "codex-payments asks how the payment webhook should retry when the provider times out: with backoff in the handler, through the job queue, or not at all, with an alert so a person decides.",
+            command: nil
+        )
     }
 
     // MARK: - The user

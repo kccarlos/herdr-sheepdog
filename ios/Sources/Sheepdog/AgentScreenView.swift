@@ -165,6 +165,8 @@ private struct AgentWindowContent: View, Equatable {
     @State private var action: AgentWindowAction?
     @State private var confirmTakeover = false
     @State private var showChanges = false
+    /// The window's height above the keyboard (`FloatingQuestions.area`).
+    @State private var questionArea: CGFloat = 0
     @FocusState private var promptFocused: Bool
 
     init(agent: Agent, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel, inputs: AgentWindowInputs) {
@@ -228,13 +230,15 @@ private struct AgentWindowContent: View, Equatable {
             }
             terminal
             if let approval {
-                FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID) { id, index in model.answer(question: id, option: index) }
+                FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID, area: questionArea) { id, index in model.answer(question: id, option: index) }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .id(approval.pending.id)
             }
             controls
         }
+        // The whole window, which the card's own size cannot change.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }
         .background(background.ignoresSafeArea())
         .animation(Theme.ease, value: state.notice)
         .onAppear {

@@ -278,6 +278,14 @@ type Option struct {
 	// stays in the option set the rail accepts, but the phone card, the
 	// push buttons and the yes/no and by-number mapping never offer it.
 	Meta bool `json:"meta,omitempty"`
+	// Description is the text the prompt draws under the label
+	// (herdr.Option.Description); the phone card shows it, nothing reads
+	// it aloud.
+	Description string `json:"description,omitempty"`
+	// Recommended and Title: the label ends in the agent's recommendation
+	// marker, and the label without it (herdr.Option).
+	Recommended bool   `json:"recommended,omitempty"`
+	Title       string `json:"title,omitempty"`
 }
 
 // Note is one thing the user asked to be remembered (the orchestrator's note

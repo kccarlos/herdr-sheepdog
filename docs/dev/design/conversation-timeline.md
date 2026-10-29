@@ -38,6 +38,7 @@ resume".
 12. [The visual system](#12-the-visual-system)
 13. [Phase 3: what was built, and where it differs](#13-phase-3-what-was-built-and-where-it-differs)
 14. [Suggested replies are tappable](#14-suggested-replies-are-tappable)
+15. [When a question goes compact](#15-when-a-question-goes-compact)
 
 ## 1. How the timeline is built today
 
@@ -665,8 +666,8 @@ the kinds apart and colour confirms. One place per concern:
   alone: a declined answer is neutral (`LedgerLook.declined`); "Catch me up"
   shows "Asking…" until the voice answers or 20 s pass
   (`ConversationTimeline.voiceAnswered`); the floating question collapses to
-  "Codex asked" and **Answer** from the third accessibility size
-  (`FloatingQuestions.collapsed`); day headings are pinned section headers.
+  "Codex asked" and **Answer** from the third accessibility size (now one
+  case of the rule in section 15); day headings are pinned section headers.
 - **Differences from the mockups.** "Sheepdog wrote" is used for answers the
   text router gave (`via: text_router`); the "Typed" caption exists for items
   the history marks typed. A row's VoiceOver label is its visible words
@@ -770,3 +771,106 @@ nothing happened. Now they are buttons.
   at every text size, and the pills stack when they do not fit side by
   side. A stale option is static text ("Suggested: …"). State changes use
   the Reduce Motion easing.
+
+## 15. When a question goes compact
+
+An agent's multiple-choice question with three long options covered most of
+a phone screen. The card had a height cap, so its question was cut off at the
+top. Each option was a capsule with its label and description run together.
+The recommended option was filled with amber, so it looked already chosen.
+
+**The fix** has two parts.
+
+- **The daemon.** The parser (`internal/herdr/prompt.go`, `parseOptions`)
+  used to treat a line under an option as a description only when it started
+  with a capital letter. Chinese has no capitals, so a Chinese description
+  was joined to its label, and an English one was dropped. The parser now
+  tells a wrapped label from a description by the pane's width: a line is a
+  wrap only when its first word could not have fitted on the line above.
+  The description reaches the app as its own field. "(Recommended)" or
+  "(推荐)" at the end of a label becomes `recommended`, with `title`
+  holding the label without it. All three fields are additive
+  ([ws-contract.md](../ws-contract.md), "Approve by tap"). `label` is
+  unchanged, so the voice and the orchestrator read what they read before.
+- **The card.** Each option is a full-width row: the label in semibold, a
+  small "Recommended" tag after it, and the description below in smaller,
+  muted text. No option is filled, so all look the same until one is tapped.
+  The question starts at its first word and shows at most three lines, then
+  a fade and **More**.
+
+**The rule.** The floating questions are either inline (the cards
+themselves) or compact (one bar, "codex asked · Answer", which opens every
+card in full in a scrolling sheet). One pure function decides:
+`QuestionPresentation.decide` in SheepdogKit, unit-tested as a table.
+
+1. **Accessibility 3 and larger: compact.** Even a short card leaves little
+   of the conversation at those sizes, and the bar is the larger target.
+   This was PR #468's rule; it is now one case of this function.
+2. **Held: no change.** Nothing changes while the sheet is open or an answer
+   is in flight or has just landed, so nothing moves under the user's
+   finger. The sheet is attached to the container, not to the bar, so a
+   change can never dismiss it.
+3. **Not measured yet: no change.** Until both sizes are known, the current
+   presentation stays (inline on first appearance).
+4. **Otherwise: inline when the cards fit the budget.** The cards' natural
+   height is their sum plus the gaps between them. The budget is
+   `budgetShare` (0.55) of the area.
+   - Coming back from compact, the cards must fit `returnShare` (0.85) of
+     the budget. This hysteresis stops a size near the line, such as the
+     keyboard or a rotation, from flipping the screen back and forth.
+
+**What is measured.** Nothing is counted in characters. Each card is laid
+out off screen, at the current width and text size and with its question
+cut to three lines, whatever is showing. That copy is hidden from VoiceOver,
+from taps and from UI tests. "More", an expanded command, a spinner or an
+answer therefore never change the measured height.
+
+The area is measured by the host on its root view, outside the floating
+stack: the phone's screen, the iPad's conversation column, or the agent
+window. It is the safe area above the keyboard. The cards' own size cannot
+feed back into it, and it shrinks when the keyboard is up.
+
+**Why 0.55.** It is about the old cap, half the screen, so every routine
+approval that floated before still floats and stays one tap away. The rest
+of the safe area keeps the capsule and the latest dialogue in view.
+
+A first try at 0.4 sent Codex's real three-option command approval to the
+bar on an iPhone. That is the most common prompt, so it would have cost an
+extra tap every time. `QuestionsUITests.testCommandApprovalFloatsInline`
+now guards it.
+
+Measured on an iPhone 18 Pro in portrait and an iPad Air 11-inch in
+portrait, at the default text size:
+
+- **Inline:** a yes/no approval, and Codex's three-option command approval
+  (testdata/herdr/codex-approval-prompt.screen.txt), whose middle option
+  wraps. It measures 332 pt on the iPhone, against a budget of about 428 pt
+  in a safe area of about 778 pt; 0.4 would have given about 311 pt.
+- **Compact on a phone:** a question whose three options carry
+  descriptions.
+- **iPad:** the same described question fits in the taller column and stays
+  inline. Codex's approval measures 291 pt in a 1180 pt window there.
+
+**The cases.**
+
+| Case | Outcome |
+| --- | --- |
+| Number of options, long descriptions | Each adds its measured height. Long ones go compact on a phone. |
+| Free-text question (no options) | Measures small, stays inline. No special case. |
+| Several agents asking at once | The stack must fit as a whole, else the bar says "2 questions" and the sheet lists them in `QuestionOrder`. |
+| Keyboard up | The area shrinks. A yes/no card can stay, a command approval goes compact while typing, and it comes back when the keyboard goes. |
+| Phone in landscape | The area is small, so cards are compact. |
+| iPad, including split view | The column's own width and height are measured. A narrow split behaves like a phone. |
+| Rotation, a Dynamic Type change, a second question | Each is a new input. The hysteresis and the held rule keep it from flip-flopping. |
+
+**What stays.**
+
+- The amber pointer row in the timeline stays in both presentations, and
+  the bar never hides that a question is waiting.
+- An answer from the sheet goes through the same `answer` path (the
+  ActionRunner and its idempotency) as a card. Nothing auto-answers.
+- VoiceOver reads the bar as "codex asked: first line of the question.
+  Answer."
+- Each question is announced once, however often the presentation changes.
+- The bar and the rows are at least 44 pt tall.
+- Reduce Motion turns the movement into a fade.
