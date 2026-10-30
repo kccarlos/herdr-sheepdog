@@ -173,9 +173,11 @@ stream show it and the phone renders the desktop exchange. The phone's
 timeline is checked against a `dog`/`typed` item (a fixture in the iOS tests;
 no iOS code change expected).
 
-**3. `GET /events?kinds=conversation,state`.** A kind filter so the panel's
-stream carries only what it shows. Extends `parseFilter` (`sse.go:84`); no
-filter keeps today's behaviour. (`GET /api/events` is a JSON tail, not SSE.)
+**3. `GET /events?kinds=<type-prefix,...>`.** A kind filter so the panel's
+stream carries only what it shows. A kind is the first dotted component of
+the event `type` (`pending.created` is `pending`, `voice.push` is `voice`);
+an unknown kind is 400. Extends `parseFilter` (`sse.go:84`); no filter keeps
+today's behaviour. (`GET /api/events` is a JSON tail, not SSE.)
 
 **4. `GET /api/state` `voice.client`.** `{name, platform, since}` of the
 `/ws` holder, from `client-ready`'s `client` field and the hub. Lets the
@@ -361,8 +363,9 @@ and classifier, state store; no herdr imports), `ui/` (views), `voice.js`
   which holds the pinned TLS and ticket for the chosen computer; nothing else
   changes.
 - **SSE reader.** `fetch` is buffered (8 MiB, 30 s), so SSE is hand-written
-  over `net.connect`: send `GET /events?kinds=conversation,state&since=ID`,
-  **dechunk** the chunked body (verified: hex-length frames), parse `id:`,
+  over `net.connect`: send `GET /events?kinds=<prefix,...>&since=ID` with the
+  event type prefixes it shows, **dechunk** the chunked body (verified:
+  hex-length frames), parse `id:`,
   `event:`, `data:`, and take the `: keepalive` comment (every 15 s) as the
   liveness signal. No frame for 40 s: reconnect with backoff (1 s doubling to
   15 s) and `Last-Event-ID`. The parser mirrors Kit's `SSEParser` and uses the

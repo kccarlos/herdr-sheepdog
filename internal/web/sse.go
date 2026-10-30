@@ -11,14 +11,28 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 )
 
-// eventFilter is the ?source= / ?pane= / ?type= selection of /events.
+// eventFilter is the ?source= / ?pane= / ?type= / ?kinds= selection of
+// /events.
 type eventFilter struct {
 	sources map[string]bool
 	pane    string
 	typ     string // prefix
+	kinds   map[string]bool
 }
 
-func parseFilter(r *http.Request) eventFilter {
+// eventKinds are the first dotted components of event types the daemon has
+// emitted. Keep this list beside the event type catalog in
+// docs/dev/architecture.md when adding a family.
+var eventKinds = map[string]bool{
+	"brain": true, "card": true, "cli": true, "context": true,
+	"conversation": true, "daemon": true, "eventlog": true, "events": true,
+	"herdr": true, "investigation": true, "note": true, "observe": true,
+	"pending": true, "promise": true, "prompts": true, "push": true,
+	"question": true, "supervisor": true, "turn": true, "user": true,
+	"voice": true, "web": true, "worker": true,
+}
+
+func parseFilter(r *http.Request) (eventFilter, error) {
 	f := eventFilter{pane: r.URL.Query().Get("pane"), typ: r.URL.Query().Get("type")}
 	if src := r.URL.Query().Get("source"); src != "" {
 		f.sources = map[string]bool{}
@@ -28,7 +42,18 @@ func parseFilter(r *http.Request) eventFilter {
 			}
 		}
 	}
-	return f
+	if kinds := r.URL.Query().Get("kinds"); kinds != "" {
+		f.kinds = map[string]bool{}
+		for _, kind := range strings.Split(kinds, ",") {
+			if kind = strings.TrimSpace(kind); kind != "" {
+				if !eventKinds[kind] {
+					return eventFilter{}, fmt.Errorf("unknown event kind %q", kind)
+				}
+				f.kinds[kind] = true
+			}
+		}
+	}
+	return f, nil
 }
 
 func (f eventFilter) match(ev eventlog.Event) bool {
@@ -40,6 +65,12 @@ func (f eventFilter) match(ev eventlog.Event) bool {
 	}
 	if f.typ != "" && !strings.HasPrefix(ev.Type, f.typ) {
 		return false
+	}
+	if f.kinds != nil {
+		kind, _, _ := strings.Cut(ev.Type, ".")
+		if !f.kinds[kind] {
+			return false
+		}
 	}
 	return true
 }
@@ -81,7 +112,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-	filter := parseFilter(r)
+	filter, err := parseFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	after, n := replayFrom(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -185,7 +220,11 @@ func (s *Server) handleEventsTail(w http.ResponseWriter, r *http.Request) {
 	if n <= 0 {
 		n = 100
 	}
-	filter := parseFilter(r)
+	filter, err := parseFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	out := make([]eventlog.Event, 0, n)
 	for _, ev := range s.deps.Log.Tail(0) {
 		if filter.match(ev) {

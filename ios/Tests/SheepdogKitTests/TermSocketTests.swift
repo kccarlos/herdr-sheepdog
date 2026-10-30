@@ -269,6 +269,7 @@ final class TermSocketTests: XCTestCase {
         XCTAssertEqual(rig.socket.state, .idle, "no reconnect after the user closed it")
     }
 
+#if os(iOS)
     /// Recorded herdr frames, wrapped as the daemon would send them, come out
     /// of the socket into a grid that matches herdr's own text.
     func testRecordedFramesThroughTheSocketDrawHerdrsScreen() throws {
@@ -283,6 +284,7 @@ final class TermSocketTests: XCTestCase {
         }
         XCTAssertEqual(grid.snapshotText(), try TerminalFixture.visible("width-narrow").joined(separator: "\n").trimmingCharacters(in: .newlines))
     }
+#endif
 
     /// The real URLSession transport against a local WebSocket server: the
     /// hello goes out before the server says anything, and term-ready makes

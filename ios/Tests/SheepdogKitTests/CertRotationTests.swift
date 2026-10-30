@@ -57,7 +57,10 @@ final class CertRotationTests: XCTestCase {
         XCTAssertNil(PinnedTrustDelegate.matchedPin(leaf: "", pins: [""]))
     }
 
+#if os(iOS)
     // MARK: - Signing in across the switch
+    // (A permanent key needs the keychain entitlement of a host app, so not
+    // in the hostless macOS run.)
 
     private var keyID = ""
 
@@ -131,6 +134,7 @@ final class CertRotationTests: XCTestCase {
         }
         XCTAssertEqual(RotationStub.signedPins.count, 1)
     }
+#endif
 }
 
 /// The daemon's sign-in routes in a `URLProtocol`: a session signature

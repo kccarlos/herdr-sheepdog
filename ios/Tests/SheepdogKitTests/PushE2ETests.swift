@@ -142,6 +142,7 @@ final class PushE2ETests: XCTestCase {
         XCTAssertTrue(PushE2E.rewrite(content, key: nil) === content)
     }
 
+#if os(iOS)
     // MARK: - The shared key store
 
     /// The real App Group keychain (the test host is the app, with its
@@ -171,4 +172,5 @@ final class PushE2ETests: XCTestCase {
     func testKeyStoreUsesTheAppGroupTheExtensionReads() {
         XCTAssertEqual(PushContentKeyStore.appGroup, "group.com.github.kccarlos.herdr-sheepdog-ios")
     }
+#endif
 }
