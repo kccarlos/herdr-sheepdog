@@ -238,6 +238,16 @@ speech synthesis.
   still delivered. There is no barge-in from a muted mic (plan §6).
 - Reconnecting clients start **unmuted**; a client that wants to stay muted
   sends `mute` right after connecting.
+- `POST /api/voice/mute {"on":true|false}` changes the same hub mute
+  state without opening `/ws` (a second `/ws` client would replace the
+  attached one). It has the same auth as `GET /api/state`, sends the
+  attached `/ws` client the same confirmation `status`, and answers
+  `{"muted":bool now}`. A body without a boolean `on` is `400`; with
+  `--voice=off` it is `503` with
+  `{"error":"the voice is off (--voice=off)"}`. The
+  `web.client.mute` event carries `via:"http"`, versus `via:"ws"` for
+  the control message. Like every mute, it lasts until the next `/ws` client connects
+  (which starts unmuted).
 
 ## Silence gate
 
@@ -835,6 +845,9 @@ control messages; the daemon resamples for GPT-Live (which runs at
   one running ("update installed, restart to finish"), `restart_to` its
   version. Display only: the voice never speaks it
   ([`update.md`](update.md)).
+- `GET /api/state`'s `voice` object reports `speaking`: true while the
+  live voice session's `Speaking()` says the model's speech is reaching
+  the user, and false when the voice is off or there is no session.
 - **GPT-Live is billed per second of open session**, so the daemon opens
   one only while a client is attached (`/ws` connected) and unmuted and
   there is speech (a frame loud enough) or a push to say, and closes it

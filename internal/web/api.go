@@ -109,12 +109,14 @@ type VoiceInfo struct {
 	Mode string `json:"mode"` // gemini | off
 	// Name is what the voice calls itself (config voice.name), so the
 	// /debug views can label its side of the conversation.
-	Name            string `json:"name,omitempty"`
-	Status          string `json:"status"`
-	Reason          string `json:"reason,omitempty"`
-	Muted           bool   `json:"muted"`
-	Stalled         bool   `json:"stalled"`
-	ClientConnected bool   `json:"client_connected"`
+	Name    string `json:"name,omitempty"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Muted   bool   `json:"muted"`
+	Stalled bool   `json:"stalled"`
+	// Speaking is true while the model's speech is reaching the user.
+	Speaking        bool `json:"speaking"`
+	ClientConnected bool `json:"client_connected"`
 	// Problem says why the voice is not connected, in words for a
 	// screen ("Setup needed: no Gemini API key yet…", "Gemini (AI
 	// Studio) rejected the API key… Retrying in 20s."); empty when
@@ -144,6 +146,36 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		ConversationStartedAt: s.conversationStartedAt(),
 		Update:                s.updateStatus(),
 	})
+}
+
+// MuteRequest is the body of POST /api/voice/mute.
+type MuteRequest struct {
+	On *bool `json:"on"`
+}
+
+// MuteResponse is the body of POST /api/voice/mute.
+type MuteResponse struct {
+	Muted bool `json:"muted"`
+}
+
+// handleVoiceMute changes the voice mute state through the same hub path
+// as the /ws mute control message.
+func (s *Server) handleVoiceMute(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Voice == nil {
+		writeError(w, http.StatusServiceUnavailable, "the voice is off (--voice=off)")
+		return
+	}
+	var req MuteRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if req.On == nil {
+		writeError(w, http.StatusBadRequest, "on must be a boolean")
+		return
+	}
+	s.hub.setMuted(*req.On, "http")
+	writeJSON(w, http.StatusOK, MuteResponse{Muted: s.hub.state().muted})
 }
 
 // updateStatus is /api/state's update object (nil without a tracker).
@@ -646,6 +678,9 @@ func (s *Server) handleHerdrEvent(w http.ResponseWriter, r *http.Request) {
 // voiceInfo is /api/state's voice object.
 func (s *Server) voiceInfo(hs hubState) VoiceInfo {
 	v := VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client}
+	if s.deps.Voice != nil {
+		v.Speaking = s.deps.Voice.Speaking()
+	}
 	if s.deps.VoiceIssue != nil {
 		v.Problem = s.deps.VoiceIssue()
 	}
