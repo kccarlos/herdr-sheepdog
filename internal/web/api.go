@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
@@ -176,6 +177,63 @@ func (s *Server) handleVoiceMute(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.setMuted(*req.On, "http")
 	writeJSON(w, http.StatusOK, MuteResponse{Muted: s.hub.state().muted})
+}
+
+// PTTRequest is the body of POST /api/voice/ptt.
+type PTTRequest struct {
+	On *bool `json:"on"`
+}
+
+// VoiceCommandResponse is the body of POST /api/voice/stop and /ptt.
+type VoiceCommandResponse struct {
+	OK bool `json:"ok"`
+}
+
+// handleVoiceStop cuts the current speech: the stop tool and flush the
+// /ws cancel message runs, then a voice-command stop to the holder so a
+// client that keeps its own playback or capture state follows. The
+// daemon does the cutting itself, so the client message is a notice.
+func (s *Server) handleVoiceStop(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Voice == nil {
+		writeError(w, http.StatusServiceUnavailable, "the voice is off (--voice=off)")
+		return
+	}
+	if s.hub.current() == nil {
+		writeError(w, http.StatusConflict, "no voice client")
+		return
+	}
+	if err := s.hub.cancel("http"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.send(wsproto.VoiceStop())
+	writeJSON(w, http.StatusOK, VoiceCommandResponse{OK: true})
+}
+
+// handleVoicePTT tells the client holding /ws to open or close its
+// microphone (hold-to-talk). The daemon has no state to change: the
+// client's own mute and speech messages follow as usual.
+func (s *Server) handleVoicePTT(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Voice == nil {
+		writeError(w, http.StatusServiceUnavailable, "the voice is off (--voice=off)")
+		return
+	}
+	var req PTTRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if req.On == nil {
+		writeError(w, http.StatusBadRequest, "on must be a boolean")
+		return
+	}
+	if s.hub.current() == nil {
+		writeError(w, http.StatusConflict, "no voice client")
+		return
+	}
+	s.hub.send(wsproto.VoicePTT(*req.On))
+	s.log.Log(logSource, "web.client.ptt", "", map[string]any{"on": *req.On})
+	writeJSON(w, http.StatusOK, VoiceCommandResponse{OK: true})
 }
 
 // updateStatus is /api/state's update object (nil without a tracker).

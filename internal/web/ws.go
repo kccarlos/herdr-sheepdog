@@ -314,6 +314,20 @@ func (h *hub) flush() {
 	h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
 }
 
+// cancel runs the stop tool and applies its effect to the audio pipe
+// (the /ws cancel message and POST /api/voice/stop). via is the tool's
+// origin ("ws" or "http").
+func (h *hub) cancel(via string) error {
+	ctx, cancel := h.s.toolCtx()
+	defer cancel()
+	res, err := h.s.runTool(ctx, voice.ToolCall{ID: via + "-cancel", Name: supervisor.ToolStop}, via)
+	if err != nil {
+		return err
+	}
+	h.afterCancel(res)
+	return nil
+}
+
 // afterCancel is the stop tool's effect on the audio pipe: stop what is
 // playing now, and let the model say the result (an interrupting push,
 // which also makes the session emit Interrupted → flush for whatever it
@@ -810,14 +824,9 @@ func (c *client) onControl(data []byte) {
 	case wsproto.TypeVisibility:
 		c.setVisibility(*m.Visible, m.VoiceScreen != nil && *m.VoiceScreen)
 	case wsproto.TypeCancel:
-		ctx, cancel := h.s.toolCtx()
-		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")
-		cancel()
-		if err != nil {
+		if err := h.cancel("ws"); err != nil {
 			c.enqueue(controlFrame(wsproto.Error("cancel: " + err.Error())))
-			return
 		}
-		h.afterCancel(res)
 	case wsproto.TypeText:
 		if h.s.deps.Voice != nil {
 			h.s.log.Log(logSource, "web.utterance", "", map[string]any{"text": m.Text, "via": "voice", "client_id": c.id})
