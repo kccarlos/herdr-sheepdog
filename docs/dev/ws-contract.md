@@ -74,6 +74,7 @@ binary version.
   | `push` | Push registration and the content key ([`push.md`](push.md)) | when the daemon has a push service |
   | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
+  | `voice-command` | the `voice-command` message and `POST /api/voice/stop` and `/ptt` (*Voice commands over HTTP*) | when a voice is configured |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
@@ -181,6 +182,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
 | `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible (`voice_screen` or not). |
+| `{"type":"voice-command","action":"stop"\|"ptt","on":bool?}`             | Another client of the daemon controls this one's voice (*Voice commands over HTTP*). Requires the `voice-command` feature; a client that does not know the type ignores it. |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -195,6 +197,8 @@ Examples (`bot-ready` is under *Protocol version and handshake*):
 {"type":"error","message":"rate limited, retrying"}
 {"type":"error","message":"DeepSeek says the balance is used up, so the orchestrator cannot use it.","problem":"balance","role":"orchestrator","provider":"deepseek","fix":"top up the account (https://platform.deepseek.com)"}
 {"type":"pong"}
+{"type":"voice-command","action":"stop"}
+{"type":"voice-command","action":"ptt","on":true}
 ```
 
 ## Account problems
@@ -261,6 +265,37 @@ speech synthesis.
   takes an `Idempotency-Key` like any device `POST`. `GET /api/conversation`
   shows the typed line (`kind:"shepherd"`, `via:"typed"`) and the reply
   (`kind:"dog"`, `via:"typed"`).
+
+## Voice commands over HTTP
+
+A client that does not hold `/ws` (the desktop panel) controls the voice
+of the one that does. Both routes have the same auth as `GET /api/state`
+and the checks of `POST /api/voice/mute`: with `--voice=off` they are
+`503` with `{"error":"the voice is off (--voice=off)"}`, and with no
+attached `/ws` client `409` with `{"error":"no voice client"}`. They
+answer `{"ok":true}`.
+
+- `POST /api/voice/stop` (no body) cuts the current speech. The daemon
+  does it itself, through the path of the `cancel` control message (the
+  stop tool, `flush`, an interrupting push of the result), so it works
+  with any client. It then sends the holder
+  `{"type":"voice-command","action":"stop"}` as a notice: a client that
+  keeps its own playback or capture state can follow (end push-to-talk,
+  show "stopped"). The client sends nothing back.
+- `POST /api/voice/ptt {"on":true|false}` is hold-to-talk: the daemon has
+  no state to change, so it only sends the holder
+  `{"type":"voice-command","action":"ptt","on":true|false}`. The client
+  opens its microphone while `on` is true and closes it when false, with
+  the usual `mute`, `silence` and `speaking` messages. A body without a
+  boolean `on` is `400`. Logged as `web.client.ptt {on}`.
+
+```json
+{"type":"voice-command","action":"stop"}
+{"type":"voice-command","action":"ptt","on":false}
+```
+
+A client that does not know `voice-command` ignores it, as it does any
+type it does not know (the iPhone app, until it implements it).
 
 ## Silence gate
 

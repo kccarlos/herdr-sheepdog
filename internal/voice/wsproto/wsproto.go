@@ -76,6 +76,10 @@ const (
 	// FeatureTerm: the terminal socket GET /term (docs/dev/term-contract.md);
 	// listed only when herdr is new enough for its terminal bridge.
 	FeatureTerm = "term"
+	// FeatureVoiceCommand: the voice-command message and POST
+	// /api/voice/stop and /ptt ("Voice commands over HTTP"); listed when a
+	// voice is configured.
+	FeatureVoiceCommand = "voice-command"
 	// FeatureScreenANSI: screen frames and ?ansi=1 on the screen route
 	// give the visible screen with SGR colours.
 	FeatureScreenANSI = "screen-ansi"
@@ -88,7 +92,7 @@ const (
 // Message types. Client→server: client-ready, mute, silence, speaking,
 // playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe,
 // visibility. Server→client: bot-ready, flush, status, transcript, error,
-// pong, screen, screen-error, card.
+// pong, screen, screen-error, card, voice-command.
 const (
 	TypeClientReady = "client-ready"
 	TypeBotReady    = "bot-ready"
@@ -113,6 +117,17 @@ const (
 
 	TypeVisibility = "visibility"
 	TypeCard       = "card"
+
+	TypeVoiceCommand = "voice-command"
+)
+
+// Actions of a voice-command message (docs/dev/ws-contract.md "Voice
+// commands over HTTP").
+const (
+	// ActionStop: the speech was cut; the client drops what it plays.
+	ActionStop = "stop"
+	// ActionPTT: hold-to-talk; On says whether to open the microphone.
+	ActionPTT = "ptt"
 )
 
 // Voice states carried by a status message.
@@ -225,7 +240,7 @@ type Message struct {
 	Daemon      *DaemonInfo `json:"daemon,omitempty"`
 	Features    []string    `json:"features,omitempty"`
 
-	// mute, silence and speaking
+	// mute, silence and speaking; voice-command with action ptt
 	On *bool `json:"on,omitempty"`
 
 	// playback: the client's player started, drained or flushed, and
@@ -307,6 +322,10 @@ type Message struct {
 	Visible     *bool `json:"visible,omitempty"`
 	VoiceScreen *bool `json:"voice_screen,omitempty"`
 	Card        *Card `json:"card,omitempty"`
+
+	// voice-command (server→client): Action is ActionStop or ActionPTT
+	// (On says whether to talk).
+	Action string `json:"action,omitempty"`
 }
 
 // ClientReady builds the client→server handshake message, the first text
@@ -400,6 +419,16 @@ func AccountError(msg, problem, role, provider, fix string) Message {
 
 // Pong builds the reply to Ping.
 func Pong() Message { return Message{Type: TypePong} }
+
+// VoiceStop builds the server→client voice-command message that tells
+// the client its speech was cut.
+func VoiceStop() Message { return Message{Type: TypeVoiceCommand, Action: ActionStop} }
+
+// VoicePTT builds the server→client voice-command message for
+// hold-to-talk: on opens the client's microphone, off closes it.
+func VoicePTT(on bool) Message {
+	return Message{Type: TypeVoiceCommand, Action: ActionPTT, On: &on}
+}
 
 // ScreenSubscribe builds the client→server request for an agent's window.
 func ScreenSubscribe(paneID string) Message {
@@ -519,6 +548,16 @@ func (m Message) Validate() error {
 	case TypeCard:
 		if m.Card == nil || m.Card.ID == "" || m.Card.Kind == "" {
 			return fmt.Errorf("wsproto: card: missing \"card\" with \"card_id\" and \"kind\"")
+		}
+	case TypeVoiceCommand:
+		switch m.Action {
+		case ActionStop:
+		case ActionPTT:
+			if m.On == nil {
+				return fmt.Errorf("wsproto: voice-command: ptt: missing \"on\"")
+			}
+		default:
+			return fmt.Errorf("wsproto: voice-command: bad action %q", m.Action)
 		}
 	case TypeCancel, TypePing, TypeFlush, TypePong, TypeScreenUnsubscribe:
 	case "":
