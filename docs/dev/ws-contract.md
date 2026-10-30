@@ -248,6 +248,19 @@ speech synthesis.
   `web.client.mute` event carries `via:"http"`, versus `via:"ws"` for
   the control message. Like every mute, it lasts until the next `/ws` client connects
   (which starts unmuted).
+- `POST /api/turn {"text":"…"}` is a typed turn for the orchestrator with a
+  text reply: it answers `{"reply":"…","turn_id":"…","acted":bool}` once the
+  turn is over. It runs the same orchestrator turn a spoken `to_supervisor`
+  does (tools, approvals and history as for speech), but waits for the reply
+  whatever `brain.reply_wait_s` is, and nothing is spoken. The voice gets one
+  `voice.push` at `urgency: silent` saying what was typed and answered, so its
+  next spoken turn knows. `turn_id` is the utterance id on the turn's `brain.*`
+  events. A missing, empty or non-string `text` is `400`; with the orchestrator
+  off it is `503` with `{"error":"the orchestrator is off (<reason>)"}`; if a
+  spoken turn claimed the typed words first (it answers them), `409`. It
+  takes an `Idempotency-Key` like any device `POST`. `GET /api/conversation`
+  shows the typed line (`kind:"shepherd"`, `via:"typed"`) and the reply
+  (`kind:"dog"`, `via:"typed"`).
 
 ## Silence gate
 

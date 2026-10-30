@@ -45,6 +45,7 @@ type Supervisor interface {
 	Settings() supervisor.Settings
 	SetSettings(supervisor.Settings) error
 	ShepherdInput(kind supervisor.InputKind, text string)
+	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
@@ -521,6 +522,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/conversation", accessDevice, s.handleConversation},
 		route{"POST /api/conversation/reset", accessDevice, s.handleConversationReset},
 		route{"POST /api/utterance", accessDevice, s.handleUtterance},
+		route{"POST /api/turn", accessDevice, s.handleTurn},
 		route{"GET /api/voice/providers", accessDevice, s.handleVoiceProviders},
 		route{"PUT /api/voice/provider", accessDevice, s.handleSetVoiceProvider},
 		route{"GET /api/brain/models", accessDevice, s.handleBrainModels},
