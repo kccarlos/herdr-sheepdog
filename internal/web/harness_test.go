@@ -48,6 +48,8 @@ type fakeSession struct {
 	speaking []bool
 	// pushTags records the tags of every PushTagged call.
 	pushTags []map[string]any
+	// pushUrgency records the urgency of every PushTagged call.
+	pushUrgency []voice.Urgency
 }
 
 func newFakeSession() *fakeSession {
@@ -74,12 +76,18 @@ func (f *fakeSession) Push(text string, _ voice.Urgency) error {
 	f.pushes = append(f.pushes, text)
 	return nil
 }
-func (f *fakeSession) PushTagged(text string, _ voice.Urgency, tags map[string]any) error {
+func (f *fakeSession) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pushes = append(f.pushes, text)
 	f.pushTags = append(f.pushTags, tags)
+	f.pushUrgency = append(f.pushUrgency, u)
 	return nil
+}
+func (f *fakeSession) pushUrgencies() []voice.Urgency {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]voice.Urgency(nil), f.pushUrgency...)
 }
 func (f *fakeSession) taggedPushes() []map[string]any {
 	f.mu.Lock()
