@@ -505,11 +505,67 @@ jobs:
             ${{ runner.temp }}/restarter.log
           retention-days: 7
 
+  # SheepdogKit built for macOS (the Mac app's shared code,
+  # docs/dev/design/desktop-client.md) and its platform-neutral unit tests,
+  # run hostless on the runner itself: no simulator, no fixture daemon and
+  # no build shared with the tests jobs. It runs beside them; only
+  # ios-summary waits for it.
+  macos:
+    needs: plan
+    if: needs.plan.outputs.tier != 'none'
+    name: macos (SheepdogKitMac)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 27.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+
+      # The same pinned XcodeGen as the tests jobs and ci_scripts/ci_post_clone.sh.
+      - name: Install XcodeGen
+        run: |
+          zip="$RUNNER_TEMP/xcodegen.zip"
+          curl -fsSL --retry 3 -o "$zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $zip" | shasum -a 256 -c -
+          unzip -q "$zip" -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate the project
+        working-directory: ios
+        run: |
+          xcodegen --version
+          xcodegen generate --spec project.yml
+
+      - name: Build and test SheepdogKitMac
+        working-directory: ios
+        run: |
+          status=0
+          xcodebuild test \
+            -project Sheepdog.xcodeproj \
+            -scheme SheepdogKitMac \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipPackagePluginValidation \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            > "$RUNNER_TEMP/macos.log" 2>&1 || status=$?
+          grep -E 'error:|^\*\* |Executed [0-9]+ tests' "$RUNNER_TEMP/macos.log" | tail -n 100 || true
+          if [ "$status" -ne 0 ]; then tail -n 80 "$RUNNER_TEMP/macos.log"; fi
+          exit "$status"
+
   # The one check to require on main: green when the tier's test jobs (the
-  # build among them) passed, or when the tier is none and no Mac job ran.
+  # build among them) and the macos job passed, or when the tier is none and
+  # no Mac job ran.
   summary:
     name: ios-summary
-    needs: [plan, tests]
+    needs: [plan, tests, macos]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -519,8 +575,9 @@ jobs:
           PLAN: ${{ needs.plan.result }}
           TIER: ${{ needs.plan.outputs.tier }}
           TESTS: ${{ needs.tests.result }}
+          MACOS: ${{ needs.macos.result }}
         run: |
-          echo "plan: $PLAN, tier: $TIER, tests: $TESTS"
+          echo "plan: $PLAN, tier: $TIER, tests: $TESTS, macos: $MACOS"
           if [ "$PLAN" != success ]; then echo "::error::the plan job did not succeed"; exit 1; fi
           case "$TIER" in
             none) want=skipped ;;
@@ -529,5 +586,9 @@ jobs:
           esac
           if [ "$TESTS" != "$want" ]; then
             echo "::error::tier $TIER wants the tests $want, got $TESTS"
+            exit 1
+          fi
+          if [ "$MACOS" != "$want" ]; then
+            echo "::error::tier $TIER wants the macos job $want, got $MACOS"
             exit 1
           fi
