@@ -658,7 +658,7 @@ final class AudioEngine {
     /// Tells the voice bar where the sound goes now.
     private func reportRoute() {
         let port = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portType
-        onRoute?(port.map(AudioRoute.init(output:)) ?? .speaker)
+        onRoute?(port.map(AudioRoute.init(port:)) ?? .speaker)
     }
 
     private func resumeAfterInterruption() {

@@ -1,4 +1,3 @@
-import AVFoundation
 import XCTest
 @testable import SheepdogKit
 
@@ -264,21 +263,6 @@ final class ConversationContextTests: XCTestCase {
         XCTAssertTrue(LocalNotice.voiceOff.bannerStillApplies(in: .voiceOff))
         XCTAssertFalse(LocalNotice.voiceOff.bannerStillApplies(in: .idle))
         XCTAssertTrue(LocalNotice.mediaServicesReset.bannerStillApplies(in: .listening), "it stays until dismissed or reconnected")
-    }
-
-    func testTheRouteGlyph() {
-        XCTAssertEqual(AudioRoute(output: .builtInSpeaker), .speaker)
-        XCTAssertEqual(AudioRoute(output: .builtInReceiver), .receiver)
-        XCTAssertEqual(AudioRoute(output: .headphones), .headphones)
-        XCTAssertEqual(AudioRoute(output: .usbAudio), .headphones)
-        XCTAssertEqual(AudioRoute(output: .bluetoothA2DP), .bluetooth)
-        XCTAssertEqual(AudioRoute(output: .bluetoothHFP), .bluetooth)
-        XCTAssertEqual(AudioRoute(output: .carAudio), .car)
-        XCTAssertEqual(AudioRoute(output: .airPlay), .airPlay)
-        XCTAssertEqual(AudioRoute(output: AVAudioSession.Port(rawValue: "SomethingNew")), .speaker)
-        let all: [AudioRoute] = [.speaker, .receiver, .headphones, .bluetooth, .car, .airPlay]
-        XCTAssertEqual(Set(all.map(\.symbol)).count, all.count, "one glyph per route")
-        XCTAssertEqual(Set(all.map(\.title)).count, all.count)
     }
 
     // MARK: - Computer names

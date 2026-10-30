@@ -120,6 +120,12 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("SHEEPDOG_HERDR_SOCKET"); ok {
 		cfg.Herdr.Socket = v
 	}
+	if v, ok := lookup("SHEEPDOG_HERDR_BACKEND"); ok {
+		cfg.Herdr.Backend = v
+	}
+	if v, ok := lookup("SHEEPDOG_HC_SOCKET"); ok {
+		cfg.Herdr.HCSocket = v
+	}
 	if v, ok := lookup("SHEEPDOG_HERDR_BIN"); ok {
 		cfg.Herdr.Bin = v
 	}

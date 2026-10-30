@@ -365,10 +365,11 @@ func (s *Server) setupState(ctx context.Context) SetupState {
 	st.Orchestrator.Preset, st.Orchestrator.BaseURL = s.presetOf(st.Orchestrator.Provider)
 	st.Presets = s.setupPresets()
 	st.Start = onboard.Start()
-	h := onboard.CheckHerdr(cfg.Herdr.Socket)
-	st.Herdr = SetupHerdr{OK: h.Status == onboard.OK, Detail: h.Detail, Fix: h.Fix, Agents: len(s.deps.Store.List())}
 	if s.deps.HerdrMode == "mock" {
 		st.Herdr = SetupHerdr{OK: true, Detail: "mock herdr (developer mode)", Agents: len(s.deps.Store.List())}
+	} else {
+		h := onboard.CheckHerdr(cfg.Herdr)
+		st.Herdr = SetupHerdr{OK: h.Status == onboard.OK, Detail: h.Detail, Fix: h.Fix, Agents: len(s.deps.Store.List())}
 	}
 	st.Phone = s.setupPhone()
 	if sd.Service != nil {

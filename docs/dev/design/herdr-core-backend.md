@@ -1,7 +1,7 @@
 # herdr-core backend
 
-Status: design, 2026-10-30. Step 1 (the backend interface) is in the
-same PR as this page; the rest follows the PR plan at the end.
+Status: built, 2026-10-30: `internal/herdr/backend.go` (the interface),
+`internal/hc` (the client) and `internal/herdrcore` (the backend).
 
 sheepdog talks to herdr, the terminal multiplexer its agents run in, over
 herdr's unix socket ([herdr-protocol.md](../herdr-protocol.md)). herdr-core
@@ -94,7 +94,7 @@ type Backend interface {               // what the daemon needs
 
 | herdr (old) | herdr-core (hc) | v1 rule |
 |---|---|---|
-| pane id `p_…` | terminal address `t7` | pane id = address. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
+| pane id `p_…` | terminal address `t7` | pane id = address, so `pane_id` in `/api/state` (agents and the pending question) is the hc address a herdr-app mod passes to hc to focus it. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
 | agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). Plain shells are not agents. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
@@ -148,15 +148,27 @@ temporary paths, so no test can reach a real core.
 
 ## PR plan
 
-1. **Interface** (this PR): `herdr.EventSource`, `herdr.Backend`, the
+1. **Interface**: `herdr.EventSource`, `herdr.Backend`, the
    Watcher over an `EventSource`, the app holding a `Backend`; this page.
    No behaviour change.
 2. **hc client**: `internal/hc`, a typed JSON-RPC client for the methods
    above with a fake server (`internal/hc/hctest`). Nothing uses it yet.
 3. **hc backend**: `internal/herdrcore` implementing `herdr.Backend`,
    `Spawner` and `Closer` on the client, the screen fallback, the
-   detection and config keys, the user docs (what sheepdog needs: herdr or
-   herdr-core).
+   detection and config keys (`internal/app/backend.go`), the doctor
+   check, `/term`'s plain refusal (`web.Deps.TermOff`) and the user docs.
+
+Implementation notes: `CreateWorkspace` and `SplitPane` both run a new
+shell terminal (label `sheepdog=spawn`, no parent); `StartAgent` types the
+kind's command into it (Codex with `--no-daemon`, which hc requires) and
+returns, and the supervisor's existing wait polls `GetAgent`, which reports
+the launch pending (`LaunchPending`, as herdr's `agent.start` does) until
+the program shows in the terminal, and not found after the start timeout.
+The fleet stream asks `terminal.get` on `created`, `restarted`, a
+`foreground` change to a known agent program (one typed into an existing
+shell) and a terminal's first status, to decide whether it is an agent.
+`Interrupt` asks hc to watch for 2 s, below the call timeout. `sheepdog herdr watch` (a
+developer tool) still talks to the old herdr only.
 
 ## Open questions
 

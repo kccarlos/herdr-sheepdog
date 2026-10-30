@@ -138,7 +138,7 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	s.mu.Unlock()
 	defer s.replies.Done()
 	s.log.Log(logSource, "supervisor.relay_by_daemon", "", map[string]any{"text": c.text, "waited_ms": waited.Milliseconds(), "inputs": c.n, "utterance_id": c.id})
-	res := s.handleUtterance(context.Background(), c, "", true)
+	res, _ := s.handleUtterance(context.Background(), c, "", true, false)
 	if res.Spoken == "" {
 		return
 	}

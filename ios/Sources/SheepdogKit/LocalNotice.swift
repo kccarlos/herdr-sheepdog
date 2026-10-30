@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 
 /// The notices this phone makes about itself (never on the daemon): the
@@ -154,7 +153,9 @@ public enum LocalNotice: Equatable, Sendable {
     }
 }
 
-/// Where the sound goes now, for the voice bar's glyph.
+/// Where the sound goes now, for the voice bar's glyph. The iOS app fills it
+/// in from an `AVAudioSession.Port` (`AudioRoute+Port.swift`); the Kit keeps
+/// the words and has no audio session, so it builds on macOS too.
 public enum AudioRoute: Equatable, Sendable {
     case speaker
     /// The phone's earpiece.
@@ -185,20 +186,6 @@ public enum AudioRoute: Equatable, Sendable {
         case .bluetooth: return "a Bluetooth device"
         case .car: return "the car"
         case .airPlay: return "AirPlay"
-        }
-    }
-
-    /// The route for an output port type. Anything this build does not know
-    /// is the speaker's glyph: a route is always shown while audio runs.
-    public init(output port: AVAudioSession.Port) {
-        switch port {
-        case .builtInSpeaker: self = .speaker
-        case .builtInReceiver: self = .receiver
-        case .headphones, .headsetMic, .usbAudio, .lineOut, .HDMI, .displayPort: self = .headphones
-        case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE: self = .bluetooth
-        case .carAudio: self = .car
-        case .airPlay: self = .airPlay
-        default: self = .speaker
         }
     }
 }
