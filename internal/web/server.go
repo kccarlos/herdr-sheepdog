@@ -539,6 +539,7 @@ func (s *Server) routeTable() ([]route, error) {
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
 		route{"GET /api/pair/qr.svg", accessLoopback, s.handlePairQR},
+		route{"GET /api/pair/qr.json", accessLoopback, s.handlePairQRJSON},
 		route{"GET /api/devices", accessLoopback, s.handleDevices},
 		route{"PATCH /api/devices/{id}", accessSetup, s.handleDeviceRename},
 		route{"DELETE /api/devices/{id}", accessSetup, s.handleDeviceRevoke},

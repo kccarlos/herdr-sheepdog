@@ -3,6 +3,8 @@ package pair
 import (
 	"errors"
 	"net"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -94,6 +96,64 @@ func TestRenderings(t *testing.T) {
 	svg, err := SVG(link)
 	if err != nil || !strings.HasPrefix(svg, "<svg") || !strings.Contains(svg, "M") {
 		t.Errorf("svg = %.80s, %v", svg, err)
+	}
+}
+
+// The matrix returned for drawing has exactly the dark modules the SVG
+// path draws, quiet zone included.
+func TestMatrixMatchesSVG(t *testing.T) {
+	link := "https://192.0.2.1:7777/voice#pair=1&d=fixed&n=Test&k=pin&e=code&u=192.0.2.1%3A7777"
+	matrix, err := RenderMatrix(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matrix.Size != len(matrix.Modules) || matrix.Size == 0 {
+		t.Fatalf("size %d with %d rows", matrix.Size, len(matrix.Modules))
+	}
+	dark := 0
+	for y, row := range matrix.Modules {
+		if len(row) != matrix.Size {
+			t.Fatalf("row %d has length %d, want %d", y, len(row), matrix.Size)
+		}
+		for _, module := range row {
+			if module != '0' && module != '1' {
+				t.Fatalf("row %d has module %q", y, module)
+			}
+			if module == '1' {
+				dark++
+			}
+		}
+	}
+
+	svg, err := SVG(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pathStart = `<path fill="#000" d="`
+	start := strings.Index(svg, pathStart)
+	if start < 0 {
+		t.Fatalf("SVG has no dark-module path: %s", svg)
+	}
+	path := strings.TrimSuffix(svg[start+len(pathStart):], `"/></svg>`)
+	matches := regexp.MustCompile(`M(\d+) (\d+)h1v1h-1z`).FindAllStringSubmatch(path, -1)
+	if len(matches) != dark {
+		t.Fatalf("SVG draws %d dark modules, matrix has %d", len(matches), dark)
+	}
+	drawn := make(map[[2]int]bool, dark)
+	for _, match := range matches {
+		x, _ := strconv.Atoi(match[1])
+		y, _ := strconv.Atoi(match[2])
+		if y >= matrix.Size || x >= matrix.Size || matrix.Modules[y][x] != '1' {
+			t.Fatalf("SVG draws light or out-of-range module (%d,%d)", x, y)
+		}
+		drawn[[2]int{x, y}] = true
+	}
+	for y, row := range matrix.Modules {
+		for x, module := range row {
+			if module == '1' && !drawn[[2]int{x, y}] {
+				t.Errorf("matrix draws dark module (%d,%d), SVG does not", x, y)
+			}
+		}
 	}
 }
 
