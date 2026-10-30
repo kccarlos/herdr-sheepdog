@@ -137,6 +137,7 @@
     "status": "connected",
     "muted": false,
     "stalled": false,
+    "speaking": false,
     "client_connected": false
   },
   "settings": {

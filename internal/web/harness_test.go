@@ -38,6 +38,7 @@ type fakeSession struct {
 	muted  bool
 	status voice.Status
 	ends   int // AudioStreamEnd calls
+	speaks bool
 	// attached is the last ClientAttached value.
 	attached bool
 	// resets records every Reset(reason) call.
@@ -89,8 +90,17 @@ func (f *fakeSession) Audio() <-chan []byte       { return f.audio }
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
 func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
 func (f *fakeSession) Status() voice.Status       { return f.status }
-func (f *fakeSession) Speaking() bool             { return false }
-func (f *fakeSession) sentFrames() int            { f.mu.Lock(); defer f.mu.Unlock(); return len(f.sent) }
+func (f *fakeSession) Speaking() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.speaks
+}
+func (f *fakeSession) setSpeaking(on bool) {
+	f.mu.Lock()
+	f.speaks = on
+	f.mu.Unlock()
+}
+func (f *fakeSession) sentFrames() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.sent) }
 func (f *fakeSession) sentTexts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
