@@ -220,6 +220,7 @@ func TestDoctorAnthropic(t *testing.T) {
 	// push relay, a free web port: nothing outside the test is touched).
 	cfg.Anthropic.APIKey = antBadKey
 	cfg.Herdr.Socket = filepath.Join(t.TempDir(), "none.sock")
+	cfg.Herdr.HCSocket = filepath.Join(t.TempDir(), "none-hc.sock")
 	cfg.Push.Mode = config.PushModeOff
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	cfg.Web.Port = l.Addr().(*net.TCPAddr).Port

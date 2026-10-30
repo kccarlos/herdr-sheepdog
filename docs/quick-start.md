@@ -19,6 +19,12 @@ herdr
 Or `brew install herdr` instead of the curl line. Other ways (mise, Windows,
 binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/releases).
 
+On herdr-core (`hc`, the new herdr) instead: skip the plugin step, install
+sheepdog with `brew install kccarlos/tap/sheepdog` and run `sheepdog setup`
+while hc is running; sheepdog finds hc's socket when it starts
+(`herdr.backend` in [CONFIG.md](../CONFIG.md); the [faq](faq.md) lists what
+herdr-core does not have yet).
+
 ## 1. Install the plugin
 
 ```sh
