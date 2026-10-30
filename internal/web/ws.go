@@ -338,15 +338,16 @@ func (h *hub) afterCancel(res voice.ToolResult) {
 	h.send(wsproto.Transcript(wsproto.DirOut, res.Spoken, true))
 }
 
-// setMuted records the client's mute state and mirrors it to the session.
-func (h *hub) setMuted(on bool) {
+// setMuted records the mute state and mirrors it to the session. via
+// identifies the control path in web.client.mute ("ws" or "http").
+func (h *hub) setMuted(on bool, via string) {
 	h.mu.Lock()
 	h.muted = on
 	h.mu.Unlock()
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(on)
 	}
-	h.s.log.Log(logSource, "web.client.mute", "", map[string]any{"muted": on})
+	h.s.log.Log(logSource, "web.client.mute", "", map[string]any{"muted": on, "via": via})
 	h.send(h.statusMsg())
 }
 
@@ -789,7 +790,7 @@ func (c *client) onControl(data []byte) {
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
-		h.setMuted(*m.On)
+		h.setMuted(*m.On, "ws")
 	case wsproto.TypeSilence:
 		h.setSilence(c, *m.On)
 	case wsproto.TypeSpeaking:

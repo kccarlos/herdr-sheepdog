@@ -493,6 +493,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"DELETE /api/devices/self", accessDevice, s.handleDeviceUnpair},
 		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
 		route{"GET /api/state", accessDevice, s.handleState},
+		route{"POST /api/voice/mute", accessDevice, s.handleVoiceMute},
 		route{"GET /api/agents", accessDevice, s.handleAgents},
 		route{"GET /api/agents/{pane_id}/screen", accessDevice, s.handleAgentScreen},
 		route{"POST /api/agents/{pane_id}/input", accessDevice, s.handleAgentInput},
