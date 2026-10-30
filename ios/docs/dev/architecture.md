@@ -852,7 +852,9 @@ direct push (`PushE2E.rewrite`). With no key, a bad ciphertext or a timeout
 it shows "Sheepdog / Open the app to see the update" and no raw data. A
 push without `e2e` (the direct APNs path) passes through untouched.
 `Sources/SheepdogPush` is compiled into both SheepdogKit (for the tests)
-and the extension. The test vector in `PushE2ETests` comes from
+and the extension; `SheepdogKitMac`, the same Kit built for macOS, takes
+only `PushE2E.swift` of it (`LiveActivityContent` calls it), not the key
+store. The test vector in `PushE2ETests` comes from
 `scripts/push-e2e-vector.go`, which seals like the daemon's
 `internal/push.Seal`.
 

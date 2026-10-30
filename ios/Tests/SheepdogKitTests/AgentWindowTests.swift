@@ -1,5 +1,4 @@
 import SheepdogKit
-import UIKit
 import XCTest
 
 /// The live agent window's decisions (`AgentWindowState`), its grid
@@ -260,6 +259,7 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertEqual(g.lines(forDrag: 13), 0)
     }
 
+#if os(iOS)
     /// SF Mono 11 pt fits about 58 columns across an iPhone 17/18 Pro in
     /// portrait (402 pt less the window's 12 pt of padding).
     func testElevenPointFitsAboutFiftyEightColumns() {
@@ -310,6 +310,8 @@ final class AgentWindowTests: XCTestCase {
         wide.feed(SnapshotScreen.bytes(text: "abcdefghij\nxy", rows: 2))
         XCTAssertEqual(wide.lineText(1), "xy")
     }
+
+#endif
 
     // MARK: Theme
 
@@ -370,6 +372,7 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertNil(hub.open(paneID: DemoWorld.authPane, mode: .observe, cols: 40, rows: 20) { _ in })
     }
 
+#if os(iOS)
     func testTheDemoScreenFitsTheGrid() {
         let world = DemoWorld(now: Date())
         let screen = try! XCTUnwrap(world.screen(paneID: DemoWorld.authPane))
@@ -380,6 +383,7 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertTrue(grid.snapshotText().contains("> hi"))
         XCTAssertTrue(grid.snapshotText().contains("Fix the login"))
     }
+#endif
 
     private func waitUntil(timeout: TimeInterval = 3, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
