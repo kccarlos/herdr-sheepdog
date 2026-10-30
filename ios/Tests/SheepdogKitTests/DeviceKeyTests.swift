@@ -41,6 +41,7 @@ final class DeviceKeyTests: XCTestCase {
                        "sheepdog-auth-v1\nd\np\ndev\nn\n1700000000\nsession")
     }
 
+#if os(iOS)
     /// A device key signs so the daemon's ECDSA check passes (CryptoKit
     /// verifies the same DER signature), and is gone after delete.
     func testDeviceKeySignsAndDeletes() throws {
@@ -59,6 +60,7 @@ final class DeviceKeyTests: XCTestCase {
         DeviceKey.delete(daemonID: id)
         XCTAssertNil(DeviceKey.load(daemonID: id))
     }
+#endif
 
     func testProblemsSayWhy() {
         XCTAssertEqual(PairingProblem(reason: "device_revoked"), .revoked)

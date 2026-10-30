@@ -73,6 +73,32 @@ targets:
         DEFINES_MODULE: YES
         SKIP_INSTALL: YES
 
+  # The same Kit for the Mac app (docs/dev/design/desktop-client.md section
+  # 5.1): one source tree, two products, so they cannot drift. Not in it:
+  # SwiftTermSurface.swift (SwiftTerm's UIKit view; the Mac app uses the
+  # TerminalSurface protocol only and has no terminal) and, of SheepdogPush
+  # (the iOS Notification Service Extension), PushContentKeyStore.swift (the
+  # App Group keychain; macOS notifications are local). PushE2E.swift is in
+  # because LiveActivityContent.opened(key:) in the Kit calls it.
+  SheepdogKitMac:
+    type: framework
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources/SheepdogKit
+        excludes:
+          - SwiftTermSurface.swift
+      - path: Sources/SheepdogPush/PushE2E.swift
+    settings:
+      base:
+        PRODUCT_NAME: SheepdogKit
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-mac.kit
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+
   Sheepdog:
     type: application
     platform: iOS
@@ -320,6 +346,37 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  # The platform-neutral unit tests on macOS. Hostless: there is no Mac app
+  # to host them yet. Excluded: the tests of files this build leaves out
+  # (TerminalThroughputTests, TerminalWidthTests and their TerminalFixtures:
+  # SwiftTermSurface; AudioRoutePortTests and VoiceEngineTests: the iOS
+  # app's code; PushContentKeyStore's tests in PushE2ETests are #if os(iOS))
+  # and those that read the iOS app's Info.plist or bundle layout. The
+  # tests in shared files that draw into SwiftTerm are #if os(iOS) too.
+  SheepdogKitMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Tests/SheepdogKitTests
+        excludes:
+          - TerminalThroughputTests.swift
+          - TerminalWidthTests.swift
+          - TerminalFixtures.swift
+          - AudioRoutePortTests.swift
+          - VoiceEngineTests.swift
+          - AppTransportSecurityTests.swift
+          - PrivacyManifestTests.swift
+          - PurposeStringsTests.swift
+    dependencies:
+      - target: SheepdogKitMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-mac.kit.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+
 schemes:
   # Shared (XcodeGen writes schemes to xcshareddata), which Xcode Cloud
   # needs: its TestFlight workflow archives this scheme.
@@ -360,3 +417,15 @@ schemes:
       config: Debug
       targets:
         - SheepdogUITests
+
+  # The Kit and its unit tests on macOS (ios.yml "macos" job).
+  SheepdogKitMac:
+    build:
+      targets:
+        SheepdogKitMac: all
+        SheepdogKitMacTests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - SheepdogKitMacTests

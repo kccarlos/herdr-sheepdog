@@ -168,6 +168,14 @@ recording and screenshot tests skip. The tap-flow UI tests launch the app with
 SwiftUI animations off, so a tap never lands on a sheet or menu that is
 still moving; they tap through helpers that wait for an element to be on
 screen and check that the tap landed (`ios/Tests/SheepdogUITests/PaneSwitch.swift`).
+
+Beside the test jobs, a `macos` job builds `SheepdogKitMac` (the Kit for
+the Mac app, [desktop-client.md](design/desktop-client.md)) and runs
+its unit tests (`SheepdogKitMacTests`, the platform-neutral share of
+`SheepdogKitTests`) on its own Mac with `xcodebuild -scheme SheepdogKitMac
+-destination 'platform=macOS' test`: no simulator, fixture daemon or shared
+build, and nothing waits on it. It runs in the same tiers as the test jobs
+(not on `none`), and `ios-summary` needs it.
 Each test step runs `ios/scripts/ci-xctest.sh`: a failing test is run once
 more (`-retry-tests-on-failure -test-iterations 2`) and the job fails only
 if it fails twice, and a test runner that never started (once seen on a

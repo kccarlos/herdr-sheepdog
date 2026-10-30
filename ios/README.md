@@ -67,6 +67,11 @@ without the "Trust & Enable" prompt Xcode shows the first time; in Xcode
 itself, click Trust & Enable once instead. Most UI tests need a fixture
 daemon and skip themselves when there is none
 ([docs/dev/status.md](docs/dev/status.md#running-the-tests));
+The Kit also builds for macOS (`SheepdogKitMac`; it excludes
+`SwiftTermSurface.swift`, and `AudioRoute` is filled in by the iOS app from an
+`AVAudioSession.Port`); `xcodebuild -scheme SheepdogKitMac -destination
+'platform=macOS' test` runs its unit tests, the platform-neutral share of
+`SheepdogKitTests`.
 `.github/workflows/ios.yml` runs the whole suite, fixture daemons included,
 on every PR that touches the app, and its smoke tests on every PR that
 touches the daemon's API.
