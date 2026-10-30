@@ -1,0 +1,166 @@
+# herdr-core backend
+
+Status: design, 2026-10-30. Step 1 (the backend interface) is in the
+same PR as this page; the rest follows the PR plan at the end.
+
+sheepdog talks to herdr, the terminal multiplexer its agents run in, over
+herdr's unix socket ([herdr-protocol.md](../herdr-protocol.md)). herdr-core
+(`hc`) is the new herdr: a different program with a different API, while
+the old herdr stays maintained and keeps its users. sheepdog supports
+both from one daemon: one backend interface, two implementations, chosen
+at startup.
+
+## What hc is, for sheepdog
+
+- **API.** JSON-RPC 2.0 over a unix socket, one message per line
+  (`hc.openrpc.json` in the herdr-core repo is the truth; `hc schema`
+  prints it). The methods sheepdog needs: `hello`, `terminal.list`,
+  `terminal.get`, `terminal.read`, `terminal.send`, `terminal.keys`,
+  `terminal.interrupt`, `terminal.run`, `terminal.kill`,
+  `events.subscribe`.
+- **Socket.** `HC_SOCKET`, else `<session>.sock` under
+  `$XDG_RUNTIME_DIR/herdr-core/`, else `/run/user/<uid>/herdr-core/`, else
+  the session's state directory
+  (`~/.local/state/herdr-core/default/default.sock`); `HC_SESSION` names
+  the session (default `default`).
+- **Status comes from the agent.** hc never guesses status from the
+  screen. A program reports it through OSC 7501, the Program Status
+  Protocol: a word (`idle`, `working`, `done`, `blocked`, `error`), and
+  optionally `app`, `kind` (`permission`, `question`, `auth`), `msg`,
+  `title` and `progress`. A program that does not report has no status.
+- **No workspaces in core.** hc has terminals only. herdr-app, the GUI,
+  keeps its spaces and tabs in a core document (`doc.get`/`doc.set`, name
+  `herdr-app`) that core never interprets.
+
+### Do Claude Code and Codex report OSC 7501? Yes
+
+Checked on 2026-10-30 with hc 0.1.15, Claude Code 2.1.314 and Codex CLI
+0.166, each started with `hc run --bg` in a private core (its own
+`HC_SOCKET`, `HC_SESSION` and state directory):
+
+| Moment | Claude Code | Codex |
+|---|---|---|
+| first-run folder trust question | `status: null`, `reported: false` | `status: null`, `reported: false` |
+| at its prompt | `{app: claude-code, state: idle}` | `{app: codex, state: idle}` |
+| a turn | `working`, then `done` with `msg` (a one-line summary of the reply) | `working`, then `done` |
+| an approval | `{state: blocked, kind: permission, msg: "approve Bash: curl -sI https://example.com"}` | `{state: blocked, kind: permission}` |
+
+So the status words are the primary signal on hc, and they line up with
+herdr's. One gap: the first-run trust question comes **before** the
+agent's status reporting starts, so a just-started agent at that
+question looks like a plain program with no status. The screen fallback
+below covers it.
+
+The event stream (`events.subscribe`, plain mode) carries a `status`
+event per change, `turn` when a turn ends, `title`, `created`,
+`finished`, `lost`, `removed`, `foreground`, a `heartbeat` every 15 s and
+`missed` with a fresh snapshot when a subscriber falls behind.
+
+## The interface
+
+`internal/herdr` keeps its types as the shared vocabulary (`State`,
+`AgentInfo`, `PaneInfo`, `Snapshot`, `ReadResult`, `StatusEvent`,
+`FleetEvent`, `Transition`, the prompt parser). A second backend
+translates into them; nothing above the backend learns a new word.
+
+```go
+// internal/herdr/backend.go
+type EventSource interface {           // what the Watcher reads
+	Snapshot(ctx) (Snapshot, error)
+	Subscribe(ctx, paneID) <-chan StatusEvent
+	SubscribeFleet(ctx) <-chan FleetEvent
+	Resync() <-chan struct{}
+}
+
+type Backend interface {               // what the daemon needs
+	EventSource
+	Ping(ctx) (Pong, error)
+	ListAgents, Read, Prompt, SendKeys, Interrupt   // = supervisor.Herdr
+}
+```
+
+- The `Watcher` takes an `EventSource`, so its dedup, `blocked` debounce,
+  rename and `Known` seeding apply to both backends unchanged.
+- The optional capabilities stay where they are: the supervisor's small
+  interfaces (`Spawner`, `Closer`, `Renamer`, `SpaceHost`,
+  `WorktreeCreator`, `ANSIReader`) and the web layer's `ShellHost`, found
+  by type assertion through `inject.Herdr`. A backend without one gets
+  the clean refusal those paths already have.
+- The live terminal (`/term`) is the old herdr's: `web.TermDeps` is built
+  only for it. Without it `/api/hello` does not list `term` and the app
+  uses its snapshot window, as it does with an old herdr today.
+
+## Mapping
+
+| herdr (old) | herdr-core (hc) | v1 rule |
+|---|---|---|
+| pane id `p_…` | terminal address `t7` | pane id = address. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
+| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). Plain shells are not agents. |
+| agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
+| agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
+| workspace / tab | none in core (herdr-app's `herdr-app` document) | no workspace in v1: `WorkspaceID` and label empty. |
+| `idle`, `working`, `done`, `blocked` | the same words | as is. |
+| — | `error` | `done`: the turn ended; the finish announcement reads the screen and says what went wrong. |
+| `unknown` | status `null` after reporting (cleared), or any other word | `unknown`. |
+| — | status `null`, never reported, known kind | the **screen fallback**: `terminal.read`, and `ParsePrompt` finding a question makes it `blocked`; otherwise `unknown`. Polled every few seconds only for such terminals. |
+| `pane.read` sources | `terminal.read {lines}` (plain text; `stitched` for full-screen apps) | `visible` → `lines: 0`; the recent sources → `lines: n`. No ANSI read. |
+| `agent.prompt` (refuses a blocked agent) | `terminal.send` (refuses `blocked` unless `force`) | never `force`; hc's `blocked` error is `ErrAgentBlocked`. |
+| `pane.send_keys` | `terminal.keys` | the same key names (`enter`, `esc`, `up`, `down`, `tab`, `ctrl+c`, digits). |
+| interrupt | `terminal.interrupt` (esc for status reporters, else ctrl+c) | as is. |
+| `pane.agent_status_changed` | `status` event | → `StatusEvent`. |
+| `pane_agent_detected` | the first `status` event of a terminal, or `created` of a known kind | → `FleetAgentDetected`. |
+| `pane_exited` / `pane_closed` | `finished`, `lost` / `removed` | → `FleetPaneExited` / `FleetPaneClosed`. |
+| resubscribe after `events_lost` | `missed`, a reconnect | → `Resync`. |
+| `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live local terminals, agents = the ones above). |
+| `agent_session` (the worker's transcript) | not reported | none on hc: no worker history digest. |
+| `ping` version | `hello` version | → `Pong`. |
+
+## What v1 supports on hc
+
+- the agent list, states and transitions, the blocked question with its
+  options (the prompt parser on `terminal.read`), the finish announcement;
+- reading a screen; sending a prompt, an option's keys and an interrupt;
+- starting an agent (`terminal.run` of a shell in the folder, then the
+  kind's command typed into it, ready when it reports status or shows a
+  question) and closing one (`terminal.kill`);
+- the app's agent window as snapshots, no app change.
+
+Not in v1, each refused with the message the app already shows:
+
+- anything that writes herdr-app's document: workspaces, tabs, splits,
+  worktrees, renaming a space (no `doc.set` from sheepdog);
+- renaming an agent;
+- the live terminal (`/term`): it needs `terminal.attach` in framed mode;
+  the app falls back to its snapshot window;
+- the phone shell (it opens a herdr workspace);
+- the worker's own transcript (no `agent_session` on hc);
+- terminals on machines added to the core.
+
+## Choosing the backend
+
+`herdr.backend` (CONFIG.md): `auto` (default), `herdr` or `hc`.
+`herdr.hc_socket` overrides the hc socket path (default: hc's own rules
+above). `auto` asks both sockets once at startup: the one that answers
+wins; if both answer, the old herdr (behaviour unchanged for its users)
+and the choice is logged as `daemon.herdr_backend`; if neither answers,
+the old herdr, as today. Tests and the bench daemon set both sockets to
+temporary paths, so no test can reach a real core.
+
+## PR plan
+
+1. **Interface** (this PR): `herdr.EventSource`, `herdr.Backend`, the
+   Watcher over an `EventSource`, the app holding a `Backend`; this page.
+   No behaviour change.
+2. **hc client**: `internal/hc`, a typed JSON-RPC client for the methods
+   above with a fake server (`internal/hc/hctest`). Nothing uses it yet.
+3. **hc backend**: `internal/herdrcore` implementing `herdr.Backend`,
+   `Spawner` and `Closer` on the client, the screen fallback, the
+   detection and config keys, the user docs (what sheepdog needs: herdr or
+   herdr-core).
+
+## Open questions
+
+- Both running: prefer the old herdr (as above) or hc?
+- `error` as `done`, or as `blocked`?
+- Workspaces from herdr-app's document (read-only `doc.get`) for spoken
+  names, once its shape is stable.

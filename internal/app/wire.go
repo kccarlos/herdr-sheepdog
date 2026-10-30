@@ -38,9 +38,10 @@ func (a *App) wire() error {
 
 	var inner supervisor.Herdr
 	if opts.Herdr == HerdrSocket {
-		a.hc = herdr.NewClient(cfg.Herdr.Socket)
-		a.hc.Log = a.log
-		inner = a.hc
+		client := herdr.NewClient(cfg.Herdr.Socket)
+		client.Log = a.log
+		a.backend, a.term = client, herdrTerm(cfg, client)
+		inner = a.backend
 		a.wref = &watcherRef{}
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
@@ -281,17 +282,7 @@ func (a *App) wire() error {
 	if a.wref != nil {
 		deps.Watcher = a.wref
 	}
-	if a.hc != nil {
-		hc := a.hc
-		deps.Term = &web.TermDeps{
-			Bin: cfg.Herdr.Bin, Socket: cfg.Herdr.Socket,
-			Version: func(ctx context.Context) (string, error) {
-				p, err := hc.Ping(ctx)
-				return p.Version, err
-			},
-			Shells: hc, ProjectRoots: cfg.Supervisor.ProjectRoots,
-		}
-	}
+	deps.Term = a.term
 	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
 	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
@@ -419,4 +410,17 @@ func pushComputerID(dataDir string) string {
 		return ""
 	}
 	return id
+}
+
+// herdrTerm is the old herdr's live terminal: one `herdr terminal session`
+// bridge per channel, listed only for a herdr new enough to have it.
+func herdrTerm(cfg config.Config, client *herdr.Client) *web.TermDeps {
+	return &web.TermDeps{
+		Bin: cfg.Herdr.Bin, Socket: cfg.Herdr.Socket,
+		Version: func(ctx context.Context) (string, error) {
+			p, err := client.Ping(ctx)
+			return p.Version, err
+		},
+		Shells: client, ProjectRoots: cfg.Supervisor.ProjectRoots,
+	}
 }

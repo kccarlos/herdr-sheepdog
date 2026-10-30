@@ -157,12 +157,15 @@ type App struct {
 	cfg  config.Config
 	opts Options
 
-	elog     *eventlog.Log
-	log      logging.Logger
-	store    *state.Store
-	herdr    *inject.Herdr
-	hc       *herdr.Client // nil in mock mode
-	wref     *watcherRef   // nil in mock mode
+	elog    *eventlog.Log
+	log     logging.Logger
+	store   *state.Store
+	herdr   *inject.Herdr
+	backend herdr.Backend // nil in mock mode
+	wref    *watcherRef   // nil in mock mode
+	// term backs /term (the live terminal); nil in mock mode and on a
+	// backend without a terminal bridge.
+	term     *web.TermDeps
 	sup      *supervisor.Supervisor
 	brain    *brain.Brain // nil when off
 	brainOff string       // why the orchestrator is off (web.Deps.BrainOffReason)

@@ -152,10 +152,10 @@ func (a *App) watchdogProbes() observe.Probes {
 	if li, ok := a.voice.(supervisor.Listener); ok {
 		p.Listener = li.HasListener
 	}
-	if a.wref != nil && a.hc != nil {
+	if a.wref != nil && a.backend != nil {
 		p.HerdrBeat = a.wref.beat
 		p.HerdrPing = func(ctx context.Context) error {
-			_, err := a.hc.Ping(ctx)
+			_, err := a.backend.Ping(ctx)
 			return err
 		}
 		// Three missed snapshots (and no event meanwhile).
@@ -186,7 +186,7 @@ func (a *App) runWatcher(ctx context.Context) {
 				known[row.PaneID] = row.State
 			}
 		}
-		w := herdr.NewWatcher(a.hc, herdr.WatcherConfig{
+		w := herdr.NewWatcher(a.backend, herdr.WatcherConfig{
 			Debounce:         time.Duration(a.cfg.DebounceMS) * time.Millisecond,
 			SnapshotInterval: time.Duration(a.cfg.SnapshotIntervalS) * time.Second,
 			Known:            known,
