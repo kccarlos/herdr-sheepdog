@@ -147,16 +147,26 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.pairing(r.URL.Query().Get("new") == "1"))
 }
 
+// pairQRLink returns the current pairing link for a QR renderer, or
+// writes the same conflict /api/pair would answer when there is none.
+func (s *Server) pairQRLink(w http.ResponseWriter, r *http.Request) (string, bool) {
+	p := s.pairing(r.URL.Query().Get("new") == "1")
+	if p.Link == "" {
+		writeError(w, http.StatusConflict, p.Error)
+		return "", false
+	}
+	return p.Link, true
+}
+
 // handlePairQR serves the current pairing code as SVG. It holds a
 // one-time enroll code: the route is loopback only, and nothing logs the
 // body.
 func (s *Server) handlePairQR(w http.ResponseWriter, r *http.Request) {
-	p := s.pairing(r.URL.Query().Get("new") == "1")
-	if p.Link == "" {
-		writeError(w, http.StatusConflict, p.Error)
+	link, ok := s.pairQRLink(w, r)
+	if !ok {
 		return
 	}
-	svg, err := pair.SVG(p.Link)
+	svg, err := pair.SVG(link)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -164,6 +174,23 @@ func (s *Server) handlePairQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(svg))
+}
+
+// handlePairQRJSON serves the current pairing code as a module matrix.
+// Like the SVG, it holds a one-time enroll code, is loopback only, and
+// logs neither the link nor the body.
+func (s *Server) handlePairQRJSON(w http.ResponseWriter, r *http.Request) {
+	link, ok := s.pairQRLink(w, r)
+	if !ok {
+		return
+	}
+	matrix, err := pair.RenderMatrix(link)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, matrix)
 }
 
 // EnrollRequest is POST /api/devices/enroll.

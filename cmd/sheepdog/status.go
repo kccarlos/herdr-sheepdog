@@ -177,7 +177,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			r.Service = st
 		}
 	}
-	h := onboard.CheckHerdr(cfg.Herdr.Socket)
+	h := onboard.CheckHerdr(cfg.Herdr)
 	r.Herdr = statusHerdr{Reachable: h.Status == onboard.OK, Socket: cfg.Herdr.Socket}
 	if !r.Herdr.Reachable {
 		r.Herdr.Detail = h.Detail

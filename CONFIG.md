@@ -90,8 +90,10 @@ so they have no `SHEEPDOG_*` override.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
+| `herdr.backend` | `SHEEPDOG_HERDR_BACKEND` | `auto` | Which multiplexer the agents run in: `herdr` (the herdr app), `hc` (herdr-core, the new herdr), or `auto`: at startup the daemon asks both sockets and takes the one that answers; when both answer it takes `herdr`, and when neither does it waits for `herdr`. The choice is logged as `daemon.herdr_backend`. On herdr-core some things are not available yet: workspaces, tabs and worktrees, renaming an agent, the live agent window (the app shows the screen instead) and the phone shell ([`docs/dev/design/herdr-core-backend.md`](docs/dev/design/herdr-core-backend.md)). |
 | `herdr.socket` | `SHEEPDOG_HERDR_SOCKET` | `~/.config/herdr/herdr.sock` | Path of the herdr unix domain socket (`--herdr=socket`, the default; ignored under `--herdr=mock`). |
 | `herdr.bin` | `SHEEPDOG_HERDR_BIN` | *(empty)* | The herdr binary the daemon runs for the iPhone app's live agent windows (`herdr terminal session control`, one child process per open window, pointed at `herdr.socket`). Empty finds `herdr` on `PATH`, then `~/.local/bin/herdr`. The live window needs herdr 0.9.2 or newer; with an older herdr the app shows the read-only screen instead. |
+| `herdr.hc_socket` | `SHEEPDOG_HC_SOCKET` | hc's own: `$HC_SOCKET`, else `<session>.sock` in `$XDG_RUNTIME_DIR/herdr-core/`, else `~/.local/state/herdr-core/<session>/<session>.sock` (`HC_SESSION`, default `default`) | Path of herdr-core's socket, for `herdr.backend = "hc"` or `auto`. |
 
 ## `[state]`
 

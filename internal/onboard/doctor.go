@@ -26,7 +26,7 @@ type DoctorOptions struct {
 // Doctor runs every check on the effective config, in a fixed order.
 func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	var out []Result
-	out = append(out, CheckHerdr(cfg.Herdr.Socket))
+	out = append(out, CheckHerdr(cfg.Herdr))
 	out = append(out, checkGeminiKeys(ctx, o.Endpoints, cfg)...)
 	if cfg.Gemini.Vertex.APIKey != "" || cfg.Gemini.Vertex.Project != "" {
 		r := Result{Name: "vertex", Status: OK, Detail: "VERTEX_API_KEY and VERTEX_PROJECT set (not checked live)"}
