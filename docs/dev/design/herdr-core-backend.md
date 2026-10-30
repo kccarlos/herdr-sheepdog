@@ -161,9 +161,13 @@ temporary paths, so no test can reach a real core.
 Implementation notes: `CreateWorkspace` and `SplitPane` both run a new
 shell terminal (label `sheepdog=spawn`, no parent); `StartAgent` types the
 kind's command into it (Codex with `--no-daemon`, which hc requires) and
-returns, and the supervisor's existing wait polls `GetAgent`. The fleet
-stream asks `terminal.get` on `created`, `restarted` and a terminal's first
-status, to decide whether it is an agent. `sheepdog herdr watch` (a
+returns, and the supervisor's existing wait polls `GetAgent`, which reports
+the launch pending (`LaunchPending`, as herdr's `agent.start` does) until
+the program shows in the terminal, and not found after the start timeout.
+The fleet stream asks `terminal.get` on `created`, `restarted`, a
+`foreground` change to a known agent program (one typed into an existing
+shell) and a terminal's first status, to decide whether it is an agent.
+`Interrupt` asks hc to watch for 2 s, below the call timeout. `sheepdog herdr watch` (a
 developer tool) still talks to the old herdr only.
 
 ## Open questions

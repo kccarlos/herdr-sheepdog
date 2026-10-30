@@ -52,7 +52,7 @@ herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
 sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
 ```
 
-Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. herdr 0.9.4 or newer is needed for the plugin.
+Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. herdr 0.9.4 or newer is needed for the plugin. On herdr-core (`hc`), use Homebrew: sheepdog finds hc's socket when it starts ([herdr.backend](CONFIG.md)).
 
 <p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -145,5 +146,28 @@ func TestAgentKindsOnPath(t *testing.T) {
 	}
 	if want := []string{"claude", "codex", "pi"}; !slices.Equal(kinds, want) {
 		t.Fatalf("kinds = %v, want %v", kinds, want)
+	}
+}
+
+// The supervisor polls GetAgent right after StartAgent, while the shell
+// still holds the foreground: the launch must read as pending, as with
+// herdr's agent.start, and as gone once its wait is over.
+func TestStartAgentLaunchIsPendingUntilTheProgramShows(t *testing.T) {
+	b, srv := newBackend(t)
+	srv.Add(liveTerminal("t1", "zsh"))
+	ctx := testContext(t)
+	if _, err := b.GetAgent(ctx, "t1"); !errors.Is(err, herdr.ErrAgentNotFound) {
+		t.Fatalf("GetAgent on a plain shell = %v, want ErrAgentNotFound", err)
+	}
+	if err := b.StartAgent(ctx, "t1", "x", "codex", nil, 150*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	info, err := b.GetAgent(ctx, "t1")
+	if err != nil || !info.LaunchPending || info.Agent != "codex" {
+		t.Fatalf("GetAgent during the launch = %+v, %v; want pending codex", info, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := b.GetAgent(ctx, "t1"); !errors.Is(err, herdr.ErrAgentNotFound) {
+		t.Fatalf("GetAgent after the launch wait = %v, want ErrAgentNotFound", err)
 	}
 }

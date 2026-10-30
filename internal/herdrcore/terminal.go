@@ -54,10 +54,15 @@ func (b *Backend) SendKeys(ctx context.Context, paneID string, keys ...string) e
 	return translate(err)
 }
 
+// interruptWatch is how long hc watches an interrupt for its effect:
+// below the client's call timeout, so a slow stop is an answer
+// (still_working), not a failed call after the key went in.
+const interruptWatch = 2 * time.Second
+
 // Interrupt presses the terminal's stop key (esc for a status reporter,
 // else ctrl+c).
 func (b *Backend) Interrupt(ctx context.Context, paneID string) error {
-	res, err := b.client.Interrupt(ctx, paneID)
+	res, err := b.client.Interrupt(ctx, paneID, interruptWatch)
 	b.logEvent("herdr.interrupt", paneID, map[string]any{"key": res.Key, "outcome": res.Outcome, "error": errString(err)})
 	return translate(err)
 }

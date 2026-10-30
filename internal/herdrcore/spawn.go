@@ -65,17 +65,22 @@ func pid32(pid int) uint32 {
 }
 
 // StartAgent types the kind's command into the terminal's shell and returns
-// at once; the caller polls GetAgent until the agent reports, shows a
-// question or its own timeout passes. name is a placeholder (hc cannot
-// rename) and timeout is not enforced here.
-func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args []string, _ time.Duration) error {
+// at once, like herdr's agent.start: until the program shows, GetAgent
+// reports the launch pending, and after timeout (zero: DefaultLaunchWait)
+// not found. The caller polls GetAgent until the agent reports, shows a
+// question or gives up. name is a placeholder (hc cannot rename).
+func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args []string, timeout time.Duration) error {
 	if !knownKind(kind) {
 		return fmt.Errorf("herdrcore: unknown agent kind %q", kind)
 	}
 	command := agentCommand(kind, args)
 	_, err := b.client.Send(ctx, paneID, command, false)
 	b.logEvent("herdr.agent_start", paneID, map[string]any{"kind": kind, "command": command, "error": errString(err)})
-	return translate(err)
+	if err != nil {
+		return translate(err)
+	}
+	b.startLaunch(paneID, kind, timeout)
+	return nil
 }
 
 // agentCommand is the shell line that starts kind with args. Codex runs

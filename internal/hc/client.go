@@ -137,12 +137,20 @@ func (c *Client) Keys(ctx context.Context, terminal string, keys ...string) (Key
 	return result, err
 }
 
-// Interrupt asks herdr-core to press the terminal's stop key.
-func (c *Client) Interrupt(ctx context.Context, terminal string) (InterruptResult, error) {
+// Interrupt asks herdr-core to press the terminal's stop key and watch
+// for its effect for watch (zero: hc's default, 10 s). Keep watch below
+// the client's Timeout, or the call ends before hc answers.
+func (c *Client) Interrupt(ctx context.Context, terminal string, watch time.Duration) (InterruptResult, error) {
 	var result InterruptResult
-	err := c.Call(ctx, "terminal.interrupt", struct {
-		Terminal string `json:"terminal"`
-	}{Terminal: terminal}, &result)
+	params := struct {
+		Terminal string   `json:"terminal"`
+		Timeout  *float64 `json:"timeout,omitempty"`
+	}{Terminal: terminal}
+	if watch > 0 {
+		s := watch.Seconds()
+		params.Timeout = &s
+	}
+	err := c.Call(ctx, "terminal.interrupt", params, &result)
 	return result, err
 }
 

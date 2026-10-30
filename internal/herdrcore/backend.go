@@ -37,6 +37,9 @@ type Backend struct {
 
 	mu   sync.Mutex
 	pong herdr.Pong // the last hello, zero until the first
+	// launches are StartAgent's launches not yet seen as agents, by
+	// terminal (agents.go).
+	launches map[string]launch
 }
 
 // New returns a backend over client. A nil log discards events.
@@ -49,6 +52,7 @@ func New(client *hc.Client, log herdr.Logger) *Backend {
 		client:   client,
 		log:      log,
 		resync:   make(chan struct{}, 1),
+		launches: map[string]launch{},
 	}
 }
 
@@ -97,7 +101,8 @@ func translate(err error) error {
 		return nil
 	case errors.Is(err, hc.ErrBlocked):
 		return fmt.Errorf("%w: %w", herdr.ErrAgentBlocked, err)
-	case errors.Is(err, hc.ErrNotFound):
+	case errors.Is(err, hc.ErrNotFound), errors.Is(err, hc.ErrFinished):
+		// A finished terminal is no longer a pane.
 		return fmt.Errorf("%w: %w", herdr.ErrPaneNotFound, err)
 	}
 	return err

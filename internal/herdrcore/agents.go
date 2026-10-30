@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -29,10 +30,56 @@ func (b *Backend) GetAgent(ctx context.Context, target string) (herdr.AgentInfo,
 		}
 		return herdr.AgentInfo{}, err
 	}
+	if isPane(t) && !isAgent(t) {
+		if kind, ok := b.launching(t.Address); ok {
+			// Typed into the shell, not running yet (hc samples the
+			// foreground program about twice a second).
+			return herdr.AgentInfo{PaneID: t.Address, TerminalID: t.Address, Agent: kind, Cwd: cwdOf(t), LaunchPending: true}, nil
+		}
+	}
+	b.endLaunch(t.Address)
 	if !isPane(t) || !isAgent(t) {
 		return herdr.AgentInfo{}, fmt.Errorf("%w: terminal %s is not a live agent", herdr.ErrAgentNotFound, target)
 	}
 	return agentInfo(t, b.stateOf(ctx, t)), nil
+}
+
+// launch is one StartAgent launch: the kind typed, and when it is given
+// up on if the program never shows (herdr's agent.start drops it then).
+type launch struct {
+	kind  string
+	until time.Time
+}
+
+// DefaultLaunchWait is how long a launch stays pending when StartAgent is
+// given no timeout.
+const DefaultLaunchWait = 30 * time.Second
+
+func (b *Backend) startLaunch(address, kind string, wait time.Duration) {
+	if wait <= 0 {
+		wait = DefaultLaunchWait
+	}
+	b.mu.Lock()
+	b.launches[address] = launch{kind: kind, until: time.Now().Add(wait)}
+	b.mu.Unlock()
+}
+
+// launching is the kind of a launch still pending in address.
+func (b *Backend) launching(address string) (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l, ok := b.launches[address]
+	if ok && time.Now().After(l.until) {
+		delete(b.launches, address)
+		return "", false
+	}
+	return l.kind, ok
+}
+
+func (b *Backend) endLaunch(address string) {
+	b.mu.Lock()
+	delete(b.launches, address)
+	b.mu.Unlock()
 }
 
 // Snapshot lists the live local terminals as panes, and the agents among

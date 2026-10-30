@@ -72,6 +72,15 @@ func (f *fleetFeed) handle(ctx context.Context, n hc.Notification) bool {
 	switch n.Type {
 	case "created", "restarted":
 		return f.detect(ctx, n.Terminal, false)
+	case "foreground":
+		// A known agent typed into an existing shell: found now, not at
+		// the next snapshot (it reports no status before its first-run
+		// question).
+		var fg *hc.Foreground
+		if err := n.DecodeData(&fg); err != nil || fg == nil || !knownKind(argvBase(fg.Argv)) {
+			return true
+		}
+		return f.detect(ctx, n.Terminal, true)
 	case "status":
 		var data hc.StatusData
 		if err := n.DecodeData(&data); err != nil || !data.Reported {
