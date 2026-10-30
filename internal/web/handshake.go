@@ -123,6 +123,7 @@ func (c *client) onClientReady(m wsproto.Message) {
 		return
 	}
 	c.attachIfPending()
+	c.h.setClientInfo(c, m.Client)
 	// The daemon speaks its own protocol; a newer client steps down to
 	// it (or closes, if it cannot).
 	c.enqueue(controlFrame(wsproto.BotReady(wsproto.ProtocolVersion, c.h.s.deps.MinProtocol, c.h.s.deps.Version, c.h.s.features())))
