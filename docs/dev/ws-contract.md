@@ -848,6 +848,13 @@ control messages; the daemon resamples for GPT-Live (which runs at
 - `GET /api/state`'s `voice` object reports `speaking`: true while the
   live voice session's `Speaking()` says the model's speech is reaching
   the user, and false when the voice is off or there is no session.
+- `GET /api/state`'s `voice.client` is `{name, platform, since}` for the
+  client holding `/ws`, taken from its accepted `client-ready` handshake
+  (the `version` is not included). `since` is when that handshake was
+  accepted. The field is omitted when no client holds `/ws`, or when a
+  connected client has not supplied `client` in its handshake. It is
+  cleared when that client disconnects and replaced when a new client's
+  accepted handshake takes over `/ws`.
 - **GPT-Live is billed per second of open session**, so the daemon opens
   one only while a client is attached (`/ws` connected) and unmuted and
   there is speech (a frame loud enough) or a push to say, and closes it
@@ -912,6 +919,17 @@ answer a question by tap. All three need a paired device under "Auth".
   id (a `: replay truncated …` comment says so). `?n=<count>` replays the
   last count events of the current run instead (what `/debug` does on a
   fresh load; a `?since=` below 10¹² is read as a count, as before).
+- **`GET /events?kinds=<kind,...>`** keeps only events whose `type` has
+  one of the comma-separated first dotted components as its kind:
+  `herdr.state` is `herdr`, `pending.created` is `pending`, and
+  `supervisor.relay` is `supervisor`. The current kinds are `brain`,
+  `card`, `cli`, `context`, `conversation`, `daemon`, `eventlog`,
+  `events`, `herdr`, `investigation`, `note`, `observe`, `pending`,
+  `promise`, `prompts`, `push`, `question`, `supervisor`, `turn`,
+  `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
+  `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
+  `source`, `pane`, and `type` filters behave as before. `GET /api/events`
+  accepts the same filters.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most

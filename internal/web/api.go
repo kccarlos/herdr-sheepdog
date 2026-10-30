@@ -114,6 +114,9 @@ type VoiceInfo struct {
 	Reason  string `json:"reason,omitempty"`
 	Muted   bool   `json:"muted"`
 	Stalled bool   `json:"stalled"`
+	// Client is the /ws holder from its accepted client-ready handshake;
+	// omitted until the handshake carries a client and after it disconnects.
+	Client *VoiceClientInfo `json:"client,omitempty"`
 	// Speaking is true while the model's speech is reaching the user.
 	Speaking        bool `json:"speaking"`
 	ClientConnected bool `json:"client_connected"`
@@ -124,6 +127,13 @@ type VoiceInfo struct {
 	Problem string `json:"problem,omitempty"`
 	// SetupNeeded: the voice has no credentials (run sheepdog setup).
 	SetupNeeded bool `json:"setup_needed,omitempty"`
+}
+
+// VoiceClientInfo identifies the client holding /ws.
+type VoiceClientInfo struct {
+	Name     string    `json:"name"`
+	Platform string    `json:"platform"`
+	Since    time.Time `json:"since"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -677,7 +687,7 @@ func (s *Server) handleHerdrEvent(w http.ResponseWriter, r *http.Request) {
 
 // voiceInfo is /api/state's voice object.
 func (s *Server) voiceInfo(hs hubState) VoiceInfo {
-	v := VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client}
+	v := VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, Client: hs.clientInfo, ClientConnected: hs.client}
 	if s.deps.Voice != nil {
 		v.Speaking = s.deps.Voice.Speaking()
 	}

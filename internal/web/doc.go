@@ -6,8 +6,8 @@
 //     line per event, `id:` = the event's stable id). Last-Event-ID or
 //     ?since=<id> replays what came after that id from the log (across
 //     day files and restarts, at most 2 000 events), ?n=<count> the last
-//     count events of the ring; ?source= / ?pane= / ?type= filter; a
-//     keepalive comment every 15 s.
+//     count events of the ring; ?source= / ?pane= / ?type= / ?kinds=
+//     filter; a keepalive comment every 15 s.
 //   - GET /api/state, GET /api/agents, GET /api/events?n=: the state
 //     table, pending action (with its options for a tap), session and
 //     voice status as JSON.

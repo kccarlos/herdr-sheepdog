@@ -60,13 +60,15 @@ type tagPusher interface {
 type hub struct {
 	s *Server
 
-	mu      sync.Mutex
-	client  *client
-	seq     int
-	status  voice.Status
-	reason  string
-	stalled bool
-	muted   bool
+	mu     sync.Mutex
+	client *client
+	// clientInfo is the accepted client-ready identity of client.
+	clientInfo *VoiceClientInfo
+	seq        int
+	status     voice.Status
+	reason     string
+	stalled    bool
+	muted      bool
 	// unheard: model audio is being dropped for want of a client in the
 	// current run (web.audio_unheard is logged once per run; a client
 	// attaching or the model's turn completing starts a new run).
@@ -89,19 +91,25 @@ func newHub(s *Server) *hub {
 
 // hubState is the daemon's view of the voice side for /api/state.
 type hubState struct {
-	status  voice.Status
-	reason  string
-	muted   bool
-	stalled bool
-	client  bool
+	status     voice.Status
+	reason     string
+	muted      bool
+	stalled    bool
+	client     bool
+	clientInfo *VoiceClientInfo
 }
 
 // state returns the voice status, its reason, the mute and stalled flags
-// and whether a browser client is attached.
+// and the attached browser client's identity.
 func (h *hub) state() hubState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return hubState{status: h.status, reason: h.reason, muted: h.muted, stalled: h.stalled, client: h.client != nil}
+	var info *VoiceClientInfo
+	if h.clientInfo != nil {
+		clone := *h.clientInfo
+		info = &clone
+	}
+	return hubState{status: h.status, reason: h.reason, muted: h.muted, stalled: h.stalled, client: h.client != nil, clientInfo: info}
 }
 
 func (h *hub) statusMsg() wsproto.Message {
@@ -187,6 +195,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	last := h.client == c
 	if last {
 		h.client = nil
+		h.clientInfo = nil
 	}
 	h.mu.Unlock()
 	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
@@ -205,6 +214,7 @@ func (h *hub) attach(c *client) bool {
 	}
 	old := h.client
 	h.client = c
+	h.clientInfo = nil
 	// docs/dev/ws-contract.md: "reconnecting clients start unmuted" — a new
 	// client's mic is never silenced by whatever the previous client left
 	// behind (audit B2).
@@ -222,6 +232,19 @@ func (h *hub) attach(c *client) bool {
 		ca.ClientAttached(true)
 	}
 	return old != nil
+}
+
+// setClientInfo records the accepted client-ready identity of c. A client
+// that lost a replacement race is ignored.
+func (h *hub) setClientInfo(c *client, info *wsproto.ClientInfo) {
+	if info == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.client == c {
+		h.clientInfo = &VoiceClientInfo{Name: info.Name, Platform: info.Platform, Since: h.s.deps.Now().UTC()}
+	}
+	h.mu.Unlock()
 }
 
 // current returns the attached client, if any.
