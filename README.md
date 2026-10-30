@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 
 ## try it in three minutes
 
-**You need:** [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The install downloads a prebuilt binary for Apple silicon Macs and x86-64 Linux; any other machine builds from source and needs [Go](https://go.dev/dl/).
+**You need:** [herdr](https://github.com/herdrdev/herdr) (the herdr app or herdr-core, `hc`), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The install downloads a prebuilt binary for Apple silicon Macs and x86-64 Linux; any other machine builds from source and needs [Go](https://go.dev/dl/).
 
 ```bash
 herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin

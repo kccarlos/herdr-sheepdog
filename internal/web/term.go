@@ -185,7 +185,11 @@ func remoteKind(remote string) string {
 func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	t := s.term
 	if !t.available() {
-		writeError(w, http.StatusServiceUnavailable, "the live terminal needs herdr "+herdr.TerminalMinVersion+" or newer")
+		msg := "the live terminal needs herdr " + herdr.TerminalMinVersion + " or newer"
+		if s.deps.TermOff != "" {
+			msg = s.deps.TermOff
+		}
+		writeError(w, http.StatusServiceUnavailable, msg)
 		return
 	}
 	conn, err := websocket.Accept(w, r, nil)
