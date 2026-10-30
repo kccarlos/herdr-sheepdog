@@ -129,6 +129,14 @@ final class WSMessageTests: XCTestCase {
         XCTAssertThrowsError(try decode(#"{"type":"bark"}"#))
     }
 
+    /// The daemon's `voice-command` message (docs/dev/ws-contract.md "Voice
+    /// commands over HTTP") is not implemented by the app yet: it decodes
+    /// as an unknown type, which `VoiceSocket` drops without closing.
+    func testVoiceCommandIsAnUnknownTypeTheAppIgnores() {
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"stop"}"#))
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"ptt","on":true}"#))
+    }
+
     func testAudioContractMatchesTheDaemon() {
         XCTAssertEqual(AudioContract.captureRate, 16_000)
         XCTAssertEqual(AudioContract.playbackRate, 24_000)
