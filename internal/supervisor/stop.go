@@ -129,7 +129,7 @@ func (s *Supervisor) relayStopRest() {
 	go func() {
 		defer s.replies.Done()
 		s.log.Log(logSource, "supervisor.stop_rest", "", map[string]any{"text": rest, "heard": last.text, "utterance_id": c.id})
-		res := s.handleUtterance(s.life, c, "", true)
+		res, _ := s.handleUtterance(s.life, c, "", true, false)
 		if res.Spoken == "" {
 			return
 		}

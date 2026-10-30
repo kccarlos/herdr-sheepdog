@@ -248,6 +248,19 @@ speech synthesis.
   `web.client.mute` event carries `via:"http"`, versus `via:"ws"` for
   the control message. Like every mute, it lasts until the next `/ws` client connects
   (which starts unmuted).
+- `POST /api/turn {"text":"…"}` is a typed turn for the orchestrator with a
+  text reply: it answers `{"reply":"…","turn_id":"…","acted":bool}` once the
+  turn is over. It runs the same orchestrator turn a spoken `to_supervisor`
+  does (tools, approvals and history as for speech), but waits for the reply
+  whatever `brain.reply_wait_s` is, and nothing is spoken. The voice gets one
+  `voice.push` at `urgency: silent` saying what was typed and answered, so its
+  next spoken turn knows. `turn_id` is the utterance id on the turn's `brain.*`
+  events. A missing, empty or non-string `text` is `400`; with the orchestrator
+  off it is `503` with `{"error":"the orchestrator is off (<reason>)"}`; if a
+  spoken turn claimed the typed words first (it answers them), `409`. It
+  takes an `Idempotency-Key` like any device `POST`. `GET /api/conversation`
+  shows the typed line (`kind:"shepherd"`, `via:"typed"`) and the reply
+  (`kind:"dog"`, `via:"typed"`).
 
 ## Silence gate
 
@@ -618,7 +631,7 @@ These answer only this computer (`127.0.0.0/8`, `::1`) and refuse any
 other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
 {path, remote}`), whatever it presents:
 
-- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`;
+- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`, `GET /api/pair/qr.json`;
 - debug and internal: the `/debug` page, `/api/inject/*` (blocked,
   pane, done, state, screen, remove), `POST /api/herdr/event` (the herdr
   hooks), `POST /api/prompts/reload`, `GET /api/voice/system_prompt`,
@@ -687,6 +700,11 @@ Only this computer gets one (loopback only):
   Reading it again returns the same code until it expires or is used;
   `?new=1` makes a new one, which invalidates the old one.
 - `GET /api/pair/qr.svg` is the current code as SVG (`?new=1` as above).
+- `GET /api/pair/qr.json` is the current code as
+  `{"size":n,"modules":["010…","…"]}` (`?new=1` as above). `modules` has
+  `n` rows, each `n` characters: `1` is a dark module and `0` is light.
+  The quiet zone is included, and these are the same modules the SVG
+  draws. Rows of strings are smaller than a boolean matrix.
 - `web.pair.code {expires}` is logged for each new code. No event, page
   state or log line carries a code.
 
@@ -848,6 +866,13 @@ control messages; the daemon resamples for GPT-Live (which runs at
 - `GET /api/state`'s `voice` object reports `speaking`: true while the
   live voice session's `Speaking()` says the model's speech is reaching
   the user, and false when the voice is off or there is no session.
+- `GET /api/state`'s `voice.client` is `{name, platform, since}` for the
+  client holding `/ws`, taken from its accepted `client-ready` handshake
+  (the `version` is not included). `since` is when that handshake was
+  accepted. The field is omitted when no client holds `/ws`, or when a
+  connected client has not supplied `client` in its handshake. It is
+  cleared when that client disconnects and replaced when a new client's
+  accepted handshake takes over `/ws`.
 - **GPT-Live is billed per second of open session**, so the daemon opens
   one only while a client is attached (`/ws` connected) and unmuted and
   there is speech (a frame loud enough) or a push to say, and closes it
@@ -912,6 +937,17 @@ answer a question by tap. All three need a paired device under "Auth".
   id (a `: replay truncated …` comment says so). `?n=<count>` replays the
   last count events of the current run instead (what `/debug` does on a
   fresh load; a `?since=` below 10¹² is read as a count, as before).
+- **`GET /events?kinds=<kind,...>`** keeps only events whose `type` has
+  one of the comma-separated first dotted components as its kind:
+  `herdr.state` is `herdr`, `pending.created` is `pending`, and
+  `supervisor.relay` is `supervisor`. The current kinds are `brain`,
+  `card`, `cli`, `context`, `conversation`, `daemon`, `eventlog`,
+  `events`, `herdr`, `investigation`, `note`, `observe`, `pending`,
+  `promise`, `prompts`, `push`, `question`, `supervisor`, `turn`,
+  `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
+  `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
+  `source`, `pane`, and `type` filters behave as before. `GET /api/events`
+  accepts the same filters.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most

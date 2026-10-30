@@ -45,14 +45,14 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 
 ## try it in three minutes
 
-**You need:** [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The install downloads a prebuilt binary for Apple silicon Macs and x86-64 Linux; any other machine builds from source and needs [Go](https://go.dev/dl/).
+**You need:** [herdr](https://github.com/herdrdev/herdr) (the herdr app or herdr-core, `hc`), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The install downloads a prebuilt binary for Apple silicon Macs and x86-64 Linux; any other machine builds from source and needs [Go](https://go.dev/dl/).
 
 ```bash
 herdr plugin install kccarlos/herdr-sheepdog   # 1. install the plugin
 sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
 ```
 
-Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. herdr 0.9.4 or newer is needed for the plugin.
+Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. herdr 0.9.4 or newer is needed for the plugin. On herdr-core (`hc`), use Homebrew: sheepdog finds hc's socket when it starts ([herdr.backend](CONFIG.md)).
 
 <p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -263,6 +264,18 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 		if !tc.want && resp.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("herdr %s: GET /term = %d, want 503", tc.version, resp.StatusCode)
 		}
+	}
+	// No Deps.Term because the backend has none (herdr-core): not listed,
+	// and /term says why in plain words.
+	off := newHarness(t, harnessOpts{termOff: "the live terminal is not available with herdr-core yet"})
+	resp, err := http.Get(off.http.URL + "/term")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "herdr-core") {
+		t.Errorf("GET /term without a live terminal = %d %s", resp.StatusCode, body)
 	}
 	// No Deps.Term (herdr mock mode): never listed.
 	h := newHarness(t, harnessOpts{})

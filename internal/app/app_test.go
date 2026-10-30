@@ -47,6 +47,8 @@ func testConfig(t *testing.T) config.Config {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	cfg.Herdr.Socket = filepath.Join(sockDir, "h.sock")
+	// Never the real herdr-core: auto detection asks this socket too.
+	cfg.Herdr.HCSocket = filepath.Join(sockDir, "hc.sock")
 	// App tests must never spawn a real codex/claude (cost, non-determinism
 	// across machines); point [cli] at binaries that do not exist so
 	// Detect always reports both absent.

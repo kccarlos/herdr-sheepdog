@@ -165,7 +165,9 @@ type App struct {
 	wref    *watcherRef   // nil in mock mode
 	// term backs /term (the live terminal); nil in mock mode and on a
 	// backend without a terminal bridge.
-	term     *web.TermDeps
+	term *web.TermDeps
+	// termOff is /term's answer when the backend has no live terminal.
+	termOff  string
 	sup      *supervisor.Supervisor
 	brain    *brain.Brain // nil when off
 	brainOff string       // why the orchestrator is off (web.Deps.BrainOffReason)

@@ -26,7 +26,9 @@ func Template() string {
 # "w9:p1" = "auth"
 
 [herdr]
+# backend = "auto"   # auto, herdr or hc (herdr-core); auto takes whichever answers at startup
 # socket = %[5]q
+# hc_socket = ""     # herdr-core's socket; empty follows hc's own rules (HC_SOCKET, HC_SESSION)
 # bin = ""   # the herdr binary for the phone's terminal; empty finds it on PATH or in ~/.local/bin
 
 [state]

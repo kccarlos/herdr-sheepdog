@@ -99,14 +99,14 @@ func TestClientCallsRequestsAndResults(t *testing.T) {
 		"keys":     []any{"enter", "tab"},
 	})
 
-	interrupted, err := client.Interrupt(ctx, "t1")
+	interrupted, err := client.Interrupt(ctx, "t1", 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if interrupted.Key != "esc" || interrupted.Outcome != "stopped" {
 		t.Fatalf("unexpected interrupt: %+v", interrupted)
 	}
-	assertParams(t, server, "terminal.interrupt", map[string]any{"terminal": "t1"})
+	assertParams(t, server, "terminal.interrupt", map[string]any{"terminal": "t1", "timeout": float64(2)})
 
 	runParams := hc.RunParams{
 		Argv:     []string{"claude"},
