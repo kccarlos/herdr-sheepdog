@@ -26,7 +26,8 @@ import (
 //	          with a via other than voice; via typed, the text reply to
 //	          POST /api/turn, keeps its via)
 //	push      voice.push that is not silent (the skipped pushes of
-//	          --voice=off included: they are what the voice would say)
+//	          --voice=off included: they are what the voice would say),
+//	          except a mid-turn handoff (its text is the voice item's)
 //	approval  pending.created of an answer_prompt, with its resolution
 //	          (pending.confirmed / expired / cancelled / replaced)
 //	notice    daemon.start and the voice session's reconnects, as dividers
@@ -242,6 +243,7 @@ type convoPayload struct {
 	Cancelled bool            `json:"cancelled"`
 	Urgency   string          `json:"urgency"`
 	Agent     string          `json:"agent"`
+	Handoff   bool            `json:"handoff"`
 	ID        string          `json:"id"`
 	OldID     string          `json:"old_id"`
 	Kind      string          `json:"kind"`
@@ -331,6 +333,9 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 			}
 		}
 	case "voice.push":
+		if p.Handoff {
+			return // the rest of a turn already shown as its own text
+		}
 		b.closeAll()
 		if p.Urgency == "silent" {
 			return
