@@ -80,7 +80,7 @@ func (c WatcherConfig) withDefaults() WatcherConfig {
 // dedup + debounce path. All bookkeeping is owned by the Run goroutine; no
 // locks are needed.
 type Watcher struct {
-	client *Client
+	client EventSource
 	cfg    WatcherConfig
 	log    Logger
 
@@ -128,8 +128,9 @@ type pendingBlock struct {
 	timer  *time.Timer
 }
 
-// NewWatcher builds a Watcher over client. log may be nil.
-func NewWatcher(client *Client, cfg WatcherConfig, log Logger) *Watcher {
+// NewWatcher builds a Watcher over client (a *Client or another backend's
+// EventSource). log may be nil.
+func NewWatcher(client EventSource, cfg WatcherConfig, log Logger) *Watcher {
 	if log == nil {
 		log = NopLogger{}
 	}
