@@ -379,9 +379,43 @@ func balanceOf(ctx context.Context, ep Endpoints, c Compat) (Result, bool) {
 // HerdrInstallHint is the one-line fix when herdr is missing.
 const HerdrInstallHint = "install herdr from https://github.com/herdrdev/herdr/releases and start it (herdr), then run sheepdog doctor again"
 
-// CheckHerdr reports whether herdr's socket answers and its binary is
+// CheckHerdr reports whether the multiplexer herdr.backend picks
+// answers: herdr's socket (and its binary on PATH), herdr-core's socket,
+// or with auto either of them.
+func CheckHerdr(h config.Herdr) Result {
+	switch h.Backend {
+	case config.HerdrBackendHC:
+		return checkHC(h.HCSocketPath())
+	case config.HerdrBackendAuto, "":
+		if r := checkHC(h.HCSocketPath()); r.Status == OK && !socketAnswers(h.Socket) {
+			return r
+		}
+	}
+	return checkOldHerdr(h.Socket)
+}
+
+// socketAnswers reports whether a unix socket accepts a connection.
+func socketAnswers(socket string) bool {
+	conn, err := net.DialTimeout("unix", socket, time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// checkHC reports whether herdr-core's socket answers.
+func checkHC(socket string) Result {
+	const name = "herdr"
+	if socketAnswers(socket) {
+		return Result{Name: name, Status: OK, Detail: "herdr-core socket " + socket + " answers"}
+	}
+	return Result{Name: name, Status: Fail, Detail: "herdr-core's socket " + socket + " does not answer", Fix: "start herdr-core (hc server start), or set herdr.hc_socket / SHEEPDOG_HC_SOCKET to its socket"}
+}
+
+// checkOldHerdr reports whether herdr's socket answers and its binary is
 // on PATH.
-func CheckHerdr(socket string) Result {
+func checkOldHerdr(socket string) Result {
 	const name = "herdr"
 	_, binErr := exec.LookPath("herdr")
 	conn, err := net.DialTimeout("unix", socket, time.Second)

@@ -45,6 +45,9 @@ func validate(cfg Config) error {
 	if cfg.Push.EffectiveMode() == PushModeRelay && !strings.HasPrefix(cfg.Push.Relay.URL, "https://") && !strings.HasPrefix(cfg.Push.Relay.URL, "http://") {
 		return fmt.Errorf("config: push.relay.url=%q: want an http(s) URL", cfg.Push.Relay.URL)
 	}
+	if !oneOf(cfg.Herdr.Backend, HerdrBackends) {
+		return fmt.Errorf("config: herdr.backend=%q: want one of %s", cfg.Herdr.Backend, strings.Join(HerdrBackends, ", "))
+	}
 	if !oneOf(cfg.Log.Level, LogLevels) {
 		return fmt.Errorf("config: log.level=%q: want one of %s", cfg.Log.Level, strings.Join(LogLevels, ", "))
 	}

@@ -636,6 +636,62 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
 }
 
+// TurnRequest is the body of POST /api/turn.
+type TurnRequest struct {
+	Text string `json:"text"`
+}
+
+// TurnResponse is the body of the POST /api/turn answer: the
+// orchestrator's text reply, the turn's id on its brain.* events and
+// whether the turn acted (sent something to a worker or recorded something).
+type TurnResponse struct {
+	Reply  string `json:"reply"`
+	TurnID string `json:"turn_id"`
+	Acted  bool   `json:"acted"`
+}
+
+// handleTurn sends a typed turn straight to the orchestrator and answers
+// with its text reply: the turn a spoken to_supervisor runs, so tools,
+// approvals and history work the same, but the reply is not spoken. The
+// voice only gets a silent context line (supervisor.TypedTurn).
+func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.brainOrUnavailable(w); !ok {
+		return
+	}
+	if s.deps.Supervisor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	var req TurnRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "typed"})
+	s.typed(text)
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	start := s.deps.Now()
+	reply, err := s.deps.Supervisor.TypedTurn(ctx)
+	if errors.Is(err, supervisor.ErrNoTypedInput) {
+		// A spoken turn claimed the typed words first and answers them.
+		writeError(w, http.StatusConflict, "a spoken turn is already answering this")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The reply is a "dog" item with via typed in GET /api/conversation.
+	s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": reply.TurnID, "name": voice.ToolToSupervisor, "spoken": reply.Text, "via": "typed", "dur_ms": s.deps.Now().Sub(start).Milliseconds()})
+	writeJSON(w, http.StatusOK, TurnResponse{Reply: reply.Text, TurnID: reply.TurnID, Acted: reply.Acted})
+}
+
 // typed records text as something the user typed, before it reaches
 // the voice model or the text router: the one rail reads these inputs,
 // never the tool argument the model relays (docs/dev/roles.md "The one

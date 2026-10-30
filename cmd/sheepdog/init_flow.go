@@ -221,7 +221,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 		keys: map[string]string{}, have: map[string]string{}}
 	f.ep = onboard.AnthropicEndpoints(f.ep, cur)
 
-	fprintln(out, "sheepdog init: "+onboard.CheckHerdr(cur.Herdr.Socket).Line())
+	fprintln(out, "sheepdog init: "+onboard.CheckHerdr(cur.Herdr).Line())
 
 	card, err := f.startingPoint()
 	if err != nil {

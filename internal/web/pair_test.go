@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,6 +24,9 @@ func TestPairLoopbackServer(t *testing.T) {
 	}
 	if code, _ := h.do(h.authedRequest("GET", "/api/pair/qr.svg", "", nil, nil), nil); code != http.StatusConflict {
 		t.Errorf("qr without an address: %d", code)
+	}
+	if code, _ := h.do(h.authedRequest("GET", "/api/pair/qr.json", "", nil, nil), nil); code != http.StatusConflict {
+		t.Errorf("qr JSON without an address: %d", code)
 	}
 	if _, err := h.srv.pairAddresses("127.0.0.1:7777"); !errors.Is(err, pair.ErrLoopback) {
 		t.Errorf("loopback: %v", err)
@@ -63,6 +67,17 @@ func TestPairAllInterfaces(t *testing.T) {
 	}
 	if !strings.HasPrefix(resp.Link, "https://100.101.102.103:"+port+"/voice#pair=1&") {
 		t.Errorf("link = %s", resp.Link)
+	}
+	var matrix pair.Matrix
+	if code := h.getJSON("/api/pair/qr.json", &matrix); code != http.StatusOK {
+		t.Fatalf("/api/pair/qr.json = %d", code)
+	}
+	want, err := pair.RenderMatrix(resp.Link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(matrix, want) {
+		t.Error("/api/pair/qr.json does not hold the current pairing link's matrix")
 	}
 	var again PairResponse
 	h.getJSON("/api/pair", &again)

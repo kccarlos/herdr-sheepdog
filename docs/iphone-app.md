@@ -255,7 +255,7 @@ With one computer, none of this shows: no names and no Talk to.
     - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
       (`supervisor.project_roots`) or an agent's own folder.
-  - The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog
+  - The live window needs herdr 0.9.2 or newer (not yet herdr-core) and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
     refreshes every few seconds (in colour with an up-to-date sheepdog), and
     it says so. "herdr is not running"

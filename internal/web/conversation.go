@@ -23,7 +23,8 @@ import (
 //	          via=voice (that one is followed by voice.text) — via typed
 //	voice       voice.transcript.out fragments merged per model turn, or a
 //	          tool result spoken without a voice model (voice.tool_result
-//	          with a via other than voice)
+//	          with a via other than voice; via typed, the text reply to
+//	          POST /api/turn, keeps its via)
 //	push      voice.push that is not silent (the skipped pushes of
 //	          --voice=off included: they are what the voice would say)
 //	approval  pending.created of an answer_prompt, with its resolution
@@ -324,7 +325,10 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 		// Without a voice model the daemon speaks the result itself.
 		if p.Via != "" && p.Via != "voice" && !p.Cancelled && strings.TrimSpace(p.Spoken) != "" {
 			b.dog = nil
-			b.push(ev, "dog", p.Spoken)
+			it := b.push(ev, "dog", p.Spoken)
+			if p.Via == "typed" {
+				it.Via = "typed" // the reply to POST /api/turn
+			}
 		}
 	case "voice.push":
 		b.closeAll()
