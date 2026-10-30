@@ -72,6 +72,20 @@ The Kit also builds for macOS (`SheepdogKitMac`; it excludes
 `AVAudioSession.Port`); `xcodebuild -scheme SheepdogKitMac -destination
 'platform=macOS' test` runs its unit tests, the platform-neutral share of
 `SheepdogKitTests`.
+
+The Mac menu-bar app (`SheepdogMac`, product `Sheepdog.app`; macOS 14 or
+later) builds and tests the same way, after `xcodegen generate`:
+
+```sh
+xcodebuild -scheme SheepdogMac -destination 'platform=macOS' test
+```
+
+Debug is signed automatically with the team in `project.yml`. Without that
+team's certificate, add `CODE_SIGN_IDENTITY=-` to run the tests with ad-hoc
+signing. The app reads the daemon on `127.0.0.1:7777`; to point it at another
+port, `defaults write com.github.kccarlos.herdr-sheepdog-mac sheepdogDaemonPort -int 7801`.
+How it is built is in
+[docs/dev/architecture.md](docs/dev/architecture.md#sheepdogapp-macos).
 `.github/workflows/ios.yml` runs the whole suite, fixture daemons included,
 on every PR that touches the app, and its smoke tests on every PR that
 touches the daemon's API.
