@@ -308,6 +308,9 @@ targets:
     platform: iOS
     sources:
       - path: Tests/SheepdogKitTests
+      # Cases shared with the herdr-app panel's node tests
+      # (docs/dev/design/desktop-client.md, section 6.1).
+      - path: Tests/Fixtures
     # Hosted in the app so the keychain test runs with the app's entitlements
     # (a hostless XCTest bundle has no keychain access group and every
     # SecItemAdd fails with errSecMissingEntitlement).

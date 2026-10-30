@@ -82,7 +82,8 @@ and Node for the browser tests.
 make build         # bin/sheepdog
 make run-dev       # serve --voice=off --herdr=mock --dev, for poking at /debug
 make test          # go test -race ./...
-make test-web      # web/voice, web/debug and web/static *.test.mjs (skipped without node)
+make test-web      # web/voice, web/debug and web/static *.test.mjs, and the panel's (skipped without node)
+make test-panel    # only the herdr-app panel's tests, herdr-app/mods/sheepdog (`herdr-app check herdr-app/mods/sheepdog` is its load check, run by hand)
 make vet lint
 make eval          # offline eval sets (no network)
 make eval-live     # the small eval sets against the real model (burns quota)
