@@ -1112,6 +1112,11 @@ answer a question by tap. All three need a paired device under "Auth".
   the agent left the question some other way (answered at the computer,
   cancelled). Each agent also carries `title`, its own session title
   (Claude Code's, Codex's thread name) when it has one.
+- **An agent exit.** When an agent exits back to its shell, it leaves
+  `GET /api/state`'s `agents` (and `/api/agents`) on the next watcher
+  transition; the terminal remains a shell and still appears in its
+  space's `shells`. If a later agent starts in that same terminal, it gets
+  a fresh state-table row and kind.
 
 ## Agent window: screen and input
 

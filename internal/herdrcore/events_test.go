@@ -146,6 +146,12 @@ func TestSubscribeFleetEvents(t *testing.T) {
 	srv.SetStatus("t1", &hc.Status{State: "working", App: "codex"})
 	expectNone(t, ch, 100*time.Millisecond)
 
+	srv.SetStatus("t1", nil)
+	ev = receive(t, ch)
+	if ev.Kind != herdr.FleetAgentDetected || ev.PaneID != "t1" || ev.Agent != "codex" || !ev.Released {
+		t.Fatalf("released event = %+v", ev)
+	}
+
 	srv.Finish("t1", "exited")
 	if ev := receive(t, ch); ev.Kind != herdr.FleetPaneExited || ev.PaneID != "t1" {
 		t.Fatalf("finished event = %+v", ev)

@@ -118,7 +118,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if t.Closed {
+	if t.Closed || t.Released {
 		a, ok := s.table.Agents[t.PaneID]
 		if !ok {
 			return Agent{}, false, nil

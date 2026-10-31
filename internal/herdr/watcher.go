@@ -23,6 +23,9 @@ type Transition struct {
 	// Closed is set when the pane (or its workspace) went away; To is then
 	// StateUnknown and the pane will not be reported again.
 	Closed bool `json:"closed,omitempty"`
+	// Released is set when the agent went away but its pane stayed as a
+	// shell. To is StateUnknown and the pane can host a new agent later.
+	Released bool `json:"released,omitempty"`
 	// Renamed marks a name-only update: herdr's agent name changed (a
 	// rename in herdr's own UI or `herdr agent rename`) while the state
 	// did not, so From == To. It reports nothing else: no event of
@@ -119,6 +122,9 @@ type paneState struct {
 	// seeded marks a pane from WatcherConfig.Known that has not been seen
 	// alive yet (no subscription open).
 	seeded bool
+	// released is set after the agent left and the row was removed. The
+	// pane stays watched for a later agent in the same shell.
+	released bool
 }
 
 type pendingBlock struct {
@@ -263,6 +269,7 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		known, wasKnown := w.panes[a.PaneID]
 		firstSight := !wasKnown || known.seeded
 		p := w.ensurePane(ctx, a.PaneID, a.WorkspaceID, a.Agent)
+		p.activate()
 		// A pane already reported (state set) whose herdr name differs
 		// from the one it was reported with. A persisted pane seen for
 		// the first time has no name on record here; its row keeps
@@ -306,7 +313,7 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		if p.state == "" {
 			continue
 		}
-		w.applyEvent(ctx, p, StatusEvent{PaneID: id, WorkspaceID: p.workspace, State: StateUnknown, At: at, Source: "snapshot"})
+		w.releasePane(ctx, p, at, "snapshot")
 	}
 	return nil
 }
@@ -316,10 +323,14 @@ func (w *Watcher) handleFleet(ctx context.Context, ev FleetEvent) {
 	switch ev.Kind {
 	case FleetAgentDetected:
 		if ev.Released {
-			return // the status subscription delivers the following `unknown`
+			if p, ok := w.panes[ev.PaneID]; ok {
+				w.releasePane(ctx, p, ev.At, string(ev.Kind))
+			}
+			return
 		}
 		p := w.ensurePane(ctx, ev.PaneID, ev.WorkspaceID, ev.Agent)
 		p.agent = ev.Agent
+		p.activate()
 		// Bootstrap the new pane's state and workspace label right away
 		// rather than waiting for the next tick.
 		if err := w.refreshSnapshot(ctx); err != nil {
@@ -360,6 +371,9 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 	if ev.WorkspaceID != "" {
 		p.workspace = ev.WorkspaceID
 	}
+	if ev.State != StateUnknown {
+		p.activate()
+	}
 	if ev.State == p.lastEv && ev.At.Sub(p.lastEvAt) < w.cfg.DedupWindow {
 		w.log.Log("herdr", "herdr.dedup", p.id, map[string]any{"state": ev.State, "source": ev.Source})
 		return
@@ -395,7 +409,17 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 		})
 		return
 	}
-	w.emit(ctx, p, ev.State, ev.At, ev.Source, false)
+	w.emit(ctx, p, ev.State, ev.At, ev.Source, false, false)
+}
+
+// activate starts a fresh agent in a pane whose previous row was released.
+// Caller owns the Watcher goroutine.
+func (p *paneState) activate() {
+	if !p.released {
+		return
+	}
+	p.state, p.lastEv, p.lastEvAt = "", "", time.Time{}
+	p.released = false
 }
 
 func (w *Watcher) handleFired(ctx context.Context, seq uint64) {
@@ -403,14 +427,14 @@ func (w *Watcher) handleFired(ctx context.Context, seq uint64) {
 		if p.pending != nil && p.pending.seq == seq {
 			pb := p.pending
 			p.pending = nil
-			w.emit(ctx, p, StateBlocked, pb.at, pb.source, false)
+			w.emit(ctx, p, StateBlocked, pb.at, pb.source, false, false)
 			return
 		}
 	}
 }
 
-func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time, source string, closed bool) {
-	if p.state == to && !closed {
+func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time, source string, closed, released bool) {
+	if p.state == to && !closed && !released {
 		return
 	}
 	t := Transition{
@@ -423,6 +447,7 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		WorkspaceID:    p.workspace,
 		WorkspaceLabel: w.wsLabels[p.workspace],
 		Closed:         closed,
+		Released:       released,
 		Source:         source,
 		Cwd:            p.cwd,
 	}
@@ -431,6 +456,9 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		t.Session = &sess
 	}
 	p.state = to
+	if released {
+		p.released = true
+	}
 	w.log.Log("herdr", "herdr.transition", p.id, t)
 	select {
 	case w.out <- t:
@@ -506,8 +534,22 @@ func (w *Watcher) removePane(ctx context.Context, p *paneState, at time.Time, so
 	w.dropPane(p)
 	delete(w.panes, p.id)
 	if p.state != "" {
-		w.emit(ctx, p, StateUnknown, at, source, true)
+		w.emit(ctx, p, StateUnknown, at, source, true, false)
 	}
+}
+
+// releasePane removes the agent row while keeping the pane watched as a
+// shell, so a later agent in the same terminal starts fresh.
+func (w *Watcher) releasePane(ctx context.Context, p *paneState, at time.Time, source string) {
+	if p.state == "" || p.released {
+		return
+	}
+	if p.pending != nil {
+		p.pending.timer.Stop()
+		p.pending = nil
+	}
+	p.lastEv, p.lastEvAt = StateUnknown, at
+	w.emit(ctx, p, StateUnknown, at, source, false, true)
 }
 
 func (w *Watcher) dropPane(p *paneState) {

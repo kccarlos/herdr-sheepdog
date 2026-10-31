@@ -531,6 +531,26 @@ func TestAgentExitPushesInterrupt(t *testing.T) {
 	}
 }
 
+func TestReleasedAgentLeavesTheRoster(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.sup.HandleTransition(context.Background(), herdr.Transition{
+		PaneID: "w5:p1", From: herdr.StateBlocked, To: herdr.StateUnknown,
+		At: h.clock.Now(), Released: true,
+	})
+	if rows := h.store.List(); len(rows) != 1 || rows[0].PaneID != "w6:p1" {
+		t.Fatalf("agents after release = %+v, want only w6:p1", rows)
+	}
+	cancelled := h.log.ofType("pending.cancelled")
+	if len(cancelled) != 1 || payload(cancelled[0])["reason"] != "agent_exited" {
+		t.Errorf("pending.cancelled = %v", cancelled)
+	}
+	push := h.pusher.last(t)
+	if push.Text != "auth has exited while it was busy." || push.Urgency != voice.UrgencyInterrupt {
+		t.Errorf("push = %+v", push)
+	}
+}
+
 // The acceptance run of 2026-10-02: Claude Code's AskUserQuestion
 // widget (a description line under each option) went blocked, but the
 // parser saw no prompt — supervisor.blocked_no_question — so send_keys

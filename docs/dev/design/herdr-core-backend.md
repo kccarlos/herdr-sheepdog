@@ -107,14 +107,15 @@ type Backend interface {               // what the daemon needs
 | tab | herdr-app's tab, shown for `herdr.tab=<id>` | `TabID` = the `herdr.tab` label. |
 | `idle`, `working`, `done`, `blocked` | the same words | as is. |
 | — | `error` | `done`: the turn ended; the finish announcement reads the screen and says what went wrong. |
-| `unknown` | status `null` after reporting (cleared), or any other word | `unknown`. |
+| `unknown` | any other status word | `unknown` while the terminal remains an agent. |
+| `pane_agent_detected` with `released:true` | status `null` after reporting, with no known agent program in front or in the start `argv[0]` | → `FleetAgentDetected{Released:true}`; the state table removes the row and the terminal stays a shell. |
 | — | status `null`, never reported, known kind | the **screen fallback**: `terminal.read`, and `ParsePrompt` finding a question makes it `blocked`; otherwise `unknown`. Polled every few seconds only for such terminals. |
 | `pane.read` sources | `terminal.read {lines}` (plain text; `stitched` for full-screen apps) | `visible` → `lines: 0`; the recent sources → `lines: n`. No ANSI read. |
 | `agent.prompt` (refuses a blocked agent) | `terminal.send` (refuses `blocked` unless `force`) | never `force`; hc's `blocked` error is `ErrAgentBlocked`. |
 | `pane.send_keys` | `terminal.keys` | the same key names (`enter`, `esc`, `up`, `down`, `tab`, `ctrl+c`, digits). |
 | interrupt | `terminal.interrupt` (esc for status reporters, else ctrl+c) | as is. |
 | `pane.agent_status_changed` | `status` event | → `StatusEvent`. |
-| `pane_agent_detected` | the first `status` event of a terminal, or `created` of a known kind | → `FleetAgentDetected`. |
+| `pane_agent_detected` | the first `status` event of a terminal, `created` of a known kind, or the cleared-status release above | → `FleetAgentDetected`, with `Released` on the exit. |
 | `pane_exited` / `pane_closed` | `finished`, `lost` / `removed` | → `FleetPaneExited` / `FleetPaneClosed`. |
 | resubscribe after `events_lost` | `missed`, a reconnect | → `Resync`. |
 | `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live local terminals, agents = the ones above). |
@@ -145,12 +146,13 @@ The scenarios are:
 7. a blocked question with options is read and parsed the same way.
 
 The exit decision follows the old protocol. `agent.list` contains only
-panes that currently host a recognised agent. Exiting an agent emits
-`unknown` and may keep the transition in the daemon's state history, but it
-does not keep the terminal in the active agent list. hc therefore treats a
-terminal as an agent only when it has a current status or a known agent
-program in the foreground or start argv. `terminal.reported` remembers that
-a program once reported; on its own it does not make a shell an agent.
+panes that currently host a recognised agent. Exiting an agent emits the
+`FleetAgentDetected{Released:true}` signal, which removes its state-table
+row and therefore its `/api/state` and `/api/agents` entries; the terminal
+stays a shell and can host a later agent. hc therefore treats a terminal as
+an agent only when it has a current status or a known agent program in the
+foreground or start argv. `terminal.reported` remembers that a program once
+reported; on its own it does not make a shell an agent.
 
 ## What v1 supports on hc
 
@@ -263,7 +265,8 @@ comes from `herdr.PaneInDir`, which shares `herdr.PaneDirs`' real-path
 folder match with agent spawning.
 The fleet stream asks `terminal.get` on `created`, `restarted`, a
 `foreground` change to a known agent program (one typed into an existing
-shell) and a terminal's first status, to decide whether it is an agent.
+shell) and a terminal's status, to decide whether it is an agent or has
+released one.
 `Interrupt` asks hc to watch for 2 s, below the call timeout. `sheepdog herdr watch` (a
 developer tool) still talks to the old herdr only.
 

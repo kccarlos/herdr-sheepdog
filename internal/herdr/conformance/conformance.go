@@ -208,6 +208,7 @@ func agentsAreDetectedFreshAndResumed(t *testing.T, newDriver NewDriver) {
 func exitedAgentIsNoLongerListed(t *testing.T, newDriver NewDriver) {
 	d := newDriver(t)
 	ctx := testContext(t)
+	store := watchState(t, ctx, d.Backend())
 	shells := NewShellBook()
 	pane, _, err := shells.Open(ctx, d.ShellHost(), t.TempDir())
 	if err != nil {
@@ -217,10 +218,12 @@ func exitedAgentIsNoLongerListed(t *testing.T, newDriver NewDriver) {
 		t.Fatal(err)
 	}
 	oneAgent(t, ctx, d.Backend())
+	waitAgentRows(t, store, 1)
 	if err := d.Exit(ctx, pane.PaneID); err != nil {
 		t.Fatal(err)
 	}
 	assertAgents(t, ctx, d.Backend())
+	waitAgentRows(t, store, 0)
 
 	snap, err := d.Backend().Snapshot(ctx)
 	if err != nil {
@@ -237,6 +240,14 @@ func exitedAgentIsNoLongerListed(t *testing.T, newDriver NewDriver) {
 	}
 	if !found {
 		t.Fatalf("terminal %s disappeared instead of returning to its shell", pane.PaneID)
+	}
+
+	if err := d.Run(ctx, pane.PaneID, Program{Kind: "codex", App: "codex", Reported: true, State: herdr.StateUnknown}); err != nil {
+		t.Fatal(err)
+	}
+	rows := waitAgentRows(t, store, 1)
+	if rows[0].PaneID != pane.PaneID || rows[0].Kind != "codex" {
+		t.Fatalf("state row after the next agent = %+v, want Codex in %s", rows[0], pane.PaneID)
 	}
 }
 
@@ -414,6 +425,60 @@ func oneAgent(t *testing.T, ctx context.Context, backend herdr.Backend) herdr.Ag
 		t.Fatalf("agents = %+v, want one", agents)
 	}
 	return agents[0]
+}
+
+// watchState runs the production watcher over backend and folds its
+// transitions into the state table, the same two steps the daemon uses.
+func watchState(t *testing.T, ctx context.Context, backend herdr.Backend) *state.Store {
+	t.Helper()
+	store, err := state.Open("", state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	w := herdr.NewWatcher(backend, herdr.WatcherConfig{
+		Debounce:         10 * time.Millisecond,
+		SnapshotInterval: 20 * time.Millisecond,
+	}, nil)
+	runDone := make(chan error, 1)
+	applyDone := make(chan struct{})
+	go func() { runDone <- w.Run(watchCtx) }()
+	go func() {
+		defer close(applyDone)
+		for tr := range w.Transitions() {
+			if _, _, err := store.Apply(tr); err != nil {
+				t.Errorf("state.Apply(%+v): %v", tr, err)
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-runDone:
+			if err != nil {
+				t.Errorf("watcher: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not stop")
+		}
+		<-applyDone
+	})
+	return store
+}
+
+func waitAgentRows(t *testing.T, store *state.Store, want int) []state.Agent {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		rows := store.List()
+		if len(rows) == want {
+			return rows
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state agents = %+v, want %d", rows, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func spoken(agent herdr.AgentInfo) string {
