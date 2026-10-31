@@ -390,6 +390,18 @@ and classifier, state store; no herdr imports), `ui/` (views), `voice.js`
 - **IME commit fires `change`, not `submit`.** Measured for one pinyin
   commit; the retest in section 7 confirms the commit-Enter case.
 - **Never open `/ws`** (section 2).
+- **`list()` cannot be scrolled from code.** `herdr-app check` warns that
+  `track_scroll` is ignored on it, and only `v_virtual_list` (rows of
+  stated heights) takes a scroll handle. Panel A lists newest first, so the
+  list needs no scrolling to show the latest: older pages are added below,
+  where they move nothing, and drawing the last row pages back. The rows of a
+  `list()` may carry no handlers, so the folded "N agent updates" group, which
+  opens on a tap, is not drawn yet (each update is its own line).
+- **Events only trigger a refetch.** Panel A does not fold `/events` records
+  into items (as the phone's `ConversationHistory.fold` does): the daemon's
+  own rebuild stays the only copy of those rules, so a record makes the panel
+  ask `/api/state` and `/api/conversation` again, with transcript fragments
+  waiting for a quiet 1.5 s.
 - Each open copy of a mod has its own state and poll; `key` keeps one window.
 
 ### 6.4 States

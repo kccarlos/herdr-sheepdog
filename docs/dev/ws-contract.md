@@ -1001,7 +1001,14 @@ answer a question by tap. All three need a paired device under "Auth".
   `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
   `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
   `source`, `pane`, and `type` filters behave as before. `GET /api/events`
-  accepts the same filters.
+  accepts the same filters. The herdr-app panel (`herdr-app/mods/sheepdog`,
+  a read-only client of this section and `GET /api/state`, over loopback,
+  never `/ws`) asks for `kinds=card,conversation,daemon,pending,voice,web`
+  and `since=<newest conversation item id>`, sends `Last-Event-ID` on a
+  reconnect, reads the stream over a raw socket (so it de-chunks the HTTP
+  body) and takes the `: keepalive` comment as its liveness: no frame for
+  40 s and it reconnects. An event only tells it to ask `GET /api/state`
+  and `GET /api/conversation` again.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most
