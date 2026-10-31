@@ -348,11 +348,15 @@ final class MacVoiceHostTests: XCTestCase {
         XCTAssertEqual(rig.audio.starts, 1)
     }
 
-    func testAnEngineThatDiedInARouteChangeIsRebuiltOnce() async {
+    func testAnEngineThatDiedInARouteChangeIsRebuiltOnceTheHardwareSettles() async {
         let rig = Rig()
         await connect(rig)
         rig.audio.die(LocalNotice.microphoneWentAway)
+        await Task.yield()
         XCTAssertTrue(rig.log.lines.contains(LocalNotice.microphoneWentAway))
+        XCTAssertEqual(rig.audio.starts, 1, "not from inside the engine's own callback")
+        rig.audio.onAvailable?()
+        await Task.yield()
         XCTAssertEqual(rig.audio.starts, 2)
         XCTAssertTrue(rig.audio.isRunning)
         XCTAssertNil(rig.host.state.problem)
@@ -363,6 +367,9 @@ final class MacVoiceHostTests: XCTestCase {
         await connect(rig)
         rig.audio.startFailure = Boom()
         rig.audio.die(LocalNotice.audioStoppedAfterRouteChange("boom"))
+        await Task.yield()
+        rig.audio.onAvailable?()
+        await Task.yield()
         XCTAssertEqual(rig.audio.starts, 2)
         XCTAssertNotNil(rig.host.state.problem)
         XCTAssertTrue(rig.host.state.heldHere)

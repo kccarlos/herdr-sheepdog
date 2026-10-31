@@ -967,8 +967,21 @@ The counterpart of `AudioEngine`, on the same Kit pieces (`PCMConverter`,
   real hardware is the maintainer's check 2 (design section 7).
 - A route change arrives as `AVAudioEngineConfigurationChange`, which stops the
   engine. `restartCapture` rebuilds it on the new format, voice processing back
-  on, and reports `LocalNotice.routeChanged`; a rebuild that fails reports
-  `onStopped`, and the core starts the engine once more.
+  on, and reports `LocalNotice.routeChanged`. Nothing touches the input while
+  iOS holds the audio (an interruption, or one iOS did not let us resume
+  from): a route change then is only remembered, and the way back
+  (`reactivate`) rebuilds. Every `installTap` goes through `requireCapturable`
+  (the session is active and ours, the input has a format), which throws a
+  Swift error where AVFoundation would raise an uncatchable `NSException`
+  (TestFlight 0.2.3 build 132 crashed there: a route change during Duolingo's
+  interruption, whose failed rebuild made the core start the engine again
+  inside the handler). A rebuild that fails reports `onStopped`; the core
+  does not start the engine again right then (`suspension.engineStopped`, the
+  orb says "tap to resume"), but on `audioAvailable` (`onAvailable`: an
+  interruption ended, or the route moved again) or when the user asks, and
+  `VoiceEngine` delivers both callbacks on the next main-actor turn, not from
+  inside the handler. `MacAudioEngine` has the same stop and availability,
+  from `AVAudioEngineConfigurationChange`.
 
 ## The Live Activity
 

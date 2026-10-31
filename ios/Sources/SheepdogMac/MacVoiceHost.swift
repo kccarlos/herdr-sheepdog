@@ -155,8 +155,16 @@ final class MacVoiceHost: VoiceControlling {
         audio.onMicSignal = { [weak self] noSignal in
             self?.send(.micSignal(ok: !noSignal))
         }
+        // Both come from inside the engine's configuration-change handler,
+        // with the engine half torn down: the core's answer waits for the
+        // next main-actor turn instead of re-entering the engine from
+        // there. Tasks run in order, so a stop is told before the
+        // availability that follows it.
         audio.onStopped = { [weak self] message in
-            self?.send(.audioStopped(message))
+            Task { @MainActor in self?.send(.audioStopped(message)) }
+        }
+        audio.onAvailable = { [weak self] in
+            Task { @MainActor in self?.send(.audioAvailable) }
         }
         audio.onNotice = { [weak self] notice in
             self?.log.log(notice.logText)

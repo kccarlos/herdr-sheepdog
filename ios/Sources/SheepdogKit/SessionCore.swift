@@ -93,6 +93,12 @@ public struct SessionCore: Equatable, Sendable {
     public struct AudioSuspension: Equatable, Sendable {
         /// iOS paused the audio and would not resume it by itself.
         public var pausedByIOS = false
+        /// The engine stopped by itself (a route change it could not rebuild
+        /// the capture chain for, often while iOS held the audio). Nothing
+        /// starts it again until iOS gives the audio back
+        /// (`audioAvailable`) or the user asks (unmute, tap to resume):
+        /// a start while iOS holds the audio cannot succeed.
+        public var engineStopped = false
         /// Paused in the background: Keep listening with the screen locked
         /// is off and the app left the foreground.
         public var backgroundSuspended = false
@@ -133,7 +139,7 @@ public struct SessionCore: Equatable, Sendable {
             gateClosed: mic.gateClosed,
             speaking: playback.heldSpeaking,
             thinking: thinkingExpiry != nil,
-            audioPaused: suspension.pausedByIOS,
+            audioPaused: suspension.pausedByIOS || suspension.engineStopped,
             micUnavailable: mic.unavailable
         )
     }
@@ -367,11 +373,22 @@ public struct SessionCore: Equatable, Sendable {
 
         case let .audioStopped(message):
             // The engine died under us (a route change it could not
-            // rebuild). Say so, and start it again once — a second
-            // failure is `audioStartFailed`'s banner, not a loop.
+            // rebuild). Say so, and wait: starting it right now would run
+            // inside the route change, while iOS may still hold the audio.
+            // `audioAvailable` (or the user) starts it, once.
             playback.speaking = false
             quietSpeaking()
+            suspension.engineStopped = true
             effects.append(.notice(message))
+
+        case .audioAvailable:
+            // iOS gave the audio back (an interruption ended) or the route
+            // settled. Only an engine that stopped by itself needs this.
+            guard suspension.engineStopped else {
+                derive = false
+                break
+            }
+            suspension.engineStopped = false
             startAudioIfNeeded(&effects)
 
         case let .playbackChanged(speaking):
@@ -386,7 +403,13 @@ public struct SessionCore: Equatable, Sendable {
             suspension.pausedByIOS = paused
 
         case .resumeTapped:
-            effects.append(.resumeAudio)
+            // An engine that stopped by itself is started, not resumed.
+            if suspension.engineStopped {
+                suspension.engineStopped = false
+                startAudioIfNeeded(&effects)
+            } else {
+                effects.append(.resumeAudio)
+            }
 
         case let .audioResumeFailed(message):
             effects.append(.showBanner(.audioResumeFailed(message)))
@@ -411,6 +434,7 @@ public struct SessionCore: Equatable, Sendable {
                 break
             }
             suspension.backgroundSuspended = true
+            suspension.engineStopped = false
             effects.append(.suspendAudio)
             connection.socketMuted = daemonMute
             effects.append(.send(.mute(true)))
@@ -470,6 +494,7 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func resetSession() {
         suspension.backgroundSuspended = false
         suspension.pausedByIOS = false
+        suspension.engineStopped = false
         connection.muteSync.reset()
         voice = Voice()
         mic.gateClosed = false
@@ -534,6 +559,8 @@ public struct SessionCore: Equatable, Sendable {
                 effects.append(.send(.silence(false)))
             }
             effects.append(.setCaptureMuted(false))
+            // The user asking is as good as iOS giving the audio back.
+            suspension.engineStopped = false
             // Capture starts on the running engine now, not on the
             // daemon's status echo; start the engine if it is not up.
             startAudioIfNeeded(&effects)
@@ -555,6 +582,7 @@ public struct SessionCore: Equatable, Sendable {
     /// Capture runs only while something can hear it.
     private mutating func applyVoiceStatus(_ effects: inout [SessionEffect]) {
         if voice.status == .closed {
+            suspension.engineStopped = false
             effects.append(.stopAudio)
             setShepherdSpeaking(false, &effects)
             // Being replaced is the banner's to explain ("Another client took
@@ -577,7 +605,8 @@ public struct SessionCore: Equatable, Sendable {
     /// since it also plays what the voice says. Mute only gates capture. The
     /// caller skips the effect when the engine already runs.
     private func startAudioIfNeeded(_ effects: inout [SessionEffect]) {
-        guard AudioLifecycle.engineShouldRun(socketOpen: connection.socket == .open, voice: voice.status, suspended: suspension.backgroundSuspended) else { return }
+        guard !suspension.engineStopped,
+              AudioLifecycle.engineShouldRun(socketOpen: connection.socket == .open, voice: voice.status, suspended: suspension.backgroundSuspended) else { return }
         effects.append(.startAudio)
     }
 }
@@ -641,6 +670,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// The running engine stopped by itself (a route change it could not
     /// rebuild); the words say why.
     case audioStopped(String)
+    /// iOS gave the audio back after an interruption, or the route settled
+    /// after the engine stopped by itself: the one moment to start it again.
+    case audioAvailable
     case playbackChanged(speaking: Bool)
     /// The microphone delivers signal (`ok`) or only digital zero.
     case micSignal(ok: Bool)

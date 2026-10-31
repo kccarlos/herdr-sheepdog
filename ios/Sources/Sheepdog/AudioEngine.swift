@@ -76,6 +76,10 @@ final class AudioEngine {
     /// The engine stopped by itself: a route change it could not rebuild
     /// the capture chain for. The words say why.
     var onStopped: ((String) -> Void)?
+    /// iOS gave the audio back (an interruption ended) or the route moved
+    /// again after the engine stopped by itself: the moment to start it
+    /// again.
+    var onAvailable: (() -> Void)?
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
@@ -108,6 +112,16 @@ final class AudioEngine {
     private var queue = PlaybackQueue()
     private var wasSpeaking = false
     private var interrupted = false
+    /// The `.playAndRecord` session is active and ours: false until
+    /// `configureSession` succeeds, and again while iOS holds the audio.
+    /// Installing a tap on an input iOS will not let us record from throws
+    /// an `NSException`, which Swift cannot catch.
+    private var sessionActive = false
+    /// The route changed while iOS held the audio: the tap's format is
+    /// stale, so the capture chain is rebuilt when the audio comes back.
+    private var routeChangedWhileHeld = false
+    /// The engine stopped by itself (`onStopped`) and has not started since.
+    private var stoppedByItself = false
     private var observers: [NSObjectProtocol] = []
 
     init() {
@@ -141,6 +155,7 @@ final class AudioEngine {
     /// listening with the screen locked is off.
     func start() throws {
         guard !isRunning else { return }
+        guard !holdsAudio else { throw Failure.sessionFailed("iOS has the audio right now") }
         try configureSession()
 
         let input = engine.inputNode
@@ -160,11 +175,7 @@ final class AudioEngine {
         connectPlayback()
         engine.mainMixerNode.outputVolume = 1
         let format = input.inputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0 else {
-            // The simulator does this while a route settles; so does a device
-            // whose microphone another app holds.
-            throw Failure.format("No microphone is available right now — check that nothing else is using it.")
-        }
+        try requireCapturable(format)
         let converter = try PCMConverter(inputFormat: format)
         self.converter = converter
         chunker.reset()
@@ -186,6 +197,7 @@ final class AudioEngine {
         }
         player.play()
         isRunning = true
+        stoppedByItself = false
         startSteering()
         restartedForSignal = false
         if !isMuted, gate.manual != false { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
@@ -251,6 +263,9 @@ final class AudioEngine {
         isRunning = false
         isGateClosed = false
         interrupted = false
+        sessionActive = false
+        routeChangedWhileHeld = false
+        stoppedByItself = false
         setNeedsResume(false)
         onRoute?(nil)
         watchdog.disarm()
@@ -350,8 +365,26 @@ final class AudioEngine {
             // the frames the contract wants.
             try session.setPreferredIOBufferDuration(0.04)
             try session.setActive(true, options: [])
+            sessionActive = true
         } catch {
+            sessionActive = false
             throw Failure.sessionFailed(error.localizedDescription)
+        }
+    }
+
+    /// iOS has the audio: an interruption is on, or it ended without letting
+    /// us resume. Nothing may touch the input then.
+    private var holdsAudio: Bool { interrupted || needsResume }
+
+    /// The one check in front of every `installTap`: the session is ours and
+    /// the input has a format. Refusing here is a Swift error; reaching
+    /// AVFoundation without it is a crash.
+    private func requireCapturable(_ format: AVAudioFormat) throws {
+        guard sessionActive, !holdsAudio else { throw Failure.sessionFailed("iOS has the audio right now") }
+        guard format.channelCount > 0, format.sampleRate > 0 else {
+            // The simulator does this while a route settles; so does a device
+            // whose microphone another app holds.
+            throw Failure.format("No microphone is available right now — check that nothing else is using it.")
         }
     }
 
@@ -614,6 +647,7 @@ final class AudioEngine {
         switch type {
         case .began:
             interrupted = true
+            sessionActive = false
             engine.pause()
             flushPlayback()
             // Nothing can arrive while iOS holds the audio: silence now is
@@ -624,6 +658,12 @@ final class AudioEngine {
         case .ended:
             guard interrupted else { return }
             interrupted = false
+            guard isRunning else {
+                // The engine stopped by itself during the interruption:
+                // nothing to resume, and now it can start again.
+                if stoppedByItself { onAvailable?() }
+                return
+            }
             let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt).map(AVAudioSession.InterruptionOptions.init)
             guard options?.contains(.shouldResume) ?? true else {
                 // Still "running" but paused: say so, and let the orb take
@@ -639,11 +679,23 @@ final class AudioEngine {
     }
 
     private func handleRouteChange(_ note: Notification) {
-        guard isRunning,
-              let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+        guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
         switch reason {
         case .oldDeviceUnavailable, .newDeviceAvailable, .override, .categoryChange:
+            guard isRunning else {
+                // Stopped by itself: the route moved again, which is when a
+                // microphone that went away may be back.
+                if stoppedByItself, !holdsAudio { onAvailable?() }
+                return
+            }
+            // iOS holds the audio (a call, another app playing): the route
+            // changes under an interruption are not ours to rebuild for.
+            // Remember it; the way back from the interruption rebuilds.
+            guard !holdsAudio else {
+                routeChangedWhileHeld = true
+                return
+            }
             // Headphones in or out: the hardware format can change under the
             // tap, so rebuild the capture chain rather than convert from a
             // rate that no longer exists.
@@ -680,9 +732,20 @@ final class AudioEngine {
     private func reactivate() throws {
         guard isRunning else { return }
         try AVAudioSession.sharedInstance().setActive(true, options: [])
-        try engine.start()
-        player.play()
-        setNeedsResume(false)
+        sessionActive = true
+        if routeChangedWhileHeld {
+            // The route moved while iOS held the audio: rebuild the capture
+            // chain on what it is now instead of restarting the old one.
+            routeChangedWhileHeld = false
+            setNeedsResume(false)
+            restartCapture()
+            guard isRunning else { return }
+            reportRoute()
+        } else {
+            try engine.start()
+            player.play()
+            setNeedsResume(false)
+        }
         if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false, gateClosed: gate.manual == false) {
             watchdog.arm(at: CFAbsoluteTimeGetCurrent())
             restartedForSignal = false
@@ -695,8 +758,32 @@ final class AudioEngine {
         onPausedChanged?(paused)
     }
 
+    /// Rebuilds the capture chain; if that cannot be done the engine stops
+    /// and says why (`onStopped`). While iOS holds the audio nothing is
+    /// rebuilt: the way back from the interruption does it (`reactivate`).
     private func restartCapture() {
         guard isRunning else { return }
+        guard !holdsAudio else {
+            routeChangedWhileHeld = true
+            return
+        }
+        do {
+            try rebuildCapture()
+        } catch Failure.format {
+            stopByItself(LocalNotice.microphoneWentAway)
+        } catch {
+            stopByItself(LocalNotice.audioStoppedAfterRouteChange(error.localizedDescription))
+        }
+    }
+
+    private func stopByItself(_ message: String) {
+        isRunning = false
+        stoppedByItself = true
+        stopSteering()
+        onStopped?(message)
+    }
+
+    private func rebuildCapture() throws {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         // A category change (another audio client, a system dialog) can
@@ -710,12 +797,8 @@ final class AudioEngine {
         enableVoiceProcessing()
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0, let converter = try? PCMConverter(inputFormat: format) else {
-            isRunning = false
-            stopSteering()
-            onStopped?(LocalNotice.microphoneWentAway)
-            return
-        }
+        try requireCapturable(format)
+        let converter = try PCMConverter(inputFormat: format)
         self.converter = converter
         metrics.hardwareSampleRate = format.sampleRate
         chunker.reset()
@@ -726,12 +809,11 @@ final class AudioEngine {
         connectPlayback()
         do {
             try engine.start()
-            player.play()
-            recordVoiceProcessing()
         } catch {
-            isRunning = false
-            stopSteering()
-            onStopped?(LocalNotice.audioStoppedAfterRouteChange(error.localizedDescription))
+            input.removeTap(onBus: 0)
+            throw Failure.engineFailed(error.localizedDescription)
         }
+        player.play()
+        recordVoiceProcessing()
     }
 }
