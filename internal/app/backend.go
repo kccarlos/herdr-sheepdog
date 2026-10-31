@@ -15,16 +15,15 @@ import (
 // backendProbe bounds each socket check of herdr.backend = auto.
 const backendProbe = time.Second
 
-// hcTermOff is /term's answer on herdr-core: its live terminal
-// (terminal.attach) is not bridged yet, and the app shows the screen.
-const hcTermOff = "the live terminal is not available with herdr-core yet"
+// hcTermOff is /term's answer when herdr-core is not running or is too old
+// to attach (the app shows the screen).
+const hcTermOff = "the live terminal needs a running herdr-core that has terminal.attach"
 
 // newBackend builds the backend herdr.backend picks (auto: asks both
 // sockets once, docs/dev/design/herdr-core-backend.md "Choosing the
-// backend") and logs the choice as daemon.herdr_backend. The live
-// terminal deps are the old herdr's only; on herdr-core termOff says why
-// there are none.
-func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps, termOff string) {
+// backend") and logs the choice as daemon.herdr_backend, with the live
+// terminal deps of that backend.
+func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps) {
 	old := herdr.NewClient(cfg.Herdr.Socket)
 	old.Log = a.log
 	hcSocket := cfg.Herdr.HCSocketPath()
@@ -37,9 +36,26 @@ func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps
 	}
 	a.log.Log("daemon", "daemon.herdr_backend", "", map[string]any{"backend": kind, "reason": reason, "socket": socket})
 	if kind == config.HerdrBackendHC {
-		return core, nil, hcTermOff
+		return core, hcTerm(core)
 	}
-	return old, herdrTerm(cfg, old), ""
+	return old, herdrTerm(cfg, old)
+}
+
+// hcTerm is herdr-core's live terminal: one framed attach stream per
+// channel, listed only while the core can attach. There is no phone
+// shell (it opens a herdr workspace).
+func hcTerm(core *herdrcore.Backend) *web.TermDeps {
+	return &web.TermDeps{
+		Check: core.TermReady,
+		Off:   hcTermOff,
+		Start: func(ctx context.Context, o herdr.BridgeOptions) (web.TermBridge, error) {
+			b, err := core.StartBridge(ctx, o)
+			if err != nil {
+				return nil, err
+			}
+			return b, nil
+		},
+	}
 }
 
 // pinger is the liveness check chooseBackend asks each backend.

@@ -80,11 +80,73 @@ func TestOpenShell(t *testing.T) {
 	}
 	for i, cwd := range []string{"/work/a", "/work/b"} {
 		r := runs[i]
-		if r.Cwd != cwd || len(r.Argv) != 0 || r.Line != "" || !r.NoParent ||
+		if r.Cwd != cwd || len(r.Argv) != 0 || r.Line != "" || !r.NoParent || !r.Keep ||
 			!maps.Equal(r.Env, map[string]string{"DISABLE_AUTO_UPDATE": "true"}) ||
-			!maps.Equal(r.Labels, map[string]string{"sheepdog": "spawn"}) {
+			r.Labels["sheepdog"] != "spawn" || r.Labels["herdr.space"] == "" || r.Labels["herdr.tab"] == "" || len(r.Labels) != 3 {
 			t.Errorf("run %d params = %+v", i, r)
 		}
+	}
+}
+
+// A new workspace is a new space and tab; a split of one of its panes is a
+// new tab of the same space, which herdr-app shows beside it.
+func TestSpawnLabelsNewAndExistingSpace(t *testing.T) {
+	b, srv := newBackend(t)
+	ctx := testContext(t)
+
+	first, err := b.CreateWorkspace(ctx, "/work/a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := b.CreateWorkspace(ctx, "/work/a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := b.SplitPane(ctx, first.PaneID, "/work/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.WorkspaceID == "" || first.TabID == "" || first.WorkspaceID == other.WorkspaceID {
+		t.Fatalf("new spaces = %+v, %+v", first, other)
+	}
+	if joined.WorkspaceID != first.WorkspaceID || joined.TabID == "" || joined.TabID == first.TabID {
+		t.Fatalf("split = %+v, want the space of %+v in a new tab", joined, first)
+	}
+	runs := requestParams[hc.RunParams](t, srv, "terminal.run")
+	if len(runs) != 3 || runs[2].Labels["herdr.space"] != runs[0].Labels["herdr.space"] ||
+		runs[2].Labels["herdr.tab"] == runs[0].Labels["herdr.tab"] {
+		t.Fatalf("terminal.run labels = %+v", runs)
+	}
+}
+
+// A split of a space herdr-app already has (a terminal it started, with
+// ids of its own) reuses that space's id as written.
+func TestSplitPaneJoinsAnExistingSpaceByItsLabel(t *testing.T) {
+	b, srv := newBackend(t)
+	app := liveTerminal("t1", "zsh")
+	app.Labels = map[string]string{"herdr.space": "s-existing", "herdr.tab": "k-1"}
+	srv.Add(app)
+	plain := liveTerminal("t2", "zsh")
+	srv.Add(plain)
+	ctx := testContext(t)
+
+	pane, err := b.SplitPane(ctx, "t1", "/work/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pane.WorkspaceID != "s-existing" || pane.TabID == "" || pane.TabID == "k-1" {
+		t.Fatalf("split = %+v", pane)
+	}
+	// An unlabeled terminal is in no space: the split starts one.
+	fresh, err := b.SplitPane(ctx, "t2", "/work/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.WorkspaceID == "" || fresh.WorkspaceID == "s-existing" {
+		t.Fatalf("split of an unlabeled terminal = %+v", fresh)
+	}
+	if _, err := b.SplitPane(ctx, "t99", "/work/a"); !errors.Is(err, herdr.ErrPaneNotFound) {
+		t.Fatalf("SplitPane on missing = %v, want ErrPaneNotFound", err)
 	}
 }
 

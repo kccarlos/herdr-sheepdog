@@ -44,7 +44,15 @@ type TermDeps struct {
 	// Version returns the running herdr's version (Ping). The feature is
 	// listed, and /term served, only for herdr >= herdr.TerminalMinVersion.
 	Version func(ctx context.Context) (string, error)
-	// Start runs one bridge (default herdr.StartBridge).
+	// Check, when set, replaces the Version check: it returns nil when the
+	// backend can run a live terminal now (herdr-core: its core has
+	// terminal.attach).
+	Check func(ctx context.Context) error
+	// Off is /term's 503 message when the feature is not available
+	// (default: the herdr version message).
+	Off string
+	// Start runs one bridge (default herdr.StartBridge on Bin). A backend
+	// that is not the old herdr brings its own and needs no Bin.
 	Start func(ctx context.Context, o herdr.BridgeOptions) (TermBridge, error)
 	// Ping is the WebSocket ping period (default 20 s); a client that
 	// does not answer within Timeout (default 60 s) is closed.
@@ -85,6 +93,11 @@ func newTermServer(s *Server, d *TermDeps) *termServer {
 	deps := *d
 	if deps.Start == nil {
 		deps.Start = func(ctx context.Context, o herdr.BridgeOptions) (TermBridge, error) {
+			bin, err := herdr.ResolveBin(deps.Bin)
+			if err != nil {
+				return nil, err
+			}
+			o.Bin = bin
 			b, err := herdr.StartBridge(ctx, o)
 			if err != nil {
 				return nil, err
@@ -104,11 +117,11 @@ func newTermServer(s *Server, d *TermDeps) *termServer {
 	return &termServer{s: s, deps: deps, shells: map[string]string{}}
 }
 
-// available reports whether herdr is new enough for the bridge. The
-// answer is cached for 30 s (a failed ping for 5 s), so bot-ready costs
-// at most one short ping.
+// available reports whether the backend can run a bridge (herdr new
+// enough, or the core has terminal.attach). The answer is cached for
+// 30 s (a failed ping for 5 s), so bot-ready costs at most one short ping.
 func (t *termServer) available() bool {
-	if t == nil || t.deps.Version == nil {
+	if t == nil || (t.deps.Version == nil && t.deps.Check == nil) {
 		return false
 	}
 	t.mu.Lock()
@@ -122,8 +135,12 @@ func (t *termServer) available() bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	v, err := t.deps.Version(ctx)
-	t.ok = err == nil && herdr.TerminalSupported(v)
+	if t.deps.Check != nil {
+		t.ok = t.deps.Check(ctx) == nil
+	} else {
+		v, err := t.deps.Version(ctx)
+		t.ok = err == nil && herdr.TerminalSupported(v)
+	}
 	t.checked = time.Now()
 	return t.ok
 }
@@ -186,8 +203,8 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	t := s.term
 	if !t.available() {
 		msg := "the live terminal needs herdr " + herdr.TerminalMinVersion + " or newer"
-		if s.deps.TermOff != "" {
-			msg = s.deps.TermOff
+		if t != nil && t.deps.Off != "" {
+			msg = t.deps.Off
 		}
 		writeError(w, http.StatusServiceUnavailable, msg)
 		return
@@ -475,12 +492,7 @@ func (c *termConn) startBridge(tc *termChan, gen int, first bool) {
 		OnClose: func(cl herdr.Closed) { c.onBridgeClosed(tc, gen, cl) },
 	}
 	c.mu.Unlock()
-	bin, err := herdr.ResolveBin(c.t.deps.Bin)
-	var b TermBridge
-	if err == nil {
-		opts.Bin = bin
-		b, err = c.t.deps.Start(c.ctx, opts)
-	}
+	b, err := c.t.deps.Start(c.ctx, opts)
 	if err != nil {
 		reason := termproto.ReasonHerdr
 		var ae *herdr.AttachError

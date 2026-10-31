@@ -10,6 +10,12 @@ import (
 
 const defaultTimeout = 5 * time.Second
 
+// sendTimeout bounds terminal.send. herdr-core pastes only once nobody has
+// typed in the terminal for about 3 s, holding the text while a person types
+// there, so the reply can come well after the client's usual timeout although
+// the text is delivered.
+const sendTimeout = 30 * time.Second
+
 // Client calls a herdr-core JSON-RPC endpoint.
 type Client struct {
 	// Socket is the Unix socket path.
@@ -28,7 +34,12 @@ func NewClient(socket string) *Client {
 // Each call uses a new connection. Call is not safe to use with a nil out; pass
 // a pointer to the expected result type.
 func (c *Client) Call(ctx context.Context, method string, params, out any) error {
-	callCtx, cancel := context.WithTimeout(ctx, c.timeout())
+	return c.call(ctx, c.timeout(), method, params, out)
+}
+
+// call is Call with its own timeout.
+func (c *Client) call(ctx context.Context, timeout time.Duration, method string, params, out any) error {
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	conn, err := (&net.Dialer{}).DialContext(callCtx, "unix", c.Socket)
@@ -116,10 +127,12 @@ func (c *Client) Read(ctx context.Context, terminal string, lines int) (ReadResu
 	return result, err
 }
 
-// Send pastes text and submits it with Enter.
+// Send pastes text and submits it with Enter. It waits up to sendTimeout
+// (or the client's Timeout, if longer): herdr-core holds the paste until the
+// terminal has been quiet for about 3 s.
 func (c *Client) Send(ctx context.Context, terminal, text string, force bool) (SendResult, error) {
 	var result SendResult
-	err := c.Call(ctx, "terminal.send", struct {
+	err := c.call(ctx, max(c.timeout(), sendTimeout), "terminal.send", struct {
 		Terminal string `json:"terminal"`
 		Text     string `json:"text"`
 		Force    bool   `json:"force"`

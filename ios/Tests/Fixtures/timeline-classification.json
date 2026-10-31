@@ -1,0 +1,264 @@
+{
+  "about": "One daemon conversation item in, its category and style out. Run by ConversationTimeline.classify (ios/Tests/SheepdogKitTests/TimelineClassificationFixtureTests.swift) and by the herdr-app panel's model/classify.js (herdr-app/mods/sheepdog/model/classify.test.mjs). Change either classifier and this file in the same PR. `style` is shownByDefault, folds, bridgesRuns and ledger of RowClass. `line` is ConversationItem.settledLine: the words of a settled question, null while it is open and for every other kind. The sixth category, screen, is the phone's folded group of updates, which no single item makes, so it has no case.",
+  "cases": [
+    {
+      "name": "you, by voice",
+      "item": {"id": 1790000000000001, "ts": "2026-09-22T08:31:17.490932Z", "kind": "shepherd", "text": "what is going on", "via": "voice"},
+      "category": "dialogue",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "you, typed",
+      "item": {"id": 1790000000000002, "ts": "2026-09-22T08:31:18.1Z", "kind": "shepherd", "text": "what is going on", "via": "typed"},
+      "category": "dialogue",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "the voice",
+      "item": {"id": 1790000000000003, "ts": "2026-09-22T08:31:19.2Z", "kind": "dog", "text": "Two agents are working."},
+      "category": "dialogue",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "the voice, a typed turn answered in text",
+      "item": {"id": 1790000000000004, "ts": "2026-09-22T08:31:20.3Z", "kind": "dog", "text": "Two agents are working.", "via": "typed"},
+      "category": "dialogue",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "a text-router answer",
+      "item": {"id": 1790000000000005, "ts": "2026-09-22T08:31:21.4Z", "kind": "dog", "text": "Nothing was in flight.", "via": "text_router"},
+      "category": "dialogue",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "open question, no resolution yet",
+      "item": {"id": 1790000000000006, "ts": "2026-09-22T08:32:00Z", "kind": "approval", "text": "Codex is asking to run the migration.", "agent": "Codex", "pending_id": "ap-1"},
+      "category": "needsYou",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "open question, explicit",
+      "item": {"id": 1790000000000007, "ts": "2026-09-22T08:32:10Z", "kind": "approval", "text": "Allow it?", "pending_id": "ap-2", "answered": false, "resolution": "open"},
+      "category": "needsYou",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "interrupt push",
+      "item": {"id": 1790000000000008, "ts": "2026-09-22T08:32:20Z", "kind": "push", "text": "docs has gone away; its pane closed.", "urgency": "interrupt"},
+      "category": "needsYou",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "news push",
+      "item": {"id": 1790000000000009, "ts": "2026-09-22T08:32:30Z", "kind": "push", "text": "billing finished the migration.", "agent": "billing", "urgency": "idle"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": true, "bridgesRuns": false, "ledger": true},
+      "line": null
+    },
+    {
+      "name": "push with no urgency",
+      "item": {"id": 1790000000000010, "ts": "2026-09-22T08:32:40Z", "kind": "push", "text": "billing is working."},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": true, "bridgesRuns": false, "ledger": true},
+      "line": null
+    },
+    {
+      "name": "answered question, approved by tap",
+      "item": {"id": 1790000000000011, "ts": "2026-09-22T08:33:00Z", "kind": "approval", "text": "billing asks to run the tests.", "agent": "billing", "via": "tap", "pending_id": "ap-3", "answered": true, "answer": "Yes, proceed", "resolution": "confirmed"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "You approved — Yes, proceed · by tap"
+    },
+    {
+      "name": "answered question, declined by voice",
+      "item": {"id": 1790000000000012, "ts": "2026-09-22T08:33:10Z", "kind": "approval", "text": "billing asks to delete the cache.", "agent": "billing", "via": "brain", "pending_id": "ap-4", "answered": true, "answer": "No, and tell Codex what to do differently", "resolution": "confirmed"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "You declined — No, and tell Codex what to do differently · by voice"
+    },
+    {
+      "name": "answered question with no recorded answer",
+      "item": {"id": 1790000000000013, "ts": "2026-09-22T08:33:20Z", "kind": "approval", "text": "Allow it?", "pending_id": "ap-5", "answered": true, "resolution": "confirmed"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "Answered"
+    },
+    {
+      "name": "answered question, an unfamiliar way of answering",
+      "item": {"id": 1790000000000014, "ts": "2026-09-22T08:33:30Z", "kind": "approval", "text": "Allow it?", "via": "watch", "pending_id": "ap-6", "answered": true, "answer": "Yes", "resolution": "confirmed"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "You approved — Yes · via watch"
+    },
+    {
+      "name": "expired question",
+      "item": {"id": 1790000000000015, "ts": "2026-09-22T08:34:00Z", "kind": "approval", "text": "Codex is asking allow Computer Use to use Finder.", "agent": "Codex", "pending_id": "ap-7", "answered": false, "resolution": "expired"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "Codex's question (allow Computer Use to use Finder) — expired"
+    },
+    {
+      "name": "cancelled question",
+      "item": {"id": 1790000000000016, "ts": "2026-09-22T08:34:10Z", "kind": "approval", "text": "Codex asks to run printf hello.", "agent": "Codex", "pending_id": "ap-8", "answered": false, "resolution": "cancelled", "reason": "prompt_gone"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "Codex's question (run printf hello) — closed"
+    },
+    {
+      "name": "replaced question, a long topic cut at a word",
+      "item": {"id": 1790000000000017, "ts": "2026-09-22T08:34:20Z", "kind": "approval", "text": "billing wants to overwrite every generated file under the build directory", "agent": "billing", "pending_id": "ap-9", "answered": false, "resolution": "replaced"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "billing's question (overwrite every generated file…) — replaced"
+    },
+    {
+      "name": "closed question with no agent",
+      "item": {"id": 1790000000000018, "ts": "2026-09-22T08:34:30Z", "kind": "approval", "text": "Allow it?", "pending_id": "ap-10", "answered": false, "resolution": "cancelled"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "A question (Allow it) — closed"
+    },
+    {
+      "name": "question with a resolution this build does not know",
+      "item": {"id": 1790000000000019, "ts": "2026-09-22T08:34:40Z", "kind": "approval", "text": "Allow it?", "agent": "Codex", "pending_id": "ap-11", "resolution": "withdrawn"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": true},
+      "line": "Codex's question (Allow it) — closed"
+    },
+    {
+      "name": "card",
+      "item": {"id": 1790000000000020, "ts": "2026-09-22T08:35:00Z", "kind": "card", "text": "Open pull requests", "card_id": "c-1"},
+      "category": "outcome",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "new conversation",
+      "item": {"id": 1790000000000021, "ts": "2026-09-22T08:36:00Z", "kind": "notice", "text": "New conversation", "subkind": "reset"},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "restart, tagged",
+      "item": {"id": 1790000000000022, "ts": "2026-09-22T08:36:10Z", "kind": "notice", "text": "Sheepdog started.", "subkind": "start", "version": "0.9.1"},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": true, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "restart, from an older daemon (words only)",
+      "item": {"id": 1790000000000023, "ts": "2026-09-22T08:36:20Z", "kind": "notice", "text": "Sheepdog started."},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": true, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "voice restarted, the row the context pass makes",
+      "item": {"id": 1790000000000024, "ts": "2026-09-22T08:36:30Z", "kind": "notice", "text": "Voice reconnected with a fresh session; earlier context was lost.", "subkind": "voice_restarted"},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "a kind this build does not know, tagged as a reset",
+      "item": {"id": 1790000000000025, "ts": "2026-09-22T08:36:40Z", "kind": "wobble", "text": "", "subkind": "reset"},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "context lost, tagged",
+      "item": {"id": 1790000000000026, "ts": "2026-09-22T08:37:00Z", "kind": "notice", "text": "Voice context lost.", "subkind": "context_lost", "reason": "session_expired"},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "context lost, words only",
+      "item": {"id": 1790000000000027, "ts": "2026-09-22T08:37:10Z", "kind": "notice", "text": "Voice context lost."},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "fresh reconnect, tagged",
+      "item": {"id": 1790000000000028, "ts": "2026-09-22T08:37:20Z", "kind": "notice", "text": "Voice reconnected with a fresh session; earlier context was lost.", "subkind": "fresh"},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "fresh reconnect, words only",
+      "item": {"id": 1790000000000029, "ts": "2026-09-22T08:37:30Z", "kind": "notice", "text": "Voice reconnected with a fresh session; earlier context was lost."},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "resumed reconnect, tagged",
+      "item": {"id": 1790000000000030, "ts": "2026-09-22T08:37:40Z", "kind": "notice", "text": "Voice reconnected; the conversation continues.", "subkind": "resumed"},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "resumed reconnect, words only",
+      "item": {"id": 1790000000000031, "ts": "2026-09-22T08:37:50Z", "kind": "notice", "text": "Voice reconnected; the conversation continues."},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "voice closed, tagged",
+      "item": {"id": 1790000000000032, "ts": "2026-09-22T08:38:00Z", "kind": "notice", "text": "Voice session closed: shutdown.", "subkind": "closed", "reason": "shutdown"},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "voice closed, words only",
+      "item": {"id": 1790000000000033, "ts": "2026-09-22T08:38:10Z", "kind": "notice", "text": "Voice session closed: shutdown."},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "a subkind this build does not know falls back to the words",
+      "item": {"id": 1790000000000034, "ts": "2026-09-22T08:38:20Z", "kind": "notice", "text": "Sheepdog started.", "subkind": "from_the_future"},
+      "category": "context",
+      "style": {"shownByDefault": true, "folds": false, "bridgesRuns": true, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "a notice nobody recognises is plumbing",
+      "item": {"id": 1790000000000035, "ts": "2026-09-22T08:38:30Z", "kind": "notice", "text": "Something new happened."},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "a kind this build does not know",
+      "item": {"id": 1790000000000036, "ts": "2026-09-22T08:38:40Z", "kind": "wobble", "text": ""},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    },
+    {
+      "name": "an inherited property name is not a subkind",
+      "item": {"id": 1790000000000037, "ts": "2026-09-22T08:38:50Z", "kind": "notice", "text": "Something new happened.", "subkind": "constructor"},
+      "category": "system",
+      "style": {"shownByDefault": false, "folds": false, "bridgesRuns": false, "ledger": false},
+      "line": null
+    }
+  ]
+}
