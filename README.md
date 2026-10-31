@@ -37,6 +37,7 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 - **it remembers** — "tell me when claude-auth is done", and it comes back to a question it could not answer. [faq →](docs/faq.md)
 - **iPhone app** — QR pairing, Live Activity, earbud remote, and lock-screen notifications through an end-to-end encrypted relay. [iPhone app →](docs/iphone-app.md)
 - **Mac panel and menu bar** — read the conversation, type, answer and talk in herdr-app; Sheepdog.app supplies the microphone, notifications and a global shortcut. [Mac →](docs/desktop.md)
+- **herdr-app mod** — Sheepdog is also a community mod: [mods/sheepdog](mods/sheepdog), [RECIPE.md](RECIPE.md).
 - **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
 - **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 

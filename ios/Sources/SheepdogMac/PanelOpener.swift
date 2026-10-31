@@ -78,7 +78,7 @@ public enum PanelOpenProblem: Equatable, Sendable {
         case .herdrAppMissing:
             return "The panel lives in herdr-app, and Sheepdog could not find the herdr-app command. Install herdr-app, then choose Open panel again."
         case .panelMissing:
-            return "Copy the panel into herdr-app's mods folder from a copy of the sheepdog repository:\n\nmkdir -p ~/.config/herdr-app/mods\ncp -R herdr-app/mods/sheepdog ~/.config/herdr-app/mods/\n\nThen choose Open panel again. The guide has the details."
+            return "Copy the panel into herdr-app's mods folder from a copy of the sheepdog repository:\n\nmkdir -p ~/.config/herdr-app/mods\ncp -R mods/sheepdog ~/.config/herdr-app/mods/\n\nThen choose Open panel again. The guide has the details."
         case let .failed(said):
             return "herdr-app said: \(said)"
         }

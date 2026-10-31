@@ -1,5 +1,5 @@
 {
-  "about": "One daemon conversation item in, its category and style out. Run by ConversationTimeline.classify (ios/Tests/SheepdogKitTests/TimelineClassificationFixtureTests.swift) and by the herdr-app panel's model/classify.js (herdr-app/mods/sheepdog/model/classify.test.mjs). Change either classifier and this file in the same PR. `style` is shownByDefault, folds, bridgesRuns and ledger of RowClass. `line` is ConversationItem.settledLine: the words of a settled question, null while it is open and for every other kind. The sixth category, screen, is the phone's folded group of updates, which no single item makes, so it has no case.",
+  "about": "One daemon conversation item in, its category and style out. Run by ConversationTimeline.classify (ios/Tests/SheepdogKitTests/TimelineClassificationFixtureTests.swift) and by the herdr-app panel's model/classify.js (mods/sheepdog/model/classify.test.mjs). Change either classifier and this file in the same PR. `style` is shownByDefault, folds, bridgesRuns and ledger of RowClass. `line` is ConversationItem.settledLine: the words of a settled question, null while it is open and for every other kind. The sixth category, screen, is the phone's folded group of updates, which no single item makes, so it has no case.",
   "cases": [
     {
       "name": "you, by voice",

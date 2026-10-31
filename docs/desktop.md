@@ -87,9 +87,10 @@ Then run `sheepdog restart`. The key and its environment override are in
 From a checkout of this repository:
 
 ```sh
-mkdir -p ~/.config/herdr-app/mods
-cp -R herdr-app/mods/sheepdog ~/.config/herdr-app/mods/
-herdr-app check ~/.config/herdr-app/mods/sheepdog
+HERDR_APP_MODS="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods"
+mkdir -p "$HERDR_APP_MODS"
+cp -R mods/sheepdog "$HERDR_APP_MODS/"
+herdr-app check "$HERDR_APP_MODS/sheepdog"
 ```
 
 On a layout you own, herdr-app docks Sheepdog on the right the first time it
@@ -104,7 +105,7 @@ Choose **Copy my layout**. That makes a layout you own and switches
 herdr-app to it, but it does not add the Sheepdog block. Open the copied
 `layouts/<name>.json` file in herdr-app's folder and add a block for the mod
 `sheepdog` on the right side. Reload or restart herdr-app. The
-[panel README](../herdr-app/mods/sheepdog/README.md) has herdr-app's current
+[panel README](../mods/sheepdog/README.md) has herdr-app's current
 docking details.
 
 ### 4. Install Sheepdog.app

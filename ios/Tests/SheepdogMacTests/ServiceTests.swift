@@ -80,7 +80,7 @@ final class PanelOpenerTests: XCTestCase {
             XCTAssertFalse(problem.message.isEmpty)
             XCTAssertTrue(problem.guide.absoluteString.contains("docs/desktop.md#"))
         }
-        XCTAssertTrue(PanelOpenProblem.panelMissing.message.contains("cp -R herdr-app/mods/sheepdog ~/.config/herdr-app/mods/"))
+        XCTAssertTrue(PanelOpenProblem.panelMissing.message.contains("cp -R mods/sheepdog ~/.config/herdr-app/mods/"))
     }
 
     func testAFailedOpenIsReportedOnTheMainActorAndLogged() async throws {

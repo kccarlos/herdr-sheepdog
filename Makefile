@@ -43,7 +43,7 @@ test:
 
 # The herdr-app panel's tests (net/ and model/ of the mod; no herdr imports,
 # so plain node runs them).
-PANEL_TESTS := herdr-app/mods/sheepdog/*/*.test.mjs
+PANEL_TESTS := mods/sheepdog/*/*.test.mjs
 
 # Browser-side unit tests (web/voice/*.test.mjs, web/debug/*.test.mjs; plain
 # node --test, no npm), and the panel's. Skipped when node is not on PATH so
