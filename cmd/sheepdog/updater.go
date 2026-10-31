@@ -51,7 +51,7 @@ var (
 // installHow is the upgrade command for how this binary was installed.
 func installHow() string {
 	exe, _ := osExecutable()
-	return upgradeCommand(detectInstall(exe), "")
+	return upgradeCommand(detectInstall(exe))
 }
 
 // startUpdateWatchers runs the daily check (when update.check is on) and

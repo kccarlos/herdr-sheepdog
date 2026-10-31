@@ -58,6 +58,10 @@ jobs:
       # ~/.local/bin link (into a temp dir) and the next-step line.
       - if: needs.changes.outputs.code == 'true'
         run: sh scripts/plugin-fetch_test.sh
+      # The standalone installer: supported platforms, checksum, pinned
+      # release, symlink/Homebrew safety, PATH hint and setup prompt.
+      - if: needs.changes.outputs.code == 'true'
+        run: sh scripts/install_test.sh
       # The Homebrew formula render and the tap commit (scratch repo, no push).
       - if: needs.changes.outputs.code == 'true'
         run: bash packaging/homebrew/tap-update_test.sh

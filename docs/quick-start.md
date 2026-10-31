@@ -20,16 +20,24 @@ herdr
 Or `brew install herdr` instead of the curl line. Other ways (mise and
 binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/releases).
 
-On herdr-core (`hc`, the new herdr) instead: skip the plugin step, install
-sheepdog with `brew install kccarlos/tap/sheepdog` and run `sheepdog setup`
-while hc is running; sheepdog finds hc's socket when it starts
-(`herdr.backend` in [CONFIG.md](../CONFIG.md); the [faq](faq.md) lists what
-herdr-core does not have yet).
-
 Using herdr-app on herdr-core? Keep the conversation in its sidebar and use
 Sheepdog.app for voice: [Sheepdog on your Mac](desktop.md).
 
-## 1. Install the plugin
+## 1. Install sheepdog
+
+For herdr-core (`hc`), herdr-app, or a Linux server, install the daemon
+directly:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
+```
+
+The installer downloads the latest release for Apple silicon macOS or x86-64
+Linux, verifies its sha256, and puts `sheepdog` in `~/.local/bin`. It offers
+to run `sheepdog setup` when a terminal is available (otherwise it prints the
+next step). For another platform, [build from source](#other-ways-to-install).
+
+If you use old herdr, its plugin remains the easy install path:
 
 ```sh
 herdr plugin install kccarlos/herdr-sheepdog
@@ -49,10 +57,9 @@ herdr does not show the build step's own messages when it succeeds. If
 `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and open a new
 terminal, or run `~/.local/bin/sheepdog` directly.
 
-Any other machine (an Intel Mac, ARM Linux), or a release that is not
-published yet, builds from source instead and needs [Go](https://go.dev/dl/);
-that takes about ten seconds on a fast connection. Without Go the install
-stops and says so ([troubleshooting.md](troubleshooting.md)).
+If the plugin has no release for your machine, it builds from source and
+needs [Go](https://go.dev/dl/); without Go it stops and says so
+([troubleshooting.md](troubleshooting.md)).
 
 ## 2. Set up in your browser
 
@@ -216,10 +223,11 @@ speaks it. Update with the command for your install method:
 
 | You installed with | Update with |
 |---|---|
+| One-line installer | Rerun the installer |
 | herdr plugin | `herdr plugin update kccarlos.sheepdog` |
 | Homebrew | `brew upgrade sheepdog` |
 | From source | `git pull` in your clone, then `make install` |
-| Release download | Download the new archive from the release page and replace the binary |
+| Manual release download | Download the new archive from the release page and replace the binary |
 
 Then the running daemon has to start the new version:
 
@@ -236,16 +244,16 @@ Then the running daemon has to start the new version:
 
 ## Other ways to install
 
-The plugin is the supported path. The daemon is also a plain binary:
+The installer above is the supported path. The daemon is also a plain binary:
 
+- **Homebrew:** `brew install kccarlos/tap/sheepdog` (macOS and Linux;
+  the macOS binary is signed and notarized). `brew upgrade sheepdog` updates it.
+- **From source** (Go, see `go.mod`): `git clone https://github.com/kccarlos/herdr-sheepdog.git`,
+  then `make install` builds it and copies it to `~/.local/bin/`.
 - **Release download:** each GitHub release carries
   `sheepdog_<tag>_darwin_arm64.tar.gz` and `sheepdog_<tag>_linux_amd64.tar.gz`
   with `checksums.txt`. Check the sha256, unpack, and put `sheepdog` on your
   PATH. The macOS binary is signed and notarized.
-- **From source** (Go, see `go.mod`): `git clone https://github.com/kccarlos/herdr-sheepdog.git`,
-  then `make install` builds it and copies it to `~/.local/bin/`.
-- **Homebrew:** `brew install kccarlos/tap/sheepdog` (macOS and Linux;
-  the macOS binary is signed and notarized). `brew upgrade sheepdog` updates it.
 - **Sheepdog.app (Mac only):** the menu-bar app that holds the microphone,
   `brew install --cask kccarlos/tap/sheepdog-app` (signed, notarized, arm64,
   macOS 14 or newer). It talks to the daemon above, so install that too.

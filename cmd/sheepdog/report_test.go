@@ -174,13 +174,25 @@ func TestDetectInstallAndUpgradeSteps(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(plugin, "bin"), 0o755)
 	_ = os.WriteFile(filepath.Join(plugin, "herdr-plugin.toml"), nil, 0o644)
 	_ = os.WriteFile(filepath.Join(plugin, "bin", "sheepdog"), nil, 0o755)
-	if m := detectInstall(filepath.Join(plugin, "bin", "sheepdog")); m.Kind != "herdr plugin" || upgradeSteps(m, "")[0] != "herdr plugin update kccarlos.sheepdog" {
+	if m := detectInstall(filepath.Join(plugin, "bin", "sheepdog")); m.Kind != "herdr plugin" || upgradeSteps(m)[0] != "herdr plugin update kccarlos.sheepdog" {
 		t.Errorf("plugin: %+v", m)
 	}
 	if m := detectInstall("/opt/homebrew/Cellar/sheepdog/0.1.0/bin/sheepdog"); m.Kind != "homebrew" {
 		t.Errorf("brew: %+v", m)
 	}
-	if m := detectInstall("/usr/local/bin/sheepdog-nowhere"); m.Kind != "binary" || !strings.HasPrefix(upgradeSteps(m, "https://x/rel")[0], "download it from https://x/rel") {
-		t.Errorf("binary: %+v", m)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	defaultBinary := detectInstall(filepath.Join(home, ".local", "bin", "sheepdog"))
+	wantCommand := "curl -fsSL " + installScriptURL + " | sh"
+	if defaultBinary.Kind != "binary" || upgradeCommand(defaultBinary) != wantCommand {
+		t.Errorf("default binary: %+v, command %q", defaultBinary, upgradeCommand(defaultBinary))
+	}
+	if steps := upgradeSteps(defaultBinary); len(steps) != 2 || steps[0] != wantCommand || steps[1] != "sheepdog restart" {
+		t.Errorf("default binary steps: %q", steps)
+	}
+	customBinary := detectInstall(filepath.Join(home, "opt", "bin", "sheepdog"))
+	wantCommand = "SHEEPDOG_INSTALL_DIR=" + filepath.Join(home, "opt", "bin") + " " + wantCommand
+	if got := upgradeCommand(customBinary); got != wantCommand {
+		t.Errorf("custom binary command = %q, want %q", got, wantCommand)
 	}
 }

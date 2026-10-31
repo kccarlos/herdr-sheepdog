@@ -18,6 +18,8 @@ import (
 // releaseRepo is the GitHub repository releases are published in.
 const releaseRepo = update.Repo
 
+const installScriptURL = "https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh"
+
 // releaseAPI is the GitHub API root (tests point it at a stub).
 var releaseAPI = "https://api.github.com"
 
@@ -61,7 +63,7 @@ func fileExists(p string) bool {
 }
 
 // upgradeSteps says how to upgrade for an install method.
-func upgradeSteps(m installMethod, releaseURL string) []string {
+func upgradeSteps(m installMethod) []string {
 	switch m.Kind {
 	case "herdr plugin":
 		return []string{"herdr plugin update kccarlos.sheepdog", "sheepdog restart"}
@@ -73,7 +75,7 @@ func upgradeSteps(m installMethod, releaseURL string) []string {
 		root := filepath.Dir(filepath.Dir(m.Path))
 		return []string{"git -C " + root + " pull && make -C " + root + " build   (a checkout you cloned)", "herdr plugin update kccarlos.sheepdog   (if herdr installed it)", "sheepdog restart"}
 	}
-	return []string{"download it from " + releaseURL + " and replace " + m.Path, "sheepdog restart"}
+	return []string{upgradeCommand(m), "sheepdog restart"}
 }
 
 // updateDataDir is the data directory the update cache lives in ("" when
@@ -100,7 +102,7 @@ func latestRelease(ctx context.Context) (release, error) {
 
 // upgradeCommand is the one command that upgrades for m (the "how" of the
 // update notice), without the restart step.
-func upgradeCommand(m installMethod, releaseURL string) string {
+func upgradeCommand(m installMethod) string {
 	switch m.Kind {
 	case "herdr plugin":
 		return "herdr plugin update kccarlos.sheepdog"
@@ -110,10 +112,15 @@ func upgradeCommand(m installMethod, releaseURL string) string {
 		root := filepath.Dir(filepath.Dir(m.Path))
 		return "git -C " + root + " pull && make -C " + root + " build"
 	}
-	if releaseURL == "" {
-		releaseURL = "https://github.com/" + releaseRepo + "/releases/latest"
+	command := "curl -fsSL " + installScriptURL + " | sh"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return command
 	}
-	return "download it from " + releaseURL + " and replace " + m.Path
+	if filepath.Clean(filepath.Dir(m.Path)) != filepath.Clean(filepath.Join(home, ".local", "bin")) {
+		command = "SHEEPDOG_INSTALL_DIR=" + filepath.Dir(m.Path) + " " + command
+	}
+	return command
 }
 
 // runUpdate implements `sheepdog update`: it checks the latest release
@@ -160,7 +167,7 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fprintf(stdout, "sheepdog %s is available (you have %s): %s\n", r.TagName, version, r.HTMLURL)
 	}
 	fprintln(stdout, "To upgrade:")
-	for _, s := range upgradeSteps(m, r.HTMLURL) {
+	for _, s := range upgradeSteps(m) {
 		fprintf(stdout, "  %s\n", s)
 	}
 	return 0

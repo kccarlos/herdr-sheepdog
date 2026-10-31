@@ -64,9 +64,8 @@ You can use the panel without a browser. A browser is still useful for
 
 ### 1. Install sheepdog
 
-Install the daemon from [the quick start](quick-start.md), then run
-`sheepdog setup` and finish its checks. If you use herdr-core, follow the
-Homebrew path in [Other ways to install](quick-start.md#other-ways-to-install).
+Install the daemon with the one-liner from [the quick start](quick-start.md#1-install-sheepdog)
+or `brew install kccarlos/tap/sheepdog`, then run `sheepdog setup`.
 
 ### 2. Choose herdr-core if both herdr versions are running
 
