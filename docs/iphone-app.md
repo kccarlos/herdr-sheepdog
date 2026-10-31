@@ -183,7 +183,9 @@ With one computer, none of this shows: no names and no Talk to.
   only the one the voice is on. The round button opens the agent's window
   (below). **+ ▸ New agent** takes two steps. **Where:** one of the
   spaces herdr has open (with the agents already in it), or a folder in
-  `supervisor.project_roots` that has no space yet. **Which agent:** the
+  `supervisor.project_roots`; a folder that already has a space adds the
+  agent there, and only one with none opens a new space (a new worktree
+  always does). **Which agent:** the
   coding agents installed on your computer (Claude Code, Codex, agy and
   the others herdr knows), **New worktree** (off; it gives the agent its
   own branch and folder, and is hidden when the folder is not a git

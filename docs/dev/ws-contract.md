@@ -1174,12 +1174,14 @@ phone").
 - **New agent.** `kind` is one of the `kinds` of `GET /api/spaces`
   ([Spaces](#spaces)). With `space` (a space's `id`) the agent joins that
   space: its pane is split from the space's first pane, in the space's
-  folder. With `dir` a new space opens there: a folder's name or full
-  path resolved as for the orchestrator (inside a project root, or an
-  open space's own folder), even when a space already works there.
+  folder. With `dir` a folder's name or full path is resolved as for the
+  orchestrator (inside a project root, or an open space's own folder, a
+  trailing slash or symlink aside): when a space already works there the
+  agent joins it, exactly as with `space` (`supervisor.spawn` has
+  `joined: true`), and only a folder with no space opens a new one.
   With `worktree` (a branch name: letters, digits and `. _ / -`), herdr's
   `worktree.create` makes the branch's worktree in that repository and
-  the new space opens there. herdr's `agent.start` starts the agent in
+  a new space opens there, even when a space works in the folder. herdr's `agent.start` starts the agent in
   the new shell, and the answer comes once herdr reports it ready (up to
   about a minute): `spoken` is "Claude is ready in bench.", or, with
   `blocked: true`, the agent started at a question (its first-run trust

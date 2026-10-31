@@ -208,7 +208,9 @@ never reading or writing the document:
   appears as a new tab of that space. The supervisor picks `paneID` the
   way it does for the old herdr (the first pane in the folder, or the
   space the user named), so "a new agent in an existing space" works
-  unchanged. A `paneID` with no space label (a terminal herdr-app does
+  unchanged, and so does a tap's folder that a space already works in: the
+  agent joins that space as a new tab, never a second space with the same
+  name. A `paneID` with no space label (a terminal herdr-app does
   not show) has no space to join, so the agent gets a new one; a missing
   `paneID` is `ErrPaneNotFound`.
 - Ids: eight random hex digits (`newID`). herdr-app's own ids are not

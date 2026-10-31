@@ -117,7 +117,9 @@ case and punctuation aside.
 
 The daemon (`internal/supervisor` `spawn.go`, `startAgent`, the one
 start path for voice and tap) then opens a new herdr workspace in the
-directory, or splits a pane from an existing workspace there, waits for
+directory, or splits a pane from an existing workspace there (a tap on
+New agent with a folder does the same: it joins the workspace already
+in that folder, and only a fresh worktree always opens a new one), waits for
 the pane's shell, and starts the agent with herdr's `agent.start`
 (`--kind claude`, the model as `--model haiku` or `-m …`). herdr types
 the kind's own executable and reports when it detected the agent.
