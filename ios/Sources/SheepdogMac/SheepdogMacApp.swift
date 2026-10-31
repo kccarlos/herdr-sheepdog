@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         let locator = DaemonLocator()
         let log = AppLog()
-        let panel = PanelOpener()
+        let panel = PanelOpener(log: log)
         let voice = MacVoiceHost(
             channel: VoiceSocket(endpoint: locator.endpoint),
             audio: MacAudioEngine(log: log),
