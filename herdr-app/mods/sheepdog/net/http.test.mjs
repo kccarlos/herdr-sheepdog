@@ -89,6 +89,81 @@ test("a tap is POSTed to /api/pending/answer with the id, the 1-based option and
   assert.deepEqual(JSON.parse(calls[0].options.body), { id: "p1", option: 2 });
 });
 
+test("settings routes use their documented GET, PUT and DELETE shapes", async () => {
+  const { fetch, calls } = recordingFetch(200, { ok: true });
+  const http = createHttp({ fetch, base: DEFAULT_URL });
+  await http.voiceProviders();
+  await http.setVoiceProvider("openai");
+  await http.brainModels("deepseek");
+  await http.setBrainModel("deepseek", "deepseek-flash");
+  await http.settings();
+  await http.setSettings({ languages: ["zh-Hans", "en"] });
+  await http.removeDevice("phone 1");
+  assert.deepEqual(calls.map((call) => [call.url, call.options?.method ?? "GET"]), [
+    [`${DEFAULT_URL}/api/voice/providers`, "GET"],
+    [`${DEFAULT_URL}/api/voice/provider`, "PUT"],
+    [`${DEFAULT_URL}/api/brain/models?provider=deepseek`, "GET"],
+    [`${DEFAULT_URL}/api/brain/model`, "PUT"],
+    [`${DEFAULT_URL}/api/settings`, "GET"],
+    [`${DEFAULT_URL}/api/settings`, "PUT"],
+    [`${DEFAULT_URL}/api/devices/phone%201`, "DELETE"],
+  ]);
+  assert.deepEqual(JSON.parse(calls[1].options.body), { provider: "openai" });
+  assert.deepEqual(JSON.parse(calls[3].options.body), { provider: "deepseek", model: "deepseek-flash" });
+  assert.deepEqual(JSON.parse(calls[5].options.body), { languages: ["zh-Hans", "en"] });
+  assert.equal(calls[6].options.body, undefined);
+});
+
+test("agents, devices, pairing and reset use their API answers", async () => {
+  const calls = [];
+  const answers = [
+    [{ pane_id: "w1:p1", alias: "api" }],
+    { devices: [{ id: "phone-1", name: "Phone" }] },
+    { link: "https://example.invalid/voice#pair=1", addresses: [] },
+    { size: 1, modules: ["1"] },
+    { ok: true, reset_id: "r1", at: "2026-10-30T12:00:00Z" },
+  ];
+  const fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => answers.shift() };
+  };
+  const http = createHttp({ fetch, base: DEFAULT_URL });
+  assert.equal((await http.agents())[0].alias, "api");
+  assert.equal((await http.devices())[0].id, "phone-1");
+  assert.match((await http.pair()).link, /pair=1/);
+  assert.deepEqual(await http.pairQR(), { size: 1, modules: ["1"] });
+  assert.deepEqual(await http.reset("panel-reset-1"), { ok: true, reset_id: "r1", at: "2026-10-30T12:00:00Z" });
+  assert.equal(calls[4].url, `${DEFAULT_URL}/api/conversation/reset`);
+  assert.equal(calls[4].options.headers["Idempotency-Key"], "panel-reset-1");
+  assert.deepEqual(JSON.parse(calls[4].options.body), { via: "app" });
+});
+
+test("a fresh pairing code is made only by /api/pair?new=1", async () => {
+  const { fetch, urls } = fakeFetch({
+    "/api/pair?new=1": { status: 200, body: { link: "https://example.invalid/voice#pair=1", addresses: [] } },
+    "/api/pair/qr.json": { status: 200, body: { size: 1, modules: ["1"] } },
+  });
+  const http = createHttp({ fetch, base: DEFAULT_URL });
+  await http.pair(true);
+  await http.pairQR();
+  assert.deepEqual(urls, [`${DEFAULT_URL}/api/pair?new=1`, `${DEFAULT_URL}/api/pair/qr.json`]);
+});
+
+test("the voice's controls are POSTed to /api/voice/*, each with a key; stop has no body", async () => {
+  const { fetch, calls } = recordingFetch(200, { ok: true });
+  const http = createHttp({ fetch, base: DEFAULT_URL });
+  await http.mute(true, "k1");
+  await http.stop("k2");
+  await http.ptt(false, "k3");
+  assert.deepEqual(calls.map((c) => c.url), [`${DEFAULT_URL}/api/voice/mute`, `${DEFAULT_URL}/api/voice/stop`, `${DEFAULT_URL}/api/voice/ptt`]);
+  assert.deepEqual(calls.map((c) => c.options.headers["Idempotency-Key"]), ["k1", "k2", "k3"]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { on: true });
+  assert.equal(calls[1].options.body, undefined);
+  assert.deepEqual(JSON.parse(calls[2].options.body), { on: false });
+  const none = createHttp({ fetch: recordingFetch(409, { error: "no voice client" }).fetch, base: DEFAULT_URL });
+  await assert.rejects(none.ptt(true, "k"), (e) => e.status === 409 && e.message === "no voice client");
+});
+
 test("a refused POST carries the daemon's own words and its status", async () => {
   const off = createHttp({ fetch: recordingFetch(503, { error: "the orchestrator is off (no brain key)" }).fetch, base: DEFAULT_URL });
   await assert.rejects(off.turn("hi", "k"), (e) => e.kind === "http" && e.status === 503 && e.message === "the orchestrator is off (no brain key)");
@@ -113,6 +188,9 @@ test("nothing answering is 'down'; an error status, and not-sheepdog answers, sa
 
   const broken = createHttp({ fetch: fakeFetch({ "/api/state": { status: 500, body: {} } }).fetch, base: DEFAULT_URL });
   await assert.rejects(broken.state(), (e) => e.kind === "http" && e.status === 500 && /HTTP 500/.test(e.message));
+
+  const noCode = createHttp({ fetch: fakeFetch({ "/api/pair/qr.json": { status: 409, body: { error: "no pairing link" } } }).fetch, base: DEFAULT_URL });
+  await assert.rejects(noCode.pairQR(), (e) => e.status === 409 && e.message === "no pairing link");
 
   const html = createHttp({ fetch: fakeFetch({ "/api/state": { status: 200, body: new Error("not json") } }).fetch, base: DEFAULT_URL });
   await assert.rejects(html.state(), (e) => e.kind === "invalid");

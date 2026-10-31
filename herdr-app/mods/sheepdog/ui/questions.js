@@ -41,7 +41,8 @@ function optionRow(t, q, option, { sending, enabled, onAnswer }) {
           h_flex()
             .gap(8)
             .items_center()
-            .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(labelOf(option)))
+            .flex_wrap()
+            .child(div().min_w(0).text_size(12.5).font_semibold().text_color(t.foreground).child(labelOf(option)))
             .when(Boolean(option.recommended), (el) => el.child(div().px(6).rounded(8).bg(tint(t.blocked, "1f")).text_size(10).font_semibold().text_color(t.blocked).child("Recommended"))),
         )
         .when(Boolean(option.description?.trim()), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(option.description.trim()))),

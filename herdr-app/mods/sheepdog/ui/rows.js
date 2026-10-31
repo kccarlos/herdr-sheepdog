@@ -12,6 +12,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { CATEGORIES, kindOf, settledLine } from "../model/classify.js";
 import { agentName, cardOf, displayTitle, kindWord } from "../model/cards.js";
+import { isLight } from "../model/palette.js";
 import { classifyRow } from "../model/timeline.js";
 import { tint } from "./widgets.js";
 
@@ -45,6 +46,7 @@ export function notice(t, text, code) {
 // What you or the voice said: the voice's words are left, yours right.
 function bubble(t, item) {
   const mine = kindOf(item) === "shepherd";
+  const light = isLight(t.chrome);
   const wrote = !mine && (item.via === "text_router" || item.via === "typed");
   const note = item.pending ? "Sending…" : mine ? (item.via === "typed" ? "Typed" : "") : wrote ? "Sheepdog wrote" : "";
   const body = div()
@@ -53,7 +55,13 @@ function bubble(t, item) {
     .rounded(14)
     .when(Boolean(item.pending), (el) => el.opacity(0.6))
     .when(mine, (el) => el.rounded_br(CORNER).bg(t.accent).text_color(t.accent_foreground))
-    .when(!mine, (el) => el.rounded_bl(CORNER).bg(t.raised).text_color(t.foreground))
+    .when(!mine, (el) =>
+      el
+        .rounded_bl(CORNER)
+        .bg(light ? t.selected : t.raised)
+        .when(light, (s) => s.border(1).border_color(t.border))
+        .text_color(t.foreground),
+    )
     .text_size(13)
     .child(item.text);
   return h_flex()
@@ -88,15 +96,19 @@ function pointer(t, item) {
         .gap(7)
         .items_center()
         .child(div().size(8).rounded(4).flex_none().bg(t.blocked))
+        // Two words in a wrapping row, not a block inside a block (which broke
+        // the line): "billing asked — waiting for your answer" stays on one
+        // line, or wraps between the two.
         .child(
-          div()
+          h_flex()
             .flex_1()
             .min_w(0)
+            .flex_wrap()
+            .gap_x(4)
             .text_size(12.5)
             .font_semibold()
-            .text_color(t.foreground)
-            .child(question ? `${asker} asked` : item.text)
-            .when(question, (el) => el.child(div().text_color(t.blocked).child(" — waiting for your answer"))),
+            .child(div().text_color(t.foreground).child(question ? `${asker} asked` : item.text))
+            .when(question, (el) => el.child(div().text_color(t.blocked).child("— waiting for your answer"))),
         ),
     )
     .when(question && Boolean(item.text), (el) => el.child(div().pl(15).text_size(12).text_color(t.muted).child(item.text)));

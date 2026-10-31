@@ -44,6 +44,14 @@ test("a restart reads started, restarted or updated, with its time", () => {
   assert.deepEqual(titles, ["Sheepdog started · 08:00", "Sheepdog restarted · 08:00", "Sheepdog updated to v0.9.1 · 08:00"]);
 });
 
+test("consecutive Sheepdog restarts collapse into the newer divider", () => {
+  const start = (sec) => item(sec, "notice", { text: "Sheepdog started.", subkind: "start", version: "0.9.0" });
+  const rows = buildRows([item(0, "shepherd"), start(10), start(70), item(80, "dog")], time);
+  const restarts = rows.filter((r) => r.type === "divider" && r.title.startsWith("Sheepdog restarted"));
+  assert.equal(restarts.length, 1);
+  assert.equal(restarts[0].title, "Sheepdog restarted · 08:01");
+});
+
 test("the plumbing is hidden, and brought back with the technical view", () => {
   const items = [
     item(0, "shepherd"), item(1, "notice", { text: "Voice context lost.", subkind: "context_lost" }),
@@ -121,7 +129,7 @@ test("the space between rows follows the phone's table", () => {
   assert.equal(gap(day, you), 14, "a divider to dialogue");
   assert.equal(gap(you, dog), 6, "within one exchange");
   assert.equal(gap(dog, you2), 18, "a new exchange starts");
-  assert.equal(gap(you2, ask), 4, "dialogue to a question");
+  assert.equal(gap(you2, ask), 18, "dialogue to a question: the normal space, not tucked");
   assert.equal(gap(ask, push), 18, "between categories");
   assert.equal(gap(push, card), 8, "a run and a card");
   assert.equal(gap(card, reset), 18);
