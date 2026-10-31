@@ -130,7 +130,7 @@ final class WSMessageTests: XCTestCase {
     }
 
     /// `voice-command` (docs/dev/ws-contract.md): Sheepdog.app implements it,
-    /// the iPhone app's `VoiceEngine` drops it.
+    /// the iPhone app's `VoiceEngine` only its `mute`.
     func testVoiceCommandStopAndPTT() throws {
         let stop = try decode(#"{"type":"voice-command","action":"stop"}"#)
         XCTAssertEqual(stop, .voiceStop)
@@ -138,17 +138,20 @@ final class WSMessageTests: XCTestCase {
         XCTAssertEqual(talk, .voicePTT(true))
         XCTAssertEqual(talk.on, true)
         XCTAssertEqual(try decode(#"{"type":"voice-command","action":"ptt","on":false}"#).on, false)
+        XCTAssertEqual(try decode(#"{"type":"voice-command","action":"mute","on":true}"#), .voiceMute(true))
     }
 
     func testVoiceCommandNeedsAKnownActionAndPTTNeedsOn() {
         XCTAssertThrowsError(try decode(#"{"type":"voice-command"}"#))
         XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"dance"}"#))
         XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"ptt"}"#))
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"mute"}"#))
     }
 
     func testVoiceCommandEncodesAsTheDaemonWritesIt() throws {
         XCTAssertEqual(try WSMessage.voiceStop.encodedString(), #"{"action":"stop","type":"voice-command"}"#)
         XCTAssertEqual(try WSMessage.voicePTT(true).encodedString(), #"{"action":"ptt","on":true,"type":"voice-command"}"#)
+        XCTAssertEqual(try WSMessage.voiceMute(false).encodedString(), #"{"action":"mute","on":false,"type":"voice-command"}"#)
     }
 
     func testTheMacSaysWhoItIs() {

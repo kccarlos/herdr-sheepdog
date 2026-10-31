@@ -50,6 +50,44 @@ func TestHTTPVoicePTTReachesTheClient(t *testing.T) {
 	}
 }
 
+// An HTTP mute reaches the holder as a voice-command before the status
+// that confirms it, so a client that owns its mute takes it as its own
+// instead of restating the old state.
+func TestHTTPMuteTellsTheClientBeforeTheStatus(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	for _, on := range []bool{true, false} {
+		var got MuteResponse
+		if code, body := h.postJSON("/api/voice/mute", map[string]any{"on": on}, &got); code != http.StatusOK || got.Muted != on {
+			t.Fatalf("mute %v = %d %s", on, code, body)
+		}
+		var order []string
+		for len(order) < 2 {
+			m, _, err := c.read(3 * time.Second)
+			if err != nil {
+				t.Fatalf("mute %v: reading: %v (so far %v)", on, err, order)
+			}
+			switch m.Type {
+			case wsproto.TypeVoiceCommand:
+				if want := wsproto.VoiceMute(on); !reflect.DeepEqual(m, want) {
+					t.Fatalf("voice-command = %+v, want %+v", m, want)
+				}
+				order = append(order, m.Type)
+			case wsproto.TypeStatus:
+				if m.Muted == nil || *m.Muted != on {
+					t.Fatalf("status = %+v, want muted %v", m, on)
+				}
+				order = append(order, m.Type)
+			}
+		}
+		if want := []string{wsproto.TypeVoiceCommand, wsproto.TypeStatus}; !reflect.DeepEqual(order, want) {
+			t.Fatalf("mute %v order = %v, want %v", on, order, want)
+		}
+	}
+}
+
 func TestHTTPVoiceCommandWithoutClient(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true})
 	for path, body := range map[string]any{"/api/voice/stop": map[string]any{}, "/api/voice/ptt": map[string]any{"on": true}} {

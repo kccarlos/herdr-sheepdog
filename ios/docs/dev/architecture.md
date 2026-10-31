@@ -946,8 +946,10 @@ as `voice.client`.
 - **`voice-command`** (docs/dev/ws-contract.md). `stop` is the core's `flush`
   (drop the playback; the daemon already cut the speech). `ptt on` unmutes a
   muted microphone and remembers it did; `ptt off` mutes it again. With the
-  microphone already open both do nothing. The iPhone app ignores the type
-  (`VoiceEngine.receive`).
+  microphone already open both do nothing. `mute` is the panel's Mute: the
+  core's `muteRequested`, obeyed as the user's own mute (it also ends a
+  hold-to-talk the hotkey started, so the release does not undo it). The
+  iPhone app implements only `mute` (`VoiceEngine.receive`).
 
 ### Audio (`MacAudioEngine`)
 
@@ -1419,6 +1421,8 @@ Behaviour worth knowing:
   daemon serves one at a time), the app says so once and waits.
 - **The app owns mute.** It tells the daemon its mute state on every
   connect and corrects a daemon that disagrees. Hold-to-talk never mutes.
+  A mute from the desktop panel arrives as a `voice-command` `mute` before
+  the daemon's `status`, and is obeyed as the user's own (`muteRequested`).
 - **Keep listening with the screen locked** (on by default). When it is
   off, going to the background pauses the microphone and playback and
   sends `mute`, so a per-minute GPT-Live session stops billing. Both resume

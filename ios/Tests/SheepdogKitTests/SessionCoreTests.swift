@@ -318,6 +318,29 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.sessionState, .listening)
     }
 
+    /// A mute from the desktop panel (`voice-command` `mute`) is obeyed as
+    /// the user's own, and the status that confirms it then agrees; a bare
+    /// status saying muted is still overruled (the test above).
+    func testAMuteFromAnotherClientIsObeyedAndItsStatusAgrees() {
+        var core = connected()
+        // The same tap a mute from the orb gives: a phone in a pocket
+        // muted from the desk says so.
+        XCTAssertEqual(core.apply(.muteRequested(true), now: t0), [.setCaptureMuted(true), .send(.mute(true)), .haptic(.tap)])
+        XCTAssertTrue(core.mic.muted)
+        XCTAssertEqual(core.apply(.status(.status(.connected, muted: true)), now: t0), [.startAudio], "no re-send")
+        XCTAssertEqual(core.apply(.muteRequested(true), now: t0), [], "already muted")
+
+        XCTAssertEqual(core.apply(.muteRequested(false), now: at(1)), [.send(.mute(false)), .setCaptureMuted(false), .startAudio, .haptic(.tap)])
+        XCTAssertFalse(core.mic.muted)
+        XCTAssertEqual(core.apply(.status(.status(.connected, muted: false)), now: at(1)), [.startAudio])
+    }
+
+    func testAMuteFromAnotherClientInHoldToTalkChangesNothing() {
+        var core = connected(talkMode: .holdToTalk)
+        XCTAssertEqual(core.apply(.muteRequested(true), now: t0), [])
+        XCTAssertFalse(core.mic.muted, "hold-to-talk hides Mute: a mute there could never be undone")
+    }
+
     func testAMutedStartStillStartsTheEngine() {
         var core = SessionCore()
         _ = core.apply(.connectTapped, now: t0)

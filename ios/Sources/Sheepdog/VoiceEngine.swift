@@ -381,9 +381,12 @@ final class VoiceEngine {
             if let text = message.message { send(.daemonError(text)) }
         case .transcript, .screen, .screenError, .card:
             host?.voiceEngine(self, control: message)
+        case .voiceCommand:
+            // A mute from the desktop panel is the user's own; stop and
+            // hold-to-talk from the Mac are Sheepdog.app's, not the phone's yet.
+            if message.action == .mute, let on = message.on { send(.muteRequested(on)) }
         case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
-             .screenSubscribe, .screenUnsubscribe, .visibility, .voiceCommand:
-            // `voiceCommand` is Sheepdog.app's; the phone does not implement it yet.
+             .screenSubscribe, .screenUnsubscribe, .visibility:
             break
         }
     }
