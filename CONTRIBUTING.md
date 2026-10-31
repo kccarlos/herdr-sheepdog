@@ -22,11 +22,16 @@ make build        # bin/sheepdog
 make run-dev      # a daemon with no voice, no herdr and no key; poke at /debug
 make test         # go test -race ./... (includes the docs checks)
 make test-web     # browser-side and herdr-app panel tests (needs node; the panel is in mods/sheepdog/)
+make sync-layout  # copy the panel files embedded in the binary into sheepdog-layout/
 make vet lint
 make eval         # offline eval sets, no network, no keys
 ```
 
 Architecture first: [docs/dev/architecture.md](docs/dev/architecture.md). The developer guide is [docs/dev/development.md](docs/dev/development.md); the vocabulary is [docs/dev/glossary.md](docs/dev/glossary.md).
+
+The herdr.dev layout listing is in `sheepdog-layout/`. Its `mods/sheepdog/`
+copy must match the files embedded by `Panel`; `make test` checks every file,
+and its failure names `make sync-layout` as the fix.
 
 Never commit a key, a token, a `.env` file or a log that has not been through `sheepdog doctor --report`. Tests must not touch your real `~/.config/sheepdog`; `cmd/sheepdog`'s tests already point `HOME` at a temp directory.
 

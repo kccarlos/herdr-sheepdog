@@ -88,6 +88,14 @@ func environmentChecks(cfg config.Config, env Environment) []Result {
 	case PanelCurrent:
 		out = append(out, Result{Name: "herdr-app panel", Status: OK, Detail: "matches this sheepdog"})
 	}
+	if env.HerdrApp && env.Panel != PanelNotApplicable && env.Panel != PanelMissing && !env.PanelDocked {
+		out = append(out, Result{
+			Name:   "herdr-app layout",
+			Status: Warn,
+			Detail: fmt.Sprintf("the panel is installed but not docked in the layout herdr-app shows (%s)", env.ShownLayout),
+			Fix:    "sheepdog setup switches to the Sheepdog layout, or open the panel and choose Copy my layout",
+		})
+	}
 	if env.OS == "darwin" && env.HerdrApp {
 		const fix = "brew install --cask kccarlos/tap/sheepdog-app"
 		if env.SheepdogApp {

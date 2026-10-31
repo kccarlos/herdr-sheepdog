@@ -81,34 +81,34 @@ backend = "hc"
 Then run `sheepdog restart`. The key and its environment override are in
 [CONFIG.md](../CONFIG.md).
 
-### 3. Install the panel
+### 3. Install the panel and layout
 
 Run `sheepdog setup` after herdr-app is installed. It installs or updates the
-panel for you.
+panel, offers the Sheepdog layout, and switches herdr-app to it. The layout is
+Herdr's usual window with the panel docked on the right.
 
-If you need to install it by hand from a checkout of this repository:
+You can also ask a coding agent to add
+`herdr.dev/mods/kccarlos/sheepdog`, or the layout listing under
+`herdr.dev/layouts/kccarlos`, to herdr-app. The layout listing includes the
+panel and starts from Herdr's main layout.
 
-```sh
-HERDR_APP_MODS="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods"
-mkdir -p "$HERDR_APP_MODS"
-cp -R mods/sheepdog "$HERDR_APP_MODS/"
-herdr-app check "$HERDR_APP_MODS/sheepdog"
-```
-
-On a layout you own, herdr-app docks Sheepdog on the right the first time it
-sees the folder. A layout that ships with herdr-app cannot be changed by a
-mod. If the panel opens as a window instead, run:
+If you need to install it by hand from a checkout of this repository, copy both
+the panel and the layout:
 
 ```sh
-herdr-app do mod.open --name sheepdog
+HERDR_APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
+mkdir -p "$HERDR_APP_HOME/mods" "$HERDR_APP_HOME/layouts"
+cp -R mods/sheepdog "$HERDR_APP_HOME/mods/"
+cp sheepdog-layout/layouts/sheepdog.json "$HERDR_APP_HOME/layouts/"
+herdr-app check "$HERDR_APP_HOME/mods/sheepdog"
+herdr-app do layout.switch '{"name":"sheepdog"}'
 ```
 
-Choose **Copy my layout**. That makes a layout you own and switches
-herdr-app to it, but it does not add the Sheepdog block. Open the copied
-`layouts/<name>.json` file in herdr-app's folder and add a block for the mod
-`sheepdog` on the right side. Reload or restart herdr-app. The
-[panel README](../mods/sheepdog/README.md) has herdr-app's current
-docking details.
+As a last fallback, you can open the panel with
+`herdr-app do mod.open --name sheepdog` and choose **Copy my layout**. That
+makes a layout you own; add a block for the mod `sheepdog` on its right side
+and reload herdr-app. The
+[panel README](../mods/sheepdog/README.md) explains the docking rules.
 
 ### 4. Install Sheepdog.app
 

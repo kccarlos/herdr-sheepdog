@@ -110,7 +110,7 @@ func TestDetect(t *testing.T) {
 			},
 			want: Environment{
 				OS: "linux", OldHerdr: Presence{Installed: true, Answers: true},
-				HerdrAppHome: "/fake/home/.config/herdr-app", Panel: PanelNotApplicable,
+				HerdrAppHome: "/fake/home/.config/herdr-app", ShownLayout: "main", Panel: PanelNotApplicable,
 			},
 		},
 		{
@@ -124,7 +124,7 @@ func TestDetect(t *testing.T) {
 			},
 			want: Environment{
 				OS: "linux", HerdrCore: Presence{Installed: true, Answers: true},
-				HerdrApp: true, HerdrAppHome: "/custom/herdr-app", Panel: PanelOutdated,
+				HerdrApp: true, HerdrAppHome: "/custom/herdr-app", ShownLayout: "main", Panel: PanelOutdated,
 			},
 		},
 		{
@@ -134,7 +134,7 @@ func TestDetect(t *testing.T) {
 				paths: map[string]bool{"herdr-app": true},
 			},
 			want: Environment{
-				OS: "linux", HerdrApp: true, HerdrAppHome: "/fake/home/.config/herdr-app", Panel: PanelMissing,
+				OS: "linux", HerdrApp: true, HerdrAppHome: "/fake/home/.config/herdr-app", ShownLayout: "main", Panel: PanelMissing,
 			},
 		},
 		{
@@ -157,7 +157,7 @@ func TestDetect(t *testing.T) {
 			want: Environment{
 				OS:       "darwin",
 				OldHerdr: Presence{Installed: true, Answers: true}, HerdrCore: Presence{Installed: true, Answers: true},
-				HerdrApp: true, HerdrAppHome: "/fake/app-home", Panel: PanelCurrent, SheepdogApp: true,
+				HerdrApp: true, HerdrAppHome: "/fake/app-home", ShownLayout: "main", Panel: PanelCurrent, SheepdogApp: true,
 			},
 		},
 		{
@@ -173,7 +173,7 @@ func TestDetect(t *testing.T) {
 				},
 			},
 			want: Environment{
-				OS: "darwin", HerdrApp: true, HerdrAppHome: "/fake/home/.config/herdr-app", Panel: PanelOutdated,
+				OS: "darwin", HerdrApp: true, HerdrAppHome: "/fake/home/.config/herdr-app", ShownLayout: "main", Panel: PanelOutdated,
 			},
 		},
 		{
@@ -185,14 +185,68 @@ func TestDetect(t *testing.T) {
 				},
 			},
 			want: Environment{
-				OS: "linux", HerdrAppHome: "/fake/home/.config/herdr-app", Panel: PanelNotApplicable,
+				OS: "linux", HerdrAppHome: "/fake/home/.config/herdr-app", ShownLayout: "main", Panel: PanelNotApplicable,
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Detect(config.Config{Herdr: testHerdr()}, tc.probe.probe(), panel)
+			got := Detect(config.Config{Herdr: testHerdr()}, tc.probe.probe(), panel, nil)
 			if got != tc.want {
 				t.Errorf("Detect() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDetectHerdrAppLayout(t *testing.T) {
+	const home = "/fake/app-home"
+	docked := `{"id":"root","type":"row","children":[{"id":"panel","type":"block","content":{"mod":"sheepdog"}}]}`
+	notDocked := `{"id":"root","type":"row","children":[{"id":"main","type":"block","content":{"mod":"tabs"}}]}`
+	wantLayout := []byte(docked)
+	for _, tc := range []struct {
+		name   string
+		files  map[string]string
+		shown  string
+		docked bool
+		layout LayoutState
+	}{
+		{name: "shared absent", shown: "main"},
+		{name: "shared present", files: map[string]string{
+			home + "/shared.json": `{"layout":"work"}`,
+		}, shown: "work"},
+		{name: "shown layout without the panel", files: map[string]string{
+			home + "/shared.json":       `{"layout":"work"}`,
+			home + "/layouts/work.json": notDocked,
+		}, shown: "work"},
+		{name: "shown layout docks the panel", files: map[string]string{
+			home + "/shared.json":         `{"layout":"custom"}`,
+			home + "/layouts/custom.json": docked,
+		}, shown: "custom", docked: true},
+		{name: "sheepdog layout missing", files: map[string]string{
+			home + "/shared.json":       `{"layout":"work"}`,
+			home + "/layouts/work.json": notDocked,
+		}, shown: "work"},
+		{name: "sheepdog layout current", files: map[string]string{
+			home + "/shared.json":           `{"layout":"sheepdog"}`,
+			home + "/layouts/sheepdog.json": string(wantLayout),
+		}, shown: "sheepdog", docked: true, layout: LayoutCurrent},
+		{name: "sheepdog layout different", files: map[string]string{
+			home + "/shared.json":           `{"layout":"work"}`,
+			home + "/layouts/work.json":     notDocked,
+			home + "/layouts/sheepdog.json": `{"id":"root","type":"row"}`,
+		}, shown: "work", layout: LayoutDifferent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := &fakeProbe{
+				goos: "linux", home: "/fake/home",
+				env:   map[string]string{"HERDR_APP_HOME": home},
+				paths: map[string]bool{"herdr-app": true},
+				files: tc.files,
+			}
+			got := Detect(config.Config{Herdr: testHerdr()}, probe.probe(), testPanel(nil), wantLayout)
+			if got.ShownLayout != tc.shown || got.PanelDocked != tc.docked || got.Layout != tc.layout {
+				t.Errorf("layout detection = shown %q docked %v %v, want %q %v %v",
+					got.ShownLayout, got.PanelDocked, got.Layout, tc.shown, tc.docked, tc.layout)
 			}
 		})
 	}
@@ -295,7 +349,7 @@ func TestInstallPanel(t *testing.T) {
 		ReadFile:      os.ReadFile,
 		SocketAnswers: func(string) bool { return false },
 	}
-	if got := Detect(config.Config{Herdr: testHerdr()}, p, panel).Panel; got != PanelCurrent {
+	if got := Detect(config.Config{Herdr: testHerdr()}, p, panel, nil).Panel; got != PanelCurrent {
 		t.Errorf("panel after install = %v, want current", got)
 	}
 }
@@ -308,7 +362,7 @@ func TestDoctorEnvironmentResults(t *testing.T) {
 	cfg.Web.Port = -1 // make the port check fail locally without dialing a real daemon
 	env := Environment{
 		OS: "darwin", OldHerdr: Presence{Installed: true, Answers: true},
-		HerdrCore: Presence{Installed: true, Answers: true}, HerdrApp: true, Panel: PanelMissing,
+		HerdrCore: Presence{Installed: true, Answers: true}, HerdrApp: true, ShownLayout: "main", Panel: PanelMissing,
 	}
 	byName := map[string]Result{}
 	for _, r := range Doctor(context.Background(), cfg, DoctorOptions{Environment: &env}) {
@@ -316,6 +370,9 @@ func TestDoctorEnvironmentResults(t *testing.T) {
 	}
 	if r := byName["herdr-app panel"]; r.Status != Warn || r.Fix != "sheepdog setup installs it" {
 		t.Errorf("missing panel = %+v", r)
+	}
+	if r, ok := byName["herdr-app layout"]; ok {
+		t.Errorf("missing panel produced a layout check: %+v", r)
 	}
 	if r := byName["Sheepdog.app"]; r.Status != Warn || r.Fix != "brew install --cask kccarlos/tap/sheepdog-app" {
 		t.Errorf("missing app = %+v", r)
@@ -336,8 +393,22 @@ func TestDoctorEnvironmentResults(t *testing.T) {
 	if r := byName["Sheepdog.app"]; r.Status != OK {
 		t.Errorf("installed app = %+v", r)
 	}
+	if r := byName["herdr-app layout"]; r.Status != Warn ||
+		r.Detail != "the panel is installed but not docked in the layout herdr-app shows (main)" ||
+		r.Fix != "sheepdog setup switches to the Sheepdog layout, or open the panel and choose Copy my layout" {
+		t.Errorf("undocked panel = %+v", r)
+	}
 	if r, ok := byName["herdr backend"]; ok {
 		t.Errorf("explicit backend produced advice: %+v", r)
+	}
+
+	env.PanelDocked = true
+	byName = map[string]Result{}
+	for _, r := range Doctor(context.Background(), cfg, DoctorOptions{Environment: &env}) {
+		byName[r.Name] = r
+	}
+	if r, ok := byName["herdr-app layout"]; ok {
+		t.Errorf("docked panel produced a layout warning: %+v", r)
 	}
 
 	env = Environment{OS: "linux", Panel: PanelNotApplicable}

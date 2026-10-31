@@ -2,6 +2,7 @@ package onboard
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -68,6 +69,26 @@ func (s PanelState) String() string {
 	}
 }
 
+// LayoutState is the Sheepdog layout compared with the one in this binary.
+type LayoutState int
+
+const (
+	LayoutMissing LayoutState = iota
+	LayoutCurrent
+	LayoutDifferent
+)
+
+func (s LayoutState) String() string {
+	switch s {
+	case LayoutCurrent:
+		return "current"
+	case LayoutDifferent:
+		return "different"
+	default:
+		return "missing"
+	}
+}
+
 // Environment is the herdr setup found on this computer.
 type Environment struct {
 	OS           string
@@ -76,12 +97,15 @@ type Environment struct {
 	HerdrApp     bool
 	HerdrAppHome string
 	Panel        PanelState
+	ShownLayout  string
+	PanelDocked  bool
+	Layout       LayoutState
 	SheepdogApp  bool
 }
 
 // Detect inspects the installed herdr tools and compares the panel in panel
-// with the copy installed for herdr-app.
-func Detect(cfg config.Config, p Probe, panel fs.FS) Environment {
+// and the layout in layout with the copies installed for herdr-app.
+func Detect(cfg config.Config, p Probe, panel fs.FS, layout []byte) Environment {
 	env := Environment{
 		OS:           p.GOOS,
 		OldHerdr:     Presence{Installed: probeLookPath(p, "herdr"), Answers: probeSocket(p, cfg.Herdr.Socket)},
@@ -100,6 +124,9 @@ func Detect(cfg config.Config, p Probe, panel fs.FS) Environment {
 			probeIsDir(p, filepath.Join(p.Home, "Applications", "Sheepdog.app"))
 	}
 	env.Panel = detectPanel(env.HerdrApp, env.HerdrAppHome, p, panel)
+	env.ShownLayout = detectShownLayout(env.HerdrAppHome, p)
+	env.PanelDocked = detectPanelDocked(env.HerdrAppHome, env.ShownLayout, p)
+	env.Layout = detectLayout(env.HerdrAppHome, p, layout)
 	return env
 }
 
@@ -165,6 +192,109 @@ func detectPanel(applicable bool, home string, p Probe, panel fs.FS) PanelState 
 		return PanelOutdated
 	}
 	return PanelCurrent
+}
+
+func detectShownLayout(home string, p Probe) string {
+	const main = "main"
+	if p.ReadFile == nil {
+		return main
+	}
+	data, err := p.ReadFile(filepath.Join(home, "shared.json"))
+	if err != nil {
+		return main
+	}
+	var shared map[string]json.RawMessage
+	if json.Unmarshal(data, &shared) != nil {
+		return main
+	}
+	var name string
+	if raw, ok := shared["layout"]; !ok || json.Unmarshal(raw, &name) != nil {
+		return main
+	}
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return main
+	}
+	return name
+}
+
+func detectPanelDocked(home, name string, p Probe) bool {
+	if p.ReadFile == nil {
+		return false
+	}
+	data, err := p.ReadFile(filepath.Join(home, "layouts", name+".json"))
+	if err != nil {
+		return false
+	}
+	var layout any
+	if json.Unmarshal(data, &layout) != nil {
+		return false
+	}
+	return jsonReferencesMod(layout, "sheepdog")
+}
+
+func jsonReferencesMod(value any, mod string) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if content, ok := v["content"].(map[string]any); ok && content["mod"] == mod {
+			return true
+		}
+		for _, child := range v {
+			if jsonReferencesMod(child, mod) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if jsonReferencesMod(child, mod) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func detectLayout(home string, p Probe, want []byte) LayoutState {
+	if p.ReadFile == nil {
+		return LayoutMissing
+	}
+	got, err := p.ReadFile(filepath.Join(home, "layouts", "sheepdog.json"))
+	if err != nil {
+		return LayoutMissing
+	}
+	if bytes.Equal(got, want) {
+		return LayoutCurrent
+	}
+	return LayoutDifferent
+}
+
+// InstallLayout writes the embedded Sheepdog layout atomically with mode
+// 0644. Setup calls it only when the layout file is missing.
+func InstallLayout(home string, layout []byte) error {
+	dir := filepath.Join(home, "layouts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".sheepdog-layout-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(layout); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, filepath.Join(dir, "sheepdog.json")); err != nil {
+		return err
+	}
+	return os.Chmod(filepath.Join(dir, "sheepdog.json"), 0o644)
 }
 
 // InstallPanel replaces every file in panel under home/mods/sheepdog. Other

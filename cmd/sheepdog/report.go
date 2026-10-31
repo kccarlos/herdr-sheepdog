@@ -105,7 +105,7 @@ func buildReport(ctx context.Context, o reportOptions) string {
 	if o.loadErr == nil {
 		h("Doctor")
 		var lines []string
-		environment := onboard.Detect(o.cfg, onboard.SystemProbe(), herdrsheepdog.Panel)
+		environment := onboard.Detect(o.cfg, onboard.SystemProbe(), herdrsheepdog.Panel, herdrsheepdog.Layout)
 		for _, r := range onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
 			Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath,
 			Environment: &environment,

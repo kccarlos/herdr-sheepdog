@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web test-panel lint vet cross clean install run-dev changelog eval eval-live release-sign
+.PHONY: build test test-web test-panel sync-layout lint vet cross clean install run-dev changelog eval eval-live release-sign
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -62,6 +62,17 @@ test-panel:
 	else \
 		echo "test-panel: node not found, skipping"; \
 	fi
+
+# Copy only the files embedded by herdrsheepdog.Panel into the layout listing.
+# The sync test rejects a missing, extra or different file.
+sync-layout:
+	rm -rf sheepdog-layout/mods/sheepdog
+	mkdir -p sheepdog-layout/mods/sheepdog/model sheepdog-layout/mods/sheepdog/net sheepdog-layout/mods/sheepdog/ui
+	cp mods/sheepdog/main.js mods/sheepdog/mod.json mods/sheepdog/logo.svg mods/sheepdog/.gitignore sheepdog-layout/mods/sheepdog/
+	for f in mods/sheepdog/model/*.js mods/sheepdog/net/*.js mods/sheepdog/ui/*.js; do \
+		case "$$f" in *.test.mjs) continue;; esac; \
+		cp "$$f" "sheepdog-layout/$$f"; \
+	done
 
 lint:
 	golangci-lint run
