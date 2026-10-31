@@ -83,9 +83,16 @@ final class RouteHandlerTests: XCTestCase {
 
 @MainActor
 final class StatusItemControllerTests: XCTestCase {
-    private func make(voice: FakeVoice? = nil, login: FakeLoginItem = FakeLoginItem(), panel: FakePanel = FakePanel(), log: FakeLog = FakeLog(), quit: @escaping () -> Void = {}) -> (StatusItemController, FakeStatusSource) {
+    private func make(
+        voice: FakeVoice? = nil,
+        hotkey: FakeHotkey? = nil,
+        login: FakeLoginItem = FakeLoginItem(),
+        panel: FakePanel = FakePanel(),
+        log: FakeLog = FakeLog(),
+        quit: @escaping () -> Void = {}
+    ) -> (StatusItemController, FakeStatusSource) {
         let source = FakeStatusSource()
-        return (StatusItemController(source: source, voice: voice ?? FakeVoice(), panel: panel, loginItem: login, log: log, quit: quit), source)
+        return (StatusItemController(source: source, voice: voice ?? FakeVoice(), panel: panel, hotkey: hotkey ?? FakeHotkey(), loginItem: login, log: log, quit: quit), source)
     }
 
     private func items(_ rows: [MenuItemSpec.Row]) -> [(title: String, enabled: Bool, checked: Bool)] {
@@ -101,9 +108,10 @@ final class StatusItemControllerTests: XCTestCase {
         let rows = StatusItemController.rows(for: MenuBarState(state: nil), loginItemEnabled: true)
         XCTAssertEqual(rows.first, .status("Sheepdog isn't running"))
         let items = items(rows)
-        XCTAssertEqual(items.map(\.title), ["Open panel", "Talk", "Mute", "Stop", "Use here", "Launch at login", "Quit Sheepdog"])
-        XCTAssertEqual(items.map(\.enabled), [true, false, false, false, false, true, true])
+        XCTAssertEqual(items.map(\.title), ["Open panel", "Talk", "Mute", "Stop", "Use here", "⌥ Space", "⌃ Space", "⌃⌥ Space", "Launch at login", "Quit Sheepdog"])
+        XCTAssertEqual(items.map(\.enabled), [true, false, false, false, false, true, true, true, true, true])
         XCTAssertEqual(items.first { $0.title == "Launch at login" }?.checked, true)
+        XCTAssertEqual(items.first { $0.title == "⌥ Space" }?.checked, true)
     }
 
     func testTheVoiceRowsWithTheDaemonUpAndNoSessionHere() {
@@ -193,6 +201,19 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertEqual(voice.routes, [.talk, .toggleMute, .stop])
         XCTAssertEqual(voice.useHeres, 1)
         XCTAssertEqual(voice.settingsOpened, 1)
+    }
+
+    func testTheHotkeyMenuChoiceAndActionsDriveTheVoice() {
+        let voice = FakeVoice()
+        let hotkey = FakeHotkey()
+        let (c, _) = make(voice: voice, hotkey: hotkey)
+        c.perform(.selectHotkey(.controlSpace))
+        XCTAssertEqual(hotkey.selections, [.controlSpace])
+        hotkey.onAction?(.pushToTalk(true))
+        hotkey.onAction?(.pushToTalk(false))
+        hotkey.onAction?(.toggleMute)
+        XCTAssertEqual(voice.pushToTalkCalls, [true, false])
+        XCTAssertEqual(voice.routes, [.toggleMute])
     }
 
     func testUpdateFollowsTheDaemon() {

@@ -11,14 +11,17 @@ public struct VoiceMenuState: Equatable {
     public var muted = false
     /// The microphone is refused in System Settings.
     public var micDenied = false
+    /// The app's speech detector hears the user now.
+    public var userTalking = false
     /// Why the session is not working, in a sentence (the banner's words on
     /// the phone), or nil.
     public var problem: String?
 
-    public init(heldHere: Bool = false, muted: Bool = false, micDenied: Bool = false, problem: String? = nil) {
+    public init(heldHere: Bool = false, muted: Bool = false, micDenied: Bool = false, userTalking: Bool = false, problem: String? = nil) {
         self.heldHere = heldHere
         self.muted = muted
         self.micDenied = micDenied
+        self.userTalking = userTalking
         self.problem = problem
     }
 }
@@ -33,6 +36,8 @@ public protocol VoiceControlling: AnyObject {
     func handle(route: AppRoute)
     /// Use here: connect `/ws`, which takes the voice from the phone.
     func useHere()
+    /// Hold-to-talk from the global hotkey or the daemon's `ptt` command.
+    func pushToTalk(on: Bool)
     func openMicrophoneSettings()
 }
 
@@ -229,7 +234,7 @@ final class MacVoiceHost: VoiceControlling {
     /// Hold-to-talk: the microphone is open while `on`. Muted before: unmute
     /// now and mute again at the release. Not muted: nothing to open, and
     /// nothing to close.
-    private func pushToTalk(on: Bool) {
+    func pushToTalk(on: Bool) {
         guard core.connection.wantsConnection else { return }
         if on {
             guard core.mic.muted else { return }
@@ -348,6 +353,7 @@ final class MacVoiceHost: VoiceControlling {
             heldHere: core.connection.wantsConnection,
             muted: core.mic.muted,
             micDenied: microphone.access == .denied,
+            userTalking: core.mic.speaking,
             problem: problem
         )
         guard next != state else { return }

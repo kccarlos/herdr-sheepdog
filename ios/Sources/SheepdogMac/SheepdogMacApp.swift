@@ -18,6 +18,7 @@ struct SheepdogMacApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: StatusItemController?
     private var voice: MacVoiceHost?
+    private var notifications: NotificationService?
     private var routes: RouteHandler?
 
     /// Set up before LaunchServices hands over a `sheepdog://talk` that
@@ -29,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         let locator = DaemonLocator()
         let log = AppLog()
+        let panel = PanelOpener()
         let voice = MacVoiceHost(
             channel: VoiceSocket(endpoint: locator.endpoint),
             audio: MacAudioEngine(log: log),
@@ -38,15 +40,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             timers: TaskTimers(),
             log: log
         )
+        let notifications = NotificationService(panel: panel, log: log)
+        let source = DaemonStatusMonitor(locator: locator)
+        source.onEvent = { [weak voice] event in
+            notifications.receive(event, voice: voice?.state ?? VoiceMenuState())
+        }
         let controller = StatusItemController(
-            source: DaemonStatusMonitor(locator: locator),
+            source: source,
             voice: voice,
-            panel: PanelOpener(),
+            panel: panel,
+            hotkey: HotkeyService(),
             loginItem: LoginItem(),
             log: log
         )
         controller.install()
         self.voice = voice
+        self.notifications = notifications
         self.controller = controller
         routes = RouteHandler(voice: voice, log: log)
     }

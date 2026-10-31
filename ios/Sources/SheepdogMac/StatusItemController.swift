@@ -15,6 +15,7 @@ public struct MenuItemSpec: Equatable {
         case stop
         /// Take the voice from the phone: connect `/ws`.
         case useHere
+        case selectHotkey(HotkeyShortcut)
         case openMicrophoneSettings
     }
 
@@ -31,7 +32,12 @@ public struct MenuItemSpec: Equatable {
 /// (`VoiceControlling`); the daemon must answer for the ones that connect.
 @MainActor
 public final class StatusItemController: NSObject {
-    public static func rows(for state: MenuBarState, loginItemEnabled: Bool, voice: VoiceMenuState = VoiceMenuState()) -> [MenuItemSpec.Row] {
+    public static func rows(
+        for state: MenuBarState,
+        loginItemEnabled: Bool,
+        voice: VoiceMenuState = VoiceMenuState(),
+        hotkey: HotkeyShortcut = .optionSpace
+    ) -> [MenuItemSpec.Row] {
         let daemonUp = state.kind != .daemonDown
         var rows: [MenuItemSpec.Row] = [.status(state.line)]
         if let problem = voice.problem { rows.append(.status(problem)) }
@@ -49,6 +55,13 @@ public final class StatusItemController: NSObject {
         }
         rows += [
             .separator,
+            .status("Hotkey"),
+        ]
+        rows += HotkeyShortcut.allCases.map {
+            .item(title: $0.title, action: .selectHotkey($0), enabled: true, checked: $0 == hotkey)
+        }
+        rows += [
+            .separator,
             .item(title: "Launch at login", action: .toggleLoginItem, enabled: true, checked: loginItemEnabled),
             .item(title: "Quit Sheepdog", action: .quit, enabled: true, checked: false),
         ]
@@ -58,6 +71,7 @@ public final class StatusItemController: NSObject {
     private let source: DaemonStatusSource
     private let voice: VoiceControlling
     private let panel: PanelOpening
+    private let hotkey: HotkeyServing
     private let loginItem: LoginItemControlling
     private let log: AppLogging
     private let quit: () -> Void
@@ -66,14 +80,37 @@ public final class StatusItemController: NSObject {
     /// The state the menu shows; the daemon is "down" until it answers.
     public private(set) var state = MenuBarState(state: nil)
 
-    public init(source: DaemonStatusSource, voice: VoiceControlling, panel: PanelOpening, loginItem: LoginItemControlling, log: AppLogging, quit: @escaping () -> Void = { NSApp.terminate(nil) }) {
+    public init(
+        source: DaemonStatusSource,
+        voice: VoiceControlling,
+        panel: PanelOpening,
+        hotkey: HotkeyServing,
+        loginItem: LoginItemControlling,
+        log: AppLogging,
+        quit: @escaping () -> Void = { NSApp.terminate(nil) }
+    ) {
         self.source = source
         self.voice = voice
         self.panel = panel
+        self.hotkey = hotkey
         self.loginItem = loginItem
         self.log = log
         self.quit = quit
         super.init()
+        hotkey.onChange = { [weak self] in
+            self?.render()
+        }
+        hotkey.onAction = { [weak self] action in
+            switch action {
+            case let .pushToTalk(on):
+                self?.voice.pushToTalk(on: on)
+            case .toggleMute:
+                self?.voice.handle(route: .toggleMute)
+            }
+        }
+        hotkey.onError = { [weak self] message in
+            self?.log.log(message)
+        }
     }
 
     /// Puts the item in the menu bar and starts following the daemon.
@@ -94,6 +131,7 @@ public final class StatusItemController: NSObject {
         voice.onChange = { [weak self] in
             self?.render()
         }
+        hotkey.start()
         source.start()
     }
 
@@ -120,6 +158,7 @@ public final class StatusItemController: NSObject {
         case .quit:
             voice.handle(route: .end)
             source.stop()
+            hotkey.stop()
             quit()
         case .talk:
             voice.handle(route: .talk)
@@ -129,6 +168,9 @@ public final class StatusItemController: NSObject {
             voice.handle(route: .stop)
         case .useHere:
             voice.useHere()
+        case let .selectHotkey(shortcut):
+            hotkey.select(shortcut)
+            render()
         case .openMicrophoneSettings:
             voice.openMicrophoneSettings()
         }
@@ -147,7 +189,7 @@ public final class StatusItemController: NSObject {
     private func menu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state) {
+        for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state, hotkey: hotkey.shortcut) {
             switch row {
             case let .status(text):
                 let line = NSMenuItem(title: text, action: nil, keyEquivalent: "")

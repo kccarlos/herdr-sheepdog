@@ -4,6 +4,10 @@ import SheepdogKit
 /// The daemon's state as the menu bar sees it: `nil` is "did not answer".
 public protocol DaemonStatusSource: AnyObject {
     var onChange: (@MainActor (DaemonState?) -> Void)? { get set }
+    /// Every event that woke the status refresh. The desktop notifications
+    /// classify these before the state read; the state callback stays the
+    /// menu's single source for what is true now.
+    var onEvent: (@MainActor (DaemonEvent) -> Void)? { get set }
     func start()
     func stop()
 }
@@ -15,6 +19,7 @@ public protocol DaemonStatusSource: AnyObject {
 /// or restarted) the status goes to `nil` and the loop retries.
 public final class DaemonStatusMonitor: DaemonStatusSource {
     public var onChange: (@MainActor (DaemonState?) -> Void)?
+    public var onEvent: (@MainActor (DaemonEvent) -> Void)?
 
     private let client: DaemonClient
     private let retryDelay: TimeInterval
@@ -59,7 +64,8 @@ public final class DaemonStatusMonitor: DaemonStatusSource {
             for try await output in client.events() {
                 if Task.isCancelled { return }
                 switch output {
-                case .event:
+                case let .event(event):
+                    await MainActor.run { onEvent?(event) }
                     scheduleRefresh()
                 case .closed:
                     await send(nil)
