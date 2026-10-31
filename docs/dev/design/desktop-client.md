@@ -336,8 +336,9 @@ and implements the protocol `VoiceEngine` already drives.
 
 ### 6.1 Structure
 
-A herdr-app mod, `sheepdog`, plain JS like the draft (`main.js`, `RECIPE.md`),
-split into modules so logic is testable under `node`.
+A herdr-app mod, `sheepdog`, at `mods/sheepdog/`, plain JS like the draft
+(`main.js`, with the build brief in the repository-root `RECIPE.md`), split
+into modules so logic is testable under `node`.
 
 - **Decision (owner): the docked block is the whole panel**, not a rail plus
   a separate window. Top to bottom: the status header (voice state and
@@ -549,10 +550,10 @@ planned here): the loopback proxy and computer switcher, a pairing code.
   phone: a known v1 limit. Remote agents stay unwatched (the hc-backend
   `isLocal` filter); lifting that is a separate product decision.
 - **IME.** Only one commit was measured; the retest may add a guard.
-- **Where the panel's code lives.** Proposed: in this repo, under
-  `herdr-app/mods/sheepdog/`, so it shares the classification fixtures, the
-  protocol fixtures and CI with the daemon and the app, and the `herdr-mod`
-  topic goes on this repo. herdr.dev's indexer is not documented for a mod in
-  a subfolder of a larger repo; if it needs the mod at a repo's root, a small
-  mirror repo is published from this folder by the release job. The draft in
-  the separate local repo is folded in by PR 12.
+- **Where the panel's code lives.** It is in this repo at `mods/sheepdog/`,
+  so it shares the classification fixtures, protocol fixtures and CI with the
+  daemon and the app. The repository follows herdr.dev's community-mod layout:
+  the `herdr-mod` topic is on the repository, the mod is under `mods/`, and the
+  build brief and preview are the repository-root `RECIPE.md` and
+  `preview.png`. No mirror repository or root `layouts/` folder is needed. The
+  draft in the separate local repo was folded in by PR 12.

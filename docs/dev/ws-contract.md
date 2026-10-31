@@ -1013,7 +1013,7 @@ answer a question by tap. All three need a paired device under "Auth".
   `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
   `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
   `source`, `pane`, and `type` filters behave as before. `GET /api/events`
-  accepts the same filters. The herdr-app panel (`herdr-app/mods/sheepdog`,
+  accepts the same filters. The herdr-app panel (`mods/sheepdog`,
   a client of this section, `GET /api/state` and six POSTs over loopback,
   never `/ws`) asks for
   `kinds=card,conversation,daemon,pending,voice,web`

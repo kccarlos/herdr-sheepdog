@@ -1,6 +1,8 @@
 # Sheepdog
 
-A docked panel for [sheepdog](https://github.com/kccarlos/herdr-sheepdog), the daemon that lets you manage your coding agents by voice. Docked in the sidebar it is the whole panel: the voice's state and who holds it ("Voice on iPhone"), how many agents need you, voice controls, the question to answer, a composer to type to Sheepdog with the suggested replies to tap, and the conversation you also see on the phone. The header menu opens Settings, pairing and New conversation; an agent's name opens its details. A sidebar too narrow for that shows a compact rail, which opens the same panel as a window. (A `preview.png` is added with the screenshots; there is none yet.)
+A docked panel for [sheepdog](https://github.com/kccarlos/herdr-sheepdog), the daemon that lets you manage your coding agents by voice. Docked in the sidebar it is the whole panel: the voice's state and who holds it ("Voice on iPhone"), how many agents need you, voice controls, the question to answer, a composer to type to Sheepdog with the suggested replies to tap, and the conversation you also see on the phone. The header menu opens Settings, pairing and New conversation; an agent's name opens its details. A sidebar too narrow for that shows a compact rail, which opens the same panel as a window.
+
+![Sheepdog](preview.png)
 
 ## What you see
 
@@ -57,7 +59,7 @@ Every colour is a `theme()` name, so dark and light both work; the only computed
 - `net/`: `config.js` (the base URL, default `http://127.0.0.1:7777`, from the block's `props.url` or the shared key `sheepdog.url`; only plain `http`), `http.js` (the reads, Settings `PUT`s and device `DELETE`, plus the six POSTs, each with an `Idempotency-Key`), `sse.js` (chunked decoder, SSE parser, the client with its 1 s silence check, and the backoff), `live.js` (events and the 3 s poll drive the store).
 - `model/`: `classify.js` (the phone's classification table, its notices and the settled-question words), `timeline.js` (day headings, dividers, repeated-restart collapse, the reconnect and settled-question rules, ledger joins, spacing, newest-first layout), `history.js` (pages merged by id), `store.js` (with the replies folded from events), `status.js` (the voice's words, the states), `events.js` (which events matter, and the `kinds`), `composer.js` (what `submit` sends, what a failed send gives back, the keys), `outbox.js` (the lines on their way, matched against the conversation by id), `questions.js` (the open questions and their answer phases), `presentation.js` (inline or compact), `replies.js` (suggested replies and their liveness), `cards.js` and `markdown.js` (a card's words, its agent, its markdown blocks), `settings.js` (the loaded form, action/error state, language order and update words), `qr.js` (validated matrix rows), `agents.js` (the phone's detail fields), `layout.js` (panel or rail by width, whether to offer docking, the vertical budget), `palette.js` (the amber), `voice.js` (the controls' state table, the command each action maps to, the controller with hold-to-talk, the app check). None imports `herdr`.
 - `ui/`: `rail.js` (the compact rail), `panel.js` (`list()` with a `Scrollbar.vertical` of the same id and `on_item_click`), `rows.js`, `composer.js` (`Textarea` and the suggested replies), `questions.js`, `cards.js` (the card sheet), `voice.js` (the voice bar), `widgets.js`, and the separate `menu.js`, `settings.js`, `pair.js`, `agent.js` and `reset.js` overlays with `overlay-widgets.js`. They use `div`, `image` and `list` from `gpui-kit`, `h_flex`, `v_flex`, `Textarea` and `Scrollbar` from `gpui-base`.
-- `logo.svg`, drawn with `image("mods/sheepdog/logo.svg")`.
+- `mods/sheepdog/logo.svg`, drawn with `image("mods/sheepdog/logo.svg")`.
 - Network and programs, to say before installing: `fetch` and one raw TCP socket to the daemon address only (default `127.0.0.1:7777`, this computer; nothing else is contacted, no token is sent), the GET, `PUT` and `DELETE` routes above, the six POSTs for a line, an answer, a reset and the voice controls, `exec("open", ["sheepdog://talk"])` for Talk and Use here, a read-only look at `/Applications/Sheepdog.app` and `~/Applications/Sheepdog.app`, `run("layout.clone", { name })` for **Copy my layout**, `run("terminal.open", { argv: ["sheepdog", "setup"], place: "tab" })` when you press a setup button and `run("agent.focus", { terminal })` when you press **Show … in herdr** on a card. It reads no file's contents and writes none.
 
 ## Watch out
@@ -77,7 +79,7 @@ Every colour is a `theme()` name, so dark and light both work; the only computed
 
 ## Done when
 
-1. `herdr-app check herdr-app/mods/sheepdog` passes with no daemon running, and `make test-panel` passes.
+1. `herdr-app check mods/sheepdog` passes with no daemon running, and `make test-panel` passes.
 2. With no daemon on the address the panel says "Sheepdog isn't running" with `sheepdog setup` and a **Run it in a tab** button (the rail's tooltip says it); starting the daemon turns it into the voice state within about 3 seconds, with no restart.
 3. With a daemon the header's voice words match `/api/state` (`voice.mode`, `status`, `muted`, `speaking`, `client`): with the phone holding the voice it says "Voice on iPhone" and shows **Use here**.
 4. A blocked agent adds an amber count to the header (and the rail) within about a second and a pointer to the timeline; answering it elsewhere turns the pointer into a settled line. The pointer's words stay on one line or wrap between the two parts, and it has normal space to the row below.

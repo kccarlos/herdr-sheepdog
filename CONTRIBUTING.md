@@ -21,7 +21,7 @@ git clone https://github.com/kccarlos/herdr-sheepdog.git && cd herdr-sheepdog
 make build        # bin/sheepdog
 make run-dev      # a daemon with no voice, no herdr and no key; poke at /debug
 make test         # go test -race ./... (includes the docs checks)
-make test-web     # browser-side and herdr-app panel tests (needs node)
+make test-web     # browser-side and herdr-app panel tests (needs node; the panel is in mods/sheepdog/)
 make vet lint
 make eval         # offline eval sets, no network, no keys
 ```

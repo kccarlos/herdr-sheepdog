@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CATEGORIES, classify, daemonNotice, settledLine } from "./classify.js";
 
-const fixture = JSON.parse(readFileSync(new URL("../../../../ios/Tests/Fixtures/timeline-classification.json", import.meta.url), "utf8"));
+const fixture = JSON.parse(readFileSync(new URL("../../../ios/Tests/Fixtures/timeline-classification.json", import.meta.url), "utf8"));
 
 test("every case classifies as the fixture says", () => {
   assert.ok(fixture.cases.length > 0);
