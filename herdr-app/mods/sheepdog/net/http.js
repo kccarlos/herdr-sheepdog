@@ -1,6 +1,6 @@
 // The panel's HTTP calls: the reads /api/state and /api/conversation, and the
-// two POSTs it makes, /api/turn (a typed line) and /api/pending/answer (a tap
-// on a question). `fetch` is the mod runtime's (buffered, so only for these
+// POSTs it makes: /api/turn (a typed line), /api/pending/answer (a tap on a
+// question) and the voice's /api/voice/mute, /stop and /ptt. `fetch` is the mod runtime's (buffered, so only for these
 // small JSON answers; the event stream is net/sse.js), passed in so node tests
 // it. Every POST carries an Idempotency-Key (docs/dev/ws-contract.md).
 
@@ -74,5 +74,11 @@ export function createHttp({ fetch, base }) {
     // A tap on option `option` (1-based) of the open question `id`:
     // { ok, spoken }. 409 when the question is no longer open.
     answer: (id, option, key) => postJson("/api/pending/answer", { id, option }, key),
+    // The voice's controls, relayed by the daemon to whoever holds it: mute or
+    // unmute, cut the speech, hold-to-talk on or off. Each answers { ok } (mute
+    // { muted }); 409 when no client holds the voice, 503 when it is off.
+    mute: (on, key) => postJson("/api/voice/mute", { on }, key),
+    stop: (key) => postJson("/api/voice/stop", undefined, key),
+    ptt: (on, key) => postJson("/api/voice/ptt", { on }, key),
   };
 }

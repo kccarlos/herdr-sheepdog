@@ -89,6 +89,21 @@ test("a tap is POSTed to /api/pending/answer with the id, the 1-based option and
   assert.deepEqual(JSON.parse(calls[0].options.body), { id: "p1", option: 2 });
 });
 
+test("the voice's controls are POSTed to /api/voice/*, each with a key; stop has no body", async () => {
+  const { fetch, calls } = recordingFetch(200, { ok: true });
+  const http = createHttp({ fetch, base: DEFAULT_URL });
+  await http.mute(true, "k1");
+  await http.stop("k2");
+  await http.ptt(false, "k3");
+  assert.deepEqual(calls.map((c) => c.url), [`${DEFAULT_URL}/api/voice/mute`, `${DEFAULT_URL}/api/voice/stop`, `${DEFAULT_URL}/api/voice/ptt`]);
+  assert.deepEqual(calls.map((c) => c.options.headers["Idempotency-Key"]), ["k1", "k2", "k3"]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { on: true });
+  assert.equal(calls[1].options.body, undefined);
+  assert.deepEqual(JSON.parse(calls[2].options.body), { on: false });
+  const none = createHttp({ fetch: recordingFetch(409, { error: "no voice client" }).fetch, base: DEFAULT_URL });
+  await assert.rejects(none.ptt(true, "k"), (e) => e.status === 409 && e.message === "no voice client");
+});
+
 test("a refused POST carries the daemon's own words and its status", async () => {
   const off = createHttp({ fetch: recordingFetch(503, { error: "the orchestrator is off (no brain key)" }).fetch, base: DEFAULT_URL });
   await assert.rejects(off.turn("hi", "k"), (e) => e.kind === "http" && e.status === 503 && e.message === "the orchestrator is off (no brain key)");

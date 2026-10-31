@@ -88,15 +88,19 @@ function pointer(t, item) {
         .gap(7)
         .items_center()
         .child(div().size(8).rounded(4).flex_none().bg(t.blocked))
+        // Two words in a wrapping row, not a block inside a block (which broke
+        // the line): "billing asked — waiting for your answer" stays on one
+        // line, or wraps between the two.
         .child(
-          div()
+          h_flex()
             .flex_1()
             .min_w(0)
+            .flex_wrap()
+            .gap_x(4)
             .text_size(12.5)
             .font_semibold()
-            .text_color(t.foreground)
-            .child(question ? `${asker} asked` : item.text)
-            .when(question, (el) => el.child(div().text_color(t.blocked).child(" — waiting for your answer"))),
+            .child(div().text_color(t.foreground).child(question ? `${asker} asked` : item.text))
+            .when(question, (el) => el.child(div().text_color(t.blocked).child("— waiting for your answer"))),
         ),
     )
     .when(question && Boolean(item.text), (el) => el.child(div().pl(15).text_size(12).text_color(t.muted).child(item.text)));

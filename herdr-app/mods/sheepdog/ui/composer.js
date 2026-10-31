@@ -1,5 +1,5 @@
-// The composer at the bottom of the panel (docs/dev/design/desktop-client.md,
-// section 6.3): the suggested replies the orchestrator offered (only the live
+// The composer under the question card, above the timeline (docs/dev/design/
+// desktop-client.md, sections 6.1 and 6.3): the suggested replies the orchestrator offered (only the live
 // ones), a note under them, the textarea, and what the last send said. The
 // textarea's state is made once in main.js (it needs a live host call) and
 // handed in; Enter sends, Shift+Enter is a new line (model/composer.js decides).
@@ -37,7 +37,7 @@ export function composerView(t, { state, live, notice, busy, onSend }) {
     .px(12)
     .py(10)
     .gap(8)
-    .border_t(1)
+    .border_b(1)
     .border_color(t.border)
     .when(Boolean(live), (el) => el.child(suggestions(t, live, { busy, onSend })))
     .child(div().w_full().px(10).py(6).rounded(8).bg(t.input).border(1).border_color(t.border).text_size(13).text_color(t.foreground).child(Textarea.new(state).w_full()))

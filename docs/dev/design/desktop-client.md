@@ -336,12 +336,25 @@ and implements the protocol `VoiceEngine` already drives.
 A herdr-app mod, `sheepdog`, plain JS like the draft (`main.js`, `RECIPE.md`),
 split into modules so logic is testable under `node`.
 
-- **Rail.** A slim docked or `peek` block: voice state and holder, agents that
-  need you, daemon-down and setup states. Click opens the panel.
-- **Panel.** A `kind: "window"` overlay with `key` and `keep: true`: floats,
-  drags, returns after a restart, needs no personal layout. It holds the
-  timeline, the floating question card, suggested replies, the textarea and
-  the voice controls.
+- **Decision (owner): the docked block is the whole panel**, not a rail plus
+  a separate window. Top to bottom: the status header (voice state and
+  holder, how many agents need you), the floating question card when an agent
+  asks, the composer with the suggested replies, the voice controls, and the
+  timeline, fully newest first (every item, no per-turn grouping) in herdr-app's
+  lazy `list()`, which is top-anchored; drawing its last row loads older
+  history. "Needs you" is the phone's amber (`#D98718` light, `#F39C1F` dark),
+  not the theme's red.
+- **Rail.** The same block narrower than about 160 px: the logo, a voice dot
+  and a needs-you badge. Click opens the panel as a window.
+- **Window.** A `kind: "window"` overlay with `key` and `keep: true`: floats,
+  drags, returns after a restart. It is the same panel; it is also the
+  fallback when the mod is not docked (`herdr-app do mod.open --name
+  sheepdog`), where it says how to put Sheepdog in the sidebar. A mod cannot
+  dock itself (herdr-app edits only layouts the user owns, through
+  `layout.set` with a whole tree), so the window offers `layout.clone` (a copy
+  of the shown layout, which the user then owns) and tells the user to add the
+  block for the mod to its right side. Docking from first sight of the folder
+  is herdr-app's own.
 - **Overlays.** Settings, agent details and the pairing QR, each its own
   overlay so the panel stays small.
 
@@ -353,8 +366,9 @@ style out). `SheepdogKitTests` and the panel's `node --test` both run it, and
 a change to either classifier lands with a fixture change in the same PR.
 
 Modules: `net/` (base URL, `http.js`, `sse.js`), `model/` (timeline reducer
-and classifier, state store; no herdr imports), `ui/` (views), `voice.js`
-(commands, "Use here"). Only `ui/` and `voice.js` touch `herdr`.
+and classifier, state store, and `voice.js`: the voice controls' state table
+and commands, with `exec` and the file check passed in; no herdr imports),
+`ui/` (views). Only `main.js` and `ui/` touch `herdr`.
 
 ### 6.2 Data layer
 
@@ -410,10 +424,11 @@ and classifier, state store; no herdr imports), `ui/` (views), `voice.js`
 |---|---|---|
 | Daemon down | connect refused, no SSE, no poll | "Sheepdog isn't running", the start command, retry timer. |
 | Setup needed | `/api/state` voice `problem` set | The daemon's words and a button to Settings. |
-| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check) | Voice buttons off; "brew install --cask sheepdog" with copy. Text still works. |
-| Sheepdog.app not running | installed, `voice.client` not this Mac | "Talk" runs `open sheepdog://talk`. |
-| Voice elsewhere | `voice.client.platform` is another device | "Voice on iPhone" and **Use here**. |
-| Muted, speaking, listening | `voice.muted`, `voice.speaking` | Rail dot and label; Stop only while speaking. |
+| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check, every 30 s), and nobody holds the voice | Voice buttons off; "brew install --cask sheepdog-app" in a box. Text still works. With the phone holding the voice its controls still work (the daemon relays them) and only **Use here** is off. |
+| Sheepdog.app not running | installed, no `voice.client` | "Talk" runs `open sheepdog://talk`. |
+| Voice elsewhere | `voice.client.platform` is another device | "Voice on iPhone" and **Use here**; Mute, Stop and hold-to-talk go to the phone. |
+| No voice client | a voice control answered 409 | "No voice is connected" and **Use here**. |
+| Muted, speaking, listening | `voice.muted`, `voice.speaking` | Dot and label; Talk unmutes, Mute while not muted, Stop only while speaking, hold-to-talk while someone holds the voice. |
 | Mic denied | the app's report | The System Settings fix, in words. |
 | Orchestrator off | `POST /api/turn` is 503 | The reason under the textarea; typed text kept. |
 
@@ -484,7 +499,7 @@ for harder pieces.
 | 11 | Release: archive, sign, notarize, staple, cask | claude-credit | Dry run on the macOS job; `spctl --assess`; `brew audit --cask`; `policy` check. |
 | 12 | Panel A: `net/`, `model/`, read-only timeline, rail, states | claude-credit | `node --test`; `herdr-app check`; screenshots; a double reload leaves one window. |
 | 13 | Panel B: send, cards, answers, compact mode, suggested replies, agent focus | codex-ds | Fixture tests; screenshots; IME retest. |
-| 14 | Panel C: voice controls, "Use here", missing-app states | codex-ds | Command-mapping tests; screenshots; checks 4 to 6. |
+| 14 | Panel C: voice controls, "Use here", missing-app states, and the owner's layout decision (section 6.1) | codex-ds | Command-mapping tests; screenshots; checks 4 to 6. |
 | 15 | Panel D: settings, agent details, pairing QR, update notice | codex-ds | Screenshots; the QR scans on a phone. |
 | 16 | Docs: `iphone-app.md` pointer, `status.md`, install guide | Claude | Links resolve; steps run on a clean user. |
 

@@ -1,9 +1,11 @@
-// The panel: a window over the layout with the timeline and the composer
-// (docs/dev/design/desktop-client.md, sections 6.1 and 6.4). A header with the
-// voice, a banner for the states that replace or qualify the timeline (daemon
-// down, setup needed, live updates paused), the list, the open questions and
-// the composer at the bottom; a card or the questions can open over the list.
-// The voice controls and Settings are later PRs.
+// The panel: the one block, docked in the sidebar or opened as a window over
+// the layout (docs/dev/design/desktop-client.md, sections 6.1 and 6.4). Top to
+// bottom: the status header (the voice and who holds it, how many agents need
+// you), a banner for the states that qualify it (daemon down, setup needed,
+// live updates paused, "put me in the sidebar"), the voice controls, the
+// floating question card, the composer with the suggested replies, and the
+// timeline, newest first, filling the rest; a card or the questions can open
+// over the timeline. Settings are a later PR.
 
 import { div, list } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar } from "gpui-base";
@@ -12,48 +14,76 @@ import { composerView } from "./composer.js";
 import { questionBar, questionSheet, questionStack } from "./questions.js";
 import { notice, rowView } from "./rows.js";
 import { paused } from "./rail.js";
+import { voiceBar } from "./voice.js";
 import { button, command, dot, logo, toneColor } from "./widgets.js";
 
 // What a window opens at.
 export const WINDOW = { width: 420, height: 640 };
 
-// The header: the logo, the voice (and who holds it), and the window's own
-// controls. A press the mod does not stop drags the window, so the controls
-// stop it.
+// The header: the logo, the needs-you count, and the window's own controls on
+// the first line; the voice (and who holds it) and Technical on the second. A
+// press the mod does not stop drags a window, so the controls stop it.
 function header(t, status, { technical, onToggleTechnical, onClose }) {
   const stop = (_e, cx) => cx.stop_propagation();
   const control = (id, label, onClick) =>
     div().id(id).px(8).h(24).flex().items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted).hover((s) => s.bg(t.hover)).on_mouse_down("left", stop).on_click(onClick).child(label);
   const ok = status.phase === "ok";
-  return h_flex()
+  return v_flex()
     .w_full()
     .px(12)
     .py(10)
-    .gap(8)
-    .items_center()
+    .gap(6)
     .border_b(1)
     .border_color(t.border)
-    .child(logo(20))
     .child(
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Sheepdog"))
+      h_flex()
+        .w_full()
+        .gap(8)
+        .items_center()
+        .child(logo(20))
+        .child(div().flex_1().min_w(0).text_size(13).font_semibold().text_color(t.foreground).child("Sheepdog"))
+        .when(ok && status.needsYou > 0, (el) =>
+          el.child(div().flex_none().px(8).h(20).flex().items_center().rounded(10).bg(t.blocked).text_size(11).font_semibold().text_color(t.solid_foreground).child(`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`)),
+        )
+        .when(Boolean(onClose), (el) => el.child(control("close", "✕", onClose))),
+    )
+    .child(
+      h_flex()
+        .w_full()
+        .gap(6)
+        .items_center()
         .when(ok, (el) =>
           el.child(
             h_flex()
+              .flex_1()
+              .min_w(0)
               .gap(6)
               .items_center()
               .child(dot(toneColor(t, status.voice.tone), 7))
               .child(div().truncate().text_size(11.5).text_color(t.muted).child(status.voice.label)),
           ),
-        ),
-    )
-    .when(ok && status.needsYou > 0, (el) =>
-      el.child(div().px(8).h(20).flex().items_center().rounded(10).bg(t.blocked).text_size(11).font_semibold().text_color(t.solid_foreground).child(`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`)),
-    )
-    .child(control("technical", technical ? "Hide technical" : "Technical", onToggleTechnical))
-    .when(Boolean(onClose), (el) => el.child(control("close", "✕", onClose)));
+        )
+        .when(!ok, (el) => el.child(div().flex_1()))
+        .child(control("technical", technical ? "Hide technical" : "Technical", onToggleTechnical)),
+    );
+}
+
+// The window opened without the docked block: where the panel belongs. The
+// mod cannot dock itself (herdr-app changes a layout only through a layout you
+// own), so this says what to do, and the button does the one step it can: copy
+// the shown layout, which makes it yours.
+function dockHint(t, { note, onCopyLayout }) {
+  return v_flex()
+    .w_full()
+    .p(12)
+    .gap(6)
+    .border_b(1)
+    .border_color(t.border)
+    .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child("Put Sheepdog in the sidebar"))
+    .child(div().text_size(12).text_color(t.muted).child("This window is the fallback. Docked, Sheepdog is this panel in your sidebar, and a narrow sidebar shrinks it to a small rail."))
+    .child(div().text_size(12).text_color(t.muted).child("A layout that came with herdr-app cannot be changed. Copy it to make it yours (herdr-app switches to the copy and closes this window), then add the block for the mod sheepdog on its right side (herdr-app docks a mod the first time it sees the folder, into a layout you own)."))
+    .child(h_flex().child(button(t, "dock-copy-layout", "Copy my layout", onCopyLayout)))
+    .when(Boolean(note), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(note)));
 }
 
 // Daemon down: the whole body is the explanation.
@@ -117,10 +147,13 @@ function empty(t, text) {
 
 // `paging`: { synced, canLoadOlder, loadingOlder } of the history. `compose`:
 // what ui/composer.js draws. `questions`: { cards, presentation, busy,
-// onAnswer, onOpen } for the floating questions (ui/questions.js). `sheet`:
-// what is open over the list, or null: { type: "card", card, note, onFocus,
-// onClose } or { type: "questions", onClose }.
-export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, sheet, onSetup, onToggleTechnical, onClose, onEndShown, onOpenRow }) {
+// onAnswer, onOpen } for the floating questions (ui/questions.js). `voice`:
+// { controls, state, on } for the voice bar (ui/voice.js). `dock`: the
+// "put Sheepdog in the sidebar" hint of a window that is not the docked
+// block's, { note, onCopyLayout }, else null. `sheet`: what is open over the
+// list, or null: { type: "card", card, note, onFocus, onClose } or { type:
+// "questions", onClose }.
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, dock, sheet, onSetup, onToggleTechnical, onClose, onEndShown, onOpenRow }) {
   const up = status.phase === "ok" || status.phase === "setup";
   let body;
   if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
@@ -136,10 +169,13 @@ export function panelView(t, { status, entries, paging, technical, retryMs, comp
     .size_full()
     .bg(t.chrome)
     .child(header(t, status, { technical, onToggleTechnical, onClose }))
+    .when(Boolean(dock), (el) => el.child(dockHint(t, dock)))
     .when(status.phase === "setup", (el) => el.child(setup(t, status, onSetup)))
     .when(status.paused && status.phase !== "down", (el) => el.child(div().w_full().px(12).pt(8).child(paused(t))))
-    .child(body)
-    .when(floating && questions.presentation === "inline", (el) => el.child(questionStack(t, questions.cards, questions)))
-    .when(floating && questions.presentation === "compact", (el) => el.child(questionBar(t, questions.cards, questions)))
-    .when(up, (el) => el.child(composerView(t, compose)));
+    .when(status.phase === "ok", (el) => el.child(voiceBar(t, voice.controls, voice.state, voice.on)))
+    // The question floats at the top, where it cannot be missed.
+    .when(floating && questions.presentation === "inline", (el) => el.child(div().w_full().pt(8).child(questionStack(t, questions.cards, questions))))
+    .when(floating && questions.presentation === "compact", (el) => el.child(div().w_full().pt(8).child(questionBar(t, questions.cards, questions))))
+    .when(up, (el) => el.child(composerView(t, compose)))
+    .child(body);
 }
