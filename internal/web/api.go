@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
@@ -186,6 +187,63 @@ func (s *Server) handleVoiceMute(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.setMuted(*req.On, "http")
 	writeJSON(w, http.StatusOK, MuteResponse{Muted: s.hub.state().muted})
+}
+
+// PTTRequest is the body of POST /api/voice/ptt.
+type PTTRequest struct {
+	On *bool `json:"on"`
+}
+
+// VoiceCommandResponse is the body of POST /api/voice/stop and /ptt.
+type VoiceCommandResponse struct {
+	OK bool `json:"ok"`
+}
+
+// handleVoiceStop cuts the current speech: the stop tool and flush the
+// /ws cancel message runs, then a voice-command stop to the holder so a
+// client that keeps its own playback or capture state follows. The
+// daemon does the cutting itself, so the client message is a notice.
+func (s *Server) handleVoiceStop(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Voice == nil {
+		writeError(w, http.StatusServiceUnavailable, "the voice is off (--voice=off)")
+		return
+	}
+	if s.hub.current() == nil {
+		writeError(w, http.StatusConflict, "no voice client")
+		return
+	}
+	if err := s.hub.cancel("http"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.send(wsproto.VoiceStop())
+	writeJSON(w, http.StatusOK, VoiceCommandResponse{OK: true})
+}
+
+// handleVoicePTT tells the client holding /ws to open or close its
+// microphone (hold-to-talk). The daemon has no state to change: the
+// client's own mute and speech messages follow as usual.
+func (s *Server) handleVoicePTT(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Voice == nil {
+		writeError(w, http.StatusServiceUnavailable, "the voice is off (--voice=off)")
+		return
+	}
+	var req PTTRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if req.On == nil {
+		writeError(w, http.StatusBadRequest, "on must be a boolean")
+		return
+	}
+	if s.hub.current() == nil {
+		writeError(w, http.StatusConflict, "no voice client")
+		return
+	}
+	s.hub.send(wsproto.VoicePTT(*req.On))
+	s.log.Log(logSource, "web.client.ptt", "", map[string]any{"on": *req.On})
+	writeJSON(w, http.StatusOK, VoiceCommandResponse{OK: true})
 }
 
 // updateStatus is /api/state's update object (nil without a tracker).
@@ -586,6 +644,62 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
+}
+
+// TurnRequest is the body of POST /api/turn.
+type TurnRequest struct {
+	Text string `json:"text"`
+}
+
+// TurnResponse is the body of the POST /api/turn answer: the
+// orchestrator's text reply, the turn's id on its brain.* events and
+// whether the turn acted (sent something to a worker or recorded something).
+type TurnResponse struct {
+	Reply  string `json:"reply"`
+	TurnID string `json:"turn_id"`
+	Acted  bool   `json:"acted"`
+}
+
+// handleTurn sends a typed turn straight to the orchestrator and answers
+// with its text reply: the turn a spoken to_supervisor runs, so tools,
+// approvals and history work the same, but the reply is not spoken. The
+// voice only gets a silent context line (supervisor.TypedTurn).
+func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.brainOrUnavailable(w); !ok {
+		return
+	}
+	if s.deps.Supervisor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	var req TurnRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "typed"})
+	s.typed(text)
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	start := s.deps.Now()
+	reply, err := s.deps.Supervisor.TypedTurn(ctx)
+	if errors.Is(err, supervisor.ErrNoTypedInput) {
+		// A spoken turn claimed the typed words first and answers them.
+		writeError(w, http.StatusConflict, "a spoken turn is already answering this")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The reply is a "dog" item with via typed in GET /api/conversation.
+	s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": reply.TurnID, "name": voice.ToolToSupervisor, "spoken": reply.Text, "via": "typed", "dur_ms": s.deps.Now().Sub(start).Milliseconds()})
+	writeJSON(w, http.StatusOK, TurnResponse{Reply: reply.Text, TurnID: reply.TurnID, Acted: reply.Acted})
 }
 
 // typed records text as something the user typed, before it reaches

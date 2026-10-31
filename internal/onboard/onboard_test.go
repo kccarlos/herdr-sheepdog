@@ -278,6 +278,7 @@ func TestDoctor(t *testing.T) {
 	f := newFakeAPI(t)
 	cfg := config.Default()
 	cfg.Herdr.Socket = filepath.Join(t.TempDir(), "none.sock")
+	cfg.Herdr.HCSocket = filepath.Join(t.TempDir(), "none-hc.sock")
 	cfg.Gemini.APIKeys = []string{goodKey}
 	cfg.Brain.OpenAICompat = []config.OpenAICompat{{Name: "openrouter", BaseURL: f.srv.URL + "/v1", APIKeyEnv: "OPENROUTER_API_KEY", Model: "x/y", APIKey: "good"}, {Name: "groq", BaseURL: "https://api.groq.com/openai/v1", APIKeyEnv: "GROQ_API_KEY", Model: "m"}}
 	cfg.Brain.Provider = "openrouter"
@@ -359,5 +360,32 @@ func TestGeminiKeyOnlyWhenNeeded(t *testing.T) {
 	cfg.Brain.Provider = "deepseek"
 	if rs := checkGeminiKeys(context.Background(), f.endpoints(), cfg); rs[0].Status != Fail {
 		t.Errorf("gemini voice, no key: %+v, want Fail", rs)
+	}
+}
+
+func TestCheckHerdrFollowsBackend(t *testing.T) {
+	dir, err := os.MkdirTemp("", "sdhc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	hcSock, none := filepath.Join(dir, "hc.sock"), filepath.Join(dir, "none.sock")
+	l, err := net.Listen("unix", hcSock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	for _, tc := range []struct {
+		h    config.Herdr
+		want Status
+	}{
+		{config.Herdr{Backend: config.HerdrBackendAuto, Socket: none, HCSocket: hcSock}, OK},
+		{config.Herdr{Backend: config.HerdrBackendHC, Socket: none, HCSocket: hcSock}, OK},
+		{config.Herdr{Backend: config.HerdrBackendHC, Socket: none, HCSocket: none}, Fail},
+		{config.Herdr{Backend: config.HerdrBackendHerdr, Socket: none, HCSocket: hcSock}, Fail},
+	} {
+		if r := CheckHerdr(tc.h); r.Status != tc.want {
+			t.Errorf("CheckHerdr(%+v) = %v %q, want %v", tc.h, r.Status, r.Detail, tc.want)
+		}
 	}
 }

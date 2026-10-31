@@ -45,6 +45,7 @@ type Supervisor interface {
 	Settings() supervisor.Settings
 	SetSettings(supervisor.Settings) error
 	ShepherdInput(kind supervisor.InputKind, text string)
+	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
@@ -230,6 +231,10 @@ type Deps struct {
 	// windows (docs/dev/term-contract.md), and the `term` feature; nil
 	// (herdr mock mode) serves neither.
 	Term *TermDeps
+	// TermOff is /term's 503 message when Term is nil because the backend
+	// has no live terminal (herdr-core); empty keeps the herdr version
+	// message.
+	TermOff string
 	// Shell is config web.shell: paired devices may open the phone shell
 	// and send attachments (on by default; the setup page switches it).
 	Shell bool
@@ -490,6 +495,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
 		route{"GET /api/state", accessDevice, s.handleState},
 		route{"POST /api/voice/mute", accessDevice, s.handleVoiceMute},
+		route{"POST /api/voice/stop", accessDevice, s.handleVoiceStop},
+		route{"POST /api/voice/ptt", accessDevice, s.handleVoicePTT},
 		route{"GET /api/agents", accessDevice, s.handleAgents},
 		route{"GET /api/agents/{pane_id}/screen", accessDevice, s.handleAgentScreen},
 		route{"POST /api/agents/{pane_id}/input", accessDevice, s.handleAgentInput},
@@ -517,6 +524,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/conversation", accessDevice, s.handleConversation},
 		route{"POST /api/conversation/reset", accessDevice, s.handleConversationReset},
 		route{"POST /api/utterance", accessDevice, s.handleUtterance},
+		route{"POST /api/turn", accessDevice, s.handleTurn},
 		route{"GET /api/voice/providers", accessDevice, s.handleVoiceProviders},
 		route{"PUT /api/voice/provider", accessDevice, s.handleSetVoiceProvider},
 		route{"GET /api/brain/models", accessDevice, s.handleBrainModels},
@@ -535,6 +543,7 @@ func (s *Server) routeTable() ([]route, error) {
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
 		route{"GET /api/pair/qr.svg", accessLoopback, s.handlePairQR},
+		route{"GET /api/pair/qr.json", accessLoopback, s.handlePairQRJSON},
 		route{"GET /api/devices", accessLoopback, s.handleDevices},
 		route{"PATCH /api/devices/{id}", accessSetup, s.handleDeviceRename},
 		route{"DELETE /api/devices/{id}", accessSetup, s.handleDeviceRevoke},

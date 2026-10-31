@@ -1,5 +1,11 @@
 package config
 
+import (
+	"os"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+)
+
 // Prompts configures the prompt workspace (docs/dev/roles.md "Prompt files"):
 // user overrides of the embedded assistant/SVP/USER prompt files.
 type Prompts struct {
@@ -143,13 +149,41 @@ type Computer struct {
 	Name string `toml:"name"`
 }
 
+// HCSocketPath is HCSocket, or hc's own default when it is empty.
+func (h Herdr) HCSocketPath() string {
+	if h.HCSocket != "" {
+		return h.HCSocket
+	}
+	home, _ := os.UserHomeDir()
+	return hc.DefaultSocket(os.Getenv, home, os.Getuid(), nil)
+}
+
+// The herdr.backend values.
+const (
+	HerdrBackendAuto  = "auto"
+	HerdrBackendHerdr = "herdr"
+	HerdrBackendHC    = "hc"
+)
+
+// HerdrBackends are the valid herdr.backend values.
+var HerdrBackends = []string{HerdrBackendAuto, HerdrBackendHerdr, HerdrBackendHC}
+
 // LogLevels are the valid log.level values.
 var LogLevels = []string{"debug", "info", "warn", "error"}
 
-// Herdr configures the herdr socket client.
+// Herdr configures how the daemon reaches the agents: the old herdr's
+// socket, or herdr-core's (docs/dev/design/herdr-core-backend.md).
 type Herdr struct {
+	// Backend picks the multiplexer: auto (default: whichever socket
+	// answers at startup, the old herdr when both or neither do), herdr
+	// or hc (herdr-core).
+	Backend string `toml:"backend"`
 	// Socket is the path of the herdr unix socket.
 	Socket string `toml:"socket"`
+	// HCSocket is the path of herdr-core's socket; the default follows
+	// hc's own rules (HC_SOCKET, HC_SESSION, XDG_RUNTIME_DIR, the
+	// session's state directory).
+	HCSocket string `toml:"hc_socket"`
 	// Bin is the herdr binary the phone's terminal windows run
 	// (`herdr terminal session`); empty finds `herdr` on PATH, then
 	// ~/.local/bin/herdr.

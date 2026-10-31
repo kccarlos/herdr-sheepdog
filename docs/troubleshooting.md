@@ -43,6 +43,7 @@ you changed `web.port`.
 | You see | Fix |
 |---|---|
 | `FAIL herdr … no herdr on PATH and no socket at ~/.config/herdr/herdr.sock — fix: install herdr from https://github.com/herdrdev/herdr/releases and start it (herdr), then run sheepdog doctor again` | Install and start herdr. Meanwhile `sheepdog demo` works. |
+| `FAIL herdr … herdr-core's socket … does not answer` | `herdr.backend` is `hc` but herdr-core is not running: start it (`hc server start`), or point `herdr.hc_socket` at its socket. |
 | Agents never show up | `sheepdog status` shows whether herdr is reachable (`herdr` line). Start herdr, then `sheepdog doctor`. |
 
 ## Running it

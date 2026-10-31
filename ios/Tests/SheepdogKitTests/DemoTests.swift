@@ -102,12 +102,15 @@ final class DemoWorldTests: XCTestCase {
         XCTAssertEqual(world.history.items.filter { $0.kind == .dog }.count, 10)
     }
 
+#if os(iOS)
     /// The demo asks for speech recognition; iOS kills an app that does so
-    /// without a usage string.
+    /// without a usage string. (Reads the host app's Info.plist, so not in
+    /// the hostless macOS run.)
     func testSpeechRecognitionUsageDescription() throws {
         let text = try XCTUnwrap(Bundle.main.infoDictionary?["NSSpeechRecognitionUsageDescription"] as? String)
         XCTAssertTrue(text.contains("on-device"))
     }
+#endif
 
     func testAgentWindow() throws {
         var world = DemoWorld(now: t0)

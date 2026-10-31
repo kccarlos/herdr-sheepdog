@@ -90,6 +90,8 @@ function pointer(t, item) {
         .child(div().size(8).rounded(4).flex_none().bg(t.blocked))
         .child(
           div()
+            .flex_1()
+            .min_w(0)
             .text_size(12.5)
             .font_semibold()
             .text_color(t.foreground)

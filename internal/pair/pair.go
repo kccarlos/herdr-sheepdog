@@ -407,20 +407,48 @@ func ANSI(link string) (string, error) {
 	return b.String(), nil
 }
 
+// Matrix is a QR code's modules as rows of "0" (light) and "1" (dark)
+// characters. The quiet zone is included, so Size is both the number of
+// rows and the length of every row.
+type Matrix struct {
+	Size    int      `json:"size"`
+	Modules []string `json:"modules"`
+}
+
+// RenderMatrix renders link as a QR code matrix.
+func RenderMatrix(link string) (Matrix, error) {
+	q, err := qrcode.New(link, qrcode.Medium)
+	if err != nil {
+		return Matrix{}, err
+	}
+	bm := q.Bitmap()
+	m := Matrix{Size: len(bm), Modules: make([]string, len(bm))}
+	for y, row := range bm {
+		modules := make([]byte, len(row))
+		for x, dark := range row {
+			modules[x] = '0'
+			if dark {
+				modules[x] = '1'
+			}
+		}
+		m.Modules[y] = string(modules)
+	}
+	return m, nil
+}
+
 // SVG renders link as a QR code in SVG (dark modules on white).
 func SVG(link string) (string, error) {
-	q, err := qrcode.New(link, qrcode.Medium)
+	matrix, err := RenderMatrix(link)
 	if err != nil {
 		return "", err
 	}
-	bm := q.Bitmap()
-	n := len(bm)
+	n := matrix.Size
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" shape-rendering="crispEdges">`, n, n, n*6, n*6)
 	fmt.Fprintf(&b, `<rect width="%d" height="%d" fill="#fff"/><path fill="#000" d="`, n, n)
-	for y, row := range bm {
-		for x, dark := range row {
-			if dark {
+	for y, row := range matrix.Modules {
+		for x := range row {
+			if row[x] == '1' {
 				fmt.Fprintf(&b, "M%d %dh1v1h-1z", x, y)
 			}
 		}

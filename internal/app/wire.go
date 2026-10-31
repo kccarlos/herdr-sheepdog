@@ -38,9 +38,7 @@ func (a *App) wire() error {
 
 	var inner supervisor.Herdr
 	if opts.Herdr == HerdrSocket {
-		client := herdr.NewClient(cfg.Herdr.Socket)
-		client.Log = a.log
-		a.backend, a.term = client, herdrTerm(cfg, client)
+		a.backend, a.term, a.termOff = a.newBackend(cfg)
 		inner = a.backend
 		a.wref = &watcherRef{}
 	}
@@ -282,7 +280,7 @@ func (a *App) wire() error {
 	if a.wref != nil {
 		deps.Watcher = a.wref
 	}
-	deps.Term = a.term
+	deps.Term, deps.TermOff = a.term, a.termOff
 	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
 	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)

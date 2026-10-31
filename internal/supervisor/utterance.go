@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -195,7 +197,7 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 	if c.reading != "" {
 		payload["reading"] = c.reading
 	}
-	res := s.handleUtterance(ctx, c, callIDOf(ctx), false)
+	res, _ := s.handleUtterance(ctx, c, callIDOf(ctx), false, false)
 	if res.Spoken != "" && !res.Pending {
 		// The voice tags the playback of this answer with it
 		// (turn.latency's first audio).
@@ -204,13 +206,48 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 	return res, nil
 }
 
+// TypedReply is the orchestrator's answer to a typed turn (TypedTurn).
+type TypedReply struct {
+	// Text is the reply, for the user to read.
+	Text string
+	// TurnID names the turn: the utterance id on its brain.* events.
+	TurnID string
+	// Acted: the turn sent something to a worker or recorded something.
+	Acted bool
+}
+
+// ErrNoTypedInput is TypedTurn's answer when no typed input is waiting.
+var ErrNoTypedInput = errors.New("no typed input to answer")
+
+// TypedTurn answers what the user just typed (ShepherdInput(InputTyped),
+// recorded by the caller) with one orchestrator turn, the same turn a
+// spoken to_supervisor runs, and returns the reply as text: it waits for
+// it whatever Config.ReplyWait says, and nothing is spoken. The voice is
+// then told what was typed and answered, silently, so its next spoken
+// turn knows.
+func (s *Supervisor) TypedTurn(ctx context.Context) (TypedReply, error) {
+	c, fresh := s.claimInput(ctx)
+	if !fresh {
+		return TypedReply{}, ErrNoTypedInput
+	}
+	s.log.Log(logSource, "supervisor.relay", "", map[string]any{"heard": c.text, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id})
+	res, acted := s.handleUtterance(ctx, c, "", false, true)
+	if res.Spoken != "" {
+		s.pushTagged("", fmt.Sprintf("The user typed %q and the orchestrator answered in text: %q. Nothing was spoken.", c.text, res.Spoken), voice.UrgencySilent, map[string]any{"utterance_id": c.id, "answers_text": c.text})
+	}
+	return TypedReply{Text: res.Spoken, TurnID: c.id, Acted: acted}, nil
+}
+
 // handleUtterance runs the user's claimed words: the fast paths,
 // then one orchestrator turn. A relay (daemon false) returns the reply as the
 // tool result, waiting up to Config.ReplyWait for it; the daemon's own
 // relay of an unanswered utterance (relay.go) has no tool call to answer,
 // so its turn's reply is always pushed (deliverLate), and only a fast
-// path's result is returned, for the caller to push.
-func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon bool) voice.ToolResult {
+// path's result is returned, for the caller to push. A typed turn
+// (TypedTurn, forceSync) always waits for the reply, whatever
+// Config.ReplyWait says: nothing speaks it, so there is no "on it" to cover
+// a late one. acted is whether the turn acted (false for a fast path).
+func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon, forceSync bool) (voice.ToolResult, bool) {
 	note := echoNote(c)
 	if note != "" {
 		s.log.Log(logSource, "supervisor.echo_possible", "", map[string]any{"text": c.text, "utterance_id": c.id})
@@ -219,16 +256,16 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	// Bare stop first: "no" is an answer, "no no" is a stop.
 	if bareStop(text) {
 		res, _ := s.Stop(ctx, StopTriggerBareWord)
-		return res
+		return res, false
 	}
 	// The "New conversation" bare-phrase trigger and its confirm
 	// (docs/dev/roles.md "Triggers" (b)): a fast path, like the stop word
 	// above — no model, and only this claimed user input can ask or
 	// confirm it.
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
-		return res
+		return res, false
 	}
-	sync := s.cfg.ReplyWait < 0 && !daemon
+	sync := (s.cfg.ReplyWait < 0 || forceSync) && !daemon
 	// The turn is detached from the tool call unless it is synchronous:
 	// the voice cancels a handler's context as soon as the handler
 	// returns, and the turn may outlive it. Like an investigation job it
@@ -254,7 +291,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 		// and for the test harness (Config.bareAnswers).
 		if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
 			s.endUtterance(u)
-			return res
+			return res, false
 		}
 	}
 	s.coalesce(u)
@@ -265,14 +302,15 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 		s.mu.Unlock()
 		start := s.cfg.Now()
 		s.deliverLate(turnCtx, u, s.utteranceTurn(turnCtx, u), start)
-		return voice.ToolResult{}
+		return voice.ToolResult{}, false
 	case sync:
 		// Synchronous: the turn runs under the tool call's own context
 		// and its reply is always the tool result.
 		defer s.endUtterance(u)
-		return s.inlineResult(turnCtx, u, s.utteranceTurn(turnCtx, u))
+		out := s.utteranceTurn(turnCtx, u)
+		return s.inlineResult(turnCtx, u, out), out.acted
 	default:
-		return s.awaitReply(ctx, turnCtx, u)
+		return s.awaitReply(ctx, turnCtx, u), false
 	}
 }
 

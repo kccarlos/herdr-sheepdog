@@ -74,6 +74,7 @@ func ScratchConfig(o DaemonOptions) config.Config {
 	cfg.Web.Dev = false
 	cfg.Push.APNs.KeyPath = "" // never APNs the user's phone
 	cfg.Herdr.Socket = filepath.Join(o.Dir, "no-herdr.sock")
+	cfg.Herdr.HCSocket = filepath.Join(o.Dir, "no-hc.sock")
 	if cfg.Gemini.Backend == "vertex" {
 		// The voice runs on Vertex; the AI Studio key pool would only
 		// register the free-tier gemini orchestrator provider as a failover

@@ -74,6 +74,7 @@ binary version.
   | `push` | Push registration and the content key ([`push.md`](push.md)) | when the daemon has a push service |
   | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
+  | `voice-command` | the `voice-command` message and `POST /api/voice/stop` and `/ptt` (*Voice commands over HTTP*) | when a voice is configured |
   | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
@@ -181,6 +182,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
 | `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible (`voice_screen` or not). |
+| `{"type":"voice-command","action":"stop"\|"ptt","on":bool?}`             | Another client of the daemon controls this one's voice (*Voice commands over HTTP*). Requires the `voice-command` feature; a client that does not know the type ignores it. |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -195,6 +197,8 @@ Examples (`bot-ready` is under *Protocol version and handshake*):
 {"type":"error","message":"rate limited, retrying"}
 {"type":"error","message":"DeepSeek says the balance is used up, so the orchestrator cannot use it.","problem":"balance","role":"orchestrator","provider":"deepseek","fix":"top up the account (https://platform.deepseek.com)"}
 {"type":"pong"}
+{"type":"voice-command","action":"stop"}
+{"type":"voice-command","action":"ptt","on":true}
 ```
 
 ## Account problems
@@ -248,6 +252,50 @@ speech synthesis.
   `web.client.mute` event carries `via:"http"`, versus `via:"ws"` for
   the control message. Like every mute, it lasts until the next `/ws` client connects
   (which starts unmuted).
+- `POST /api/turn {"text":"…"}` is a typed turn for the orchestrator with a
+  text reply: it answers `{"reply":"…","turn_id":"…","acted":bool}` once the
+  turn is over. It runs the same orchestrator turn a spoken `to_supervisor`
+  does (tools, approvals and history as for speech), but waits for the reply
+  whatever `brain.reply_wait_s` is, and nothing is spoken. The voice gets one
+  `voice.push` at `urgency: silent` saying what was typed and answered, so its
+  next spoken turn knows. `turn_id` is the utterance id on the turn's `brain.*`
+  events. A missing, empty or non-string `text` is `400`; with the orchestrator
+  off it is `503` with `{"error":"the orchestrator is off (<reason>)"}`; if a
+  spoken turn claimed the typed words first (it answers them), `409`. It
+  takes an `Idempotency-Key` like any device `POST`. `GET /api/conversation`
+  shows the typed line (`kind:"shepherd"`, `via:"typed"`) and the reply
+  (`kind:"dog"`, `via:"typed"`).
+
+## Voice commands over HTTP
+
+A client that does not hold `/ws` (the desktop panel) controls the voice
+of the one that does. Both routes have the same auth as `GET /api/state`
+and the checks of `POST /api/voice/mute`: with `--voice=off` they are
+`503` with `{"error":"the voice is off (--voice=off)"}`, and with no
+attached `/ws` client `409` with `{"error":"no voice client"}`. They
+answer `{"ok":true}`.
+
+- `POST /api/voice/stop` (no body) cuts the current speech. The daemon
+  does it itself, through the path of the `cancel` control message (the
+  stop tool, `flush`, an interrupting push of the result), so it works
+  with any client. It then sends the holder
+  `{"type":"voice-command","action":"stop"}` as a notice: a client that
+  keeps its own playback or capture state can follow (end push-to-talk,
+  show "stopped"). The client sends nothing back.
+- `POST /api/voice/ptt {"on":true|false}` is hold-to-talk: the daemon has
+  no state to change, so it only sends the holder
+  `{"type":"voice-command","action":"ptt","on":true|false}`. The client
+  opens its microphone while `on` is true and closes it when false, with
+  the usual `mute`, `silence` and `speaking` messages. A body without a
+  boolean `on` is `400`. Logged as `web.client.ptt {on}`.
+
+```json
+{"type":"voice-command","action":"stop"}
+{"type":"voice-command","action":"ptt","on":false}
+```
+
+A client that does not know `voice-command` ignores it, as it does any
+type it does not know (the iPhone app, until it implements it).
 
 ## Silence gate
 
@@ -566,7 +614,26 @@ reliably removes is the *click* — an underrun is a faded pause.
   when the attach state changes; an open GPT-Live session is not kept open
   (billed) for a held push, and a fresh one opens for it on attach. What
   cannot be held is the model's own reply to audio it heard before the
-  page went away (see `web.audio_unheard` above).
+  page went away (see `web.audio_unheard` above), except for the
+  mid-turn handoff below.
+- **Mid-turn handoff.** When the client is replaced or detaches while the
+  model is speaking a turn (its `turn complete` has not come), the part of
+  the turn's out transcript the user has not heard becomes a push, so the
+  next client says the rest: the daemon logs `web.turn_handoff {reason
+  replaced|detach, chars}` and pushes it (`when_idle`, tagged `handoff`)
+  through the session's push queue, where it is held like any spoken push
+  (`voice.push_held`, dropped after 5 minutes). *Heard* is what the
+  playback reports acknowledge: the turn's transcript up to the last
+  `drained` report from the attached client, so with no `drained` yet the
+  whole turn so far is handed off. The report gives no finer position
+  mid-turn, and a handoff is better too long than silent. What the model
+  generates after a detach is audio for nobody; when the turn completes
+  with nobody attached, that tail is handed off as a second push. A text
+  is handed off once (replacing twice hands off nothing the second time),
+  a turn that is complete or was cut (`flush`, barge-in) hands off nothing,
+  and the reply Gemini finished generating but the client is still playing
+  is out of scope (its turn is complete). `/api/conversation` keeps the
+  turn's full text as its `dog` item; the handoff push is not a chat item.
 - **Voice reconnect.** When the daemon reconnects to the model (GoAway, drop,
   rate limit), clients see `status: reconnecting` then `status: connected`.
   Audio frames the client sends during the gap are buffered by the daemon
@@ -618,7 +685,7 @@ These answer only this computer (`127.0.0.0/8`, `::1`) and refuse any
 other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
 {path, remote}`), whatever it presents:
 
-- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`;
+- pairing: `GET /api/pair`, `GET /api/pair/qr.svg`, `GET /api/pair/qr.json`;
 - debug and internal: the `/debug` page, `/api/inject/*` (blocked,
   pane, done, state, screen, remove), `POST /api/herdr/event` (the herdr
   hooks), `POST /api/prompts/reload`, `GET /api/voice/system_prompt`,
@@ -687,6 +754,11 @@ Only this computer gets one (loopback only):
   Reading it again returns the same code until it expires or is used;
   `?new=1` makes a new one, which invalidates the old one.
 - `GET /api/pair/qr.svg` is the current code as SVG (`?new=1` as above).
+- `GET /api/pair/qr.json` is the current code as
+  `{"size":n,"modules":["010…","…"]}` (`?new=1` as above). `modules` has
+  `n` rows, each `n` characters: `1` is a dark module and `0` is light.
+  The quiet zone is included, and these are the same modules the SVG
+  draws. Rows of strings are smaller than a boolean matrix.
 - `web.pair.code {expires}` is logged for each new code. No event, page
   state or log line carries a code.
 
