@@ -324,12 +324,12 @@ func (e *ReasonError) Unwrap() error { return e.Err }
 // worktreeRefusal says why dir cannot have a fresh worktree of branch
 // (with its reason code), or nil when it can.
 func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
-	g, isGit := gitInfo(dir.Path)
+	g, isGit := herdr.GitInfo(dir.Path)
 	if !isGit {
 		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
 	}
-	if branchCheckedOut(ctx, g.root, branch) {
-		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	if branchCheckedOut(ctx, g.Root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.Repo)}
 	}
 	return "", nil
 }
