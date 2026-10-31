@@ -53,8 +53,9 @@ msign_is_signed() {
 }
 
 msign_sign() {
-  local bin="${1:?usage: sign <binary>}"
-  [[ -f "$bin" ]] || msign_die "no such file: $bin"
+  local bin="${1:?usage: sign <binary or bundle>}"
+  # A binary is a file; a .app or .framework is a directory.
+  [[ -e "$bin" ]] || msign_die "no such file: $bin"
 
   local found hash name
   found="$(msign_find_identity)"
@@ -93,8 +94,8 @@ msign_notary_auth() {
 }
 
 msign_notarize() {
-  local bin="${1:?usage: notarize <binary>}"
-  [[ -f "$bin" ]] || msign_die "no such file: $bin"
+  local bin="${1:?usage: notarize <binary or bundle>}"
+  [[ -e "$bin" ]] || msign_die "no such file: $bin"
   msign_notary_auth
 
   local work zip out status id
