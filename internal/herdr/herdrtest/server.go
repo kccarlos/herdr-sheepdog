@@ -5,9 +5,10 @@
 //
 // It implements the methods internal/herdr uses (ping, agent.list,
 // agent.get, pane.read, agent.read, agent.prompt, pane.send_keys,
-// agent.send_keys, session.snapshot, events.subscribe) over an in-memory
-// pane/agent table that tests mutate through the Set*/Remove* methods, and
-// it records every request so tests can assert on the wire.
+// agent.send_keys, session.snapshot, events.subscribe, workspace.create,
+// tab.create, pane.split, pane.close) over an in-memory pane/agent table
+// that tests mutate through the Set*/Remove* methods, and it records every
+// request so tests can assert on the wire.
 package herdrtest
 
 import (
@@ -61,6 +62,8 @@ type Server struct {
 	panes      map[string]herdr.PaneInfo
 	agents     map[string]herdr.AgentInfo
 	screens    map[string]string
+	nextSpace  int
+	nextTab    int
 	requests   []Request
 	subs       map[*subConn]struct{}
 	// Handlers lets a test override or add a method. The returned error may
@@ -529,6 +532,64 @@ func (s *Server) builtin(method string) Handler {
 		return func(json.RawMessage) (any, error) {
 			return map[string]any{"type": "pong", "version": s.version, "protocol": 22}, nil
 		}
+	case "workspace.create":
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				Cwd   string `json:"cwd"`
+				Label string `json:"label"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			pane := s.createPane(params.Cwd, "", params.Label)
+			return map[string]any{"type": "workspace_created", "root_pane": pane}, nil
+		}
+	case "tab.create":
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				WorkspaceID string `json:"workspace_id"`
+				Cwd         string `json:"cwd"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			if _, ok := s.workspace(params.WorkspaceID); !ok {
+				return nil, &herdr.Error{Code: "pane_not_found", Message: "workspace " + params.WorkspaceID + " not found"}
+			}
+			pane := s.createPane(params.Cwd, params.WorkspaceID, "")
+			return map[string]any{"type": "tab_created", "root_pane": pane}, nil
+		}
+	case "pane.split":
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				TargetPaneID string `json:"target_pane_id"`
+				Cwd          string `json:"cwd"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			s.mu.Lock()
+			anchor, ok := s.panes[params.TargetPaneID]
+			s.mu.Unlock()
+			if !ok {
+				return nil, &herdr.Error{Code: "pane_not_found", Message: "pane " + params.TargetPaneID + " not found"}
+			}
+			pane := s.createPane(params.Cwd, anchor.WorkspaceID, "")
+			return map[string]any{"type": "pane_info", "pane": pane}, nil
+		}
+	case "pane.close":
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				PaneID string `json:"pane_id"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			if !s.closePane(params.PaneID) {
+				return nil, &herdr.Error{Code: "pane_not_found", Message: "pane " + params.PaneID + " not found"}
+			}
+			return map[string]any{"type": "ok"}, nil
+		}
 	case "agent.list":
 		return func(json.RawMessage) (any, error) {
 			s.mu.Lock()
@@ -645,6 +706,75 @@ func (s *Server) builtin(method string) Handler {
 		}
 	}
 	return nil
+}
+
+// createPane creates a shell pane in workspaceID, or in a fresh workspace
+// when workspaceID is empty. label names the workspace, as herdr's
+// workspace.create does.
+func (s *Server) createPane(cwd, workspaceID, label string) herdr.PaneInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if workspaceID == "" {
+		for {
+			s.nextSpace++
+			workspaceID = fmt.Sprintf("w%d", s.nextSpace)
+			if _, exists := s.workspaces[workspaceID]; !exists {
+				break
+			}
+		}
+	}
+	s.nextTab++
+	tabID := fmt.Sprintf("%s:t%d", workspaceID, s.nextTab)
+	var paneID string
+	for n := 1; ; n++ {
+		paneID = fmt.Sprintf("%s:p%d", workspaceID, n)
+		if _, exists := s.panes[paneID]; !exists {
+			break
+		}
+	}
+	w := s.workspaces[workspaceID]
+	w.WorkspaceID = workspaceID
+	if label != "" {
+		w.Label = label
+	} else if w.Label == "" {
+		w.Label = workspaceID
+	}
+	w.PaneCount++
+	s.workspaces[workspaceID] = w
+	pane := herdr.PaneInfo{
+		PaneID: paneID, WorkspaceID: workspaceID, TabID: tabID,
+		Status: herdr.StateUnknown, Cwd: cwd,
+	}
+	s.panes[paneID] = pane
+	return pane
+}
+
+func (s *Server) workspace(id string) (herdr.WorkspaceInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w, ok := s.workspaces[id]
+	return w, ok
+}
+
+func (s *Server) closePane(paneID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pane, ok := s.panes[paneID]
+	if !ok {
+		return false
+	}
+	delete(s.panes, paneID)
+	delete(s.agents, paneID)
+	delete(s.screens, paneID)
+	if w, ok := s.workspaces[pane.WorkspaceID]; ok {
+		w.PaneCount--
+		if w.PaneCount <= 0 {
+			delete(s.workspaces, pane.WorkspaceID)
+		} else {
+			s.workspaces[pane.WorkspaceID] = w
+		}
+	}
+	return true
 }
 
 // resolveAgent looks up params.target (name or pane id) like herdr does.

@@ -99,7 +99,7 @@ type Backend interface {               // what the daemon needs
 | herdr (old) | herdr-core (hc) | v1 rule |
 |---|---|---|
 | pane id `p_…` | terminal address `t7` | pane id = address, so `pane_id` in `/api/state` (agents and the pending question) is the hc address a herdr-app mod passes to hc to focus it. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
-| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it reports status; the `sheepdog=shell` label does not suppress that. |
+| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal with a current status, or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). `reported` alone is not enough: after a cleared status with the shell in front, the terminal is a shell again. A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it has a status; the `sheepdog=shell` label does not suppress that. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
 | workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live local terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
@@ -120,6 +120,37 @@ type Backend interface {               // what the daemon needs
 | `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live local terminals, agents = the ones above). |
 | `agent_session` (the worker's transcript) | not reported | none on hc: no worker history digest. |
 | `ping` version | `hello` version | → `Pong`. |
+
+## Conformance
+
+`internal/herdr/conformance` is the behaviour contract shared by both
+backends. Its scenarios drive a small backend-specific test driver over
+`herdrtest` or `hctest`; both `internal/herdr` and `internal/herdrcore`
+run the whole list. A new edge case belongs there first, and a fix for one
+backend is accepted only when both drivers pass it.
+
+The scenarios are:
+
+1. a plain shell is never an agent;
+2. Claude and Codex are detected fresh and resumed (`--resume` for Claude,
+   `resume` for Codex), with the right kind and a sensible spoken name;
+3. an exited agent leaves the terminal at a plain shell and is no longer
+   listed as an agent;
+4. a different agent started later in that same shell is detected with
+   its new kind;
+5. the phone shell can be opened, reused and closed with no agent, while
+   an agent is running in it, and after that agent exited;
+6. a new agent in a folder with an existing space joins that space (the
+   old backend splits its pane; hc opens a new tab in the same space);
+7. a blocked question with options is read and parsed the same way.
+
+The exit decision follows the old protocol. `agent.list` contains only
+panes that currently host a recognised agent. Exiting an agent emits
+`unknown` and may keep the transition in the daemon's state history, but it
+does not keep the terminal in the active agent list. hc therefore treats a
+terminal as an agent only when it has a current status or a known agent
+program in the foreground or start argv. `terminal.reported` remembers that
+a program once reported; on its own it does not make a shell an agent.
 
 ## What v1 supports on hc
 

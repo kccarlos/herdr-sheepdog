@@ -65,11 +65,13 @@ func argvBase(argv []string) string {
 	return strings.TrimPrefix(path.Base(argv[0]), "-")
 }
 
-// isAgent reports whether t is an agent: it reported status or runs a known
-// agent program. The phone-shell label only marks how the terminal was
-// opened, not what is running in it.
+// isAgent reports whether t is an agent: it has a current status or runs a
+// known agent program. terminal.Reported alone is not enough: a program that
+// cleared its status and returned the shell must leave the agent list, as an
+// exited agent does on the old backend. The phone-shell label only marks how
+// the terminal was opened, not what is running in it.
 func isAgent(t hc.Terminal) bool {
-	return t.Reported || knownKind(kindOf(t))
+	return t.Status != nil || knownKind(kindOf(t))
 }
 
 // agentKind is the kind of t when it is an agent, else empty.

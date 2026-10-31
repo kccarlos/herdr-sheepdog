@@ -227,7 +227,7 @@ func TestShellOpenAndReuse(t *testing.T) {
 	}
 	// After a restart the daemon finds its shells in herdr again.
 	h.srv.term.mu.Lock()
-	h.srv.term.shells = map[string]string{}
+	h.srv.term.shells = NewShellBook()
 	h.srv.term.mu.Unlock()
 	c.send(shellOpen(4, lib))
 	if m2 := c.expect(termproto.TypeOpened); m2.PaneID != m.PaneID {
