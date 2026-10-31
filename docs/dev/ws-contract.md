@@ -1495,6 +1495,33 @@ events that need the user, whether or not a `/ws` client is attached.
 The contract (routes, payload, when an alert is sent) is in
 [`push.md`](push.md).
 
+### Desktop notifications
+
+Sheepdog.app uses the same `GET /events` stream for local macOS notifications;
+there is no desktop push registration. It notifies for an answerable
+`pending.created` (the title is the agent and the body is
+`PendingAction.displaySummary`), a `herdr.transition` from `working` to `done`
+or `idle` (`"<agent> finished."`), and a failed or unexpectedly closed voice
+session (`voice.connect_error`, `voice.session_error`, `daemon.voice_error`,
+`daemon.voice_provider_error`, or a `voice.closed` other than `shutdown`,
+`replaced`, and `voice_off`). The voice wording comes from `LocalNotice`, so
+it matches the phone's own notice text.
+
+The app asks for notification permission when the first such event arrives,
+not at launch. Until the panel reports whether it is visible, the stand-in is
+the voice state: while this Mac holds `/ws` and the client's existing
+microphone speech detector (`core.mic.speaking`) says the user is talking,
+the event does not become a notification. Clicking one runs
+`herdr-app do mod.open --name sheepdog` through the same panel opener as the
+menu.
+
+The global shortcut is local to Sheepdog.app, not part of this protocol. It
+uses Carbon's `RegisterEventHotKey` on Option+Space by default (Control+Space
+and Control+Option+Space are the other fixed choices), with no Accessibility
+permission. Key-down starts push-to-talk; a release at or after 300 ms ends
+it, while a shorter release also toggles mute. The choice is stored in the
+app's `UserDefaults` as `hotkey.shortcut`.
+
 ## Non-goals
 
 No compression, no multiple clients, no more than one agent window per client, no client-side resampling contract
