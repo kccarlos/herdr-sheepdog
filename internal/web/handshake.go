@@ -36,6 +36,9 @@ func (s *Server) features() []string {
 		f = append(f, wsproto.FeatureProvider)
 	}
 	f = append(f, wsproto.FeatureHistory)
+	if s.deps.Voice != nil {
+		f = append(f, wsproto.FeatureVoiceCommand)
+	}
 	if s.deps.Push != nil {
 		f = append(f, wsproto.FeaturePush)
 	}

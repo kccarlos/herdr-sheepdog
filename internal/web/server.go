@@ -495,6 +495,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
 		route{"GET /api/state", accessDevice, s.handleState},
 		route{"POST /api/voice/mute", accessDevice, s.handleVoiceMute},
+		route{"POST /api/voice/stop", accessDevice, s.handleVoiceStop},
+		route{"POST /api/voice/ptt", accessDevice, s.handleVoicePTT},
 		route{"GET /api/agents", accessDevice, s.handleAgents},
 		route{"GET /api/agents/{pane_id}/screen", accessDevice, s.handleAgentScreen},
 		route{"POST /api/agents/{pane_id}/input", accessDevice, s.handleAgentInput},
