@@ -76,17 +76,21 @@ func TestSetupEnvironmentInteractive(t *testing.T) {
 	appHome, envPath := filepath.Join(dir, "herdr-app"), filepath.Join(dir, ".env")
 	panel := setupTestPanel()
 	var out bytes.Buffer
-	prompt := newPrompter(strings.NewReader("2\n\n"), &out)
+	prompt := newPrompter(strings.NewReader("2\n\ny\n"), &out)
 	var checked string
 	var restartedBackend string
 	changed, err := setupEnvironment(context.Background(), setupTestConfig(), envPath, setupEnvironmentOptions{
 		Probe:       setupTestProbe(appHome, true, true),
 		Panel:       panel,
+		Layout:      []byte("layout"),
 		Prompt:      prompt,
 		Interactive: true,
 		HerdrAppCheck: func(_ context.Context, modDir string) (string, error) {
 			checked = modDir
 			return "loaded sheepdog\n", nil
+		},
+		LayoutSwitch: func(context.Context) (string, error) {
+			return "switched\n", nil
 		},
 		Setenv: func(key, value string) error {
 			if key != "SHEEPDOG_HERDR_BACKEND" {
@@ -126,7 +130,7 @@ func TestSetupEnvironmentInteractive(t *testing.T) {
 		"herdr-core (hc) — herdr-app",
 		"old herdr (terminal)",
 		"herdr-app check: loaded sheepdog",
-		"herdr-app do mod.open --name sheepdog",
+		"Switched herdr-app to the Sheepdog layout.",
 		"brew install --cask kccarlos/tap/sheepdog-app",
 	} {
 		if !strings.Contains(text, want) {
@@ -146,6 +150,7 @@ func TestSetupEnvironmentNonInteractive(t *testing.T) {
 	changed, err := setupEnvironment(context.Background(), setupTestConfig(), envPath, setupEnvironmentOptions{
 		Probe:  setupTestProbe(appHome, true, true),
 		Panel:  setupTestPanel(),
+		Layout: []byte("layout"),
 		Prompt: newPrompter(strings.NewReader(""), &out),
 		Out:    &out,
 		HerdrAppCheck: func(context.Context, string) (string, error) {
@@ -178,7 +183,8 @@ func TestSetupEnvironmentNonInteractive(t *testing.T) {
 		"SHEEPDOG_HERDR_BACKEND=hc",
 		"Installed the Sheepdog panel for herdr-app.",
 		"herdr-app check: loaded sheepdog",
-		"In herdr-app, open Sheepdog from the menu bar app's Open panel",
+		"Installed the Sheepdog layout for herdr-app.",
+		`herdr-app do layout.switch '{"name":"sheepdog"}'`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output missing %q:\n%s", want, text)
@@ -194,9 +200,10 @@ func TestSetupEnvironmentCheckFailureIsAWarning(t *testing.T) {
 	appHome := filepath.Join(dir, "herdr-app")
 	var out bytes.Buffer
 	_, err := setupEnvironment(context.Background(), setupTestConfig(), filepath.Join(dir, ".env"), setupEnvironmentOptions{
-		Probe: setupTestProbe(appHome, true, true),
-		Panel: setupTestPanel(),
-		Out:   &out,
+		Probe:  setupTestProbe(appHome, true, true),
+		Panel:  setupTestPanel(),
+		Layout: []byte("layout"),
+		Out:    &out,
 		HerdrAppCheck: func(context.Context, string) (string, error) {
 			return "parse warning", errors.New("exit status 1")
 		},
@@ -206,5 +213,120 @@ func TestSetupEnvironmentCheckFailureIsAWarning(t *testing.T) {
 	}
 	if text := out.String(); !strings.Contains(text, "Warning: herdr-app check failed: exit status 1") {
 		t.Errorf("warning missing:\n%s", text)
+	}
+}
+
+func TestSetupSheepdogLayout(t *testing.T) {
+	panel := setupTestPanel()
+	baseConfig := setupTestConfig()
+	baseConfig.Herdr.Backend = config.HerdrBackendHC // no backend question in these layout cases
+	for _, tc := range []struct {
+		name        string
+		answer      string
+		interactive bool
+		existing    string
+		shownDocked bool
+		switchErr   error
+		wantWritten bool
+		wantSwitch  int
+		wantText    []string
+	}{
+		{
+			name: "yes writes and switches", answer: "y\n", interactive: true,
+			wantWritten: true, wantSwitch: 1,
+			wantText: []string{"Installed the Sheepdog layout for herdr-app.", "Switched herdr-app to the Sheepdog layout."},
+		},
+		{
+			name: "no writes nothing and says how to dock later", answer: "n\n", interactive: true,
+			wantText: []string{"Skipped the Sheepdog layout.", "choose Copy my layout"},
+		},
+		{
+			name:        "no tty installs but does not switch",
+			wantWritten: true,
+			wantText:    []string{"Installed the Sheepdog layout for herdr-app.", `herdr-app do layout.switch '{"name":"sheepdog"}'`},
+		},
+		{
+			name: "different file is kept", answer: "y\n", interactive: true,
+			existing: "mine", wantSwitch: 1,
+			wantText: []string{"differs from this version, so setup kept it.", "Switched herdr-app to the Sheepdog layout."},
+		},
+		{
+			name: "already docked does nothing", existing: "mine", shownDocked: true,
+			wantText: []string{"docked in herdr-app's main layout"},
+		},
+		{
+			name: "switch failure is a warning", answer: "y\n", interactive: true,
+			switchErr: errors.New("exit status 1"), wantWritten: true, wantSwitch: 1,
+			wantText: []string{
+				"Warning: could not switch herdr-app to the Sheepdog layout: exit status 1",
+				`herdr-app do layout.switch '{"name":"sheepdog"}'`,
+				"or press Ctrl+Shift+L in herdr-app.",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			appHome, envPath := filepath.Join(dir, "herdr-app"), filepath.Join(dir, ".env")
+			if err := onboard.InstallPanel(appHome, panel); err != nil {
+				t.Fatal(err)
+			}
+			shown := `{"id":"root","type":"row","children":[]}`
+			if tc.shownDocked {
+				shown = `{"id":"root","type":"row","children":[{"type":"block","content":{"mod":"sheepdog"}}]}`
+			}
+			if err := os.MkdirAll(filepath.Join(appHome, "layouts"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(appHome, "layouts", "main.json"), []byte(shown), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.existing != "" {
+				if err := os.WriteFile(filepath.Join(appHome, "layouts", "sheepdog.json"), []byte(tc.existing), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var out bytes.Buffer
+			prompt := newPrompter(strings.NewReader(tc.answer), &out)
+			switches := 0
+			_, err := setupEnvironment(context.Background(), baseConfig, envPath, setupEnvironmentOptions{
+				Probe:       setupTestProbe(appHome, false, false),
+				Panel:       panel,
+				Layout:      []byte("layout"),
+				Prompt:      prompt,
+				Interactive: tc.interactive,
+				LayoutSwitch: func(context.Context) (string, error) {
+					switches++
+					return "switched\n", tc.switchErr
+				},
+				Out: &out,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if switches != tc.wantSwitch {
+				t.Errorf("layout switches = %d, want %d\n%s", switches, tc.wantSwitch, out.String())
+			}
+			got, readErr := os.ReadFile(filepath.Join(appHome, "layouts", "sheepdog.json"))
+			if tc.wantWritten {
+				if readErr != nil || string(got) != "layout" {
+					t.Errorf("written layout = %q, %v", got, readErr)
+				}
+				if st, err := os.Stat(filepath.Join(appHome, "layouts", "sheepdog.json")); err != nil || st.Mode().Perm() != 0o644 {
+					t.Errorf("layout mode = %v, %v; want 0644", st.Mode().Perm(), err)
+				}
+			} else if tc.existing == "" {
+				if readErr == nil {
+					t.Errorf("layout unexpectedly written as %q", got)
+				}
+			} else if readErr != nil || string(got) != tc.existing {
+				t.Errorf("existing layout = %q, %v; want %q kept", got, readErr, tc.existing)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("output missing %q:\n%s", want, out.String())
+				}
+			}
+		})
 	}
 }

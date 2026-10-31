@@ -99,7 +99,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		src = "defaults (no " + cfgPath + ")"
 	}
 	fprintln(stdout, onboard.Result{Name: "config", Status: onboard.OK, Detail: "loaded " + src}.Line())
-	environment := onboard.Detect(cfg, onboard.SystemProbe(), herdrsheepdog.Panel)
+	environment := onboard.Detect(cfg, onboard.SystemProbe(), herdrsheepdog.Panel, herdrsheepdog.Layout)
 	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{
 		Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath,
 		Environment: &environment,

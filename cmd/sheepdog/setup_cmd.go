@@ -74,9 +74,11 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	wrote, err := setupEnvironment(ctx, l.cfg, envPath, setupEnvironmentOptions{
 		Probe:         setupEnvironmentProbe(),
 		Panel:         setupPanel,
+		Layout:        herdrsheepdog.Layout,
 		Prompt:        prompt,
 		Interactive:   prompt.tty != nil,
 		HerdrAppCheck: setupHerdrAppCheck,
+		LayoutSwitch:  setupLayoutSwitch,
 		Setenv:        os.Setenv,
 		Out:           stdout,
 	})
@@ -151,9 +153,11 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 	if _, err := setupEnvironment(ctx, l.cfg, envPath, setupEnvironmentOptions{
 		Probe:         setupEnvironmentProbe(),
 		Panel:         setupPanel,
+		Layout:        herdrsheepdog.Layout,
 		Prompt:        shared,
 		Interactive:   shared.tty != nil,
 		HerdrAppCheck: setupHerdrAppCheck,
+		LayoutSwitch:  setupLayoutSwitch,
 		Setenv:        os.Setenv,
 		Out:           stdout,
 	}); err != nil {
@@ -221,13 +225,16 @@ func existingSetupEnvPath(envPath, requested string) string {
 }
 
 type setupHerdrAppCheckFunc func(context.Context, string) (string, error)
+type setupLayoutSwitchFunc func(context.Context) (string, error)
 
 type setupEnvironmentOptions struct {
 	Probe         onboard.Probe
 	Panel         fs.FS
+	Layout        []byte
 	Prompt        *prompter
 	Interactive   bool
 	HerdrAppCheck setupHerdrAppCheckFunc
+	LayoutSwitch  setupLayoutSwitchFunc
 	Setenv        func(string, string) error
 	Out           io.Writer
 }
@@ -244,6 +251,12 @@ var (
 		out, err := exec.CommandContext(ctx, "herdr-app", "check", dir).CombinedOutput()
 		return string(out), err
 	}
+	setupLayoutSwitch setupLayoutSwitchFunc = func(ctx context.Context) (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "herdr-app", "do", "layout.switch", `{"name":"sheepdog"}`).CombinedOutput()
+		return string(out), err
+	}
 )
 
 // setupEnvironment detects old herdr, herdr-core, herdr-app and Sheepdog.app,
@@ -253,7 +266,7 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	if o.Out == nil {
 		return false, fmt.Errorf("no output writer")
 	}
-	env := onboard.Detect(cfg, o.Probe, o.Panel)
+	env := onboard.Detect(cfg, o.Probe, o.Panel, o.Layout)
 	fprintln(o.Out, "Your setup:")
 	fprintf(o.Out, "  %-23s %s\n", "herdr (old, terminal)", setupPresence(env.OldHerdr))
 	fprintf(o.Out, "  %-23s %s\n", "herdr-core", setupPresence(env.HerdrCore))
@@ -339,7 +352,7 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		}
 	}
 	if env.HerdrApp && installedPanel {
-		fprintln(o.Out, "In herdr-app, open Sheepdog from the menu bar app's Open panel (or run: herdr-app do mod.open --name sheepdog). On Herdr's own layout, choose Copy my layout to dock it.")
+		setupSheepdogLayout(ctx, env, o)
 	}
 	if env.OS == "darwin" && env.HerdrApp && !env.SheepdogApp {
 		fprintln(o.Out, "")
@@ -347,6 +360,85 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		fprintln(o.Out, "  brew install --cask kccarlos/tap/sheepdog-app")
 	}
 	return wroteBackend, nil
+}
+
+func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEnvironmentOptions) {
+	if env.PanelDocked {
+		fprintf(o.Out, "The Sheepdog panel is docked in herdr-app's %s layout.\n", env.ShownLayout)
+		return
+	}
+
+	switchNow := false
+	declined := false
+	if o.Interactive && o.Prompt != nil {
+		yes, err := o.Prompt.yesNo("Switch herdr-app to the Sheepdog layout (Herdr's window with the panel docked on the right)?", true)
+		if err != nil {
+			fprintf(o.Out, "Warning: could not ask about the Sheepdog layout: %v\n", err)
+		} else {
+			switchNow = yes
+			declined = !yes
+		}
+	}
+	if declined {
+		fprintln(o.Out, "Skipped the Sheepdog layout. To dock the panel later, run sheepdog setup again, or open the panel and choose Copy my layout.")
+		return
+	}
+	if !switchNow {
+		switch env.Layout {
+		case onboard.LayoutMissing:
+			if err := onboard.InstallLayout(env.HerdrAppHome, o.Layout); err != nil {
+				fprintf(o.Out, "Warning: could not install the Sheepdog layout: %v\n", err)
+			} else {
+				fprintln(o.Out, "Installed the Sheepdog layout for herdr-app.")
+			}
+		case onboard.LayoutDifferent:
+			fprintln(o.Out, "The Sheepdog layout already exists but differs from this version, so setup kept it.")
+		}
+		if probeHasCommand(o.Probe, "herdr-app") {
+			fprintln(o.Out, "To switch herdr-app to it, run:")
+			fprintln(o.Out, `  herdr-app do layout.switch '{"name":"sheepdog"}'`)
+		} else {
+			fprintln(o.Out, "Open herdr-app's layout picker and choose Sheepdog, or press Ctrl+Shift+L to cycle to it.")
+		}
+		return
+	}
+
+	switch env.Layout {
+	case onboard.LayoutMissing:
+		if err := onboard.InstallLayout(env.HerdrAppHome, o.Layout); err != nil {
+			fprintf(o.Out, "Warning: could not install the Sheepdog layout: %v\n", err)
+			return
+		}
+		fprintln(o.Out, "Installed the Sheepdog layout for herdr-app.")
+	case onboard.LayoutDifferent:
+		fprintln(o.Out, "The Sheepdog layout already exists but differs from this version, so setup kept it.")
+	}
+	if !probeHasCommand(o.Probe, "herdr-app") {
+		fprintln(o.Out, "Open herdr-app's layout picker and choose Sheepdog, or press Ctrl+Shift+L to cycle to it.")
+		return
+	}
+	if o.LayoutSwitch == nil {
+		printLayoutSwitchManual(o.Out, nil)
+		return
+	}
+	line, err := o.LayoutSwitch(ctx)
+	if err != nil {
+		printLayoutSwitchManual(o.Out, err)
+		return
+	}
+	if text := setupLastLine(line); text != "" {
+		fprintln(o.Out, "herdr-app layout switch: "+text)
+	}
+	fprintln(o.Out, "Switched herdr-app to the Sheepdog layout.")
+}
+
+func printLayoutSwitchManual(w io.Writer, err error) {
+	if err != nil {
+		fprintf(w, "Warning: could not switch herdr-app to the Sheepdog layout: %v\n", err)
+	}
+	fprintln(w, "Switch it with:")
+	fprintln(w, `  herdr-app do layout.switch '{"name":"sheepdog"}'`)
+	fprintln(w, "or press Ctrl+Shift+L in herdr-app.")
 }
 
 func setupPresence(p onboard.Presence) string {
