@@ -303,8 +303,16 @@ final class VoiceEngine {
         audio.onMicSignal = { [weak self] noSignal in
             self?.send(.micSignal(ok: !noSignal))
         }
+        // Both come from inside an `AVAudioSession` notification handler,
+        // with the engine half torn down: the core's answer (and any effect
+        // it runs) waits for the next main-actor turn instead of re-entering
+        // the engine from there. Tasks run in order, so a stop is always
+        // told before the availability that follows it.
         audio.onStopped = { [weak self] message in
-            self?.send(.audioStopped(message))
+            Task { @MainActor in self?.send(.audioStopped(message)) }
+        }
+        audio.onAvailable = { [weak self] in
+            Task { @MainActor in self?.send(.audioAvailable) }
         }
         audio.onPausedChanged = { [weak self] paused in
             self?.send(.interruption(paused: paused))

@@ -28,6 +28,9 @@ protocol VoiceAudio: AnyObject {
     var onMicSignal: ((Bool) -> Void)? { get set }
     /// The running engine died and could not be rebuilt; the words say why.
     var onStopped: ((String) -> Void)? { get set }
+    /// The hardware moved again after the engine stopped by itself: the
+    /// moment to start it again.
+    var onAvailable: (() -> Void)? { get set }
 
     var metrics: AudioMetrics { get }
     var isRunning: Bool { get }

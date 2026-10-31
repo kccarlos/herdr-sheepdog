@@ -45,6 +45,7 @@ final class MacAudioEngine: VoiceAudio {
     var onNotice: ((LocalNotice) -> Void)?
     var onMicSignal: ((Bool) -> Void)?
     var onStopped: ((String) -> Void)?
+    var onAvailable: (() -> Void)?
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
@@ -53,6 +54,8 @@ final class MacAudioEngine: VoiceAudio {
     private var isMuted = false
     /// Debounces `onGate`: only the transition into "closed" is reported.
     private var isGateClosed = false
+    /// The engine stopped by itself (`onStopped`) and has not started since.
+    private var stoppedByItself = false
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -127,6 +130,7 @@ final class MacAudioEngine: VoiceAudio {
         }
         player.play()
         isRunning = true
+        stoppedByItself = false
         startSteering()
         restartedForSignal = false
         if !isMuted, gate.manual != false { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
@@ -466,7 +470,12 @@ final class MacAudioEngine: VoiceAudio {
     /// or a headset microphone came or went, the sample rate moved). Say so
     /// and rebuild.
     private func configurationChanged() {
-        guard isRunning else { return }
+        guard isRunning else {
+            // Stopped by itself: the hardware moved again, which is when a
+            // microphone that went away may be back.
+            if stoppedByItself { onAvailable?() }
+            return
+        }
         restartCapture(routeChanged: true)
     }
 
@@ -482,9 +491,7 @@ final class MacAudioEngine: VoiceAudio {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else {
-            isRunning = false
-            stopSteering()
-            onStopped?(LocalNotice.microphoneWentAway)
+            stopByItself(LocalNotice.microphoneWentAway)
             return
         }
         metrics.hardwareSampleRate = format.sampleRate
@@ -499,9 +506,14 @@ final class MacAudioEngine: VoiceAudio {
             recordVoiceProcessing()
             if routeChanged { onNotice?(.routeChanged(output: nil)) }
         } catch {
-            isRunning = false
-            stopSteering()
-            onStopped?(LocalNotice.audioStoppedAfterRouteChange(error.localizedDescription))
+            stopByItself(LocalNotice.audioStoppedAfterRouteChange(error.localizedDescription))
         }
+    }
+
+    private func stopByItself(_ message: String) {
+        isRunning = false
+        stoppedByItself = true
+        stopSteering()
+        onStopped?(message)
     }
 }

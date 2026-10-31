@@ -81,6 +81,7 @@ final class FakeAudio: VoiceAudio {
     var onNotice: ((LocalNotice) -> Void)?
     var onMicSignal: ((Bool) -> Void)?
     var onStopped: ((String) -> Void)?
+    var onAvailable: (() -> Void)?
 
     var metrics = AudioMetrics()
     private(set) var isRunning = false

@@ -625,13 +625,42 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.apply(.tokenRefused(endpoint: "x"), now: at(1)), [])
     }
 
-    /// 5. An engine that died after a route change stayed dead.
-    func testAnEngineThatDiesIsSaidAndStartedAgain() {
+    /// 5. An engine that died after a route change stayed dead; then it was
+    /// started again from inside the route change, while iOS held the audio
+    /// (a crash). Now it waits for the audio to come back.
+    func testAnEngineThatDiesIsSaidAndStartedOnceWhenTheAudioIsBack() {
         var core = connected()
         _ = core.apply(.gateChanged(closed: false), now: t0)
         let effects = core.apply(.audioStopped("The microphone went away with the route change."), now: at(1))
-        XCTAssertEqual(effects, [.notice("The microphone went away with the route change."), .startAudio])
+        XCTAssertEqual(effects, [.notice("The microphone went away with the route change.")], "no restart inside the route change")
         XCTAssertFalse(core.mic.speaking)
+        XCTAssertEqual(core.sessionState, .audioPaused, "the orb offers the way back")
+
+        XCTAssertEqual(core.apply(.status(.status(.connected)), now: at(2)), [], "a status does not start it while iOS holds the audio")
+        XCTAssertEqual(core.apply(.audioAvailable, now: at(3)), [.startAudio])
+        XCTAssertEqual(core.apply(.audioAvailable, now: at(3)), [], "once")
+        XCTAssertEqual(core.apply(.status(.status(.connected)), now: at(4)), [.startAudio], "back to normal")
+    }
+
+    /// 5b. The orb's tap and the unmute are the user asking.
+    func testAnEngineThatDiedStartsWhenTheUserAsks() {
+        var core = connected()
+        _ = core.apply(.audioStopped(LocalNotice.microphoneWentAway), now: at(1))
+        XCTAssertEqual(core.apply(.resumeTapped, now: at(2)), [.startAudio])
+
+        _ = core.apply(.muteTapped, now: at(3))
+        _ = core.apply(.audioStopped(LocalNotice.microphoneWentAway), now: at(4))
+        XCTAssertTrue(core.apply(.muteTapped, now: at(5)).contains(.startAudio), "the unmute")
+    }
+
+    /// 5c. Nothing to start when the engine did not stop by itself, or the
+    /// session ended meanwhile.
+    func testTheAudioComingBackStartsNothingElse() {
+        var core = connected()
+        XCTAssertEqual(core.apply(.audioAvailable, now: at(1)), [])
+        _ = core.apply(.audioStopped(LocalNotice.microphoneWentAway), now: at(2))
+        _ = core.apply(.endTapped, now: at(3))
+        XCTAssertEqual(core.apply(.audioAvailable, now: at(4)), [])
     }
 
     /// 6. The unmute's gate reset and the daemon disagreed: a muted client
