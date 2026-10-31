@@ -85,9 +85,11 @@ jobs:
   # same script as `make release-sign`), replacing the tarball and
   # checksums.txt on the release, then builds, signs, notarizes and staples
   # Sheepdog.app with scripts/release-sign-app.sh and adds its zip to the
-  # release and checksums.txt. The only job outside ios.yml that may use a
-  # GitHub-hosted Mac, and only because it runs in the `release` environment
-  # (maintainer approval, v* tags only); the policy check enforces that.
+  # release and checksums.txt. App failures are recorded in app_signed, not
+  # allowed to fail the daemon release. The only job outside ios.yml that may
+  # use a GitHub-hosted Mac, and only because it runs in the `release`
+  # environment (maintainer approval, v* tags only); the policy check enforces
+  # that.
   sign-macos:
     needs: release
     if: ${{ !cancelled() && (needs.release.result == 'success' || (needs.release.result == 'skipped' && github.event_name == 'workflow_dispatch')) }}
@@ -98,7 +100,7 @@ jobs:
       contents: write
     outputs:
       signed: ${{ steps.sign.outputs.signed }}
-      app_signed: ${{ steps.app.outputs.signed }}
+      app_signed: ${{ steps.app_status.outputs.signed || 'false' }}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
@@ -236,7 +238,9 @@ jobs:
       # whatever the newest installed one is; XcodeGen is the pin ios.yml
       # and Xcode Cloud use.
       - name: Select the newest Xcode
+        id: xcode
         if: steps.sign.outputs.signed == 'true'
+        continue-on-error: true
         run: |
           set -euo pipefail
           xcode="$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -n 1)"
@@ -244,7 +248,9 @@ jobs:
           xcodebuild -version
 
       - name: Install XcodeGen
-        if: steps.sign.outputs.signed == 'true'
+        id: xcodegen
+        if: steps.sign.outputs.signed == 'true' && steps.xcode.outcome == 'success'
+        continue-on-error: true
         run: |
           set -euo pipefail
           zip="$RUNNER_TEMP/xcodegen.zip"
@@ -256,7 +262,8 @@ jobs:
 
       - name: Build, sign, notarize and upload Sheepdog.app (scripts/release-sign-app.sh)
         id: app
-        if: steps.sign.outputs.signed == 'true'
+        if: steps.sign.outputs.signed == 'true' && steps.xcodegen.outcome == 'success'
+        continue-on-error: true
         env:
           NOTARY_ISSUER: ${{ env.NOTARY_ISSUER_ID }}
           NOTARY_KEY_ID: ${{ steps.op.outputs.NOTARY_KEY_ID }}
@@ -267,7 +274,9 @@ jobs:
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Verify the published Sheepdog.app
+        id: verify-app
         if: steps.app.outputs.signed == 'true'
+        continue-on-error: true
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/verify-app"
@@ -287,20 +296,43 @@ jobs:
           grep -q 'source=Notarized Developer ID' "$d/spctl.txt"
           echo "::notice title=Sheepdog.app signed::$asset is signed, notarized and stapled"
 
+      - name: Record whether Sheepdog.app shipped
+        id: app_status
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          APP_SIGNED: ${{ steps.app.outputs.signed }}
+          VERIFY: ${{ steps.verify-app.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$APP_SIGNED" == true && "$VERIFY" == success ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            message="Sheepdog.app was not shipped; the daemon release continues"
+            echo "::warning title=Sheepdog.app not shipped::$message"
+            {
+              echo "## Sheepdog.app not shipped"
+              echo
+              echo "$message."
+              echo "Investigate the app steps in this job; the release binary and Homebrew formula are unaffected."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Remove the keychain and the API key
         if: always()
         run: |
           if [ -n "${SIGN_KEYCHAIN:-}" ]; then security delete-keychain "$SIGN_KEYCHAIN" || true; fi
           rm -rf "$RUNNER_TEMP/notary" "$RUNNER_TEMP/sheepdog-sign.p12" "$RUNNER_TEMP/sheepdog-sign.keychain-db"
 
-  # Renders Formula/sheepdog.rb (the daemon) and Casks/sheepdog-app.rb
-  # (Sheepdog.app) from the signed checksums and pushes both to
-  # kccarlos/homebrew-tap in one commit. GitHub-hosted ubuntu-latest (Homebrew
-  # and Ruby preinstalled, a fresh VM per run) rather than the Cloud Run
-  # runner; Homebrew casks need macOS, so the cask is only syntax-checked here.
+  # Renders Formula/sheepdog.rb (the daemon) from the signed checksums and
+  # updates kccarlos/homebrew-tap. It adds Casks/sheepdog-app.rb only when
+  # Sheepdog.app was signed and verified. GitHub-hosted ubuntu-latest
+  # (Homebrew and Ruby preinstalled, a fresh VM per run) rather than the Cloud
+  # Run runner; Homebrew casks need macOS, so the cask is only syntax-checked
+  # here.
   homebrew:
     needs: sign-macos
-    if: ${{ !cancelled() && needs.sign-macos.outputs.signed == 'true' && needs.sign-macos.outputs.app_signed == 'true' }}
+    if: ${{ !cancelled() && needs.sign-macos.outputs.signed == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 30
@@ -311,6 +343,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
+      APP_SIGNED: ${{ needs.sign-macos.outputs.app_signed }}
     steps:
       - name: Tap token present?
         id: creds
@@ -339,16 +372,24 @@ jobs:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
         run: scripts/op-load.sh HOMEBREW_TAP_TOKEN=op://github/homebrew-tap-token/credential
 
-      - name: Render the formula and the cask from the signed checksums
+      - name: Render the formula from the signed checksums
         if: steps.creds.outputs.ok == 'true'
         run: |
           set -euo pipefail
           packaging/homebrew/render.sh "$TAG" > "$RUNNER_TEMP/sheepdog.rb"
           ruby -c "$RUNNER_TEMP/sheepdog.rb"
           cat "$RUNNER_TEMP/sheepdog.rb"
+
+      - name: Render the cask from the signed checksums
+        id: cask
+        if: steps.creds.outputs.ok == 'true' && env.APP_SIGNED == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
           packaging/homebrew/render.sh --cask "$TAG" > "$RUNNER_TEMP/sheepdog-app.rb"
           ruby -c "$RUNNER_TEMP/sheepdog-app.rb"
           cat "$RUNNER_TEMP/sheepdog-app.rb"
+          echo "rendered=true" >> "$GITHUB_OUTPUT"
 
       - name: brew audit --strict
         if: steps.creds.outputs.ok == 'true'
@@ -370,14 +411,38 @@ jobs:
           token: ${{ steps.op.outputs.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      # tap-update.sh fails, before committing, if only one of the two files
-      # would change.
-      - name: Commit and push Formula/sheepdog.rb and Casks/sheepdog-app.rb
+      - name: Record what the tap update includes
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          CASK: ${{ steps.cask.outputs.rendered }}
+        run: |
+          set -euo pipefail
+          if [[ "$APP_SIGNED" == true && "$CASK" == true ]]; then
+            message="Sheepdog.app was signed and its cask is included"
+          elif [[ "$APP_SIGNED" == true ]]; then
+            message="Sheepdog.app was signed but its cask could not be rendered; the daemon formula continues"
+            echo "::warning title=Sheepdog.app cask not published::$message"
+          else
+            message="Sheepdog.app was not shipped; the daemon formula continues"
+            echo "::warning title=Sheepdog.app not published::$message"
+          fi
+          {
+            echo "## Homebrew tap"
+            echo
+            echo "$message."
+            echo "The daemon formula is rendered and updated whenever its signing succeeded."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push the Homebrew tap files
         id: tap
         if: steps.creds.outputs.ok == 'true'
         run: |
           set -euo pipefail
-          packaging/homebrew/tap-update.sh homebrew-tap "$RUNNER_TEMP/sheepdog.rb" "$RUNNER_TEMP/sheepdog-app.rb" "$TAG" | tee "$RUNNER_TEMP/tap-update.txt"
+          cask=()
+          if [[ "${{ steps.cask.outputs.rendered }}" == true ]]; then
+            cask=("$RUNNER_TEMP/sheepdog-app.rb")
+          fi
+          packaging/homebrew/tap-update.sh homebrew-tap "$RUNNER_TEMP/sheepdog.rb" ${cask[@]+"${cask[@]}"} "$TAG" | tee "$RUNNER_TEMP/tap-update.txt"
           if grep -q '^changed=true$' "$RUNNER_TEMP/tap-update.txt"; then
             git -C homebrew-tap push origin HEAD:main
           fi

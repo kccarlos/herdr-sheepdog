@@ -191,7 +191,8 @@ is `release.yml`'s `sign-macos` job, which signs and notarizes the daemon's
 darwin binary and builds, signs, notarizes and staples Sheepdog.app on a
 GitHub-hosted Mac in the `release` environment
 (maintainer approval, `v*` tags only), followed by the `homebrew` job that
-pushes the formula and the cask to the tap ([signing.md](signing.md)). The `policy` CI
+pushes the formula, and the cask when the app signed and verified, to the tap
+([signing.md](signing.md)). The `policy` CI
 job (`scripts/workflow-policy.sh`, tested by
 `scripts/workflow-policy_test.sh`) fails if a macOS runner or `xcodebuild`
 appears anywhere else, including a `release.yml` job without

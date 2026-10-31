@@ -2,8 +2,9 @@
 
 The formula and the cask are published to the tap `kccarlos/homebrew-tap` as
 `Formula/sheepdog.rb` and `Casks/sheepdog-app.rb` by the `homebrew` job of
-`.github/workflows/release.yml`, after the darwin binary and Sheepdog.app are
-signed and notarized (docs/dev/signing.md):
+`.github/workflows/release.yml`, after the darwin binary is signed and
+notarized (docs/dev/signing.md). The cask moves only when Sheepdog.app was
+signed and verified; an app failure does not hold back the daemon formula:
 `brew install kccarlos/tap/sheepdog` and
 `brew install --cask kccarlos/tap/sheepdog-app`. The cask's token differs
 from the formula's because both live in one tap.
@@ -16,11 +17,11 @@ from the formula's because both live in one tap.
   version and the zip's sha256.
 - `render.sh [--cask] <tag>`: fills a template from the release's
   `checksums.txt` and prints the formula, or with `--cask` the cask.
-- `tap-update.sh <tap checkout> <formula> <cask> <tag>`: writes
-  `Formula/sheepdog.rb` and `Casks/sheepdog-app.rb`, adds a row for each to
-  the tap README's table once, and commits both as `sheepdog <version>` as
-  KC; it does not push. It fails, writing nothing, if only one of the two
-  differs from the tap.
+- `tap-update.sh <tap checkout> <formula> [<cask>] <tag>`: writes
+  `Formula/sheepdog.rb` and, when given, `Casks/sheepdog-app.rb`, adds their
+  rows to the tap README's table once, and commits them as `sheepdog
+  <version>` as KC; it does not push. It checks that every file it is given
+  belongs to `<tag>`.
 - `tap-update_test.sh`: tests both against a scratch repository (CI runs it).
 - `../../.goreleaser.yaml`: a draft goreleaser config that builds the same
   assets as release.yml; not used by CI.

@@ -75,12 +75,21 @@ out="$("$here/tap-update.sh" "$tap" "$work/sheepdog.rb" "$work/sheepdog-app.rb" 
 check "second run is a no-op" grep -q '^changed=false$' <<<"$out"
 check "no second commit" test "$(git -C "$tap" rev-list --count HEAD)" = 2
 
-# Only one of the two differs: fail and write nothing.
-{ cat "$work/sheepdog-app.rb"; echo '# changed'; } > "$work/cask2.rb"
-check "fails when only the cask would change" bash -c "! '$here/tap-update.sh' '$tap' '$work/sheepdog.rb' '$work/cask2.rb' v9.9.9"
-check "the tap is untouched by that" test -z "$(git -C "$tap" status --porcelain)"
+# The formula can move without the app, so a daemon release never waits for it.
+cask_before="$(sha256sum "$tap/Casks/sheepdog-app.rb")"
 { cat "$work/sheepdog.rb"; echo '# changed'; } > "$work/formula2.rb"
-check "fails when only the formula would change" bash -c "! '$here/tap-update.sh' '$tap' '$work/formula2.rb' '$work/sheepdog-app.rb' v9.9.9"
+out="$("$here/tap-update.sh" "$tap" "$work/formula2.rb" v9.9.9)"
+check "formula-only run reports a change" grep -q '^changed=true$' <<<"$out"
+check "formula-only run writes the formula" cmp -s "$work/formula2.rb" "$tap/Formula/sheepdog.rb"
+check "formula-only run leaves the cask alone" test "$(sha256sum "$tap/Casks/sheepdog-app.rb")" = "$cask_before"
+check "formula-only commit changes one Ruby file" test "$(git -C "$tap" show --name-only --format= HEAD | grep -c '\.rb$')" = 1
+
+# A later app release can move the cask with the formula.
+{ cat "$work/sheepdog-app.rb"; echo '# changed'; } > "$work/cask2.rb"
+out="$("$here/tap-update.sh" "$tap" "$work/formula2.rb" "$work/cask2.rb" v9.9.9)"
+check "formula and cask run reports a change" grep -q '^changed=true$' <<<"$out"
+check "formula and cask run updates the formula" cmp -s "$work/formula2.rb" "$tap/Formula/sheepdog.rb"
+check "formula and cask run updates the cask" cmp -s "$work/cask2.rb" "$tap/Casks/sheepdog-app.rb"
 check "fails on a cask for another tag" bash -c "! '$here/tap-update.sh' '$tap' '$work/sheepdog.rb' '$work/rc.rb' v9.9.9"
 
 check "rejects a bad tag" bash -c "! '$here/tap-update.sh' '$tap' '$work/sheepdog.rb' '$work/sheepdog-app.rb' 9.9.9"

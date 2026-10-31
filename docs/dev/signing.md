@@ -34,8 +34,9 @@ sign-macos (GitHub-hosted macos-15, environment: release)
    │                              Sheepdog-<version>-macos.zip added to the release and checksums.txt
    ▼
 homebrew (GitHub-hosted ubuntu-latest, environment: release)
-                                  render.sh (formula and --cask) → ruby -c → brew audit --strict →
-                                  commit Formula/sheepdog.rb and Casks/sheepdog-app.rb to
+                                  render.sh (formula; --cask when the app signed) → ruby -c →
+                                  brew audit --strict → commit Formula/sheepdog.rb, and
+                                  Casks/sheepdog-app.rb when the app signed, to
                                   kccarlos/homebrew-tap, push →
                                   brew install kccarlos/tap/sheepdog (Linux smoke test)
 ```
@@ -57,20 +58,22 @@ homebrew (GitHub-hosted ubuntu-latest, environment: release)
    --context context:primary-signature`, the check that works for a bare
    CLI binary; see [Checking a download](#checking-a-download)). The
    keychain and the key file are deleted in an always-run step.
-   After the daemon, the same job signs [Sheepdog.app](#sheepdogapp).
-3. **homebrew** renders `Formula/sheepdog.rb` and the cask
-   `Casks/sheepdog-app.rb` from the signed `checksums.txt` with
-   `packaging/homebrew/render.sh` (`--cask` for the cask), checks both with
-   `ruby -c` and the formula with `brew audit --strict` (casks need macOS,
-   so the cask has no audit in this job), and `packaging/homebrew/tap-update.sh`
-   commits both to `kccarlos/homebrew-tap` as one commit, `sheepdog <version>`
-   (author KC), together with a README table row for each the first time,
-   then pushes to the tap's `main`. `tap-update.sh` fails before writing
-   anything if only one of the two would change, and the job runs only if
-   both the daemon and the app were signed, so the tap never has a formula
-   without its cask or the reverse. A rerun with an unchanged formula and
-   cask commits nothing. It ends by installing the formula from the tap on
-   Linux and running `brew test`.
+   After the daemon, the same job signs [Sheepdog.app](#sheepdogapp). Those
+   app steps are allowed to fail: the job records `app_signed=false`, warns
+   in the annotation and job summary that the app was not shipped, and still
+   succeeds so the daemon can be released.
+3. **homebrew** runs whenever the daemon signing succeeded. It renders
+   `Formula/sheepdog.rb` from the signed `checksums.txt` with
+   `packaging/homebrew/render.sh`, checks it with `ruby -c` and
+   `brew audit --strict`, and has `packaging/homebrew/tap-update.sh` commit
+   it to `kccarlos/homebrew-tap` as `sheepdog <version>` (author KC), adding
+   a README table row the first time. When `app_signed` is true it also
+   renders the cask with `render.sh --cask`, syntax-checks it (casks need
+   macOS, so it has no audit in this job), and passes it to `tap-update.sh`
+   in the same commit, adding its README row the first time. A formula-only
+   update leaves the existing cask untouched. A rerun with unchanged files
+   commits nothing. It ends by installing the formula from the tap on Linux
+   and running `brew test`.
 
 Both sign-macos and homebrew run in the `release` environment, so a run
 asks for approval twice: once before signing, and again when homebrew
@@ -146,7 +149,8 @@ gh workflow run release.yml --ref v0.1.1 -f tag=v0.1.1
 ```
 
 `release-sign.sh` is idempotent: an already signed and notarized tarball
-is left alone, and the homebrew job then only re-publishes the formula.
+is left alone. The homebrew job republishes the formula, and the cask when
+the app is signed and verified.
 
 GitHub runs the workflow file **as it is at the dispatched ref**. Tags
 created before this workflow had `workflow_dispatch` (v0.1.0) cannot be
@@ -408,8 +412,8 @@ runs.
 | sign-macos skipped with a notice | `OP_SERVICE_ACCOUNT_TOKEN` is not set in the `release` environment |
 | dispatch refused by the environment | the run was not dispatched on a `v*` tag ref |
 | sign-macos: the app step fails at `xcodebuild archive` | the newest Xcode on the macos-15 image is too old for the project's SDK floor (iOS 26 / macOS 14 targets); the log shows `xcodebuild -version` |
-| homebrew skipped after sign-macos succeeded for the daemon | the app step failed (`app_signed` is unset): fix it and re-dispatch; the tap is never updated with only one of formula and cask |
-| homebrew: `only the cask would change` | the formula and the cask in the tap disagree about being current; update the stale one by hand (`packaging/homebrew/README.md`) |
+| `Sheepdog.app not shipped` warning | an app-specific step failed; the daemon release and its Homebrew formula continue. Fix the app and re-dispatch to add or update the cask |
+| `Sheepdog.app cask not published` warning | the app signed but the cask could not be rendered; the daemon formula still publishes. Fix the cask and re-dispatch |
 | homebrew: push rejected (403) | `homebrew-tap-token` expired or lacks Contents write on the tap |
 | `sha256 mismatch` | the release asset does not match its `checksums.txt`; do not sign it, rebuild the release |
 

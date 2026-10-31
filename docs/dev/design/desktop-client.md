@@ -324,7 +324,9 @@ and implements the protocol `VoiceEngine` already drives.
   a "Sheepdog.app" section; "No entitlements" stays true for the daemon.
 - **Cask** next to the existing formula in the tap: `app "Sheepdog.app"`, a
   minimum macOS version, `zap` for preferences. The formula keeps the daemon;
-  an `.app` in a formula is awkward. The release job updates both, and
+  an `.app` in a formula is awkward. The release job updates the formula
+  whenever the daemon signed, and the cask only when the app signed and
+  verified; an app failure warns but never holds back the daemon.
   `brew install --cask kccarlos/tap/sheepdog-app` puts the app in
   `/Applications`, where the panel looks. The token is `sheepdog-app`, not
   `sheepdog`: the formula already has that name.
@@ -536,8 +538,9 @@ planned here): the loopback proxy and computer switcher, a pairing code.
   prevent duplicates; PR 12 checks by reloading twice. herdr-app is young: the
   README names the version tested.
 - **Homebrew cask.** A notarized `.app` in a cask and Gatekeeper's first run.
-  One script updates formula and cask together and the job fails if only one
-  moved, so they cannot disagree on versions.
+  Formula and cask can temporarily be for different releases when the app
+  step fails; the daemon release still completes and the job summary warns
+  that Sheepdog.app was not shipped.
 - **Mic grant fragility.** A changed bundle id or team resets the grant;
   ad-hoc development builds are another identity and prompt again.
 - **Launching.** `open sheepdog://talk` could be taken by the iOS app if it
