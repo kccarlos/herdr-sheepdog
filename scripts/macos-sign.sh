@@ -11,6 +11,9 @@
 # Environment:
 #   SIGN_IDENTITY_MATCH    substring the identity must contain
 #                          (default "Developer ID Application")
+#   SIGN_ENTITLEMENTS      entitlements plist for `sign` (default none: the
+#                          daemon needs none; scripts/release-sign-app.sh
+#                          passes Sheepdog.app's)
 #   SIGN_KEYCHAIN          keychain to look in (default: the user's search
 #                          list, i.e. the login keychain)
 #   SIGN_ALLOW_UNTRUSTED=1 also accept identities that do not chain to a
@@ -65,10 +68,12 @@ msign_sign() {
   [[ -z "${SIGN_KEYCHAIN:-}" ]] && echo "macos-sign: (the first time, macOS asks to let codesign use the key: enter the login password, then Always Allow)"
 
   # Hardened runtime (required for notarization) and a secure timestamp.
-  # The binary is pure Go (CGO_ENABLED=0), so it needs no entitlements.
-  local -a kc=()
+  # The daemon is pure Go (CGO_ENABLED=0), so it needs no entitlements;
+  # Sheepdog.app passes its own through SIGN_ENTITLEMENTS.
+  local -a kc=() ent=()
   [[ -n "${SIGN_KEYCHAIN:-}" ]] && kc=(--keychain "$SIGN_KEYCHAIN")
-  codesign --sign "$hash" ${kc[@]+"${kc[@]}"} --options runtime --timestamp --force "$bin"
+  [[ -n "${SIGN_ENTITLEMENTS:-}" ]] && ent=(--entitlements "$SIGN_ENTITLEMENTS")
+  codesign --sign "$hash" ${kc[@]+"${kc[@]}"} ${ent[@]+"${ent[@]}"} --options runtime --timestamp --force "$bin"
 
   codesign --verify --strict --verbose=2 "$bin"
   codesign --display --verbose=2 "$bin" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp|CodeDirectory)' || true

@@ -324,9 +324,12 @@ and implements the protocol `VoiceEngine` already drives.
   a "Sheepdog.app" section; "No entitlements" stays true for the daemon.
 - **Cask** next to the existing formula in the tap: `app "Sheepdog.app"`, a
   minimum macOS version, `zap` for preferences. The formula keeps the daemon;
-  an `.app` in a formula is awkward. The release job updates both, and
-  `brew install --cask sheepdog` puts the app in `/Applications`, where the
-  panel looks.
+  an `.app` in a formula is awkward. The release job updates the formula
+  whenever the daemon signed, and the cask only when the app signed and
+  verified; an app failure warns but never holds back the daemon.
+  `brew install --cask kccarlos/tap/sheepdog-app` puts the app in
+  `/Applications`, where the panel looks. The token is `sheepdog-app`, not
+  `sheepdog`: the formula already has that name.
 - The bundle id and team never change; the mic grant is tied to them.
 
 ## 6. The panel
@@ -438,7 +441,7 @@ and commands, with `exec` and the file check passed in; no herdr imports),
 |---|---|---|
 | Daemon down | connect refused, no SSE, no poll | "Sheepdog isn't running", the start command, retry timer. |
 | Setup needed | `/api/state` voice `problem` set | The daemon's words and a button to Settings. |
-| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check, every 30 s), and nobody holds the voice | Voice buttons off; "brew install --cask sheepdog-app" in a box. Text still works. With the phone holding the voice its controls still work (the daemon relays them) and only **Use here** is off. |
+| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check, every 30 s), and nobody holds the voice | Voice buttons off; "brew install --cask kccarlos/tap/sheepdog-app" in a box. Text still works. With the phone holding the voice its controls still work (the daemon relays them) and only **Use here** is off. |
 | Sheepdog.app not running | installed, no `voice.client` | "Talk" runs `open sheepdog://talk`. |
 | Voice elsewhere | `voice.client.platform` is another device | "Voice on iPhone" and **Use here**; Mute, Stop and hold-to-talk go to the phone. |
 | No voice client | a voice control answered 409 | "No voice is connected" and **Use here**. |
@@ -535,8 +538,9 @@ planned here): the loopback proxy and computer switcher, a pairing code.
   prevent duplicates; PR 12 checks by reloading twice. herdr-app is young: the
   README names the version tested.
 - **Homebrew cask.** A notarized `.app` in a cask and Gatekeeper's first run.
-  One script updates formula and cask together and the job fails if only one
-  moved, so they cannot disagree on versions.
+  Formula and cask can temporarily be for different releases when the app
+  step fails; the daemon release still completes and the job summary warns
+  that Sheepdog.app was not shipped.
 - **Mic grant fragility.** A changed bundle id or team resets the grant;
   ad-hoc development builds are another identity and prompt again.
 - **Launching.** `open sheepdog://talk` could be taken by the iOS app if it
