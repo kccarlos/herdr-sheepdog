@@ -36,18 +36,20 @@ func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps
 	}
 	a.log.Log("daemon", "daemon.herdr_backend", "", map[string]any{"backend": kind, "reason": reason, "socket": socket})
 	if kind == config.HerdrBackendHC {
-		return core, hcTerm(core)
+		return core, hcTerm(core, cfg.Supervisor.ProjectRoots)
 	}
 	return old, herdrTerm(cfg, old)
 }
 
 // hcTerm is herdr-core's live terminal: one framed attach stream per
-// channel, listed only while the core can attach. There is no phone
-// shell (it opens a herdr workspace).
-func hcTerm(core *herdrcore.Backend) *web.TermDeps {
+// channel, listed only while the core can attach. Its phone shells use the
+// backend's existing space for the folder, or a new one.
+func hcTerm(core *herdrcore.Backend, roots []string) *web.TermDeps {
 	return &web.TermDeps{
-		Check: core.TermReady,
-		Off:   hcTermOff,
+		Check:        core.TermReady,
+		Off:          hcTermOff,
+		Shells:       shellHost(core),
+		ProjectRoots: roots,
 		Start: func(ctx context.Context, o herdr.BridgeOptions) (web.TermBridge, error) {
 			b, err := core.StartBridge(ctx, o)
 			if err != nil {
@@ -56,6 +58,13 @@ func hcTerm(core *herdrcore.Backend) *web.TermDeps {
 			return b, nil
 		},
 	}
+}
+
+// shellHost finds the phone-shell half of a backend the same way for both
+// implementations.
+func shellHost(backend herdr.Backend) web.ShellHost {
+	h, _ := backend.(web.ShellHost)
+	return h
 }
 
 // pinger is the liveness check chooseBackend asks each backend.

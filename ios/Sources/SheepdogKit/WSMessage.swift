@@ -10,7 +10,7 @@ import Foundation
 /// `playback`, `drain`, `cancel`, `text`, `ping`, `screen-subscribe`,
 /// `screen-unsubscribe`, `visibility`.
 /// Server → client: `bot-ready`, `flush`, `status`, `transcript`, `error`,
-/// `pong`, `screen`, `screen-error`, `card`.
+/// `pong`, `screen`, `screen-error`, `card`, `voice-command`.
 public struct WSMessage: Codable, Equatable, Sendable {
     /// Message type discriminator. Mirrors `wsproto.Type*`.
     public enum Kind: String, Codable, Sendable {
@@ -28,6 +28,18 @@ public struct WSMessage: Codable, Equatable, Sendable {
         /// Cards (feature `cards`): whether the screen can be seen, and
         /// something the orchestrator put on it.
         case visibility, card
+        /// Another client of the daemon controls this one's voice (`stop`,
+        /// hold-to-talk; docs/dev/ws-contract.md). The iPhone app ignores
+        /// it; Sheepdog.app implements it.
+        case voiceCommand = "voice-command"
+    }
+
+    /// What a `voice-command` asks for. Mirrors `wsproto.Action*`.
+    public enum VoiceAction: String, Codable, Sendable {
+        /// The speech was cut: drop what plays.
+        case stop
+        /// Hold-to-talk: `on` opens the microphone, off closes it.
+        case ptt
     }
 
     /// Who is talking, on `client-ready` (docs/ws-contract.md "Protocol
@@ -45,9 +57,18 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
         /// This app: "sheepdog-ios", "0.1.0 (10)", "ios".
         public static func app(bundle: Bundle = .main) -> ClientInfo {
+            ClientInfo(name: "sheepdog-ios", version: version(of: bundle), platform: "ios")
+        }
+
+        /// Sheepdog.app: "sheepdog-mac", "0.1.0 (1)", "macos".
+        public static func mac(bundle: Bundle = .main) -> ClientInfo {
+            ClientInfo(name: "sheepdog-mac", version: version(of: bundle), platform: "macos")
+        }
+
+        private static func version(of bundle: Bundle) -> String {
             let short = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
             let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-            return ClientInfo(name: "sheepdog-ios", version: "\(short) (\(build))", platform: "ios")
+            return "\(short) (\(build))"
         }
     }
 
@@ -91,7 +112,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var client: ClientInfo?
     public var daemon: DaemonInfo?
     public var features: [String]?
-    /// `mute` / `silence` / `speaking`.
+    /// `mute` / `silence` / `speaking`, and `voice-command` `ptt`.
     public var on: Bool?
     /// `playback`: what the player did, and the milliseconds of the run
     /// actually played, in stream time (24 kHz audio consumed, not wall
@@ -154,6 +175,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var voiceScreen: Bool?
     /// `card`: what the orchestrator put on the screen.
     public var card: ScreenCard?
+    /// `voice-command`: what is asked (`on` says whether `ptt` talks).
+    public var action: VoiceAction?
 
     enum CodingKeys: String, CodingKey {
         case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
@@ -168,7 +191,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case audioState = "audio_state"
         case paneID = "pane_id"
         case lines, ansi, screen, ended
-        case visible, card
+        case visible, card, action
         case voiceScreen = "voice_screen"
     }
 
@@ -208,7 +231,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         ended: Bool? = nil,
         visible: Bool? = nil,
         voiceScreen: Bool? = nil,
-        card: ScreenCard? = nil
+        card: ScreenCard? = nil,
+        action: VoiceAction? = nil
     ) {
         self.type = type
         self.protocol = `protocol`
@@ -246,6 +270,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.visible = visible
         self.voiceScreen = voiceScreen
         self.card = card
+        self.action = action
     }
 
     // MARK: - Client → server constructors
@@ -340,6 +365,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         WSMessage(type: .screenError, message: message, paneID: paneID, ended: ended)
     }
     public static func card(_ card: ScreenCard) -> WSMessage { WSMessage(type: .card, card: card) }
+    public static let voiceStop = WSMessage(type: .voiceCommand, action: .stop)
+    public static func voicePTT(_ on: Bool) -> WSMessage { WSMessage(type: .voiceCommand, on: on, action: .ptt) }
 
     // MARK: - Wire format
 
@@ -410,6 +437,15 @@ public struct WSMessage: Codable, Equatable, Sendable {
             if visible == nil { throw WSMessageError.missingField("visibility", "visible") }
         case .card:
             if (card?.cardID ?? "").isEmpty { throw WSMessageError.missingField("card", "card") }
+        case .voiceCommand:
+            switch action {
+            case .stop?:
+                break
+            case .ptt?:
+                if on == nil { throw WSMessageError.missingField("voice-command", "on") }
+            case nil:
+                throw WSMessageError.badValue("voice-command", "action")
+            }
         case .cancel, .ping, .flush, .pong, .screenUnsubscribe:
             break
         }

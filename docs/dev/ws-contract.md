@@ -41,14 +41,17 @@ binary version.
 |---|---|
 | 1 | Everything in this document (the contract as of the handshake's introduction, plus the handshake itself). |
 
-- **`GET /api/hello`** carries `protocol` (what the daemon speaks) and
-  `min_protocol` (the oldest client protocol it still serves), so a
-  client can tell before it connects.
+- **`GET /api/hello`** carries `protocol` (what the daemon speaks),
+  `min_protocol` (the oldest client protocol it still serves), and `shell`
+  (whether the phone shell is offered now), so a client can tell before it
+  connects. `shell` is false without a working live terminal or with the
+  shell switch off.
 - **`client-ready`.** Every client sends this as its **first text
   frame**, before `mute`, `silence`, `speaking` or any audio:
 
   ```json
   {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}
+  {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-mac","version":"0.1.0 (1)","platform":"macos"}}
   {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-voice","version":"embedded","platform":"web"}}
   ```
 
@@ -876,7 +879,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true,"shell":true|false}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
@@ -1515,6 +1518,33 @@ Not part of `/ws`: the iOS app registers its APNs device token over
 events that need the user, whether or not a `/ws` client is attached.
 The contract (routes, payload, when an alert is sent) is in
 [`push.md`](push.md).
+
+### Desktop notifications
+
+Sheepdog.app uses the same `GET /events` stream for local macOS notifications;
+there is no desktop push registration. It notifies for an answerable
+`pending.created` (the title is the agent and the body is
+`PendingAction.displaySummary`), a `herdr.transition` from `working` to `done`
+or `idle` (`"<agent> finished."`), and a failed or unexpectedly closed voice
+session (`voice.connect_error`, `voice.session_error`, `daemon.voice_error`,
+`daemon.voice_provider_error`, or a `voice.closed` other than `shutdown`,
+`replaced`, and `voice_off`). The voice wording comes from `LocalNotice`, so
+it matches the phone's own notice text.
+
+The app asks for notification permission when the first such event arrives,
+not at launch. Until the panel reports whether it is visible, the stand-in is
+the voice state: while this Mac holds `/ws` and the client's existing
+microphone speech detector (`core.mic.speaking`) says the user is talking,
+the event does not become a notification. Clicking one runs
+`herdr-app do mod.open --name sheepdog` through the same panel opener as the
+menu.
+
+The global shortcut is local to Sheepdog.app, not part of this protocol. It
+uses Carbon's `RegisterEventHotKey` on Option+Space by default (Control+Space
+and Control+Option+Space are the other fixed choices), with no Accessibility
+permission. Key-down starts push-to-talk; a release at or after 300 ms ends
+it, while a shorter release also toggles mute. The choice is stored in the
+app's `UserDefaults` as `hotkey.shortcut`.
 
 ## Non-goals
 
