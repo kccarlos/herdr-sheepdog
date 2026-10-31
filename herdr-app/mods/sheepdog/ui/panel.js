@@ -3,7 +3,7 @@
 // voice, a banner for the states that replace or qualify the timeline (daemon
 // down, setup needed, live updates paused), the list, the open questions and
 // the composer at the bottom; a card or the questions can open over the list.
-// The voice controls and Settings are later PRs.
+// Settings, pairing, agent details and New conversation have their own overlays.
 
 import { div, list } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar } from "gpui-base";
@@ -20,7 +20,7 @@ export const WINDOW = { width: 420, height: 640 };
 // The header: the logo, the voice (and who holds it), and the window's own
 // controls. A press the mod does not stop drags the window, so the controls
 // stop it.
-function header(t, status, { technical, onToggleTechnical, onClose }) {
+function header(t, status, { technical, onToggleTechnical, onMenu, onClose }) {
   const stop = (_e, cx) => cx.stop_propagation();
   const control = (id, label, onClick) =>
     div().id(id).px(8).h(24).flex().items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted).hover((s) => s.bg(t.hover)).on_mouse_down("left", stop).on_click(onClick).child(label);
@@ -53,6 +53,7 @@ function header(t, status, { technical, onToggleTechnical, onClose }) {
       el.child(div().px(8).h(20).flex().items_center().rounded(10).bg(t.blocked).text_size(11).font_semibold().text_color(t.solid_foreground).child(`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`)),
     )
     .child(control("technical", technical ? "Hide technical" : "Technical", onToggleTechnical))
+    .child(control("menu", "⋯", onMenu))
     .when(Boolean(onClose), (el) => el.child(control("close", "✕", onClose)));
 }
 
@@ -120,7 +121,7 @@ function empty(t, text) {
 // onAnswer, onOpen } for the floating questions (ui/questions.js). `sheet`:
 // what is open over the list, or null: { type: "card", card, note, onFocus,
 // onClose } or { type: "questions", onClose }.
-export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, sheet, onSetup, onToggleTechnical, onClose, onEndShown, onOpenRow }) {
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, sheet, onSetup, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
   const up = status.phase === "ok" || status.phase === "setup";
   let body;
   if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
@@ -135,7 +136,7 @@ export function panelView(t, { status, entries, paging, technical, retryMs, comp
     .id("sheepdog-panel")
     .size_full()
     .bg(t.chrome)
-    .child(header(t, status, { technical, onToggleTechnical, onClose }))
+    .child(header(t, status, { technical, onToggleTechnical, onMenu, onClose }))
     .when(status.phase === "setup", (el) => el.child(setup(t, status, onSetup)))
     .when(status.paused && status.phase !== "down", (el) => el.child(div().w_full().px(12).pt(8).child(paused(t))))
     .child(body)

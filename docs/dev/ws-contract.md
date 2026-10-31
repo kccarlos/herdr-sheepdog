@@ -1002,8 +1002,7 @@ answer a question by tap. All three need a paired device under "Auth".
   `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
   `source`, `pane`, and `type` filters behave as before. `GET /api/events`
   accepts the same filters. The herdr-app panel (`herdr-app/mods/sheepdog`,
-  a client of this section, `GET /api/state` and two POSTs, `/api/turn` and
-  `/api/pending/answer`, over loopback, never `/ws`) asks for
+  a client of this section, over loopback, never `/ws`) asks for
   `kinds=card,conversation,daemon,pending,voice,web`
   and `since=<newest conversation item id>`, sends `Last-Event-ID` on a
   reconnect, reads the stream over a raw socket (so it de-chunks the HTTP
@@ -1011,9 +1010,15 @@ answer a question by tap. All three need a paired device under "Auth".
   40 s and it reconnects. An event tells it to ask `GET /api/state`
   and `GET /api/conversation` again; the one payload it reads is a
   `voice.tool_result` of `to_supervisor`, whose `options` are the suggested
-  replies it offers (the conversation items do not carry them). Every POST
-  it makes has an `Idempotency-Key`; it reuses the key only when a send got
-  no answer, because the daemon keeps a refusal under its key too.
+  replies it offers (the conversation items do not carry them). Its overlays
+  use the same daemon routes as the phone: Settings reads and changes the
+  voice and orchestrator models, languages and chattiness, lists and removes
+  paired devices, and shows `/api/state`'s update notice; Pair a phone reads
+  `/api/pair` and `/api/pair/qr.json`; agent details read `/api/agents`.
+  It makes three POSTs, each with an `Idempotency-Key`: `/api/turn`,
+  `/api/pending/answer` and `/api/conversation/reset {"via":"app"}` after a
+  confirmation. It reuses a typed line's key only when the send got no
+  answer, because the daemon keeps a refusal under its key too.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most
