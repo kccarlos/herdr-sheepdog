@@ -146,3 +146,15 @@ test("an answer that is not sheepdog's says what it was", async () => {
   assert.equal(store.getState().daemon, "down");
   assert.match(store.getState().detail, /not sheepdog/);
 });
+
+test("observed events keep the orchestrator's replies, and tell subscribers only when one changed", () => {
+  const store = createStore({ http: fakeHttp(), now: () => 0 });
+  let heard = 0;
+  store.subscribe(() => heard++);
+  const result = { type: "voice.tool_result", payload: { name: "to_supervisor", spoken: "Shall I?", options: ["Yes"] } };
+  store.observe(result, 10);
+  store.observe({ type: "voice.push", payload: {} }, 11);
+  store.observe(result, 10);
+  assert.deepEqual(store.getState().replies, [{ id: 10, options: ["Yes"], pending: false }]);
+  assert.equal(heard, 1);
+});

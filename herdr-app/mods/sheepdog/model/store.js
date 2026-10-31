@@ -4,6 +4,7 @@
 // something changed; it never draws. No herdr imports: node tests it.
 
 import { applyNewest, applyOlder, canLoadOlder, emptyHistory, newestId } from "./history.js";
+import { foldReply } from "./replies.js";
 
 // How many items one page asks for.
 export const PAGE_SIZE = 50;
@@ -18,6 +19,7 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     detail: "", // why it is down
     stream: "connecting", // connecting | live | down
     loadingOlder: false,
+    replies: [], // the orchestrator's replies seen on the stream (model/replies.js)
   };
   const listeners = new Set();
   let running = null; // the refresh loop in flight
@@ -98,6 +100,11 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     refresh,
     loadOlder,
     setStream: (stream) => set({ stream }),
+    // A daemon event, for what only its payload says: the suggested replies.
+    observe(event, id) {
+      const replies = foldReply(snapshot.replies, event, id);
+      if (replies !== snapshot.replies) set({ replies });
+    },
     newestId: () => newestId(snapshot.history),
   };
 }

@@ -3,6 +3,8 @@
 // changes what the panel shows makes the store ask /api/state and
 // /api/conversation again; while the stream is down a 3 s poll does the same,
 // and the stream's status is what the rail reads as "Live updates paused".
+// Each event is also handed to the store's `observe`, for the replies'
+// suggested options, which only the event's payload has.
 // Takes `connect` and the clock as arguments, no herdr imports: node tests it.
 
 import { eventEffect, KINDS } from "../model/events.js";
@@ -47,7 +49,8 @@ export function createLive({ store, connect, endpoint, clock, kinds = KINDS }) {
     if (mine === settle && !stopped) await request(what);
   }
 
-  function onEvent(event) {
+  function onEvent(event, id) {
+    store.observe(event, id);
     switch (eventEffect(event.type)) {
       case "now": request(ALL); break;
       case "state": request({ state: true, conversation: false }); break;
