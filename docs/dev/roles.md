@@ -132,6 +132,13 @@ instruction send path (its menu guard included); it is dropped
 (`supervisor.spawn_instruction_dropped`) if the agent never gets there
 within ten minutes.
 
+On herdr-core there is no `agent.start`: the backend types the kind's
+command into a shell terminal it opened kept and labelled with the
+space and tab herdr-app shows it in (a split joins the space of the
+pane it is given as a new tab; a new workspace gets fresh ids), so the
+agent appears in herdr-app
+([design](design/herdr-core-backend.md#spaces-without-the-document)).
+
 Rails (authorisation and runaways, not judgement):
 - the user's own recent words must be behind it: the newest
   recorded input, said or typed (a tap on a question does not count),
