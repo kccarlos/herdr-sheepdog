@@ -5,6 +5,8 @@ import {
   addLanguage,
   askToRemoveDevice,
   beginSettingsAction,
+  brainProviderGroups,
+  brainSelectionMatches,
   cancelDeviceRemoval,
   defaultBrainModel,
   emptySettingsForm,
@@ -83,6 +85,50 @@ test("brain choices put recommended models first and keep an unlisted current mo
   assert.equal(defaultBrainModel({ models_provider: "deepseek", models: [{ name: "first" }, { name: "best", recommended: true }] }, "deepseek"), "best");
   assert.equal(defaultBrainModel({ model: "old", models_provider: "openai", models: [{ name: "first" }] }, "openai"), "first");
   assert.equal(defaultBrainModel({ models_provider: "deepseek", error: "catalog down", models: [{ name: "first" }] }, "deepseek"), "");
+});
+
+test("brain choices group models under providers and check only the current pair", () => {
+  const brain = {
+    provider: "fake",
+    model: "fake-reflex",
+    models_provider: "fake",
+    providers: [
+      { id: "fake", label: "Fake" },
+      { id: "fake2", label: "Fake 2" },
+      { id: "openai", label: "OpenAI", available: false, reason: "no OPENAI_API_KEY" },
+    ],
+    models: [
+      { name: "gemini-3.8-flash", display_name: "Gemini 3.8 Flash", recommended: true },
+      { name: "fake-reflex", display_name: "Scripted reflex (no network)" },
+    ],
+  };
+  const groups = brainProviderGroups(brain);
+  assert.deepEqual(groups.map((group) => group.label), ["Fake", "Fake 2", "OpenAI"]);
+  assert.deepEqual(groups[0].models.map((model) => model.name), ["gemini-3.8-flash", "fake-reflex"]);
+  assert.deepEqual(groups.flatMap((group) => group.models).filter((model) => model.selected).map((model) => `${model.provider}/${model.name}`), ["fake/fake-reflex"]);
+  assert.equal(brainSelectionMatches(brain, "fake", "fake-reflex"), true);
+  assert.equal(brainSelectionMatches(brain, "fake2", "fake-reflex"), false);
+  assert.equal(groups[2].selectable, false);
+  assert.equal(groups[2].reason, "no OPENAI_API_KEY");
+  assert.deepEqual(groups[2].models, []);
+});
+
+test("switching provider moves the one checked row into that provider's group", () => {
+  const brain = {
+    provider: "fake2",
+    model: "deepseek-flash",
+    models_provider: "fake2",
+    providers: [{ id: "fake", label: "Fake" }, { id: "fake2", label: "Fake 2" }],
+    models: [
+      { name: "deepseek-flash", recommended: true },
+      { name: "fake-reflex" },
+    ],
+  };
+  const groups = brainProviderGroups(brain);
+  assert.deepEqual(groups[0].models, []);
+  assert.deepEqual(groups[1].models.filter((model) => model.selected).map((model) => model.name), ["deepseek-flash"]);
+  assert.equal(brainSelectionMatches(brain, "fake2", "deepseek-flash"), true);
+  assert.equal(brainSelectionMatches(brain, "fake", "deepseek-flash"), false);
 });
 
 test("provider detail and update notices say what the daemon reported", () => {

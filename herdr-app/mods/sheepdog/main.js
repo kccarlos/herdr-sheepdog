@@ -30,6 +30,7 @@ import {
   addLanguage,
   askToRemoveDevice,
   beginSettingsAction,
+  brainSelectionMatches,
   cancelDeviceRemoval,
   defaultBrainModel,
   emptySettingsForm,
@@ -221,7 +222,7 @@ export default class Sheepdog extends View {
   }
 
   async chooseBrainModel(provider, model, cx) {
-    if (this.settingsForm.busy || model === this.settingsForm.brain?.model) return;
+    if (this.settingsForm.busy || brainSelectionMatches(this.settingsForm.brain, provider, model)) return;
     this.setSettings(beginSettingsAction(this.settingsForm, "brain"), cx);
     try {
       const brain = await this.http.setBrainModel(provider, model);

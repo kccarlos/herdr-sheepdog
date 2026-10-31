@@ -110,6 +110,43 @@ export function orderedBrainModels(brain) {
   return [...recommended, ...current, ...rest];
 }
 
+// The daemon reports one provider's model catalog at a time. Put that
+// catalog under its provider heading and leave the other providers as
+// headings to switch through. Only the daemon's exact current pair is checked.
+export function brainProviderGroups(brain) {
+  const currentProvider = String(brain?.provider || "");
+  const catalogProvider = String(brain?.models_provider || "");
+  let providers = Array.isArray(brain?.providers) ? brain.providers : [];
+  if (currentProvider && !providers.some((provider) => String(provider?.id || "") === currentProvider)) {
+    providers = [...providers, { id: currentProvider, label: currentProvider, available: true }];
+  }
+  return providers.map((provider) => {
+    const id = String(provider?.id || "");
+    const available = provider?.available !== false;
+    const models = available && id === catalogProvider
+      ? orderedBrainModels(brain).map((model) => ({
+        ...model,
+        provider: id,
+        selected: brainSelectionMatches(brain, id, model?.name),
+      }))
+      : [];
+    return {
+      id,
+      label: String(provider?.label || id),
+      available,
+      selectable: available,
+      reason: String(provider?.reason || ""),
+      current: id === currentProvider,
+      models,
+    };
+  });
+}
+
+export function brainSelectionMatches(brain, provider, model) {
+  return String(brain?.provider || "") === String(provider || "") &&
+    String(brain?.model || "") === String(model || "");
+}
+
 // The model to try after a provider-only catalog request, as the phone does:
 // its first recommended model, else its first. A failed catalog is no choice.
 export function defaultBrainModel(brain, provider) {

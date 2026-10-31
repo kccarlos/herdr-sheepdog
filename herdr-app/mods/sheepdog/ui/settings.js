@@ -6,8 +6,8 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import {
+  brainProviderGroups,
   languageChoices,
-  orderedBrainModels,
   updateNotice,
   voiceProviderDetail,
 } from "../model/settings.js";
@@ -64,37 +64,64 @@ function voiceSection(t, form, actions) {
   });
 }
 
+function brainProviderHeading(t, form, group, actions) {
+  const canSwitch = group.available && !group.current && !form.busy;
+  return h_flex()
+    .id(`settings-brain-provider-${group.id}`)
+    .w_full()
+    .min_h(32)
+    .px(9)
+    .py(5)
+    .gap(8)
+    .items_center()
+    .rounded(7)
+    .bg(group.current ? t.selected : t.raised)
+    .border(1)
+    .border_color(group.current ? t.accent : t.border)
+    .when(canSwitch, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => actions.brainProvider(group.id, cx)))
+    .when(!group.available, (el) => el.opacity(0.52))
+    .child(
+      v_flex()
+        .flex_1()
+        .min_w(0)
+        .gap(1)
+        .child(div().text_size(11.5).font_semibold().text_color(group.available ? t.foreground : t.muted).child(group.label))
+        .when(Boolean(group.reason), (el) => el.child(div().text_size(11).text_color(t.muted).child(`Unavailable — ${group.reason}`))),
+    )
+    .child(
+      div()
+        .flex_none()
+        .text_size(11)
+        .font_semibold()
+        .text_color(group.current ? t.accent : t.muted)
+        .child(group.current ? "Current" : group.available ? "Choose" : ""),
+    );
+}
+
 function brainSection(t, form, actions) {
   const brain = form.brain;
   const rows = [];
   if (!brain) {
     rows.push(mutedText(t, form.errors.brain || "Loading orchestrator models…"));
   } else {
-    for (const provider of brain.providers || []) {
-      const id = String(provider.id || "");
-      rows.push(
-        choice(t, `settings-brain-provider-${id}`, {
-          title: provider.label || id,
-          detail: provider.available === false ? (provider.reason ? `Unavailable — ${provider.reason}` : "Unavailable") : "",
-          selected: id === brain.provider,
-          disabled: provider.available === false || Boolean(form.busy),
-          onClick: (_e, cx) => actions.brainProvider(id, cx),
-        }),
-      );
-    }
-    const models = orderedBrainModels(brain);
-    if (models.length === 0) rows.push(mutedText(t, "No models were discovered for this provider."));
-    for (const model of models) {
-      const name = String(model.name || "");
-      rows.push(
-        choice(t, `settings-brain-model-${name}`, {
-          title: model.display_name || name,
-          detail: model.recommended ? "Recommended" : "",
-          selected: name === brain.model,
-          disabled: Boolean(form.busy),
-          onClick: (_e, cx) => actions.brainModel(brain.provider, name, cx),
-        }),
-      );
+    const groups = brainProviderGroups(brain);
+    for (const group of groups) {
+      rows.push(brainProviderHeading(t, form, group, actions));
+      for (const model of group.models) {
+        const name = String(model.name || "");
+        rows.push(
+          choice(t, `settings-brain-model-${group.id}-${name}`, {
+            title: model.display_name || name,
+            detail: model.recommended ? "Recommended" : "",
+            selected: model.selected,
+            disabled: Boolean(form.busy),
+            onClick: (_e, cx) => actions.brainModel(group.id, name, cx),
+          }),
+        );
+      }
+      if (group.current && group.models.length === 0 && !brain.error) {
+        rows.push(mutedText(t, "No models were discovered for this provider."));
+      }
     }
     if (brain.error) rows.push(mutedText(t, `Model list not fresh: ${brain.error}`));
   }
