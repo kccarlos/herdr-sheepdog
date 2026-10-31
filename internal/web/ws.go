@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,13 @@ type hub struct {
 	// the turn's end owes it an empty final fragment (the clients' only
 	// boundary for the voice's reply besides the next `in` and a flush).
 	outOpen bool
+	// turnOut is the out transcript of the model turn in progress (empty
+	// between turns) and turnHeard how much of it, in bytes, the client
+	// has acknowledged by a drained playback report; handedOff: the turn's
+	// unheard part was already handed to the push queue (handoff).
+	turnOut   string
+	turnHeard int
+	handedOff bool
 }
 
 func newHub(s *Server) *hub {
@@ -193,13 +201,18 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	c.gone = true
 	last := h.client == c
+	var rest string
 	if last {
 		h.client = nil
+		rest = h.takeUnheardLocked()
 		h.clientInfo = nil
 	}
 	h.mu.Unlock()
 	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
 		ca.ClientAttached(false)
+	}
+	if last {
+		h.handoff(rest, "detach")
 	}
 }
 
@@ -214,6 +227,10 @@ func (h *hub) attach(c *client) bool {
 	}
 	old := h.client
 	h.client = c
+	var rest string
+	if old != nil {
+		rest = h.takeUnheardLocked()
+	}
 	h.clientInfo = nil
 	// docs/dev/ws-contract.md: "reconnecting clients start unmuted" — a new
 	// client's mic is never silenced by whatever the previous client left
@@ -227,6 +244,7 @@ func (h *hub) attach(c *client) bool {
 	if old != nil {
 		old.enqueue(controlFrame(h.closedStatus("replaced")))
 		old.closeAfterFlush(websocket.StatusNormalClosure, "replaced")
+		h.handoff(rest, "replaced")
 	}
 	if ca, ok := h.s.deps.Voice.(clientAttacher); ok {
 		ca.ClientAttached(true)
@@ -297,6 +315,9 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.send(h.statusMsg())
 		h.voiceConnected(e)
 	case voice.EventInterrupted:
+		h.mu.Lock()
+		h.endTurnLocked() // cut on purpose: what was not heard is not owed
+		h.mu.Unlock()
 		h.flush()
 	case voice.EventTurnComplete:
 		h.s.audio.EndRun()
@@ -304,10 +325,18 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.unheard = false // the next unheard audio is another turn
 		closeOut := h.outOpen
 		h.outOpen = false
+		// A turn that completes with nobody attached, after part of it
+		// was handed off, hands off what it generated since.
+		var rest string
+		if h.client == nil && h.handedOff {
+			rest = h.takeUnheardLocked()
+		}
+		h.endTurnLocked()
 		h.mu.Unlock()
 		if closeOut {
 			h.send(wsproto.Transcript(wsproto.DirOut, "", true))
 		}
+		h.handoff(rest, "detach")
 	case voice.EventTranscript:
 		if e.Cut != nil {
 			return // a correction for the orchestrator, not a caption
@@ -315,6 +344,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		if e.Dir == voice.DirOut {
 			h.mu.Lock()
 			h.outOpen = !e.Final
+			h.turnOut += e.Text
 			h.mu.Unlock()
 		}
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
@@ -323,6 +353,52 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 			h.send(wsproto.Error(e.Err.Error()))
 		}
 	}
+}
+
+// endTurnLocked forgets the model turn's transcript bookkeeping: it
+// completed or was cut. Caller holds h.mu.
+func (h *hub) endTurnLocked() {
+	h.turnOut, h.turnHeard, h.handedOff = "", 0, false
+}
+
+// takeUnheardLocked returns the part of the turn in progress that the
+// client has not acknowledged and marks the whole turn as handed off, so
+// the same text is never handed off twice. "" when no turn is running or
+// nothing is left. Caller holds h.mu.
+func (h *hub) takeUnheardLocked() string {
+	if h.turnOut == "" {
+		return ""
+	}
+	rest := strings.TrimSpace(h.turnOut[h.turnHeard:])
+	h.turnHeard, h.handedOff = len(h.turnOut), true
+	return rest
+}
+
+// handoff pushes the unheard rest of a model turn (docs/dev/ws-contract.md
+// "Mid-turn handoff"): the voice moved on (reason replaced or detach)
+// while the model was speaking, so the next client would never hear it.
+// The push goes through the session's push queue like any spoken push: it
+// is held while no client is attached (voice.push_held, five minutes) and
+// said after the model's turn. The chat item keeps the full text: the
+// push carries the handoff tag, which /api/conversation skips.
+func (h *hub) handoff(rest, reason string) {
+	if rest == "" || h.s.deps.Voice == nil {
+		return
+	}
+	h.s.log.Log(logSource, "web.turn_handoff", "", map[string]any{"reason": reason, "chars": len([]rune(rest))})
+	text := "The user did not hear the end of what you were saying, because they switched devices or left. Say the rest of it again, briefly and naturally: " + rest
+	if err := h.push(text, voice.UrgencyIdle, map[string]any{voice.TagHandoff: true}); err != nil {
+		h.s.log.Log(logSource, "web.push_error", "", map[string]any{"error": err.Error()})
+	}
+}
+
+// push sends a tagged push to the voice session (a plain one when the
+// session takes no tags).
+func (h *hub) push(text string, u voice.Urgency, tags map[string]any) error {
+	if tp, ok := h.s.deps.Voice.(tagPusher); ok {
+		return tp.PushTagged(text, u, tags)
+	}
+	return h.s.deps.Voice.Push(text, u)
 }
 
 // flush drops queued audio and tells the client to drop its buffer.
@@ -361,13 +437,7 @@ func (h *hub) afterCancel(res voice.ToolResult) {
 	if h.s.deps.Voice != nil {
 		// Tagged stop: the one reply that stays INTERRUPT even while the
 		// model (or the client's playback) counts as speaking.
-		push := func() error { return h.s.deps.Voice.Push(res.Spoken, voice.UrgencyInterrupt) }
-		if tp, ok := h.s.deps.Voice.(tagPusher); ok {
-			push = func() error {
-				return tp.PushTagged(res.Spoken, voice.UrgencyInterrupt, map[string]any{"stop": true})
-			}
-		}
-		if err := push(); err != nil {
+		if err := h.push(res.Spoken, voice.UrgencyInterrupt, map[string]any{"stop": true}); err != nil {
 			h.s.log.Log(logSource, "web.push_error", "", map[string]any{"error": err.Error()})
 		}
 		return
@@ -430,6 +500,15 @@ func (h *hub) setPlayback(c *client, state string, playedMs int) {
 	c.mu.Lock()
 	c.playbackReports++
 	c.mu.Unlock()
+	if state == voice.PlaybackDrained {
+		// The client played everything it was sent: the turn's text so
+		// far was heard (the handoff's acknowledged position).
+		h.mu.Lock()
+		if h.client == c {
+			h.turnHeard = len(h.turnOut)
+		}
+		h.mu.Unlock()
+	}
 	if v, ok := h.s.deps.Voice.(playbackReporter); ok {
 		v.ClientPlayback(state, playedMs)
 	}

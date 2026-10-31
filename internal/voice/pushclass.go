@@ -30,6 +30,10 @@ const (
 	TagAnswersUtterance = "answers_utterance"
 	TagKeepsPromiseIDs  = "keeps_promise_ids"
 	TagPushID           = "push_id"
+	// TagHandoff marks the push that carries the unheard rest of a model
+	// turn after the /ws client changed (web hub handoff); the
+	// conversation does not show it, the turn's own text is there.
+	TagHandoff = "handoff"
 )
 
 // Push tags that carry facts into a briefing (gemini/briefing.go).

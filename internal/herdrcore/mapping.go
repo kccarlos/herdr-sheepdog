@@ -114,6 +114,8 @@ func cwdOf(t hc.Terminal) string {
 func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 	return herdr.AgentInfo{
 		PaneID:         t.Address,
+		WorkspaceID:    spaceOf(t),
+		TabID:          t.Labels[labelTab],
 		TerminalID:     t.Address,
 		Status:         state,
 		Agent:          kindOf(t),
@@ -127,6 +129,8 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 	return herdr.PaneInfo{
 		PaneID:        t.Address,
+		WorkspaceID:   spaceOf(t),
+		TabID:         t.Labels[labelTab],
 		Status:        state,
 		Agent:         agentKind(t),
 		Cwd:           cwdOf(t),

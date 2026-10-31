@@ -31,7 +31,9 @@ at startup.
   `title` and `progress`. A program that does not report has no status.
 - **No workspaces in core.** hc has terminals only. herdr-app, the GUI,
   keeps its spaces and tabs in a core document (`doc.get`/`doc.set`, name
-  `herdr-app`) that core never interprets.
+  `herdr-app`) that core never interprets. It shows a terminal in a space
+  and tab by the labels `herdr.space` and `herdr.tab` ("Spaces without the
+  document").
 
 ### Do Claude Code and Codex report OSC 7501? Yes
 
@@ -100,7 +102,9 @@ type Backend interface {               // what the daemon needs
 | agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). Plain shells are not agents. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
-| workspace / tab | none in core (herdr-app's `herdr-app` document) | no workspace in v1: `WorkspaceID` and label empty. |
+| workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live local terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
+| workspace label | herdr-app's space name, in its document | not read. The label follows herdr-app's rule for a space nobody named: its first (oldest) terminal's repo (the git checkout's folder name, from `.git`), else its folder, `~` at home. A name the user gave in herdr-app is not seen. |
+| tab | herdr-app's tab, shown for `herdr.tab=<id>` | `TabID` = the `herdr.tab` label. |
 | `idle`, `working`, `done`, `blocked` | the same words | as is. |
 | — | `error` | `done`: the turn ended; the finish announcement reads the screen and says what went wrong. |
 | `unknown` | status `null` after reporting (cleared), or any other word | `unknown`. |
@@ -124,7 +128,12 @@ type Backend interface {               // what the daemon needs
 - reading a screen; sending a prompt, an option's keys and an interrupt;
 - starting an agent (`terminal.run` of a shell in the folder, then the
   kind's command typed into it, ready when it reports status or shows a
-  question) and closing one (`terminal.kill`);
+  question) and closing one (`terminal.kill`). The shell is kept by the
+  core and labelled `herdr.space` and `herdr.tab`, so herdr-app shows the
+  agent: in the folder's existing space as a new tab, or in a new space
+  (see "Spaces without the document");
+- the agent list, spoken names and `/api/spaces` grouped by space, as with
+  the old herdr;
 - the app's agent window, no app change: live over `terminal.attach` in
   framed mode ([term-contract.md](../term-contract.md#on-herdr-core)), or
   as snapshots when the core cannot attach. hc sends the program's raw
@@ -135,12 +144,18 @@ type Backend interface {               // what the daemon needs
 
 Not in v1, each refused with the message the app already shows:
 
-- anything that writes herdr-app's document: workspaces, tabs, splits,
-  worktrees, renaming a space (no `doc.set` from sheepdog);
+- anything that writes herdr-app's document: renaming a space (a name
+  lives in the document), closing a space as a structure operation, real
+  splits, worktrees (no `doc.set` from sheepdog). Closing a space is not
+  turned into killing its terminals: that would end work the user did not
+  name. Both are refused as before (`/api/spaces/{id}/rename` and `close`
+  answer "spaces are not available here": the backend is not a
+  `SpaceHost`);
 - renaming an agent;
 - scrollback in the live terminal for a program that does not use the
   mouse;
-- the phone shell (it opens a herdr workspace);
+- the phone shell: a shell tab is now reachable over `/term`, but opening
+  one on hc is not wired yet;
 - the worker's own transcript (no `agent_session` on hc);
 - terminals on machines added to the core.
 
@@ -170,8 +185,36 @@ temporary paths, so no test can reach a real core.
    terminal socket runs per channel) and `web.TermDeps` for hc
    (`Check`, `Off`; `web.Deps.TermOff` is gone).
 
+4. **Spaces from labels**: spawn labels its terminals and the snapshot
+   reads the labels (below).
+
+### Spaces without the document
+
+herdr-app shows a core terminal in a space and tab when it carries the
+labels `herdr.space=<id>` and `herdr.tab=<id>`, and makes a new space or
+tab of an id it does not know. So sheepdog gets spaces from labels alone,
+never reading or writing the document:
+
+- `CreateWorkspace` runs the shell with `keep: true` and fresh space and
+  tab ids; the new agent is a new space in herdr-app. `label` is ignored:
+  herdr-app names an unnamed space after its first terminal.
+- `SplitPane(paneID, cwd)` runs it in the space of `paneID` (its
+  `herdr.space` label, from `terminal.get`) with a fresh tab id: the agent
+  appears as a new tab of that space. The supervisor picks `paneID` the
+  way it does for the old herdr (the first pane in the folder, or the
+  space the user named), so "a new agent in an existing space" works
+  unchanged. A `paneID` with no space label (a terminal herdr-app does
+  not show) has no space to join, so the agent gets a new one; a missing
+  `paneID` is `ErrPaneNotFound`.
+- Ids: eight random hex digits (`newID`). herdr-app's own ids are not
+  documented and it only compares them, so no format is copied; an id of
+  its own, read off a live terminal's label, is reused as written.
+- The terminals keep the `sheepdog=spawn` label, so they stay
+  recognisable.
+
 Implementation notes: `CreateWorkspace` and `SplitPane` both run a new
-shell terminal (label `sheepdog=spawn`, no parent); `StartAgent` types the
+shell terminal (labels `sheepdog=spawn`, `herdr.space`, `herdr.tab`; kept,
+no parent); `StartAgent` types the
 kind's command into it (Codex with `--no-daemon`, which hc requires) and
 returns, and the supervisor's existing wait polls `GetAgent`, which reports
 the launch pending (`LaunchPending`, as herdr's `agent.start` does) until
@@ -186,5 +229,6 @@ developer tool) still talks to the old herdr only.
 
 - Both running: prefer the old herdr (as above) or hc?
 - `error` as `done`, or as `blocked`?
-- Workspaces from herdr-app's document (read-only `doc.get`) for spoken
-  names, once its shape is stable.
+- Space names the user gave in herdr-app, from its document (read-only
+  `doc.get`), once its shape is stable: today a named space is called by
+  its folder's name here.

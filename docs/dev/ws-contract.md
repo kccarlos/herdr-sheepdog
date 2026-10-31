@@ -614,7 +614,26 @@ reliably removes is the *click* — an underrun is a faded pause.
   when the attach state changes; an open GPT-Live session is not kept open
   (billed) for a held push, and a fresh one opens for it on attach. What
   cannot be held is the model's own reply to audio it heard before the
-  page went away (see `web.audio_unheard` above).
+  page went away (see `web.audio_unheard` above), except for the
+  mid-turn handoff below.
+- **Mid-turn handoff.** When the client is replaced or detaches while the
+  model is speaking a turn (its `turn complete` has not come), the part of
+  the turn's out transcript the user has not heard becomes a push, so the
+  next client says the rest: the daemon logs `web.turn_handoff {reason
+  replaced|detach, chars}` and pushes it (`when_idle`, tagged `handoff`)
+  through the session's push queue, where it is held like any spoken push
+  (`voice.push_held`, dropped after 5 minutes). *Heard* is what the
+  playback reports acknowledge: the turn's transcript up to the last
+  `drained` report from the attached client, so with no `drained` yet the
+  whole turn so far is handed off. The report gives no finer position
+  mid-turn, and a handoff is better too long than silent. What the model
+  generates after a detach is audio for nobody; when the turn completes
+  with nobody attached, that tail is handed off as a second push. A text
+  is handed off once (replacing twice hands off nothing the second time),
+  a turn that is complete or was cut (`flush`, barge-in) hands off nothing,
+  and the reply Gemini finished generating but the client is still playing
+  is out of scope (its turn is complete). `/api/conversation` keeps the
+  turn's full text as its `dog` item; the handoff push is not a chat item.
 - **Voice reconnect.** When the daemon reconnects to the model (GoAway, drop,
   rate limit), clients see `status: reconnecting` then `status: connected`.
   Audio frames the client sends during the gap are buffered by the daemon

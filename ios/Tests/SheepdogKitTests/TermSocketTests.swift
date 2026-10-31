@@ -155,10 +155,13 @@ final class TermSocketTests: XCTestCase {
         let before = try rig.last!.messages().count
         rig.socket.resize(ch: ch, cols: 50, rows: 30)
         rig.socket.resize(ch: ch, cols: 52, rows: 28)
-        try await Task.sleep(nanoseconds: 80_000_000)
-        XCTAssertEqual(try rig.last!.messages().count, before, "nothing inside the 150 ms window")
+        // Two sizes in a row send one message, the last size: that is the
+        // debounce. (Timing "nothing within 80 ms" against the 150 ms window
+        // was flaky on a loaded CI Mac, whose sleep can overshoot the window.)
         try await waitUntil { (try? rig.last!.messages().count) == before + 1 }
         XCTAssertEqual(try rig.last!.messages().last, .resize(ch: ch, cols: 52, rows: 28), "only the last size")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(try rig.last!.messages().count, before + 1, "the first size is never sent")
         rig.socket.resize(ch: ch, cols: 52, rows: 28)
         try await waitUntil { (try? rig.last!.messages().count) == before + 2 }
         XCTAssertEqual(try rig.last!.messages().last, .resize(ch: ch, cols: 52, rows: 28), "the same size asks for a repaint")

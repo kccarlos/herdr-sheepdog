@@ -83,7 +83,8 @@ func (b *Backend) endLaunch(address string) {
 }
 
 // Snapshot lists the live local terminals as panes, and the agents among
-// them. There are no workspaces on hc.
+// them. Workspaces are the herdr-app spaces the terminals' labels name
+// (spaces.go).
 func (b *Backend) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
 	list, err := b.client.List(ctx, false)
 	if err != nil {
@@ -100,6 +101,7 @@ func (b *Backend) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
 		Panes:      []herdr.PaneInfo{},
 		Agents:     []herdr.AgentInfo{},
 	}
+	spaces := newSpaceSet()
 	for _, t := range list.Terminals {
 		if !isPane(t) {
 			continue
@@ -109,7 +111,9 @@ func (b *Backend) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
 		if isAgent(t) {
 			snap.Agents = append(snap.Agents, agentInfo(t, state))
 		}
+		spaces.add(t, state)
 	}
+	snap.Workspaces = spaces.workspaces()
 	return snap, nil
 }
 
