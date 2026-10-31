@@ -8,6 +8,8 @@ the agents. The app talks only to your own daemon (and to Apple for
 notifications, if you set up push). It needs iOS 26 or newer, and runs on
 iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 
+Also on your Mac: [the herdr-app panel and Sheepdog.app](desktop.md).
+
 ## Install
 
 - **TestFlight:** [join the beta](https://testflight.apple.com/join/bjCaFYgK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".

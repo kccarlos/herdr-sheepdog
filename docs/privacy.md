@@ -156,6 +156,16 @@ sends nothing.
 
 All three ask first. Deleting the plugin is `herdr plugin uninstall kccarlos.sheepdog`.
 
+## The Mac client
+
+The herdr-app panel and Sheepdog.app are local clients of the daemon on the
+same Mac. They use its loopback address and do not connect to another
+computer. The panel reads the conversation and sends the text and answers you
+choose; it never opens the microphone. Sheepdog.app sends your microphone
+audio to the daemon and plays the voice's audio from it, so the same rows in
+"What goes to which provider" apply. Its notifications are made locally by
+macOS; they do not use Apple's push service or the sheepdog relay.
+
 ## The iPhone app
 
 The app has no server of its own and collects nothing; the one service the project runs is the push relay. It talks to the
