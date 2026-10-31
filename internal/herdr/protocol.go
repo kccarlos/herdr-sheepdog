@@ -149,6 +149,9 @@ type PaneInfo struct {
 	Label         string `json:"label,omitempty"`
 	Cwd           string `json:"cwd,omitempty"`
 	TerminalTitle string `json:"terminal_title_stripped,omitempty"`
+	// PhoneShell marks a terminal opened as the phone's plain shell. It is
+	// backend metadata, not part of herdr's wire response.
+	PhoneShell bool `json:"-"`
 	// Session is the pane's agent_session, as on AgentInfo.
 	Session *AgentSession `json:"agent_session,omitempty"`
 }

@@ -49,7 +49,8 @@ func TestChooseBackend(t *testing.T) {
 func TestHCTermStartsABridgeWithoutHerdrBin(t *testing.T) {
 	srv := hctest.New(t)
 	srv.Add(hc.Terminal{Address: "t1", State: "live", Argv: []string{"claude"}})
-	deps := hcTerm(herdrcore.New(hc.NewClient(srv.Path), nil))
+	roots := []string{"/work/projects"}
+	deps := hcTerm(herdrcore.New(hc.NewClient(srv.Path), nil), roots)
 	ctx := context.Background()
 	if err := deps.Check(ctx); err != nil {
 		t.Fatalf("Check against a core with terminal.attach = %v", err)
@@ -64,7 +65,7 @@ func TestHCTermStartsABridgeWithoutHerdrBin(t *testing.T) {
 	default:
 		t.Error("bridge not done after Release")
 	}
-	if deps.Bin != "" || deps.Off == "" {
-		t.Errorf("deps = %+v, want no herdr binary and an off message", deps)
+	if deps.Bin != "" || deps.Off == "" || deps.Shells == nil || len(deps.ProjectRoots) != 1 || deps.ProjectRoots[0] != roots[0] {
+		t.Errorf("deps = %+v, want its shell wire, project roots, no herdr binary and an off message", deps)
 	}
 }

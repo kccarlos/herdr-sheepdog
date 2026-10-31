@@ -249,9 +249,11 @@ With one computer, none of this shows: no names and no Talk to.
     titled "Shell · folder". It has the same terminal and keys, no prompt
     field, and starts in typing mode. **+ ▸ New shell** opens one
     in your first project folder. Each folder has one shell, which the app
-    reuses. On your computer the shell is a tab in herdr's "phone shell"
-    workspace, so you see it there too. Leaving the window keeps the shell
-    running, and ⋯ ▸ **Close shell** ends it (it asks first).
+    reuses. On your computer it opens beside the work in that folder: the
+    old herdr puts it in its "phone shell" workspace, while herdr-core adds
+    a tab to the folder's existing space or opens a new space. Leaving the
+    window keeps the shell running, and ⋯ ▸ **Close shell** ends it (it
+    asks first).
     - The shell is on unless **Shell from your phone** is turned off on
       your computer's setup page
       ([remote-access.md](remote-access.md#the-phone-shell)).

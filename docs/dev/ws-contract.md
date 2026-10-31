@@ -41,9 +41,11 @@ binary version.
 |---|---|
 | 1 | Everything in this document (the contract as of the handshake's introduction, plus the handshake itself). |
 
-- **`GET /api/hello`** carries `protocol` (what the daemon speaks) and
-  `min_protocol` (the oldest client protocol it still serves), so a
-  client can tell before it connects.
+- **`GET /api/hello`** carries `protocol` (what the daemon speaks),
+  `min_protocol` (the oldest client protocol it still serves), and `shell`
+  (whether the phone shell is offered now), so a client can tell before it
+  connects. `shell` is false without a working live terminal or with the
+  shell switch off.
 - **`client-ready`.** Every client sends this as its **first text
   frame**, before `mute`, `silence`, `speaking` or any audio:
 
@@ -876,7 +878,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true,"shell":true|false}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16

@@ -419,6 +419,6 @@ func herdrTerm(cfg config.Config, client *herdr.Client) *web.TermDeps {
 			p, err := client.Ping(ctx)
 			return p.Version, err
 		},
-		Shells: client, ProjectRoots: cfg.Supervisor.ProjectRoots,
+		Shells: shellHost(client), ProjectRoots: cfg.Supervisor.ProjectRoots,
 	}
 }

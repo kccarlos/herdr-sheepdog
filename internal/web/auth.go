@@ -435,6 +435,8 @@ type HelloResponse struct {
 	// device's POSTs (idempotency.go), so the app may retry a typed
 	// line or a New agent after a timeout.
 	IdempotencyKeys bool `json:"idempotency_keys"`
+	// Shell says the daemon offers the phone's plain shell now.
+	Shell bool `json:"shell"`
 }
 
 // HelloSecurity is /api/hello's security object.
@@ -463,6 +465,7 @@ func (s *Server) handleHello(w http.ResponseWriter, _ *http.Request) {
 		Computer:        s.computer(),
 		Security:        s.helloSecurity(),
 		IdempotencyKeys: true,
+		Shell:           s.term.shellAllowed(),
 	})
 }
 

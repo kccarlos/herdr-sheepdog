@@ -184,13 +184,13 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 	if w.Worktree != nil && w.Worktree.CheckoutPath != "" {
 		raw = w.Worktree.CheckoutPath
 		if readable(raw) {
-			sp.Path = realDir(raw)
+			sp.Path = herdr.RealDir(raw)
 		}
 		sp.Worktree = w.Worktree.Linked
 	}
 	if sp.Path == "" && len(panes) > 0 {
 		if raw = panes[0].Cwd; readable(raw) {
-			sp.Path = realDir(raw)
+			sp.Path = herdr.RealDir(raw)
 		}
 	}
 	unreadable := sp.Path == "" && raw != "" && !readable(raw)

@@ -90,12 +90,12 @@ func (s *Supervisor) protectedWhy(row state.Agent) string {
 	if s.cfg.OwnPane != "" && row.PaneID == s.cfg.OwnPane {
 		return "runs in the pane sheepdog itself runs in"
 	}
-	cwd := realDir(row.Cwd)
+	cwd := herdr.RealDir(row.Cwd)
 	if cwd == "" {
 		cwd = filepath.Clean(row.Cwd)
 	}
 	for _, d := range s.cfg.ProtectedDirs {
-		p := realDir(d)
+		p := herdr.RealDir(d)
 		if p == "" {
 			p = filepath.Clean(d)
 		}

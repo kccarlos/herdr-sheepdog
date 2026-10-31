@@ -272,10 +272,10 @@ func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 	if first.PaneID == "" {
 		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
 	}
-	path := realDir(first.Cwd)
+	path := herdr.RealDir(first.Cwd)
 	for _, w := range snap.Workspaces {
 		if w.WorkspaceID == id && w.Worktree != nil && w.Worktree.CheckoutPath != "" {
-			if p := realDir(w.Worktree.CheckoutPath); p != "" {
+			if p := herdr.RealDir(w.Worktree.CheckoutPath); p != "" {
 				path = p
 			}
 		}
@@ -545,22 +545,15 @@ func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
 func (s *Supervisor) spawnDirsIn(snap herdr.Snapshot, access *fsaccess.Set) []spawnDir {
 	var out []spawnDir
 	seen := map[string]bool{}
-	for _, p := range snap.Panes {
-		if !access.OK(p.Cwd) {
-			continue
-		}
-		path := realDir(p.Cwd)
-		if path == "" || seen[path] {
-			continue
-		}
-		seen[path] = true
-		out = append(out, spawnDir{Name: filepath.Base(path), Path: path, Pane: p.PaneID})
+	for _, d := range herdr.PaneDirs(snap, access.OK) {
+		seen[d.Path] = true
+		out = append(out, spawnDir{Name: filepath.Base(d.Path), Path: d.Path, Pane: d.Pane.PaneID})
 	}
 	for _, root := range s.cfg.ProjectRoots {
 		if !access.OK(root) {
 			continue
 		}
-		r := realDir(root)
+		r := herdr.RealDir(root)
 		if r == "" {
 			continue
 		}
@@ -572,7 +565,7 @@ func (s *Supervisor) spawnDirsIn(snap herdr.Snapshot, access *fsaccess.Set) []sp
 			if strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
-			path := realDir(filepath.Join(r, e.Name()))
+			path := herdr.RealDir(filepath.Join(r, e.Name()))
 			if path == "" || seen[path] || !inside(path, r) {
 				continue
 			}
@@ -597,7 +590,7 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 		}
 	}
 	if filepath.IsAbs(want) {
-		path := realDir(want)
+		path := herdr.RealDir(want)
 		if path == "" {
 			return spawnDir{}, "no such directory", fmt.Errorf("%s is not a directory; the projects are %s", want, dirNames(dirs))
 		}
@@ -611,7 +604,7 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 		// path below it. Only a project root allows what lies inside.
 		allowed := false
 		for _, r := range roots {
-			if rr := realDir(r); rr != "" && inside(path, rr) {
+			if rr := herdr.RealDir(r); rr != "" && inside(path, rr) {
 				allowed = true
 			}
 		}
@@ -662,26 +655,6 @@ func dirNames(dirs []spawnDir) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-// realDir is path made absolute with every symlink resolved, or "" when
-// it is not an existing directory.
-func realDir(path string) string {
-	if path == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return ""
-	}
-	real, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return ""
-	}
-	if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
-		return ""
-	}
-	return real
 }
 
 // inside reports whether path is strictly below root (both resolved).
