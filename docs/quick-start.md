@@ -25,6 +25,9 @@ while hc is running; sheepdog finds hc's socket when it starts
 (`herdr.backend` in [CONFIG.md](../CONFIG.md); the [faq](faq.md) lists what
 herdr-core does not have yet).
 
+Using herdr-app on herdr-core? Keep the conversation in its sidebar and use
+Sheepdog.app for voice: [Sheepdog on your Mac](desktop.md).
+
 ## 1. Install the plugin
 
 ```sh

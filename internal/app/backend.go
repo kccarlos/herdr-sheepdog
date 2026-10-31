@@ -15,16 +15,15 @@ import (
 // backendProbe bounds each socket check of herdr.backend = auto.
 const backendProbe = time.Second
 
-// hcTermOff is /term's answer on herdr-core: its live terminal
-// (terminal.attach) is not bridged yet, and the app shows the screen.
-const hcTermOff = "the live terminal is not available with herdr-core yet"
+// hcTermOff is /term's answer when herdr-core is not running or is too old
+// to attach (the app shows the screen).
+const hcTermOff = "the live terminal needs a running herdr-core that has terminal.attach"
 
 // newBackend builds the backend herdr.backend picks (auto: asks both
 // sockets once, docs/dev/design/herdr-core-backend.md "Choosing the
-// backend") and logs the choice as daemon.herdr_backend. The live
-// terminal deps are the old herdr's only; on herdr-core termOff says why
-// there are none.
-func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps, termOff string) {
+// backend") and logs the choice as daemon.herdr_backend, with the live
+// terminal deps of that backend.
+func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps) {
 	old := herdr.NewClient(cfg.Herdr.Socket)
 	old.Log = a.log
 	hcSocket := cfg.Herdr.HCSocketPath()
@@ -37,9 +36,35 @@ func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps
 	}
 	a.log.Log("daemon", "daemon.herdr_backend", "", map[string]any{"backend": kind, "reason": reason, "socket": socket})
 	if kind == config.HerdrBackendHC {
-		return core, nil, hcTermOff
+		return core, hcTerm(core, cfg.Supervisor.ProjectRoots)
 	}
-	return old, herdrTerm(cfg, old), ""
+	return old, herdrTerm(cfg, old)
+}
+
+// hcTerm is herdr-core's live terminal: one framed attach stream per
+// channel, listed only while the core can attach. Its phone shells use the
+// backend's existing space for the folder, or a new one.
+func hcTerm(core *herdrcore.Backend, roots []string) *web.TermDeps {
+	return &web.TermDeps{
+		Check:        core.TermReady,
+		Off:          hcTermOff,
+		Shells:       shellHost(core),
+		ProjectRoots: roots,
+		Start: func(ctx context.Context, o herdr.BridgeOptions) (web.TermBridge, error) {
+			b, err := core.StartBridge(ctx, o)
+			if err != nil {
+				return nil, err
+			}
+			return b, nil
+		},
+	}
+}
+
+// shellHost finds the phone-shell half of a backend the same way for both
+// implementations.
+func shellHost(backend herdr.Backend) web.ShellHost {
+	h, _ := backend.(web.ShellHost)
+	return h
 }
 
 // pinger is the liveness check chooseBackend asks each backend.

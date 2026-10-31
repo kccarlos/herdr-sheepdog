@@ -43,11 +43,15 @@ final class DaemonStatusMonitorTests: XCTestCase {
         let m = monitor()
         let got = expectation(description: "muted state, twice")
         got.expectedFulfillmentCount = 2
+        let event = expectation(description: "the event reaches notifications")
         m.onChange = { daemon in
             if daemon?.voice.muted == true { got.fulfill() }
         }
+        m.onEvent = { daemonEvent in
+            if daemonEvent.type == "voice.client" { event.fulfill() }
+        }
         m.start()
-        wait(for: [got], timeout: 5)
+        wait(for: [got, event], timeout: 5)
         m.stop()
     }
 

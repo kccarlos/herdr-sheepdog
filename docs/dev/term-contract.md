@@ -15,8 +15,10 @@ cannot drift.
   the device closes it with code **4003**.
 - **Discovery.** `bot-ready` on `/ws` lists the feature `term` only when
   the daemon talks to a real herdr (not `--herdr=mock`) whose `ping`
-  reports **0.9.2 or newer**. A client opens `/term` only then. When herdr
-  is older or not running, `GET /term` answers `503` before the upgrade.
+  reports **0.9.2 or newer**, or to herdr-core whose `hello` lists
+  `terminal.attach` ([herdr-core](#on-herdr-core)). A client opens `/term`
+  only then. When herdr is older or not running, `GET /term` answers `503`
+  before the upgrade.
 - **Several connections** (a phone and an iPad) are allowed. Each carries
   up to **4 channels**; the daemon holds at most **8** across all of them.
 
@@ -25,7 +27,9 @@ cannot drift.
 A channel is one open window on one pane, with a client-chosen id `ch`
 from 1 to 65535. For each channel the daemon runs one
 `herdr terminal session control|observe <pane>` child process (the
-*bridge*, `internal/herdr/bridge.go`) pointed at `herdr.socket`.
+*bridge*, `internal/herdr/bridge.go`) pointed at `herdr.socket`. On
+herdr-core the bridge is an attach stream instead ([On
+herdr-core](#on-herdr-core)); the rest of this page holds for both.
 
 - A channel targets only a **tracked agent** (a row of `GET /api/agents`).
   Any other pane is refused with `refused:not_tracked`, so the user's other
@@ -39,6 +43,47 @@ from 1 to 65535. For each channel the daemon runs one
   the pane. A resize reopens its bridge at the new size.
 - Closing a channel releases control. The pane, and the agent in it, keep
   running.
+
+## On herdr-core
+
+The wire is the same, and the app is the same; only the bridge differs
+(`internal/herdrcore/bridge.go`, built on the framed connection of
+`internal/hc/framed.go`). For each channel the daemon opens one framed hc
+connection and a `terminal.attach` stream on the pane (the terminal's
+address) and keeps its credit flowing, as hc's
+"Framed mode" asks.
+
+- **Frames.** hc sends the program's raw output, not rendered diffs. The app
+  feeds every frame to a full terminal emulator, so the daemon passes the
+  bytes through: each hc DATA frame is one terminal frame, the first paint
+  is `full`, and `seq` counts frames from 1. The daemon has no emulator.
+- **Resync.** A resize to the current size (and an overflow of the send
+  queue) attaches again: the new first paint is a `full` frame, preceded by
+  `ESC[0m ESC[H ESC[2J` so it replaces what the screen shows.
+- **Modes.** hc has no single controller. `control` attaches as the active
+  viewer (it sets the size, and `term-resize` sends a RESIZE); `observe`
+  attaches read-only and never resizes the terminal (what size its stream
+  has is hc's). A second `control` is never `refused:busy`, and
+  `takeover` changes nothing; `taken_over` never happens.
+- **Input** is written to the stream unchanged. hc never encodes keys: a
+  program that asked for Windows' win32-input-mode (`CSI ? 9001 h`) is not
+  supported.
+- **Wheel and clicks.** hc has no scroll command and no mouse command, so
+  the daemon writes the mouse bytes itself, in the encoding the program
+  asked for (SGR with `?1006`, else the legacy one up to column and row
+  223). It follows the program's `CSI ? 1000|1002|1003|1006 h|l` in the
+  stream, nothing else. A scroll is `lines` wheel notches
+  ([below](#wheel-notches)), and a click or drag is sent only when the
+  program asked for the mouse (a drag, for motion). A program that did not
+  ask for the mouse has no scrollback the daemon can move: its `term-scroll`
+  is dropped.
+- **Close reasons.** The program exiting or being killed is `gone`; hc
+  stopping, a lost shell or a broken connection is `herdr`.
+- **Phone shell.** The same shell target works. hc runs the user's login
+  shell with `keep: true` in the folder, labels it `sheepdog=shell`, and
+  puts it in the folder's existing space as a new tab, or in a new space.
+  `term-ready.shell` and `/api/hello`'s `shell` are true only while
+  `terminal.attach` works.
 
 ## Control messages (text frames)
 
@@ -172,14 +217,17 @@ Frames are diffs, so a lost frame corrupts the screen.
 
 ## The plain shell
 
-A phone shell is a plain shell in a project folder. The daemon opens it
-as a herdr tab in a workspace labelled `phone shell` (the workspace
-itself the first time), so the user sees it on the computer too.
+A phone shell is a plain shell in a project folder. On the old herdr the
+daemon opens it as a tab in a workspace labelled `phone shell` (the
+workspace itself the first time). On herdr-core it opens as a new tab in
+the space already working in that folder, or in a new space when none
+does. Either way the user sees it on the computer too.
 
 - **One per folder, reused.** `term-open {target:{shell:{cwd}}}` attaches
   to the folder's shell when there is one, else opens it. Opens are
   serialised, so two quick taps make one shell. After a daemon restart the
-  daemon finds its shells again in the `phone shell` workspace.
+  daemon finds old-herdr shells in the `phone shell` workspace and
+  herdr-core shells by their `sheepdog=shell` label.
 - **Folder.** `cwd` is resolved (symlinks, `~`) and must lie inside a
   `supervisor.project_roots` entry or be a tracked agent's own folder (a
   worktree herdr put elsewhere). An empty `cwd` is the first project root.
@@ -193,11 +241,13 @@ itself the first time), so the user sees it on the computer too.
   running. **Closing** it ends the pane:
 
   `POST /api/shells/{pane_id}/close` → `200 {"ok":true}`; `403` where the
-  shell is gated off; `404` for a pane that is no phone shell.
+  shell is gated off; `404` for a pane that is no phone shell. On
+  herdr-core the backend also verifies the terminal carries
+  `sheepdog=shell` before `terminal.kill`.
 
 Phone shells are not agents: a plain shell is not in the agent list and
-the orchestrator is not told about it (an agent the user starts inside one
-is tracked like any other).
+the orchestrator is not told about it. On herdr-core a terminal carrying
+`sheepdog=shell` stays off the agent list.
 
 ## Event log
 

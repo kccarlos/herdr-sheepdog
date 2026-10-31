@@ -34,6 +34,7 @@ type paneFeed struct {
 	out    chan<- herdr.StatusEvent
 
 	kind     string
+	space    string      // the terminal's herdr.space label
 	fallback bool        // the terminal is an agent that has not reported
 	last     herdr.State // the last state emitted or seeded
 }
@@ -75,6 +76,7 @@ func (f *paneFeed) seed(ctx context.Context, sub *hc.Subscription) {
 			continue
 		}
 		f.kind = kindOf(t)
+		f.space = spaceOf(t)
 		f.fallback = isPane(t) && needsFallback(t)
 		if f.fallback {
 			f.last, _ = f.b.screenState(ctx, f.paneID)
@@ -125,7 +127,7 @@ func (f *paneFeed) handle(ctx context.Context, n hc.Notification) (done, alive b
 }
 
 func (f *paneFeed) emit(ctx context.Context, state herdr.State) bool {
-	ev := herdr.StatusEvent{PaneID: f.paneID, Agent: f.kind, State: state, At: time.Now(), Source: "socket"}
+	ev := herdr.StatusEvent{PaneID: f.paneID, WorkspaceID: f.space, Agent: f.kind, State: state, At: time.Now(), Source: "socket"}
 	select {
 	case f.out <- ev:
 		return true

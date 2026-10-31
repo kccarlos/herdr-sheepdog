@@ -41,9 +41,11 @@ binary version.
 |---|---|
 | 1 | Everything in this document (the contract as of the handshake's introduction, plus the handshake itself). |
 
-- **`GET /api/hello`** carries `protocol` (what the daemon speaks) and
-  `min_protocol` (the oldest client protocol it still serves), so a
-  client can tell before it connects.
+- **`GET /api/hello`** carries `protocol` (what the daemon speaks),
+  `min_protocol` (the oldest client protocol it still serves), and `shell`
+  (whether the phone shell is offered now), so a client can tell before it
+  connects. `shell` is false without a working live terminal or with the
+  shell switch off.
 - **`client-ready`.** Every client sends this as its **first text
   frame**, before `mute`, `silence`, `speaking` or any audio:
 
@@ -80,7 +82,7 @@ binary version.
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
   | `agent-actions` | the user's own New agent, Rename, Stop and Close routes (*Agent actions*) | with `screen` |
-  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
+  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer, or herdr-core has `terminal.attach` (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
@@ -877,7 +879,7 @@ request forgery). The app sends no `Origin`.
   `localhost`), and a request that changes something only from that
   origin as JSON; anything else gets `403` with "The setup page only
   opens on the computer sheepdog runs on…".
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"device","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1,"computer":{"id":"…","name":"Studio Mac"},"security":{"pin":"…","cert_expires":"…","tailscale_https":"…"?},"idempotency_keys":true,"shell":true|false}`
   so a client can confirm it found a sheepdog daemon, this contract's audio format, the voice model behind it and the
   `/ws` protocol (*Protocol version and handshake*) before it ever opens
   `/ws`. `computer.id` is the daemon id (`<data_dir>/tls/daemon_id`, 16
@@ -1002,7 +1004,27 @@ answer a question by tap. All three need a paired device under "Auth".
   `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
   `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
   `source`, `pane`, and `type` filters behave as before. `GET /api/events`
-  accepts the same filters.
+  accepts the same filters. The herdr-app panel (`herdr-app/mods/sheepdog`,
+  a client of this section, `GET /api/state` and six POSTs over loopback,
+  never `/ws`) asks for
+  `kinds=card,conversation,daemon,pending,voice,web`
+  and `since=<newest conversation item id>`, sends `Last-Event-ID` on a
+  reconnect, reads the stream over a raw socket (so it de-chunks the HTTP
+  body) and takes the `: keepalive` comment as its liveness: no frame for
+  40 s and it reconnects. An event tells it to ask `GET /api/state`
+  and `GET /api/conversation` again; the one payload it reads is a
+  `voice.tool_result` of `to_supervisor`, whose `options` are the suggested
+  replies it offers (the conversation items do not carry them). Its overlays
+  use the same daemon routes as the phone: Settings reads and changes the
+  voice and orchestrator models, languages and chattiness, lists and removes
+  paired devices, and shows `/api/state`'s update notice; Pair a phone reads
+  `/api/pair` and `/api/pair/qr.json`; agent details read `/api/agents`.
+  It makes six POSTs, each with an `Idempotency-Key`: `/api/turn`,
+  `/api/pending/answer`, `/api/conversation/reset {"via":"app"}` after a
+  confirmation, and `/api/voice/mute`, `/api/voice/stop` and
+  `/api/voice/ptt` for the voice controls. It reuses a typed line's key only
+  when the send got no answer, because the daemon keeps a refusal under its
+  key too.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most
@@ -1173,12 +1195,14 @@ phone").
 - **New agent.** `kind` is one of the `kinds` of `GET /api/spaces`
   ([Spaces](#spaces)). With `space` (a space's `id`) the agent joins that
   space: its pane is split from the space's first pane, in the space's
-  folder. With `dir` a new space opens there: a folder's name or full
-  path resolved as for the orchestrator (inside a project root, or an
-  open space's own folder), even when a space already works there.
+  folder. With `dir` a folder's name or full path is resolved as for the
+  orchestrator (inside a project root, or an open space's own folder, a
+  trailing slash or symlink aside): when a space already works there the
+  agent joins it, exactly as with `space` (`supervisor.spawn` has
+  `joined: true`), and only a folder with no space opens a new one.
   With `worktree` (a branch name: letters, digits and `. _ / -`), herdr's
   `worktree.create` makes the branch's worktree in that repository and
-  the new space opens there. herdr's `agent.start` starts the agent in
+  a new space opens there, even when a space works in the folder. herdr's `agent.start` starts the agent in
   the new shell, and the answer comes once herdr reports it ready (up to
   about a minute): `spoken` is "Claude is ready in bench.", or, with
   `blocked: true`, the agent started at a question (its first-run trust
@@ -1494,6 +1518,33 @@ Not part of `/ws`: the iOS app registers its APNs device token over
 events that need the user, whether or not a `/ws` client is attached.
 The contract (routes, payload, when an alert is sent) is in
 [`push.md`](push.md).
+
+### Desktop notifications
+
+Sheepdog.app uses the same `GET /events` stream for local macOS notifications;
+there is no desktop push registration. It notifies for an answerable
+`pending.created` (the title is the agent and the body is
+`PendingAction.displaySummary`), a `herdr.transition` from `working` to `done`
+or `idle` (`"<agent> finished."`), and a failed or unexpectedly closed voice
+session (`voice.connect_error`, `voice.session_error`, `daemon.voice_error`,
+`daemon.voice_provider_error`, or a `voice.closed` other than `shutdown`,
+`replaced`, and `voice_off`). The voice wording comes from `LocalNotice`, so
+it matches the phone's own notice text.
+
+The app asks for notification permission when the first such event arrives,
+not at launch. Until the panel reports whether it is visible, the stand-in is
+the voice state: while this Mac holds `/ws` and the client's existing
+microphone speech detector (`core.mic.speaking`) says the user is talking,
+the event does not become a notification. Clicking one runs
+`herdr-app do mod.open --name sheepdog` through the same panel opener as the
+menu.
+
+The global shortcut is local to Sheepdog.app, not part of this protocol. It
+uses Carbon's `RegisterEventHotKey` on Option+Space by default (Control+Space
+and Control+Option+Space are the other fixed choices), with no Accessibility
+permission. Key-down starts push-to-talk; a release at or after 300 ms ends
+it, while a shorter release also toggles mute. The choice is stored in the
+app's `UserDefaults` as `hotkey.shortcut`.
 
 ## Non-goals
 

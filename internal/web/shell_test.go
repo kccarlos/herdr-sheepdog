@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -50,6 +51,30 @@ func (f *fakeShells) CreateWorkspace(_ context.Context, cwd, label string) (herd
 	f.creates = append(f.creates, "workspace "+cwd)
 	f.snap.Workspaces = append(f.snap.Workspaces, herdr.WorkspaceInfo{WorkspaceID: "w9", Label: label})
 	return f.add("w9", cwd), nil
+}
+
+func (f *fakeShells) ShellWorkspace(snap herdr.Snapshot, _ string) string {
+	for _, w := range snap.Workspaces {
+		if w.Label == ShellWorkspace {
+			return w.WorkspaceID
+		}
+	}
+	return ""
+}
+
+func (f *fakeShells) IsShellPane(p herdr.PaneInfo, workspaceID string) bool {
+	return workspaceID != "" && p.WorkspaceID == workspaceID
+}
+
+func (f *fakeShells) OpenShell(ctx context.Context, workspaceID, cwd string) (herdr.PaneInfo, error) {
+	if workspaceID == "" {
+		return f.CreateWorkspace(ctx, cwd, ShellWorkspace)
+	}
+	return f.CreateTab(ctx, workspaceID, cwd, filepath.Base(cwd))
+}
+
+func (f *fakeShells) CloseShell(ctx context.Context, pane string) error {
+	return f.ClosePane(ctx, pane)
 }
 
 func (f *fakeShells) CreateTab(_ context.Context, ws, cwd, _ string) (herdr.PaneInfo, error) {
@@ -130,6 +155,10 @@ func TestShellGate(t *testing.T) {
 		if shell != tc.want {
 			t.Errorf("%s: term-ready.shell = %v, want %v", tc.kind, shell, tc.want)
 		}
+		var hello HelloResponse
+		if code := h.getJSON("/api/hello", &hello); code != http.StatusOK || hello.Shell != tc.want {
+			t.Errorf("%s: /api/hello shell = %v (code %d), want %v", tc.kind, hello.Shell, code, tc.want)
+		}
 		c.send(shellOpen(1, filepath.Join(root, "app")))
 		m := c.expect(map[bool]string{true: termproto.TypeOpened, false: termproto.TypeClosed}[tc.want])
 		if !tc.want && (m.Reason != termproto.RefusedShellOff || len(fs.createCalls()) != 0) {
@@ -143,6 +172,25 @@ func TestShellGate(t *testing.T) {
 	h, _ := newTermHarness(t, "0.9.5")
 	if _, shell := helloReady(t, h); shell {
 		t.Error("term-ready.shell without a shell host")
+	}
+	var hello HelloResponse
+	if code := h.getJSON("/api/hello", &hello); code != http.StatusOK || hello.Shell {
+		t.Errorf("/api/hello shell without a shell host = %v (code %d)", hello.Shell, code)
+	}
+}
+
+func TestShellIsNotAdvertisedWithoutTheLiveTerminal(t *testing.T) {
+	h, _, _ := newShellHarness(t, true)
+	h.srv.term.deps.Version = func(context.Context) (string, error) {
+		return "", errors.New("terminal.attach missing")
+	}
+	h.srv.term.mu.Lock()
+	h.srv.term.checked = time.Time{}
+	h.srv.term.mu.Unlock()
+
+	var hello HelloResponse
+	if code := h.getJSON("/api/hello", &hello); code != http.StatusOK || hello.Shell {
+		t.Fatalf("/api/hello shell without a live terminal = %v (code %d)", hello.Shell, code)
 	}
 }
 

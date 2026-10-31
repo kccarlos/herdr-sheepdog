@@ -168,7 +168,9 @@ final class MacVoiceHostTests: XCTestCase {
         let rig = Rig()
         await connect(rig)
         rig.audio.onGate?(false)
+        XCTAssertTrue(rig.host.state.userTalking)
         rig.audio.onGate?(true)
+        XCTAssertFalse(rig.host.state.userTalking)
         XCTAssertEqual(rig.channel.sent, [.silence(false), .speaking(true), .silence(true), .speaking(false)])
     }
 

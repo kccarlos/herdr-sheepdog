@@ -91,8 +91,8 @@ func TestSpacesReportsAFolderItCannotRead(t *testing.T) {
 	}
 }
 
-// A new agent starts in an open space (split from its first pane) or in
-// a new space, even in a folder a space already works in.
+// A new agent starts in an open space (split from its first pane) or, in
+// a folder no space works in, in a new space.
 func TestUserNewAgentInASpaceOrANewOne(t *testing.T) {
 	w := spacesWorld(t)
 	if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Space: "w3"}); err != nil {
@@ -101,10 +101,10 @@ func TestUserNewAgentInASpaceOrANewOne(t *testing.T) {
 	if split := w.params("pane.split"); len(split) != 1 || split[0]["target_pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
 		t.Fatalf("pane.split = %v", split)
 	}
-	if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench"}); err != nil {
+	if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "app"}); err != nil {
 		t.Fatal(err)
 	}
-	if created := w.params("workspace.create"); len(created) != 1 || created[0]["cwd"] != w.bench {
+	if created := w.params("workspace.create"); len(created) != 1 || created[0]["cwd"] != filepath.Join(w.root, "app") {
 		t.Fatalf("workspace.create = %v", created)
 	}
 	for name, req := range map[string]NewAgentRequest{
@@ -122,6 +122,81 @@ func TestUserNewAgentInASpaceOrANewOne(t *testing.T) {
 	if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Space: "w9"}); !errors.Is(err, ErrNoSuchSpace) {
 		t.Errorf("unknown space = %v", err)
 	}
+}
+
+// A folder a space already works in is joined, not opened twice: the
+// agent is split from that space's pane. A path with a trailing slash or
+// through a symlink is the same folder; a folder with no space and a
+// fresh worktree open a new space.
+func TestUserNewAgentInAFolderJoinsItsSpace(t *testing.T) {
+	for _, name := range []string{"name", "path", "slash", "symlink"} {
+		t.Run(name, func(t *testing.T) {
+			w := spacesWorld(t)
+			dir := "bench"
+			switch name {
+			case "path":
+				dir = w.bench
+			case "slash":
+				dir = w.bench + "/"
+			case "symlink":
+				// Outside the project roots: only the space's own folder.
+				dir = filepath.Join(t.TempDir(), "link")
+				if err := os.Symlink(w.bench, dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Spoken != "Codex is ready in bench." {
+				t.Errorf("spoken = %q", res.Spoken)
+			}
+			// Any pane of the space will do: the folder's pane is the
+			// first the snapshot lists, whose order the fake leaves open.
+			if split := w.params("pane.split"); len(split) != 1 || !strings.HasPrefix(split[0]["target_pane_id"].(string), "w3:") || split[0]["cwd"] != w.bench {
+				t.Fatalf("pane.split = %v", split)
+			}
+			if created := w.params("workspace.create"); len(created) != 0 {
+				t.Fatalf("workspace.create = %v", created)
+			}
+			ev := w.log.ofType("supervisor.spawn")
+			if len(ev) != 1 || ev[0].Payload.(map[string]any)["joined"] != true {
+				t.Fatalf("supervisor.spawn = %+v", ev)
+			}
+		})
+	}
+	t.Run("no space", func(t *testing.T) {
+		w := spacesWorld(t)
+		if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "app"}); err != nil {
+			t.Fatal(err)
+		}
+		if split := w.params("pane.split"); len(split) != 0 {
+			t.Fatalf("pane.split = %v", split)
+		}
+		if ev := w.log.ofType("supervisor.spawn"); len(ev) != 1 || ev[0].Payload.(map[string]any)["joined"] != false {
+			t.Fatalf("supervisor.spawn = %+v", ev)
+		}
+	})
+	t.Run("worktree", func(t *testing.T) {
+		w := spacesWorld(t)
+		if err := os.RemoveAll(filepath.Join(w.bench, ".git")); err != nil {
+			t.Fatal(err)
+		}
+		gitRepo(t, w.bench)
+		w.srv.Handle("worktree.create", func(json.RawMessage) (any, error) {
+			pane := herdr.PaneInfo{PaneID: "w30:p1", WorkspaceID: "w30", Cwd: w.bench + "-fix", Status: herdr.StateUnknown}
+			w.srv.SetPane(pane)
+			w.srv.SetScreen(pane.PaneID, "❯ ")
+			return map[string]any{"type": "worktree_created", "root_pane": pane}, nil
+		})
+		if _, err := w.sup.UserNewAgent(context.Background(), NewAgentRequest{Kind: "codex", Dir: "bench", Worktree: "fix"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(w.params("pane.split")) != 0 || len(w.params("worktree.create")) != 1 {
+			t.Fatalf("split = %v, worktree = %v", w.params("pane.split"), w.params("worktree.create"))
+		}
+	})
 }
 
 // A space with no agent: a workspace in the folder, or a fresh worktree;

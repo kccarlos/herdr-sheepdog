@@ -251,7 +251,7 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": req.Via, "error": err.Error()})
 		return started{}, &StartError{PaneID: pane.PaneID, Reason: ReasonStartFailed, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
 	}
-	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
+	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "joined": dir.Pane != "" && wt == nil && req.Space == "", "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
 	if req.Model != "" {
 		fields["model"] = req.Model
 	}
@@ -272,10 +272,10 @@ func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 	if first.PaneID == "" {
 		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
 	}
-	path := realDir(first.Cwd)
+	path := herdr.RealDir(first.Cwd)
 	for _, w := range snap.Workspaces {
 		if w.WorkspaceID == id && w.Worktree != nil && w.Worktree.CheckoutPath != "" {
-			if p := realDir(w.Worktree.CheckoutPath); p != "" {
+			if p := herdr.RealDir(w.Worktree.CheckoutPath); p != "" {
 				path = p
 			}
 		}
@@ -324,12 +324,12 @@ func (e *ReasonError) Unwrap() error { return e.Err }
 // worktreeRefusal says why dir cannot have a fresh worktree of branch
 // (with its reason code), or nil when it can.
 func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
-	g, isGit := gitInfo(dir.Path)
+	g, isGit := herdr.GitInfo(dir.Path)
 	if !isGit {
 		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
 	}
-	if branchCheckedOut(ctx, g.root, branch) {
-		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	if branchCheckedOut(ctx, g.Root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.Repo)}
 	}
 	return "", nil
 }
@@ -545,22 +545,15 @@ func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
 func (s *Supervisor) spawnDirsIn(snap herdr.Snapshot, access *fsaccess.Set) []spawnDir {
 	var out []spawnDir
 	seen := map[string]bool{}
-	for _, p := range snap.Panes {
-		if !access.OK(p.Cwd) {
-			continue
-		}
-		path := realDir(p.Cwd)
-		if path == "" || seen[path] {
-			continue
-		}
-		seen[path] = true
-		out = append(out, spawnDir{Name: filepath.Base(path), Path: path, Pane: p.PaneID})
+	for _, d := range herdr.PaneDirs(snap, access.OK) {
+		seen[d.Path] = true
+		out = append(out, spawnDir{Name: filepath.Base(d.Path), Path: d.Path, Pane: d.Pane.PaneID})
 	}
 	for _, root := range s.cfg.ProjectRoots {
 		if !access.OK(root) {
 			continue
 		}
-		r := realDir(root)
+		r := herdr.RealDir(root)
 		if r == "" {
 			continue
 		}
@@ -572,7 +565,7 @@ func (s *Supervisor) spawnDirsIn(snap herdr.Snapshot, access *fsaccess.Set) []sp
 			if strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
-			path := realDir(filepath.Join(r, e.Name()))
+			path := herdr.RealDir(filepath.Join(r, e.Name()))
 			if path == "" || seen[path] || !inside(path, r) {
 				continue
 			}
@@ -597,7 +590,7 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 		}
 	}
 	if filepath.IsAbs(want) {
-		path := realDir(want)
+		path := herdr.RealDir(want)
 		if path == "" {
 			return spawnDir{}, "no such directory", fmt.Errorf("%s is not a directory; the projects are %s", want, dirNames(dirs))
 		}
@@ -611,7 +604,7 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 		// path below it. Only a project root allows what lies inside.
 		allowed := false
 		for _, r := range roots {
-			if rr := realDir(r); rr != "" && inside(path, rr) {
+			if rr := herdr.RealDir(r); rr != "" && inside(path, rr) {
 				allowed = true
 			}
 		}
@@ -662,26 +655,6 @@ func dirNames(dirs []spawnDir) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-// realDir is path made absolute with every symlink resolved, or "" when
-// it is not an existing directory.
-func realDir(path string) string {
-	if path == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return ""
-	}
-	real, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return ""
-	}
-	if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
-		return ""
-	}
-	return real
 }
 
 // inside reports whether path is strictly below root (both resolved).

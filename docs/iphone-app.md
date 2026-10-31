@@ -8,6 +8,8 @@ the agents. The app talks only to your own daemon (and to Apple for
 notifications, if you set up push). It needs iOS 26 or newer, and runs on
 iPad too (iPadOS 26; see [On iPad](#on-ipad)).
 
+Also on your Mac: [the herdr-app panel and Sheepdog.app](desktop.md).
+
 ## Install
 
 - **TestFlight:** [join the beta](https://testflight.apple.com/join/bjCaFYgK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
@@ -183,7 +185,9 @@ With one computer, none of this shows: no names and no Talk to.
   only the one the voice is on. The round button opens the agent's window
   (below). **+ ▸ New agent** takes two steps. **Where:** one of the
   spaces herdr has open (with the agents already in it), or a folder in
-  `supervisor.project_roots` that has no space yet. **Which agent:** the
+  `supervisor.project_roots`; a folder that already has a space adds the
+  agent there, and only one with none opens a new space (a new worktree
+  always does). **Which agent:** the
   coding agents installed on your computer (Claude Code, Codex, agy and
   the others herdr knows), **New worktree** (off; it gives the agent its
   own branch and folder, and is hidden when the folder is not a git
@@ -210,7 +214,10 @@ With one computer, none of this shows: no names and no Talk to.
   when you leave the window or the app goes to the background.
   - **Pinch** to change the text size (⋯ ▸ Reset text size undoes it).
     **Drag** to scroll back through the output, and **Latest** returns to
-    the bottom. A **tap** clicks, for programs that use the mouse.
+    the bottom. A **tap** clicks, for programs that use the mouse. With
+    herdr-core, dragging scrolls only programs that use the mouse (Codex,
+    Claude Code's full-screen mode); herdr-core keeps no scrollback to
+    scroll for the others.
     **Long-press** selects text to copy; ⋯ ▸ Copy screen copies all of it.
   - The keys under the terminal send esc, tab, the arrows and return
     straight to the agent. Control-C is at the top of **···** (More keys),
@@ -246,16 +253,18 @@ With one computer, none of this shows: no names and no Talk to.
     titled "Shell · folder". It has the same terminal and keys, no prompt
     field, and starts in typing mode. **+ ▸ New shell** opens one
     in your first project folder. Each folder has one shell, which the app
-    reuses. On your computer the shell is a tab in herdr's "phone shell"
-    workspace, so you see it there too. Leaving the window keeps the shell
-    running, and ⋯ ▸ **Close shell** ends it (it asks first).
+    reuses. On your computer it opens beside the work in that folder: the
+    old herdr puts it in its "phone shell" workspace, while herdr-core adds
+    a tab to the folder's existing space or opens a new space. Leaving the
+    window keeps the shell running, and ⋯ ▸ **Close shell** ends it (it
+    asks first).
     - The shell is on unless **Shell from your phone** is turned off on
       your computer's setup page
       ([remote-access.md](remote-access.md#the-phone-shell)).
     - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
       (`supervisor.project_roots`) or an agent's own folder.
-  - The live window needs herdr 0.9.2 or newer (not yet herdr-core) and an up-to-date sheepdog
+  - The live window needs herdr 0.9.2 or newer, or herdr-core, and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
     refreshes every few seconds (in colour with an up-to-date sheepdog), and
     it says so. "herdr is not running"

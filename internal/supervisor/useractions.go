@@ -78,12 +78,13 @@ func (s *Supervisor) InstalledKinds(ctx context.Context) ([]string, error) {
 type NewAgentRequest struct {
 	Kind string
 	// Space is the open space (herdr workspace id) to start in; or, with
-	// Space empty, Dir is the folder of a new space: a project's name or
-	// full path, as for the orchestrator.
+	// Space empty, Dir is a project's name or full path, as for the
+	// orchestrator: the agent joins the space already working in that
+	// folder, and only a folder with none opens a new space.
 	Space string
 	Dir   string
-	// Worktree, with Dir, is the branch of a fresh git worktree the new
-	// space opens in instead of the project folder.
+	// Worktree, with Dir, is the branch of a fresh git worktree a new
+	// space opens in instead of the project folder (never a join).
 	Worktree string
 	// Text is the optional first prompt, sent once the agent is ready.
 	Text string
@@ -134,7 +135,10 @@ func (s *Supervisor) UserNewAgent(ctx context.Context, req NewAgentRequest) (New
 	if !slices.Contains(kinds, req.Kind) {
 		return refuse("bad kind", &ReasonError{Reason: ReasonNotInstalled, Err: fmt.Errorf("%w: kind %q is not one herdr supports that is installed here (%s)", ErrUserAction, req.Kind, strings.Join(kinds, ", "))})
 	}
-	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Space == "", Worktree: req.Worktree, Text: req.Text, Name: req.Name, Via: "user"})
+	// A folder joins the space that works in it (startAgent matches it
+	// as the orchestrator's new_agent_dir does); a fresh worktree is
+	// always a new space.
+	st, err := s.startAgent(ctx, spawnStart{Kind: req.Kind, Space: req.Space, Dir: req.Dir, NewSpace: req.Worktree != "", Worktree: req.Worktree, Text: req.Text, Name: req.Name, Via: "user"})
 	if err != nil {
 		return NewAgentResult{}, err
 	}

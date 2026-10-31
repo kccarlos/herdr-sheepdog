@@ -157,7 +157,7 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 		}
 		git := false
 		if access.OK(d.Path) {
-			_, git = gitInfo(d.Path)
+			_, git = herdr.GitInfo(d.Path)
 		}
 		out.Folders = append(out.Folders, Folder{Name: d.Name, Path: d.Path, Git: git})
 	}
@@ -184,21 +184,21 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 	if w.Worktree != nil && w.Worktree.CheckoutPath != "" {
 		raw = w.Worktree.CheckoutPath
 		if readable(raw) {
-			sp.Path = realDir(raw)
+			sp.Path = herdr.RealDir(raw)
 		}
 		sp.Worktree = w.Worktree.Linked
 	}
 	if sp.Path == "" && len(panes) > 0 {
 		if raw = panes[0].Cwd; readable(raw) {
-			sp.Path = realDir(raw)
+			sp.Path = herdr.RealDir(raw)
 		}
 	}
 	unreadable := sp.Path == "" && raw != "" && !readable(raw)
 	if unreadable {
 		sp.Path = raw
 	} else if sp.Path != "" {
-		g, ok := gitInfo(sp.Path)
-		sp.Git, sp.Repo, sp.Branch = ok, g.repo, g.branch
+		g, ok := herdr.GitInfo(sp.Path)
+		sp.Git, sp.Repo, sp.Branch = ok, g.Repo, g.Branch
 		if w.Worktree != nil && w.Worktree.RepoName != "" {
 			sp.Repo = w.Worktree.RepoName
 		}
@@ -236,47 +236,6 @@ func paneNumber(id string) int {
 		return -1
 	}
 	return n
-}
-
-// gitCheckout is what gitInfo reads.
-type gitCheckout struct {
-	root, repo, branch string
-}
-
-// gitInfo finds the git checkout dir is in (walking up to a .git) and
-// its branch from HEAD, without running git. ok is false outside one.
-func gitInfo(dir string) (gitCheckout, bool) {
-	for d := dir; d != "" && d != string(filepath.Separator) && d != "."; d = filepath.Dir(d) {
-		dotgit := filepath.Join(d, ".git")
-		fi, err := os.Stat(dotgit)
-		if err != nil {
-			continue
-		}
-		g := gitCheckout{root: d, repo: filepath.Base(d)}
-		gitdir := dotgit
-		if !fi.IsDir() {
-			// A linked worktree: ".git" is a file "gitdir: <path>".
-			b, err := os.ReadFile(dotgit)
-			if err != nil {
-				return g, true
-			}
-			p := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(b)), "gitdir:"))
-			if !filepath.IsAbs(p) {
-				p = filepath.Join(d, p)
-			}
-			gitdir = p
-		}
-		if head, err := os.ReadFile(filepath.Join(gitdir, "HEAD")); err == nil {
-			h := strings.TrimSpace(string(head))
-			if ref, ok := strings.CutPrefix(h, "ref: refs/heads/"); ok {
-				g.branch = ref
-			} else if len(h) >= 7 {
-				g.branch = h[:7]
-			}
-		}
-		return g, true
-	}
-	return gitCheckout{}, false
 }
 
 // space finds workspace id in a fresh snapshot.

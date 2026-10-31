@@ -12,28 +12,42 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// CreateWorkspace opens a new shell terminal in cwd. hc has no workspaces,
-// so label is ignored; the terminal is not a child of any other, and
-// carries a label that tells sheepdog's terminals apart.
+// CreateWorkspace opens a new shell terminal in cwd, in a new herdr-app
+// space and tab (fresh ids in its labels: herdr-app makes them on sight).
+// The space has no name of its own, so label is ignored and herdr-app names
+// it after the folder.
 func (b *Backend) CreateWorkspace(ctx context.Context, cwd, _ string) (herdr.PaneInfo, error) {
-	return b.openShell(ctx, cwd)
+	return b.openShell(ctx, cwd, newID(), spawnValue)
 }
 
-// SplitPane opens a new shell terminal in cwd. hc has no splits, so it is a
-// terminal like any other and paneID is only the caller's anchor.
-func (b *Backend) SplitPane(ctx context.Context, _, cwd string) (herdr.PaneInfo, error) {
-	return b.openShell(ctx, cwd)
+// SplitPane opens a new shell terminal in cwd, in a new tab of the space
+// paneID is in. hc has no splits. A pane that is in no space (a terminal
+// herdr-app does not show) has none to join, so it gets a new space.
+func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
+	anchor, err := b.client.Get(ctx, paneID)
+	if err != nil {
+		return herdr.PaneInfo{}, translate(err)
+	}
+	space := spaceOf(anchor)
+	if space == "" {
+		space = newID()
+	}
+	return b.openShell(ctx, cwd, space, spawnValue)
 }
 
-// openShell runs the machine's own shell (no argv) in cwd.
-func (b *Backend) openShell(ctx context.Context, cwd string) (herdr.PaneInfo, error) {
+// openShell runs the machine's own shell (no argv) in cwd, kept by the
+// core, in a new tab of space. role is sheepdog's label value: spawn for an
+// agent's shell, shell for the phone's plain shell.
+func (b *Backend) openShell(ctx context.Context, cwd, space, role string) (herdr.PaneInfo, error) {
+	tab := newID()
 	t, err := b.client.Run(ctx, hc.RunParams{
 		Cwd:      cwd,
 		Env:      herdr.PaneEnv,
-		Labels:   map[string]string{spawnLabel: spawnValue},
+		Labels:   map[string]string{spawnLabel: role, labelSpace: space, labelTab: tab},
+		Keep:     true,
 		NoParent: true,
 	})
-	b.logEvent("herdr.open_shell", t.Address, map[string]any{"cwd": cwd, "error": errString(err)})
+	b.logEvent("herdr.open_shell", t.Address, map[string]any{"cwd": cwd, "space": space, "tab": tab, "role": role, "error": errString(err)})
 	if err != nil {
 		return herdr.PaneInfo{}, err
 	}

@@ -56,10 +56,15 @@ final class FakeLog: AppLogging {
 
 final class FakeStatusSource: DaemonStatusSource {
     var onChange: (@MainActor (DaemonState?) -> Void)?
+    var onEvent: (@MainActor (DaemonEvent) -> Void)?
     private(set) var running = false
 
     func start() { running = true }
     func stop() { running = false }
+
+    func emit(_ event: DaemonEvent) {
+        MainActor.assumeIsolated { onEvent?(event) }
+    }
 }
 
 struct Boom: Error {}
@@ -230,10 +235,35 @@ final class FakeVoice: VoiceControlling {
     var state = VoiceMenuState()
     var onChange: (@MainActor () -> Void)?
     private(set) var routes: [AppRoute] = []
+    private(set) var pushToTalkCalls: [Bool] = []
     private(set) var useHeres = 0
     private(set) var settingsOpened = 0
 
     func handle(route: AppRoute) { routes.append(route) }
+    func pushToTalk(on: Bool) { pushToTalkCalls.append(on) }
     func useHere() { useHeres += 1 }
     func openMicrophoneSettings() { settingsOpened += 1 }
+}
+
+@MainActor
+final class FakeHotkey: HotkeyServing {
+    var shortcut: HotkeyShortcut
+    var onChange: (@MainActor () -> Void)?
+    var onAction: (@MainActor (HotkeyAction) -> Void)?
+    var onError: (@MainActor (String) -> Void)?
+    private(set) var started = false
+    private(set) var selections: [HotkeyShortcut] = []
+
+    init(shortcut: HotkeyShortcut = .optionSpace) {
+        self.shortcut = shortcut
+    }
+
+    func start() { started = true }
+    func stop() { started = false }
+
+    func select(_ shortcut: HotkeyShortcut) {
+        selections.append(shortcut)
+        self.shortcut = shortcut
+        onChange?()
+    }
 }
