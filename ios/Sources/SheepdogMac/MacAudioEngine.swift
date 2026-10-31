@@ -380,12 +380,25 @@ final class MacAudioEngine: VoiceAudio {
 
     // MARK: - Time-stretch
 
-    /// player → time-pitch → mixer, both edges at the playback format.
+    /// player → time-pitch → mixer, both edges at the playback format, and
+    /// mixer → output at the input's sample rate. The voice-processing unit
+    /// on the Mac will not initialize unless its two client sides share a
+    /// rate (`AUVPAggregate`: "client-side input and output formats do not
+    /// match", -10875), and the mixer's implicit link to the output can come
+    /// up at 44.1 kHz against a 48 kHz microphone. Called after voice
+    /// processing is on, so the input format is the one the unit delivers.
     private func connectPlayback() {
+        let inputRate = engine.inputNode.outputFormat(forBus: 0).sampleRate
+        let outputChannels = engine.outputNode.inputFormat(forBus: 0).channelCount
         engine.disconnectNodeOutput(player)
         engine.disconnectNodeOutput(timePitch)
         engine.connect(player, to: timePitch, format: playbackFormat)
         engine.connect(timePitch, to: engine.mainMixerNode, format: playbackFormat)
+        if inputRate > 0,
+           let mixed = AVAudioFormat(standardFormatWithSampleRate: inputRate, channels: outputChannels > 0 ? outputChannels : 2) {
+            engine.disconnectNodeOutput(engine.mainMixerNode)
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: mixed)
+        }
     }
 
     private func startSteering() {
