@@ -93,7 +93,9 @@ jobs:
   sign-macos:
     needs: release
     if: ${{ !cancelled() && (needs.release.result == 'success' || (needs.release.result == 'skipped' && github.event_name == 'workflow_dispatch')) }}
-    runs-on: macos-15
+    # The runner ios.yml uses: it has Xcode 27, which SheepdogMac needs (the
+    # macos-15 image's newest Xcode, 26.3, cannot build it).
+    runs-on: xcode-27
     environment: release
     timeout-minutes: 45
     permissions:
@@ -234,17 +236,16 @@ jobs:
           echo "::notice title=darwin binary signed::$asset is signed and notarized"
 
       # Sheepdog.app, after the daemon: the same keychain and API key
-      # (docs/dev/signing.md, "Sheepdog.app"). The Xcode on the image is
-      # whatever the newest installed one is; XcodeGen is the pin ios.yml
-      # and Xcode Cloud use.
-      - name: Select the newest Xcode
+      # (docs/dev/signing.md, "Sheepdog.app"). The Xcode and XcodeGen are
+      # the ones ios.yml pins, so the app is archived with the toolchain its
+      # tests ran on.
+      - name: Select Xcode 27.1
         id: xcode
         if: steps.sign.outputs.signed == 'true'
         continue-on-error: true
         run: |
           set -euo pipefail
-          xcode="$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -n 1)"
-          sudo xcode-select -s "$xcode"
+          sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
       - name: Install XcodeGen

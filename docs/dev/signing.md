@@ -25,7 +25,7 @@ repositories). Pushing a `v*` tag runs three jobs:
 release (Cloud Run, ubuntu)      build darwin/arm64 + linux/amd64, create the GitHub Release
    │                              (darwin tarball unsigned for now)
    ▼  ── the maintainer approves the `release` environment ──
-sign-macos (GitHub-hosted macos-15, environment: release)
+sign-macos (GitHub-hosted xcode-27, environment: release)
    │                              temporary keychain ← MACOS_CERT_P12_BASE64
    │                              scripts/release-sign.sh <tag>: codesign, notarytool, re-tar,
    │                              rewrite checksums.txt, gh release upload --clobber
@@ -309,8 +309,9 @@ Connect API key as the daemon, so no new secret exists. Sign-macos runs
 
 1. If `checksums.txt` already lists the zip, stop (a rerun changes nothing;
    to redo the app, delete the asset and its line).
-2. Select the newest Xcode on the image, install the pinned XcodeGen (the
-   version `ios.yml` and Xcode Cloud use), `xcodegen generate`.
+2. Select Xcode 27.1 on the `xcode-27` image (the runner and Xcode `ios.yml`
+   tests with), install the pinned XcodeGen (the version `ios.yml` and Xcode
+   Cloud use), `xcodegen generate`.
 3. `xcodebuild archive` of `SheepdogMac`, Release, arm64 only (like the
    daemon), unsigned (`CODE_SIGNING_ALLOWED=NO`): the project's automatic
    signing is for Debug and needs the team's development certificate.
@@ -411,7 +412,7 @@ runs.
 | sign-macos: `security import` fails | the item's `password` does not match its `.p12` |
 | sign-macos skipped with a notice | `OP_SERVICE_ACCOUNT_TOKEN` is not set in the `release` environment |
 | dispatch refused by the environment | the run was not dispatched on a `v*` tag ref |
-| sign-macos: the app step fails at `xcodebuild archive` | the newest Xcode on the macos-15 image is too old for the project's SDK floor (iOS 26 / macOS 14 targets); the log shows `xcodebuild -version` |
+| sign-macos: the app step fails at `xcodebuild archive` | the job's Xcode is not the one `ios.yml` uses (v0.1.15 ran on macos-15, whose newest Xcode, 26.3, cannot build `SheepdogKitMac`); keep `runs-on` and the selected Xcode in step with `ios.yml`; the log shows `xcodebuild -version` |
 | `Sheepdog.app not shipped` warning | an app-specific step failed; the daemon release and its Homebrew formula continue. Fix the app and re-dispatch to add or update the cask |
 | `Sheepdog.app cask not published` warning | the app signed but the cask could not be rendered; the daemon formula still publishes. Fix the cask and re-dispatch |
 | homebrew: push rejected (403) | `homebrew-tap-token` expired or lacks Contents write on the tap |
