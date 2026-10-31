@@ -91,7 +91,7 @@ type initKey struct {
 
 // runInit implements `sheepdog init`.
 func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return runInitWith(ctx, args, newPrompter(stdin, stdout, false), stdout, stderr)
+	return runInitWith(ctx, args, newPrompter(stdin, stdout), stdout, stderr)
 }
 
 // runInitWith is init with a prompter the caller shares (one reader per

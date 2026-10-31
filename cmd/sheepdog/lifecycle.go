@@ -94,6 +94,15 @@ func recordedEnvFile(configPath string) string {
 // serviceInstalled reports whether the login service's unit file exists.
 func (l *lifecycle) serviceInstalled() bool { return l.mgr.Run != nil && l.mgr.Installed() }
 
+// useEnvFile makes later start and stop calls use envFile, even when setup has
+// just created it beside a custom config.
+func (l *lifecycle) useEnvFile(envFile string) {
+	l.envFile = envFile
+	if spec, err := serviceSpecFor(l.cfg, l.configPath, envFile, ""); err == nil {
+		l.mgr = service.Manager{Spec: spec, Run: serviceRunner}
+	}
+}
+
 // url is the daemon's local base URL from config.
 func (l *lifecycle) url() string { return daemon.LocalURL(l.cfg.Web.Bind, l.cfg.Web.Port) }
 

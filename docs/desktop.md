@@ -84,7 +84,10 @@ Then run `sheepdog restart`. The key and its environment override are in
 
 ### 3. Install the panel
 
-From a checkout of this repository:
+Run `sheepdog setup` after herdr-app is installed. It installs or updates the
+panel for you.
+
+If you need to install it by hand from a checkout of this repository:
 
 ```sh
 HERDR_APP_MODS="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods"

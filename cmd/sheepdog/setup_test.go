@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
 // TestMain keeps every test off the developer's real secret file: the
@@ -26,6 +28,23 @@ func TestMain(m *testing.M) {
 	}
 	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		_ = os.Setenv(k, home)
+	}
+	// Commands that inspect the host during setup see a Linux test home
+	// with no herdr tools. Focused setup tests inject their own probe.
+	setupEnvironmentProbe = func() onboard.Probe {
+		return onboard.Probe{
+			GOOS: "linux",
+			Home: home,
+			Getenv: func(string) string {
+				return ""
+			},
+			LookPath: func(string) (string, error) {
+				return "", os.ErrNotExist
+			},
+			Stat:          os.Stat,
+			ReadFile:      os.ReadFile,
+			SocketAnswers: func(string) bool { return false },
+		}
 	}
 	// The developer's shell may export real keys and SHEEPDOG_* settings:
 	// no test may see them.
