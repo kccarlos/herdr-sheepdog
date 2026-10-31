@@ -371,6 +371,8 @@ targets:
           - AppTransportSecurityTests.swift
           - PrivacyManifestTests.swift
           - PurposeStringsTests.swift
+      # The classification cases the panel's node tests share (section 6.1).
+      - path: Tests/Fixtures
     dependencies:
       - target: SheepdogKitMac
     settings:
