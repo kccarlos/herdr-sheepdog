@@ -231,10 +231,6 @@ type Deps struct {
 	// windows (docs/dev/term-contract.md), and the `term` feature; nil
 	// (herdr mock mode) serves neither.
 	Term *TermDeps
-	// TermOff is /term's 503 message when Term is nil because the backend
-	// has no live terminal (herdr-core); empty keeps the herdr version
-	// message.
-	TermOff string
 	// Shell is config web.shell: paired devices may open the phone shell
 	// and send attachments (on by default; the setup page switches it).
 	Shell bool

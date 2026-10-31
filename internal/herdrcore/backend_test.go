@@ -2,6 +2,8 @@ package herdrcore_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -141,6 +143,98 @@ func TestSnapshot(t *testing.T) {
 	}
 	if _, ok := panes["m/t1"]; ok {
 		t.Fatal("remote terminal listed")
+	}
+}
+
+// The herdr.space label is the workspace, herdr.tab the tab; a space is
+// named after its first terminal's repo, else folder, and shows its most
+// urgent agent's state. Unlabeled terminals stay panes in no workspace.
+func TestSnapshotSpacesFromLabels(t *testing.T) {
+	b, srv := newBackend(t)
+	repo := filepath.Join(t.TempDir(), "api")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(t.TempDir(), "notes")
+	labels := func(space, tab string) map[string]string {
+		return map[string]string{"herdr.space": space, "herdr.tab": tab}
+	}
+
+	// s1: a shell made first, in a subfolder of a repo, and two agents.
+	shell := liveTerminal("t1", "zsh")
+	shell.Cwd = filepath.Join(repo, "cmd")
+	shell.CreatedMS = 100
+	shell.Labels = labels("s1", "a")
+	srv.Add(shell)
+	idle := reported("t2", "claude-code", "idle")
+	idle.CreatedMS = 200
+	idle.Labels = labels("s1", "b")
+	srv.Add(idle)
+	blocked := reported("t3", "codex", "blocked")
+	blocked.CreatedMS = 300
+	blocked.Labels = labels("s1", "c")
+	srv.Add(blocked)
+	// s2: one agent in a plain folder.
+	working := reported("t4", "claude-code", "working")
+	working.Cwd = folder
+	working.CreatedMS = 400
+	working.Labels = labels("s2", "d")
+	srv.Add(working)
+	// No labels: a pane, in no space.
+	srv.Add(reported("t5", "claude-code", "idle"))
+	// Another app's label does not make a space.
+	other := liveTerminal("t6", "zsh")
+	other.Labels = map[string]string{"sheepdog": "spawn"}
+	srv.Add(other)
+
+	snap, err := b.Snapshot(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []herdr.WorkspaceInfo{
+		{WorkspaceID: "s1", Number: 1, Label: "api", PaneCount: 3, Status: herdr.StateBlocked},
+		{WorkspaceID: "s2", Number: 2, Label: "notes", PaneCount: 1, Status: herdr.StateWorking},
+	}
+	if !slices.Equal(snap.Workspaces, want) {
+		t.Fatalf("workspaces = %+v, want %+v", snap.Workspaces, want)
+	}
+	panes := map[string]herdr.PaneInfo{}
+	for _, p := range snap.Panes {
+		panes[p.PaneID] = p
+	}
+	if len(panes) != 6 {
+		t.Fatalf("panes = %+v, want all 6 live local terminals", panes)
+	}
+	for id, w := range map[string][2]string{"t1": {"s1", "a"}, "t3": {"s1", "c"}, "t4": {"s2", "d"}, "t5": {"", ""}, "t6": {"", ""}} {
+		if p := panes[id]; p.WorkspaceID != w[0] || p.TabID != w[1] {
+			t.Errorf("%s = space %q tab %q, want %q %q", id, p.WorkspaceID, p.TabID, w[0], w[1])
+		}
+	}
+	for _, a := range snap.Agents {
+		switch a.PaneID {
+		case "t3":
+			if a.WorkspaceID != "s1" || a.TabID != "c" {
+				t.Errorf("agent t3 = %+v", a)
+			}
+		case "t5":
+			if a.WorkspaceID != "" {
+				t.Errorf("unlabeled agent t5 = %+v", a)
+			}
+		}
+	}
+}
+
+func TestSpaceNameAtHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	b, srv := newBackend(t)
+	at := liveTerminal("t1", "zsh")
+	at.Cwd = home
+	at.Labels = map[string]string{"herdr.space": "s1", "herdr.tab": "a"}
+	srv.Add(at)
+	snap, err := b.Snapshot(testContext(t))
+	if err != nil || len(snap.Workspaces) != 1 || snap.Workspaces[0].Label != "~" {
+		t.Fatalf("workspaces = %+v, %v", snap.Workspaces, err)
 	}
 }
 

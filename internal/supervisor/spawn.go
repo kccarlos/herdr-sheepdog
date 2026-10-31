@@ -251,7 +251,7 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "via": req.Via, "error": err.Error()})
 		return started{}, &StartError{PaneID: pane.PaneID, Reason: ReasonStartFailed, Err: fmt.Errorf("could not start %s in %s: %w", state.KindWord(req.Kind), where, err)}
 	}
-	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
+	fields := map[string]any{"dir": dir.Path, "kind": req.Kind, "pane": pane.PaneID, "split": dir.Pane != "" && wt == nil, "joined": dir.Pane != "" && wt == nil && req.Space == "", "worktree": req.Worktree != "", "first_instruction": req.Text != "", "via": req.Via}
 	if req.Model != "" {
 		fields["model"] = req.Model
 	}
@@ -324,12 +324,12 @@ func (e *ReasonError) Unwrap() error { return e.Err }
 // worktreeRefusal says why dir cannot have a fresh worktree of branch
 // (with its reason code), or nil when it can.
 func worktreeRefusal(ctx context.Context, dir spawnDir, branch string) (string, error) {
-	g, isGit := gitInfo(dir.Path)
+	g, isGit := herdr.GitInfo(dir.Path)
 	if !isGit {
 		return "not git", &ReasonError{Reason: ReasonNotGit, Err: fmt.Errorf("%w: %s is not in a git repository, so it cannot have a fresh worktree", ErrUserAction, dir.Name)}
 	}
-	if branchCheckedOut(ctx, g.root, branch) {
-		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.repo)}
+	if branchCheckedOut(ctx, g.Root, branch) {
+		return "branch exists", &ReasonError{Reason: ReasonBranchExists, Err: fmt.Errorf("%w: the branch %s is already checked out in %s; open its worktree instead", ErrUserAction, branch, g.Repo)}
 	}
 	return "", nil
 }

@@ -79,7 +79,7 @@ binary version.
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
   | `agent-actions` | the user's own New agent, Rename, Stop and Close routes (*Agent actions*) | with `screen` |
-  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
+  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer, or herdr-core has `terminal.attach` (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
@@ -1184,12 +1184,14 @@ phone").
 - **New agent.** `kind` is one of the `kinds` of `GET /api/spaces`
   ([Spaces](#spaces)). With `space` (a space's `id`) the agent joins that
   space: its pane is split from the space's first pane, in the space's
-  folder. With `dir` a new space opens there: a folder's name or full
-  path resolved as for the orchestrator (inside a project root, or an
-  open space's own folder), even when a space already works there.
+  folder. With `dir` a folder's name or full path is resolved as for the
+  orchestrator (inside a project root, or an open space's own folder, a
+  trailing slash or symlink aside): when a space already works there the
+  agent joins it, exactly as with `space` (`supervisor.spawn` has
+  `joined: true`), and only a folder with no space opens a new one.
   With `worktree` (a branch name: letters, digits and `. _ / -`), herdr's
   `worktree.create` makes the branch's worktree in that repository and
-  the new space opens there. herdr's `agent.start` starts the agent in
+  a new space opens there, even when a space works in the folder. herdr's `agent.start` starts the agent in
   the new shell, and the answer comes once herdr reports it ready (up to
   about a minute): `spoken` is "Claude is ready in bench.", or, with
   `blocked: true`, the agent started at a question (its first-run trust

@@ -83,7 +83,9 @@ targets:
   SheepdogKitMac:
     type: framework
     platform: macOS
-    deploymentTarget: "26.0"
+    # SheepdogMac's floor: an app cannot link a framework built for a newer
+    # macOS than its own.
+    deploymentTarget: "14.0"
     sources:
       - path: Sources/SheepdogKit
         excludes:
@@ -98,6 +100,53 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         DEFINES_MODULE: YES
         SKIP_INSTALL: YES
+
+  # Sheepdog.app for the Mac (docs/dev/design/desktop-client.md section 5):
+  # a menu-bar item with no window and no Dock icon. Not sandboxed: it talks
+  # to a loopback daemon, and a sandbox needs extra entitlements for no gain
+  # on a Developer ID app. Hardened runtime, with the one entitlement the
+  # microphone needs (the voice session is PR 9). Debug is signed
+  # automatically with the team; Developer ID signing is release.yml's
+  # (docs/dev/signing.md).
+  SheepdogMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/SheepdogMac
+    dependencies:
+      - target: SheepdogKitMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-mac
+        PRODUCT_NAME: Sheepdog
+        # The product is "Sheepdog", but its module must not share the iOS
+        # app's name.
+        PRODUCT_MODULE_NAME: SheepdogMac
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ENABLE_HARDENED_RUNTIME: YES
+    entitlements:
+      path: Sources/SheepdogMac/SheepdogMac.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+    info:
+      path: Sources/SheepdogMac/Info.plist
+      properties:
+        CFBundleDisplayName: Sheepdog
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Menu bar only: no Dock icon, no app menu.
+        LSUIElement: true
+        # sheepdog://talk, the same scheme the iOS app registers (SheepdogKit
+        # AppRoute); the panel's `open sheepdog://talk` lands here.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.github.kccarlos.herdr-sheepdog-mac
+            CFBundleURLSchemes:
+              - sheepdog
+        NSMicrophoneUsageDescription: >-
+          Sheepdog uses the microphone so you can talk to your coding agents.
+          What you say goes to the sheepdog daemon on your own computer, and
+          from there to the AI voice and orchestrator services you set up.
 
   Sheepdog:
     type: application
@@ -371,6 +420,8 @@ targets:
           - AppTransportSecurityTests.swift
           - PrivacyManifestTests.swift
           - PurposeStringsTests.swift
+      # The classification cases the panel's node tests share (section 6.1).
+      - path: Tests/Fixtures
     dependencies:
       - target: SheepdogKitMac
     settings:
@@ -379,6 +430,26 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO
+
+  # The Mac app's unit tests, with fakes for every platform service. Hosted
+  # in the app, which skips its menu-bar setup under XCTest.
+  SheepdogMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests/SheepdogMacTests
+    dependencies:
+      - target: SheepdogMac
+      - target: SheepdogKitMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        # XcodeGen derives the host's path from the target name; the
+        # product is called Sheepdog.
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Sheepdog.app/Contents/MacOS/Sheepdog
+        BUNDLE_LOADER: $(TEST_HOST)
 
 schemes:
   # Shared (XcodeGen writes schemes to xcshareddata), which Xcode Cloud
@@ -432,3 +503,19 @@ schemes:
       gatherCoverageData: false
       targets:
         - SheepdogKitMacTests
+
+  # The Mac app and its unit tests (ios.yml "macos" job).
+  SheepdogMac:
+    build:
+      targets:
+        SheepdogMac: all
+        SheepdogMacTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - SheepdogMacTests
+    archive:
+      config: Release

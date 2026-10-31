@@ -866,6 +866,48 @@ tapped. Tapping any notification opens that agent's Agents card. Nothing is
 shown in the foreground while the session is live. The payload format is
 described in the daemon's `docs/dev/push.md`.
 
+## Sheepdog.app (macOS)
+
+`SheepdogMac` is the Mac app of
+[desktop-client.md](../../../docs/dev/design/desktop-client.md) (sections 5.2
+and 5.4): a menu-bar item with no window and no Dock icon (`LSUIElement`),
+product name `Sheepdog`, not sandboxed, hardened runtime, macOS 14 and later.
+It links `SheepdogKitMac`, which is why that framework's deployment target is
+14 too. This shell shows the daemon's state, opens the panel and registers
+`sheepdog://`; the voice session (`MacAudioEngine`, `MacVoiceHost`, the mic
+permission) is PR 9, so Talk, Mute, Stop and Use here are in the menu, disabled.
+`com.apple.security.device.audio-input` and `NSMicrophoneUsageDescription` are
+already in place for it.
+
+Everything in `Sources/SheepdogMac` that touches the system sits behind a
+protocol, and `Tests/SheepdogMacTests/Fakes.swift` has a fake of each:
+
+| Protocol | Real | What it does |
+|---|---|---|
+| `DaemonLocating` | `DaemonLocator` | `127.0.0.1` and port 7777; the `sheepdogDaemonHost` and `sheepdogDaemonPort` `UserDefaults` keys override them. |
+| `DaemonStatusSource` | `DaemonStatusMonitor` | Kit's `DaemonClient`: `state()` once, then the `/events` stream (`SSEParser`); any event re-reads `/api/state`, a burst as one read. A dropped stream publishes `nil` ("daemon down") and retries every 5 s. |
+| `PanelOpening` | `PanelOpener` | Runs `herdr-app do mod.open --name sheepdog` through `/usr/bin/env` (`ProcessLaunching`), with the usual install directories added to `PATH`, because a menu-bar app does not get the shell's. |
+| `LoginItemControlling` | `LoginItem` | `SMAppService.mainApp`; off by default. |
+| `AppLogging` | `AppLog` | `os.Logger`. |
+
+`MenuBarState` is the pure table from `DaemonState` (nil: daemon down) to the
+icon and the menu's first line: daemon down, off (`--voice=off`, or no client
+holds the voice), voice elsewhere (`voice.client.platform` is not `macos`; the
+line names `voice.client.name`), muted, speaking, listening, and the count of
+open questions as the "needs you" badge. It lives in the app, not in Kit,
+because only this app draws it; Kit holds what it decodes
+(`DaemonState.VoiceInfo.speaking` and `.client`, absent from an older daemon,
+pinned by `VoiceClientDecodeTests`). `StatusItemController` builds the menu
+from `rows(for:loginItemEnabled:)` and sets a template image (`MenuBarIcon`,
+the mono brand logo) so the icon follows light and dark; dimmed states use
+`appearsDisabled`.
+
+`RouteHandler` parses `sheepdog://` URLs with Kit's `AppRoute`, delivered to
+`application(_:open:)`. Only `talk` is known, and it logs "voice arrives in
+PR 9". The unit tests are hosted in the app, which skips its menu-bar setup
+when `XCTestConfigurationFilePath` is set, so tests never ask a daemon
+anything.
+
 ## The Live Activity
 
 The voice session's Live Activity is a lock-screen banner first; the
