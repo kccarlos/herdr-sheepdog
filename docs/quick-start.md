@@ -238,6 +238,10 @@ The plugin is the supported path. The daemon is also a plain binary:
   then `make install` builds it and copies it to `~/.local/bin/`.
 - **Homebrew:** `brew install kccarlos/tap/sheepdog` (macOS and Linux;
   the macOS binary is signed and notarized). `brew upgrade sheepdog` updates it.
+- **Sheepdog.app (Mac only):** the menu-bar app that holds the microphone,
+  `brew install --cask kccarlos/tap/sheepdog-app` (signed, notarized, arm64,
+  macOS 14 or newer). It talks to the daemon above, so install that too.
+  `brew upgrade --cask sheepdog-app` updates it.
 
 Then run `sheepdog setup` as above. `sheepdog update` prints the upgrade steps
 for the way you installed.

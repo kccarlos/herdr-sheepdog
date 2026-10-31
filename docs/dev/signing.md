@@ -5,7 +5,8 @@ Application** certificate and notarized by Apple, so someone who downloads
 it with a browser can run it without Gatekeeper blocking it. The Linux
 build is not affected.
 
-This is for the daemon's own macOS binary only. The **iOS companion app**
+This is for the daemon's own macOS binary and, since the same job signs
+it, the Mac app ([Sheepdog.app](#sheepdogapp)). The **iOS companion app**
 ([`ios/`](../../ios/README.md)) is signed and shipped separately, by Xcode Cloud (which only archives
 TestFlight builds; the app's tests run in `ios.yml` on GitHub Actions), not
 by anything in this document — see
@@ -29,10 +30,13 @@ sign-macos (GitHub-hosted macos-15, environment: release)
    │                              scripts/release-sign.sh <tag>: codesign, notarytool, re-tar,
    │                              rewrite checksums.txt, gh release upload --clobber
    │                              then download the published tarball and verify it again
+   │                              scripts/release-sign-app.sh <tag>: Sheepdog.app (see below),
+   │                              Sheepdog-<version>-macos.zip added to the release and checksums.txt
    ▼
 homebrew (GitHub-hosted ubuntu-latest, environment: release)
-                                  render.sh → ruby -c → brew audit --strict →
-                                  commit Formula/sheepdog.rb to kccarlos/homebrew-tap, push →
+                                  render.sh (formula and --cask) → ruby -c → brew audit --strict →
+                                  commit Formula/sheepdog.rb and Casks/sheepdog-app.rb to
+                                  kccarlos/homebrew-tap, push →
                                   brew install kccarlos/tap/sheepdog (Linux smoke test)
 ```
 
@@ -53,14 +57,20 @@ homebrew (GitHub-hosted ubuntu-latest, environment: release)
    --context context:primary-signature`, the check that works for a bare
    CLI binary; see [Checking a download](#checking-a-download)). The
    keychain and the key file are deleted in an always-run step.
-3. **homebrew** renders `Formula/sheepdog.rb` from the signed
-   `checksums.txt` with `packaging/homebrew/render.sh`, checks it with
-   `ruby -c` and `brew audit --strict`, and `packaging/homebrew/tap-update.sh`
-   commits it to `kccarlos/homebrew-tap` as `sheepdog <version>` (author
-   KC) together with a README table row the first time, then pushes to
-   the tap's `main`. A rerun with an unchanged formula commits nothing. It
-   ends by installing the formula from the tap on Linux and running `brew
-   test`.
+   After the daemon, the same job signs [Sheepdog.app](#sheepdogapp).
+3. **homebrew** renders `Formula/sheepdog.rb` and the cask
+   `Casks/sheepdog-app.rb` from the signed `checksums.txt` with
+   `packaging/homebrew/render.sh` (`--cask` for the cask), checks both with
+   `ruby -c` and the formula with `brew audit --strict` (casks need macOS,
+   so the cask has no audit in this job), and `packaging/homebrew/tap-update.sh`
+   commits both to `kccarlos/homebrew-tap` as one commit, `sheepdog <version>`
+   (author KC), together with a README table row for each the first time,
+   then pushes to the tap's `main`. `tap-update.sh` fails before writing
+   anything if only one of the two would change, and the job runs only if
+   both the daemon and the app were signed, so the tap never has a formula
+   without its cask or the reverse. A rerun with an unchanged formula and
+   cask commits nothing. It ends by installing the formula from the tap on
+   Linux and running `brew test`.
 
 Both sign-macos and homebrew run in the `release` environment, so a run
 asks for approval twice: once before signing, and again when homebrew
@@ -283,6 +293,65 @@ on a bare Mach-O binary. Gatekeeper looks the notarization ticket up
 online the first time it evaluates the binary, so a user who is offline at
 that moment may be refused until they are online.
 
+## Sheepdog.app
+
+The Mac app (`ios/`, scheme `SheepdogMac`, product `Sheepdog.app`, bundle id
+`com.github.kccarlos.herdr-sheepdog-mac`; [design](design/desktop-client.md))
+ships as `Sheepdog-<version>-macos.zip` on the same release as the daemon,
+with its sha256 in `checksums.txt`. It uses the **same** Developer ID
+Application identity, the same temporary keychain and the same App Store
+Connect API key as the daemon, so no new secret exists. Sign-macos runs
+`scripts/release-sign-app.sh <tag>` after the daemon:
+
+1. If `checksums.txt` already lists the zip, stop (a rerun changes nothing;
+   to redo the app, delete the asset and its line).
+2. Select the newest Xcode on the image, install the pinned XcodeGen (the
+   version `ios.yml` and Xcode Cloud use), `xcodegen generate`.
+3. `xcodebuild archive` of `SheepdogMac`, Release, arm64 only (like the
+   daemon), unsigned (`CODE_SIGNING_ALLOWED=NO`): the project's automatic
+   signing is for Debug and needs the team's development certificate.
+   `MARKETING_VERSION` is the tag without `v` and without a pre-release suffix
+   (`v1.2.3-rc1` is 1.2.3); the script checks the built
+   `CFBundleShortVersionString`.
+4. Sign inside-out with `scripts/macos-sign.sh`'s `msign_sign`: nested
+   frameworks first, then the app with `SIGN_ENTITLEMENTS` set to
+   `ios/Sources/SheepdogMac/SheepdogMac.entitlements`, `codesign --options
+   runtime --timestamp`. The script checks the signed app carries the
+   microphone entitlement.
+5. `notarytool submit --wait` on a `ditto` zip (`msign_notarize`, which prints
+   Apple's log and fails on anything but `Accepted`), then `xcrun stapler
+   staple` and `stapler validate` on the `.app` itself.
+6. `ditto -c -k --keepParent` the stapled app into the zip, append its line
+   to `checksums.txt` (the daemon and linux lines stay), `gh release upload
+   --clobber` both.
+7. The workflow downloads the zip again, checks its sha256, `codesign
+   --verify --deep --strict`, the team id, `stapler validate` and `spctl
+   --assess --type execute` (for an `.app`, unlike the bare daemon, this
+   reports `source=Notarized Developer ID`).
+
+Unlike the daemon, the app has entitlements (only
+`com.apple.security.device.audio-input`, for the voice session) and it is
+stapled, so it opens offline. The bundle id and team never change: the
+microphone grant is tied to them.
+
+**Debug and local builds need no release identity.** `xcodebuild` from the
+generated project signs Debug automatically with the team's development
+certificate, or run it with `CODE_SIGNING_ALLOWED=NO` for a build that only
+has to compile. `scripts/release-sign-app.sh --dry-run <tag>` builds and
+signs but neither notarizes nor uploads; it needs a Developer ID identity in
+the keychain (`SIGN_KEYCHAIN` and `SIGN_ALLOW_UNTRUSTED=1` accept a
+self-signed one, as in [Testing without the real
+certificate](#testing-without-the-real-certificate)).
+
+### The cask
+
+`brew install --cask kccarlos/tap/sheepdog-app` installs the zip into
+`/Applications` (`packaging/homebrew/sheepdog-app.rb.tmpl`: `app
+"Sheepdog.app"`, arm64, macOS 14 or newer, `zap` for the app's
+preferences). The token is `sheepdog-app` because the daemon's formula is
+already `sheepdog`. Its `livecheck` follows `v*` tags only, so the iOS app's
+`ios-v*` tags do not count as a new version.
+
 ## Checking a download
 
 ```sh
@@ -338,6 +407,9 @@ runs.
 | sign-macos: `security import` fails | the item's `password` does not match its `.p12` |
 | sign-macos skipped with a notice | `OP_SERVICE_ACCOUNT_TOKEN` is not set in the `release` environment |
 | dispatch refused by the environment | the run was not dispatched on a `v*` tag ref |
+| sign-macos: the app step fails at `xcodebuild archive` | the newest Xcode on the macos-15 image is too old for the project's SDK floor (iOS 26 / macOS 14 targets); the log shows `xcodebuild -version` |
+| homebrew skipped after sign-macos succeeded for the daemon | the app step failed (`app_signed` is unset): fix it and re-dispatch; the tap is never updated with only one of formula and cask |
+| homebrew: `only the cask would change` | the formula and the cask in the tap disagree about being current; update the stale one by hand (`packaging/homebrew/README.md`) |
 | homebrew: push rejected (403) | `homebrew-tap-token` expired or lacks Contents write on the tap |
 | `sha256 mismatch` | the release asset does not match its `checksums.txt`; do not sign it, rebuild the release |
 

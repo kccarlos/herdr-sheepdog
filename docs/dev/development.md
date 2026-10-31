@@ -187,9 +187,10 @@ uses no secrets. Archives, signing
 and TestFlight stay on Xcode Cloud, which runs no tests, and no signing
 certificate or App Store Connect key for the app goes into GitHub. The other exception
 is `release.yml`'s `sign-macos` job, which signs and notarizes the daemon's
-darwin binary on a GitHub-hosted Mac in the `release` environment
+darwin binary and builds, signs, notarizes and staples Sheepdog.app on a
+GitHub-hosted Mac in the `release` environment
 (maintainer approval, `v*` tags only), followed by the `homebrew` job that
-pushes the formula to the tap ([signing.md](signing.md)). The `policy` CI
+pushes the formula and the cask to the tap ([signing.md](signing.md)). The `policy` CI
 job (`scripts/workflow-policy.sh`, tested by
 `scripts/workflow-policy_test.sh`) fails if a macOS runner or `xcodebuild`
 appears anywhere else, including a `release.yml` job without

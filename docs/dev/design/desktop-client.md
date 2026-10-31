@@ -325,8 +325,9 @@ and implements the protocol `VoiceEngine` already drives.
 - **Cask** next to the existing formula in the tap: `app "Sheepdog.app"`, a
   minimum macOS version, `zap` for preferences. The formula keeps the daemon;
   an `.app` in a formula is awkward. The release job updates both, and
-  `brew install --cask sheepdog` puts the app in `/Applications`, where the
-  panel looks.
+  `brew install --cask kccarlos/tap/sheepdog-app` puts the app in
+  `/Applications`, where the panel looks. The token is `sheepdog-app`, not
+  `sheepdog`: the formula already has that name.
 - The bundle id and team never change; the mic grant is tied to them.
 
 ## 6. The panel
@@ -398,7 +399,7 @@ and classifier, state store; no herdr imports), `ui/` (views), `voice.js`
 |---|---|---|
 | Daemon down | connect refused, no SSE, no poll | "Sheepdog isn't running", the start command, retry timer. |
 | Setup needed | `/api/state` voice `problem` set | The daemon's words and a button to Settings. |
-| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check) | Voice buttons off; "brew install --cask sheepdog" with copy. Text still works. |
+| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check) | Voice buttons off; "brew install --cask kccarlos/tap/sheepdog-app" with copy. Text still works. |
 | Sheepdog.app not running | installed, `voice.client` not this Mac | "Talk" runs `open sheepdog://talk`. |
 | Voice elsewhere | `voice.client.platform` is another device | "Voice on iPhone" and **Use here**. |
 | Muted, speaking, listening | `voice.muted`, `voice.speaking` | Rail dot and label; Stop only while speaking. |
