@@ -117,7 +117,9 @@ case and punctuation aside.
 
 The daemon (`internal/supervisor` `spawn.go`, `startAgent`, the one
 start path for voice and tap) then opens a new herdr workspace in the
-directory, or splits a pane from an existing workspace there, waits for
+directory, or splits a pane from an existing workspace there (a tap on
+New agent with a folder does the same: it joins the workspace already
+in that folder, and only a fresh worktree always opens a new one), waits for
 the pane's shell, and starts the agent with herdr's `agent.start`
 (`--kind claude`, the model as `--model haiku` or `-m …`). herdr types
 the kind's own executable and reports when it detected the agent.
@@ -131,6 +133,13 @@ until the new agent sits idle at its prompt and then goes through the
 instruction send path (its menu guard included); it is dropped
 (`supervisor.spawn_instruction_dropped`) if the agent never gets there
 within ten minutes.
+
+On herdr-core there is no `agent.start`: the backend types the kind's
+command into a shell terminal it opened kept and labelled with the
+space and tab herdr-app shows it in (a split joins the space of the
+pane it is given as a new tab; a new workspace gets fresh ids), so the
+agent appears in herdr-app
+([design](design/herdr-core-backend.md#spaces-without-the-document)).
 
 Rails (authorisation and runaways, not judgement):
 - the user's own recent words must be behind it: the newest
