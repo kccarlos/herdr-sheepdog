@@ -17,7 +17,8 @@ at startup.
   prints it). The methods sheepdog needs: `hello`, `terminal.list`,
   `terminal.get`, `terminal.read`, `terminal.send`, `terminal.keys`,
   `terminal.interrupt`, `terminal.run`, `terminal.kill`,
-  `events.subscribe`.
+  `events.subscribe`, and for the live terminal `terminal.attach` on a
+  framed connection (`hello` with `framed`).
 - **Socket.** `HC_SOCKET`, else `<session>.sock` under
   `$XDG_RUNTIME_DIR/herdr-core/`, else `/run/user/<uid>/herdr-core/`, else
   the session's state directory
@@ -86,9 +87,10 @@ type Backend interface {               // what the daemon needs
   `WorktreeCreator`, `ANSIReader`) and the web layer's `ShellHost`, found
   by type assertion through `inject.Herdr`. A backend without one gets
   the clean refusal those paths already have.
-- The live terminal (`/term`) is the old herdr's: `web.TermDeps` is built
-  only for it. Without it `/api/hello` does not list `term` and the app
-  uses its snapshot window, as it does with an old herdr today.
+- The live terminal (`/term`) has a bridge per backend: `web.TermDeps` is
+  built for both, and `/api/hello` lists `term` only while the backend can
+  run one (the old herdr's version, or hc's `hello` listing
+  `terminal.attach`). Otherwise the app uses its snapshot window.
 
 ## Mapping
 
@@ -123,15 +125,21 @@ type Backend interface {               // what the daemon needs
 - starting an agent (`terminal.run` of a shell in the folder, then the
   kind's command typed into it, ready when it reports status or shows a
   question) and closing one (`terminal.kill`);
-- the app's agent window as snapshots, no app change.
+- the app's agent window, no app change: live over `terminal.attach` in
+  framed mode ([term-contract.md](../term-contract.md#on-herdr-core)), or
+  as snapshots when the core cannot attach. hc sends the program's raw
+  output and the app's terminal emulator draws it, so the daemon needs none
+  of its own. hc has no scroll or mouse command: the daemon encodes the
+  wheel and clicks itself, for programs that asked for the mouse, and a
+  program without it has no scrollback to scroll.
 
 Not in v1, each refused with the message the app already shows:
 
 - anything that writes herdr-app's document: workspaces, tabs, splits,
   worktrees, renaming a space (no `doc.set` from sheepdog);
 - renaming an agent;
-- the live terminal (`/term`): it needs `terminal.attach` in framed mode;
-  the app falls back to its snapshot window;
+- scrollback in the live terminal for a program that does not use the
+  mouse;
 - the phone shell (it opens a herdr workspace);
 - the worker's own transcript (no `agent_session` on hc);
 - terminals on machines added to the core.
@@ -156,7 +164,11 @@ temporary paths, so no test can reach a real core.
 3. **hc backend**: `internal/herdrcore` implementing `herdr.Backend`,
    `Spawner` and `Closer` on the client, the screen fallback, the
    detection and config keys (`internal/app/backend.go`), the doctor
-   check, `/term`'s plain refusal (`web.Deps.TermOff`) and the user docs.
+   check, `/term`'s plain refusal and the user docs.
+4. **Live terminal**: `internal/hc/framed.go` (framed mode, attach
+   streams, credit), `internal/herdrcore/bridge.go` (the bridge the
+   terminal socket runs per channel) and `web.TermDeps` for hc
+   (`Check`, `Off`; `web.Deps.TermOff` is gone).
 
 Implementation notes: `CreateWorkspace` and `SplitPane` both run a new
 shell terminal (label `sheepdog=spawn`, no parent); `StartAgent` types the

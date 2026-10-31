@@ -79,7 +79,7 @@ binary version.
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
   | `agent-actions` | the user's own New agent, Rename, Stop and Close routes (*Agent actions*) | with `screen` |
-  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer (not with `--herdr=mock`) |
+  | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer, or herdr-core has `terminal.attach` (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
