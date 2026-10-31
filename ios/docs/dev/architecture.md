@@ -873,11 +873,12 @@ described in the daemon's `docs/dev/push.md`.
 and 5.4): a menu-bar item with no window and no Dock icon (`LSUIElement`),
 product name `Sheepdog`, not sandboxed, hardened runtime, macOS 14 and later.
 It links `SheepdogKitMac`, which is why that framework's deployment target is
-14 too. This shell shows the daemon's state, opens the panel and registers
-`sheepdog://`; the voice session (`MacAudioEngine`, `MacVoiceHost`, the mic
-permission) is PR 9, so Talk, Mute, Stop and Use here are in the menu, disabled.
+14 too. It shows the daemon's state, opens the panel, registers `sheepdog://`
+and holds the voice: `MacVoiceHost` runs a `/ws` session on Kit's
+`SessionCore`, `VoiceSocket` and `ProtocolHandshake`, over `MacAudioEngine`
+and the microphone permission (sections below).
 `com.apple.security.device.audio-input` and `NSMicrophoneUsageDescription` are
-already in place for it.
+what the microphone needs.
 
 Everything in `Sources/SheepdogMac` that touches the system sits behind a
 protocol, and `Tests/SheepdogMacTests/Fakes.swift` has a fake of each:
@@ -889,6 +890,12 @@ protocol, and `Tests/SheepdogMacTests/Fakes.swift` has a fake of each:
 | `PanelOpening` | `PanelOpener` | Runs `herdr-app do mod.open --name sheepdog` through `/usr/bin/env` (`ProcessLaunching`), with the usual install directories added to `PATH`, because a menu-bar app does not get the shell's. |
 | `LoginItemControlling` | `LoginItem` | `SMAppService.mainApp`; off by default. |
 | `AppLogging` | `AppLog` | `os.Logger`. |
+| `VoiceAudio` | `MacAudioEngine` | The microphone and the speaker (below). |
+| `VoiceChannel` | `VoiceSocket` | The `/ws` socket, as Kit has it. |
+| `DaemonProbing` | `DaemonProbe` | `GET /api/state` before the socket opens, as the phone's `openSession` does, so a daemon that is not there is told plainly. |
+| `MicrophonePermission` | `SystemMicrophonePermission` | `AVCaptureDevice` authorization; `request()` asks only the first time. |
+| `SystemSettingsOpening` | `SystemSettingsOpener` | The Microphone page of Privacy & Security. |
+| `VoiceTimers` | `TaskTimers` | The ticker, and the one-shot that opens a lost `/ws` again. |
 
 `MenuBarState` is the pure table from `DaemonState` (nil: daemon down) to the
 icon and the menu's first line: daemon down, off (`--voice=off`, or no client
@@ -898,15 +905,70 @@ open questions as the "needs you" badge. It lives in the app, not in Kit,
 because only this app draws it; Kit holds what it decodes
 (`DaemonState.VoiceInfo.speaking` and `.client`, absent from an older daemon,
 pinned by `VoiceClientDecodeTests`). `StatusItemController` builds the menu
-from `rows(for:loginItemEnabled:)` and sets a template image (`MenuBarIcon`,
+from `rows(for:loginItemEnabled:voice:)` and sets a template image (`MenuBarIcon`,
 the mono brand logo) so the icon follows light and dark; dimmed states use
 `appearsDisabled`.
 
 `RouteHandler` parses `sheepdog://` URLs with Kit's `AppRoute`, delivered to
-`application(_:open:)`. Only `talk` is known, and it logs "voice arrives in
-PR 9". The unit tests are hosted in the app, which skips its menu-bar setup
-when `XCTestConfigurationFilePath` is set, so tests never ask a daemon
-anything.
+`application(_:open:)`. `talk`, `mute`, `stop` and `end` go to the voice
+(`AppRoute.actions` says what each means for the session as it is: `talk`
+connects `/ws`, which takes the voice from the phone, or unmutes the session
+that runs); the agent and window routes are the panel's and are ignored. The
+unit tests are hosted in the app, which skips its set-up when
+`XCTestConfigurationFilePath` is set, so tests never ask a daemon anything or
+open the microphone.
+
+### The voice session (`MacVoiceHost`)
+
+The thin host of the Mac's `/ws` session, the counterpart of `SessionViewModel`
+and `VoiceEngine` (both stay in the iPhone app). Every callback becomes a
+`SessionEvent`, `SessionCore` decides, and the host runs the effects over
+`VoiceSocket`, `MacAudioEngine` and the permission; haptics, the conversation
+and banners have no place on a Mac, and a banner's words become the menu's one
+line of trouble (`VoiceMenuState.problem`). `client-ready` says
+`sheepdog-mac`, platform `macos` (`ClientInfo.mac()`), which the daemon shows
+as `voice.client`.
+
+- **Open mic.** The microphone is open while the session runs; Mute is the
+  core's mute, so the menu and `POST /api/voice/mute` agree. Talk is
+  `AppRoute.talk`: start the session, or unmute the one that runs. Use here
+  connects without unmuting. Stop is the core's Stop (`/ws` `cancel`).
+- **First talk.** The `probe` effect checks the daemon, then asks for the
+  microphone (`AVCaptureDevice.requestAccess`, once). Refused: the engine is not
+  started (it would run without hearing), the core says the microphone is
+  unavailable, and the menu shows "Microphone off: open System Settings" with an
+  item that opens the Privacy pane. The session still carries the voice's words.
+- **"Take it back".** `status: closed, reason: replaced` ends the session
+  without reconnecting (Kit's rule); the menu says another client took it, and
+  Use here connects again. A socket that is only lost opens again after 3 s while
+  the session is wanted, because `VoiceSocket` never retries by itself and the
+  Mac has no `ComputerLink` until computers arrive (v2).
+- **`voice-command`** (docs/dev/ws-contract.md). `stop` is the core's `flush`
+  (drop the playback; the daemon already cut the speech). `ptt on` unmutes a
+  muted microphone and remembers it did; `ptt off` mutes it again. With the
+  microphone already open both do nothing. The iPhone app ignores the type
+  (`VoiceEngine.receive`).
+
+### Audio (`MacAudioEngine`)
+
+The counterpart of `AudioEngine`, on the same Kit pieces (`PCMConverter`,
+`FrameChunker`, `CaptureGate`, `MicSignalWatchdog`, `PlaybackQueue`,
+`PlaybackRatePolicy` through the time-pitch unit). Differences:
+
+- `inputNode.setVoiceProcessingEnabled(true)` is the echo canceller, on before
+  the engine starts. There is no `AVAudioSession`.
+- The voice-processing input is not mono (an experiment saw six channels at
+  48 kHz with channel 0 silent). The tap is read at the node's own format and
+  `MicMixdown` makes it one mono channel before `PCMConverter` brings it to 16 kHz
+  PCM16: the average of the channels that carry something in that buffer, so a
+  live channel passes at full level whatever its index, and an all-zero buffer
+  stays zero for the watchdog. `MicMixdownTests` use generated six-channel,
+  interleaved and silent buffers. Whether the live channel is the microphone on
+  real hardware is the maintainer's check 2 (design section 7).
+- A route change arrives as `AVAudioEngineConfigurationChange`, which stops the
+  engine. `restartCapture` rebuilds it on the new format, voice processing back
+  on, and reports `LocalNotice.routeChanged`; a rebuild that fails reports
+  `onStopped`, and the core starts the engine once more.
 
 ## The Live Activity
 

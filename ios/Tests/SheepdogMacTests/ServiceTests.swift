@@ -54,43 +54,87 @@ final class PanelOpenerTests: XCTestCase {
     }
 }
 
+@MainActor
 final class RouteHandlerTests: XCTestCase {
-    func testTalkOnlyLogs() {
-        let log = FakeLog()
-        RouteHandler(log: log).handle(URL(string: "sheepdog://talk")!)
-        XCTAssertEqual(log.lines, ["sheepdog://talk: voice arrives in PR 9"])
+    func testTheVoiceRoutesGoToTheVoice() {
+        let voice = FakeVoice()
+        let handler = RouteHandler(voice: voice, log: FakeLog())
+        ["talk", "stop", "end", "mute", "mute?on=true"].forEach { handler.handle(URL(string: "sheepdog://\($0)")!) }
+        XCTAssertEqual(voice.routes, [.talk, .stop, .end, .toggleMute, .mute(true)])
     }
 
-    func testOtherRoutesAreIgnoredWithAReason() {
+    func testRoutesTheMacDoesNotHaveAreIgnoredWithAReason() {
+        let voice = FakeVoice()
         let log = FakeLog()
-        RouteHandler(log: log).handle(URL(string: "sheepdog://stop")!)
+        RouteHandler(voice: voice, log: log).handle(URL(string: "sheepdog://agent/w1:p2")!)
+        XCTAssertTrue(voice.routes.isEmpty)
         XCTAssertEqual(log.lines.count, 1)
         XCTAssertTrue(log.lines[0].contains("not handled"))
     }
 
     func testAForeignURLIsIgnored() {
+        let voice = FakeVoice()
         let log = FakeLog()
-        RouteHandler(log: log).handle(URL(string: "https://example.invalid/talk")!)
+        RouteHandler(voice: voice, log: log).handle(URL(string: "https://example.invalid/talk")!)
+        XCTAssertTrue(voice.routes.isEmpty)
         XCTAssertEqual(log.lines, ["ignored a URL that is not a sheepdog route"])
     }
 }
 
+@MainActor
 final class StatusItemControllerTests: XCTestCase {
-    private func make(login: FakeLoginItem = FakeLoginItem(), panel: FakePanel = FakePanel(), log: FakeLog = FakeLog(), quit: @escaping () -> Void = {}) -> (StatusItemController, FakeStatusSource) {
+    private func make(voice: FakeVoice? = nil, login: FakeLoginItem = FakeLoginItem(), panel: FakePanel = FakePanel(), log: FakeLog = FakeLog(), quit: @escaping () -> Void = {}) -> (StatusItemController, FakeStatusSource) {
         let source = FakeStatusSource()
-        return (StatusItemController(source: source, panel: panel, loginItem: login, log: log, quit: quit), source)
+        return (StatusItemController(source: source, voice: voice ?? FakeVoice(), panel: panel, loginItem: login, log: log, quit: quit), source)
     }
 
-    func testTheMenuLayoutAndWhatIsDisabled() {
-        let rows = StatusItemController.rows(for: MenuBarState(state: nil), loginItemEnabled: true)
-        XCTAssertEqual(rows.first, .status("Sheepdog isn't running"))
-        let items = rows.compactMap { row -> (String, Bool, Bool)? in
+    private func items(_ rows: [MenuItemSpec.Row]) -> [(title: String, enabled: Bool, checked: Bool)] {
+        rows.compactMap { row in
             if case let .item(title, _, enabled, checked) = row { return (title, enabled, checked) }
             return nil
         }
-        XCTAssertEqual(items.map(\.0), ["Open panel", "Talk", "Mute", "Stop", "Use here", "Launch at login", "Quit Sheepdog"])
-        XCTAssertEqual(items.map(\.1), [true, false, false, false, false, true, true])
-        XCTAssertEqual(items.first { $0.0 == "Launch at login" }?.2, true)
+    }
+
+    private let listening = DaemonState(agents: [], voice: DaemonState.VoiceInfo(mode: "gemini", status: "connected", clientConnected: true))
+
+    func testTheMenuLayoutAndWhatIsDisabledWithTheDaemonDown() {
+        let rows = StatusItemController.rows(for: MenuBarState(state: nil), loginItemEnabled: true)
+        XCTAssertEqual(rows.first, .status("Sheepdog isn't running"))
+        let items = items(rows)
+        XCTAssertEqual(items.map(\.title), ["Open panel", "Talk", "Mute", "Stop", "Use here", "Launch at login", "Quit Sheepdog"])
+        XCTAssertEqual(items.map(\.enabled), [true, false, false, false, false, true, true])
+        XCTAssertEqual(items.first { $0.title == "Launch at login" }?.checked, true)
+    }
+
+    func testTheVoiceRowsWithTheDaemonUpAndNoSessionHere() {
+        let rows = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
+        let voice = items(rows).filter { ["Talk", "Mute", "Stop", "Use here"].contains($0.title) }
+        XCTAssertEqual(voice.map(\.enabled), [true, false, false, true])
+    }
+
+    func testTheVoiceRowsWhileListeningHere() {
+        let rows = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, voice: VoiceMenuState(heldHere: true))
+        let voice = items(rows).filter { ["Talk", "Mute", "Stop", "Use here"].contains($0.title) }
+        // Talk has nothing to do while the microphone is open.
+        XCTAssertEqual(voice.map(\.enabled), [false, true, true, false])
+        XCTAssertEqual(voice.map(\.checked), [false, false, false, false])
+    }
+
+    func testMutedHereOffersTalkAndShowsMuteChecked() {
+        let rows = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, voice: VoiceMenuState(heldHere: true, muted: true))
+        let talk = items(rows).first { $0.title == "Talk" }
+        let mute = items(rows).first { $0.title == "Mute" }
+        XCTAssertEqual(talk?.enabled, true)
+        XCTAssertEqual(mute?.checked, true)
+    }
+
+    func testADeniedMicrophoneSaysSoAndOffersTheSettings() {
+        let voice = VoiceMenuState(heldHere: true, micDenied: true, problem: MacVoiceHost.microphoneOff)
+        let rows = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, voice: voice)
+        XCTAssertTrue(rows.contains(.status("Microphone off: open System Settings")))
+        XCTAssertEqual(items(rows).first { $0.title == "Open Microphone Settings…" }?.enabled, true)
+        let without = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
+        XCTAssertNil(items(without).first { $0.title == "Open Microphone Settings…" })
     }
 
     func testOpenPanelRunsThePanelOpener() {
@@ -127,19 +171,28 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertEqual(log.lines.count, 1)
     }
 
-    func testQuitStopsTheSourceAndQuits() {
+    func testQuitEndsTheVoiceStopsTheSourceAndQuits() {
         var quit = 0
-        let (c, source) = make(quit: { quit += 1 })
+        let voice = FakeVoice()
+        let (c, source) = make(voice: voice, quit: { quit += 1 })
         source.start()
         c.perform(.quit)
+        XCTAssertEqual(voice.routes, [.end])
         XCTAssertFalse(source.running)
         XCTAssertEqual(quit, 1)
     }
 
-    func testTheVoiceRowsDoNothingYet() {
-        let (c, source) = make()
-        c.perform(.voice)
-        XCTAssertFalse(source.running)
+    func testTheVoiceItemsDriveTheVoice() {
+        let voice = FakeVoice()
+        let (c, _) = make(voice: voice)
+        c.perform(.talk)
+        c.perform(.toggleMute)
+        c.perform(.stop)
+        c.perform(.useHere)
+        c.perform(.openMicrophoneSettings)
+        XCTAssertEqual(voice.routes, [.talk, .toggleMute, .stop])
+        XCTAssertEqual(voice.useHeres, 1)
+        XCTAssertEqual(voice.settingsOpened, 1)
     }
 
     func testUpdateFollowsTheDaemon() {
