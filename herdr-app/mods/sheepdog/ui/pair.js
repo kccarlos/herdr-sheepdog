@@ -11,6 +11,15 @@ const MODULE = 5;
 const QR_DARK = "#000000";
 const QR_LIGHT = "#ffffff";
 
+// The daemon's error is one sentence in the panel. Pairing can fail twice in
+// one load (the link and its matrix); show that once, in sentence case.
+function pairError(text) {
+  const line = String(text ?? "").trim().replace(/\s+/g, " ");
+  if (!line) return "";
+  const first = /^.*?[.!?](?:\s|$)/.exec(line)?.[0]?.trim() || line;
+  return first[0].toUpperCase() + first.slice(1);
+}
+
 function matrixView(rows) {
   return v_flex()
     .self_center()
@@ -31,6 +40,7 @@ export function pairOverlay(t, { form, onClose, onRefresh }) {
   } catch (error) {
     codeError = error.message;
   }
+  const message = pairError(form.error || codeError);
   const body = v_flex()
     .id("sheepdog-pair")
     .flex_1()
@@ -40,8 +50,7 @@ export function pairOverlay(t, { form, onClose, onRefresh }) {
     .p(16)
     .gap(12)
     .items_center()
-    .when(Boolean(form.error), (el) => el.child(errorText(t, form.error)))
-    .when(Boolean(codeError), (el) => el.child(errorText(t, codeError)))
+    .when(Boolean(message), (el) => el.child(errorText(t, message).w_full().truncate()))
     .when(rows.length > 0, (el) => el.child(matrixView(rows)))
     .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Scan this with the Sheepdog app"))
     .child(mutedText(t, "Open the iPhone app, choose Scan a new code, and point the camera here."))

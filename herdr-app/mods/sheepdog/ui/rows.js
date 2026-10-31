@@ -12,6 +12,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { CATEGORIES, kindOf, settledLine } from "../model/classify.js";
 import { agentName, cardOf, displayTitle, kindWord } from "../model/cards.js";
+import { isLight } from "../model/palette.js";
 import { classifyRow } from "../model/timeline.js";
 import { tint } from "./widgets.js";
 
@@ -45,6 +46,7 @@ export function notice(t, text, code) {
 // What you or the voice said: the voice's words are left, yours right.
 function bubble(t, item) {
   const mine = kindOf(item) === "shepherd";
+  const light = isLight(t.chrome);
   const wrote = !mine && (item.via === "text_router" || item.via === "typed");
   const note = item.pending ? "Sending…" : mine ? (item.via === "typed" ? "Typed" : "") : wrote ? "Sheepdog wrote" : "";
   const body = div()
@@ -53,7 +55,13 @@ function bubble(t, item) {
     .rounded(14)
     .when(Boolean(item.pending), (el) => el.opacity(0.6))
     .when(mine, (el) => el.rounded_br(CORNER).bg(t.accent).text_color(t.accent_foreground))
-    .when(!mine, (el) => el.rounded_bl(CORNER).bg(t.raised).text_color(t.foreground))
+    .when(!mine, (el) =>
+      el
+        .rounded_bl(CORNER)
+        .bg(light ? t.selected : t.raised)
+        .when(light, (s) => s.border(1).border_color(t.border))
+        .text_color(t.foreground),
+    )
     .text_size(13)
     .child(item.text);
   return h_flex()

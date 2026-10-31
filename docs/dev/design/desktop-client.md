@@ -338,12 +338,20 @@ split into modules so logic is testable under `node`.
 
 - **Decision (owner): the docked block is the whole panel**, not a rail plus
   a separate window. Top to bottom: the status header (voice state and
-  holder, how many agents need you), the voice controls, the floating question
-  card when an agent asks, the composer with the suggested replies, and the
-  timeline, fully newest first (every item, no per-turn grouping) in herdr-app's
-  lazy `list()`, which is top-anchored; drawing its last row loads older
-  history. "Needs you" is the phone's amber (`#D98718` light, `#F39C1F` dark),
-  not the theme's red.
+  holder, how many agents need you), banners, the voice controls, the floating
+  question card when an agent asks, the composer with the suggested replies,
+  and the timeline, fully newest first (every item, no per-turn grouping) in
+  herdr-app's lazy `list()`, which is top-anchored; drawing its last row loads
+  older history. "Needs you" is the phone's amber (`#D98718` light, `#F39C1F`
+  dark), not the theme's red.
+- **The timeline keeps the majority of a short panel.** `model/layout.js`
+  budgets the header and composer first and reserves at least 55% of the
+  height for the timeline. The banners, voice controls and question share the
+  remainder in a capped `overflow_y_scroll` region; when space is short the
+  docking and setup banners become one-line rows, the question uses the same
+  compact decision as the phone with the remaining height as its area, and
+  suggested replies become one horizontally scrolling row. The composer stays
+  outside that scroll area, so it is always visible.
 - **Rail.** The same block narrower than about 160 px: the logo, a voice dot
   and a needs-you badge. Click opens the panel as a window.
 - **Window.** A `kind: "window"` overlay with `key` and `keep: true`: floats,
@@ -416,6 +424,12 @@ and commands, with `exec` and the file check passed in; no herdr imports),
   own rebuild stays the only copy of those rules, so a record makes the panel
   ask `/api/state` and `/api/conversation` again, with transcript fragments
   waiting for a quiet 1.5 s.
+- **A short panel compacts before it overflows.** The vertical budget is pure
+  model logic: given the header, banners, voice bar, question and composer
+  heights, it returns the timeline floor, whether banners collapse, how much
+  height the top details may use, whether those details scroll, and the area
+  for the question's compact rule. Consecutive identical "Sheepdog restarted"
+  dividers collapse to the newer one, since nothing happened between them.
 - Each open copy of a mod has its own state and poll; `key` keeps one window.
 
 ### 6.4 States
@@ -436,7 +450,10 @@ and commands, with `exec` and the file check passed in; no herdr imports),
 
 `theme()` supplies every colour, so dark and light both work. The colour logo
 is `logo.svg` with its cream sticker outline, drawn with `image()`, which keeps
-colour (`svg()` would tint it to one colour).
+colour (`svg()` would tint it to one colour). The composer uses `raised` on
+light themes and `input` on dark ones; the voice bubble uses `selected` with a
+border on light themes and `raised` on dark ones. Both branches use theme
+tokens, so neither hard-codes a palette.
 
 
 ## 7. Testing

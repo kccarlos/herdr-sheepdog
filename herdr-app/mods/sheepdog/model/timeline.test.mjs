@@ -44,6 +44,14 @@ test("a restart reads started, restarted or updated, with its time", () => {
   assert.deepEqual(titles, ["Sheepdog started · 08:00", "Sheepdog restarted · 08:00", "Sheepdog updated to v0.9.1 · 08:00"]);
 });
 
+test("consecutive Sheepdog restarts collapse into the newer divider", () => {
+  const start = (sec) => item(sec, "notice", { text: "Sheepdog started.", subkind: "start", version: "0.9.0" });
+  const rows = buildRows([item(0, "shepherd"), start(10), start(70), item(80, "dog")], time);
+  const restarts = rows.filter((r) => r.type === "divider" && r.title.startsWith("Sheepdog restarted"));
+  assert.equal(restarts.length, 1);
+  assert.equal(restarts[0].title, "Sheepdog restarted · 08:01");
+});
+
 test("the plumbing is hidden, and brought back with the technical view", () => {
   const items = [
     item(0, "shepherd"), item(1, "notice", { text: "Voice context lost.", subkind: "context_lost" }),

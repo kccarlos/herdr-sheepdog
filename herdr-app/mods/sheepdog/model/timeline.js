@@ -109,7 +109,17 @@ export function buildRows(items, time = localTime) {
       default: {
         // A notice, or a kind this build does not know.
         const title = dividerTitle(item, { afterContent: sawContent, previousVersion: lastVersion, formatTime: time.formatTime });
-        merged.push({ ...itemRow(item), type: "divider", title });
+        const previous = merged[merged.length - 1];
+        const repeatedRestart =
+          daemonNotice(item) === "restarted" &&
+          title.startsWith("Sheepdog restarted ·") &&
+          previous?.type === "divider" &&
+          previous.title.startsWith("Sheepdog restarted ·") &&
+          daemonNotice(previous.item) === "restarted";
+        // Two restarts with nothing between them describe one interruption
+        // in the conversation. Keep the newer time.
+        if (repeatedRestart) merged[merged.length - 1] = { ...itemRow(item), type: "divider", title };
+        else merged.push({ ...itemRow(item), type: "divider", title });
         const version = trimmed(item.version);
         if (daemonNotice(item) === "restarted" && version) lastVersion = version;
       }

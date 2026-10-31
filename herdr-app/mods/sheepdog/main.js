@@ -20,10 +20,10 @@ import { createLive, POLL_MS } from "./net/live.js";
 import { agentDetails } from "./model/agents.js";
 import { focusCommand } from "./model/cards.js";
 import { keyMaker, restored, submission } from "./model/composer.js";
-import { DOCKED_WIDTH, layoutMode, needsDock } from "./model/layout.js";
+import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
 import { createOutbox, pendingItems } from "./model/outbox.js";
 import { amber } from "./model/palette.js";
-import { decide, estimateHeight } from "./model/presentation.js";
+import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
 import { liveSuggestions } from "./model/replies.js";
 import {
@@ -417,10 +417,10 @@ export default class Sheepdog extends View {
 
   // How the open questions float: the cards, and inline or compact for this
   // window (the rule of model/presentation.js, with heights estimated).
-  questions(snapshot) {
+  questions(snapshot, area) {
     const cards = this.answers.cards(snapshot.app);
     const held = this.sheet?.type === "questions" || this.answers.busy() || cards.some((c) => c.phase === "answered" || c.phase === "gone");
-    this.presentation = decide({ heights: cards.map((c) => estimateHeight(c.pending, { width: this.size.width })), area: this.size.height, held }, this.presentation);
+    this.presentation = decide({ heights: cards.map((c) => estimateHeight(c.pending, { width: this.size.width })), area, held }, this.presentation);
     // With nothing to answer there is nothing to open.
     if (cards.length === 0 && this.sheet?.type === "questions") this.sheet = null;
     return {
@@ -631,6 +631,28 @@ export default class Sheepdog extends View {
       const voice = this.voice.getState();
       const controls = voiceControls({ phase: status.phase, voice: snapshot.app?.voice, view: status.voice, installed: voice.installed, noVoice: voice.notice?.code === "no-voice" });
       const outbox = this.outbox.getState();
+      const questionCards = this.answers.cards(snapshot.app);
+      const questionHeights = questionCards.map((card) => estimateHeight(card.pending, { width: this.size.width }));
+      const bannerHeights = [];
+      if (this.offerDock) bannerHeights.push(150);
+      if (status.phase === "setup") bannerHeights.push(150);
+      if (status.paused && status.phase !== "down") bannerHeights.push(40);
+      const voiceHeight = status.phase === "ok"
+        ? (controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
+        : 0;
+      const composerHeight = derived.live ? 116 : 80;
+      const budgetFor = (question) =>
+        panelBudget({
+          height: this.size.height,
+          header: 54,
+          banners: bannerHeights,
+          voice: voiceHeight,
+          question,
+          composer: composerHeight,
+        });
+      const questionBudget = budgetFor(natural(questionHeights));
+      const questions = this.questions(snapshot, questionBudget.questionArea);
+      const layout = budgetFor(questions.presentation === "compact" ? COMPACT_QUESTION_HEIGHT : natural(questionHeights));
       const closeSheet = (_e, cx) => {
         this.sheet = null;
         cx.notify();
@@ -641,9 +663,10 @@ export default class Sheepdog extends View {
         paging: { synced: snapshot.history.synced, canLoadOlder: snapshot.history.nextBefore != null, loadingOlder: snapshot.loadingOlder },
         technical: this.technical,
         retryMs: POLL_MS,
-        compose: { state: this.composer, live: derived.live, notice: outbox.notice, busy: outbox.busy, onSend: (text, cx) => this.send(text, cx, false) },
-        questions: this.questions(snapshot),
+        compose: { state: this.composer, live: derived.live, notice: outbox.notice, busy: outbox.busy, compact: layout.compactBanners || layout.detailsScroll, maxHeight: composerHeight, onSend: (text, cx) => this.send(text, cx, false) },
+        questions,
         voice: { controls, state: voice, on: this.voiceHandlers(controls) },
+        layout,
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
         onSetup: () => this.runSetup(),
