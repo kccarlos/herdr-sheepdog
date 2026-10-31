@@ -35,10 +35,11 @@ final class DaemonLocatorTests: XCTestCase {
     }
 }
 
+@MainActor
 final class PanelOpenerTests: XCTestCase {
     func testRunsHerdrAppDoModOpenThroughEnvWithAnInstallSearchPath() throws {
         let launcher = FakeLauncher()
-        try PanelOpener(launcher: launcher, environment: ["PATH": "/usr/bin:/bin"]).openPanel()
+        try PanelOpener(launcher: launcher, environment: ["PATH": "/usr/bin:/bin"], reporter: PanelProblemAlertNever()).openPanel()
         let launch = try XCTUnwrap(launcher.launches.first)
         XCTAssertEqual(launch.executable, "/usr/bin/env")
         XCTAssertEqual(launch.arguments, ["herdr-app", "do", "mod.open", "--name", "sheepdog"])
@@ -50,8 +51,62 @@ final class PanelOpenerTests: XCTestCase {
     func testALaunchFailureIsThrown() {
         let launcher = FakeLauncher()
         launcher.failure = Boom()
-        XCTAssertThrowsError(try PanelOpener(launcher: launcher, environment: [:]).openPanel())
+        XCTAssertThrowsError(try PanelOpener(launcher: launcher, environment: [:], reporter: PanelProblemAlertNever()).openPanel())
     }
+
+    // What herdr-app answers, as herdr-app and env print it.
+
+    func testSuccessIsNoProblem() {
+        XCTAssertNil(PanelOpenProblem(status: 0, output: "{\n  \"ok\": true\n}\n"))
+    }
+
+    func testAMissingModIsPanelMissing() {
+        XCTAssertEqual(PanelOpenProblem(status: 1, output: "{\n  \"error\": \"no mod folder \\\"sheepdog\\\"\"\n}\n"), .panelMissing)
+    }
+
+    func testEnvNotFindingHerdrAppIsHerdrAppMissing() {
+        XCTAssertEqual(PanelOpenProblem(status: 127, output: "env: herdr-app: No such file or directory\n"), .herdrAppMissing)
+    }
+
+    func testAnyOtherErrorIsShownInHerdrAppsWords() {
+        XCTAssertEqual(PanelOpenProblem(status: 1, output: "{\"error\": \"the window is not open\"}"), .failed("the window is not open"))
+        XCTAssertEqual(PanelOpenProblem(status: 2, output: "  boom\n"), .failed("boom"))
+        XCTAssertEqual(PanelOpenProblem(status: 3, output: ""), .failed("herdr-app stopped with status 3."))
+    }
+
+    func testEveryProblemHasWordsAndAGuide() {
+        for problem in [PanelOpenProblem.herdrAppMissing, .panelMissing, .failed("x")] {
+            XCTAssertFalse(problem.title.isEmpty)
+            XCTAssertFalse(problem.message.isEmpty)
+            XCTAssertTrue(problem.guide.absoluteString.contains("docs/desktop.md#"))
+        }
+        XCTAssertTrue(PanelOpenProblem.panelMissing.message.contains("cp -R herdr-app/mods/sheepdog ~/.config/herdr-app/mods/"))
+    }
+
+    func testAFailedOpenIsReportedOnTheMainActorAndLogged() async throws {
+        let launcher = FakeLauncher()
+        launcher.exit = (1, #"{"error": "no mod folder \"sheepdog\""}"#)
+        let reporter = FakePanelReporter()
+        let log = FakeLog()
+        try PanelOpener(launcher: launcher, environment: [:], reporter: reporter, log: log).openPanel()
+        for _ in 0..<50 where reporter.reported.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(reporter.reported, [.panelMissing])
+        XCTAssertEqual(log.lines.count, 1)
+    }
+
+    func testASuccessfulOpenReportsNothing() async throws {
+        let reporter = FakePanelReporter()
+        try PanelOpener(launcher: FakeLauncher(), environment: [:], reporter: reporter).openPanel()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(reporter.reported.isEmpty)
+    }
+}
+
+/// For tests that never get as far as a report: fails loudly if one comes.
+private struct PanelProblemAlertNever: PanelProblemReporting {
+    func report(_ problem: PanelOpenProblem) { XCTFail("unexpected report \(problem)") }
 }
 
 @MainActor

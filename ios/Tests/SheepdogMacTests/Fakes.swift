@@ -31,12 +31,22 @@ final class FakeLauncher: ProcessLaunching {
     }
 
     var failure: Error?
+    /// How the program ends: exit status and output, handed to `onExit`
+    /// at once (nil: it never ends).
+    var exit: (Int32, String)? = (0, "{\"ok\": true}")
     private(set) var launches: [Launch] = []
 
-    func launch(_ executable: String, arguments: [String], environment: [String: String]) throws {
+    func launch(_ executable: String, arguments: [String], environment: [String: String], onExit: @escaping @Sendable (Int32, String) -> Void) throws {
         launches.append(Launch(executable: executable, arguments: arguments, path: environment["PATH"]))
         if let failure { throw failure }
+        if let exit { onExit(exit.0, exit.1) }
     }
+}
+
+@MainActor
+final class FakePanelReporter: PanelProblemReporting {
+    private(set) var reported: [PanelOpenProblem] = []
+    func report(_ problem: PanelOpenProblem) { reported.append(problem) }
 }
 
 final class FakePanel: PanelOpening {

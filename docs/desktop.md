@@ -144,6 +144,7 @@ the phone away from your desk.
 | **Sheepdog isn't running** in the panel | Start the daemon with `sheepdog start`. If it will not start, run `sheepdog doctor` and follow its fix. |
 | **Voice on iPhone**, or another device has the voice | That device took the voice. Choose **Use here** in the panel or the menu-bar app to bring it back. |
 | The voice controls are off and the panel says Sheepdog.app is not installed | Install it with `brew install --cask kccarlos/tap/sheepdog-app`, then reopen Applications. The panel notices it within 30 seconds. |
+| **Open panel** says the Sheepdog panel isn't installed in herdr-app | Install the panel (step 3 above), then choose **Open panel** again. |
 | The microphone prompt was denied, or the menu says **Microphone off** | Open System Settings, Privacy & Security, Microphone, and turn on Sheepdog. The app's menu also has **Open Microphone Settings…** after a denial. |
 | There are no notifications | Open System Settings, Notifications, Sheepdog, and allow notifications. Sheepdog.app posts them locally; you do not need phone push for them. |
 | The panel cannot find the daemon, or Sheepdog.app talks to the wrong port | Point both clients at the same port, below. |
