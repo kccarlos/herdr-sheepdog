@@ -569,6 +569,21 @@ public struct UtteranceReply: Decodable, Equatable, Sendable {
 /// `GET /api/state`, trimmed to what the app shows.
 public struct DaemonState: Codable, Equatable, Sendable {
     public struct VoiceInfo: Codable, Equatable, Sendable {
+        /// The `/ws` holder (`voice.client`): who has the voice. Absent on a
+        /// daemon that predates it, and while no client is attached.
+        public struct Client: Codable, Equatable, Sendable {
+            public var name: String
+            /// `ios`, `macos`, or whatever the client reported.
+            public var platform: String
+            public var since: Date?
+
+            public init(name: String, platform: String, since: Date? = nil) {
+                self.name = name
+                self.platform = platform
+                self.since = since
+            }
+        }
+
         /// `gemini` or `off`.
         public var mode: String
         public var name: String?
@@ -576,23 +591,42 @@ public struct DaemonState: Codable, Equatable, Sendable {
         public var reason: String?
         public var muted: Bool
         public var stalled: Bool
+        /// The model's speech is reaching the user. False on a daemon that
+        /// does not report it.
+        public var speaking: Bool
         public var clientConnected: Bool
+        public var client: Client?
 
         enum CodingKeys: String, CodingKey {
-            case mode, name, status, reason, muted, stalled
+            case mode, name, status, reason, muted, stalled, speaking, client
             case clientConnected = "client_connected"
         }
 
         public var isOff: Bool { mode == "off" }
 
-        public init(mode: String, name: String? = nil, status: String, reason: String? = nil, muted: Bool = false, stalled: Bool = false, clientConnected: Bool = false) {
+        public init(mode: String, name: String? = nil, status: String, reason: String? = nil, muted: Bool = false, stalled: Bool = false, speaking: Bool = false, clientConnected: Bool = false, client: Client? = nil) {
             self.mode = mode
             self.name = name
             self.status = status
             self.reason = reason
             self.muted = muted
             self.stalled = stalled
+            self.speaking = speaking
             self.clientConnected = clientConnected
+            self.client = client
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            mode = try c.decode(String.self, forKey: .mode)
+            name = try c.decodeIfPresent(String.self, forKey: .name)
+            status = try c.decode(String.self, forKey: .status)
+            reason = try c.decodeIfPresent(String.self, forKey: .reason)
+            muted = try c.decode(Bool.self, forKey: .muted)
+            stalled = try c.decode(Bool.self, forKey: .stalled)
+            speaking = try c.decodeIfPresent(Bool.self, forKey: .speaking) ?? false
+            clientConnected = try c.decode(Bool.self, forKey: .clientConnected)
+            client = try c.decodeIfPresent(Client.self, forKey: .client)
         }
     }
 
