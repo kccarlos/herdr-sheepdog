@@ -8,8 +8,8 @@ import (
 )
 
 // ShellWorkspace returns the existing space working in cwd, or "" when the
-// phone shell needs a new one. PaneInDir is the same folder match agent
-// spawning uses.
+// phone shell needs a new one. PaneInDir uses the same PaneDirs matcher as
+// agent spawning.
 func (b *Backend) ShellWorkspace(snap herdr.Snapshot, cwd string) string {
 	if p, ok := herdr.PaneInDir(snap, cwd); ok {
 		return p.WorkspaceID

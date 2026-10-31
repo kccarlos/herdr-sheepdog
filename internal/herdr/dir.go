@@ -25,8 +25,7 @@ func RealDir(path string) string {
 	return real
 }
 
-// PaneDir is the first pane in one existing folder, or the first accepted
-// pane when PaneDirs has an access check.
+// PaneDir is the first pane in one existing folder.
 type PaneDir struct {
 	Path string
 	Pane PaneInfo

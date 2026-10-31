@@ -227,8 +227,8 @@ returns, and the supervisor's existing wait polls `GetAgent`, which reports
 the launch pending (`LaunchPending`, as herdr's `agent.start` does) until
 the program shows in the terminal, and not found after the start timeout.
 The phone shell uses the same run helper with `sheepdog=shell`; its space
-comes from `herdr.PaneInDir`, the shared real-path folder match also used
-to discover an agent's existing workspace.
+comes from `herdr.PaneInDir`, which shares `herdr.PaneDirs`' real-path
+folder match with agent spawning.
 The fleet stream asks `terminal.get` on `created`, `restarted`, a
 `foreground` change to a known agent program (one typed into an existing
 shell) and a terminal's first status, to decide whether it is an agent.
