@@ -80,10 +80,8 @@ type termServer struct {
 	// version cache for termAvailable
 	checked time.Time
 	ok      bool
-	// shells maps each phone shell's pane to its folder (shell.go);
-	// shellMu serialises opening one.
-	shells  map[string]string
-	shellMu sync.Mutex
+	// shells tracks the live phone shells and their folders (shell.go).
+	shells *ShellBook
 }
 
 func newTermServer(s *Server, d *TermDeps) *termServer {
@@ -114,7 +112,7 @@ func newTermServer(s *Server, d *TermDeps) *termServer {
 	if deps.QueueBytes <= 0 {
 		deps.QueueBytes = 256 << 10
 	}
-	return &termServer{s: s, deps: deps, shells: map[string]string{}}
+	return &termServer{s: s, deps: deps, shells: NewShellBook()}
 }
 
 // available reports whether the backend can run a bridge (herdr new

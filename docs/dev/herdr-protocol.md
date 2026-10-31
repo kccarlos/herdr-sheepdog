@@ -116,8 +116,9 @@ CLI wrappers print server errors as JSON on stderr with exit status 1.
     reconciler that read the pane directly and raise a synthetic
     `blocked → blocked` transition (`docs/dev/roles.md` "blocked → blocked is
     a block").
-  - `unknown` = agent present but unclassifiable (also emitted when an agent
-    exits and the pane returns to a shell).
+  - `unknown` = agent present but unclassifiable. An agent exit is the
+    separate `pane_agent_detected` `released:true` event below, followed by
+    `unknown` in the status stream.
 - The state a hook may *report* (`pane.report_agent`) is the narrower
   `PaneAgentState`: `idle | working | blocked | unknown` (no `done`).
 - The plan's `blocked | working | done | idle` matches herdr except for the
@@ -257,7 +258,11 @@ Two different envelope shapes arrive on the same stream:
    ```
 
    `pane_agent_detected` with `released:true` + `final_status` means the agent
-   process exited; it is followed by `pane.agent_status_changed` → `unknown`.
+   process exited while its pane stayed alive; it is followed by
+   `pane.agent_status_changed` → `unknown`. The Watcher turns the release
+   into `Transition{Released:true, To:unknown}`: the state table removes the
+   agent row, while the terminal remains a shell. This is not a pane close,
+   and the same terminal can host a later agent.
 
 Important constraints found in `src/api/subscriptions.rs`:
 
@@ -286,9 +291,10 @@ subscribed to `pane.agent_detected`, `pane.created`, `pane.closed`,
 `pane.exited`, `workspace.closed` (fleet discovery), plus one
 `pane.agent_status_changed` subscription per agent pane — either bundled into
 the same request when the pane set is known, or one connection per pane opened
-on `pane_agent_detected` and dropped on `released:true`/`pane_closed`/
-`workspace_closed`. Alternatively use the plugin hook channel (§8), which *is*
-fleet-wide. Reconcile both with the 30 s `session.snapshot` diff.
+on `pane_agent_detected`, kept across `released:true` so a later agent in the
+same shell is seen, and dropped on `pane_closed`/`workspace_closed`.
+Alternatively use the plugin hook channel (§8), which *is* fleet-wide.
+Reconcile both with the 30 s `session.snapshot` diff.
 
 ### `events_lost` and resubscribe (herdr >= 0.9.2)
 

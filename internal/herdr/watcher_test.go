@@ -183,12 +183,12 @@ func TestWatcherSnapshotDiffReemitsMissedTransition(t *testing.T) {
 		t.Errorf("snapshot-sourced blocked emitted after %v, before the debounce", since)
 	}
 
-	// Agent exits without any event: the pane is still there, so it becomes
-	// unknown rather than closed.
+	// Agent exits without any event: the pane is still there, so the row is
+	// released rather than closed.
 	srv.RemoveAgent("w5:p1")
 	tr = expectTransition(t, ch, herdr.StateBlocked, herdr.StateUnknown)
-	if tr.Closed {
-		t.Errorf("pane with a shell left should not be Closed: %+v", tr)
+	if !tr.Released || tr.Closed {
+		t.Errorf("pane with a shell left should be Released, not Closed: %+v", tr)
 	}
 	// And when the pane itself vanishes, it is reported closed.
 	srv.RemovePane("w5:p1")
@@ -261,7 +261,12 @@ func TestWatcherFleetDiscoveryAndClose(t *testing.T) {
 	srv.EmitAgentDetected("w7:p1", "w7", "claude", true, herdr.StateDone)
 	srv.RemoveAgent("w7:p1")
 	srv.EmitStatus("w7:p1", herdr.StateUnknown)
-	expectTransition(t, ch, herdr.StateWorking, herdr.StateUnknown)
+	for !tr.Released {
+		tr = recvTransition(t, ch)
+	}
+	if tr.To != herdr.StateUnknown || tr.Closed {
+		t.Errorf("released agent transition = %+v, want unknown and not Closed", tr)
+	}
 
 	srv.RemovePane("w7:p1")
 	srv.EmitWorkspaceClosed("w7")
@@ -280,6 +285,31 @@ func TestWatcherFleetDiscoveryAndClose(t *testing.T) {
 	tr = expectTransition(t, ch, herdr.StateIdle, herdr.StateUnknown)
 	if !tr.Closed || tr.Source != "pane_closed" {
 		t.Errorf("pane_closed transition = %+v", tr)
+	}
+}
+
+func TestWatcherFreshAgentAfterReleaseStartsUnknown(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "w5", Label: "shell"})
+	srv.SetAgent(herdr.AgentInfo{PaneID: "w5:p1", WorkspaceID: "w5", Status: herdr.StateIdle, Agent: "claude"})
+	w, _, _ := startWatcher(t, srv, time.Hour, 1)
+	ch := w.Transitions()
+	expectTransition(t, ch, "", herdr.StateIdle)
+
+	srv.EmitAgentDetected("w5:p1", "w5", "claude", true, herdr.StateDone)
+	srv.RemoveAgent("w5:p1")
+	srv.EmitStatus("w5:p1", herdr.StateUnknown)
+	var tr herdr.Transition
+	for !tr.Released {
+		tr = recvTransition(t, ch)
+	}
+
+	srv.SetAgent(herdr.AgentInfo{PaneID: "w5:p1", WorkspaceID: "w5", Status: herdr.StateUnknown, Agent: "codex"})
+	srv.EmitAgentDetected("w5:p1", "w5", "codex", false, "")
+	srv.EmitStatus("w5:p1", herdr.StateUnknown)
+	tr = expectTransition(t, ch, "", herdr.StateUnknown)
+	if tr.Agent != "codex" {
+		t.Fatalf("fresh agent transition = %+v", tr)
 	}
 }
 
@@ -308,6 +338,9 @@ collect:
 		case tr := <-ch:
 			if tr.To == herdr.StateBlocked {
 				t.Errorf("flapping blocked leaked through: %+v", tr)
+			}
+			if tr.To == herdr.StateUnknown && len(got) > 0 && got[len(got)-1] == herdr.StateUnknown {
+				continue // released event and its following status arrived in either order
 			}
 			got = append(got, tr.To)
 		case <-deadline:

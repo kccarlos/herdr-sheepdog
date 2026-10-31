@@ -31,15 +31,15 @@ func (b *Backend) SubscribeFleet(ctx context.Context) <-chan herdr.FleetEvent {
 type fleetFeed struct {
 	b      *Backend
 	out    chan<- herdr.FleetEvent
-	agents map[string]bool
+	agents map[string]string
 }
 
-// agentSet is the addresses of the live local agent terminals.
-func agentSet(terminals []hc.Terminal) map[string]bool {
-	set := make(map[string]bool)
+// agentSet maps the addresses of live local agent terminals to their kinds.
+func agentSet(terminals []hc.Terminal) map[string]string {
+	set := make(map[string]string)
 	for _, t := range terminals {
 		if isPane(t) && isAgent(t) {
-			set[t.Address] = true
+			set[t.Address] = kindOf(t)
 		}
 	}
 	return set
@@ -73,13 +73,8 @@ func (f *fleetFeed) handle(ctx context.Context, n hc.Notification) bool {
 	case "created", "restarted":
 		return f.detect(ctx, n.Terminal, false)
 	case "foreground":
-		// A known agent typed into an existing shell: found now, not at
-		// the next snapshot (it reports no status before its first-run
-		// question).
-		var fg *hc.Foreground
-		if err := n.DecodeData(&fg); err != nil || fg == nil || !knownKind(argvBase(fg.Argv)) {
-			return true
-		}
+		// Re-read the terminal: a known agent may have been typed into an
+		// existing shell, or the shell may have replaced an exited one.
 		return f.detect(ctx, n.Terminal, true)
 	case "status":
 		var data hc.StatusData
@@ -97,23 +92,35 @@ func (f *fleetFeed) handle(ctx context.Context, n hc.Notification) bool {
 	return true
 }
 
-// detect emits FleetAgentDetected for the terminal when it is a live agent.
-// A terminal already known is reported again only when fresh (it was just
+// detect emits FleetAgentDetected for the terminal when it is a live agent,
+// or Released when it stopped being one while the terminal stayed alive. A
+// terminal already known is reported again only when fresh (it was just
 // created or restarted).
 func (f *fleetFeed) detect(ctx context.Context, address string, fromStatus bool) bool {
-	if fromStatus && f.agents[address] {
-		return true
-	}
 	t, err := f.b.client.Get(ctx, address)
-	if err != nil || !isPane(t) || !isAgent(t) {
+	if err != nil || !isPane(t) {
 		return true
 	}
-	f.agents[address] = true
+	kind, known := f.agents[address]
+	if !isAgent(t) {
+		if !known {
+			return true
+		}
+		delete(f.agents, address)
+		return f.emit(ctx, herdr.FleetEvent{
+			Kind: herdr.FleetAgentDetected, PaneID: address, Agent: kind, Released: true,
+		})
+	}
+	if fromStatus && known {
+		return true
+	}
+	kind = kindOf(t)
+	f.agents[address] = kind
 	pane := paneInfo(t, f.b.stateOf(ctx, t))
 	return f.emit(ctx, herdr.FleetEvent{
 		Kind:   herdr.FleetAgentDetected,
 		PaneID: address,
-		Agent:  kindOf(t),
+		Agent:  kind,
 		Pane:   &pane,
 	})
 }

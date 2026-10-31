@@ -14,12 +14,17 @@ import (
 // model call on `blocked`, so callers that must not stall run it in a
 // goroutine per transition.
 func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
+	if t.Released {
+		s.mu.Lock()
+		s.dropPendingFor(t.PaneID, "agent_exited")
+		s.mu.Unlock()
+	}
 	prev, _ := s.store.Get(t.PaneID)
 	row, _, err := s.store.Apply(t)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
-	if !t.Closed {
+	if !t.Closed && !t.Released {
 		// The worker's own session title, read as a fact: it may
 		// change the spoken names (names.go).
 		s.refreshTitle(row)
@@ -55,15 +60,21 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.brain.WorkerEventLinked(alias, string(from), string(t.To), t.Closed, eventLink(s.newEventID(t.PaneID)))
 	}
 
-	if t.Closed {
+	if t.Closed || t.Released {
 		s.mu.Lock()
-		s.dropPendingFor(t.PaneID, "pane_closed")
+		if t.Closed {
+			s.dropPendingFor(t.PaneID, "pane_closed")
+		}
 		s.forgetPrompt(t.PaneID)
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
-			s.push(t.PaneID, aliasOr(state.Say(prev))+" has gone away; its pane closed.", voice.UrgencyInterrupt)
+			line := aliasOr(state.Say(prev)) + " has gone away; its pane closed."
+			if t.Released {
+				line = aliasOr(state.Say(prev)) + " has exited while it was busy."
+			}
+			s.push(t.PaneID, line, voice.UrgencyInterrupt)
 		}
 		return
 	}

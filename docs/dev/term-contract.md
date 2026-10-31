@@ -245,9 +245,11 @@ does. Either way the user sees it on the computer too.
   herdr-core the backend also verifies the terminal carries
   `sheepdog=shell` before `terminal.kill`.
 
-Phone shells are not agents: a plain shell is not in the agent list and
-the orchestrator is not told about it. On herdr-core a terminal carrying
-`sheepdog=shell` stays off the agent list.
+Phone shells are agents only while an agent is running in them. A plain
+shell is not in the agent list and the orchestrator is not told about it.
+On herdr-core, a `sheepdog=shell` terminal becomes an agent when it reports
+status or runs a known agent program; the label keeps the shell
+findable, reusable and closable rather than excluding it from the list.
 
 ## Event log
 

@@ -437,3 +437,19 @@ func TestOpenIgnoresDroppedSessionFields(t *testing.T) {
 		t.Errorf("session = %+v", ss)
 	}
 }
+
+func TestReleasedAgentLeavesItsPaneRow(t *testing.T) {
+	s, err := Open("", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, s, tr("w1:p1", "", herdr.StateIdle, t0))
+	x := tr("w1:p1", herdr.StateIdle, herdr.StateUnknown, t0.Add(time.Minute))
+	x.Released = true
+	if _, changed := mustApply(t, s, x); !changed {
+		t.Fatal("releasing an agent should change the table")
+	}
+	if rows := s.List(); len(rows) != 0 {
+		t.Fatalf("agents after release = %+v, want none", rows)
+	}
+}

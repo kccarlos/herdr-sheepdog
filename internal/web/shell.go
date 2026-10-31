@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -38,6 +39,17 @@ type ShellHost interface {
 }
 
 var _ ShellHost = (*herdr.Client)(nil)
+
+// ShellBook is the daemon's live phone-shell registry. A shell is keyed by
+// pane and folder; Open reaps closed panes, adopts shells left by
+// a daemon restart, and opens one only when the folder has none.
+type ShellBook struct {
+	mu    sync.Mutex
+	panes map[string]string
+}
+
+// NewShellBook returns an empty phone-shell registry.
+func NewShellBook() *ShellBook { return &ShellBook{panes: map[string]string{}} }
 
 // errOutsideProjects: the shell's folder is not inside supervisor.project_roots
 // nor a tracked agent's folder.
@@ -105,12 +117,18 @@ func inside(path, root string) bool {
 // none. The backend chooses the old herdr's shared workspace or herdr-core's
 // folder space. Opens are serialised, so two quick taps make one shell.
 func (t *termServer) shellPane(ctx context.Context, dir string) (pane string, reused bool, err error) {
-	t.shellMu.Lock()
-	defer t.shellMu.Unlock()
-	h := t.deps.Shells
+	p, reused, err := t.shells.Open(ctx, t.deps.Shells, dir)
+	return p.PaneID, reused, err
+}
+
+// Open returns the folder's phone shell, opening one when needed. Opens are
+// serialised, so two quick taps make one shell.
+func (b *ShellBook) Open(ctx context.Context, h ShellHost, dir string) (herdr.PaneInfo, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	snap, err := h.Snapshot(ctx)
 	if err != nil {
-		return "", false, err
+		return herdr.PaneInfo{}, false, err
 	}
 	ws := h.ShellWorkspace(snap, dir)
 	alive := map[string]herdr.PaneInfo{}
@@ -119,36 +137,56 @@ func (t *termServer) shellPane(ctx context.Context, dir string) (pane string, re
 			alive[p.PaneID] = p
 		}
 	}
-	t.mu.Lock()
 	// Forget shells herdr no longer has; adopt ones a restart forgot.
-	for p := range t.shells {
+	for p := range b.panes {
 		if _, ok := alive[p]; !ok {
-			delete(t.shells, p)
+			delete(b.panes, p)
 		}
 	}
 	for id, p := range alive {
-		if _, ok := t.shells[id]; !ok && p.Cwd != "" {
-			t.shells[id] = realDir(p.Cwd)
+		if _, ok := b.panes[id]; !ok && p.Cwd != "" {
+			b.panes[id] = realDir(p.Cwd)
 		}
 	}
-	for id, d := range t.shells {
+	for id, d := range b.panes {
 		if d == dir {
-			t.mu.Unlock()
-			return id, true, nil
+			return alive[id], true, nil
 		}
 	}
-	t.mu.Unlock()
 	p, err := h.OpenShell(ctx, ws, dir)
 	if err == nil && p.PaneID == "" {
 		err = errors.New("herdr returned no pane")
 	}
 	if err != nil {
-		return "", false, err
+		return herdr.PaneInfo{}, false, err
 	}
-	t.mu.Lock()
-	t.shells[p.PaneID] = dir
-	t.mu.Unlock()
-	return p.PaneID, false, nil
+	b.panes[p.PaneID] = dir
+	return p, false, nil
+}
+
+// Has reports whether pane is a live phone shell known to the registry.
+func (b *ShellBook) Has(pane string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.panes[pane]
+	return ok
+}
+
+// Forget drops pane from the registry.
+func (b *ShellBook) Forget(pane string) {
+	b.mu.Lock()
+	delete(b.panes, pane)
+	b.mu.Unlock()
+}
+
+// Close ends a phone shell and forgets it. CloseShell may keep an old
+// backend shell that already vanished as ErrPaneNotFound.
+func (b *ShellBook) Close(ctx context.Context, h ShellHost, pane string) error {
+	err := h.CloseShell(ctx, pane)
+	if err == nil || errors.Is(err, herdr.ErrPaneNotFound) {
+		b.Forget(pane)
+	}
+	return err
 }
 
 // isShell reports whether pane is a phone shell the daemon opened.
@@ -156,16 +194,11 @@ func (t *termServer) isShell(pane string) bool {
 	if t == nil {
 		return false
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	_, ok := t.shells[pane]
-	return ok
+	return t.shells.Has(pane)
 }
 
 func (t *termServer) forgetShell(pane string) {
-	t.mu.Lock()
-	delete(t.shells, pane)
-	t.mu.Unlock()
+	t.shells.Forget(pane)
 }
 
 // openShell is term-open {target:{shell}} after the gate: find or open the
@@ -204,13 +237,12 @@ func (s *Server) handleShellClose(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	err := t.deps.Shells.CloseShell(ctx, pane)
+	err := t.shells.Close(ctx, t.deps.Shells, pane)
 	if err != nil && !errors.Is(err, herdr.ErrPaneNotFound) {
 		s.log.Log(logSource, "web.shell.close", pane, map[string]any{"pane_id": pane, "remote_kind": kind, "error": err.Error()})
 		writeError(w, http.StatusBadGateway, "could not close the shell: "+err.Error())
 		return
 	}
-	t.forgetShell(pane)
 	s.log.Log(logSource, "web.shell.close", pane, map[string]any{"pane_id": pane, "remote_kind": kind})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

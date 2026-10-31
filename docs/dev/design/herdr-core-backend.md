@@ -99,7 +99,7 @@ type Backend interface {               // what the daemon needs
 | herdr (old) | herdr-core (hc) | v1 rule |
 |---|---|---|
 | pane id `p_…` | terminal address `t7` | pane id = address, so `pane_id` in `/api/state` (agents and the pending question) is the hc address a herdr-app mod passes to hc to focus it. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
-| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). Plain shells are not agents. |
+| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal with a current status, or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). `reported` alone is not enough: after a cleared status with the shell in front, the terminal is a shell again. A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it has a status; the `sheepdog=shell` label does not suppress that. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
 | workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live local terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
@@ -107,19 +107,52 @@ type Backend interface {               // what the daemon needs
 | tab | herdr-app's tab, shown for `herdr.tab=<id>` | `TabID` = the `herdr.tab` label. |
 | `idle`, `working`, `done`, `blocked` | the same words | as is. |
 | — | `error` | `done`: the turn ended; the finish announcement reads the screen and says what went wrong. |
-| `unknown` | status `null` after reporting (cleared), or any other word | `unknown`. |
+| `unknown` | any other status word | `unknown` while the terminal remains an agent. |
+| `pane_agent_detected` with `released:true` | status `null` after reporting, with no known agent program in front or in the start `argv[0]` | → `FleetAgentDetected{Released:true}`; the state table removes the row and the terminal stays a shell. |
 | — | status `null`, never reported, known kind | the **screen fallback**: `terminal.read`, and `ParsePrompt` finding a question makes it `blocked`; otherwise `unknown`. Polled every few seconds only for such terminals. |
 | `pane.read` sources | `terminal.read {lines}` (plain text; `stitched` for full-screen apps) | `visible` → `lines: 0`; the recent sources → `lines: n`. No ANSI read. |
 | `agent.prompt` (refuses a blocked agent) | `terminal.send` (refuses `blocked` unless `force`) | never `force`; hc's `blocked` error is `ErrAgentBlocked`. |
 | `pane.send_keys` | `terminal.keys` | the same key names (`enter`, `esc`, `up`, `down`, `tab`, `ctrl+c`, digits). |
 | interrupt | `terminal.interrupt` (esc for status reporters, else ctrl+c) | as is. |
 | `pane.agent_status_changed` | `status` event | → `StatusEvent`. |
-| `pane_agent_detected` | the first `status` event of a terminal, or `created` of a known kind | → `FleetAgentDetected`. |
+| `pane_agent_detected` | the first `status` event of a terminal, `created` of a known kind, or the cleared-status release above | → `FleetAgentDetected`, with `Released` on the exit. |
 | `pane_exited` / `pane_closed` | `finished`, `lost` / `removed` | → `FleetPaneExited` / `FleetPaneClosed`. |
 | resubscribe after `events_lost` | `missed`, a reconnect | → `Resync`. |
 | `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live local terminals, agents = the ones above). |
 | `agent_session` (the worker's transcript) | not reported | none on hc: no worker history digest. |
 | `ping` version | `hello` version | → `Pong`. |
+
+## Conformance
+
+`internal/herdr/conformance` is the behaviour contract shared by both
+backends. Its scenarios drive a small backend-specific test driver over
+`herdrtest` or `hctest`; both `internal/herdr` and `internal/herdrcore`
+run the whole list. A new edge case belongs there first, and a fix for one
+backend is accepted only when both drivers pass it.
+
+The scenarios are:
+
+1. a plain shell is never an agent;
+2. Claude and Codex are detected fresh and resumed (`--resume` for Claude,
+   `resume` for Codex), with the right kind and a sensible spoken name;
+3. an exited agent leaves the terminal at a plain shell and is no longer
+   listed as an agent;
+4. a different agent started later in that same shell is detected with
+   its new kind;
+5. the phone shell can be opened, reused and closed with no agent, while
+   an agent is running in it, and after that agent exited;
+6. a new agent in a folder with an existing space joins that space (the
+   old backend splits its pane; hc opens a new tab in the same space);
+7. a blocked question with options is read and parsed the same way.
+
+The exit decision follows the old protocol. `agent.list` contains only
+panes that currently host a recognised agent. Exiting an agent emits the
+`FleetAgentDetected{Released:true}` signal, which removes its state-table
+row and therefore its `/api/state` and `/api/agents` entries; the terminal
+stays a shell and can host a later agent. hc therefore treats a terminal as
+an agent only when it has a current status or a known agent program in the
+foreground or start argv. `terminal.reported` remembers that a program once
+reported; on its own it does not make a shell an agent.
 
 ## What v1 supports on hc
 
@@ -136,9 +169,10 @@ type Backend interface {               // what the daemon needs
   login shell, `keep: true`, and the same folder-to-space match agent
   spawning uses. If a space already works in the folder, the shell is a
   new tab there; otherwise it opens a new space. It also carries
-  `sheepdog=shell`, so it never appears in the agent list, and the phone's
-  close endpoint calls `terminal.kill` only when the terminal has that
-  label;
+  `sheepdog=shell`, which the phone uses to find, reuse and close it. A
+  plain phone shell stays off the agent list; once an agent reports or
+  runs in it, the terminal is tracked as that agent while keeping the
+  shell label;
 - the agent list, spoken names and `/api/spaces` grouped by space, as with
   the old herdr;
 - the app's agent window, no app change: live over `terminal.attach` in
@@ -231,7 +265,8 @@ comes from `herdr.PaneInDir`, which shares `herdr.PaneDirs`' real-path
 folder match with agent spawning.
 The fleet stream asks `terminal.get` on `created`, `restarted`, a
 `foreground` change to a known agent program (one typed into an existing
-shell) and a terminal's first status, to decide whether it is an agent.
+shell) and a terminal's status, to decide whether it is an agent or has
+released one.
 `Interrupt` asks hc to watch for 2 s, below the call timeout. `sheepdog herdr watch` (a
 developer tool) still talks to the old herdr only.
 

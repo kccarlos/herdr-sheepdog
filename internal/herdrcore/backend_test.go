@@ -89,7 +89,6 @@ func TestListAgentsMapping(t *testing.T) {
 		"t2": {"codex", herdr.StateDone},
 		"t4": {"codex", herdr.StateBlocked},
 		"t6": {"custom", herdr.StateUnknown},
-		"t7": {"custom", herdr.StateUnknown},
 		"t9": {"codex", herdr.StateUnknown},
 	}
 	if len(got) != len(want) {
@@ -104,6 +103,9 @@ func TestListAgentsMapping(t *testing.T) {
 		if a.Agent != w.agent || a.Status != w.state {
 			t.Errorf("%s = agent %q status %q, want %q %q", id, a.Agent, a.Status, w.agent, w.state)
 		}
+	}
+	if a, ok := got["t7"]; ok {
+		t.Errorf("cleared status with no known foreground program is still an agent: %+v", a)
 	}
 
 	t1 := got["t1"]
@@ -138,8 +140,8 @@ func TestSnapshot(t *testing.T) {
 	if p := panes["t1"]; p.Agent != "claude" || p.Status != herdr.StateWorking || p.Cwd != "/work/now" {
 		t.Fatalf("agent pane = %+v", p)
 	}
-	if len(snap.Agents) != 6 {
-		t.Fatalf("agents = %d, want 6", len(snap.Agents))
+	if len(snap.Agents) != 5 {
+		t.Fatalf("agents = %d, want 5", len(snap.Agents))
 	}
 	if _, ok := panes["m/t1"]; ok {
 		t.Fatal("remote terminal listed")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
 func TestPhoneShellOpensInTheFoldersExistingSpace(t *testing.T) {
@@ -93,27 +94,56 @@ func TestPhoneShellFolderMatchFollowsSymlinks(t *testing.T) {
 	}
 }
 
-func TestPhoneShellIsNeverAnAgent(t *testing.T) {
+func TestPhoneShellBecomesAnAgentAfterReportingStatus(t *testing.T) {
 	b, srv := newBackend(t)
 	dir := t.TempDir()
-	shell, err := b.OpenShell(testContext(t), "", dir)
+	ctx := testContext(t)
+	shell, err := b.OpenShell(ctx, "", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.Add(hc.Terminal{
-		Address: shell.PaneID,
-		State:   "live",
-		Argv:    []string{"codex"},
-		Cwd:     dir,
-		Labels:  map[string]string{"sheepdog": "shell", "herdr.space": shell.WorkspaceID, "herdr.tab": shell.TabID},
-	})
 
-	agents, err := b.ListAgents(testContext(t))
+	agents, err := b.ListAgents(ctx)
+	if err != nil || len(agents) != 0 {
+		t.Fatalf("plain phone shell listed as an agent: %+v, %v", agents, err)
+	}
+
+	srv.SetStatus(shell.PaneID, &hc.Status{State: "idle", App: "claude-code"})
+	agents, err = b.ListAgents(ctx)
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("agents after status = %+v, %v", agents, err)
+	}
+	agent := agents[0]
+	if agent.PaneID != shell.PaneID || agent.Agent != "claude" || agent.Status != herdr.StateIdle {
+		t.Fatalf("phone shell agent = %+v", agent)
+	}
+	snap, err := b.Snapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 0 {
-		t.Fatalf("phone shell listed as an agent: %+v", agents)
+	var pane herdr.PaneInfo
+	for _, p := range snap.Panes {
+		if p.PaneID == shell.PaneID {
+			pane = p
+			break
+		}
+	}
+	if pane.PaneID == "" || pane.Agent != "claude" || !b.IsShellPane(pane, "") {
+		t.Fatalf("phone shell stopped being a shell after it became an agent: %+v", pane)
+	}
+
+	if err := b.CloseShell(ctx, shell.PaneID); err != nil {
+		t.Fatal(err)
+	}
+	agents, err = b.ListAgents(ctx)
+	if err != nil || len(agents) != 0 {
+		t.Fatalf("agents after close = %+v, %v", agents, err)
+	}
+	kills := requestParams[struct {
+		Terminal string `json:"terminal"`
+	}](t, srv, "terminal.kill")
+	if len(kills) != 1 || kills[0].Terminal != shell.PaneID {
+		t.Fatalf("terminal.kill params = %+v", kills)
 	}
 }
 
