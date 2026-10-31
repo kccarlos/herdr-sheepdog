@@ -99,7 +99,7 @@ type Backend interface {               // what the daemon needs
 | herdr (old) | herdr-core (hc) | v1 rule |
 |---|---|---|
 | pane id `p_…` | terminal address `t7` | pane id = address, so `pane_id` in `/api/state` (agents and the pending question) is the hc address a herdr-app mod passes to hc to focus it. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
-| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). Plain shells are not agents. |
+| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal that has reported status (`reported`), or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it reports status; the `sheepdog=shell` label does not suppress that. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
 | workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live local terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
@@ -136,9 +136,10 @@ type Backend interface {               // what the daemon needs
   login shell, `keep: true`, and the same folder-to-space match agent
   spawning uses. If a space already works in the folder, the shell is a
   new tab there; otherwise it opens a new space. It also carries
-  `sheepdog=shell`, so it never appears in the agent list, and the phone's
-  close endpoint calls `terminal.kill` only when the terminal has that
-  label;
+  `sheepdog=shell`, which the phone uses to find, reuse and close it. A
+  plain phone shell stays off the agent list; once an agent reports or
+  runs in it, the terminal is tracked as that agent while keeping the
+  shell label;
 - the agent list, spoken names and `/api/spaces` grouped by space, as with
   the old herdr;
 - the app's agent window, no app change: live over `terminal.attach` in

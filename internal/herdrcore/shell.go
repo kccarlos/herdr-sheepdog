@@ -23,8 +23,8 @@ func (b *Backend) IsShellPane(p herdr.PaneInfo, _ string) bool {
 }
 
 // OpenShell opens a phone shell in workspaceID, or in a new space when
-// workspaceID is empty. It uses the agent spawn path but labels the kept
-// terminal as a shell, so it is not an agent and only it can be closed here.
+// workspaceID is empty. It uses the agent spawn path and labels the kept
+// terminal as a shell, which keeps the shell reusable and closable here.
 func (b *Backend) OpenShell(ctx context.Context, workspaceID, cwd string) (herdr.PaneInfo, error) {
 	if workspaceID == "" {
 		workspaceID = newID()
