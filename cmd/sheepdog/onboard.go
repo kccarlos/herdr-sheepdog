@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -26,7 +27,8 @@ var onboardEndpoints = onboard.DefaultEndpoints
 func printDoctorUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog doctor [flags]")
 	fprintln(w, "")
-	fprintln(w, "Checks the setup and prints one line per check with the fix: herdr,")
+	fprintln(w, "Checks the setup and prints one line per check with the fix: herdr and")
+	fprintln(w, "its backend, the herdr-app panel, Sheepdog.app on macOS,")
 	fprintln(w, "every configured key (live and cheap; the balance where the API shows it),")
 	fprintln(w, "a tool-calling probe on OpenAI-compatible orchestrators (a few tokens),")
 	fprintln(w, "the orchestrator and voice providers, the web port, the bind/token")
@@ -97,7 +99,11 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		src = "defaults (no " + cfgPath + ")"
 	}
 	fprintln(stdout, onboard.Result{Name: "config", Status: onboard.OK, Detail: "loaded " + src}.Line())
-	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath})
+	environment := onboard.Detect(cfg, onboard.SystemProbe(), herdrsheepdog.Panel)
+	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{
+		Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath,
+		Environment: &environment,
+	})
 	if r, ok := envLocationCheck(cfg.DataDir, envPath); ok {
 		results = append(results, r)
 	}
@@ -143,8 +149,8 @@ type prompter struct {
 	nonInteractive bool
 }
 
-func newPrompter(stdin io.Reader, out io.Writer, nonInteractive bool) *prompter {
-	p := &prompter{r: bufio.NewReader(stdin), out: out, nonInteractive: nonInteractive}
+func newPrompter(stdin io.Reader, out io.Writer) *prompter {
+	p := &prompter{r: bufio.NewReader(stdin), out: out}
 	if f, ok := stdin.(*os.File); ok {
 		if st, err := f.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
 			p.tty = f

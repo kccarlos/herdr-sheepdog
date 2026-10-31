@@ -95,7 +95,9 @@ if command -v go >/dev/null 2>&1; then
 	mkdir -p "$work/repo/scripts"
 	cp "$work/pf.sh" "$work/repo/scripts/plugin-fetch.sh"
 	cp -R "$repo/cmd" "$repo/internal" "$repo/go.mod" "$repo/go.sum" "$work/repo/"
-	for d in prompts web assets; do [ ! -d "$repo/$d" ] || cp -R "$repo/$d" "$work/repo/"; done
+	for d in prompts web assets mods; do [ ! -d "$repo/$d" ] || cp -R "$repo/$d" "$work/repo/"; done
+	# The root package (panel.go embeds mods/sheepdog for sheepdog setup).
+	cp "$repo"/*.go "$work/repo/"
 	SHEEPDOG_RELEASE_URL="file://$work/none" sh "$work/repo/scripts/plugin-fetch.sh" >"$work/out" 2>&1 && rc=0 || rc=$?
 	check "no release, go builds" "$rc"
 	[ -x "$work/repo/bin/sheepdog" ]

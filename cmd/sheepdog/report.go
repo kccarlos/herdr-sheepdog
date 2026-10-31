@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -104,7 +105,11 @@ func buildReport(ctx context.Context, o reportOptions) string {
 	if o.loadErr == nil {
 		h("Doctor")
 		var lines []string
-		for _, r := range onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath}) {
+		environment := onboard.Detect(o.cfg, onboard.SystemProbe(), herdrsheepdog.Panel)
+		for _, r := range onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
+			Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath,
+			Environment: &environment,
+		}) {
 			lines = append(lines, r.Line())
 		}
 		code(strings.Join(lines, "\n"))

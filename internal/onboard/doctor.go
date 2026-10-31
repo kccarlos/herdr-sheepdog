@@ -21,12 +21,18 @@ type DoctorOptions struct {
 	ConfigPath, EnvPath string
 	// PortClient is the client of the port check's /api/hello call.
 	PortClient *http.Client
+	// Environment adds the herdr-app, Sheepdog.app and backend checks when
+	// non-nil.
+	Environment *Environment
 }
 
 // Doctor runs every check on the effective config, in a fixed order.
 func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	var out []Result
 	out = append(out, CheckHerdr(cfg.Herdr))
+	if o.Environment != nil {
+		out = append(out, environmentChecks(cfg, *o.Environment)...)
+	}
 	out = append(out, checkGeminiKeys(ctx, o.Endpoints, cfg)...)
 	if cfg.Gemini.Vertex.APIKey != "" || cfg.Gemini.Vertex.Project != "" {
 		r := Result{Name: "vertex", Status: OK, Detail: "VERTEX_API_KEY and VERTEX_PROJECT set (not checked live)"}
@@ -66,6 +72,36 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	out = append(out, CheckPush(ctx, o.Endpoints, cfg.Push))
 	if o.EnvPath != "" {
 		out = append(out, CheckSecretFile("env file", o.EnvPath))
+	}
+	return out
+}
+
+func environmentChecks(cfg config.Config, env Environment) []Result {
+	var out []Result
+	switch env.Panel {
+	case PanelNotApplicable:
+		out = append(out, Result{Name: "herdr-app panel", Status: Skip, Detail: "herdr-app not found"})
+	case PanelMissing:
+		out = append(out, Result{Name: "herdr-app panel", Status: Warn, Detail: "not installed", Fix: "sheepdog setup installs it"})
+	case PanelOutdated:
+		out = append(out, Result{Name: "herdr-app panel", Status: Warn, Detail: "older than this sheepdog", Fix: "sheepdog setup installs it"})
+	case PanelCurrent:
+		out = append(out, Result{Name: "herdr-app panel", Status: OK, Detail: "matches this sheepdog"})
+	}
+	if env.OS == "darwin" && env.HerdrApp {
+		const fix = "brew install --cask kccarlos/tap/sheepdog-app"
+		if env.SheepdogApp {
+			out = append(out, Result{Name: "Sheepdog.app", Status: OK, Detail: "installed"})
+		} else {
+			out = append(out, Result{Name: "Sheepdog.app", Status: Warn, Detail: "not installed", Fix: fix})
+		}
+	}
+	if advice := AdviseBackend(cfg, env); advice.Ask || advice.Set != "" {
+		fix := "run sheepdog setup to choose"
+		if advice.Set != "" {
+			fix = "SHEEPDOG_HERDR_BACKEND=" + advice.Set
+		}
+		out = append(out, Result{Name: "herdr backend", Status: Warn, Detail: advice.Why, Fix: fix})
 	}
 	return out
 }

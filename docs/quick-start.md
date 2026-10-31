@@ -6,7 +6,8 @@ You need
 [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a
 microphone (on this computer, or over SSH: see below) and one free Gemini API
 key (the setup page links to it; [models.md](models.md) lists the
-alternatives). Getting the key from AI Studio is the slowest step.
+alternatives). Windows is not supported. Getting the key from AI Studio is
+the slowest step.
 
 No herdr yet? Install it, then start it where your work lives and leave it
 running:
@@ -16,7 +17,7 @@ curl -fsSL https://herdr.dev/install.sh | sh
 herdr
 ```
 
-Or `brew install herdr` instead of the curl line. Other ways (mise, Windows,
+Or `brew install herdr` instead of the curl line. Other ways (mise and
 binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/releases).
 
 On herdr-core (`hc`, the new herdr) instead: skip the plugin step, install
@@ -58,6 +59,10 @@ stops and says so ([troubleshooting.md](troubleshooting.md)).
 ```sh
 sheepdog setup
 ```
+
+`sheepdog setup` detects whether old herdr, herdr-core or herdr-app is
+installed and running. It can pin the backend, ask when the setup is
+ambiguous, and offer to install the panel for herdr-app.
 
 ```text
 Starting sheepdog…
