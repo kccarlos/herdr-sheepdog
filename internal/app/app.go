@@ -163,11 +163,8 @@ type App struct {
 	herdr   *inject.Herdr
 	backend herdr.Backend // nil in mock mode
 	wref    *watcherRef   // nil in mock mode
-	// term backs /term (the live terminal); nil in mock mode and on a
-	// backend without a terminal bridge.
-	term *web.TermDeps
-	// termOff is /term's answer when the backend has no live terminal.
-	termOff  string
+	// term backs /term (the live terminal); nil in mock mode.
+	term     *web.TermDeps
 	sup      *supervisor.Supervisor
 	brain    *brain.Brain // nil when off
 	brainOff string       // why the orchestrator is off (web.Deps.BrainOffReason)

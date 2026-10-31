@@ -265,9 +265,14 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 			t.Errorf("herdr %s: GET /term = %d, want 503", tc.version, resp.StatusCode)
 		}
 	}
-	// No Deps.Term because the backend has none (herdr-core): not listed,
-	// and /term says why in plain words.
-	off := newHarness(t, harnessOpts{termOff: "the live terminal is not available with herdr-core yet"})
+	// A backend whose Check fails (herdr-core without terminal.attach):
+	// not listed, and /term says why in plain words.
+	ft := &fakeTerm{}
+	deps := ft.deps()
+	deps.Version = nil
+	deps.Check = func(context.Context) error { return errors.New("no terminal.attach") }
+	deps.Off = "the live terminal needs herdr-core with terminal.attach"
+	off := newHarness(t, harnessOpts{term: deps})
 	resp, err := http.Get(off.http.URL + "/term")
 	if err != nil {
 		t.Fatal(err)
@@ -276,6 +281,12 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "herdr-core") {
 		t.Errorf("GET /term without a live terminal = %d %s", resp.StatusCode, body)
+	}
+	oc := dialWSRaw(t, off)
+	oc.expect(wsproto.TypeStatus)
+	oc.send(wsproto.ClientReady(1, iosClient))
+	if m := oc.expect(wsproto.TypeBotReady); slices.Contains(m.Features, wsproto.FeatureTerm) {
+		t.Errorf("failed Check lists term: %v", m.Features)
 	}
 	// No Deps.Term (herdr mock mode): never listed.
 	h := newHarness(t, harnessOpts{})
