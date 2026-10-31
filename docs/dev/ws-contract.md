@@ -49,6 +49,7 @@ binary version.
 
   ```json
   {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}
+  {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-mac","version":"0.1.0 (1)","platform":"macos"}}
   {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-voice","version":"embedded","platform":"web"}}
   ```
 

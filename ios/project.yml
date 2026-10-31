@@ -105,7 +105,7 @@ targets:
   # a menu-bar item with no window and no Dock icon. Not sandboxed: it talks
   # to a loopback daemon, and a sandbox needs extra entitlements for no gain
   # on a Developer ID app. Hardened runtime, with the one entitlement the
-  # microphone needs (the voice session is PR 9). Debug is signed
+  # microphone needs (the voice session). Debug is signed
   # automatically with the team; Developer ID signing is release.yml's
   # (docs/dev/signing.md).
   SheepdogMac:

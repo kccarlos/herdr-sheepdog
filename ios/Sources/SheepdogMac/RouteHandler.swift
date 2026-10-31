@@ -2,12 +2,17 @@ import Foundation
 import SheepdogKit
 
 /// What a `sheepdog://` URL does in the Mac app. The parse is Kit's
-/// `AppRoute`, the one the iOS app uses. Only `talk` is known so far, and it
-/// only logs: the voice session arrives in PR 9.
+/// `AppRoute`, the one the iOS app uses. The voice routes go to the Mac's
+/// voice session, which decides what they mean for the session as it is
+/// (`AppRoute.actions`): `talk` connects `/ws`, which takes the voice from
+/// the phone, or unmutes the session that runs.
+@MainActor
 public struct RouteHandler {
+    private let voice: VoiceControlling
     private let log: AppLogging
 
-    public init(log: AppLogging) {
+    public init(voice: VoiceControlling, log: AppLogging) {
+        self.voice = voice
         self.log = log
     }
 
@@ -17,10 +22,10 @@ public struct RouteHandler {
             return
         }
         switch route {
-        case .talk:
-            log.log("sheepdog://talk: voice arrives in PR 9")
-        default:
-            log.log("ignored \(route.url.absoluteString): not handled by this shell yet")
+        case .talk, .mute, .toggleMute, .stop, .end:
+            voice.handle(route: route)
+        case .agent, .window, .toggleTalk:
+            log.log("ignored \(route.url.absoluteString): not handled by this app")
         }
     }
 }

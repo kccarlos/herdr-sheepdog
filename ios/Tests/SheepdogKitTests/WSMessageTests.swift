@@ -129,12 +129,33 @@ final class WSMessageTests: XCTestCase {
         XCTAssertThrowsError(try decode(#"{"type":"bark"}"#))
     }
 
-    /// The daemon's `voice-command` message (docs/dev/ws-contract.md "Voice
-    /// commands over HTTP") is not implemented by the app yet: it decodes
-    /// as an unknown type, which `VoiceSocket` drops without closing.
-    func testVoiceCommandIsAnUnknownTypeTheAppIgnores() {
-        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"stop"}"#))
-        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"ptt","on":true}"#))
+    /// `voice-command` (docs/dev/ws-contract.md): Sheepdog.app implements it,
+    /// the iPhone app's `VoiceEngine` drops it.
+    func testVoiceCommandStopAndPTT() throws {
+        let stop = try decode(#"{"type":"voice-command","action":"stop"}"#)
+        XCTAssertEqual(stop, .voiceStop)
+        let talk = try decode(#"{"type":"voice-command","action":"ptt","on":true}"#)
+        XCTAssertEqual(talk, .voicePTT(true))
+        XCTAssertEqual(talk.on, true)
+        XCTAssertEqual(try decode(#"{"type":"voice-command","action":"ptt","on":false}"#).on, false)
+    }
+
+    func testVoiceCommandNeedsAKnownActionAndPTTNeedsOn() {
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command"}"#))
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"dance"}"#))
+        XCTAssertThrowsError(try decode(#"{"type":"voice-command","action":"ptt"}"#))
+    }
+
+    func testVoiceCommandEncodesAsTheDaemonWritesIt() throws {
+        XCTAssertEqual(try WSMessage.voiceStop.encodedString(), #"{"action":"stop","type":"voice-command"}"#)
+        XCTAssertEqual(try WSMessage.voicePTT(true).encodedString(), #"{"action":"ptt","on":true,"type":"voice-command"}"#)
+    }
+
+    func testTheMacSaysWhoItIs() {
+        let info = WSMessage.ClientInfo.mac(bundle: Bundle(for: WSMessageTests.self))
+        XCTAssertEqual(info.name, "sheepdog-mac")
+        XCTAssertEqual(info.platform, "macos")
+        XCTAssertFalse(info.version.isEmpty)
     }
 
     func testAudioContractMatchesTheDaemon() {
