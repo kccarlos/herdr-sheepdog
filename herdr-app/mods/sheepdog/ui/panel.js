@@ -43,7 +43,7 @@ function header(t, status, { technical, onToggleTechnical, onMenu, onClose }) {
         .items_center()
         .child(logo(20))
         .child(div().flex_1().min_w(0).text_size(13).font_semibold().text_color(t.foreground).child("Sheepdog"))
-        .when(ok && status.needsYou > 0, (el) =>
+        .when((ok || status.phase === "setup") && status.needsYou > 0, (el) =>
           el.child(div().flex_none().px(8).h(20).flex().items_center().rounded(10).bg(t.blocked).text_size(11).font_semibold().text_color(t.solid_foreground).child(`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`)),
         )
         .child(control("menu", "⋯", onMenu))

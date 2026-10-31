@@ -1,6 +1,7 @@
 // "New conversation" asks before clearing the orchestrator's and voice's
 // context. Agents, open questions, promises and recorded history stay.
 
+import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { errorText, mutedText, overlayButton, overlayFrame } from "./overlay-widgets.js";
 
