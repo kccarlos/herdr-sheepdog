@@ -374,7 +374,8 @@ final class VoiceEngine {
         case .transcript, .screen, .screenError, .card:
             host?.voiceEngine(self, control: message)
         case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
-             .screenSubscribe, .screenUnsubscribe, .visibility:
+             .screenSubscribe, .screenUnsubscribe, .visibility, .voiceCommand:
+            // `voiceCommand` is Sheepdog.app's; the phone does not implement it yet.
             break
         }
     }

@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web lint vet cross clean install run-dev changelog eval eval-live release-sign
+.PHONY: build test test-web test-panel lint vet cross clean install run-dev changelog eval eval-live release-sign
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -41,14 +41,26 @@ changelog:
 test:
 	go test -race ./...
 
+# The herdr-app panel's tests (net/ and model/ of the mod; no herdr imports,
+# so plain node runs them).
+PANEL_TESTS := herdr-app/mods/sheepdog/*/*.test.mjs
+
 # Browser-side unit tests (web/voice/*.test.mjs, web/debug/*.test.mjs; plain
-# node --test, no npm). Skipped when node is not on PATH so `make test`
-# stays Go-only.
+# node --test, no npm), and the panel's. Skipped when node is not on PATH so
+# `make test` stays Go-only.
 test-web:
 	@if command -v node >/dev/null 2>&1; then \
-		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs' 'web/static/*.test.mjs' 'web/setup/*.test.mjs'; \
+		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs' 'web/static/*.test.mjs' 'web/setup/*.test.mjs' '$(PANEL_TESTS)'; \
 	else \
 		echo "test-web: node not found, skipping"; \
+	fi
+
+# Only the panel's tests (part of test-web, which CI runs).
+test-panel:
+	@if command -v node >/dev/null 2>&1; then \
+		node --test '$(PANEL_TESTS)'; \
+	else \
+		echo "test-panel: node not found, skipping"; \
 	fi
 
 lint:
