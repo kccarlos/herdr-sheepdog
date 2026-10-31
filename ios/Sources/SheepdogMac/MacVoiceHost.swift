@@ -234,6 +234,11 @@ final class MacVoiceHost: VoiceControlling {
             send(.flush)
         case .ptt?:
             pushToTalk(on: message.on ?? false)
+        case .mute?:
+            // A mute from the panel ends a hold-to-talk the hotkey started:
+            // its release must not undo what the panel asked for.
+            pttUnmuted = false
+            send(.muteRequested(message.on ?? false))
         case nil:
             break
         }

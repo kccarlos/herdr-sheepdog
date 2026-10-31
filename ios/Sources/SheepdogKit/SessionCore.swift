@@ -273,7 +273,8 @@ public struct SessionCore: Equatable, Sendable {
             voice.stalled = message.stalled ?? false
             if let provider = message.provider { voice.provider = provider }
             // The app owns mute: a daemon that disagrees is told again,
-            // never obeyed.
+            // never obeyed. A mute from another client comes as a
+            // `voice-command` first (`muteRequested`), so its status agrees.
             let intent = daemonMute
             if case let .resend(log) = connection.muteSync.status(daemonMuted: message.muted, intent: intent) {
                 if log {
@@ -297,6 +298,9 @@ public struct SessionCore: Equatable, Sendable {
 
         case .muteTapped:
             setMuted(!mic.muted, &effects)
+
+        case let .muteRequested(on):
+            setMuted(on, &effects)
 
         case .holdBegan:
             guard mic.talkMode == .holdToTalk, !mic.holding, voiceBar.orbAction == .holdToTalk else {
@@ -624,6 +628,10 @@ public enum SessionEvent: Equatable, Sendable {
     case connectTapped
     case endTapped
     case muteTapped
+    /// Another client of the daemon muted or unmuted this voice (the
+    /// desktop panel, through a `voice-command` `mute`): the user's own
+    /// mute, from somewhere else. Unlike a `status`, it is obeyed.
+    case muteRequested(Bool)
     case holdBegan
     case holdEnded
     case talkModeChanged(TalkMode)

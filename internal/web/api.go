@@ -185,6 +185,10 @@ func (s *Server) handleVoiceMute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "on must be a boolean")
 		return
 	}
+	// The command goes first, so the holder has taken the mute as its own
+	// before the confirming status arrives: a client that owns its mute
+	// state answers a status it did not ask for by restating its own.
+	s.hub.send(wsproto.VoiceMute(*req.On))
 	s.hub.setMuted(*req.On, "http")
 	writeJSON(w, http.StatusOK, MuteResponse{Muted: s.hub.state().muted})
 }

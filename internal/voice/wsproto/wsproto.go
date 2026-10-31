@@ -128,6 +128,9 @@ const (
 	ActionStop = "stop"
 	// ActionPTT: hold-to-talk; On says whether to open the microphone.
 	ActionPTT = "ptt"
+	// ActionMute: POST /api/voice/mute; On says whether to mute. A client
+	// that owns its mute state takes this as the user's own mute.
+	ActionMute = "mute"
 )
 
 // Voice states carried by a status message.
@@ -323,8 +326,8 @@ type Message struct {
 	VoiceScreen *bool `json:"voice_screen,omitempty"`
 	Card        *Card `json:"card,omitempty"`
 
-	// voice-command (server→client): Action is ActionStop or ActionPTT
-	// (On says whether to talk).
+	// voice-command (server→client): Action is ActionStop, ActionPTT (On
+	// says whether to talk) or ActionMute (On says whether to mute).
 	Action string `json:"action,omitempty"`
 }
 
@@ -428,6 +431,12 @@ func VoiceStop() Message { return Message{Type: TypeVoiceCommand, Action: Action
 // hold-to-talk: on opens the client's microphone, off closes it.
 func VoicePTT(on bool) Message {
 	return Message{Type: TypeVoiceCommand, Action: ActionPTT, On: &on}
+}
+
+// VoiceMute builds the server→client voice-command message for a mute
+// from another client (POST /api/voice/mute): on mutes, off unmutes.
+func VoiceMute(on bool) Message {
+	return Message{Type: TypeVoiceCommand, Action: ActionMute, On: &on}
 }
 
 // ScreenSubscribe builds the client→server request for an agent's window.
@@ -552,9 +561,9 @@ func (m Message) Validate() error {
 	case TypeVoiceCommand:
 		switch m.Action {
 		case ActionStop:
-		case ActionPTT:
+		case ActionPTT, ActionMute:
 			if m.On == nil {
-				return fmt.Errorf("wsproto: voice-command: ptt: missing \"on\"")
+				return fmt.Errorf("wsproto: voice-command: %s: missing \"on\"", m.Action)
 			}
 		default:
 			return fmt.Errorf("wsproto: voice-command: bad action %q", m.Action)

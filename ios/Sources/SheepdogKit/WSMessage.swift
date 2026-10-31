@@ -29,8 +29,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         /// something the orchestrator put on it.
         case visibility, card
         /// Another client of the daemon controls this one's voice (`stop`,
-        /// hold-to-talk; docs/dev/ws-contract.md). The iPhone app ignores
-        /// it; Sheepdog.app implements it.
+        /// hold-to-talk, mute; docs/dev/ws-contract.md). Sheepdog.app
+        /// implements all three; the iPhone app only `mute`.
         case voiceCommand = "voice-command"
     }
 
@@ -40,6 +40,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case stop
         /// Hold-to-talk: `on` opens the microphone, off closes it.
         case ptt
+        /// `POST /api/voice/mute`: `on` mutes, off unmutes.
+        case mute
     }
 
     /// Who is talking, on `client-ready` (docs/ws-contract.md "Protocol
@@ -367,6 +369,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public static func card(_ card: ScreenCard) -> WSMessage { WSMessage(type: .card, card: card) }
     public static let voiceStop = WSMessage(type: .voiceCommand, action: .stop)
     public static func voicePTT(_ on: Bool) -> WSMessage { WSMessage(type: .voiceCommand, on: on, action: .ptt) }
+    public static func voiceMute(_ on: Bool) -> WSMessage { WSMessage(type: .voiceCommand, on: on, action: .mute) }
 
     // MARK: - Wire format
 
@@ -441,7 +444,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
             switch action {
             case .stop?:
                 break
-            case .ptt?:
+            case .ptt?, .mute?:
                 if on == nil { throw WSMessageError.missingField("voice-command", "on") }
             case nil:
                 throw WSMessageError.badValue("voice-command", "action")

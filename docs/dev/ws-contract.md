@@ -185,7 +185,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
 | `{"type":"card","card":{…}}`                                             | The orchestrator put something on the user's screen (*Cards*). Only sent to a client that reported itself visible (`voice_screen` or not). |
-| `{"type":"voice-command","action":"stop"\|"ptt","on":bool?}`             | Another client of the daemon controls this one's voice (*Voice commands over HTTP*). Requires the `voice-command` feature; a client that does not know the type ignores it. |
+| `{"type":"voice-command","action":"stop"\|"ptt"\|"mute","on":bool?}`      | Another client of the daemon controls this one's voice (*Voice commands over HTTP*). Requires the `voice-command` feature; a client that does not know the type ignores it. |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -291,14 +291,23 @@ answer `{"ok":true}`.
   opens its microphone while `on` is true and closes it when false, with
   the usual `mute`, `silence` and `speaking` messages. A body without a
   boolean `on` is `400`. Logged as `web.client.ptt {on}`.
+- `POST /api/voice/mute {"on":true|false}` (*Mute semantics*) also sends
+  the holder `{"type":"voice-command","action":"mute","on":true|false}`,
+  **before** the `status` that confirms the mute. A client that owns its
+  mute state and answers a disagreeing `status` by restating its own (the
+  iPhone app and Sheepdog.app) takes the command as the user's own mute,
+  so the status that follows agrees. Unlike the two routes above, mute
+  needs no holder: with none it only changes the hub state.
 
 ```json
 {"type":"voice-command","action":"stop"}
 {"type":"voice-command","action":"ptt","on":false}
+{"type":"voice-command","action":"mute","on":true}
 ```
 
-A client that does not know `voice-command` ignores it, as it does any
-type it does not know (the iPhone app, until it implements it).
+A client that does not know `voice-command`, or one of its actions,
+ignores it, as it does any message it does not know. The iPhone app
+implements `mute` only.
 
 ## Silence gate
 

@@ -283,6 +283,34 @@ final class MacVoiceHostTests: XCTestCase {
         XCTAssertFalse(rig.host.state.muted)
     }
 
+    /// The panel's Mute (`POST /api/voice/mute`): the daemon sends the
+    /// command, then the status that confirms it. The app mutes and does
+    /// not answer the status by unmuting again.
+    func testAMuteFromThePanelSticks() async {
+        let rig = Rig()
+        await connect(rig)
+        rig.channel.emit(.control(.voiceMute(true)))
+        rig.channel.emit(.control(.status(.connected, muted: true)))
+        XCTAssertTrue(rig.host.state.muted)
+        XCTAssertEqual(rig.audio.muted, [true])
+        XCTAssertFalse(rig.channel.sent.contains(.mute(false)), "the panel's mute is not undone")
+
+        rig.channel.emit(.control(.voiceMute(false)))
+        rig.channel.emit(.control(.status(.connected, muted: false)))
+        XCTAssertFalse(rig.host.state.muted)
+        XCTAssertEqual(rig.audio.muted, [true, false])
+    }
+
+    func testAPanelMuteDuringHoldToTalkIsNotUndoneByTheRelease() async {
+        let rig = Rig()
+        await connect(rig)
+        rig.host.handle(route: .mute(true))
+        rig.channel.emit(.control(.voicePTT(true)))
+        rig.channel.emit(.control(.voiceMute(false)))
+        rig.channel.emit(.control(.voicePTT(false)))
+        XCTAssertFalse(rig.host.state.muted, "the panel unmuted; the release leaves it")
+    }
+
     func testVoiceCommandStopDropsThePlayback() async {
         let rig = Rig()
         await connect(rig)
