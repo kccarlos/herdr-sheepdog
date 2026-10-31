@@ -33,6 +33,22 @@ func TestSubscribeStatusEvents(t *testing.T) {
 	expectClosed(t, ch)
 }
 
+func TestSubscribeStatusEventCarriesTheSpace(t *testing.T) {
+	b, srv := newBackend(t)
+	agent := reported("t1", "claude-code", "idle")
+	agent.Labels = map[string]string{"herdr.space": "s1", "herdr.tab": "a"}
+	srv.Add(agent)
+	ctx, cancel := context.WithCancel(testContext(t))
+	defer cancel()
+
+	ch := b.Subscribe(ctx, "t1")
+	awaitSubscribers(t, srv, 1)
+	srv.SetStatus("t1", &hc.Status{State: "working", App: "claude-code"})
+	if ev := receive(t, ch); ev.WorkspaceID != "s1" || ev.State != herdr.StateWorking {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
 func TestSubscribeEndsForMissingTerminals(t *testing.T) {
 	b, srv := newBackend(t)
 	srv.Add(reported("t1", "claude-code", "idle"))
