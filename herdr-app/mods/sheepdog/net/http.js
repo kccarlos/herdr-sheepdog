@@ -1,9 +1,10 @@
 // The panel's HTTP calls: the conversation, settings, pairing and agent
-// routes, plus the user actions /api/turn, /api/pending/answer,
-// /api/conversation/reset, the two model switches and device removal.
-// `fetch` is the mod runtime's (buffered, so only for these small JSON
-// answers; the event stream is net/sse.js), passed in so node tests it.
-// Every POST carries an Idempotency-Key (docs/dev/ws-contract.md).
+// routes; the user actions /api/turn, /api/pending/answer and
+// /api/conversation/reset; the two model switches and device removal; and the
+// voice's /api/voice/mute, /stop and /ptt. `fetch` is the mod runtime's
+// (buffered, so only for these small JSON answers; the event stream is
+// net/sse.js), passed in so node tests it. Every POST carries an
+// Idempotency-Key (docs/dev/ws-contract.md).
 
 // What went wrong, for the store. `kind`: "down" (nothing answered), "http"
 // (an error status, `status`; for a POST the message is the daemon's own
@@ -102,5 +103,11 @@ export function createHttp({ fetch, base }) {
     // "New conversation": reset the orchestrator and voice context, not the
     // agents, questions, promises or recorded history.
     reset: (key) => postJson("/api/conversation/reset", { via: "app" }, key),
+    // The voice's controls, relayed by the daemon to whoever holds it: mute or
+    // unmute, cut the speech, hold-to-talk on or off. Each answers { ok } (mute
+    // { muted }); 409 when no client holds the voice, 503 when it is off.
+    mute: (on, key) => postJson("/api/voice/mute", { on }, key),
+    stop: (key) => postJson("/api/voice/stop", undefined, key),
+    ptt: (on, key) => postJson("/api/voice/ptt", { on }, key),
   };
 }

@@ -121,7 +121,7 @@ test("the space between rows follows the phone's table", () => {
   assert.equal(gap(day, you), 14, "a divider to dialogue");
   assert.equal(gap(you, dog), 6, "within one exchange");
   assert.equal(gap(dog, you2), 18, "a new exchange starts");
-  assert.equal(gap(you2, ask), 4, "dialogue to a question");
+  assert.equal(gap(you2, ask), 18, "dialogue to a question: the normal space, not tucked");
   assert.equal(gap(ask, push), 18, "between categories");
   assert.equal(gap(push, card), 8, "a run and a card");
   assert.equal(gap(card, reset), 18);

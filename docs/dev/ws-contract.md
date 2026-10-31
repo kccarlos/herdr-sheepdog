@@ -1015,10 +1015,12 @@ answer a question by tap. All three need a paired device under "Auth".
   voice and orchestrator models, languages and chattiness, lists and removes
   paired devices, and shows `/api/state`'s update notice; Pair a phone reads
   `/api/pair` and `/api/pair/qr.json`; agent details read `/api/agents`.
-  It makes three POSTs, each with an `Idempotency-Key`: `/api/turn`,
-  `/api/pending/answer` and `/api/conversation/reset {"via":"app"}` after a
-  confirmation. It reuses a typed line's key only when the send got no
-  answer, because the daemon keeps a refusal under its key too.
+  It makes six POSTs, each with an `Idempotency-Key`: `/api/turn`,
+  `/api/pending/answer`, `/api/conversation/reset {"via":"app"}` after a
+  confirmation, and `/api/voice/mute`, `/api/voice/stop` and
+  `/api/voice/ptt` for the voice controls. It reuses a typed line's key only
+  when the send got no answer, because the daemon keeps a refusal under its
+  key too.
 - **`GET /api/conversation?limit=200&before=<id>`** answers
   `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
   from the log, newest last, at most `limit` items (default 200, at most

@@ -259,7 +259,9 @@ const isFromUser = (row) => row.type === "item" && row.item.kind === "shepherd";
 
 // The space above `row` under `previous`: 6 within one exchange, 14 from a
 // divider to dialogue, 18 between different categories (and when a new
-// exchange starts), 0 inside a ledger run, 8 between a run and a card. The
+// exchange starts, and around a question: the phone tucks it 4 under the
+// words that led to it, but newest first it sits above them, so it gets the
+// normal space), 0 inside a ledger run, 8 between a run and a card. The
 // technical view is a log: 6 everywhere.
 export function gap(previous, row, { joined = false, technical = false } = {}) {
   if (technical) return 6;
@@ -271,7 +273,6 @@ export function gap(previous, row, { joined = false, technical = false } = {}) {
   }
   if (a === "context") return b === "dialogue" ? 14 : 8;
   if (a === "dialogue" && b === "dialogue") return !isFromUser(previous) && isFromUser(row) ? 18 : 6;
-  if (a === "dialogue" && b === "needsYou") return 4;
   return 18;
 }
 
