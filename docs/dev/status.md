@@ -1,4 +1,4 @@
-# Status — 2026-10-07
+# Status — 2026-10-30
 
 Living handoff note: what is on `main`, what is verified how, and what is
 open. Update it whenever a PR lands or a live check is done; it is what a
@@ -14,7 +14,8 @@ after this page.
 
 ## Where main is
 
-`main` = `5506d97` (#186; the dual-brain voice layer landed in #122 and is the adopted design since the user's phone test of 2026-10-04; unified roles, roles only, in #185). The v1 plan, the 2026-09-18 redesign and
+`main` = `adee710d` (#498; Sheepdog.app now holds the voice session). The v1
+plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -148,6 +149,32 @@ What is in:
   `sheepdog scorecard`, `sheepdog audio-e2e`, and `sheepdog bench` (tier-2
   voice benchmark, [`bench/README.md`](bench/README.md)).
 - **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per user utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
+
+## Desktop client
+
+The [desktop client PR plan](design/desktop-client.md#8-pr-plan) is split
+between `main`, feature branches awaiting review, and the release still to
+come. This is the state on 2026-10-30:
+
+| Design PR | State |
+|---|---|
+| 0 | Done: design [#488](https://github.com/kccarlos/herdr-sheepdog/pull/488). |
+| 2–6 | Done on `main`: `voice.client`, filtered events, typed turns, voice commands, mid-turn handoff and the pairing QR. |
+| 7 | Done on `main`: `SheepdogKitMac` and the macOS CI job. |
+| 8 | Done on `main`: the Sheepdog.app menu-bar shell, daemon status and login item. |
+| 9 | Done on `main`: the Mac audio engine, `/ws` voice session and microphone permission. |
+| 10 | Code complete on `feat/dc-mac-notify`; pending review and merge. Real-session notification and hotkey checks remain. |
+| 11 | Code complete on `feat/dc-mac-release`; pending review, merge and the first `v*` release with Sheepdog.app. The cask is not installable until that release exists. |
+| 12 | Done on `main`: the panel data layer, timeline and rail. |
+| 13 | Done on `main`: sending, question cards, compact mode, suggested replies and agent focus. |
+| 14 | Code complete on `feat/dc-panel-c` and `feat/dc-panel-d`; pending review and merge. |
+| 15 | Code complete on `feat/dc-panel-d`; pending review and merge, plus its real herdr-app screenshot and QR checks. |
+| 16 | This documentation change; pending review. |
+
+The daemon and panel have automated coverage, and the Mac targets have unit
+tests. The checks that need a real microphone, a person at herdr-app, a phone
+handoff or a clean cask install are still pending; section 7 of the
+[design](design/desktop-client.md#7-testing) lists them.
 
 ## Verified live
 

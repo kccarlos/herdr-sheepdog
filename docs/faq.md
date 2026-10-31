@@ -11,9 +11,11 @@ agent. Agents sheepdog starts show up in herdr-app, each in a space and tab.
 To try it without herdr, use `sheepdog demo` or the iPhone app's demo
 ([quick-start.md](quick-start.md)).
 
-**Do I need an iPhone?** No. The voice page works in a desktop browser:
-`sheepdog open`. The app adds the lock screen, earbuds and being away from your
-desk. There is no Android app.
+**Do I need an iPhone?** No. On a Mac with herdr-app on herdr-core, the
+[desktop client](desktop.md) gives you the conversation, voice controls and
+Sheepdog.app. Without it, the voice page works in a desktop browser:
+`sheepdog open`. The iPhone app adds the lock screen, earbuds and being away
+from your desk. There is no Android app.
 
 **What does it cost?** sheepdog is free (MIT). One free Gemini key runs both
 models. GPT-Live is $0.05 per minute of open session; DeepSeek is paid per
