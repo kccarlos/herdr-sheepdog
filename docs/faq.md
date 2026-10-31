@@ -6,8 +6,9 @@
 (Claude Code, Codex, agy). Either herdr works: the herdr app, or herdr-core
 (`hc`, the new herdr). sheepdog finds whichever is running when it starts;
 `herdr.backend` in [CONFIG.md](../CONFIG.md) picks one. On herdr-core some things
-are not there yet: workspaces and tabs, renaming an agent, the live agent window
-(the app shows the screen instead) and the phone shell. To try it without
+are not there yet: renaming or closing a space, worktrees, renaming an agent,
+the live agent window (the app shows the screen instead) and the phone shell.
+Agents sheepdog starts show up in herdr-app, each in a space and tab. To try it without
 herdr, use `sheepdog demo` or the iPhone app's demo
 ([quick-start.md](quick-start.md)).
 

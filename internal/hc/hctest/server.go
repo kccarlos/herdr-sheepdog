@@ -47,6 +47,12 @@ type Server struct {
 	screens     map[string]string
 	requests    []Request
 	subscribers map[*subscriber]struct{}
+
+	// Framed mode (framed.go).
+	fconns   map[*framedConn]struct{}
+	paints   map[string]string
+	attaches map[string]int
+	frames   []StreamFrame
 }
 
 type subscriber struct {
@@ -121,6 +127,7 @@ func (s *Server) Close() {
 		close(s.quit)
 		_ = s.ln.Close()
 		s.DropSubscribers()
+		s.dropFramed()
 		s.wg.Wait()
 		_ = os.RemoveAll(s.dir)
 	})
@@ -285,7 +292,8 @@ func (s *Server) accept() {
 
 func (s *Server) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	in := bufio.NewReader(conn)
+	line, err := in.ReadBytes('\n')
 	if err != nil && len(line) == 0 {
 		return
 	}
@@ -311,6 +319,10 @@ func (s *Server) serve(conn net.Conn) {
 		s.subscribe(conn, request)
 		return
 	}
+	if request.Method == "hello" && helloFramed(request.Params) {
+		s.serveFramed(conn, in, request)
+		return
+	}
 
 	result, callErr := s.handle(request.Method, request.Params)
 	if callErr != nil {
@@ -334,7 +346,8 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			Methods: []string{
 				"hello", "terminal.list", "terminal.get", "terminal.read",
 				"terminal.send", "terminal.keys", "terminal.interrupt",
-				"terminal.run", "terminal.kill", "events.subscribe",
+				"terminal.run", "terminal.kill", "terminal.attach",
+				"events.subscribe",
 			},
 			Core: hc.CoreInfo{ID: "fake-core", Name: "hctest"},
 		}, nil
