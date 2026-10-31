@@ -17,7 +17,7 @@ import (
 // The space has no name of its own, so label is ignored and herdr-app names
 // it after the folder.
 func (b *Backend) CreateWorkspace(ctx context.Context, cwd, _ string) (herdr.PaneInfo, error) {
-	return b.openShell(ctx, cwd, newID())
+	return b.openShell(ctx, cwd, newID(), spawnValue)
 }
 
 // SplitPane opens a new shell terminal in cwd, in a new tab of the space
@@ -32,21 +32,22 @@ func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane
 	if space == "" {
 		space = newID()
 	}
-	return b.openShell(ctx, cwd, space)
+	return b.openShell(ctx, cwd, space, spawnValue)
 }
 
 // openShell runs the machine's own shell (no argv) in cwd, kept by the
-// core, in a new tab of space.
-func (b *Backend) openShell(ctx context.Context, cwd, space string) (herdr.PaneInfo, error) {
+// core, in a new tab of space. role is sheepdog's label value: spawn for an
+// agent's shell, shell for the phone's plain shell.
+func (b *Backend) openShell(ctx context.Context, cwd, space, role string) (herdr.PaneInfo, error) {
 	tab := newID()
 	t, err := b.client.Run(ctx, hc.RunParams{
 		Cwd:      cwd,
 		Env:      herdr.PaneEnv,
-		Labels:   map[string]string{spawnLabel: spawnValue, labelSpace: space, labelTab: tab},
+		Labels:   map[string]string{spawnLabel: role, labelSpace: space, labelTab: tab},
 		Keep:     true,
 		NoParent: true,
 	})
-	b.logEvent("herdr.open_shell", t.Address, map[string]any{"cwd": cwd, "space": space, "tab": tab, "error": errString(err)})
+	b.logEvent("herdr.open_shell", t.Address, map[string]any{"cwd": cwd, "space": space, "tab": tab, "role": role, "error": errString(err)})
 	if err != nil {
 		return herdr.PaneInfo{}, err
 	}

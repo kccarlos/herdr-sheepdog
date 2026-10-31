@@ -17,21 +17,24 @@ import (
 )
 
 // The phone shell (docs/dev/term-contract.md "The plain shell"): a plain
-// shell in a project folder, opened over /term as a herdr tab in the
-// "phone shell" workspace, one per folder and reused. One switch per
-// computer gates it, web.shell (on by default, set on the setup page),
-// for every paired device on every network.
+// shell in a project folder, opened over /term as a herdr tab, one per
+// folder and reused. The old herdr puts it in the "phone shell" workspace;
+// herdr-core joins the folder's existing space. One switch per computer
+// gates it, web.shell (on by default, set on the setup page), for every
+// paired device on every network.
 
-// ShellWorkspace is the label of the herdr workspace phone shells open in.
-const ShellWorkspace = "phone shell"
+// ShellWorkspace is the old herdr workspace label phone shells open in.
+const ShellWorkspace = herdr.PhoneShellWorkspace
 
-// ShellHost is the part of *herdr.Client the phone shell uses (tests pass
-// a fake).
+// ShellHost is what the phone shell uses from a backend (tests pass a fake).
+// A backend supplies its own layout: the old herdr has one phone-shell
+// workspace, while herdr-core joins the existing space for the folder.
 type ShellHost interface {
 	Snapshot(ctx context.Context) (herdr.Snapshot, error)
-	CreateWorkspace(ctx context.Context, cwd, label string) (herdr.PaneInfo, error)
-	CreateTab(ctx context.Context, workspaceID, cwd, label string) (herdr.PaneInfo, error)
-	ClosePane(ctx context.Context, paneID string) error
+	ShellWorkspace(snap herdr.Snapshot, cwd string) string
+	IsShellPane(p herdr.PaneInfo, workspaceID string) bool
+	OpenShell(ctx context.Context, workspaceID, cwd string) (herdr.PaneInfo, error)
+	CloseShell(ctx context.Context, paneID string) error
 }
 
 var _ ShellHost = (*herdr.Client)(nil)
@@ -40,13 +43,13 @@ var _ ShellHost = (*herdr.Client)(nil)
 // nor a tracked agent's folder.
 var errOutsideProjects = errors.New("that folder is outside the project directories")
 
-// shellAllowed is the gate: herdr can open shells and the computer's
-// shell switch is on.
+// shellAllowed is the gate: the live terminal and shell host work, and the
+// computer's shell switch is on.
 func (t *termServer) shellAllowed() bool {
 	if t == nil || t.deps.Shells == nil {
 		return false
 	}
-	return t.s.shellOn.Load()
+	return t.s.shellOn.Load() && t.available()
 }
 
 // shellDir resolves the folder a shell asks for: empty is the first
@@ -81,21 +84,13 @@ func (t *termServer) shellDir(want string) (string, error) {
 // realDir expands ~ and resolves symlinks; "" when path is not a folder.
 func realDir(path string) string {
 	if strings.HasPrefix(path, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
 		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
-	if !filepath.IsAbs(path) {
-		return ""
-	}
-	p, err := filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return ""
-	}
-	if st, err := os.Stat(p); err != nil || !st.IsDir() {
-		return ""
-	}
-	return p
+	return herdr.RealDir(path)
 }
 
 // inside reports whether path is root or below it.
@@ -107,8 +102,8 @@ func inside(path, root string) bool {
 }
 
 // shellPane returns the phone shell for dir, opening one when there is
-// none: a tab in the "phone shell" workspace (the workspace itself the
-// first time). Opens are serialised, so two quick taps make one shell.
+// none. The backend chooses the old herdr's shared workspace or herdr-core's
+// folder space. Opens are serialised, so two quick taps make one shell.
 func (t *termServer) shellPane(ctx context.Context, dir string) (pane string, reused bool, err error) {
 	t.shellMu.Lock()
 	defer t.shellMu.Unlock()
@@ -117,16 +112,10 @@ func (t *termServer) shellPane(ctx context.Context, dir string) (pane string, re
 	if err != nil {
 		return "", false, err
 	}
-	ws := ""
-	for _, w := range snap.Workspaces {
-		if w.Label == ShellWorkspace {
-			ws = w.WorkspaceID
-			break
-		}
-	}
+	ws := h.ShellWorkspace(snap, dir)
 	alive := map[string]herdr.PaneInfo{}
 	for _, p := range snap.Panes {
-		if ws != "" && p.WorkspaceID == ws {
+		if h.IsShellPane(p, ws) {
 			alive[p.PaneID] = p
 		}
 	}
@@ -149,12 +138,7 @@ func (t *termServer) shellPane(ctx context.Context, dir string) (pane string, re
 		}
 	}
 	t.mu.Unlock()
-	var p herdr.PaneInfo
-	if ws == "" {
-		p, err = h.CreateWorkspace(ctx, dir, ShellWorkspace)
-	} else {
-		p, err = h.CreateTab(ctx, ws, dir, filepath.Base(dir))
-	}
+	p, err := h.OpenShell(ctx, ws, dir)
 	if err == nil && p.PaneID == "" {
 		err = errors.New("herdr returned no pane")
 	}
@@ -220,7 +204,7 @@ func (s *Server) handleShellClose(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	err := t.deps.Shells.ClosePane(ctx, pane)
+	err := t.deps.Shells.CloseShell(ctx, pane)
 	if err != nil && !errors.Is(err, herdr.ErrPaneNotFound) {
 		s.log.Log(logSource, "web.shell.close", pane, map[string]any{"pane_id": pane, "remote_kind": kind, "error": err.Error()})
 		writeError(w, http.StatusBadGateway, "could not close the shell: "+err.Error())

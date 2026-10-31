@@ -18,6 +18,7 @@ const (
 	claudeApp  = "claude-code"
 	spawnLabel = "sheepdog"
 	spawnValue = "spawn"
+	shellValue = "shell"
 )
 
 func knownKind(kind string) bool { return slices.Contains(knownKinds, kind) }
@@ -64,9 +65,11 @@ func argvBase(argv []string) string {
 	return strings.TrimPrefix(path.Base(argv[0]), "-")
 }
 
-// isAgent reports whether t is an agent: it reported status or runs a
-// known agent program.
-func isAgent(t hc.Terminal) bool { return t.Reported || knownKind(kindOf(t)) }
+// isAgent reports whether t is an agent: it is not a phone shell, and it
+// reported status or runs a known agent program.
+func isAgent(t hc.Terminal) bool {
+	return t.Labels[spawnLabel] != shellValue && (t.Reported || knownKind(kindOf(t)))
+}
 
 // agentKind is the kind of t when it is an agent, else empty.
 func agentKind(t hc.Terminal) string {
@@ -135,5 +138,6 @@ func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 		Agent:         agentKind(t),
 		Cwd:           cwdOf(t),
 		TerminalTitle: t.Title,
+		PhoneShell:    t.Labels[spawnLabel] == shellValue,
 	}
 }

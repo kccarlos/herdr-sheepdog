@@ -132,6 +132,13 @@ type Backend interface {               // what the daemon needs
   core and labelled `herdr.space` and `herdr.tab`, so herdr-app shows the
   agent: in the folder's existing space as a new tab, or in a new space
   (see "Spaces without the document");
+- the phone shell, using that same `terminal.run` path with the user's
+  login shell, `keep: true`, and the same folder-to-space match agent
+  spawning uses. If a space already works in the folder, the shell is a
+  new tab there; otherwise it opens a new space. It also carries
+  `sheepdog=shell`, so it never appears in the agent list, and the phone's
+  close endpoint calls `terminal.kill` only when the terminal has that
+  label;
 - the agent list, spoken names and `/api/spaces` grouped by space, as with
   the old herdr;
 - the app's agent window, no app change: live over `terminal.attach` in
@@ -154,8 +161,6 @@ Not in v1, each refused with the message the app already shows:
 - renaming an agent;
 - scrollback in the live terminal for a program that does not use the
   mouse;
-- the phone shell: a shell tab is now reachable over `/term`, but opening
-  one on hc is not wired yet;
 - the worker's own transcript (no `agent_session` on hc);
 - terminals on machines added to the core.
 
@@ -221,6 +226,9 @@ kind's command into it (Codex with `--no-daemon`, which hc requires) and
 returns, and the supervisor's existing wait polls `GetAgent`, which reports
 the launch pending (`LaunchPending`, as herdr's `agent.start` does) until
 the program shows in the terminal, and not found after the start timeout.
+The phone shell uses the same run helper with `sheepdog=shell`; its space
+comes from `herdr.PaneInDir`, which shares `herdr.PaneDirs`' real-path
+folder match with agent spawning.
 The fleet stream asks `terminal.get` on `created`, `restarted`, a
 `foreground` change to a known agent program (one typed into an existing
 shell) and a terminal's first status, to decide whether it is an agent.

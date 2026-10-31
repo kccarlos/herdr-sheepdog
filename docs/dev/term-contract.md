@@ -79,8 +79,11 @@ address) and keeps its credit flowing, as hc's
   is dropped.
 - **Close reasons.** The program exiting or being killed is `gone`; hc
   stopping, a lost shell or a broken connection is `herdr`.
-- **No phone shell** (`term-ready.shell` is false): it opens a herdr
-  workspace.
+- **Phone shell.** The same shell target works. hc runs the user's login
+  shell with `keep: true` in the folder, labels it `sheepdog=shell`, and
+  puts it in the folder's existing space as a new tab, or in a new space.
+  `term-ready.shell` and `/api/hello`'s `shell` are true only while
+  `terminal.attach` works.
 
 ## Control messages (text frames)
 
@@ -214,14 +217,17 @@ Frames are diffs, so a lost frame corrupts the screen.
 
 ## The plain shell
 
-A phone shell is a plain shell in a project folder. The daemon opens it
-as a herdr tab in a workspace labelled `phone shell` (the workspace
-itself the first time), so the user sees it on the computer too.
+A phone shell is a plain shell in a project folder. On the old herdr the
+daemon opens it as a tab in a workspace labelled `phone shell` (the
+workspace itself the first time). On herdr-core it opens as a new tab in
+the space already working in that folder, or in a new space when none
+does. Either way the user sees it on the computer too.
 
 - **One per folder, reused.** `term-open {target:{shell:{cwd}}}` attaches
   to the folder's shell when there is one, else opens it. Opens are
   serialised, so two quick taps make one shell. After a daemon restart the
-  daemon finds its shells again in the `phone shell` workspace.
+  daemon finds old-herdr shells in the `phone shell` workspace and
+  herdr-core shells by their `sheepdog=shell` label.
 - **Folder.** `cwd` is resolved (symlinks, `~`) and must lie inside a
   `supervisor.project_roots` entry or be a tracked agent's own folder (a
   worktree herdr put elsewhere). An empty `cwd` is the first project root.
@@ -235,11 +241,13 @@ itself the first time), so the user sees it on the computer too.
   running. **Closing** it ends the pane:
 
   `POST /api/shells/{pane_id}/close` → `200 {"ok":true}`; `403` where the
-  shell is gated off; `404` for a pane that is no phone shell.
+  shell is gated off; `404` for a pane that is no phone shell. On
+  herdr-core the backend also verifies the terminal carries
+  `sheepdog=shell` before `terminal.kill`.
 
 Phone shells are not agents: a plain shell is not in the agent list and
-the orchestrator is not told about it (an agent the user starts inside one
-is tracked like any other).
+the orchestrator is not told about it. On herdr-core a terminal carrying
+`sheepdog=shell` stays off the agent list.
 
 ## Event log
 
