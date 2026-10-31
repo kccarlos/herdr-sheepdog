@@ -1,11 +1,15 @@
-// The panel: a window over the layout with the read-only timeline
+// The panel: a window over the layout with the timeline and the composer
 // (docs/dev/design/desktop-client.md, sections 6.1 and 6.4). A header with the
 // voice, a banner for the states that replace or qualify the timeline (daemon
-// down, setup needed, live updates paused), and the list. Sending, the voice
-// controls and Settings are later PRs; this shows what the daemon says.
+// down, setup needed, live updates paused), the list, the open questions and
+// the composer at the bottom; a card or the questions can open over the list.
+// The voice controls and Settings are later PRs.
 
 import { div, list } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar } from "gpui-base";
+import { cardSheet } from "./cards.js";
+import { composerView } from "./composer.js";
+import { questionBar, questionSheet, questionStack } from "./questions.js";
 import { notice, rowView } from "./rows.js";
 import { paused } from "./rail.js";
 import { button, command, dot, logo, toneColor } from "./widgets.js";
@@ -81,8 +85,9 @@ function setup(t, status, onSetup) {
 // The list, newest first (model/timeline.js says why): the rows, then a last
 // row that says whether older history is coming. `list()` draws only what is
 // on screen and asks each row by index, so drawing that last row means the
-// bottom was reached: the panel pages back.
-function timeline(t, { entries, canLoadOlder, loadingOlder, onEndShown }) {
+// bottom was reached: the panel pages back. A press on a row is the list's
+// `on_item_click`, with the row's key.
+function timeline(t, { entries, canLoadOlder, loadingOlder, onEndShown, onOpenRow }) {
   const end = () => {
     onEndShown();
     return div().w_full().px(12).py(12).child(notice(t, loadingOlder ? "Loading earlier…" : canLoadOlder ? "Earlier messages" : "This is the start of the conversation"));
@@ -98,7 +103,9 @@ function timeline(t, { entries, canLoadOlder, loadingOlder, onEndShown }) {
         entries.length + 1,
         (i) => (i === entries.length ? "end" : entries[i].row.id),
         (i) => (i === entries.length ? end() : rowView(t, entries[i])),
-      ).size_full(),
+      )
+        .size_full()
+        .on_item_click(onOpenRow),
     )
     .child(Scrollbar.vertical("timeline").absolute().inset_0());
 }
@@ -108,14 +115,22 @@ function empty(t, text) {
   return div().flex_1().flex().items_center().justify_center().px(24).text_size(12.5).text_color(t.dim).child(text);
 }
 
-// `paging`: { synced, canLoadOlder, loadingOlder } of the history.
-export function panelView(t, { status, entries, paging, technical, retryMs, onSetup, onToggleTechnical, onClose, onEndShown }) {
+// `paging`: { synced, canLoadOlder, loadingOlder } of the history. `compose`:
+// what ui/composer.js draws. `questions`: { cards, presentation, busy,
+// onAnswer, onOpen } for the floating questions (ui/questions.js). `sheet`:
+// what is open over the list, or null: { type: "card", card, note, onFocus,
+// onClose } or { type: "questions", onClose }.
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, sheet, onSetup, onToggleTechnical, onClose, onEndShown, onOpenRow }) {
+  const up = status.phase === "ok" || status.phase === "setup";
   let body;
   if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
   else if (status.phase === "down") body = down(t, status, retryMs, onSetup);
+  else if (sheet?.type === "card") body = cardSheet(t, sheet.card, sheet);
+  else if (sheet?.type === "questions") body = questionSheet(t, questions.cards, { busy: questions.busy, onAnswer: questions.onAnswer, onClose: sheet.onClose });
   else if (!paging.synced) body = empty(t, "Loading the conversation…");
   else if (entries.length === 0) body = empty(t, "Nothing has been said yet.");
-  else body = timeline(t, { entries, ...paging, onEndShown });
+  else body = timeline(t, { entries, ...paging, onEndShown, onOpenRow });
+  const floating = up && sheet?.type !== "questions" && questions.cards.length > 0;
   return v_flex()
     .id("sheepdog-panel")
     .size_full()
@@ -123,5 +138,8 @@ export function panelView(t, { status, entries, paging, technical, retryMs, onSe
     .child(header(t, status, { technical, onToggleTechnical, onClose }))
     .when(status.phase === "setup", (el) => el.child(setup(t, status, onSetup)))
     .when(status.paused && status.phase !== "down", (el) => el.child(div().w_full().px(12).pt(8).child(paused(t))))
-    .child(body);
+    .child(body)
+    .when(floating && questions.presentation === "inline", (el) => el.child(questionStack(t, questions.cards, questions)))
+    .when(floating && questions.presentation === "compact", (el) => el.child(questionBar(t, questions.cards, questions)))
+    .when(up, (el) => el.child(composerView(t, compose)));
 }

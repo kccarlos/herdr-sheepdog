@@ -1,9 +1,12 @@
-// The panel's HTTP reads: /api/state and /api/conversation. `fetch` is the mod
-// runtime's (buffered, so only for these small JSON answers; the event stream
-// is net/sse.js), passed in so node tests it. Read-only: this PR POSTs nothing.
+// The panel's HTTP calls: the reads /api/state and /api/conversation, and the
+// two POSTs it makes, /api/turn (a typed line) and /api/pending/answer (a tap
+// on a question). `fetch` is the mod runtime's (buffered, so only for these
+// small JSON answers; the event stream is net/sse.js), passed in so node tests
+// it. Every POST carries an Idempotency-Key (docs/dev/ws-contract.md).
 
 // What went wrong, for the store. `kind`: "down" (nothing answered), "http"
-// (an error status) or "invalid" (it answered, but not as sheepdog does).
+// (an error status, `status`; for a POST the message is the daemon's own
+// `error` words) or "invalid" (it answered, but not as sheepdog does).
 export class DaemonError extends Error {
   constructor(kind, message, status = 0) {
     super(message);
@@ -30,6 +33,26 @@ export function createHttp({ fetch, base }) {
     }
   }
 
+  // A POST of `body` as JSON with its Idempotency-Key. A refusal's message is
+  // the daemon's `{"error": "…"}` (503 says why the orchestrator is off).
+  async function postJson(path, body, key) {
+    let res;
+    try {
+      res = await fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: JSON.stringify(body) });
+    } catch {
+      throw new DaemonError("down", "nothing answered");
+    }
+    let answer = null;
+    try {
+      answer = await res.json();
+    } catch {
+      // No JSON body: the status says what it was.
+    }
+    if (!res.ok) throw new DaemonError("http", answer?.error || `Sheepdog answered ${path} with HTTP ${res.status}`, res.status);
+    if (!answer || typeof answer !== "object") throw new DaemonError("invalid", `${path} did not answer JSON: is this sheepdog?`);
+    return answer;
+  }
+
   return {
     // The daemon's state. Anything without a `voice` is not sheepdog.
     async state() {
@@ -44,5 +67,12 @@ export function createHttp({ fetch, base }) {
       if (!page || !Array.isArray(page.items)) throw new DaemonError("invalid", "/api/conversation did not answer a page.");
       return page;
     },
+    // A typed line for the orchestrator: { reply, turn_id, acted }. It lasts
+    // as long as the orchestrator's turn; a retry with the same `key` replays
+    // the reply instead of running the turn again.
+    turn: (text, key) => postJson("/api/turn", { text }, key),
+    // A tap on option `option` (1-based) of the open question `id`:
+    // { ok, spoken }. 409 when the question is no longer open.
+    answer: (id, option, key) => postJson("/api/pending/answer", { id, option }, key),
   };
 }

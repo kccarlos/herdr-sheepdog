@@ -36,9 +36,11 @@ function harness() {
   const clock = fakeClock();
   const asked = [];
   const streams = [];
+  const observed = [];
   const store = {
     refresh: async (what) => { asked.push(what); },
     setStream: (s) => streams.push(s),
+    observe: (event, id) => observed.push([event.type, id]),
     newestId: () => 77,
   };
   let socket;
@@ -61,7 +63,7 @@ function harness() {
   const chunk = (s) => `${new TextEncoder().encode(s).length.toString(16)}\r\n${s}\r\n`;
   // Ids above the 77 the stream resumed from, or they would be replays.
   const event = (id, type) => chunk(`id: ${1000 + id}\nevent: log\ndata: ${JSON.stringify({ type, payload: {} })}\n\n`);
-  return { clock, asked, streams, live, chunk, event, socket: () => socket };
+  return { clock, asked, observed, streams, live, chunk, event, socket: () => socket };
 }
 
 const HEAD = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
@@ -98,6 +100,20 @@ test("a burst of events is one or two rounds, and only events that change someth
   h.socket().feed(h.event(5, "web.client.stats") + h.event(6, "voice.playback"));
   await h.clock.advance(5000);
   assert.deepEqual(h.asked, []);
+  h.live.stop();
+  await h.clock.advance(POLL_MS);
+  await done;
+});
+
+test("every event is handed to the store with its id, whether or not it asks", async () => {
+  const h = harness();
+  const done = h.live.run();
+  await h.clock.advance(MIN_GAP_MS);
+  h.socket().feed(HEAD + h.chunk(": hi\n\n"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  h.socket().feed(h.event(1, "voice.tool_result") + h.event(2, "web.client.stats"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  assert.deepEqual(h.observed, [["voice.tool_result", 1001], ["web.client.stats", 1002]]);
   h.live.stop();
   await h.clock.advance(POLL_MS);
   await done;

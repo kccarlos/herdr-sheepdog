@@ -5,11 +5,13 @@
 // ones in one card; context is a hairline with a caption; plumbing (only in
 // the technical view) and the panel's own notices are dashed. Every colour is
 // a theme() name. These are drawn inside a `list()` row, which may carry no
-// handlers: nothing here is clickable.
+// handlers: nothing here is clickable. A press on a row is the list's own
+// `on_item_click` (ui/panel.js), which is how a card row opens.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { CATEGORIES, kindOf, settledLine } from "../model/classify.js";
+import { agentName, cardOf, displayTitle, kindWord } from "../model/cards.js";
 import { classifyRow } from "../model/timeline.js";
 import { tint } from "./widgets.js";
 
@@ -44,11 +46,12 @@ export function notice(t, text, code) {
 function bubble(t, item) {
   const mine = kindOf(item) === "shepherd";
   const wrote = !mine && (item.via === "text_router" || item.via === "typed");
-  const note = mine ? (item.via === "typed" ? "Typed" : "") : wrote ? "Sheepdog wrote" : "";
+  const note = item.pending ? "Sending…" : mine ? (item.via === "typed" ? "Typed" : "") : wrote ? "Sheepdog wrote" : "";
   const body = div()
     .px(12)
     .py(8)
     .rounded(14)
+    .when(Boolean(item.pending), (el) => el.opacity(0.6))
     .when(mine, (el) => el.rounded_br(CORNER).bg(t.accent).text_color(t.accent_foreground))
     .when(!mine, (el) => el.rounded_bl(CORNER).bg(t.raised).text_color(t.foreground))
     .text_size(13)
@@ -67,7 +70,7 @@ function bubble(t, item) {
 }
 
 // An open question (or a push that interrupts): a one-line pointer in amber.
-// Answering is a later PR's card; for now it says who is waiting.
+// It says who is waiting; the card that answers floats above the composer.
 function pointer(t, item) {
   const asker = (item.agent ?? "").trim() || "An agent";
   const question = kindOf(item) === "approval";
@@ -123,6 +126,7 @@ function ledgerLine(t, row, ledger, timeLabel) {
   const joinsAbove = ledger?.joinsAbove ?? false;
   const joinsBelow = ledger?.joinsBelow ?? false;
   const text = settledLine(item) ?? item.text;
+  const card = cardOf(item);
   const agent = kindOf(item) === "push" ? (item.agent ?? "").trim() : "";
   return h_flex()
     .w_full()
@@ -159,9 +163,11 @@ function ledgerLine(t, row, ledger, timeLabel) {
         .min_w(0)
         .gap(1)
         .when(Boolean(agent), (el) => el.child(div().text_size(11).font_semibold().text_color(t.muted).child(agent)))
-        .child(div().text_size(12.5).text_color(t.foreground).child(text))
-        .child(caption(t, timeLabel)),
-    );
+        .child(div().text_size(12.5).text_color(t.foreground).child(card ? displayTitle(card) : text))
+        .child(caption(t, card ? [kindWord(card), agentName(card), timeLabel].filter(Boolean).join(" · ") : timeLabel)),
+    )
+    // A card that is still stored opens on a press.
+    .when(Boolean(card), (el) => el.child(div().flex_none().text_size(14).text_color(t.dim).child("›")));
 }
 
 // One entry of the list: the row, the space above it, its place in a ledger
