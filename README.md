@@ -68,9 +68,8 @@ This needs herdr-tui 0.9.4 or newer. [Quick start →](docs/quick-start.md#herdr
 ### On herdr-app (herdr-core)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
-sheepdog setup
-brew install --cask kccarlos/tap/sheepdog-app
+curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh   # installs sheepdog, then runs sheepdog setup
+brew install --cask kccarlos/tap/sheepdog-app                                                      # Sheepdog.app: the Mac's microphone
 ```
 
 `sheepdog setup` installs the panel and switches herdr-app to the Sheepdog layout. [Quick start →](docs/quick-start.md#herdr-app-on-herdr-core)

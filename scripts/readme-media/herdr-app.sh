@@ -9,11 +9,11 @@
 # private window's 1440x900 logical-pixel region. A hidden curl shim serves
 # this tree's scripts/install.sh and a release tarball built from this tree;
 # the installer, setup, daemon, herdr-core and herdr-app are real. The
-# daemon uses the fake brain and voice=off, a free port, a placeholder key,
-# a private HC_SOCKET/session and a throwaway HOME. Needs macOS Screen
-# Recording permission for Ghostty, accessibility permission for resizing
-# that private window, Go, herdr-core (hc), herdr-app, vhs, ffmpeg and
-# gifsicle. No network access is needed.
+# daemon uses a loopback scripted brain, a state-only voice-ready proxy and
+# voice=off, free ports, a placeholder key, a private HC_SOCKET/session and a
+# throwaway HOME. Needs macOS Screen Recording permission for Ghostty,
+# accessibility permission for resizing that private window, Go, herdr-core
+# (hc), herdr-app, vhs, ffmpeg and gifsicle. No network access is needed.
 set -euo pipefail
 
 [ "$(uname -s)" = Darwin ] || { echo "herdr-app.sh records a macOS window" >&2; exit 1; }
@@ -34,6 +34,13 @@ free_port() {
 port=$(free_port)
 [ "$port" != 7777 ] && [ "$port" != 7778 ] || port=$(free_port)
 url=http://127.0.0.1:$port
+brain_port=$(free_port)
+[ "$brain_port" != "$port" ] || brain_port=$(free_port)
+panel_port=$(free_port)
+while [ "$panel_port" = "$port" ] || [ "$panel_port" = "$brain_port" ]; do
+	panel_port=$(free_port)
+done
+panel_url=http://127.0.0.1:$panel_port
 
 home=$work/h
 app_home=$home/.config/herdr-app
@@ -48,6 +55,8 @@ mkdir -p "$home/shop" "$bin" "$fake" "$release" "$app_home" "$state" \
 	"$home/.config/sheepdog" "$work/data"
 
 daemon_pid=
+brain_pid=
+state_proxy_pid=
 app_pid=
 recorder_pid=
 cleanup() {
@@ -60,6 +69,8 @@ cleanup() {
 		kill "$app_pid" 2>/dev/null
 	fi
 	if [ -n "$daemon_pid" ]; then kill "$daemon_pid" 2>/dev/null; fi
+	if [ -n "$brain_pid" ]; then kill "$brain_pid" 2>/dev/null; fi
+	if [ -n "$state_proxy_pid" ]; then kill "$state_proxy_pid" 2>/dev/null; fi
 	if [ -x "$home/.local/bin/sheepdog" ]; then
 		env HOME="$home" HC_SOCKET="$socket" HC_SESSION=sda \
 			XDG_STATE_HOME="$state" XDG_RUNTIME_DIR="$work" \
@@ -85,11 +96,14 @@ run_hc() {
 		PATH="$home/.local/bin:$bin:/usr/bin:/bin" "$hc" "$@"
 }
 
-# Build this tree the way a release asset is packed.
+# Build this tree the way the v0.1.19 release asset is packed.
+release_version=v0.1.19
+release_commit=$(git -C "$repo" rev-parse --short HEAD)
+release_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 (cd "$repo" && go build -ldflags \
-	"-X 'main.version=v0.1.0' -X 'main.commit=$(git rev-parse --short HEAD)' -X 'main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+	"-X 'main.version=$release_version' -X 'main.commit=$release_commit' -X 'main.date=$release_date'" \
 	-o "$fake/sheepdog" ./cmd/sheepdog)
-asset=sheepdog_v0.1.0_darwin_arm64.tar.gz
+asset=sheepdog_${release_version}_darwin_arm64.tar.gz
 tar -czf "$release/$asset" -C "$fake" sheepdog
 (cd "$release" && shasum -a 256 "$asset" >checksums.txt)
 
@@ -143,6 +157,16 @@ data_dir = "$work/data"
 backend = "hc"
 hc_socket = "$socket"
 
+[brain]
+provider = "fixture"
+model = "scripted"
+
+[[brain.openai_compat]]
+name = "fixture"
+label = "README fixture"
+base_url = "http://127.0.0.1:$brain_port/v1"
+model = "scripted"
+
 [web]
 bind = "127.0.0.1"
 port = $port
@@ -161,7 +185,7 @@ printf '{"last_run":"%s","presented":[]}\n' "$app_version" \
 # Write the private daemon URL and skip the first-run welcome before the app
 # has ever opened a panel. setup preserves these shared values.
 cat >"$app_home/shared.json" <<EOF
-{"frame.welcomed":"skipped","layout":"main","sheepdog.url":"$url"}
+{"frame.welcomed":"skipped","layout":"main","sheepdog.url":"$panel_url"}
 EOF
 
 run_hc server start >/dev/null
@@ -181,6 +205,11 @@ app "do" app.theme --name atom-one-dark >/dev/null
 space=$(app "do" space.new --name shop --folder "$home/shop")
 terminal=$(printf '%s' "$space" | jq -r .terminal)
 [ -n "$terminal" ] && [ "$terminal" != null ] || { echo "shop space has no terminal" >&2; exit 1; }
+cat >>"$home/.config/sheepdog/config.toml" <<EOF
+
+[aliases]
+"$terminal" = "shop-tests"
+EOF
 run_hc send "$terminal" tests
 
 for _ in $(seq 1 40); do
@@ -205,13 +234,21 @@ cliclick m:1,1
 sleep 0.8
 app shot "$work/main-before.png" >/dev/null
 
-# Use the same private config with the no-network fixture brain. Starting it
+# Use the same private config with the no-network scripted brain. Starting it
 # before setup keeps setup from following the layout switch with daemon
 # startup and browser output inside the terminal take.
-env HOME="$home" HC_SOCKET="$socket" HC_SESSION=sda \
+env -i PATH="$PATH" python3 "$here/herdr-app-brain.py" "$brain_port" \
+	>"$work/brain.log" 2>&1 &
+brain_pid=$!
+for _ in $(seq 1 40); do
+	curl -fsS "http://127.0.0.1:$brain_port/v1/models" >/dev/null 2>&1 && break
+	sleep 0.1
+done
+curl -fsS "http://127.0.0.1:$brain_port/v1/models" >/dev/null
+env -i HOME="$home" HC_SOCKET="$socket" HC_SESSION=sda \
 	XDG_STATE_HOME="$state" XDG_RUNTIME_DIR="$work" \
 	PATH="$home/.local/bin:$bin:/usr/bin:/bin" \
-	"$fake/sheepdog" serve --brain=fake --voice=off \
+	"$fake/sheepdog" serve --voice=off \
 	>"$work/daemon.log" 2>&1 &
 daemon_pid=$!
 for _ in $(seq 1 80); do
@@ -219,6 +256,15 @@ for _ in $(seq 1 80); do
 	sleep 0.25
 done
 curl -fsS "$url/api/state" >"$work/state.json"
+env -i PATH="$PATH" python3 "$here/herdr-app-state.py" "$port" "$panel_port" \
+	>"$work/state-proxy.log" 2>&1 &
+state_proxy_pid=$!
+for _ in $(seq 1 40); do
+	curl -fsS "$panel_url/api/state" >"$work/panel-state.json" 2>/dev/null && break
+	sleep 0.1
+done
+jq -e '.voice.mode == "gemini" and .voice.status == "ready"' \
+	"$work/panel-state.json" >/dev/null
 
 # Pass 1: the terminal. Dynamic waits make the actual installer and setup
 # output, rather than fixed sleeps, decide when each visible step happened.
@@ -268,6 +314,7 @@ for _ in $(seq 1 80); do
 done
 jq -e '.pending_action != null and .pending_action.question != ""' \
 	"$work/state.json" >/dev/null
+jq -e '.pending_action.agent == "shop-tests"' "$work/state.json" >/dev/null
 sleep 2
 
 # At this height the panel deliberately uses its compact "Answer" bar.
@@ -284,6 +331,8 @@ curl -fsS -m 20 -H 'Content-Type: application/json' \
 	-d '{"text":"How are my agents doing?"}' "$url/api/turn" \
 	>"$work/turn.json"
 jq -e '.reply != ""' "$work/turn.json" >/dev/null
+jq -e '.reply == "shop-tests is waiting on you: it asks to run the end-to-end tests."' \
+	"$work/turn.json" >/dev/null
 sleep 2.2
 wait "$recorder_pid"
 recorder_pid=
@@ -297,10 +346,10 @@ app shot "$work/app-after.png" >/dev/null
 # under 20 seconds. Both halves stay real-time relative to themselves.
 term=$work/herdr-app.mp4
 term_duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$term")
-term_keep=$(python3 -c "import sys; print(min(float(sys.argv[1]), 8.8))" "$term_duration")
+term_keep=$(python3 -c "import sys; print(min(float(sys.argv[1]), 8.1))" "$term_duration")
 term_speed=$(python3 -c "import sys; d=float(sys.argv[1]); k=float(sys.argv[2]); print(max(1.0, d/k))" "$term_duration" "$term_keep")
 app_duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$work/window.mov")
-app_keep=$(python3 -c "import sys; print(min(float(sys.argv[1]), 11.2))" "$app_duration")
+app_keep=$(python3 -c "import sys; print(min(float(sys.argv[1]), 11.8))" "$app_duration")
 
 mkdir -p "$out"
 ffmpeg -loglevel error -y -i "$term" -i "$work/window.mov" \
