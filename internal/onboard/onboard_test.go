@@ -388,4 +388,20 @@ func TestCheckHerdrFollowsBackend(t *testing.T) {
 			t.Errorf("CheckHerdr(%+v) = %v %q, want %v", tc.h, r.Status, r.Detail, tc.want)
 		}
 	}
+
+	// HerdrTarget names the program CheckHerdr checked, with its socket
+	// (sheepdog status prints it).
+	for _, tc := range []struct {
+		h            config.Herdr
+		name, socket string
+	}{
+		{config.Herdr{Backend: config.HerdrBackendAuto, Socket: none, HCSocket: hcSock}, "herdr-core", hcSock},
+		{config.Herdr{Backend: config.HerdrBackendAuto, Socket: none, HCSocket: none}, "herdr-tui", none},
+		{config.Herdr{Backend: config.HerdrBackendHC, Socket: none, HCSocket: hcSock}, "herdr-core", hcSock},
+		{config.Herdr{Backend: config.HerdrBackendHerdr, Socket: none, HCSocket: hcSock}, "herdr-tui", none},
+	} {
+		if name, socket := HerdrTarget(tc.h); name != tc.name || socket != tc.socket {
+			t.Errorf("HerdrTarget(%+v) = %s %s, want %s %s", tc.h, name, socket, tc.name, tc.socket)
+		}
+	}
 }

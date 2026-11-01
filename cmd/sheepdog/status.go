@@ -107,9 +107,11 @@ type statusOrchestrator struct {
 }
 
 type statusHerdr struct {
-	Reachable bool   `json:"reachable"`
-	Socket    string `json:"socket"`
-	Detail    string `json:"detail,omitempty"`
+	Reachable bool `json:"reachable"`
+	// Program is the herdr the daemon uses: herdr-tui or herdr-core.
+	Program string `json:"program"`
+	Socket  string `json:"socket"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 type statusPhones struct {
@@ -178,7 +180,8 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 		}
 	}
 	h := onboard.CheckHerdr(cfg.Herdr)
-	r.Herdr = statusHerdr{Reachable: h.Status == onboard.OK, Socket: cfg.Herdr.Socket}
+	program, socket := onboard.HerdrTarget(cfg.Herdr)
+	r.Herdr = statusHerdr{Reachable: h.Status == onboard.OK, Program: program, Socket: socket}
 	if !r.Herdr.Reachable {
 		r.Herdr.Detail = h.Detail
 	}
@@ -300,9 +303,9 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 	}
 	row("orchestrator", orch)
 	if r.Herdr.Reachable {
-		row("herdr", "reachable ("+r.Herdr.Socket+")")
+		row("herdr", r.Herdr.Program+" reachable ("+r.Herdr.Socket+")")
 	} else {
-		row("herdr", "NOT reachable: "+r.Herdr.Detail)
+		row("herdr", r.Herdr.Program+" NOT reachable: "+r.Herdr.Detail)
 	}
 	if r.Phones != nil {
 		conn := "no voice client connected"

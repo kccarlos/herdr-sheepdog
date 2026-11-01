@@ -394,6 +394,20 @@ func CheckHerdr(h config.Herdr) Result {
 	return checkOldHerdr(h.Socket)
 }
 
+// HerdrTarget is the herdr program CheckHerdr checks for h, by its name
+// in the docs (herdr-tui or herdr-core), and that program's socket.
+func HerdrTarget(h config.Herdr) (name, socket string) {
+	switch h.Backend {
+	case config.HerdrBackendHC:
+		return "herdr-core", h.HCSocketPath()
+	case config.HerdrBackendAuto, "":
+		if socketAnswers(h.HCSocketPath()) && !socketAnswers(h.Socket) {
+			return "herdr-core", h.HCSocketPath()
+		}
+	}
+	return "herdr-tui", h.Socket
+}
+
 // socketAnswers reports whether a unix socket accepts a connection.
 func socketAnswers(socket string) bool {
 	conn, err := net.DialTimeout("unix", socket, time.Second)
