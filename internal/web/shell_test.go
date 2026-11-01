@@ -237,8 +237,22 @@ func TestShellOpenAndReuse(t *testing.T) {
 		t.Errorf("creates after the restart = %d", n)
 	}
 	opens := termEvents(h, "web.shell.open")
-	if len(opens) != 4 || opens[0]["reused"] != false || opens[3]["reused"] != true || opens[0]["cwd"] != app || opens[0]["remote_kind"] != "loopback" {
-		t.Errorf("web.shell.open = %v", opens)
+	if len(opens) != 4 || opens[3]["reused"] != true {
+		t.Fatalf("web.shell.open = %v", opens)
+	}
+	// The two taps are opened concurrently, so either may be logged
+	// first: one created the shell and the other reused it.
+	fresh := 0
+	for _, o := range opens[:2] {
+		if o["cwd"] != app || o["remote_kind"] != "loopback" {
+			t.Errorf("web.shell.open for a tap = %v", o)
+		}
+		if o["reused"] == false {
+			fresh++
+		}
+	}
+	if fresh != 1 || opens[2]["reused"] != false || opens[2]["cwd"] != lib {
+		t.Errorf("web.shell.open = %v, want one new shell for the two taps and a new one for lib", opens)
 	}
 	if got := termEvents(h, "web.term.open"); len(got) != 4 || got[0]["kind"] != "shell" {
 		t.Errorf("web.term.open = %v", got)
