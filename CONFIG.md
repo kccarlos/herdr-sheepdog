@@ -20,8 +20,8 @@ with secrets redacted (as counts); `sheepdog config init` writes a
 commented template of every key below to `~/.config/sheepdog/config.toml`
 (or `--path`), refusing to overwrite an existing file without `--force`.
 
-`sheepdog init` is the guided setup on top of it: it checks herdr (and says
-how to install it), asks for one key — Gemini AI Studio by default, or
+`sheepdog init` is the guided setup on top of it: it checks the herdr programs
+(and says how to install them), asks for one key — Gemini AI Studio by default, or
 DeepSeek / any OpenAI-compatible orchestrator (`[[brain.openai_compat]]`)
 plus a Gemini key for the voice — validates each with a free model-list
 call, and writes the keys to `~/.config/sheepdog/.env` (or `--env-file`)
@@ -30,7 +30,8 @@ an existing `config.toml` is never rewritten (init prints the lines to
 add). Keys are read without echo and never printed. `--non-interactive`
 takes the keys from the environment (for scripts and tests).
 `sheepdog doctor` checks the result and prints one line per check with
-its fix: herdr's socket, every configured key (live; DeepSeek's balance and
+its fix: the selected herdr backend's socket, every configured key (live;
+DeepSeek's balance and
 an OpenRouter key's credit where the API shows them; AI Studio does not
 expose its quota), a one-call tool-calling probe on each OpenAI-compatible
 orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
@@ -90,9 +91,9 @@ so they have no `SHEEPDOG_*` override.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `herdr.backend` | `SHEEPDOG_HERDR_BACKEND` | `auto` | Which multiplexer the agents run in: `herdr` (the herdr app), `hc` (herdr-core, the new herdr), or `auto`: at startup the daemon asks both sockets and takes the one that answers; when both answer it takes `herdr`, and when neither does it waits for `herdr`. `sheepdog setup` writes `SHEEPDOG_HERDR_BACKEND` when the running setup makes the choice clear, and asks when both answer. The choice is logged as `daemon.herdr_backend`. On herdr-core some things are not available yet: renaming or closing a space, worktrees and renaming an agent ([`docs/dev/design/herdr-core-backend.md`](docs/dev/design/herdr-core-backend.md)). |
-| `herdr.socket` | `SHEEPDOG_HERDR_SOCKET` | `~/.config/herdr/herdr.sock` | Path of the herdr unix domain socket (`--herdr=socket`, the default; ignored under `--herdr=mock`). |
-| `herdr.bin` | `SHEEPDOG_HERDR_BIN` | *(empty)* | The herdr binary the daemon runs for the iPhone app's live agent windows (`herdr terminal session control`, one child process per open window, pointed at `herdr.socket`). Empty finds `herdr` on `PATH`, then `~/.local/bin/herdr`. The live window needs herdr 0.9.2 or newer; with an older herdr the app shows the read-only screen instead. |
+| `herdr.backend` | `SHEEPDOG_HERDR_BACKEND` | `auto` | Which multiplexer the agents run in: `herdr` means [herdr-tui](https://github.com/herdrdev/herdr), `hc` means herdr-core, and `auto` asks both sockets at startup and takes the one that answers. When both answer, `auto` takes `herdr`; when neither does, it waits for `herdr`. `sheepdog setup` writes `SHEEPDOG_HERDR_BACKEND` when the running setup makes the choice clear, and asks when both answer. The choice is logged as `daemon.herdr_backend`. On herdr-core some things are not available yet: renaming or closing a space, worktrees and renaming an agent ([`docs/dev/design/herdr-core-backend.md`](docs/dev/design/herdr-core-backend.md)). |
+| `herdr.socket` | `SHEEPDOG_HERDR_SOCKET` | `~/.config/herdr/herdr.sock` | Path of the herdr-tui unix domain socket (`--herdr=socket`, the default; ignored under `--herdr=mock`). |
+| `herdr.bin` | `SHEEPDOG_HERDR_BIN` | *(empty)* | The herdr-tui binary the daemon runs for the iPhone app's live agent windows (`herdr terminal session control`, one child process per open window, pointed at `herdr.socket`). Empty finds `herdr` on `PATH`, then `~/.local/bin/herdr`. The live window needs herdr-tui 0.9.2 or newer; with an older herdr-tui the app shows the read-only screen instead. |
 | `herdr.hc_socket` | `SHEEPDOG_HC_SOCKET` | hc's own: `$HC_SOCKET`, else `<session>.sock` in `$XDG_RUNTIME_DIR/herdr-core/`, else `~/.local/state/herdr-core/<session>/<session>.sock` (`HC_SESSION`, default `default`) | Path of herdr-core's socket, for `herdr.backend = "hc"` or `auto`. |
 
 ## `[state]`

@@ -293,7 +293,7 @@ func TestDoctor(t *testing.T) {
 		byName[r.Name] = r
 		all.WriteString(r.Line() + "\n")
 	}
-	for name, want := range map[string]Status{"herdr": Fail, "gemini key": OK, "openrouter key": OK, "openrouter tools": OK, "groq key": Skip, "orchestrator": OK, "voice": OK, "web port": OK, "bind/token": OK, "push": Skip, "openai voice key": Skip} {
+	for name, want := range map[string]Status{"herdr-tui": Fail, "gemini key": OK, "openrouter key": OK, "openrouter tools": OK, "groq key": Skip, "orchestrator": OK, "voice": OK, "web port": OK, "bind/token": OK, "push": Skip, "openai voice key": Skip} {
 		if byName[name].Status != want {
 			t.Errorf("%s = %+v, want %v\n%s", name, byName[name], want, all.String())
 		}

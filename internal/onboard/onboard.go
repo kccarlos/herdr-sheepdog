@@ -376,11 +376,11 @@ func balanceOf(ctx context.Context, ep Endpoints, c Compat) (Result, bool) {
 	return Result{}, false
 }
 
-// HerdrInstallHint is the one-line fix when herdr is missing.
-const HerdrInstallHint = "install herdr from https://github.com/herdrdev/herdr/releases and start it (herdr), then run sheepdog doctor again"
+// HerdrInstallHint is the one-line fix when herdr-tui is missing.
+const HerdrInstallHint = "install herdr-tui from https://github.com/herdrdev/herdr/releases and start it with herdr, then run sheepdog doctor again"
 
 // CheckHerdr reports whether the multiplexer herdr.backend picks
-// answers: herdr's socket (and its binary on PATH), herdr-core's socket,
+// answers: herdr-tui's socket (and its binary on PATH), herdr-core's socket,
 // or with auto either of them.
 func CheckHerdr(h config.Herdr) Result {
 	switch h.Backend {
@@ -406,17 +406,17 @@ func socketAnswers(socket string) bool {
 
 // checkHC reports whether herdr-core's socket answers.
 func checkHC(socket string) Result {
-	const name = "herdr"
+	const name = "herdr-core"
 	if socketAnswers(socket) {
-		return Result{Name: name, Status: OK, Detail: "herdr-core socket " + socket + " answers"}
+		return Result{Name: name, Status: OK, Detail: "socket " + socket + " answers"}
 	}
 	return Result{Name: name, Status: Fail, Detail: "herdr-core's socket " + socket + " does not answer", Fix: "start herdr-core (hc server start), or set herdr.hc_socket / SHEEPDOG_HC_SOCKET to its socket"}
 }
 
-// checkOldHerdr reports whether herdr's socket answers and its binary is
+// checkOldHerdr reports whether herdr-tui's socket answers and its binary is
 // on PATH.
 func checkOldHerdr(socket string) Result {
-	const name = "herdr"
+	const name = "herdr-tui"
 	_, binErr := exec.LookPath("herdr")
 	conn, err := net.DialTimeout("unix", socket, time.Second)
 	if err == nil {
@@ -424,9 +424,9 @@ func checkOldHerdr(socket string) Result {
 		return Result{Name: name, Status: OK, Detail: "socket " + socket + " answers"}
 	}
 	if binErr != nil {
-		return Result{Name: name, Status: Fail, Detail: "no herdr on PATH and no socket at " + socket, Fix: HerdrInstallHint}
+		return Result{Name: name, Status: Fail, Detail: "no herdr-tui on PATH and no socket at " + socket, Fix: HerdrInstallHint}
 	}
-	return Result{Name: name, Status: Fail, Detail: "herdr is installed but its socket " + socket + " does not answer", Fix: "start herdr (or set herdr.socket / SHEEPDOG_HERDR_SOCKET to its socket)"}
+	return Result{Name: name, Status: Fail, Detail: "herdr-tui is installed but its socket " + socket + " does not answer", Fix: "start herdr-tui (or set herdr.socket / SHEEPDOG_HERDR_SOCKET to its socket)"}
 }
 
 // CheckPort reports whether the web port is free, serves this daemon, or

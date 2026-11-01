@@ -253,8 +253,9 @@ With one computer, none of this shows: no names and no Talk to.
     titled "Shell · folder". It has the same terminal and keys, no prompt
     field, and starts in typing mode. **+ ▸ New shell** opens one
     in your first project folder. Each folder has one shell, which the app
-    reuses. On your computer it opens beside the work in that folder: the
-    old herdr puts it in its "phone shell" workspace, while herdr-core adds
+    reuses. On your computer it opens beside the work in that folder:
+    [herdr-tui](https://github.com/herdrdev/herdr) puts it in its "phone
+    shell" workspace, while herdr-core adds
     a tab to the folder's existing space or opens a new space. Leaving the
     window keeps the shell running, and ⋯ ▸ **Close shell** ends it (it
     asks first).
@@ -264,11 +265,11 @@ With one computer, none of this shows: no names and no Talk to.
     - Where it is off, + ▸ New shell is greyed out, and Settings says
       why. The shell opens only in your project folders
       (`supervisor.project_roots`) or an agent's own folder.
-  - The live window needs herdr 0.9.2 or newer, or herdr-core, and an up-to-date sheepdog
+  - The live window needs herdr-tui 0.9.2 or newer, or herdr-core, and an up-to-date sheepdog
     on your computer. Otherwise the window is a snapshot of the screen that
     refreshes every few seconds (in colour with an up-to-date sheepdog), and
     it says so. "herdr is not running"
-    means sheepdog cannot reach herdr: start herdr on your computer, then
+    means sheepdog cannot reach the backend: start it on your computer, then
     tap Try again.
 - **Cards.** Ask for a list or the details ("show me the failing tests",
   "show me what auth is asking") while the app is open on the conversation,

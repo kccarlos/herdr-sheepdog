@@ -42,9 +42,9 @@ you changed `web.port`.
 
 | You see | Fix |
 |---|---|
-| `FAIL herdr … no herdr on PATH and no socket at ~/.config/herdr/herdr.sock — fix: install herdr from https://github.com/herdrdev/herdr/releases and start it (herdr), then run sheepdog doctor again` | Install and start herdr. Meanwhile `sheepdog demo` works. |
-| `FAIL herdr … herdr-core's socket … does not answer` | `herdr.backend` is `hc` but herdr-core is not running: start it (`hc server start`), or point `herdr.hc_socket` at its socket. |
-| Agents never show up | `sheepdog status` shows whether herdr is reachable (`herdr` line). Start herdr, then `sheepdog doctor`. |
+| `FAIL  herdr-tui … no herdr-tui on PATH and no socket at ~/.config/herdr/herdr.sock — fix: install herdr-tui from https://github.com/herdrdev/herdr/releases and start it with herdr, then run sheepdog doctor again` | Run `herdr` to start [herdr-tui](https://github.com/herdrdev/herdr). Meanwhile `sheepdog demo` works. |
+| `FAIL  herdr-core … herdr-core's socket … does not answer` | `herdr.backend` is `hc` but herdr-core is not running: start it (`hc server start`), or point `herdr.hc_socket` at its socket. |
+| Agents never show up | `sheepdog status` shows whether the herdr backend is reachable (`herdr` line). Start it, then run `sheepdog doctor`. |
 
 ## Running it
 
@@ -70,7 +70,7 @@ See [remote-access.md](remote-access.md) and [iphone-app.md](iphone-app.md).
 | `No published release found for kccarlos/herdr-sheepdog: the repository is private or has no release yet.` then `Nothing to update to; check again later.` | `sheepdog update`, exit 0: there is nothing newer. |
 | `Could not check for a new release: …` then `Check your internet connection and try again.` | `sheepdog update`, exit 1: offline or rate-limited. |
 | `Delete the event log (…) and the orchestrator's transcripts (…)? [y/N]` | `sheepdog data clear` asks first; `n` deletes nothing. Stop the daemon before running it. |
-| `To remove the program: rm …` and `herdr plugin uninstall kccarlos.sheepdog` | The last lines of `sheepdog uninstall`: it never touches herdr's registry, so run that command yourself. |
+| `To remove the program: rm …` and `herdr plugin uninstall kccarlos.sheepdog` | The last lines of `sheepdog uninstall`: it never touches herdr-tui's plugin registry, so run that command yourself. |
 
 ## Report a bug
 

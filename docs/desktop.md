@@ -26,7 +26,7 @@ The Sheepdog block in herdr-app's sidebar contains:
   update notice. **Pair a phone** shows a QR code and link. **New conversation**
   clears Sheepdog's working memory after you confirm.
 - **Agent details** when you tap an agent's name, and cards the orchestrator
-  shows. A card can bring its agent forward in herdr.
+  shows. A card can bring its agent forward in herdr-app.
 
 In a narrow sidebar the panel becomes a small rail with the Sheepdog logo, a
 voice dot and a count of agents that need you. Click the rail to open the full
@@ -49,7 +49,7 @@ state and how many agents need you. From its menu you can:
 
 ## Requirements
 
-- **herdr-app on herdr-core.** The desktop client does not use the old herdr
+- **herdr-app on herdr-core.** The desktop client does not use herdr-tui
   interface.
 - **The sheepdog daemon on the same Mac as herdr-app**, at its default loopback
   address. The desktop client is not for a daemon on another computer.
@@ -64,33 +64,43 @@ You can use the panel without a browser. A browser is still useful for
 
 ### 1. Install sheepdog
 
-Install the daemon with the one-liner from [the quick start](quick-start.md#1-install-sheepdog)
+Install the daemon with the one-liner from
+[the quick start](quick-start.md#herdr-app-on-herdr-core)
 or `brew install kccarlos/tap/sheepdog`, then run `sheepdog setup`.
 
-### 2. Choose herdr-core if both herdr versions are running
+### 2. Choose herdr-core if both backends are running
 
-`herdr.backend` defaults to `auto`. If both old herdr and herdr-core answer,
-`auto` picks old herdr. To make Sheepdog use herdr-core, put this in
-`~/.config/sheepdog/config.toml`:
+`sheepdog setup` asks which backend to use when both
+[herdr-tui](https://github.com/herdrdev/herdr) and herdr-core run; to choose
+herdr-core, put this in `~/.config/sheepdog/config.toml`:
 
 ```toml
 [herdr]
 backend = "hc"
 ```
 
-Then run `sheepdog restart`. The key and its environment override are in
-[CONFIG.md](../CONFIG.md).
+Then run `sheepdog restart`; see
+[`herdr.backend`](../CONFIG.md#herdr) for the environment override.
 
 ### 3. Install the panel and layout
 
 Run `sheepdog setup` after herdr-app is installed. It installs or updates the
 panel, offers the Sheepdog layout, and switches herdr-app to it. The layout is
-Herdr's usual window with the panel docked on the right.
+herdr-app's usual window with the panel docked on the right.
 
-You can also ask a coding agent to add
-`herdr.dev/mods/kccarlos/sheepdog`, or the layout listing under
-`herdr.dev/layouts/kccarlos`, to herdr-app. The layout listing includes the
-panel and starts from Herdr's main layout.
+You can also ask a coding agent to add the panel:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/kccarlos/herdr-sheepdog
+```
+
+or the layout:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/kccarlos/herdr-sheepdog/tree/main/sheepdog-layout
+```
+
+Both are listed on https://herdr.dev/mods/ and https://herdr.dev/layouts/.
 
 If you need to install it by hand from a checkout of this repository, copy both
 the panel and the layout:

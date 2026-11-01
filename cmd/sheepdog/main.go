@@ -170,13 +170,13 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  init        the same setup as terminal questions (also: sheepdog setup --terminal)")
 	fprintln(w, "  doctor      check the setup, with fixes; --report: a redacted bundle for a bug report")
 	fprintln(w, "  pair        show the QR code the iOS app scans")
-	fprintln(w, "  demo        try it without herdr: scripted workers (needs GEMINI_API_KEY)")
+	fprintln(w, "  demo        try it without herdr-tui or herdr-core: scripted workers (needs GEMINI_API_KEY)")
 	fprintln(w, "")
 	fprintln(w, "Run:")
 	fprintln(w, "  start       start the daemon in the background")
 	fprintln(w, "  stop        stop it")
 	fprintln(w, "  restart     stop, then start")
-	fprintln(w, "  status      running or not: pid, version, URL, models, herdr, phones, last error")
+	fprintln(w, "  status      running or not: pid, version, URL, models, herdr backend, phones, last error")
 	fprintln(w, "  logs        print the runtime log (-f to follow, -n N lines)")
 	fprintln(w, "  open        open the voice page in your browser (or: open setup | open debug)")
 	fprintln(w, "  serve       run the daemon in this terminal (Ctrl-C stops it)")
@@ -191,7 +191,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  help        show this help")
 	fprintln(w, "")
 	fprintln(w, "Developer commands (voice-test, brain-test, eval, scorecard, audio-e2e, bench,")
-	fprintln(w, "herdr watch, prompts, feedback): sheepdog dev --help")
+	fprintln(w, "herdr watch (herdr-tui), prompts, feedback): sheepdog dev --help")
 }
 
 // fprintln and fprintf write to w and intentionally discard the error:

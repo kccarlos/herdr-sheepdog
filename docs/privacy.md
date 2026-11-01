@@ -154,7 +154,9 @@ sends nothing.
 | Everything under the data directory (config and keys stay) | `sheepdog stop`, then `sheepdog data clear --all` |
 | Everything, including config and keys | `sheepdog uninstall` (asks before each directory) |
 
-All three ask first. Deleting the plugin is `herdr plugin uninstall kccarlos.sheepdog`.
+All three ask first. For
+[herdr-tui](https://github.com/herdrdev/herdr), deleting the plugin is
+`herdr plugin uninstall kccarlos.sheepdog`.
 
 ## The Mac client
 

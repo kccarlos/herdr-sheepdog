@@ -17,7 +17,7 @@ func printUninstallUsage(w io.Writer) {
 	fprintln(w, "Stops the daemon, removes the login service and the ~/.local/bin/sheepdog")
 	fprintln(w, "link when it points to this sheepdog, then asks before deleting your config and")
 	fprintln(w, "keys (~/.config/sheepdog) and data (~/.local/share/sheepdog: transcripts, logs).")
-	fprintln(w, "It never changes herdr's plugin registry: it prints the herdr command to finish.")
+	fprintln(w, "It never changes herdr-tui's plugin registry: it prints the herdr-tui command to finish.")
 	fprintln(w, "")
 	fprintln(w, "  --yes        delete config and data without asking")
 	fprintln(w, "  --keep-data  keep config and data, ask nothing")
@@ -134,7 +134,7 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	case "binary":
 		fprintf(stdout, "To remove the program: rm %s\n", exe)
 	}
-	fprintln(stdout, "If you installed sheepdog as a herdr plugin, finish with:")
+	fprintln(stdout, "If you installed sheepdog as a herdr-tui plugin, finish with:")
 	fprintln(stdout, "  herdr plugin uninstall kccarlos.sheepdog")
 	if failed {
 		return 1
