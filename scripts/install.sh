@@ -194,6 +194,6 @@ fi
 if [ "$daemon_running" -eq 1 ]; then
 	echo "Restart it to use the new version: sheepdog restart"
 fi
-if [ "$os" = Darwin ]; then
+if [ "$os" = Darwin ] && [ ! -d /Applications/Sheepdog.app ] && [ ! -d "$HOME/Applications/Sheepdog.app" ]; then
 	echo "For voice on this Mac with herdr-app: brew install --cask kccarlos/tap/sheepdog-app"
 fi
