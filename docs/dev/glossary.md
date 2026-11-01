@@ -12,7 +12,10 @@ words is [`roles.md`](roles.md); the models read the same words in
 | **Voice** | The part that talks with the user and owns the conversation (Gemini Live or GPT-Live; two tools, `to_supervisor` and `stop`). Formerly the fast brain, the dog, the Gemini Live layer, "assistant". |
 | **Orchestrator** | The part that reads screens, investigates, decides, remembers and acts behind the rails: one stateful agent with tools (`internal/brain`). Formerly the slow brain, the brain, the supervisor brain, SVP. |
 | **Agents / workers** | The coding agents (Claude Code, Codex, agy) running in herdr panes. Say "agents" or "workers", never "flock". |
-| **herdr** | The terminal multiplexer that hosts the panes and reports each agent's state. |
+| **herdr** | The family of programs that host agent panes and report their state: herdr-tui, herdr-core, and herdr-app. Use it when a statement is true of all three. |
+| **herdr-tui** | The original terminal herdr. Select it with `herdr.backend = "herdr"` or `SHEEPDOG_HERDR_BACKEND=herdr`. |
+| **herdr-core** (`hc`) | The engine behind herdr-app. Select it with `herdr.backend = "hc"` or `SHEEPDOG_HERDR_BACKEND=hc`. |
+| **herdr-app** | The desktop app that runs on herdr-core. It has no `herdr.backend` value of its own. |
 | **Briefing** | A labelled message the orchestrator or the daemon hands to the voice (a function response, a silent context line) so it can tell the user in its own words. |
 | **Rail** | A check in code that no model can talk its way past, for example "an approval prompt is answered only on the user's own fresh words". Rails make the orchestrator safe to give tools. |
 | **Chattiness** | The user's setting (`quiet`, `normal`, `chatty`) that caps how much the voice volunteers unasked. |

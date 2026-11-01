@@ -27,8 +27,8 @@ var onboardEndpoints = onboard.DefaultEndpoints
 func printDoctorUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog doctor [flags]")
 	fprintln(w, "")
-	fprintln(w, "Checks the setup and prints one line per check with the fix: herdr and")
-	fprintln(w, "its backend, the herdr-app panel, Sheepdog.app on macOS,")
+	fprintln(w, "Checks the setup and prints one line per check with the fix: herdr-tui or")
+	fprintln(w, "herdr-core and its backend, the herdr-app panel, Sheepdog.app on macOS,")
 	fprintln(w, "every configured key (live and cheap; the balance where the API shows it),")
 	fprintln(w, "a tool-calling probe on OpenAI-compatible orchestrators (a few tokens),")
 	fprintln(w, "the orchestrator and voice providers, the web port, the bind/token")

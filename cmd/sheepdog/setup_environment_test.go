@@ -123,12 +123,12 @@ func TestSetupEnvironmentInteractive(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"Your setup:",
-		"herdr (old, terminal)   installed, running",
+		"herdr-tui               installed, running",
 		"herdr-core              installed, running",
 		"herdr-app               installed",
 		"Sheepdog.app            not installed",
 		"herdr-core (hc) — herdr-app",
-		"old herdr (terminal)",
+		"herdr-tui",
 		"herdr-app check: loaded sheepdog",
 		"Switched herdr-app to the Sheepdog layout.",
 		"brew install --cask kccarlos/tap/sheepdog-app",
@@ -179,7 +179,7 @@ func TestSetupEnvironmentNonInteractive(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"Both are running, and auto would pick old herdr.",
+		"Both are running, and auto would pick herdr-tui.",
 		"SHEEPDOG_HERDR_BACKEND=hc",
 		"Installed the Sheepdog panel for herdr-app.",
 		"herdr-app check: loaded sheepdog",

@@ -102,7 +102,7 @@ func TestDetect(t *testing.T) {
 		want  Environment
 	}{
 		{
-			name: "old herdr only on linux",
+			name: "herdr-tui only on linux",
 			probe: &fakeProbe{
 				goos: "linux", home: "/fake/home",
 				paths:   map[string]bool{"herdr": true},
@@ -265,16 +265,16 @@ func TestAdviseBackend(t *testing.T) {
 	}{
 		{name: "already herdr", backend: config.HerdrBackendHerdr, env: Environment{OldHerdr: old, HerdrCore: core}},
 		{name: "already hc", backend: config.HerdrBackendHC, env: Environment{OldHerdr: old, HerdrCore: core}},
-		{name: "auto both default old", env: Environment{OldHerdr: old, HerdrCore: core}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHerdr, Why: "Both are running, and auto would pick old herdr."}},
-		{name: "auto both with app default core", env: Environment{OldHerdr: old, HerdrCore: core, HerdrApp: true}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: "Both are running, and auto would pick old herdr."}},
-		{name: "auto core answers", env: Environment{HerdrCore: core}, want: BackendAdvice{Set: config.HerdrBackendHC, Why: "Only herdr-core is running, so pinning it avoids waiting for old herdr after a restart."}},
-		{name: "auto old answers for app", env: Environment{OldHerdr: old, HerdrCore: installedCore, HerdrApp: true}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: "herdr-app uses herdr-core, but only old herdr is running."}},
+		{name: "auto both default old", env: Environment{OldHerdr: old, HerdrCore: core}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHerdr, Why: "Both are running, and auto would pick herdr-tui."}},
+		{name: "auto both with app default core", env: Environment{OldHerdr: old, HerdrCore: core, HerdrApp: true}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: "Both are running, and auto would pick herdr-tui."}},
+		{name: "auto core answers", env: Environment{HerdrCore: core}, want: BackendAdvice{Set: config.HerdrBackendHC, Why: "Only herdr-core is running, so pinning it avoids waiting for herdr-tui after a restart."}},
+		{name: "auto old answers for app", env: Environment{OldHerdr: old, HerdrCore: installedCore, HerdrApp: true}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: "herdr-app uses herdr-core, but only herdr-tui is running."}},
 		{name: "auto old answers otherwise"},
 		{name: "auto neither core installed", env: Environment{HerdrCore: installedCore}, want: BackendAdvice{Set: config.HerdrBackendHC, Why: "Only herdr-core is installed, so Sheepdog should wait for herdr-core."}},
 		{name: "auto neither both default old", env: Environment{OldHerdr: installedOld, HerdrCore: installedCore}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHerdr, Why: "Both are installed, so choose the one Sheepdog should start with."}},
 		{name: "auto neither both with app", env: Environment{OldHerdr: installedOld, HerdrCore: installedCore, HerdrApp: true}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: "Both are installed, so choose the one Sheepdog should start with."}},
 		{name: "auto nothing"},
-		{name: "empty both is auto", env: Environment{OldHerdr: old, HerdrCore: core}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHerdr, Why: "Both are running, and auto would pick old herdr."}},
+		{name: "empty both is auto", env: Environment{OldHerdr: old, HerdrCore: core}, want: BackendAdvice{Ask: true, Default: config.HerdrBackendHerdr, Why: "Both are running, and auto would pick herdr-tui."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.Config{Herdr: config.Herdr{Backend: tc.backend}}

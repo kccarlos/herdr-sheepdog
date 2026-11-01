@@ -31,5 +31,6 @@ changed code. Do not point sheepdog at an agent started with one of these:
 
 ## Known limit
 
-herdr 0.9.0 does not report agy (Antigravity CLI) prompts as blocked, so
+[herdr-tui](https://github.com/herdrdev/herdr) 0.9.0 does not report agy
+(Antigravity CLI) prompts as blocked, so
 sheepdog cannot tell you an agy agent is waiting.

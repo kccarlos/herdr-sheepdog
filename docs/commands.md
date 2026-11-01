@@ -33,15 +33,15 @@
 | Command | What it does |
 |---|---|
 | `sheepdog update` | Check for a new release now and print how to upgrade for the way you installed it. Changes nothing. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
-| `sheepdog uninstall` | Stop, remove the login service and the `~/.local/bin/sheepdog` link, ask before deleting config and data, then print the herdr command that finishes the job. `--yes` deletes without asking; `--keep-data` keeps everything. |
+| `sheepdog uninstall` | Stop, remove the login service and the `~/.local/bin/sheepdog` link, ask before deleting config and data, then print the herdr-tui command that finishes the job. `--yes` deletes without asking; `--keep-data` keeps everything. |
 | `sheepdog service install` | Start at login (launchd on macOS, `systemd --user` on Linux). Also `uninstall`, `start`, `status`, `logs`; `install --dry-run` prints the unit. |
 | `sheepdog data clear` | Delete the event log and transcripts (`--events`, the default) or everything under the data directory (`--all`). Asks first; `--yes` skips. Stop the daemon first. |
 | `sheepdog config show` | Print the effective config, secrets redacted. `sheepdog config init` writes a commented `config.toml`. Keys: [CONFIG.md](../CONFIG.md). |
 | `sheepdog version` | Version, commit and build date. |
 
-## herdr plugin actions
+## [herdr-tui](https://github.com/herdrdev/herdr) plugin actions
 
-The plugin adds four actions to herdr (`herdr plugin action list --plugin kccarlos.sheepdog`): **Set up sheepdog**, **Pair your phone**, **Check setup** (`sheepdog doctor`) and **Logs** (`sheepdog logs -f`).
+The plugin adds four actions to herdr-tui (`herdr plugin action list --plugin kccarlos.sheepdog`): **Set up sheepdog**, **Pair your phone**, **Check setup** (`sheepdog doctor`) and **Logs** (`sheepdog logs -f`).
 
 ## Flags of `sheepdog init`
 

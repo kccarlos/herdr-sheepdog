@@ -259,7 +259,7 @@ var (
 	}
 )
 
-// setupEnvironment detects old herdr, herdr-core, herdr-app and Sheepdog.app,
+// setupEnvironment detects herdr-tui, herdr-core, herdr-app and Sheepdog.app,
 // resolves an ambiguous backend, and offers or installs the panel. It returns
 // whether it wrote the backend env setting.
 func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o setupEnvironmentOptions) (bool, error) {
@@ -268,7 +268,7 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	}
 	env := onboard.Detect(cfg, o.Probe, o.Panel, o.Layout)
 	fprintln(o.Out, "Your setup:")
-	fprintf(o.Out, "  %-23s %s\n", "herdr (old, terminal)", setupPresence(env.OldHerdr))
+	fprintf(o.Out, "  %-23s %s\n", "herdr-tui", setupPresence(env.OldHerdr))
 	fprintf(o.Out, "  %-23s %s\n", "herdr-core", setupPresence(env.HerdrCore))
 	fprintf(o.Out, "  %-23s %s\n", "herdr-app", setupFound(env.HerdrApp))
 	if env.OS == "darwin" {
@@ -305,7 +305,7 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 			chosen, err = o.Prompt.chooseDef(
 				"Which herdr should Sheepdog use",
 				[]string{config.HerdrBackendHC, config.HerdrBackendHerdr},
-				[]string{"herdr-core (hc) — herdr-app", "old herdr (terminal)"},
+				[]string{"herdr-core (hc) — herdr-app", "herdr-tui"},
 				advice.Default,
 			)
 			if err != nil {
@@ -371,7 +371,7 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 	switchNow := false
 	declined := false
 	if o.Interactive && o.Prompt != nil {
-		yes, err := o.Prompt.yesNo("Switch herdr-app to the Sheepdog layout (Herdr's window with the panel docked on the right)?", true)
+		yes, err := o.Prompt.yesNo("Switch herdr-app to the Sheepdog layout (herdr-app's window with the panel docked on the right)?", true)
 		if err != nil {
 			fprintf(o.Out, "Warning: could not ask about the Sheepdog layout: %v\n", err)
 		} else {

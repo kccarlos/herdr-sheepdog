@@ -357,9 +357,9 @@ func AdviseBackend(cfg config.Config, env Environment) BackendAdvice {
 		return BackendAdvice{}
 	}
 	const (
-		whyBothRunning = "Both are running, and auto would pick old herdr."
-		whyCoreRunning = "Only herdr-core is running, so pinning it avoids waiting for old herdr after a restart."
-		whyApp         = "herdr-app uses herdr-core, but only old herdr is running."
+		whyBothRunning = "Both are running, and auto would pick herdr-tui."
+		whyCoreRunning = "Only herdr-core is running, so pinning it avoids waiting for herdr-tui after a restart."
+		whyApp         = "herdr-app uses herdr-core, but only herdr-tui is running."
 		whyBoth        = "Both are installed, so choose the one Sheepdog should start with."
 		whyCore        = "Only herdr-core is installed, so Sheepdog should wait for herdr-core."
 	)

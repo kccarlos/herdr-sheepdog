@@ -4,15 +4,29 @@ A [herdr-app](https://herdr.dev) mod for [sheepdog](../../README.md), the daemon
 
 The build brief is [../../RECIPE.md](../../RECIPE.md), and the user guide is [docs/desktop.md](../../docs/desktop.md).
 
-- **The docked block is the whole panel** (340 px on the right by default). Top to bottom: the status (whether the voice is listening, muted or off, who holds it, "Voice on iPhone", and how many agents need you, in amber), any banners, the voice controls, an agent's question as a card with a button per option (when they would take too much of the block it is one bar, "Codex asked · Answer", that opens them), the composer with the orchestrator's suggested next steps as buttons, and under them the timeline, newest first with every item, older history added as you reach the bottom. The timeline always keeps at least 55% of a short panel: banners collapse to one line and the stack above the timeline gets its own scroll before the composer can be pushed away. **Technical** adds the plumbing (reconnects, restarts) the timeline hides; consecutive restart dividers become one. In the composer **Enter** sends and **Shift+Enter** starts a new line. Your line shows at once, then the reply; if Sheepdog cannot take it (the orchestrator is off, nothing answers) the reason shows under the box and your text stays. A card the orchestrator showed (a table, a list) opens when you press its row, with a button that shows the agent in herdr.
+- **The docked block is the whole panel** (340 px on the right by default). Top to bottom: the status (whether the voice is listening, muted or off, who holds it, "Voice on iPhone", and how many agents need you, in amber), any banners, the voice controls, an agent's question as a card with a button per option (when they would take too much of the block it is one bar, "Codex asked · Answer", that opens them), the composer with the orchestrator's suggested next steps as buttons, and under them the timeline, newest first with every item, older history added as you reach the bottom. The timeline always keeps at least 55% of a short panel: banners collapse to one line and the stack above the timeline gets its own scroll before the composer can be pushed away. **Technical** adds the plumbing (reconnects, restarts) the timeline hides; consecutive restart dividers become one. In the composer **Enter** sends and **Shift+Enter** starts a new line. Your line shows at once, then the reply; if Sheepdog cannot take it (the orchestrator is off, nothing answers) the reason shows under the box and your text stays. A card the orchestrator showed (a table, a list) opens when you press its row, with a button that shows the agent in herdr-app.
 - **Voice controls.** **Talk** starts Sheepdog.app on this Mac when nobody holds the voice (it runs `open sheepdog://talk`) and unmutes when it is muted; **Mute**; **Stop**, only while it speaks; **Hold to talk**, open from the press to the release. They go through the daemon, which relays them to whoever holds the voice, so they work for the phone too. When the iPhone holds the voice the status says "Voice on iPhone" and **Use here** takes it back to this Mac. "No voice is connected" (a 409) offers **Use here** as well. With no Sheepdog.app in `/Applications` or `~/Applications` (a read-only look) the buttons are off and the panel says `brew install --cask sheepdog-app`; typing still works.
 - **Settings and details.** The header's **⋯** menu opens Settings (voice and orchestrator models, languages, reply style, paired devices and the update notice), Pair a phone (the QR and its plain link), and New conversation (a confirmation before the reset). Orchestrator models sit under their provider's heading; unavailable providers show the daemon's reason and cannot be chosen, and only the daemon's current provider and model pair is checked. Pressing a timeline row that names an agent opens what it works on, its last result, last question and answer, and its space.
 - **The rail.** A sidebar narrower than 160 px shows a compact rail instead (the logo, a voice dot and a needs-you badge); clicking it opens the same panel as a window, which drags, remembers where you dropped it and comes back after a restart.
-- **Not docked?** The Sheepdog layout starts from Herdr's main layout and docks this panel on the right. `sheepdog setup` installs it and offers to switch to it. If the panel is already open as a window, switch to the layout or follow the hint on top (see Install).
+- **Not docked?** The Sheepdog layout starts from herdr-app's main layout and docks this panel on the right. `sheepdog setup` installs it and offers to switch to it. If the panel is already open as a window, switch to the layout or follow the hint on top (see Install).
 
 ## Install
 
-Needs the sheepdog daemon on the same computer (`sheepdog setup`; default `http://127.0.0.1:7777`) and a herdr-app with mods. `sheepdog setup` installs the panel and the Sheepdog layout, then offers to switch herdr-app to it. The layout starts from Herdr's main layout and adds a 340 px block for this mod on the right. You can also ask a coding agent to add `herdr.dev/mods/kccarlos/sheepdog` or the layout listing under `herdr.dev/layouts/kccarlos`.
+Needs the sheepdog daemon on the same computer (`sheepdog setup`; default `http://127.0.0.1:7777`) and a herdr-app with mods. `sheepdog setup` installs the panel and the Sheepdog layout, then offers to switch herdr-app to it. The layout starts from herdr-app's main layout and adds a 340 px block for this mod on the right.
+
+You can also ask a coding agent to add the panel:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/kccarlos/herdr-sheepdog
+```
+
+or the layout:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/kccarlos/herdr-sheepdog/tree/main/sheepdog-layout
+```
+
+Both are listed on https://herdr.dev/mods/ and https://herdr.dev/layouts/.
 
 To install by hand, copy this folder into `~/.config/herdr-app/mods/` (leave `README.md` and the `*.test.mjs` files out if you like), copy `sheepdog-layout/layouts/sheepdog.json` into `~/.config/herdr-app/layouts/`, run `herdr-app check` on the copied folder, then run `herdr-app do layout.switch '{"name":"sheepdog"}'`. A layout that ships with herdr-app cannot be changed by a mod. As a last fallback, `herdr-app do mod.open --name sheepdog` opens the panel as a window with **Copy my layout** (`layout.clone`); add a block for the mod `sheepdog` to that copy. Written and checked with the runtime `herdr-app check` reports as gpui-shell 0.7.1.
 
@@ -26,7 +40,7 @@ It only talks to the daemon address:
 - `PUT /api/voice/provider`, `PUT /api/brain/model` and `PUT /api/settings` for changes in Settings; `DELETE /api/devices/{id}` after a paired device's removal is confirmed; and `POST`s with `fetch`, each with an `Idempotency-Key`: `/api/turn` with a line you typed (or a suggested reply you tapped), `/api/pending/answer` with the option you tapped, `/api/conversation/reset` after New conversation is confirmed, and `/api/voice/mute`, `/api/voice/stop` and `/api/voice/ptt` for the voice controls.
 - **Talk** and **Use here** run `open sheepdog://talk` (`exec`), which macOS routes to Sheepdog.app. It looks (read-only) whether `/Applications/Sheepdog.app` or `~/Applications/Sheepdog.app` exists, every 30 seconds.
 - **Copy my layout** in a window that is not docked runs herdr-app's `layout.clone`.
-- The **Run it in a tab** and **Run sheepdog setup** buttons run `sheepdog setup` in a new terminal tab (`terminal.open`). **Show … in herdr** on a card runs herdr-app's own `agent.focus` for that agent's terminal.
+- The **Run it in a tab** and **Run sheepdog setup** buttons run `sheepdog setup` in a new terminal tab (`terminal.open`). **Show … in herdr-app** on a card runs herdr-app's own `agent.focus` for that agent's terminal.
 - The pairing QR is drawn from the daemon's module matrix with `div`s; its plain fallback text is the pairing link. It reads no file contents (only whether Sheepdog.app is there) and writes none: herdr-app reloads a mod when its folder changes, so nothing is ever written inside it.
 
 ## Develop

@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 - **it remembers** — "tell me when claude-auth is done", and it comes back to a question it could not answer. [faq →](docs/faq.md)
 - **iPhone app** — QR pairing, Live Activity, earbud remote, and lock-screen notifications through an end-to-end encrypted relay. [iPhone app →](docs/iphone-app.md)
 - **Mac panel and menu bar** — read the conversation, type, answer and talk in herdr-app; Sheepdog.app supplies the microphone, notifications and a global shortcut. [Mac →](docs/desktop.md)
-- **herdr-app mod** — Sheepdog is also a community mod: [mods/sheepdog](mods/sheepdog), [RECIPE.md](RECIPE.md).
+- **herdr-app panel and layout** — on herdr.dev's [mods](https://herdr.dev/mods/) and [layouts](https://herdr.dev/layouts/) pages (community). `sheepdog setup` installs both.
 - **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
 - **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 
@@ -47,18 +47,37 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 
 ## try it in three minutes
 
-**You need:** [herdr](https://github.com/herdrdev/herdr) (the herdr app or herdr-core, `hc`), macOS or Linux, a browser with a microphone, and one voice model plus one brain model. The simplest is **one free Gemini key** from <https://aistudio.google.com/apikey> ([other options →](docs/models.md)). The installer supports Apple silicon Macs and x86-64 Linux; [other ways to install](docs/quick-start.md#other-ways-to-install) cover other platforms.
+**You need:**
+
+- [herdr-tui](https://github.com/herdrdev/herdr), or herdr-core (`hc`) and optionally herdr-app
+- macOS (Apple silicon) or Linux (x86-64); Windows is not supported
+- a microphone, in a browser, the iPhone app, or Sheepdog.app
+- one free Gemini key from <https://aistudio.google.com/apikey>, or [another model](docs/models.md)
+
+### On herdr-tui
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh   # 1. install sheepdog
-sheepdog setup                                  # 2. the browser wizard: key, checks, start at login, phone
+herdr plugin install kccarlos/herdr-sheepdog
+sheepdog setup
 ```
 
-Or with Homebrew: `brew install kccarlos/tap/sheepdog`, then `sheepdog setup`. Old herdr can still install sheepdog through its plugin; see [quick start](docs/quick-start.md#1-install-sheepdog). herdr 0.9.4 or newer is needed for the plugin.
+This needs herdr-tui 0.9.4 or newer. [Quick start →](docs/quick-start.md#herdr-tui)
 
-<p align="center"><img src="assets/readme/install.gif" alt="Installing the plugin and running sheepdog setup" width="800"></p>
+<p align="center"><img src="assets/readme/herdr-tui.gif" alt="Installing the sheepdog plugin in herdr-tui and opening Pair your phone" width="800"></p>
 
-Setup opens a page, checks your key on the spot, and ends with a button that starts talking. About three minutes. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
+### On herdr-app (herdr-core)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
+sheepdog setup
+brew install --cask kccarlos/tap/sheepdog-app
+```
+
+`sheepdog setup` installs the panel and switches herdr-app to the Sheepdog layout. [Quick start →](docs/quick-start.md#herdr-app-on-herdr-core)
+
+<p align="center"><img src="assets/readme/herdr-app.gif" alt="The one-line installer, sheepdog setup finding herdr-core and herdr-app, and herdr-app switching to the Sheepdog layout" width="800"></p>
+
+`sheepdog setup` detects which herdr program is installed and running. It opens a page, checks your key on the spot, and ends with a button that starts talking. No agents yet? The last step's **Try it with demo agents** runs three scripted ones you can talk to (also `sheepdog demo`, once the key is saved). Over SSH with no browser, see [quick start →](docs/quick-start.md#over-ssh-with-no-browser).
 
 **iPhone app:** [join the TestFlight beta](https://testflight.apple.com/join/bjCaFYgK) (install the TestFlight app first), or [build it yourself](ios/README.md). To pair it, turn on phone access in the setup wizard (step 4), then run `sheepdog pair`. It has an offline demo mode that needs no computer. [iPhone app →](docs/iphone-app.md)
 
@@ -68,11 +87,7 @@ Something wrong? Run `sheepdog doctor`; every problem prints its fix. [troublesh
 
 ## docs
 
-[quick start](docs/quick-start.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
-
-## iPhone app
-
-The iPhone app, **Sheepdog for herdr**, lives in [`ios/`](ios/README.md) in this repository: talk to your agents, answer approvals from the lock screen and watch their screens away from your desk. Using it: [docs/iphone-app.md](docs/iphone-app.md). Building it with your own Apple team (XcodeGen, signing, push keys): [ios/README.md](ios/README.md).
+[quick start](docs/quick-start.md) · [Mac](docs/desktop.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
 
 ## thanks
 

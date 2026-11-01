@@ -2,57 +2,47 @@
 
 **From install to your first spoken answer, in about three minutes.**
 
-You need
-[herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a
-microphone (on this computer, or over SSH: see below) and one free Gemini API
-key (the setup page links to it; [models.md](models.md) lists the
-alternatives). Windows is not supported. Getting the key from AI Studio is
-the slowest step.
+| You use | Install | Then |
+|---|---|---|
+| [herdr-tui](https://github.com/herdrdev/herdr) | the herdr plugin | `sheepdog setup` |
+| herdr-app (Mac) on herdr-core | the one-line installer | `sheepdog setup` (installs the panel and switches to the Sheepdog layout), then Sheepdog.app |
+| herdr-core without herdr-app, or a Linux server | the one-line installer | `sheepdog setup` (over SSH: `sheepdog setup --terminal`) |
 
-No herdr yet? Install it, then start it where your work lives and leave it
-running:
+You need macOS on Apple silicon or Linux on x86-64, a microphone in a
+browser, the iPhone app or Sheepdog.app, and one free Gemini API key ([other
+model choices](models.md)). Windows is not supported.
+
+## herdr-tui
+
+herdr-tui is the original terminal herdr. If it is not installed, install it,
+then start it where your work lives and leave it running:
 
 ```sh
 curl -fsSL https://herdr.dev/install.sh | sh
 herdr
 ```
 
-Or `brew install herdr` instead of the curl line. Other ways (mise and
-binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/releases).
+You can also use `brew install herdr` instead of the curl line. Other ways,
+including mise and binaries, are on
+[herdr-tui's releases page](https://github.com/herdrdev/herdr/releases).
 
-Using herdr-app on herdr-core? Keep the conversation in its sidebar and use
-Sheepdog.app for voice: [Sheepdog on your Mac](desktop.md).
-
-## 1. Install sheepdog
-
-For herdr-core (`hc`), herdr-app, or a Linux server, install the daemon
-directly:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
-```
-
-The installer downloads the latest release for Apple silicon macOS or x86-64
-Linux, verifies its sha256, and puts `sheepdog` in `~/.local/bin`. It offers
-to run `sheepdog setup` when a terminal is available (otherwise it prints the
-next step). For another platform, [build from source](#other-ways-to-install).
-
-If you use old herdr, its plugin remains the easy install path:
+Install the sheepdog plugin:
 
 ```sh
 herdr plugin install kccarlos/herdr-sheepdog
+sheepdog setup
 ```
 
-It needs herdr 0.9.4 or newer (`herdr --version`; update herdr the way you
-installed it). herdr shows the build step before it runs it. The build step
-downloads the `sheepdog` binary for your machine (Apple silicon Mac or x86-64
-Linux), checks its sha256 and links it into `~/.local/bin`; herdr then prints:
+The plugin needs herdr-tui 0.9.4 or newer (`herdr --version`; update herdr-tui
+the way you installed it). herdr-tui shows the build step before it runs it.
+The build step downloads the `sheepdog` binary for your machine, checks its
+sha256 and links it into `~/.local/bin`; herdr-tui then prints:
 
 ```text
 Installed kccarlos.sheepdog from kccarlos/herdr-sheepdog.
 ```
 
-herdr does not show the build step's own messages when it succeeds. If
+herdr-tui does not show the build step's own messages when it succeeds. If
 `sheepdog` is then not found, `~/.local/bin` is not on your PATH: add
 `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and open a new
 terminal, or run `~/.local/bin/sheepdog` directly.
@@ -61,15 +51,46 @@ If the plugin has no release for your machine, it builds from source and
 needs [Go](https://go.dev/dl/); without Go it stops and says so
 ([troubleshooting.md](troubleshooting.md)).
 
-## 2. Set up in your browser
+## herdr-app on herdr-core
+
+Install the sheepdog daemon on the same Mac as herdr-app:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
+sheepdog setup
+brew install --cask kccarlos/tap/sheepdog-app
+```
+
+The installer downloads the latest release, verifies its sha256, and puts
+`sheepdog` in `~/.local/bin`. `sheepdog setup` installs the panel and offers
+to switch herdr-app to the Sheepdog layout. Sheepdog.app provides the
+microphone, speaker, notifications and global shortcut on the Mac. Keep the
+conversation in herdr-app's sidebar and use Sheepdog.app for voice:
+[Sheepdog on your Mac](desktop.md).
+
+## herdr-core without herdr-app, or on a Linux server
+
+Install the sheepdog daemon directly:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
 sheepdog setup
 ```
 
-`sheepdog setup` detects whether old herdr, herdr-core or herdr-app is
-installed and running. It can pin the backend, ask when the setup is
-ambiguous, and offer to install the panel for herdr-app.
+On a Linux server over SSH, run `sheepdog setup --terminal` instead. Talk from
+a browser through the SSH tunnel described in
+[Over SSH, with no browser](#over-ssh-with-no-browser).
+
+The installer supports Apple silicon macOS and x86-64 Linux. It offers to run
+`sheepdog setup` when a terminal is available; otherwise it prints the next
+step. For another platform, [build from source](#other-ways-to-install).
+
+## Set up in your browser
+
+`sheepdog setup` detects which herdr program is installed and running. If both
+herdr-tui and herdr-core run, it asks which backend to use; the setting is
+[`herdr.backend`](../CONFIG.md#herdr). Setup starts the daemon if needed and
+opens this page:
 
 ```text
 Starting sheepdog…
@@ -84,9 +105,9 @@ Set up sheepdog in your browser:
 The page opened in your browser. It works on its own: you can close this terminal.
 ```
 
-(Your port is 7777 unless you changed `web.port`. The last line appears only
+Your port is 7777 unless you changed `web.port`. The last line appears only
 when a browser could be opened; over SSH use the URL above, see
-[Over SSH](#over-ssh-with-no-browser).) The page has five steps:
+[Over SSH](#over-ssh-with-no-browser). The page has five steps:
 
 1. **Models.** Paste a free key from <https://aistudio.google.com/apikey>. It is
    checked on the spot ("Valid key"), then **Save and start the voice**.
@@ -105,7 +126,7 @@ Over SSH, with no display, `sheepdog setup` asks the same questions in the
 terminal (`sheepdog setup --terminal`); see
 [Over SSH, with no browser](#over-ssh-with-no-browser) for how to talk.
 
-## 3. Talk
+## Talk
 
 In herdr, open a pane and start an agent in it (`claude`, `codex` or `agy`;
 never with an "approve everything" flag, see [safety.md](safety.md)). herdr
@@ -147,8 +168,8 @@ ssh -N -L 7777:127.0.0.1:7777 you@the-server    # on your computer; use your web
 ```
 
 Then open `http://127.0.0.1:7777/voice` (or `/setup`) in your own browser.
-The tunnel may use another local port. The demo (below) listens on 7778 or the
-next free port, so forward that one too. `sheepdog open` and the end of
+The tunnel may use another local port. The demo listens on 7778 or the next
+free port, so forward that one too. `sheepdog open` and the end of
 `sheepdog setup --terminal` print this line for your port. On Linux, the
 login service (`systemd --user`) may stop when your last session ends unless
 lingering is on (`loginctl enable-linger $USER`); this is a systemd setting
@@ -224,7 +245,7 @@ speaks it. Update with the command for your install method:
 | You installed with | Update with |
 |---|---|
 | One-line installer | Rerun the installer |
-| herdr plugin | `herdr plugin update kccarlos.sheepdog` |
+| herdr-tui plugin | `herdr plugin update kccarlos.sheepdog` |
 | Homebrew | `brew upgrade sheepdog` |
 | From source | `git pull` in your clone, then `make install` |
 | Manual release download | Download the new archive from the release page and replace the binary |
@@ -259,8 +280,8 @@ The installer above is the supported path. The daemon is also a plain binary:
   macOS 14 or newer). It talks to the daemon above, so install that too.
   `brew upgrade --cask sheepdog-app` updates it.
 
-Then run `sheepdog setup` as above. `sheepdog update` prints the upgrade steps
-for the way you installed.
+Then run `sheepdog setup`. `sheepdog update` prints the upgrade steps for the
+way you installed.
 
 Next: [pair your iPhone](iphone-app.md), [choose other models](models.md),
 [use it away from home](remote-access.md).

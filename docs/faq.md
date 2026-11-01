@@ -3,8 +3,9 @@
 **Short answers to what people ask first.**
 
 **Do I need herdr?** For real use, yes: sheepdog watches the agents herdr runs
-(Claude Code, Codex, agy). Either herdr works: the herdr app, or herdr-core
-(`hc`, the new herdr). sheepdog finds whichever is running when it starts;
+(Claude Code, Codex, agy). Use either
+[herdr-tui](https://github.com/herdrdev/herdr) or herdr-core (`hc`). sheepdog
+finds whichever is running when it starts;
 `herdr.backend` in [CONFIG.md](../CONFIG.md) picks one. On herdr-core some things
 are not there yet: renaming or closing a space, worktrees and renaming an
 agent. Agents sheepdog starts show up in herdr-app, each in a space and tab.

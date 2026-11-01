@@ -218,7 +218,7 @@ func TestDoctorCommand(t *testing.T) {
 		t.Errorf("code = %d", code)
 	}
 	s := out.String()
-	for _, want := range []string{"ok    config", "FAIL  herdr", "ok    gemini key", "ok    web port", "ok    env file"} {
+	for _, want := range []string{"ok    config", "FAIL  herdr-tui", "ok    gemini key", "ok    web port", "ok    env file"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in\n%s", want, s)
 		}
