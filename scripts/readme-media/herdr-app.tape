@@ -24,7 +24,11 @@ Enter
 Wait+Screen /Run sheepdog setup now\?/
 Sleep 300ms
 Enter
+Wait+Screen /Your setup:/
 Wait+Screen /Sheepdog\.app/
+# Setup's prompts have no trailing newline, so the hidden output scrubber
+# cannot deliver them to VHS until they are answered. The setup block is
+# complete at this point; Enter takes the default for each next prompt.
 Sleep 1s
 Enter
 Sleep 3s
