@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -421,15 +423,50 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 		printLayoutSwitchManual(o.Out, nil)
 		return
 	}
-	line, err := o.LayoutSwitch(ctx)
+	out, err := o.LayoutSwitch(ctx)
+	if err == nil {
+		err = herdrAppAnswerError(out)
+	}
 	if err != nil {
 		printLayoutSwitchManual(o.Out, err)
 		return
 	}
-	if text := setupLastLine(line); text != "" {
-		fprintln(o.Out, "herdr-app layout switch: "+text)
+	// herdr-app answers ok even for a layout it does not have, so the
+	// switch counts only once its shared state says so.
+	for i := 0; ; i++ {
+		if onboard.ShownLayout(env.HerdrAppHome, o.Probe) == "sheepdog" {
+			fprintln(o.Out, "Switched herdr-app to the Sheepdog layout.")
+			return
+		}
+		if i >= layoutConfirmTries {
+			break
+		}
+		time.Sleep(layoutConfirmDelay)
 	}
-	fprintln(o.Out, "Switched herdr-app to the Sheepdog layout.")
+	printLayoutSwitchManual(o.Out, errors.New("herdr-app did not show it"))
+}
+
+// How long setup waits for herdr-app to show the Sheepdog layout after
+// the switch (tests set the delay to zero).
+var (
+	layoutConfirmTries = 10
+	layoutConfirmDelay = 200 * time.Millisecond
+)
+
+// herdrAppAnswerError reads a `herdr-app do` answer: {"ok": true}, or
+// {"error": "…"}. Anything else is not an error (an older herdr-app).
+func herdrAppAnswerError(out string) error {
+	var answer struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(out)), &answer) != nil {
+		return nil
+	}
+	if answer.Error != "" {
+		return errors.New(answer.Error)
+	}
+	return nil
 }
 
 func printLayoutSwitchManual(w io.Writer, err error) {

@@ -194,6 +194,10 @@ func detectPanel(applicable bool, home string, p Probe, panel fs.FS) PanelState 
 	return PanelCurrent
 }
 
+// ShownLayout is the layout herdr-app shows, from <home>/shared.json
+// ("main" when it cannot tell).
+func ShownLayout(home string, p Probe) string { return detectShownLayout(home, p) }
+
 func detectShownLayout(home string, p Probe) string {
 	const main = "main"
 	if p.ReadFile == nil {

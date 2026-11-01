@@ -90,7 +90,10 @@ func TestSetupEnvironmentInteractive(t *testing.T) {
 			return "loaded sheepdog\n", nil
 		},
 		LayoutSwitch: func(context.Context) (string, error) {
-			return "switched\n", nil
+			if err := os.WriteFile(filepath.Join(appHome, "shared.json"), []byte(`{"layout":"sheepdog"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return "{\n  \"ok\": true\n}\n", nil
 		},
 		Setenv: func(key, value string) error {
 			if key != "SHEEPDOG_HERDR_BACKEND" {
@@ -217,6 +220,9 @@ func TestSetupEnvironmentCheckFailureIsAWarning(t *testing.T) {
 }
 
 func TestSetupSheepdogLayout(t *testing.T) {
+	tries, delay := layoutConfirmTries, layoutConfirmDelay
+	layoutConfirmTries, layoutConfirmDelay = 2, 0
+	t.Cleanup(func() { layoutConfirmTries, layoutConfirmDelay = tries, delay })
 	panel := setupTestPanel()
 	baseConfig := setupTestConfig()
 	baseConfig.Herdr.Backend = config.HerdrBackendHC // no backend question in these layout cases
@@ -227,6 +233,8 @@ func TestSetupSheepdogLayout(t *testing.T) {
 		existing    string
 		shownDocked bool
 		switchErr   error
+		answer2     string // herdr-app's answer; "" is {"ok": true}
+		noSwitch    bool   // herdr-app answers but does not show the layout
 		wantWritten bool
 		wantSwitch  int
 		wantText    []string
@@ -263,6 +271,16 @@ func TestSetupSheepdogLayout(t *testing.T) {
 				"or press Ctrl+Shift+L in herdr-app.",
 			},
 		},
+		{
+			name: "an ok answer without the switch is a warning", answer: "y\n", interactive: true,
+			noSwitch: true, wantWritten: true, wantSwitch: 1,
+			wantText: []string{"Warning: could not switch herdr-app to the Sheepdog layout: herdr-app did not show it"},
+		},
+		{
+			name: "herdr-app's error is said", answer: "y\n", interactive: true,
+			answer2: "{\n  \"error\": \"no layout \\\"sheepdog\\\"\"\n}\n", noSwitch: true, wantWritten: true, wantSwitch: 1,
+			wantText: []string{`Warning: could not switch herdr-app to the Sheepdog layout: no layout "sheepdog"`},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -295,9 +313,19 @@ func TestSetupSheepdogLayout(t *testing.T) {
 				Layout:      []byte("layout"),
 				Prompt:      prompt,
 				Interactive: tc.interactive,
+				// Like herdr-app: a JSON answer, and the shown layout in
+				// shared.json changes when the switch really happened.
 				LayoutSwitch: func(context.Context) (string, error) {
 					switches++
-					return "switched\n", tc.switchErr
+					if tc.switchErr == nil && !tc.noSwitch {
+						if err := os.WriteFile(filepath.Join(appHome, "shared.json"), []byte(`{"layout":"sheepdog"}`), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if tc.answer2 != "" {
+						return tc.answer2, tc.switchErr
+					}
+					return "{\n  \"ok\": true\n}\n", tc.switchErr
 				},
 				Out: &out,
 			})
