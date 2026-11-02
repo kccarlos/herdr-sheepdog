@@ -143,7 +143,9 @@ The scenarios are:
    an agent is running in it, and after that agent exited;
 6. a new agent in a folder with an existing space joins that space (the
    old backend splits its pane; hc opens a new tab in the same space);
-7. a blocked question with options is read and parsed the same way.
+7. a blocked question with options is read and parsed the same way;
+8. a periodic snapshot with no state change logs nothing and emits no
+   transition.
 
 The exit decision follows the old protocol. `agent.list` contains only
 panes that currently host a recognised agent. Exiting an agent emits the

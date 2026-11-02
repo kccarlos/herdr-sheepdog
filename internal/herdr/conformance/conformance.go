@@ -9,6 +9,7 @@ package conformance
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -100,6 +101,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "blocked question with options is parsed",
 			Run:  blockedQuestionOptions,
+		},
+		{
+			Name: "a periodic snapshot with no change logs nothing and emits no transition",
+			Run:  unchangedSnapshotIsSilent,
 		},
 	}
 }
@@ -402,6 +407,118 @@ func blockedQuestionOptions(t *testing.T, newDriver NewDriver) {
 		prompt.Answers()[0].Label != "Yes" || prompt.Answers()[1].Label != "No" {
 		t.Fatalf("prompt = %+v", prompt)
 	}
+}
+
+func unchangedSnapshotIsSilent(t *testing.T, newDriver NewDriver) {
+	d := newDriver(t)
+	ctx := testContext(t)
+	shells := NewShellBook()
+	pane, _, err := shells.Open(ctx, d.ShellHost(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Run(ctx, pane.PaneID, Program{
+		Kind: "codex", App: "codex", Reported: true, State: herdr.StateIdle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oneAgent(t, ctx, d.Backend())
+
+	const snapshotEvery = 25 * time.Millisecond
+	log := &recordingLogger{}
+	watchCtx, cancel := context.WithCancel(ctx)
+	w := herdr.NewWatcher(d.Backend(), herdr.WatcherConfig{
+		Debounce:         10 * time.Millisecond,
+		SnapshotInterval: snapshotEvery,
+		DedupWindow:      5 * time.Millisecond,
+	}, log)
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(watchCtx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-runDone:
+			if err != nil {
+				t.Errorf("watcher: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not stop")
+		}
+	})
+
+	transitions := w.Transitions()
+	select {
+	case tr, ok := <-transitions:
+		if !ok {
+			t.Fatal("transitions channel closed")
+		}
+		if tr.From != "" || tr.To != herdr.StateIdle || tr.Source != "snapshot" {
+			t.Fatalf("initial transition = %+v, want snapshot to idle", tr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the initial snapshot")
+	}
+
+	// Let the initial refresh and any immediately queued socket work settle
+	// before using LastBeat to count the periodic snapshots.
+	time.Sleep(2 * snapshotEvery)
+	before := w.LastBeat()
+	log.reset()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	lastBeat := before
+	for beats := 0; beats < 2; {
+		select {
+		case tr, ok := <-transitions:
+			if !ok {
+				t.Fatal("transitions channel closed")
+			}
+			t.Fatalf("unchanged periodic snapshot emitted transition %+v", tr)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for periodic snapshots")
+		case <-tick.C:
+			if now := w.LastBeat(); now.After(lastBeat) {
+				lastBeat = now
+				beats++
+			}
+		}
+	}
+	select {
+	case tr, ok := <-transitions:
+		if !ok {
+			t.Fatal("transitions channel closed")
+		}
+		t.Fatalf("unchanged periodic snapshot emitted transition %+v", tr)
+	default:
+	}
+	if entries := log.snapshot(); len(entries) != 0 {
+		t.Fatalf("unchanged periodic snapshot logged %+v", entries)
+	}
+}
+
+type recordingLogger struct {
+	mu      sync.Mutex
+	entries []string
+}
+
+func (l *recordingLogger) Log(_, typ, paneID string, _ any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = append(l.entries, typ+" "+paneID)
+}
+
+func (l *recordingLogger) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = nil
+}
+
+func (l *recordingLogger) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.entries...)
 }
 
 func assertAgents(t *testing.T, ctx context.Context, backend herdr.Backend) {
