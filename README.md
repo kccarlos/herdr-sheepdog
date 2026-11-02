@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo/sheepdog-logo-color.svg">
-    <img src="assets/brand/logo/sheepdog-logo-mono-ink.svg" alt="sheepdog logo" width="120" height="120">
+    <img src="assets/brand/logo/sheepdog-face-ink.svg" alt="sheepdog logo" width="120" height="120">
   </picture>
 </p>
 
