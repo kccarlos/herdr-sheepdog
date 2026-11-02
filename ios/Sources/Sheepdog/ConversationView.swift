@@ -36,6 +36,11 @@ struct ConversationView: View {
     var sendingTyped = false
 
     @State private var atBottom = true
+    /// The Conversation's semantic scroll position. Unlike an imperative
+    /// `ScrollViewProxy` call in `onAppear`, SwiftUI applies this in the
+    /// same layout pass as the lazy rows, so a returning pane cannot resolve
+    /// "bottom" against a stale, not-yet-laid-out content size.
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
     /// The list's own height on screen.
     @State private var visibleHeight: CGFloat = 1000
     @State private var lastSeenID: String?
@@ -173,6 +178,13 @@ struct ConversationView: View {
                 )
             })
             .defaultScrollAnchor(.bottom)
+            .scrollPosition($scrollPosition, anchor: .bottom)
+            .onAppear {
+                // A pane switch tears the lazy stack down and inserts it
+                // again. Restore the latest row without relying on the
+                // previous UIScrollView offset.
+                scrollPosition.scrollTo(edge: .bottom)
+            }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
                 let rounded = h.rounded()
                 if rounded != visibleHeight { visibleHeight = rounded }
@@ -187,7 +199,7 @@ struct ConversationView: View {
                 // the pill would sit on the agent strip.
                 if !atBottom, visibleHeight > 160, let newest = layout.rows.last?.id, newest != lastSeenID {
                     Button {
-                        withAnimation { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
+                        withAnimation { scrollPosition.scrollTo(edge: .bottom) }
                     } label: {
                         Label("Jump to latest", systemImage: "arrow.down")
                             .font(.footnote.weight(.semibold))
@@ -219,13 +231,13 @@ struct ConversationView: View {
                 guard atBottom else { return }
                 if let id = newest?.id, id != lastSeenID { lastSeenID = id }
                 withAnimation(Theme.ease) {
-                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
             }
             .onChange(of: followToken) { _, _ in
                 atBottom = true
                 withAnimation(Theme.ease) {
-                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
             }
             .onChange(of: openPendingIDs) { _, _ in
@@ -234,7 +246,7 @@ struct ConversationView: View {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 350_000_000)
                     withAnimation(Theme.ease) {
-                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                        scrollPosition.scrollTo(edge: .bottom)
                     }
                 }
             }
