@@ -13,7 +13,7 @@ import { View } from "gpui-kit";
 import { TextareaState } from "gpui-base";
 import { exists } from "fs/promises";
 import { connect } from "net";
-import { closeOverlay, exec, home, openOverlay, props, run, setShared, shared, theme } from "herdr";
+import { closeOverlay, exec, home, nextCommand, openOverlay, props, run, setShared, shared, theme } from "herdr";
 import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
@@ -25,6 +25,7 @@ import { createOutbox, pendingItems } from "./model/outbox.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
+import { keyAction } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
 import {
   addLanguage,
@@ -77,6 +78,7 @@ export default class Sheepdog extends View {
       this.store = createStore({ http, conversation: true });
       this.initPanel(http, cx);
       this.initLive(cx, base);
+      if (this.overlayRole === "block") this.initKeys(cx);
       cx.timer.every(250, (cx) => {
         this.pageBack(cx);
         // What has stayed long enough (a note, a settled card) goes.
@@ -110,6 +112,32 @@ export default class Sheepdog extends View {
       });
       await this.live.run();
     });
+  }
+
+  // The docked block can hold the keyboard (`"focusable"` in mod.json):
+  // `pane.go` sends "focus", and the keys are the rules of model/keys.js.
+  initKeys(cx) {
+    this.panelFocus = cx.focus_handle();
+    cx.spawn(async (cx) => {
+      for (;;) {
+        if ((await nextCommand()) === "focus") {
+          this.panelFocus.focus();
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  onKey(event, cx) {
+    const question = this.answers.cards(this.store.getState().app).find((card) => card.phase === "open") ?? null;
+    const action = keyAction(event.key, { onPanel: this.panelFocus.is_focused(), question, suggestions: this.derived().live });
+    if (!action) return;
+    cx.stop_propagation();
+    if (action.type === "composer") this.composer.focus();
+    else if (action.type === "panel") this.panelFocus.focus();
+    else if (action.type === "leave") run("pane.go", { direction: "left" });
+    else if (action.type === "answer") this.answer(action.question, action.option, cx);
+    else if (action.type === "send") this.send(action.text, cx, false);
   }
 
   // The composer's textarea (made here, it needs a live host call), the typed
@@ -690,7 +718,9 @@ export default class Sheepdog extends View {
           this.wantOlder = true;
         },
         onOpenRow: (key, cx) => this.openRow(key, cx),
-      }).on_size_change(onSize);
+      })
+        .on_size_change(onSize)
+        .when(Boolean(this.panelFocus), (el) => el.track_focus(this.panelFocus).on_key_down((event, cx) => this.onKey(event, cx)));
     }
     return railView(t, status, { onOpen: () => this.openPanel() }).on_size_change(onSize);
   }
