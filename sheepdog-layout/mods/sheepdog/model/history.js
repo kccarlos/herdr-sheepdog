@@ -1,9 +1,11 @@
 // The conversation the panel knows about: items with server ids, from
 // /api/conversation pages, kept sorted by id with each id once. It ports the
 // paging half of ConversationHistory (ios/Sources/SheepdogKit); live events
-// are not folded here: the store asks the daemon for the newest page instead,
-// so the daemon's own merging rules (internal/web/conversation.go) stay the
-// only ones. Pure: every function returns a new history. No herdr imports.
+// are not merged here: the store asks the daemon for the newest page, so the
+// daemon's own merging rules (internal/web/conversation.go) stay the record.
+// Only `upsertItem` takes an item before the page has it (model/fragments.js). Pure: every function returns a new history. No herdr imports.
+
+import { sameValue } from "./equal.js";
 
 // How many items are kept in memory; older pages past this are dropped from
 // the top again (the phone's `memoryCapacity`).
@@ -35,7 +37,26 @@ export function applyNewest(history, page, requestedAt = 0) {
   const kept = history.items.filter((i) => !serverIds.has(i.id) && !(i.id >= lower && i.id <= upper));
   const holdsOlder = kept.some((i) => i.id < (items[0]?.id ?? requestedAt));
   const nextBefore = holdsOlder && page.next_before != null ? history.nextBefore : (page.next_before ?? null);
-  return trimFront({ items: normalise([...kept, ...items]), nextBefore, synced: true });
+  const next = trimFront({ items: normalise([...kept, ...items]), nextBefore, synced: true });
+  return sameHistory(history, next) ? history : next;
+}
+
+// The same items and cursor: a refetch that brought nothing new, which must
+// not look like a change (every change redraws the list).
+function sameHistory(a, b) {
+  return a.synced === b.synced && a.nextBefore === b.nextBefore && a.items.length === b.items.length &&
+    a.items.every((item, i) => sameValue(item, b.items[i]));
+}
+
+// One item shown before the daemon's page has it (model/fragments.js): added,
+// or replacing the item with its id. The next newest page replaces it.
+export function upsertItem(history, item) {
+  const at = history.items.findIndex((i) => i.id === item.id);
+  if (at >= 0) {
+    if (sameValue(history.items[at], item)) return history;
+    return { ...history, items: history.items.map((i, k) => (k === at ? item : i)) };
+  }
+  return trimFront({ ...history, items: normalise([...history.items, item]) });
 }
 
 // An older page (`before` set): merged by id, the server's copy wins.

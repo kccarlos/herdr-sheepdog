@@ -11,9 +11,72 @@ const EMPTY_ERRORS = {
   devices: "",
 };
 
-// Every part of the form before any request answers.
-export function emptySettingsForm() {
+// The form's sections, in order. `part` is the daemon route a section reads
+// (where its error lands); `open` is whether it starts open. The common
+// choices (which voice, which devices are paired) start open and the rest
+// start folded to their title and current choice.
+export const SECTIONS = [
+  { id: "voice", title: "Voice", part: "voice", open: true },
+  { id: "devices", title: "Paired devices", part: "devices", open: true },
+  { id: "brain", title: "Orchestrator", part: "brain", open: false },
+  { id: "languages", title: "Languages", part: "settings", open: false },
+  { id: "replies", title: "Replies", part: "settings", open: false },
+];
+
+// The shared value (herdr's `shared`) that remembers which sections are open.
+export const SETTINGS_OPEN_KEY = "sheepdog.settings.open";
+
+// Which sections are open: the defaults, changed by what was saved (`saved`
+// is { id: boolean }; anything else in it is ignored).
+export function openSections(saved) {
+  const open = {};
+  for (const section of SECTIONS) open[section.id] = typeof saved?.[section.id] === "boolean" ? saved[section.id] : section.open;
+  return open;
+}
+
+// A section with an error is shown open, so the error is not hidden.
+export function sectionOpen(form, id) {
+  const section = SECTIONS.find((s) => s.id === id);
+  return Boolean(form.open[id]) || Boolean(section && form.errors[section.part]);
+}
+
+export function toggleSection(form, id) {
+  return { ...form, open: { ...form.open, [id]: !sectionOpen(form, id) } };
+}
+
+// What a folded section shows beside its title: the current choice.
+export function sectionSummary(form, id) {
+  switch (id) {
+    case "voice": {
+      const voice = form.voice;
+      const current = voice?.providers?.find((p) => p.id === voice.provider);
+      return current ? String(current.label || current.id) : "";
+    }
+    case "brain": {
+      const brain = form.brain;
+      if (!brain?.model) return "";
+      const model = brain.models?.find((m) => m.name === brain.model);
+      return String(model?.display_name || brain.model);
+    }
+    case "languages": {
+      if (!form.settings) return "";
+      const { chosen } = languageChoices(form.settings);
+      return chosen.length ? chosen.map((o) => o.native || o.name || o.code).join(", ") : "Follows what you speak";
+    }
+    case "replies":
+      return form.settings ? String(form.settings.chattiness || "") : "";
+    case "devices":
+      return form.devices.length === 0 ? "None paired" : `${form.devices.length} paired`;
+    default:
+      return "";
+  }
+}
+
+// Every part of the form before any request answers. `saved` is the open
+// state remembered from the last time (see openSections).
+export function emptySettingsForm(saved) {
   return {
+    open: openSections(saved),
     state: null,
     voice: null,
     brain: null,

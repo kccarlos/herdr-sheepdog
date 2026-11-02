@@ -39,14 +39,38 @@ export function overlayFrame(t, { id, title, subtitle, onClose, body, footer }) 
     .when(Boolean(footer), (el) => el.child(footer));
 }
 
-export function formSection(t, title, children, { footer = "", error = "" } = {}) {
+// A section of a form that folds to its title and current choice (`summary`).
+// `content` is { rows, footer, error } while open, else null.
+export function foldSection(t, id, { title, summary, open, onToggle, content }) {
   return v_flex()
     .w_full()
     .gap(7)
-    .child(div().text_size(11.5).font_semibold().text_color(t.muted).child(title))
-    .children(children)
-    .when(Boolean(footer), (el) => el.child(div().text_size(11).text_color(t.dim).child(footer)))
-    .when(Boolean(error), (el) => el.child(errorText(t, error)));
+    .child(
+      h_flex()
+        .id(`fold-${id}`)
+        .w_full()
+        .min_h(32)
+        .px(9)
+        .py(5)
+        .gap(8)
+        .items_center()
+        .rounded(7)
+        .border(1)
+        .border_color(t.border)
+        .bg(open ? t.raised : t.chrome)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .on_click(onToggle)
+        .child(div().w(12).flex_none().text_size(11).text_color(t.muted).child(open ? "▾" : "▸"))
+        .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
+        .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.muted).truncate().text_right().child(open ? "" : summary)),
+    )
+    .when(Boolean(content), (el) =>
+      el
+        .children(content.rows)
+        .when(Boolean(content.footer), (e) => e.child(div().text_size(11).text_color(t.dim).child(content.footer)))
+        .when(Boolean(content.error), (e) => e.child(errorText(t, content.error))),
+    );
 }
 
 export function choice(t, id, { title, detail = "", selected = false, disabled = false, onClick, right = "" }) {

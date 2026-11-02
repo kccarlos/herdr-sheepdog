@@ -3,7 +3,9 @@
 // daemon (through `http`, which net/http.js makes) and tells subscribers when
 // something changed; it never draws. No herdr imports: node tests it.
 
-import { applyNewest, applyOlder, canLoadOlder, emptyHistory, newestId } from "./history.js";
+import { sameValue } from "./equal.js";
+import { foldFragment, noRuns } from "./fragments.js";
+import { applyNewest, applyOlder, canLoadOlder, emptyHistory, newestId, upsertItem } from "./history.js";
 import { foldReply } from "./replies.js";
 
 // How many items one page asks for.
@@ -25,7 +27,12 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
   let running = null; // the refresh loop in flight
   let queued = null; // what asked for another round while it ran
 
+  let runs = noRuns(); // transcript fragments in progress (model/fragments.js)
+
+  // Tells subscribers only when a field really changed: every notification
+  // redraws the panel, and most refetches bring what it already shows.
   const set = (patch) => {
+    if (Object.keys(patch).every((key) => sameValue(snapshot[key], patch[key]))) return;
     snapshot = { ...snapshot, ...patch };
     for (const listener of listeners) listener(snapshot);
   };
@@ -100,10 +107,18 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     refresh,
     loadOlder,
     setStream: (stream) => set({ stream }),
-    // A daemon event, for what only its payload says: the suggested replies.
+    // A daemon event: the suggested replies, which only its payload says, and
+    // the words it carries, shown before the daemon's page has them.
     observe(event, id) {
       const replies = foldReply(snapshot.replies, event, id);
       if (replies !== snapshot.replies) set({ replies });
+      if (!conversation) return;
+      const folded = foldFragment(runs, event, id);
+      runs = folded.runs;
+      if (folded.item) {
+        const history = upsertItem(snapshot.history, folded.item);
+        if (history !== snapshot.history) set({ history });
+      }
     },
     newestId: () => newestId(snapshot.history),
   };

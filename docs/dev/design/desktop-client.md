@@ -423,11 +423,15 @@ and commands, with `exec` and the file check passed in; no herdr imports),
   where they move nothing, and drawing the last row pages back. The rows of a
   `list()` may carry no handlers, so the folded "N agent updates" group, which
   opens on a tap, is not drawn yet (each update is its own line).
-- **Events only trigger a refetch.** Panel A does not fold `/events` records
-  into items (as the phone's `ConversationHistory.fold` does): the daemon's
-  own rebuild stays the only copy of those rules, so a record makes the panel
-  ask `/api/state` and `/api/conversation` again, with transcript fragments
-  waiting for a quiet 1.5 s.
+- **Events show their words, the daemon stays the record.** The daemon's
+  rebuild (`internal/web/conversation.go`) is the only full copy of the
+  folding rules, so most records make the panel ask `/api/state` and
+  `/api/conversation` again (40 ms apart at the least). For the few records
+  whose payload is the whole item (transcript fragments, typed lines, pushes),
+  `model/fragments.js` mirrors the builder and shows the words at once, as an
+  item with the id the daemon will give it; the next page, asked for after 0.7 s
+  of quiet, replaces it. A refetch that brings nothing new does not notify, and
+  a live stream is checked every 30 s.
 - **A short panel compacts before it overflows.** The vertical budget is pure
   model logic: given the header, banners, voice bar, question and composer
   heights, it returns the timeline floor, whether banners collapse, how much

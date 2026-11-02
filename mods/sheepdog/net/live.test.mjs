@@ -2,7 +2,7 @@
 // that is down: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createLive, MIN_GAP_MS, POLL_MS, QUIET_MS } from "./live.js";
+import { CHECK_MS, createLive, MIN_GAP_MS, POLL_MS, QUIET_MS } from "./live.js";
 
 const tick = async (n = 5) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
@@ -92,7 +92,7 @@ test("a burst of events is one or two rounds, and only events that change someth
   h.socket().feed(HEAD + h.chunk(": hi\n\n"));
   await h.clock.advance(MIN_GAP_MS * 2);
   h.asked.length = 0;
-  h.socket().feed(h.event(1, "pending.created") + h.event(2, "pending.created") + h.event(3, "voice.push") + h.event(4, "web.client.stats"));
+  h.socket().feed(h.event(1, "pending.created") + h.event(2, "pending.created") + h.event(3, "voice.tool_result") + h.event(4, "web.client.stats"));
   await h.clock.advance(MIN_GAP_MS * 3);
   assert.ok(h.asked.length >= 1 && h.asked.length <= 2, `asked ${h.asked.length} times`);
   assert.deepEqual(h.asked[0], { state: true, conversation: true });
@@ -134,7 +134,7 @@ test("a state-only event does not ask for the conversation", async () => {
   await done;
 });
 
-test("transcript fragments wait for a quiet moment, then ask for the conversation once", async () => {
+test("events whose words are already shown wait for a quiet moment, then ask once", async () => {
   const h = harness();
   const done = h.live.run();
   await h.clock.advance(MIN_GAP_MS); // the start's own round, and its gap
@@ -147,7 +147,7 @@ test("transcript fragments wait for a quiet moment, then ask for the conversatio
   }
   assert.deepEqual(h.asked, [], "still talking");
   await h.clock.advance(QUIET_MS);
-  assert.deepEqual(h.asked, [{ state: false, conversation: true }]);
+  assert.deepEqual(h.asked, [{ state: true, conversation: true }]);
   h.live.stop();
   await h.clock.advance(POLL_MS);
   await done;
@@ -173,4 +173,20 @@ test("with the stream down the daemon is polled every 3 s until stop()", async (
   await clock.advance(20_000);
   await done;
   assert.equal(asked.length, 4, "stopped means stopped");
+});
+
+test("with the stream up, a long silence is checked with one ask", async () => {
+  const h = harness();
+  const done = h.live.run();
+  await h.clock.advance(MIN_GAP_MS);
+  h.socket().feed(HEAD + h.chunk(": hi\n\n"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  h.asked.length = 0;
+  await h.clock.advance(CHECK_MS - POLL_MS);
+  assert.deepEqual(h.asked, [], "quiet and live: nothing asked yet");
+  await h.clock.advance(POLL_MS * 2);
+  assert.deepEqual(h.asked, [{ state: true, conversation: true }]);
+  h.live.stop();
+  await h.clock.advance(POLL_MS);
+  await done;
 });
