@@ -34,6 +34,8 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     /// Another window holds the audio (iPad): this capsule offers "Use
     /// here" in place of the keyboard.
     var audioElsewhere = false
+    /// "In another window", or who holds the daemon's voice ("Voice on Mac").
+    var elsewhereLabel = "In another window"
     let onConnect: () -> Void
     let onStop: () -> Void
     let onMute: () -> Void
@@ -63,7 +65,10 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode, audioElsewhere: audioElsewhere) }
     /// The status the capsule shows: the mode's own words where the state
     /// cannot say them (stopped, in another window).
-    private var shownStatus: String { mode.statusOverride ?? statusText }
+    private var shownStatus: String {
+        if mode == .elsewhere { return elsewhereLabel }
+        return mode.statusOverride ?? statusText
+    }
     private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
     private var height: CGFloat { min(max(scaledHeight, 60), cap) }
     /// Past this the capsule would cover the conversation it serves: the

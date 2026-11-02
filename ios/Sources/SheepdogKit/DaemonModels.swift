@@ -45,6 +45,10 @@ public struct Hello: Codable, Equatable, Sendable {
     /// (docs/dev/ws-contract.md "Idempotency keys"), so a typed line or a
     /// New agent may be retried after a timeout. Absent on older daemons.
     public var idempotencyKeys: Bool?
+    /// Why the live terminal is unavailable, from this daemon (e.g. an old
+    /// herdr or herdr-core without `terminal.attach`). Absent when the
+    /// live terminal is available and on older daemons.
+    public var termUnavailable: String?
 
     public struct Computer: Codable, Equatable, Sendable {
         public var id: String
@@ -63,12 +67,15 @@ public struct Hello: Codable, Equatable, Sendable {
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
         case idempotencyKeys = "idempotency_keys"
+        case termUnavailable = "term_unavailable"
     }
 
     public var needsToken: Bool { auth == "token" }
     public var displayName: String { voiceName?.isEmpty == false ? voiceName! : "Sheepdog" }
 
-    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio, voiceProvider: String? = nil, voiceModel: String? = nil, protocol p: Int? = nil, minProtocol: Int? = nil) {
+    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio,
+                voiceProvider: String? = nil, voiceModel: String? = nil, protocol p: Int? = nil,
+                minProtocol: Int? = nil, termUnavailable: String? = nil) {
         self.name = name
         self.version = version
         self.voiceName = voiceName
@@ -79,6 +86,7 @@ public struct Hello: Codable, Equatable, Sendable {
         self.voiceModel = voiceModel
         self.protocol = p
         self.minProtocol = minProtocol
+        self.termUnavailable = termUnavailable
     }
 }
 
@@ -563,6 +571,50 @@ public struct UtteranceReply: Decodable, Equatable, Sendable {
         self.via = via
         self.tool = tool
         self.spoken = spoken
+    }
+}
+
+/// The reply to `POST /api/turn`: the orchestrator answered the typed line
+/// in text and recorded both sides as `dog`/`typed` conversation items.
+public struct TypedTurnReply: Decodable, Equatable, Sendable {
+    public var reply: String
+    public var turnID: String
+    public var acted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case reply, acted
+        case turnID = "turn_id"
+    }
+
+    public init(reply: String, turnID: String, acted: Bool) {
+        self.reply = reply
+        self.turnID = turnID
+        self.acted = acted
+    }
+}
+
+/// The two refusals a typed turn must explain without daemon jargon.
+public enum TypedTurnFailure: LocalizedError, Equatable, Sendable {
+    /// 503: the orchestrator is off or not configured.
+    case unavailable(reason: String)
+    /// 409: a spoken turn claimed the words first.
+    case alreadyAnswered
+
+    public var errorDescription: String? {
+        switch self {
+        case let .unavailable(reason):
+            let detail = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            if detail.lowercased().contains("orchestrator is off") {
+                return "The orchestrator is off. Turn it on, then try again."
+            }
+            guard !detail.isEmpty else {
+                return "The orchestrator is unavailable. Turn it on, then try again."
+            }
+            let sentence = detail.prefix(1).uppercased() + detail.dropFirst()
+            return "Typed messages need the orchestrator. \(sentence)"
+        case .alreadyAnswered:
+            return "The voice answered that first. Try again."
+        }
     }
 }
 
