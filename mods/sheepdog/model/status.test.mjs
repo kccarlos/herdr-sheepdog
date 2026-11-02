@@ -82,10 +82,12 @@ test("muted and speaking show on the label and the tone", () => {
 test("events: what changes the conversation, only the state, or nothing", () => {
   assert.equal(eventEffect("pending.created"), "now");
   assert.equal(eventEffect("pending.confirmed"), "now");
-  assert.equal(eventEffect("web.utterance"), "now");
+  assert.equal(eventEffect("web.utterance"), "settle");
+  assert.equal(eventEffect("voice.text"), "settle");
+  assert.equal(eventEffect("voice.tool_result"), "now");
   assert.equal(eventEffect("daemon.start"), "now");
-  assert.equal(eventEffect("voice.transcript.in"), "later");
-  assert.equal(eventEffect("voice.transcript.out"), "later");
+  assert.equal(eventEffect("voice.transcript.in"), "settle");
+  assert.equal(eventEffect("voice.transcript.out"), "settle");
   assert.equal(eventEffect("web.client.attach"), "state");
   assert.equal(eventEffect("voice.muted"), "state");
   assert.equal(eventEffect("web.client.stats"), null);

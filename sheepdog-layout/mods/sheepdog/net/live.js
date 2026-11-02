@@ -1,10 +1,12 @@
 // Keeps the store current: the live stream when it is up, a poll when it is
-// not (docs/dev/design/desktop-client.md, section 6.2). A daemon event that
-// changes what the panel shows makes the store ask /api/state and
-// /api/conversation again; while the stream is down a 3 s poll does the same,
-// and the stream's status is what the rail reads as "Live updates paused".
-// Each event is also handed to the store's `observe`, for the replies'
-// suggested options, which only the event's payload has.
+// not (docs/dev/design/desktop-client.md, section 6.2). The words of an event
+// are shown at once by the store (model/fragments.js); a daemon event that
+// changes anything else makes the store ask /api/state and /api/conversation
+// again, and the ones whose words are already shown ask once things settle.
+// While the stream is down a 3 s poll asks instead, and the stream's status is
+// what the rail reads as "Live updates paused". A slow check while it is up
+// catches anything an event did not say.
+// Each event is also handed to the store's `observe`.
 // Takes `connect` and the clock as arguments, no herdr imports: node tests it.
 
 import { eventEffect, KINDS } from "../model/events.js";
@@ -14,10 +16,14 @@ import { SseClient } from "./sse.js";
 export const POLL_MS = 3000;
 // The least time between two rounds of asking, so a burst of events costs a
 // request or two.
-export const MIN_GAP_MS = 250;
-// How long transcript fragments must stop before the conversation is asked
-// again: they come many times a second and settle into one item.
-export const QUIET_MS = 1500;
+export const MIN_GAP_MS = 40;
+// How long events whose words are already shown must stop before the
+// conversation is checked: transcript fragments come many times a second and
+// settle into one item.
+export const QUIET_MS = 700;
+// How often the daemon is asked while the stream is up, in case an event was
+// not enough to know what changed.
+export const CHECK_MS = 30000;
 
 const ALL = { state: true, conversation: true };
 
@@ -28,6 +34,7 @@ export function createLive({ store, connect, endpoint, clock, kinds = KINDS }) {
   let draining = false;
   let settle = 0; // counts transcript fragments, to tell the last one
   let client = null;
+  let lastRound = clock.now(); // when the daemon was last asked
 
   // Asks for `what`, one round at a time with a gap between rounds.
   async function request(what) {
@@ -38,6 +45,7 @@ export function createLive({ store, connect, endpoint, clock, kinds = KINDS }) {
       const next = pending;
       pending = null;
       await store.refresh(next);
+      lastRound = clock.now();
       await clock.sleep(MIN_GAP_MS);
     }
     draining = false;
@@ -54,7 +62,7 @@ export function createLive({ store, connect, endpoint, clock, kinds = KINDS }) {
     switch (eventEffect(event.type)) {
       case "now": request(ALL); break;
       case "state": request({ state: true, conversation: false }); break;
-      case "later": quietThen({ state: false, conversation: true }); break;
+      case "settle": quietThen(ALL); break;
       default: break;
     }
   }
@@ -69,7 +77,8 @@ export function createLive({ store, connect, endpoint, clock, kinds = KINDS }) {
   async function poll() {
     while (!stopped) {
       await clock.sleep(POLL_MS);
-      if (!stopped && !live) await request(ALL);
+      // With the stream up, only a long silence is asked about.
+      if (!stopped && (!live || clock.now() - lastRound >= CHECK_MS)) await request(ALL);
     }
   }
 
