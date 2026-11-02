@@ -51,8 +51,9 @@ Use the mascot sparingly and consistently:
 
 | Asset | Use for |
 |---|---|
-| `assets/brand/logo/sheepdog-logo-color.svg` | README header (dark mode), app About screen, web page headers, social avatar |
-| `assets/brand/logo/sheepdog-logo-mono-ink.svg` / `-cream.svg` / `-currentcolor.svg` | favicon, docs sidebar, badges, SF-symbol-style template image, anywhere ≤ 32px or single-colour |
+| `assets/brand/logo/sheepdog-logo-color.svg` | README header (dark mode), app About screen, social avatar |
+| `assets/brand/logo/sheepdog-face-ink.svg` / `-cream.svg` / `-currentcolor.svg` | the simple face without the headset: favicons, web page headers, the Mac menu bar, README and docs headers in light mode, anywhere ≤ 32px or single-colour |
+| `assets/brand/logo/sheepdog-logo-mono-ink.svg` / `-cream.svg` / `-currentcolor.svg` | the older mono logo with the headset; only the iOS app's in-app mark still uses it |
 | `assets/brand/icon/sheepdog-icon.svg` + `assets/brand/icon/AppIcon-1024-dark.png` | iOS app icon (dark background is the canonical one). Also the GitHub repo social preview's left half |
 | `assets/brand/illustrations/hero-banner-dark.jpeg` | README hero / repo social preview (1280×640 crop) / docs landing. Replace the current launch-poster only if the banner carries the same CTA |
 | `assets/brand/illustrations/mascot-states-sheet.jpg` | reference for the four moods: listening, alert, sleeping, celebrating. Use *one* state per empty/status screen (iOS Flock view empty state = sleeping; "all agents done" = celebrating; "sheepdog is listening" = listening; "agent blocked" = alert). Crop single poses from the sheet; do not redraw them |
@@ -75,4 +76,4 @@ assets/brand/colors.json     colour source for iOS and anything else
 web/static/tokens.css        colour source for the web pages (a test keeps both files in step)
 ```
 
-Web favicons live in `web/static/` (`favicon.svg`, `favicon-32.png`, `apple-touch-icon.png`), and the pages use `web/static/logo-color.svg` and `logo-mono.svg`, copies of the brand logos.
+Web favicons live in `web/static/` (`favicon.svg`, `favicon-32.png`, `apple-touch-icon.png`), and the pages use `web/static/logo-color.svg` and `logo-face.svg`, copies of the brand logos. `favicon.svg` is the face in ink or cream by colour scheme; `favicon-32.png` is the cream face on `#1B1D22`.
