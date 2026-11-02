@@ -379,11 +379,16 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 		return
 	}
 	p.lastEv, p.lastEvAt = ev.State, ev.At
-	w.log.Log("herdr", "herdr.state", p.id, map[string]any{
-		"state":  ev.State,
-		"source": ev.Source,
-		"agent":  p.agent,
-	})
+	// Every snapshot repeats each live agent's current state. Only log a
+	// snapshot when it reports a state change; the rest of this path still
+	// runs so pending transitions and dedup behave exactly as before.
+	if ev.Source != "snapshot" || ev.State != p.state {
+		w.log.Log("herdr", "herdr.state", p.id, map[string]any{
+			"state":  ev.State,
+			"source": ev.Source,
+			"agent":  p.agent,
+		})
+	}
 
 	if p.pending != nil {
 		if ev.State == StateBlocked {
