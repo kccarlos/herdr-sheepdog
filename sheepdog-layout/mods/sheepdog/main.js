@@ -13,7 +13,7 @@ import { View } from "gpui-kit";
 import { TextareaState } from "gpui-base";
 import { exists } from "fs/promises";
 import { connect } from "net";
-import { closeOverlay, exec, home, openOverlay, props, run, shared, theme } from "herdr";
+import { closeOverlay, exec, home, openOverlay, props, run, setShared, shared, theme } from "herdr";
 import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
@@ -39,7 +39,9 @@ import {
   removeLanguage,
   settingsFailed,
   settingsLoadFinished,
+  SETTINGS_OPEN_KEY,
   settingsLoaded,
+  toggleSection,
 } from "./model/settings.js";
 import { deriveStatus } from "./model/status.js";
 import { createStore } from "./model/store.js";
@@ -141,8 +143,14 @@ export default class Sheepdog extends View {
   }
 
   initSettings(cx) {
-    this.settingsForm = emptySettingsForm();
+    // Which sections are open is remembered between openings.
+    this.settingsForm = emptySettingsForm(shared(SETTINGS_OPEN_KEY));
     this.loadSettings(cx);
+  }
+
+  toggleSettingsSection(id, cx) {
+    this.setSettings(toggleSection(this.settingsForm, id), cx);
+    setShared(SETTINGS_OPEN_KEY, this.settingsForm.open);
   }
 
   initPair(cx) {
@@ -566,6 +574,7 @@ export default class Sheepdog extends View {
           brainProvider: (id, cx) => this.chooseBrainProvider(id, cx),
           brainModel: (provider, model, cx) => this.chooseBrainModel(provider, model, cx),
           chattiness: (level, cx) => this.chooseChattiness(level, cx),
+          toggleSection: (id, cx) => this.toggleSettingsSection(id, cx),
           languageAdd: (code, cx) => this.addLanguage(code, cx),
           languageRemove: (code, cx) => this.removeLanguage(code, cx),
           languageMove: (code, delta, cx) => this.moveLanguage(code, delta, cx),

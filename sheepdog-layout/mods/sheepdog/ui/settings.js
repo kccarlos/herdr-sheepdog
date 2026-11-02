@@ -8,18 +8,28 @@ import { h_flex, v_flex } from "gpui-base";
 import {
   brainProviderGroups,
   languageChoices,
+  SECTIONS,
+  sectionOpen,
+  sectionSummary,
   updateNotice,
   voiceProviderDetail,
 } from "../model/settings.js";
 import {
   choice,
   errorText,
-  formSection,
+  foldSection,
   mutedText,
   overlayButton,
   overlayFrame,
   smallButton,
 } from "./overlay-widgets.js";
+
+// What a section holds when it is open: its rows, and the help and error
+// under them.
+const body = (rows, { footer = "", error = "" } = {}) => ({ rows, footer, error });
+
+// Which function builds each section of model/settings.js.
+const BODIES = { voice: voiceBody, brain: brainBody, languages: languagesBody, replies: repliesBody, devices: devicesBody };
 
 function updateBlock(t, update) {
   const notice = updateNotice(update);
@@ -37,7 +47,7 @@ function updateBlock(t, update) {
     .when(Boolean(notice.after), (el) => el.child(mutedText(t, notice.after)));
 }
 
-function voiceSection(t, form, actions) {
+function voiceBody(t, form, actions) {
   const list = form.voice;
   const rows = [];
   if (!list) {
@@ -58,7 +68,7 @@ function voiceSection(t, form, actions) {
       );
     }
   }
-  return formSection(t, "Voice", rows, {
+  return body(rows, {
     footer: "Which model the voice talks with. The conversation and your agents carry over.",
     error: form.errors.voice,
   });
@@ -98,7 +108,7 @@ function brainProviderHeading(t, form, group, actions) {
     );
 }
 
-function brainSection(t, form, actions) {
+function brainBody(t, form, actions) {
   const brain = form.brain;
   const rows = [];
   if (!brain) {
@@ -125,19 +135,19 @@ function brainSection(t, form, actions) {
     }
     if (brain.error) rows.push(mutedText(t, `Model list not fresh: ${brain.error}`));
   }
-  return formSection(t, "Orchestrator", rows, {
+  return body(rows, {
     footer: "The model that decides what the voice says and does. It takes effect on the next turn.",
     error: form.errors.brain,
   });
 }
 
-function languagesSection(t, form, actions) {
+function languagesBody(t, form, actions) {
   const settings = form.settings;
   if (!settings) {
-    return formSection(t, "Languages", [mutedText(t, form.errors.settings || "Loading languages…")], { error: form.errors.settings });
+    return body([mutedText(t, form.errors.settings || "Loading languages…")], { error: form.errors.settings });
   }
   if (!Array.isArray(settings.language_options) || settings.language_options.length === 0) {
-    return formSection(t, "Languages", [mutedText(t, "This daemon does not offer language choices.")]);
+    return body([mutedText(t, "This daemon does not offer language choices.")]);
   }
   const { chosen, others } = languageChoices(settings);
   const rows = [];
@@ -180,13 +190,13 @@ function languagesSection(t, form, actions) {
       );
     }
   }
-  return formSection(t, "Languages", rows, {
+  return body(rows, {
     footer: "Most preferred first. The voice and orchestrator answer in the language you use.",
     error: form.errors.settings,
   });
 }
 
-function repliesSection(t, form, actions) {
+function repliesBody(t, form, actions) {
   const settings = form.settings;
   const rows = [];
   if (!settings) {
@@ -203,13 +213,13 @@ function repliesSection(t, form, actions) {
       );
     }
   }
-  return formSection(t, "Replies", rows, {
+  return body(rows, {
     footer: "How often Sheepdog speaks up about what your agents are doing.",
     error: settings ? "" : form.errors.settings,
   });
 }
 
-function devicesSection(t, form, actions) {
+function devicesBody(t, form, actions) {
   const rows = [];
   if (form.errors.devices) rows.push(errorText(t, form.errors.devices));
   if (form.devices.length === 0 && !form.errors.devices) rows.push(mutedText(t, "No phones or browsers are paired."));
@@ -243,7 +253,7 @@ function devicesSection(t, form, actions) {
         .when(!asking, (el) => el.child(smallButton(t, `device-unpair-${id}`, "Unpair", (_e, cx) => actions.askRemove(id, cx), { disabled: Boolean(form.busy) }))),
     );
   }
-  return formSection(t, "Paired devices", rows, {
+  return body(rows, {
     footer: "Removing a device takes away its access. You can pair it again with a new code.",
   });
 }
@@ -254,11 +264,20 @@ export function settingsOverlay(t, { form, onClose, onReload, actions }) {
   if (update) sections.push(update);
   if (form.errors.state) sections.push(mutedText(t, `The update notice is unavailable: ${form.errors.state}`));
   if (form.loading) sections.push(mutedText(t, "Loading settings from Sheepdog…"));
-  sections.push(voiceSection(t, form, actions));
-  sections.push(brainSection(t, form, actions));
-  sections.push(languagesSection(t, form, actions));
-  sections.push(repliesSection(t, form, actions));
-  sections.push(devicesSection(t, form, actions));
+  // Each section is folded to its title and current choice until it is
+  // opened; a folded section builds none of its rows.
+  for (const { id, title } of SECTIONS) {
+    const open = sectionOpen(form, id);
+    sections.push(
+      foldSection(t, id, {
+        title,
+        summary: sectionSummary(form, id),
+        open,
+        onToggle: (_e, cx) => actions.toggleSection(id, cx),
+        content: open ? BODIES[id](t, form, actions) : null,
+      }),
+    );
+  }
   const body = v_flex()
     .id("sheepdog-settings")
     .flex_1()
