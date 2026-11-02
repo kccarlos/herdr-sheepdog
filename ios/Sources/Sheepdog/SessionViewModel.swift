@@ -128,6 +128,8 @@ final class SessionViewModel: ObservableObject {
         didSet { voice.providerSourcesChanged() }
     }
     @Published private(set) var stateVoiceModel: String?
+    /// The current `/ws` holder, from `/api/state voice.client`.
+    @Published private(set) var stateVoiceClient: DaemonState.VoiceInfo.Client?
     /// Settings is the presentation on screen.
     var showSettings: Bool { presentation.isShowing(.settings) }
 
@@ -180,6 +182,15 @@ final class SessionViewModel: ObservableObject {
         }
         return VoiceBarModel.statusLine(state: voice.state, talkMode: voice.talkMode, holding: voice.holding, noSignal: voice.noMicSignal)
     }
+
+    /// Another client (typically Sheepdog.app on the Mac) holds the voice.
+    /// `wantsConnection` is this app's own claim, so a tap on Use here
+    /// immediately stops this presentation from calling itself elsewhere.
+    var voiceHolder: VoiceHolderPresentation {
+        VoiceHolderPresentation(client: stateVoiceClient, localVoiceActive: wantsConnection)
+    }
+    var voiceElsewhere: Bool { voiceHolder.isElsewhere }
+    var voiceElsewhereStatus: String { voiceHolder.status ?? "Voice elsewhere" }
 
     /// The voice provider id, from whichever source knows it right now: the
     /// live `/ws` status, the provider picker's own state, `/api/state`, or
@@ -847,6 +858,7 @@ final class SessionViewModel: ObservableObject {
     /// `/api/hello` for the current computer, kept on its model.
     func loadHello() async {
         guard let model = fleet.current, let fetched = try? await current({ try await $0.hello() }) else { return }
+        agentsModel.setHello(fetched)
         model.hello = fetched
         linkModel.setHello(fetched)
     }
@@ -1038,6 +1050,7 @@ final class SessionViewModel: ObservableObject {
         assign(\.brain, state.brain)
         assign(\.stateVoiceProvider, state.voiceProvider)
         assign(\.stateVoiceModel, state.voiceModel)
+        assign(\.stateVoiceClient, state.voice.client)
         notices.setUpdate(state.update)
     }
 
@@ -1185,11 +1198,9 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Typed input
 
-    /// The text field under the conversation: says `text` as if spoken,
-    /// through `POST /api/utterance`, which records it as typed
-    /// user input (the rail takes it like a transcript). The
-    /// conversation shows it from `/events` (or the next history sync when
-    /// not connected). Returns true when the daemon took it.
+    /// The text field under the conversation: sends `text` straight to the
+    /// orchestrator through `POST /api/turn`, whose reply is recorded as a
+    /// `dog`/`typed` conversation item. Returns true when the daemon took it.
     func sendTyped(_ text: String) async -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, settings.endpoint != nil, !conversationModel.sendingTyped else { return false }
@@ -1205,15 +1216,15 @@ final class SessionViewModel: ObservableObject {
         if typedAttempt?.text != text { typedAttempt = (text, UUID().uuidString) }
         let computer = fleet.currentID
         do {
-            _ = try await action(ActionRunner.Key.typedLine, .typedLine, idempotencyKey: typedAttempt?.key) { try await $0.sendUtterance(text) }
+            _ = try await action(ActionRunner.Key.typedLine, .typedLine, idempotencyKey: typedAttempt?.key) { try await $0.sendTurn(text) }
             typedAttempt = nil
             conversationModel.typedLineSent()
             Haptics.tap()
-            if !voice.core.connection.wantsConnection {
-                // No event stream: the daemon has logged it by now.
-                await syncHistory()
-                await backfillActivity()
-            }
+            // `/api/turn` returns after the orchestrator logs both sides.
+            // Sync now even with the event stream open, so the text reply
+            // appears as a dog/typed item before the SSE fold catches up.
+            await syncHistory()
+            await backfillActivity()
             return true
         } catch is ComputerModel.Stale {
             typedAttempt = nil
@@ -1354,6 +1365,9 @@ final class SessionViewModel: ObservableObject {
         if demo != nil { return .yes }
         return TermAvailability.from(handshake: linkModel.handshake, remembered: fleet.current?.features)
     }
+
+    /// `/api/hello`'s reason when the live terminal is unavailable.
+    var termUnavailableReason: String? { linkModel.hello?.termUnavailable }
 
     // MARK: - New conversation
 
@@ -2091,6 +2105,13 @@ extension SessionViewModel: VoiceEngineHost {
     func voiceEngine(_ engine: VoiceEngine, socket event: VoiceSocket.Event) {
         switch event {
         case .opened:
+            // `/api/hello` can name a newly upgraded daemon, and `/ws` may
+            // have just changed the voice.client holder.
+            Task { [weak self] in
+                guard let self else { return }
+                await self.loadHello()
+                await self.refreshState(quiet: true)
+            }
             #if DEBUG
             // The UI tests start configured; a permission alert would sit
             // on top of everything they tap.

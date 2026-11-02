@@ -81,7 +81,7 @@ public struct AgentWindowState: Equatable, Sendable {
             case .gone: return "This agent closed."
             case .notTracked: return "sheepdog no longer tracks this agent."
             case .herdrDown: return "herdr is not running: start herdr on your computer."
-            case .snapshotOnly: return "Snapshot only. The live window needs herdr 0.9.2 or newer and an up-to-date sheepdog on your computer."
+            case .snapshotOnly: return "Snapshot only. The live window is unavailable on this computer."
             case .tooMany: return "Too many live windows are open. Close one, then try again."
             case .reconnecting: return "Reconnecting…"
             case .shellOff: return "The shell is off on this network."
@@ -136,6 +136,9 @@ public struct AgentWindowState: Equatable, Sendable {
     public private(set) var foreground = true
     /// The snapshot path is drawing.
     public private(set) var snapshotRunning = false
+    /// `/api/hello`'s `term_unavailable`: the daemon's own reason for not
+    /// offering a live terminal.
+    public private(set) var termUnavailableReason: String?
 
     public init(paneID: String, isShell: Bool = false) {
         self.paneID = paneID
@@ -167,8 +170,9 @@ public struct AgentWindowState: Equatable, Sendable {
 
     /// The window appeared. `.no` goes straight to the snapshot; otherwise
     /// the channel opens once the surface reports its size.
-    public mutating func start(_ availability: TermAvailability) -> [Command] {
+    public mutating func start(_ availability: TermAvailability, termUnavailable: String? = nil) -> [Command] {
         self.availability = availability
+        termUnavailableReason = termUnavailable
         guard availability != .no else { return fallBack(.snapshotOnly) }
         phase = .connecting
         return openIfReady(mode: .control, takeover: false)
@@ -176,7 +180,8 @@ public struct AgentWindowState: Equatable, Sendable {
 
     /// The handshake changed while the window is open: a daemon that now
     /// lists `term` upgrades a snapshot window.
-    public mutating func availabilityChanged(_ availability: TermAvailability) -> [Command] {
+    public mutating func availabilityChanged(_ availability: TermAvailability, termUnavailable: String? = nil) -> [Command] {
+        termUnavailableReason = termUnavailable
         let was = self.availability
         self.availability = availability
         guard availability == .yes, was != .yes, phase == .snapshot, !channelOpen else { return [] }
@@ -377,6 +382,16 @@ public struct AgentWindowState: Equatable, Sendable {
     /// Before raw input: the input lands at the bottom, so go there.
     public mutating func willSendInput() -> [Command] {
         latest()
+    }
+
+    /// The notice's line. Snapshot-only uses the daemon's own reason when
+    /// it provided one.
+    public var noticeText: String? {
+        guard notice == .snapshotOnly else { return notice?.text }
+        let reason = termUnavailableReason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !reason.isEmpty else { return notice?.text }
+        let sentence = reason.prefix(1).uppercased() + reason.dropFirst()
+        return "Snapshot only. \(sentence)"
     }
 
     // MARK: - Helpers

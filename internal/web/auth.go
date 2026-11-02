@@ -437,6 +437,10 @@ type HelloResponse struct {
 	IdempotencyKeys bool `json:"idempotency_keys"`
 	// Shell says the daemon offers the phone's plain shell now.
 	Shell bool `json:"shell"`
+	// TermUnavailable is why the live terminal is unavailable, in plain
+	// words (an old herdr, or herdr-core without terminal.attach). Empty
+	// when `/term` is available and on daemons that predate the field.
+	TermUnavailable string `json:"term_unavailable,omitempty"`
 }
 
 // HelloSecurity is /api/hello's security object.
@@ -466,6 +470,7 @@ func (s *Server) handleHello(w http.ResponseWriter, _ *http.Request) {
 		Security:        s.helloSecurity(),
 		IdempotencyKeys: true,
 		Shell:           s.term.shellAllowed(),
+		TermUnavailable: s.term.unavailableReason(),
 	})
 }
 

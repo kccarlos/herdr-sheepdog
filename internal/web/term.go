@@ -143,6 +143,18 @@ func (t *termServer) available() bool {
 	return t.ok
 }
 
+// unavailableReason is the one explanation for no live terminal, shared by
+// GET /term's 503 and /api/hello's term_unavailable. Empty when available.
+func (t *termServer) unavailableReason() string {
+	if t != nil && t.available() {
+		return ""
+	}
+	if t != nil && t.deps.Off != "" {
+		return t.deps.Off
+	}
+	return "the live terminal needs herdr " + herdr.TerminalMinVersion + " or newer"
+}
+
 // reserve takes one of the daemon's terminal bridges (MaxBridges) and one
 // of the device's (MaxChannels per paired device, across all its
 // connections; this computer itself has no per-device cap).
@@ -200,11 +212,7 @@ func remoteKind(remote string) string {
 func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	t := s.term
 	if !t.available() {
-		msg := "the live terminal needs herdr " + herdr.TerminalMinVersion + " or newer"
-		if t != nil && t.deps.Off != "" {
-			msg = t.deps.Off
-		}
-		writeError(w, http.StatusServiceUnavailable, msg)
+		writeError(w, http.StatusServiceUnavailable, t.unavailableReason())
 		return
 	}
 	conn, err := websocket.Accept(w, r, nil)

@@ -224,7 +224,7 @@ private struct AgentWindowContent: View, Equatable {
     private var content: some View {
         VStack(spacing: 0) {
             if let notice = state.notice, !(state.phase == .ended && !window.hasScreen) {
-                NoticeBar(notice: notice, fill: noticeFill) { act(on: notice) }
+                NoticeBar(notice: notice, text: state.noticeText ?? notice.text, fill: noticeFill) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             terminal
@@ -427,7 +427,7 @@ private struct AgentWindowContent: View, Equatable {
                 // Closed before anything was drawn: say so in the middle,
                 // not over an empty terminal.
                 ContentUnavailableView {
-                    Label(state.notice?.text ?? "This agent closed.", systemImage: "terminal")
+                    Label(state.noticeText ?? "This agent closed.", systemImage: "terminal")
                 } description: {
                     Text("Its pane closed, or sheepdog no longer tracks it.")
                 } actions: {
@@ -594,6 +594,7 @@ private struct StateChip: View {
 /// The one slim line under the header.
 struct NoticeBar: View {
     let notice: AgentWindowState.Notice
+    let text: String
     let fill: Color
     let action: () -> Void
 
@@ -627,7 +628,7 @@ struct NoticeBar: View {
     }
 
     private var label: some View {
-        Label(notice.text, systemImage: symbol)
+        Label(text, systemImage: symbol)
             .font(.footnote)
             .foregroundStyle(notice == .herdrDown ? Theme.blockedText : .primary)
             .fixedSize(horizontal: false, vertical: true)
@@ -826,7 +827,7 @@ final class AgentWindowController {
         }
         // A size that arrived before the model did.
         // (Before its first layout the view still holds SwiftTerm's 80 × 24.)
-        run(mutate { $0.start(model.termAvailability) })
+        run(mutate { $0.start(model.termAvailability, termUnavailable: model.termUnavailableReason) })
         if surface.view.bounds.width > 0, surface.cols > 0, surface.rows > 0, state.cols == 0 {
             run(mutate { $0.sizeChanged(cols: surface.cols, rows: surface.rows) })
         }
@@ -847,7 +848,7 @@ final class AgentWindowController {
 
     func availabilityChanged() {
         guard let model else { return }
-        run(mutate { $0.availabilityChanged(model.termAvailability) })
+        run(mutate { $0.availabilityChanged(model.termAvailability, termUnavailable: model.termUnavailableReason) })
     }
 
     func takeOver() { run(mutate { $0.takeOver() }) }

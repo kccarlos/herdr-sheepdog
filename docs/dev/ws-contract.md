@@ -42,10 +42,12 @@ binary version.
 | 1 | Everything in this document (the contract as of the handshake's introduction, plus the handshake itself). |
 
 - **`GET /api/hello`** carries `protocol` (what the daemon speaks),
-  `min_protocol` (the oldest client protocol it still serves), and `shell`
-  (whether the phone shell is offered now), so a client can tell before it
-  connects. `shell` is false without a working live terminal or with the
-  shell switch off.
+  `min_protocol` (the oldest client protocol it still serves), `shell`
+  (whether the phone shell is offered now), and `term_unavailable` (the
+  daemon's plain-words reason when the live terminal is unavailable), so a
+  client can tell before it connects. `shell` is false without a working
+  live terminal or with the shell switch off; `term_unavailable` is absent
+  when the live terminal is available.
 - **`client-ready`.** Every client sends this as its **first text
   frame**, before `mute`, `silence`, `speaking` or any audio:
 

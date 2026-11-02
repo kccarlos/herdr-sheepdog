@@ -382,9 +382,18 @@ final class VoiceEngine {
         case .transcript, .screen, .screenError, .card:
             host?.voiceEngine(self, control: message)
         case .voiceCommand:
-            // A mute from the desktop panel is the user's own; stop and
-            // hold-to-talk from the Mac are Sheepdog.app's, not the phone's yet.
-            if message.action == .mute, let on = message.on { send(.muteRequested(on)) }
+            switch VoiceCommandAction.resolve(message) {
+            case .stopPlayback:
+                // The daemon already cut the speech; drop the local tail.
+                send(.flush)
+            case let .pushToTalk(on):
+                send(.remotePTT(on))
+            case let .mute(on):
+                // The panel's mute is the user's own, before its status echo.
+                send(.muteRequested(on))
+            case .ignore:
+                break
+            }
         case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
              .screenSubscribe, .screenUnsubscribe, .visibility:
             break

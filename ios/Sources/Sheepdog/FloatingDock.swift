@@ -47,7 +47,7 @@ struct FloatingDock: View {
 
             // A window that does not hold the audio shows no coach mark and
             // no composer: its capsule says "In another window".
-            if scenes.isOwner(sceneID), model.voice.showCoachMark {
+            if scenes.isOwner(sceneID), !model.voiceElsewhere, model.voice.showCoachMark {
                 CoachMarkView(text: VoiceBarModel.coachMark(voiceName: model.voiceName)) {
                     model.voice.dismissCoachMark()
                 }
@@ -60,7 +60,7 @@ struct FloatingDock: View {
             }
 
             ZStack {
-                if ui.typing, scenes.isOwner(sceneID) {
+                if ui.typing, scenes.isOwner(sceneID), !model.voiceElsewhere {
                     CapsuleComposer(
                         voiceName: model.voiceName,
                         sending: model.conversationModel.sendingTyped,

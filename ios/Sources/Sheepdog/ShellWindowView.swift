@@ -60,7 +60,7 @@ private struct ShellWindowContent: View, Equatable {
     var body: some View {
         VStack(spacing: 0) {
             if let notice = state.notice, !endedEmpty {
-                NoticeBar(notice: notice, fill: noticeFill) { act(on: notice) }
+                NoticeBar(notice: notice, text: state.noticeText ?? notice.text, fill: noticeFill) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             terminal
@@ -148,7 +148,7 @@ private struct ShellWindowContent: View, Equatable {
                 TerminalSkeleton(name: title, reduceMotion: reduceMotion, message: "Opening a shell…")
             } else if endedEmpty {
                 ContentUnavailableView {
-                    Label(state.notice?.text ?? "This shell closed.", systemImage: state.notice == .shellOff ? "lock" : "apple.terminal")
+                    Label(state.noticeText ?? "This shell closed.", systemImage: state.notice == .shellOff ? "lock" : "apple.terminal")
                 } description: {
                     Text(PhoneShell.endedDescription(state.notice))
                 } actions: {
