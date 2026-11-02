@@ -148,9 +148,10 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     /// A push that interrupts is the one that must stand out.
     public var needsUser: Bool { kind == .push && urgency == "interrupt" }
 
-    /// The voice did not say this aloud: the text router answered a typed
-    /// line, so VoiceOver says "wrote" rather than "said".
-    public var isWritten: Bool { kind == .dog && via == "text_router" }
+    /// The voice did not say this aloud: a typed line went straight to the
+    /// orchestrator (or the older text router), so VoiceOver says "wrote"
+    /// rather than "said".
+    public var isWritten: Bool { kind == .dog && (via == "typed" || via == "text_router") }
 
     /// A "New conversation" divider.
     public var isResetNotice: Bool { kind == .notice && subkind == "reset" }

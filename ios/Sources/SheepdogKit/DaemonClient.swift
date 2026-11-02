@@ -468,6 +468,34 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `POST /api/turn {"text": …}` — a typed line straight to the
+    /// orchestrator, answered in text. The caller's `ActionRunner` supplies
+    /// the `Idempotency-Key`; 503 and 409 carry plain words for the composer.
+    public func sendTurn(_ text: String) async throws -> TypedTurnReply {
+        let body = try JSONSerialization.data(withJSONObject: ["text": text])
+        let request = try request(path: "/api/turn", method: "POST", body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let reason = (object?["error"] as? String) ?? ""
+        switch http.statusCode {
+        case 200 ..< 300:
+            do {
+                return try DaemonClient.decoder.decode(TypedTurnReply.self, from: data)
+            } catch {
+                throw DaemonError.malformed("the typed turn reply did not decode")
+            }
+        case 401:
+            throw DaemonError.unauthorized(endpoint: endpoint.display)
+        case 409:
+            throw TypedTurnFailure.alreadyAnswered
+        case 503:
+            throw TypedTurnFailure.unavailable(reason: reason)
+        default:
+            throw DaemonError.rejected(status: http.statusCode, message: reason)
+        }
+    }
+
     /// `GET /api/brain/models[?provider=]` — the orchestrator's model catalog and
     /// current choice. `nil` on a daemon without the route (404); a daemon
     /// whose orchestrator is off answers 503 with the reason, thrown as

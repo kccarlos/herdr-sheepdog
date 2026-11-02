@@ -57,8 +57,10 @@ final class AgentsModel {
     /// connection chip's, the feedback flag's), by name.
     private(set) var screenCovers: Set<String> = []
     /// `term-ready.shell` from this daemon: whether it offers the phone shell
-    /// to this phone on this network. nil until `/term` answered.
-    private(set) var shellOffered: Bool?
+    /// to this phone on this network. nil until `/term` answered, and again
+    /// after `/api/hello` reports a different daemon version.
+    private(set) var shellOffer = PhoneShellOffer()
+    var shellOffered: Bool? { shellOffer.offered }
 
     /// The agents as the screen groups them: running (blocked, working, idle
     /// and done) and the rest.
@@ -77,7 +79,17 @@ final class AgentsModel {
     }
 
     func setShellOffered(_ next: Bool?) {
-        if shellOffered != next { shellOffered = next }
+        if let next {
+            shellOffer.ready(shell: next)
+        } else {
+            shellOffer.reset()
+        }
+    }
+
+    /// A fresh `/api/hello`: an upgraded daemon is asked about the shell
+    /// again instead of inheriting the old binary's answer.
+    func setHello(_ hello: Hello) {
+        shellOffer.hello(version: hello.version)
     }
 
     func setScreenCover(_ name: String, _ covering: Bool) {

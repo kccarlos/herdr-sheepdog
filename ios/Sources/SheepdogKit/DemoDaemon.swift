@@ -180,7 +180,7 @@ public final class DemoDaemon: @unchecked Sendable {
             } catch {
                 return json(["error": "that question is no longer open"], status: 409)
             }
-        case ("POST", "/api/utterance"):
+        case ("POST", "/api/utterance"), ("POST", "/api/turn"):
             let text = (object["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return json(["error": "empty text"], status: 400) }
             let reply = world.ask(text)
@@ -191,6 +191,12 @@ public final class DemoDaemon: @unchecked Sendable {
                 DispatchQueue.main.async { [weak self] in self?.onCards?(cards) }
             }
             DispatchQueue.global().async { [weak self] in self?.publish() }
+            if path == "/api/turn" {
+                // A typed turn is answered in text, not through the demo's
+                // on-device voice.
+                let turnID = world.events.last.map { "demo-turn-\($0.seq)" } ?? "demo-turn"
+                return json(["reply": reply, "turn_id": turnID, "acted": false])
+            }
             DispatchQueue.main.async { [weak self] in self?.onLines?([DemoWorld.Line(text: reply, urgency: "answer")]) }
             return json(["via": "typed", "tool": "demo", "spoken": reply])
         case ("GET", "/api/spaces"):

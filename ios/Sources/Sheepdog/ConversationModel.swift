@@ -21,7 +21,7 @@ final class ConversationModel {
     private(set) var canLoadOlder = false
     /// The earlier page is on its way.
     private(set) var loadingOlder = false
-    /// Typed input (`POST /api/utterance`) in flight.
+    /// Typed input (`POST /api/turn`) in flight.
     private(set) var sendingTyped = false
     /// The daemon's refusal of the typed line, shown in the composer.
     var typedError: String?

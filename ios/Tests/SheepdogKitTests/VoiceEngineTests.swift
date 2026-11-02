@@ -137,6 +137,25 @@ final class VoiceEngineTests: XCTestCase {
         XCTAssertEqual(engine.talkMode, .openMic)
     }
 
+    func testDesktopVoiceCommandsDriveThePhoneSession() {
+        let host = Host()
+        let engine = engine(talkMode: .holdToTalk, host: host)
+        connect(engine)
+        host.effects.removeAll()
+
+        engine.receive(control: .voicePTT(true))
+        XCTAssertTrue(engine.holding, "hold-to-talk from the Mac opens the phone's mic")
+        engine.receive(control: .voicePTT(false))
+        XCTAssertFalse(engine.holding, "its release closes the mic")
+        engine.send(.gateChanged(closed: false))
+
+        engine.send(.playbackChanged(speaking: true))
+        host.effects.removeAll()
+        engine.receive(control: .voiceStop)
+        XCTAssertEqual(host.effects, [.flushPlayback, .flushTranscript, .syncHistory])
+        XCTAssertEqual(engine.state, .listening)
+    }
+
     func testLockScreenTalkToggleOpensThenSends() {
         let engine = engine(talkMode: .holdToTalk, host: Host())
         connect(engine)

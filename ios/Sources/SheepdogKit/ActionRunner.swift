@@ -39,8 +39,9 @@ public final class ActionRunner {
 
         /// `POST /api/pending/answer`.
         public static let answer = Kind(timeout: 10, idempotent: true)
-        /// `POST /api/utterance`.
-        public static let typedLine = Kind(timeout: 10, keyed: true)
+        /// `POST /api/turn`: it waits for the orchestrator's text reply.
+        /// The daemon bounds that turn at its 90 s tool timeout.
+        public static let typedLine = Kind(timeout: 90, keyed: true)
         /// `POST /api/agents`: the daemon answers once the agent is ready.
         public static let newAgent = Kind(timeout: 60, keyed: true)
         /// `POST /api/agents/{pane}/input`.

@@ -192,7 +192,9 @@ final class ActionRunnerTests: XCTestCase {
         let home = makeModel("home")
         home.start()
         await eventually("online") { home.link.isUsable }
-        let result = tap(home, "utter:home", .typedLine)
+        // Keep this test about the runner's slow-answer words: the real
+        // typed-turn timeout is longer than the link's quiet period.
+        let result = tap(home, "utter:home", .init(timeout: 10, keyed: true))
         await eventually("first attempt") { daemon.pending.count == 1 }
         clock.advance(10)
         await eventually("the retry") { daemon.made.count == 2 }
@@ -209,7 +211,7 @@ final class ActionRunnerTests: XCTestCase {
         let home = makeModel("home", keys: false)
         let result = tap(home, "utter:home", .typedLine)
         await eventually("first attempt") { daemon.pending.count == 1 }
-        clock.advance(10)
+        clock.advance(ActionRunner.Kind.typedLine.timeout)
         guard case let .failure(error) = await result.value else { return XCTFail("it succeeded") }
         XCTAssertTrue(ActionRunner.isTransport(error))
         XCTAssertEqual(daemon.made.count, 1, "a non-idempotent action is not retried without keys")
@@ -231,7 +233,7 @@ final class ActionRunnerTests: XCTestCase {
         daemon.hang = true
         let first = tap(home, "utter:home", idempotencyKey: "attempt-1")
         await eventually("sent") { daemon.pending.count == 1 }
-        clock.advance(10)
+        clock.advance(ActionRunner.Kind.typedLine.timeout)
         _ = await first.value
         let again = tap(home, "utter:home", idempotencyKey: "attempt-1")
         await eventually("sent again") { daemon.pending.count == 1 }

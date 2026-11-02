@@ -535,6 +535,55 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.sessionState, .listening, "a flush is not a gap")
     }
 
+    // MARK: - Voice commands from another client
+
+    func testRemotePushToTalkOpensAndRestoresMute() {
+        var core = connected()
+        _ = core.apply(.muteRequested(true), now: t0)
+        XCTAssertEqual(core.apply(.remotePTT(true), now: at(1)), [
+            .send(.mute(false)), .setCaptureMuted(false), .startAudio, .haptic(.tap),
+        ])
+        XCTAssertFalse(core.mic.muted)
+        XCTAssertEqual(core.apply(.remotePTT(false), now: at(2)), [
+            .setCaptureMuted(true), .send(.mute(true)), .haptic(.tap),
+        ])
+        XCTAssertTrue(core.mic.muted)
+    }
+
+    func testRemotePushToTalkLeavesAnAlreadyOpenMicrophoneAlone() {
+        var core = connected()
+        XCTAssertEqual(core.apply(.remotePTT(true), now: at(1)), [])
+        XCTAssertEqual(core.apply(.remotePTT(false), now: at(2)), [])
+        XCTAssertFalse(core.mic.muted)
+    }
+
+    func testRemotePushToTalkFollowsHoldMode() {
+        var core = connected(talkMode: .holdToTalk)
+        XCTAssertEqual(core.apply(.remotePTT(true), now: at(1)), [.setManualGate(true), .haptic(.tap)])
+        XCTAssertTrue(core.mic.holding)
+        XCTAssertEqual(core.apply(.remotePTT(false), now: at(2)), [.setManualGate(false)])
+        XCTAssertFalse(core.mic.holding)
+    }
+
+    func testAnExplicitRemoteMuteWinsOverThePushToTalkRelease() {
+        var core = connected()
+        _ = core.apply(.muteRequested(true), now: t0)
+        _ = core.apply(.remotePTT(true), now: at(1))
+        XCTAssertEqual(core.apply(.muteRequested(true), now: at(2)), [.setCaptureMuted(true), .send(.mute(true)), .haptic(.tap)])
+        XCTAssertEqual(core.apply(.remotePTT(false), now: at(3)), [])
+        XCTAssertTrue(core.mic.muted)
+    }
+
+    func testALocalMuteChangeWinsOverThePushToTalkRelease() {
+        var core = connected()
+        _ = core.apply(.muteRequested(true), now: t0)
+        _ = core.apply(.remotePTT(true), now: at(1))
+        _ = core.apply(.muteTapped, now: at(2))
+        _ = core.apply(.muteTapped, now: at(3))
+        XCTAssertEqual(core.apply(.remotePTT(false), now: at(4)), [])
+        XCTAssertFalse(core.mic.muted)
+    }
+
     func testTheDaemonsErrorAndAMissingMicSignal() {
         var core = connected()
         XCTAssertEqual(core.apply(.daemonError("boom"), now: t0), [.showBanner(.daemonSaid("boom"))])

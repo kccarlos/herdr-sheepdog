@@ -256,6 +256,16 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 		if got := slices.Contains(m.Features, wsproto.FeatureTerm); got != tc.want {
 			t.Errorf("herdr %s: features %v, term listed = %v", tc.version, m.Features, got)
 		}
+		var hello HelloResponse
+		if code := h.getJSON("/api/hello", &hello); code != http.StatusOK {
+			t.Fatalf("herdr %s: /api/hello = %d", tc.version, code)
+		}
+		if tc.want && hello.TermUnavailable != "" {
+			t.Errorf("herdr %s: available terminal has reason %q", tc.version, hello.TermUnavailable)
+		}
+		if !tc.want && !strings.Contains(hello.TermUnavailable, herdr.TerminalMinVersion) {
+			t.Errorf("herdr %s: term_unavailable = %q, want the version reason", tc.version, hello.TermUnavailable)
+		}
 		resp, err := http.Get(h.http.URL + "/term")
 		if err != nil {
 			t.Fatal(err)
@@ -281,6 +291,10 @@ func TestTermFeatureFollowsHerdrVersion(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "herdr-core") {
 		t.Errorf("GET /term without a live terminal = %d %s", resp.StatusCode, body)
+	}
+	var hello HelloResponse
+	if code := off.getJSON("/api/hello", &hello); code != http.StatusOK || hello.TermUnavailable != deps.Off {
+		t.Errorf("/api/hello term_unavailable = %d %q, want %q", code, hello.TermUnavailable, deps.Off)
 	}
 	oc := dialWSRaw(t, off)
 	oc.expect(wsproto.TypeStatus)

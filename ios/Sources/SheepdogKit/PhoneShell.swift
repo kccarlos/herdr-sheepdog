@@ -25,3 +25,35 @@ public enum PhoneShell {
         }
     }
 }
+
+/// The phone shell offer changes with the daemon binary, not just the
+/// current `/term` connection. A reconnect that finds a new `/api/hello`
+/// version forgets the old answer, so New shell is tried again.
+public struct PhoneShellOffer: Equatable, Sendable {
+    public private(set) var offered: Bool?
+    public private(set) var daemonVersion: String?
+
+    public init(offered: Bool? = nil, daemonVersion: String? = nil) {
+        self.offered = offered
+        self.daemonVersion = daemonVersion
+    }
+
+    /// Record `/api/hello`. A changed non-nil version resets the offer;
+    /// a first hello or the same daemon version leaves it alone.
+    public mutating func hello(version: String) {
+        guard daemonVersion != version else { return }
+        if daemonVersion != nil { offered = nil }
+        daemonVersion = version
+    }
+
+    /// Record `term-ready.shell`.
+    public mutating func ready(shell: Bool) {
+        if offered != shell { offered = shell }
+    }
+
+    /// This app is now looking at another computer.
+    public mutating func reset() {
+        offered = nil
+        daemonVersion = nil
+    }
+}

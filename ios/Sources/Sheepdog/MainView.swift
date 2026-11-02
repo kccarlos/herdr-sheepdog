@@ -316,7 +316,8 @@ struct SessionCapsule: View {
             route: model.voice.audioRoute,
             canType: model.isConfigured,
             computerUnreachable: model.linkModel.presentation.computerUnreachable,
-            audioElsewhere: !scenes.isOwner(sceneID),
+            audioElsewhere: !scenes.isOwner(sceneID) || model.voiceElsewhere,
+            elsewhereLabel: model.voiceElsewhere ? model.voiceElsewhereStatus : "In another window",
             onConnect: { model.connect() },
             onStop: { model.voice.stop() },
             onMute: {
@@ -327,7 +328,10 @@ struct SessionCapsule: View {
             onPress: { model.voice.pressToTalk() },
             onRelease: { model.voice.releaseToTalk() },
             onType: { withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = true } },
-            onUseHere: { scenes.claimAudio(for: sceneID) },
+            onUseHere: {
+                scenes.claimAudio(for: sceneID)
+                if model.voiceElsewhere { model.connect() }
+            },
             menuValue: menus.voiceValue,
             menu: { menus.voiceItems($0) }
         )

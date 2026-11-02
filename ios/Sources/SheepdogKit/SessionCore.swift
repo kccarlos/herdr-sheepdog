@@ -77,6 +77,9 @@ public struct SessionCore: Equatable, Sendable {
         /// gate on speech (or a hold), closes with it, and is never open
         /// while muted or without a running microphone.
         public var speaking = false
+        /// A desktop hold-to-talk unmuted the microphone; its release
+        /// returns to mute unless the user explicitly changed mute.
+        public var remotePTTUnmuted = false
     }
 
     /// What the player is doing.
@@ -297,33 +300,42 @@ public struct SessionCore: Equatable, Sendable {
             derive = false
 
         case .muteTapped:
+            mic.remotePTTUnmuted = false
             setMuted(!mic.muted, &effects)
 
         case let .muteRequested(on):
+            // An explicit desktop mute ends any hold-to-talk it started:
+            // the release must not undo what the user asked for.
+            mic.remotePTTUnmuted = false
             setMuted(on, &effects)
 
         case .holdBegan:
-            guard mic.talkMode == .holdToTalk, !mic.holding, voiceBar.orbAction == .holdToTalk else {
-                derive = false
-                break
-            }
-            // Talking over the voice stops it.
-            let state = sessionState
-            if playback.speaking || state == .speaking || state == .thinking || state == .stalled {
-                stop(&effects)
-            }
-            mic.holding = true
-            effects.append(.setManualGate(true))
-            effects.append(.haptic(.tap))
+            if !beginHold(&effects) { derive = false }
 
         case .holdEnded:
-            guard mic.holding else {
+            if !endHold(&effects) { derive = false }
+
+        case let .remotePTT(on):
+            guard connection.wantsConnection else {
                 derive = false
                 break
             }
-            // The orb came up: close the gate, the daemon hears the silence.
-            mic.holding = false
-            effects.append(.setManualGate(mic.talkMode == .holdToTalk ? false : nil))
+            if mic.talkMode == .holdToTalk {
+                let changed = on ? beginHold(&effects) : endHold(&effects)
+                if !changed { derive = false }
+            } else if on {
+                guard mic.muted else {
+                    derive = false
+                    break
+                }
+                mic.remotePTTUnmuted = true
+                setMuted(false, &effects)
+            } else if mic.remotePTTUnmuted {
+                mic.remotePTTUnmuted = false
+                setMuted(true, &effects)
+            } else {
+                derive = false
+            }
 
         case let .talkModeChanged(mode):
             guard mode != mic.talkMode else {
@@ -503,6 +515,7 @@ public struct SessionCore: Equatable, Sendable {
         voice = Voice()
         mic.gateClosed = false
         mic.holding = false
+        mic.remotePTTUnmuted = false
         mic.noSignal = false
         mic.unavailable = false
         quietSpeaking()
@@ -573,6 +586,30 @@ public struct SessionCore: Equatable, Sendable {
         effects.append(.haptic(.tap))
     }
 
+    /// Starts a hold-to-talk, whether the orb or the daemon asked.
+    private mutating func beginHold(_ effects: inout [SessionEffect]) -> Bool {
+        guard mic.talkMode == .holdToTalk, !mic.holding, voiceBar.orbAction == .holdToTalk else {
+            return false
+        }
+        // Talking over the voice stops it.
+        let state = sessionState
+        if playback.speaking || state == .speaking || state == .thinking || state == .stalled {
+            stop(&effects)
+        }
+        mic.holding = true
+        effects.append(.setManualGate(true))
+        effects.append(.haptic(.tap))
+        return true
+    }
+
+    /// Ends a hold-to-talk: close the gate, and the daemon hears silence.
+    private mutating func endHold(_ effects: inout [SessionEffect]) -> Bool {
+        guard mic.holding else { return false }
+        mic.holding = false
+        effects.append(.setManualGate(mic.talkMode == .holdToTalk ? false : nil))
+        return true
+    }
+
     /// The Stop button (and a hold that talks over the voice): silence now,
     /// and ask the daemon to cancel. It answers with a `flush`.
     private mutating func stop(_ effects: inout [SessionEffect]) {
@@ -634,6 +671,8 @@ public enum SessionEvent: Equatable, Sendable {
     case muteRequested(Bool)
     case holdBegan
     case holdEnded
+    /// `voice-command` `ptt`: another client's hold-to-talk.
+    case remotePTT(Bool)
     case talkModeChanged(TalkMode)
     /// The orb's "Audio paused by iOS — tap to resume".
     case resumeTapped
