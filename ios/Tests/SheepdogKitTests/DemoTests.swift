@@ -149,6 +149,24 @@ final class DemoDaemonTests: XCTestCase {
         XCTAssertEqual(state.update?.notice?.command, "brew upgrade sheepdog")
     }
 
+    func testTypedTurnAnswersAndPutsACardOnTheScreen() async throws {
+        let cards = expectation(description: "the demo sent its card")
+        daemon.onCards = { sent in
+            if let card = sent.first, card.title == "Your agents" {
+                cards.fulfill()
+            }
+        }
+
+        let reply = try await client.sendTurn("Show me the agents")
+        XCTAssertFalse(reply.turnID.isEmpty)
+        XCTAssertTrue(reply.reply.contains("on your screen"))
+        await fulfillment(of: [cards], timeout: 2)
+
+        let page = try await client.conversation()
+        XCTAssertTrue(page.items.contains { $0.kind == .shepherd && $0.via == "typed" && $0.text == "Show me the agents" })
+        XCTAssertTrue(page.items.contains { $0.kind == .dog && $0.via == "typed" && $0.text == reply.reply })
+    }
+
     func testNewAgentStartsAScriptedAgent() async throws {
         let options = try await client.newAgentOptions()
         let shop = try XCTUnwrap(options.projects.first { $0.name == "shop" })

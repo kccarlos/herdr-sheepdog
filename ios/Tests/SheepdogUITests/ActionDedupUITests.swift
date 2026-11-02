@@ -44,8 +44,8 @@ final class ActionDedupUITests: XCTestCase {
         while !send.isHittable, Date() < ready { usleep(150_000) }
         send.doubleTap()
         let sent = Date().addingTimeInterval(10)
-        while stub.requests("POST /api/utterance") == 0, Date() < sent { usleep(200_000) }
+        while stub.requests("POST /api/turn") == 0, Date() < sent { usleep(200_000) }
         sleep(3)
-        XCTAssertEqual(stub.requests("POST /api/utterance"), 1, "one line for two taps")
+        XCTAssertEqual(stub.requests("POST /api/turn"), 1, "one line for two taps")
     }
 }

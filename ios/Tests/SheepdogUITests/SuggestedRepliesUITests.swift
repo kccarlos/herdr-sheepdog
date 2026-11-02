@@ -53,6 +53,6 @@ final class SuggestedRepliesUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "reply.option.sent", "Not yet")).firstMatch
         XCTAssertTrue(chosen.waitForExistence(timeout: 5), "the chosen option is marked")
 
-        XCTAssertEqual(stub.requests("POST /api/utterance"), 1, "said once")
+        XCTAssertEqual(stub.requests("POST /api/turn"), 1, "sent once")
     }
 }

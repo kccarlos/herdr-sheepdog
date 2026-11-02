@@ -27,7 +27,7 @@ final class StubDaemon {
         /// `reply`, when given, is an orchestrator reply with these options
         /// (`voice.tool_result` from `to_supervisor` in `/api/events`), half
         /// a minute after the first line; every line typed
-        /// (`POST /api/utterance`) is then added to the conversation.
+        /// (`POST /api/turn`) is then added to the conversation.
         case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0, reply: (spoken: String, options: [String])? = nil)
     }
 
@@ -40,10 +40,10 @@ final class StubDaemon {
     var postDelay: TimeInterval = 0
     private let lock = NSLock()
     private var seen: [String] = []
-    /// The lines typed so far (`POST /api/utterance`'s `text`).
+    /// The lines typed so far (`POST /api/turn`'s `text`).
     private var typed: [String] = []
 
-    /// How many requests started with `prefix` ("POST /api/utterance").
+    /// How many requests started with `prefix` ("POST /api/turn").
     func requests(_ prefix: String) -> Int {
         lock.withLock { seen.filter { $0.hasPrefix(prefix) }.count }
     }
@@ -106,7 +106,7 @@ final class StubDaemon {
         let path = words.dropFirst().first.map(String.init) ?? "/"
         lock.withLock {
             seen.append("\(method) \(path)")
-            if method == "POST", path.hasPrefix("/api/utterance") { typed.append(Self.typedText(request)) }
+            if method == "POST", path.hasPrefix("/api/turn") { typed.append(Self.typedText(request)) }
         }
         let reply = response(for: path)
         let delay = method == "POST" ? postDelay : 0
@@ -145,8 +145,10 @@ final class StubDaemon {
             if path.hasPrefix("/api/pending/answer") {
                 return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
             }
-            if path.hasPrefix("/api/utterance") {
-                return http(200, "application/json", #"{"ok":true,"via":"voice"}"#)
+            if path.hasPrefix("/api/turn") {
+                let turn = lock.withLock { typed.count }
+                let text = reply?.spoken ?? "Received."
+                return http(200, "application/json", #"{"reply":"# + Self.json(text) + #","turn_id":"stub-turn-"# + String(turn) + #","acted":false}"#)
             }
             if path.hasPrefix("/api/conversation") {
                 // The first line says whose conversation this is.
