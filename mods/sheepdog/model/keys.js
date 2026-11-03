@@ -26,3 +26,16 @@ export function keyAction(key, { onPanel, question = null, suggestions = null })
   const text = suggestions?.options?.[at];
   return text ? { type: "send", text } : null;
 }
+
+// How `leave` hands the keys back. `pane.go left` starts at the panel only
+// while herdr-app's `focused_block` is the panel, which only `pane.go` sets: a
+// click into the panel or its composer leaves it unset, and then `pane.go`
+// starts at the terminal beside the panel and goes nowhere. Focusing the pane
+// that was focused before the panel (herdr's `focused()` keeps it) works in
+// both cases. `focus` is herdr's `focused()` ({ pane, terminal } or null);
+// returns { name, args } for `run`.
+export function leaveCommand(focus) {
+  if (focus?.pane) return { name: "pane.focus", args: { pane: focus.pane } };
+  if (focus?.terminal) return { name: "pane.focus", args: { terminal: focus.terminal } };
+  return { name: "pane.go", args: { direction: "left" } };
+}

@@ -13,7 +13,7 @@ import { View } from "gpui-kit";
 import { TextareaState } from "gpui-base";
 import { exists } from "fs/promises";
 import { connect } from "net";
-import { closeOverlay, exec, home, nextCommand, openOverlay, props, run, setShared, shared, theme, window as appWindow } from "herdr";
+import { closeOverlay, exec, focused, home, nextCommand, openOverlay, props, run, setShared, shared, theme, window as appWindow } from "herdr";
 import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
@@ -24,7 +24,7 @@ import { createOutbox, pendingItems } from "./model/outbox.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
-import { keyAction } from "./model/keys.js";
+import { keyAction, leaveCommand } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
 import * as overlay from "./model/overlay-actions.js";
 import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
@@ -126,9 +126,20 @@ export default class Sheepdog extends View {
     cx.stop_propagation();
     if (action.type === "composer") this.composer.focus();
     else if (action.type === "panel") this.panelFocus.focus();
-    else if (action.type === "leave") run("pane.go", { direction: "left" });
+    else if (action.type === "leave") this.leave();
     else if (action.type === "answer") this.answer(action.question, action.option, cx);
     else if (action.type === "send") this.send(action.text, cx, false);
+  }
+
+  // Esc on the panel: the keys go back to the pane that had them (a click
+  // into the panel leaves `pane.go` without a starting point, so not pane.go).
+  leave() {
+    const { name, args } = leaveCommand(focused());
+    try {
+      run(name, args);
+    } catch {
+      run("pane.go", { direction: "left" });
+    }
   }
 
   // The composer's textarea (made here, it needs a live host call), the typed

@@ -1,7 +1,7 @@
 // The docked panel's keys: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { keyAction } from "./keys.js";
+import { keyAction, leaveCommand } from "./keys.js";
 
 const question = { phase: "open", pending: { id: "q1", options: [{ index: 0, label: "Yes" }, { index: 1, label: "No" }] } };
 const suggestions = { options: ["first", "second"] };
@@ -27,4 +27,11 @@ test("in the composer digits and Enter are text, and 0 or letters mean nothing",
   assert.equal(keyAction("enter", { onPanel: false }), null);
   assert.equal(keyAction("0", { onPanel: true, suggestions }), null);
   assert.equal(keyAction("a", { onPanel: true, suggestions }), null);
+});
+
+test("leaving focuses the pane that had the keys, whether the panel was entered by pane.go or a click", () => {
+  assert.deepEqual(leaveCommand({ pane: "p1", terminal: "t1" }), { name: "pane.focus", args: { pane: "p1" } });
+  assert.deepEqual(leaveCommand({ pane: null, terminal: "t1" }), { name: "pane.focus", args: { terminal: "t1" } });
+  assert.deepEqual(leaveCommand(null), { name: "pane.go", args: { direction: "left" } });
+  assert.deepEqual(leaveCommand({ pane: null, terminal: null }), { name: "pane.go", args: { direction: "left" } });
 });
