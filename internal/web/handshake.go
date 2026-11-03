@@ -50,6 +50,14 @@ func (s *Server) features() []string {
 		if _, ok := s.deps.Supervisor.(AgentActions); ok {
 			f = append(f, wsproto.FeatureAgentActions)
 		}
+		if a, ok := s.deps.Supervisor.(Attention); ok {
+			if a.HasAttention() {
+				f = append(f, wsproto.FeatureAttention)
+			}
+			if a.HasSpaceMutes() {
+				f = append(f, wsproto.FeatureSpaceMute)
+			}
+		}
 	}
 	if _, ok := s.cardHost(); ok {
 		f = append(f, wsproto.FeatureCards)

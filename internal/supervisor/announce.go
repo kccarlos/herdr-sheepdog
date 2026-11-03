@@ -123,6 +123,19 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	}
 	kept := s.keepMatching(a.row.PaneID, events...)
 	level := s.chattiness()
+	if s.mutedQuiet(ctx, a, kept) {
+		// The user muted this space's notifications and nothing here is owed
+		// (no kept promise, not the finish of their own instruction): no
+		// orchestrator turn, no sentence, no push. The worker event still
+		// reached the orchestrator's window as context, and the question
+		// card, if any, is already in the state.
+		if s.brain != nil {
+			s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "space_muted"}, brain.Reply{}, kept, false)
+		}
+		s.recordFinish(a, doneResult)
+		s.logMutedQuiet(a, level)
+		return
+	}
 	if s.brain == nil {
 		s.codePath(a, kept, level, "no_brain")
 		return
@@ -242,6 +255,9 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
+	if u != voice.UrgencySilent {
+		s.promoteHeld(a)
+	}
 	s.notify(a, kept, spoken)
 	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
 	if u != voice.UrgencySilent {
@@ -344,6 +360,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
+		s.promoteHeld(a)
 		s.notify(a, kept, spoken)
 		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(keptTags(nil, kept)))
 		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
@@ -388,6 +405,12 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 	if a.pending == "" || a.event != brain.PromiseEventBlocked {
 		return true
 	}
+	if s.heldQuestion(a.pending) {
+		// Held back from the pending slot by the space mute (attention.go):
+		// open while it is still listed.
+		_, listed := s.store.Question(a.pending)
+		return listed
+	}
 	p, has := s.store.Pending()
 	return has && p.ID == a.pending
 }
@@ -420,9 +443,11 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		case a.owed:
 			// The user's own instruction ended: owed like a promise,
 			// so no chattiness level silences it.
+			s.promoteHeld(a)
 			s.notify(a, kept, sentence)
 			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(fromDaemon(nil)))
 		default:
+			s.promoteHeld(a)
 			s.notify(a, kept, sentence)
 			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(fromDaemon(nil)))
 		}
@@ -435,6 +460,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
+	s.promoteHeld(a)
 	s.notify(a, kept, line)
 	s.pushTagged(a.row.PaneID, line, u, a.tags(fromDaemon(keptTags(announceTags(u, duePassed, false, ""), kept))))
 }

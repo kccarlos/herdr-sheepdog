@@ -23,8 +23,8 @@ import (
 
 // StateResponse is the body of GET /api/state.
 type StateResponse struct {
-	Agents        []state.Agent `json:"agents"`
-	PendingAction *PendingView  `json:"pending_action"`
+	Agents        []AgentView  `json:"agents"`
+	PendingAction *PendingView `json:"pending_action"`
 	// Questions are every open question, oldest first: one per blocked
 	// agent whose prompt was read, the voice's pending_action among
 	// them. Each has its options for POST /api/pending/answer.
@@ -54,6 +54,10 @@ type StateResponse struct {
 	// the one in this daemon (docs/dev/update.md). Omitted when the daemon
 	// does not track it.
 	Panel *panelsync.State `json:"panel,omitempty"`
+	// AttentionCounts and SpaceMutes are omitted by a daemon without the
+	// attention and space-mute features (attention.go).
+	AttentionCounts *supervisor.AttentionCounts `json:"attention_counts,omitempty"`
+	SpaceMutes      []supervisor.SpaceMuteInfo  `json:"space_mutes,omitempty"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -146,8 +150,11 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	snap := s.deps.Store.Snapshot()
 	agents := s.deps.Store.List()
 	hs := s.hub.state()
+	views, counts, mutes := s.agentViews(r.Context(), agents)
 	writeJSON(w, http.StatusOK, StateResponse{
-		Agents:                agents,
+		Agents:                views,
+		AttentionCounts:       counts,
+		SpaceMutes:            mutes,
 		PendingAction:         s.pendingView(snap.PendingAction),
 		Questions:             s.questionViews(),
 		Session:               snap.Session,

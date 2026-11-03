@@ -83,6 +83,9 @@ type activityWatch struct {
 	mu    sync.Mutex
 	seen  map[string]time.Time
 	known map[string]push.ActivityState
+	// loud is how many waiting agents of unmuted spaces the device's banner
+	// last accounted for: a banner update is urgent only when it grows.
+	loud map[string]int
 }
 
 func (w *activityWatch) reset(dev string) {
@@ -90,6 +93,7 @@ func (w *activityWatch) reset(dev string) {
 	defer w.mu.Unlock()
 	delete(w.seen, dev)
 	delete(w.known, dev)
+	delete(w.loud, dev)
 }
 
 // watchActivities pushes Live Activity updates until ctx ends.
@@ -118,6 +122,7 @@ func (s *Server) activityStep(ctx context.Context) {
 	}
 	now := s.deps.Now()
 	snap := s.activityState()
+	loud := s.loudWaiting()
 	w := &s.activityWatch
 	for _, a := range acts {
 		if now.Sub(a.At) > push.ActivityLifetime {
@@ -127,11 +132,11 @@ func (s *Server) activityStep(ctx context.Context) {
 		}
 		w.mu.Lock()
 		if w.seen == nil {
-			w.seen, w.known = map[string]time.Time{}, map[string]push.ActivityState{}
+			w.seen, w.known, w.loud = map[string]time.Time{}, map[string]push.ActivityState{}, map[string]int{}
 		}
 		if s.deviceConnected(a.DeviceID) {
 			// The app updates the banner itself.
-			w.seen[a.DeviceID], w.known[a.DeviceID] = now, snap
+			w.seen[a.DeviceID], w.known[a.DeviceID], w.loud[a.DeviceID] = now, snap, loud
 			w.mu.Unlock()
 			continue
 		}
@@ -145,12 +150,43 @@ func (s *Server) activityStep(ctx context.Context) {
 			continue
 		}
 		w.known[a.DeviceID] = snap
+		wasLoud := w.loud[a.DeviceID]
+		w.loud[a.DeviceID] = loud
 		w.mu.Unlock()
-		u := push.ActivityUpdate{State: snap, Stale: now.Add(activityStale), Urgent: snap.Waiting > known.Waiting}
+		// A new waiting agent alerts (priority 10) unless its space is muted:
+		// that update still goes, at priority 5, so the banner stays right
+		// without waking the phone.
+		u := push.ActivityUpdate{State: snap, Stale: now.Add(activityStale), Urgent: s.activityUrgent(snap, known, loud, wasLoud, had)}
 		pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		_ = s.deps.Push.UpdateActivity(pctx, a.DeviceID, u)
 		cancel()
 	}
+}
+
+// activityUrgent reports whether a banner update alerts. Without space mutes
+// it is the old rule (more agents waiting than the banner showed); with
+// them, only waiting agents of unmuted spaces count.
+func (s *Server) activityUrgent(snap, known push.ActivityState, loud, wasLoud int, had bool) bool {
+	if _, ok := s.attentionHost(); !ok {
+		return snap.Waiting > known.Waiting
+	}
+	if !had {
+		wasLoud = known.Waiting
+	}
+	return loud > wasLoud
+}
+
+// loudWaiting is how many agents are waiting at something in a space that is
+// not muted.
+func (s *Server) loudWaiting() int {
+	host, _ := s.attentionHost()
+	n := 0
+	for _, a := range s.deps.Store.List() {
+		if a.State == herdr.StateBlocked && (host == nil || !host.PaneMuted(a.PaneID)) {
+			n++
+		}
+	}
+	return n
 }
 
 // deviceConnected reports whether the paired device holds a live

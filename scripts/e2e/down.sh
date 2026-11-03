@@ -15,6 +15,7 @@ if [ -f "$DIR/env.sh" ]; then
   . "$DIR/env.sh"
   # Each pid file is trusted only while the pid still looks like ours.
   [ -f "$DIR/ws.pid" ] && e2e_kill "$(cat "$DIR/ws.pid")"
+  [ -f "$DIR/relay.pid" ] && e2e_kill "$(cat "$DIR/relay.pid")"
   if [ -f "$DIR/app.pid" ]; then
     P=$(cat "$DIR/app.pid")
     if e2e_alive "$P" && ps -E -p "$P" 2>/dev/null | grep -q "HERDR_APP_HOME=$E2E_APP_HOME"; then

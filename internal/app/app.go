@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -179,6 +180,10 @@ type App struct {
 	marker    herdr.Marker
 	marksRun  func(ctx context.Context)
 	marksPoke func()
+	// mutes are the muted spaces (<data_dir>/space_mutes.json); mutedLog
+	// is the logger that marks a muted agent's notification events.
+	mutes    *attention.Mutes
+	mutedLog *mutedLogger
 	// term backs /term (the live terminal); nil in mock mode.
 	term     *web.TermDeps
 	sup      *supervisor.Supervisor
@@ -347,7 +352,8 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.Echo != nil {
 		log = teeLogger{elog, opts.Echo}
 	}
-	a := &App{cfg: cfg, opts: opts, elog: elog, log: log, port: port, restart: make(chan string, 1)}
+	ml := &mutedLogger{Logger: log}
+	a := &App{cfg: cfg, opts: opts, elog: elog, log: ml, mutedLog: ml, port: port, restart: make(chan string, 1)}
 	if err := a.wire(); err != nil {
 		_ = elog.Close()
 		return nil, err

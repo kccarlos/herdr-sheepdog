@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -170,6 +171,14 @@ type Config struct {
 	// event that needs the user (a block, an approval prompt, a kept
 	// promise; notify.go), whether or not a voice client is attached.
 	Notifier Notifier
+	// Marker keeps the agents' seen and pinned marks (attention.go); nil
+	// leaves /api/state without an attention field and the seen and pin
+	// routes unavailable.
+	Marker herdr.Marker
+	// Mutes is the set of muted spaces (attention.Mutes). Nil mutes
+	// nothing; with nothing muted every decision is what it was before
+	// mutes existed.
+	Mutes *attention.Mutes
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// WorkerLog reads the workers' own session transcripts for the work
@@ -270,6 +279,15 @@ func (c Config) withDefaults() Config {
 // model calls and pane reads happen outside it, herdr sends inside it so
 // an answer, a stop and an instruction cannot interleave.
 type Supervisor struct {
+	// attMu guards attLast, the attention each pane's last agent.attention
+	// event reported; idxMu guards idx, the folder index the mute check
+	// uses (attention.go).
+	attMu   sync.Mutex
+	attLast map[string]AgentAttention
+	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
+	idxMu   sync.Mutex
+	idx     *folderIndex
+
 	store   *state.Store
 	herdr   Herdr
 	querier Querier
@@ -448,6 +466,9 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	}
 	s.restoreInvestigations()
 	s.loadCards()
+	if cfg.Mutes != nil {
+		cfg.Mutes.OnExpire(s.muteExpired)
+	}
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The orchestrator's notices about itself (a provider failing over and

@@ -48,6 +48,9 @@ type BlockedRequest struct {
 	Kind string `json:"kind,omitempty"`
 	// Screen is the pane text the supervisor will read.
 	Screen string `json:"screen"`
+	// Cwd is the folder the pane works in (optional): the space a mute of
+	// that folder silences the pane with.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // ErrNotSynthetic is returned when a fake state change targets a pane
@@ -73,6 +76,7 @@ func (i *Injector) Blocked(ctx context.Context, req BlockedRequest) (state.Agent
 		return state.Agent{}, fmt.Errorf("%w: %s", ErrNotSynthetic, req.PaneID)
 	}
 	i.herdr.SetScreen(req.PaneID, req.Kind, req.Screen, herdr.StateBlocked)
+	i.herdr.SetCwd(req.PaneID, req.Cwd)
 	from, err := i.ensureRow(req.PaneID, req.Kind, req.Alias)
 	if err != nil {
 		return state.Agent{}, err
@@ -96,6 +100,8 @@ type PaneRequest struct {
 	State string `json:"state,omitempty"`
 	// Screen is the pane text the supervisor will read.
 	Screen string `json:"screen"`
+	// Cwd is the folder the pane works in (optional), as for BlockedRequest.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // Pane registers a synthetic pane in req.State, or updates one, and runs
@@ -110,7 +116,7 @@ func (i *Injector) Pane(ctx context.Context, req PaneRequest) (state.Agent, erro
 		to = herdr.StateIdle
 	}
 	if to == herdr.StateBlocked {
-		return i.Blocked(ctx, BlockedRequest{PaneID: req.PaneID, Alias: req.Alias, Kind: req.Kind, Screen: req.Screen})
+		return i.Blocked(ctx, BlockedRequest{PaneID: req.PaneID, Alias: req.Alias, Kind: req.Kind, Screen: req.Screen, Cwd: req.Cwd})
 	}
 	switch {
 	case req.PaneID == "":
@@ -146,6 +152,7 @@ func (i *Injector) Pane(ctx context.Context, req PaneRequest) (state.Agent, erro
 		}
 	}
 	i.herdr.SetScreen(req.PaneID, req.Kind, req.Screen, to)
+	i.herdr.SetCwd(req.PaneID, req.Cwd)
 	i.log.Log("web", "web.inject", req.PaneID, map[string]any{"kind": "pane", "state": string(to), "alias": req.Alias, "agent": req.Kind, "screen_bytes": len(req.Screen)})
 	i.transition(ctx, req.PaneID, req.Kind, from, to)
 	row, _ = i.store.Get(req.PaneID)
@@ -207,6 +214,7 @@ func (i *Injector) Remove(ctx context.Context, paneID string) error {
 	i.log.Log("herdr", "herdr.transition", paneID, t)
 	i.sup.HandleTransition(ctx, t)
 	i.herdr.Remove(paneID)
+	i.herdr.notifyChanged()
 	return nil
 }
 
@@ -240,5 +248,6 @@ func (i *Injector) transition(ctx context.Context, paneID, kind string, from, to
 	i.log.Log("herdr", "herdr.state", paneID, map[string]any{"state": to, "source": state.SourceInject, "agent": kind})
 	t := herdr.Transition{PaneID: paneID, From: from, To: to, At: at, Agent: kind, WorkspaceID: "synthetic", Source: state.SourceInject}
 	i.log.Log("herdr", "herdr.transition", paneID, t)
+	i.herdr.notifyChanged()
 	i.sup.HandleTransition(ctx, t)
 }

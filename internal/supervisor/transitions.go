@@ -299,9 +299,10 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
 	s.touch(row.PaneID)
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
-	s.setPending(p)
+	s.setPendingMuted(p, muted)
 	s.mu.Unlock()
 	sentence := alias + " finished, and it's asking " + prompt.Phrase() + "."
 	if prompt.Phrase() == "" {
@@ -346,6 +347,10 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
 		// It may well be a question: every level hears this.
 		line := alias + " is blocked, but I could not read its screen."
+		if s.paneMuted(ctx, row.PaneID) {
+			s.log.Log(logSource, "supervisor.push_quiet", row.PaneID, map[string]any{"text": line, "reason": "space_muted"})
+			return
+		}
 		s.notify(announcement{row: row, event: brain.PromiseEventBlocked, eventID: s.eventIDOf(row.PaneID)}, nil, line)
 		s.push(row.PaneID, line, voice.UrgencyIdle)
 		return
@@ -370,9 +375,10 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 		return
 	}
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
-	sentence := s.setPending(p)
+	sentence := s.setPendingMuted(p, muted)
 	s.mu.Unlock()
 	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: sentence, screen: screen, pending: p.ID})
 }

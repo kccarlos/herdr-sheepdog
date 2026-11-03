@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
@@ -243,6 +244,20 @@ type harnessOpts struct {
 	term *TermDeps
 	// dataDir is Deps.DataDir (attachments).
 	dataDir string
+	// marks gives the supervisor an attention.Local marker over the
+	// injector's panes, as the daemon does with --herdr=mock; mutes its
+	// space mute store; wrap replaces the Supervisor the server gets (a
+	// test double for the attention half).
+	marks bool
+	mutes *attention.Mutes
+	wrap  func(*supervisor.Supervisor) Supervisor
+}
+
+// testFleet is the fleet a test's marks follow: the injector's panes.
+type testFleet struct{ h *inject.Herdr }
+
+func (f testFleet) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
+	return f.h.MarkSnapshot(ctx)
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -290,13 +305,26 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 		providers = []ProviderInfo{{ID: "gemini", Label: "Gemini", Available: true}, {ID: "deepseek", Label: "DeepSeek", Available: true}, {ID: "openai", Label: "OpenAI", Available: false, Reason: "no OPENAI_API_KEY"}}
 	}
-	sup, err := supervisor.New(store, h, nil, pusher, log, supervisor.Config{Brain: b})
+	scfg := supervisor.Config{Brain: b, Mutes: o.mutes}
+	if o.marks {
+		local, err := attention.NewLocal("", testFleet{h}, attention.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scfg.Marker = local
+		h.Changed = func() { _ = local.Refresh(context.Background()) }
+	}
+	sup, err := supervisor.New(store, h, nil, pusher, log, scfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var serverSup Supervisor = sup
+	if o.wrap != nil {
+		serverSup = o.wrap(sup)
+	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
+	deps := Deps{Log: log, Store: store, Supervisor: serverSup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
 		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir}

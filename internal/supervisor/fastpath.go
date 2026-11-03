@@ -77,6 +77,14 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	text = strings.TrimSpace(text)
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt {
+		if w := BareWord(text); bareYesWords[w] || bareNoWords[w] {
+			if line := s.heldQuestionsLine(); line != "" {
+				// Only questions the user was never told about are open: a
+				// bare yes answers nothing (attention.go).
+				s.log.Log(logSource, "supervisor.fast_path", "", map[string]any{"path": "held_only", "text": text, "input": string(in.kind)})
+				return voice.ToolResult{Spoken: line}, true
+			}
+		}
 		return voice.ToolResult{}, false
 	}
 	keys, label, ok := bareAnswer(p, text)

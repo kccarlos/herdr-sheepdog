@@ -155,6 +155,13 @@ the foreground. When the orchestrator's line about an event is skipped as stale
 (the prompt was answered meanwhile) or the orchestrator decides to say nothing,
 nothing is sent either: the phone hears exactly what the voice would.
 
+A **muted space** ([Attention](ws-contract.md#attention)) sends nothing
+for its agents' blocks and finishes: the mute is checked in code where the
+announcement is decided, so the phone hears what the voice would, and the
+voice is silent about that space too. A kept promise and the finish of the
+user's own instruction are exceptions: they still speak and still push. The
+question card stays in `/api/state`.
+
 Dedupe: the sender remembers the last 512 event ids (or pending ids when
 no event id was minted) and sends each once, so a late orchestrator line about
 an event already notified is not sent again.
@@ -245,7 +252,9 @@ locked, or closed).
   seconds without one, each change of the banner's content is pushed:
   phase `away` ("Not listening"), the waiting rows and the counts. A new
   waiting agent goes at priority 10, anything else at 5 (iOS rate-limits
-  priority 10 per activity; priority 5 is not counted). Each update moves
+  priority 10 per activity; priority 5 is not counted). A new waiting agent
+  in a [muted space](ws-contract.md#attention) goes at 5 too, so the banner
+  stays right without alerting; its row and the counts are unchanged. Each update moves
   the stale date 30 minutes on. An activity older than 8 hours (iOS ends
   it) is forgotten, and so is one APNs reports gone (`410`).
 - **Privacy.** The content state's `rows` (agent names, questions, pane

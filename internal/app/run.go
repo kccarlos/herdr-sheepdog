@@ -77,6 +77,8 @@ func (a *App) Run(ctx context.Context) (err error) {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.marksRun(inner) }()
 	}
+	wg.Add(1)
+	go func() { defer wg.Done(); a.sup.RunAttention(inner) }()
 	if a.voice != nil {
 		// The voice starts in the background and never stops the
 		// daemon: without a key it stays off (setup mode); a failed

@@ -23,6 +23,10 @@ type Herdr struct {
 	// command into a pane. The old herdr uses it to mark the pane seen
 	// (herdr-core does that in its own StartAgent). Set it before use.
 	AfterStart func(ctx context.Context, paneID string)
+	// Changed, when set, runs after the Injector moved a synthetic pane
+	// (its state, its folder or its removal), so a store that follows the
+	// fleet can look again at once. Set it before use.
+	Changed func()
 
 	mu    sync.Mutex
 	panes map[string]*synthetic
@@ -34,6 +38,9 @@ type synthetic struct {
 	status herdr.State
 	cwd    string
 	sends  int
+	// turn counts the turns the pane finished (working to done or idle):
+	// the counterpart of the old herdr's completion_seq.
+	turn uint64
 }
 
 var _ supervisor.Herdr = (*Herdr)(nil)
@@ -62,9 +69,17 @@ func (h *Herdr) SetScreen(paneID, agent, screen string, status herdr.State) {
 		p = &synthetic{}
 		h.panes[paneID] = p
 	}
+	p.finishTurn(status)
 	p.screen, p.status = screen, status
 	if agent != "" {
 		p.agent = agent
+	}
+}
+
+// finishTurn counts a turn when the pane stops working for done or idle.
+func (p *synthetic) finishTurn(to herdr.State) {
+	if p.status == herdr.StateWorking && (to == herdr.StateDone || to == herdr.StateIdle) {
+		p.turn++
 	}
 }
 
@@ -73,8 +88,70 @@ func (h *Herdr) SetStatus(paneID string, status herdr.State) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if p, ok := h.panes[paneID]; ok {
+		p.finishTurn(status)
 		p.status = status
 	}
+}
+
+// SetCwd sets the folder a synthetic pane works in, which is how a muted
+// space finds the agent (a synthetic pane is in no herdr workspace).
+func (h *Herdr) SetCwd(paneID, cwd string) {
+	if cwd == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if p, ok := h.panes[paneID]; ok {
+		p.cwd = cwd
+	}
+}
+
+// PaneCwd is the folder of a synthetic pane.
+func (h *Herdr) PaneCwd(paneID string) (string, bool) {
+	p, ok := h.get(paneID)
+	if !ok || p.cwd == "" {
+		return "", false
+	}
+	return p.cwd, true
+}
+
+// notifyChanged runs the Changed hook.
+func (h *Herdr) notifyChanged() {
+	if h.Changed != nil {
+		h.Changed()
+	}
+}
+
+// MarkSnapshot is the fleet the seen and pinned marks follow: the inner
+// herdr's snapshot (none for the mock) plus the synthetic panes, each with a
+// turn count that is null while it works. A failing inner snapshot is an
+// error: the marks keep what they had.
+func (h *Herdr) MarkSnapshot(ctx context.Context) (herdr.Snapshot, error) {
+	var snap herdr.Snapshot
+	if sp, ok := h.inner.(supervisor.Spawner); ok {
+		var err error
+		if snap, err = sp.Snapshot(ctx); err != nil {
+			return herdr.Snapshot{}, err
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ids := make([]string, 0, len(h.panes))
+	for id := range h.panes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		p := h.panes[id]
+		snap.Panes = append(snap.Panes, herdr.PaneInfo{PaneID: id, Cwd: p.cwd})
+		a := herdr.AgentInfo{PaneID: id, Agent: p.agent, Status: p.status, Cwd: p.cwd}
+		if p.status != herdr.StateWorking {
+			turn := p.turn
+			a.CompletionSeq = &turn
+		}
+		snap.Agents = append(snap.Agents, a)
+	}
+	return snap, nil
 }
 
 // Remove forgets a synthetic pane.

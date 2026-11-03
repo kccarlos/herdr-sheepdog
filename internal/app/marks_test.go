@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,15 +45,34 @@ func TestWireMarksKeepsAStoreInTheDataDirOnTheOldHerdr(t *testing.T) {
 	}
 }
 
-func TestWireMarksInMockModeHasNothingToRefresh(t *testing.T) {
+// The mock has no herdr, but the debug injector's synthetic panes are a
+// fleet: the marks follow them, so e2e and the demo can see and pin them.
+func TestWireMarksInMockModeFollowsTheInjectedPanes(t *testing.T) {
 	a := marksApp(nil)
-	a.wireMarks(config.Config{DataDir: t.TempDir()}, nil)
+	a.wireMarks(config.Config{DataDir: t.TempDir(), SnapshotIntervalS: 5}, nil)
 
 	if _, ok := a.marker.(*attention.Local); !ok {
 		t.Fatalf("marker = %T, want attention.Local", a.marker)
 	}
-	if a.marksRun != nil || a.marksPoke != nil || a.herdr.AfterStart != nil {
-		t.Fatal("the mock has no herdr to refresh from")
+	if a.marksRun == nil || a.marksPoke == nil || a.herdr.Changed == nil {
+		t.Fatal("the mock's marks need the refresh loop, a poke and the injector hook")
+	}
+
+	ctx := context.Background()
+	a.herdr.SetScreen("e2e:work", "codex", "working", herdr.StateWorking)
+	a.herdr.Changed()
+	a.herdr.SetScreen("e2e:work", "codex", "done", herdr.StateDone)
+	a.herdr.Changed()
+	all, err := a.marker.AllMarks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := all["e2e:work"]
+	if !ok || m.Turn != 1 || m.Word != herdr.StateDone || m.Shared {
+		t.Fatalf("marks of the injected pane = %+v (tracked %v), want turn 1, done, not shared", m, ok)
+	}
+	if _, err := a.marker.SetPinned(ctx, "e2e:work", true); err != nil {
+		t.Fatalf("pinning an injected pane: %v", err)
 	}
 }
 

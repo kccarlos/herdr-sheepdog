@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -226,6 +227,11 @@ func (s *Supervisor) remindBuriedPrompt() {
 	h.lines[text] = true
 	age := now.Sub(h.sentAt)
 	s.mu.Unlock()
+	if s.paneMuted(context.Background(), p.PaneID) {
+		// A muted space's prompt is not nagged about; its card stays.
+		s.log.Log(logSource, "supervisor.push_quiet", p.PaneID, map[string]any{"text": text, "reason": "space_muted"})
+		return
+	}
 	s.log.Log(logSource, "supervisor.prompt_reminded", p.PaneID, map[string]any{
 		"pending": p.ID, "reason": reason, "since_announced_s": int(age.Seconds()), "text": text, "agent": s.aliasOf(p.PaneID),
 	})

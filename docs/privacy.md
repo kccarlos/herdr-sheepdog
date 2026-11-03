@@ -107,6 +107,7 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/notes.jsonl` | Notes the orchestrator wrote about your agents. | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions, your runtime settings. | Overwritten as it changes. |
 | `~/.local/share/sheepdog/agent_marks.json` | With the original herdr: per terminal, how many turns it finished, the last one you looked at, and whether you pinned it. No text from your sessions. | Each terminal's entry goes when the terminal closes. |
+| `~/.local/share/sheepdog/space_mutes.json` | The spaces you muted notifications for: the folder path, when, until when, and from which of your devices. No text from your sessions. | Until the mute ends, you turn it off, or the folder is gone. |
 | `~/.local/share/sheepdog/attachments/` | Photos and files you attach in the iPhone app. They are stored on your computer; the agent gets their path in your prompt and reads the file. | 7 days. |
 | `~/.local/share/sheepdog/devices.json` | Your paired phones and browsers: their names, kinds, public keys and when each was last seen. No secret. | Until you delete it or revoke a device on the setup page. |
 | `~/.local/share/sheepdog/tls/` | This computer's id and its own TLS certificate and key. | Until you delete it. |

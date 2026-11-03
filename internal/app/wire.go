@@ -44,6 +44,7 @@ func (a *App) wire() error {
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
 	a.wireMarks(cfg, opts.Stderr)
+	a.wireMutes(cfg)
 
 	// The supervisor is built before the voice session (its Handler is the
 	// session's tool handler); the pusher is filled in below. The querier
@@ -142,6 +143,8 @@ func (a *App) wire() error {
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,
 		Brain:                 a.brain,
 		Notifier:              notifier,
+		Marker:                a.marker,
+		Mutes:                 a.mutes,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -150,6 +153,8 @@ func (a *App) wire() error {
 		return err
 	}
 	a.sup = sup
+	muted := sup.PaneMuted
+	a.mutedLog.muted.Store(&muted)
 
 	// The voice context log (the /debug Context tab): every voice session
 	// records what the daemon sent its model; context.step tells the tab.
