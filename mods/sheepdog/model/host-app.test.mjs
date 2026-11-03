@@ -2,7 +2,7 @@
 // the daemon-down actions: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { INSTALL_COMMAND, noHolderView, OPEN_COMMAND, RUNNING_COMMAND, runningFrom, startDaemon } from "./host-app.js";
+import { INSTALL_COMMAND, noHolderView, OPEN_COMMAND, RUNNING_COMMAND, runningFrom, sheepdogPaths, sheepdogProgram, startDaemon } from "./host-app.js";
 import { deriveStatus } from "./status.js";
 import { voiceControls, commandFor, createVoice, RUN_CHECK_MS } from "./voice.js";
 
@@ -134,4 +134,36 @@ test("Start Sheepdog runs `sheepdog start`; failures say what to do, and never r
   const thrown = await startDaemon(async () => { throw new Error("ENOENT"); });
   assert.equal(thrown.ok, false);
   assert.match(thrown.text, /Run setup/);
+});
+
+test("Start Sheepdog falls back to the known install places when herdr's PATH lacks sheepdog", async () => {
+  const seen = [];
+  const exec = async (command, args) => {
+    seen.push([command, args]);
+    if (command === "sheepdog") throw new Error("cannot run sheepdog: No such file or directory");
+    return { code: 0 };
+  };
+  const exists = async (path) => path === "/opt/homebrew/bin/sheepdog" || path === "/usr/local/bin/sheepdog";
+  assert.deepEqual(await startDaemon(exec, { exists, home: "/Users/me" }), { ok: true, text: "Starting Sheepdog…" });
+  assert.deepEqual(seen, [["sheepdog", ["start"]], ["/opt/homebrew/bin/sheepdog", ["start"]]], "PATH first, then the first place that exists");
+  assert.deepEqual(sheepdogPaths("/Users/me/"), ["/Users/me/.local/bin/sheepdog", "/opt/homebrew/bin/sheepdog", "/usr/local/bin/sheepdog"]);
+});
+
+test("Start Sheepdog prefers PATH, and says so when nothing is installed anywhere", async () => {
+  const seen = [];
+  await startDaemon(async (c) => (seen.push(c), { code: 0 }), { exists: async () => true, home: "/h" });
+  assert.deepEqual(seen, ["sheepdog"], "no look at the disk when PATH works");
+  const down = await startDaemon(async () => { throw new Error("nope"); }, { exists: async () => false, home: "/h" });
+  assert.equal(down.ok, false);
+  assert.match(down.text, /Run setup/);
+  const brokenPlace = await startDaemon(async (c) => { throw new Error(c); }, { exists: async () => true, home: "/h" });
+  assert.equal(brokenPlace.ok, false);
+  const failing = await startDaemon(async (c) => { if (c === "sheepdog") throw new Error("x"); return { code: 1 }; }, { exists: async (p) => p.startsWith("/usr"), home: "/h" });
+  assert.match(failing.text, /did not start/);
+});
+
+test("Run setup uses a known install place, else the bare name", async () => {
+  assert.equal(await sheepdogProgram({ exists: async (p) => p === "/h/.local/bin/sheepdog", home: "/h" }), "/h/.local/bin/sheepdog");
+  assert.equal(await sheepdogProgram({ exists: async () => false, home: "/h" }), "sheepdog");
+  assert.equal(await sheepdogProgram({ exists: async () => { throw new Error("denied"); }, home: "/h" }), "sheepdog");
 });

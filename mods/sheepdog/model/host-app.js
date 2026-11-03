@@ -50,13 +50,53 @@ export const DOWN_ACTIONS = [
 ];
 export const START_COMMAND = ["sheepdog", ["start"]];
 
-// The note after `sheepdog start`: it resolves to { ok, text }. Never rejects.
-export async function startDaemon(exec) {
-  try {
-    const res = await exec(...START_COMMAND);
-    if (res && res.code !== 0) return { ok: false, text: "Sheepdog did not start. Run setup, or run sheepdog doctor in a terminal." };
-    return { ok: true, text: "Starting Sheepdog…" };
-  } catch {
-    return { ok: false, text: "Could not run sheepdog. Is it installed? Run setup to check." };
+// herdr's `exec` runs a program with the PATH of the app itself, and an app
+// opened from the Dock has a short one that lacks these folders. Where the
+// installer and Homebrew put the program, in this order.
+export const sheepdogPaths = (home) => [
+  `${String(home).replace(/\/+$/, "")}/.local/bin/sheepdog`,
+  "/opt/homebrew/bin/sheepdog",
+  "/usr/local/bin/sheepdog",
+];
+
+// The first of those that exists, or null. Never rejects.
+export async function findSheepdog({ exists, home }) {
+  for (const path of sheepdogPaths(home)) {
+    try {
+      if (await exists(path)) return path;
+    } catch {
+      // look at the next place
+    }
   }
+  return null;
+}
+
+// The program for a terminal tab (`terminal.open` argv), where nothing can be
+// retried: a known install place, else the bare name for the shell's PATH.
+export async function sheepdogProgram(places) {
+  return (await findSheepdog(places)) ?? START_COMMAND[0];
+}
+
+const NOT_RUN = { ok: false, text: "Could not run sheepdog. Is it installed? Run setup to check." };
+
+// The note after `sheepdog start`: it resolves to { ok, text }. Never rejects.
+// `exec` is herdr's: it rejects when the program cannot start (not on its
+// PATH), and then the known install places are tried, using `places` ({ exists,
+// home }) when given.
+export async function startDaemon(exec, places = null) {
+  const [command, args] = START_COMMAND;
+  let res;
+  try {
+    res = await exec(command, args);
+  } catch {
+    const path = places ? await findSheepdog(places) : null;
+    if (!path) return NOT_RUN;
+    try {
+      res = await exec(path, args);
+    } catch {
+      return NOT_RUN;
+    }
+  }
+  if (res && res.code !== 0) return { ok: false, text: "Sheepdog did not start. Run setup, or run sheepdog doctor in a terminal." };
+  return { ok: true, text: "Starting Sheepdog…" };
 }

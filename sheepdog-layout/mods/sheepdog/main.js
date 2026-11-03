@@ -28,7 +28,7 @@ import { keyAction, leaveCommand } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
 import * as overlay from "./model/overlay-actions.js";
 import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
-import { startDaemon } from "./model/host-app.js";
+import { sheepdogProgram, startDaemon } from "./model/host-app.js";
 import { later } from "./model/later.js";
 import { openSetup } from "./model/setup-link.js";
 import { deriveStatus } from "./model/status.js";
@@ -424,7 +424,7 @@ export default class Sheepdog extends View {
     this.downNote = "Starting Sheepdog…";
     cx.notify();
     later(cx, async (acx) => {
-      const result = await startDaemon(exec);
+      const result = await startDaemon(exec, { exists, home: home() });
       this.starting = false;
       this.downNote = result.ok ? null : result.text;
       acx.notify();
@@ -438,8 +438,11 @@ export default class Sheepdog extends View {
   }
 
   // Run in a tab: `sheepdog setup` starts the daemon if needed and walks through the key.
-  runSetup() {
-    run("terminal.open", { argv: ["sheepdog", "setup"], place: "tab" });
+  runSetup(cx) {
+    later(cx, async () => {
+      const program = await sheepdogProgram({ exists, home: home() });
+      run("terminal.open", { argv: [program, "setup"], place: "tab" });
+    });
   }
 
   render() {
@@ -569,7 +572,7 @@ export default class Sheepdog extends View {
         layout,
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
-        onSetup: () => this.runSetup(),
+        onSetup: (_e, cx) => this.runSetup(cx),
         onStart: (_e, cx) => this.startDaemon(cx),
         downNote: this.downNote ?? null,
         onToggleTechnical: (_e, cx) => {
