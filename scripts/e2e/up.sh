@@ -2,9 +2,11 @@
 # One-command private end-to-end environment (docs/dev/e2e.md).
 #
 #   scripts/e2e/up.sh [--port N] [--panel-from <dir>] [--no-herdr-app]
+#                     [--herdr mock|socket] [--brain fake|off] [--cli on|off]
 #
 # Builds the daemon from this worktree and runs it privately (fake
-# orchestrator, mock herdr, no voice, dev routes) beside a private herdr-core
+# orchestrator, mock herdr, no voice, dev routes; --herdr socket points it at
+# the private core instead) beside a private herdr-core
 # and, unless --no-herdr-app, a private Herdr window showing the panel from
 # --panel-from (a worktree root or a mods/sheepdog folder; default: this
 # worktree). Prints the environment directory; `down.sh <dir>` removes it.
@@ -15,12 +17,18 @@ set -euo pipefail
 PORT=""
 PANEL_FROM="$E2E_ROOT"
 WITH_APP=1
+HERDR_MODE=mock
+BRAIN_MODE=fake
+CLI_MODE=on
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT="${2:?--port needs a number}"; shift 2;;
     --panel-from) PANEL_FROM="${2:?--panel-from needs a directory}"; shift 2;;
     --no-herdr-app) WITH_APP=0; shift;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0;;
+    --herdr) HERDR_MODE="${2:?--herdr needs mock or socket}"; shift 2;;
+    --brain) BRAIN_MODE="${2:?--brain needs fake or off}"; shift 2;;
+    --cli) CLI_MODE="${2:?--cli needs on or off}"; shift 2;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0;;
     *) e2e_die "unknown argument: $1";;
   esac
 done
@@ -75,6 +83,9 @@ export E2E_HC_SOCKET=$HC_SOCKET
 export E2E_APP_HOME=$APP_HOME
 export E2E_WITH_APP=$WITH_APP
 export E2E_VOICE=off
+export E2E_HERDR=$HERDR_MODE
+export E2E_BRAIN=$BRAIN_MODE
+export E2E_CLI=$CLI_MODE
 export HERDR_APP_HOME=$APP_HOME
 export HC_SESSION=$HC_SESSION
 export HC_SOCKET=$HC_SOCKET
@@ -82,15 +93,15 @@ ENV
 # shellcheck disable=SC1091
 . "$DIR/env.sh"
 
-e2e_daemon_start
-echo "daemon up on $E2E_URL (pid $(cat "$DIR/daemon.pid"))"
-
 # The private herdr-core.
 e2e_hc server start >"$DIR/hc.log" 2>&1 || { cat "$DIR/hc.log" >&2; e2e_die "hc server start failed"; }
 e2e_wait 15 test -S "$HC_SOCKET" || e2e_die "private core socket $HC_SOCKET never appeared"
 HC_PID=$(lsof -t "$HC_SOCKET" 2>/dev/null | head -1 || true)
 [ -n "$HC_PID" ] && echo "$HC_PID" >"$DIR/hc.pid"
 echo "private core up (session $HC_SESSION, pid ${HC_PID:-unknown})"
+
+e2e_daemon_start
+echo "daemon up on $E2E_URL (pid $(cat "$DIR/daemon.pid"))"
 
 if [ "$WITH_APP" = 1 ]; then
   mkdir -p "$APP_HOME/mods/sheepdog" "$APP_HOME/layouts"

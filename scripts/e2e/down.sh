@@ -22,6 +22,7 @@ if [ -f "$DIR/env.sh" ]; then
     fi
   fi
   [ -f "$DIR/daemon.pid" ] && e2e_kill "$(cat "$DIR/daemon.pid")"
+  [ -f "$DIR/wrap.pid" ] && e2e_kill "$(cat "$DIR/wrap.pid")"
   if [ -S "$E2E_HC_SOCKET" ]; then
     e2e_hc server stop >/dev/null 2>&1 || true
   fi

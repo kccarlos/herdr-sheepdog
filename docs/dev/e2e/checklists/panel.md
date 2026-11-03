@@ -4,6 +4,11 @@ Run against a private environment ([`../../e2e.md`](../../e2e.md)): `up.sh`,
 raise the window, then tick each step. Shoot with `shot.sh` when a step says
 "look". The panel is the Sheepdog block at the window's right edge.
 
+`scripts/e2e/panel-auto.sh` runs the scriptable steps (composer send, Esc and
+`1`, approvals at once, daemon down) with real keys; the nightly runs it in
+the VM ([Nightly regression](../../e2e.md#nightly-regression)). The rest stays
+by hand.
+
 ## Settings fold and remember
 
 1. Open the panel menu, Settings. Expect sections Voice, Paired devices,

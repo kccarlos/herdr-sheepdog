@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template for scripts/e2e/nightly-install.sh, which fills in the @...@
+     values and loads it (docs/dev/e2e.md, "Nightly regression"). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.github.kccarlos.sheepdog-nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@CLONE@/scripts/e2e/nightly.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@CLONE@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>SHEEPDOG_NIGHTLY_UPDATE</key>
+    <string>1</string>
+    <key>SHEEPDOG_NIGHTLY_REF</key>
+    <string>@REF@</string>
+    <key>TART_HOME</key>
+    <string>@TART_HOME@</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/sheepdog-nightly/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/sheepdog-nightly/launchd.log</string>
+  <key>ProcessType</key>
+  <string>Standard</string>
+</dict>
+</plist>
