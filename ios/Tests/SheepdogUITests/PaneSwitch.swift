@@ -136,6 +136,23 @@ extension XCTestCase {
         return element
     }
 
+    /// Swipes the screen up until `element` sits clear of the voice
+    /// capsule floating over the bottom of the main view. On a short
+    /// phone a card's last row can end under the capsule, where XCTest
+    /// still calls it hittable but a tap lands on the capsule's buttons.
+    func revealAboveCapsule(_ app: XCUIApplication, _ element: XCUIElement, maxSwipes: Int = 4, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        // The demo keeps the real main view, and its capsule, under its cover.
+        let capsule = app.scrollViews.matching(identifier: "voice.capsule").firstMatch
+        func clear() -> Bool {
+            guard element.isTappable else { return false }
+            guard capsule.exists, let top = try? capsule.snapshot().frame.minY else { return true }
+            return element.frame.maxY <= top
+        }
+        for _ in 0 ..< maxSwipes where !clear() { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(clear(), "\(element) stays under the voice capsule", file: file, line: line)
+        return element
+    }
+
     /// Closes an open menu by tapping the very top of the screen.
     /// Taps until `item` (an item of the open menu) is gone, so a tap
     /// that lands while the menu still animates in is not lost.
