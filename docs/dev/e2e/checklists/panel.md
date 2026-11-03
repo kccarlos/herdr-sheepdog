@@ -70,8 +70,10 @@ by hand.
    agent has no question card.
 2. `scenario.sh <dir> agent-working`, then `agent-done`. Expect the line to
    follow `/api/state` `agents[].attention.group`, for example
-   "1 needs you · 1 working · 1 done", within a second or two and without
-   reopening the panel (the `agent.attention` events re-read the state).
+   "1 working · 1 done", within about 2 s of the state change and without
+   reopening the panel (`herdr.transition` and `agent.attention` events re-read
+   the state; measured with two real Haiku agents on hc). The line leaves out
+   needs you while the pill shows the same count.
 3. `scenario.sh <dir> approval`: the pill shows "1 needs you" for the open
    question. A working or done agent never raises the pill or the rail's badge.
 

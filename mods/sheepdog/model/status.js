@@ -48,13 +48,15 @@ export function voiceView(voice, host) {
 // `paused`: the daemon answers but the live stream is down, so the panel is
 // polling ("Live updates paused"). `needsYou`: open questions (the badge).
 // `agents` counts the agents per group and `agentLine` words them for the
-// status line ("1 needs you · 2 working · 1 done"); empty unless the daemon is up.
+// status line ("1 needs you · 2 working · 1 done", without the needs-you part when
+// the pill shows that same number); empty unless the daemon is up.
 export function deriveStatus(snapshot, host) {
   const { daemon, detail, app, stream } = snapshot;
   const voice = voiceView(app?.voice, host);
   const needsYou = app?.questions?.length ?? 0;
   const agents = attentionCounts(app);
-  const agentLine = attentionLine(agents);
+  // The header pill says needs you when it can; the line then does not.
+  const agentLine = attentionLine(agents, needsYou);
   if (daemon === "unknown" && !app) return { phase: "loading", detail: "", paused: false, needsYou: 0, agents, agentLine: "", voice };
   if (daemon === "down") return { phase: "down", detail, paused: false, needsYou: 0, agents, agentLine: "", voice };
   const problem = app?.voice?.setup_needed || app?.voice?.problem;

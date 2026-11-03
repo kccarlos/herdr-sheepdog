@@ -48,10 +48,12 @@ export function attentionCounts(state) {
 }
 
 // "1 needs you · 2 working · 1 done": the groups that have agents, in that
-// order; "" when none do. Agents that are not running are left out.
-export function attentionLine(counts) {
+// order; "" when none do. Agents that are not running are left out. `pill` is
+// the count the header pill already shows for needs you: when it is the same
+// number the line leaves that part out, so it is not said twice.
+export function attentionLine(counts, pill = 0) {
   const parts = [];
-  if (counts?.needsYou > 0) parts.push(`${counts.needsYou} ${counts.needsYou === 1 ? "needs" : "need"} you`);
+  if (counts?.needsYou > 0 && counts.needsYou !== pill) parts.push(`${counts.needsYou} ${counts.needsYou === 1 ? "needs" : "need"} you`);
   if (counts?.working > 0) parts.push(`${counts.working} working`);
   if (counts?.done > 0) parts.push(`${counts.done} done`);
   return parts.join(" · ");

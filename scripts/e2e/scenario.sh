@@ -116,6 +116,8 @@ case "$NAME" in
     ;;
   agent-pin)
     PANE="${ARG:-e2e:work}"
+    # The injected pane exists only on the mock backend; on hc give a real pane id.
+    [ -z "$ARG" ] && [ "${E2E_HERDR:-mock}" = socket ] && e2e_die "agent-pin on hc needs a pane id: scenario.sh $E2E_DIR agent-pin <pane>"
     [ -z "$ARG" ] && ensure_finished
     e2e_api POST "/api/agents/$PANE/pin" '{"pinned":true}' | jq -e '.attention.pinned == true' >/dev/null || e2e_die "pin did not take"
     agent_attention "$PANE" | jq -e '.pinned == true' >/dev/null || e2e_die "/api/state does not show $PANE pinned"

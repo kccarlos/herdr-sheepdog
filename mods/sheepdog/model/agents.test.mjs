@@ -64,3 +64,11 @@ test("the status line lists the groups that have agents, needs you first, and le
   assert.equal(attentionLine({ ...none, notRunning: 2 }), "");
   assert.equal(attentionLine(none), "");
 });
+
+test("the status line leaves needs you out when the pill already shows the same count", () => {
+  const counts = { needsYou: 1, working: 2, done: 1, notRunning: 0 };
+  assert.equal(attentionLine(counts, 1), "2 working · 1 done");
+  assert.equal(attentionLine(counts, 0), "1 needs you · 2 working · 1 done", "no pill: the line says it");
+  assert.equal(attentionLine(counts, 2), "1 needs you · 2 working · 1 done", "a different pill count: both say their own");
+  assert.equal(attentionLine({ ...none, needsYou: 1 }, 1), "");
+});

@@ -92,6 +92,8 @@ test("events: what changes the conversation, only the state, or nothing", () => 
   assert.equal(eventEffect("web.client.attach"), "state");
   assert.equal(eventEffect("voice.muted"), "state");
   assert.equal(eventEffect("agent.attention"), "state", "only /api/state carries the groups");
+  assert.equal(eventEffect("herdr.transition"), "state", "an older daemon says only this when an agent starts working");
+  assert.equal(eventEffect("herdr.read"), null, "the rest of the herdr kind changes nothing");
   assert.equal(eventEffect("space.muted"), "state");
   assert.equal(eventEffect("web.client.stats"), null);
   assert.equal(eventEffect("voice.playback"), null);
@@ -99,13 +101,16 @@ test("events: what changes the conversation, only the state, or nothing", () => 
 });
 
 test("the stream asks only for the kinds those events come from", () => {
-  assert.deepEqual(KINDS, ["agent", "card", "conversation", "daemon", "pending", "space", "voice", "web"]);
+  assert.deepEqual(KINDS, ["agent", "card", "conversation", "daemon", "herdr", "pending", "space", "voice", "web"]);
 });
 
 test("the status carries the agents per group and their line, while the badge stays the open questions", () => {
   const agents = [{ state: "blocked", attention: { group: "needs_you" } }, { state: "working" }, { state: "working" }, { state: "done", attention: { group: "done" } }];
   const status = deriveStatus(snap({ app: { voice: voice(), questions: [], agents } }));
-  assert.equal(status.agentLine, "1 needs you · 2 working · 1 done");
+  assert.equal(status.agentLine, "1 needs you · 2 working · 1 done", "no question card, so no pill: the line says it");
+  const asked = deriveStatus(snap({ app: { voice: voice(), questions: [{ id: "q" }], agents } }));
+  assert.equal(asked.needsYou, 1);
+  assert.equal(asked.agentLine, "2 working · 1 done", "the pill says 1 needs you, the line does not repeat it");
   assert.equal(status.agents.needsYou, 1);
   assert.equal(status.needsYou, 0, "the badge counts open questions, not blocked agents");
   assert.equal(deriveStatus(snap({ daemon: "down", app: null, stream: "down" })).agentLine, "");
