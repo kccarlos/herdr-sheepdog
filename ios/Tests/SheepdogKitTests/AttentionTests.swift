@@ -124,6 +124,27 @@ final class AttentionDecodeTests: XCTestCase {
         XCTAssertTrue(state.agents[0].hasAttention)
     }
 
+    /// Captured from a private daemon on a real herdr-core (scripts/e2e,
+    /// scenarios agent-unread and space-mute): `until` is a JSON null.
+    func testAPayloadCapturedFromARealDaemonDecodes() throws {
+        let state = #"""
+        {"agents":[{"pane_id":"e2e:muted-approval","alias":"mutedauth","state":"blocked","attention":{"group":"needs_you","unread":false,"pinned":false,"turn":0,"muted":true,"shared":false}},
+                   {"pane_id":"e2e:work","alias":"build","state":"done","attention":{"group":"done","unread":true,"pinned":false,"turn":0,"muted":false,"shared":false}}],
+         "voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false},
+         "attention_counts":{"needs_you":2,"working":0,"done_unread":1},
+         "space_mutes":[{"path":"/private/tmp/home/muted","name":"muted"}]}
+        """#
+        let decoded = try DaemonClient.decoder.decode(DaemonState.self, from: Data(state.utf8))
+        XCTAssertTrue(decoded.agents[0].isMuted)
+        XCTAssertFalse(decoded.agents[0].attention?.shared ?? true)
+        XCTAssertTrue(decoded.agents[1].isUnread)
+        XCTAssertEqual(decoded.attentionCounts?.doneUnread, 1)
+        let spaces = #"{"spaces":[{"id":"sM","name":"muted","path":"/p/muted","git":false,"worktree":false,"agents":[],"shells":[],"commands":[],"muted":true,"until":null}],"folders":[],"kinds":[],"worktrees":false}"#
+        let view = try DaemonClient.decoder.decode(SpacesView.self, from: Data(spaces.utf8))
+        XCTAssertTrue(view.spaces[0].isMuted)
+        XCTAssertNil(view.spaces[0].until)
+    }
+
     func testAnOldDaemonDecodesAndGroupsByState() throws {
         let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(oldDaemon.utf8))
         let agent = try XCTUnwrap(state.agents.first)
