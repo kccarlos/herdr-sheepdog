@@ -152,7 +152,7 @@ if [ "$WITH_APP" = 1 ]; then
   open -n -a "$APP" --env "HERDR_APP_HOME=$APP_HOME" --env "HC_SESSION=$HC_SESSION" \
     --env "HC_SOCKET=$HC_SOCKET" --env "XDG_CONFIG_HOME=$DIR/xdg/config" \
     --env "XDG_DATA_HOME=$DIR/xdg/data" --env "XDG_STATE_HOME=$DIR/xdg/state" \
-    --env "XDG_CACHE_HOME=$DIR/xdg/cache"
+    --env "XDG_CACHE_HOME=$DIR/xdg/cache" --env "DISABLE_AUTOUPDATER=1"
 
   # Find the private Herdr: the Herdr process whose environment has our
   # HERDR_APP_HOME (ps -E prints it).
