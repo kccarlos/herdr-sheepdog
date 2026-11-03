@@ -224,6 +224,12 @@ Each scheduled run first moves the clone to `origin/main`. While main has no
 new copy. launchd output goes to
 `~/Library/Logs/sheepdog-nightly/launchd.log`.
 
+The VM lives on an external disk, and macOS asks once before a launchd job
+reads a removable volume: "bash" would like to access files on a removable
+volume. Until someone clicks Allow, or allows `/bin/bash` under System
+Settings, Privacy & Security, Files and Folders, the `vm` part fails with
+that reason after 30 s. The other parts run anyway.
+
 By hand, from any checkout:
 
 ```sh
