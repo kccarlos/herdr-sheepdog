@@ -139,6 +139,32 @@ function setup(t, status, onSetup, compact) {
     .child(h_flex().child(button(t, "run-setup", "Run sheepdog setup", onSetup, true)));
 }
 
+// The panel on this computer is older than the daemon's and was not replaced
+// (model/panel-update.js): say so, and offer the setup that updates it.
+function panelUpdate(t, notice, onSetup, compact) {
+  if (compact) {
+    return h_flex()
+      .w_full()
+      .h(40)
+      .px(12)
+      .gap(8)
+      .items_center()
+      .border_b(1)
+      .border_color(t.border)
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(`${notice.title}: run ${notice.command}`))
+      .child(button(t, "run-setup-panel", "Setup", onSetup, true));
+  }
+  return v_flex()
+    .w_full()
+    .p(12)
+    .gap(6)
+    .border_b(1)
+    .border_color(t.border)
+    .child(div().text_size(13).font_semibold().text_color(t.foreground).child(notice.title))
+    .child(div().text_size(12).text_color(t.muted).child(notice.text))
+    .child(h_flex().child(button(t, "run-setup-panel", "Run sheepdog setup", onSetup, true)));
+}
+
 // The list, newest first (model/timeline.js says why): the rows, then a last
 // row that says whether older history is coming. `list()` draws only what is
 // on screen and asks each row by index, so drawing that last row means the
@@ -181,7 +207,7 @@ function empty(t, text, minHeight = 0) {
 // block's, { note, onCopyLayout }, else null. `sheet`: what is open over the
 // list, or null: { type: "card", card, note, onFocus, onClose } or { type:
 // "questions", onClose }.
-export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, sheet, onSetup, onStart, downNote, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, panelNotice, sheet, onSetup, onStart, downNote, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
   const up = status.phase === "ok" || status.phase === "setup";
   let body;
   if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
@@ -192,13 +218,15 @@ export function panelView(t, { status, entries, paging, technical, retryMs, comp
   else if (entries.length === 0) body = empty(t, "Nothing has been said yet.", layout.timelineMinHeight);
   else body = timeline(t, { entries, ...paging, minHeight: layout.timelineMinHeight, onEndShown, onOpenRow });
   const floating = up && sheet?.type !== "questions" && questions.cards.length > 0;
-  const topVisible = up && (dock || status.phase === "setup" || status.paused || status.phase === "ok" || floating);
+  const showPanelNotice = Boolean(panelNotice) && status.phase === "ok";
+  const topVisible = up && (dock || showPanelNotice || status.phase === "setup" || status.paused || status.phase === "ok" || floating);
   const top = v_flex()
     .w_full()
     .min_h(0)
     .max_h(layout.detailsHeight)
     .when(layout.detailsScroll, (el) => el.overflow_y_scroll())
     .when(Boolean(dock), (el) => el.child(dockHint(t, dock, layout.compactBanners)))
+    .when(showPanelNotice, (el) => el.child(panelUpdate(t, panelNotice, onSetup, layout.compactBanners)))
     .when(status.phase === "setup", (el) => el.child(setup(t, status, onSetup, layout.compactBanners)))
     .when(status.paused && status.phase !== "down", (el) => el.child(div().w_full().px(12).pt(8).child(paused(t))))
     .when(status.phase === "ok", (el) => el.child(voiceBar(t, voice.controls, voice.state, voice.on)))

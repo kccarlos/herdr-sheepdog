@@ -17,6 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
@@ -46,6 +47,9 @@ type statusReport struct {
 	// Update is the update notice: from the running daemon, else from the
 	// cache (omitted with update.check off).
 	Update *update.Status `json:"update,omitempty"`
+	// Panel is the herdr-app panel against this sheepdog's (omitted when
+	// there is no panel installed).
+	Panel *panelsync.State `json:"panel,omitempty"`
 	// Keys says which env file the last daemon loaded its keys from
 	// (omitted when none was recorded).
 	Keys    *statusKeys `json:"keys,omitempty"`
@@ -243,6 +247,10 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 	if !cfg.Update.Check && r.Update != nil && !r.Update.RestartPending {
 		r.Update = nil
 	}
+	if ps := panelsync.Evaluate(panelHome(), panelSource()); ps.Installed {
+		ps.AutoUpdate = cfg.Panel.AutoUpdate
+		r.Panel = &ps
+	}
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
 	r.Keys = keysStatus(cfg.DataDir)
 	return r
@@ -336,6 +344,7 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 		row("last error", "none recorded")
 	}
 	printUpdate(row, r)
+	printPanel(row, r)
 	row("log", r.LogFile)
 	if !r.Running && fileSize(daemon.StdioFile(r.DataDir)) > 0 {
 		row("crash output", daemon.StdioFile(r.DataDir))
@@ -400,6 +409,29 @@ func lastErrorIn(path string, red *redact.Redactor) *statusLastError {
 		last = e
 	}
 	return last
+}
+
+// printPanel adds the herdr-app panel line: its version, and what to do when
+// it is behind.
+func printPanel(row func(k, v string), r statusReport) {
+	p := r.Panel
+	if p == nil {
+		return
+	}
+	v := p.Version
+	if v == "" {
+		v = "not installed by sheepdog setup"
+	}
+	switch {
+	case !p.UpdateAvailable:
+		row("panel", "herdr-app panel is up to date ("+v+")")
+	case p.Modified:
+		row("panel", "herdr-app panel ("+v+") is modified or not from sheepdog setup; a newer one is available: run sheepdog setup")
+	case p.AutoUpdate:
+		row("panel", "herdr-app panel ("+v+") is older; it updates when the daemon (re)starts")
+	default:
+		row("panel", "herdr-app panel ("+v+") is older and panel.auto_update is off: run sheepdog setup")
+	}
 }
 
 // printUpdate adds the update lines: a newer release, and an upgrade that

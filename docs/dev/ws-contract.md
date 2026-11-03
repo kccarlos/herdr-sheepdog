@@ -930,7 +930,12 @@ control messages; the daemon resamples for GPT-Live (which runs at
   for the install method; `restart_pending`: the program on disk is not the
   one running ("update installed, restart to finish"), `restart_to` its
   version. Display only: the voice never speaks it
-  ([`update.md`](update.md)).
+  ([`update.md`](update.md)). `panel` is the herdr-app panel installed on
+  this computer against the one built into the daemon (omitted when the
+  daemon does not track it): `{installed, version, modified,
+  update_available, auto_update}`; `version` is the sheepdog that installed
+  it (empty without an install marker), `modified`: not exactly what setup
+  wrote, so the daemon never replaces it ([`update.md`](update.md#the-panel-after-an-upgrade)).
 - `GET /api/state`'s `voice` object reports `speaking`: true while the
   live voice session's `Speaking()` says the model's speech is reaching
   the user, and false when the voice is off or there is no session.

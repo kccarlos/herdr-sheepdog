@@ -13,6 +13,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
 
 func setupTestPanel() fstest.MapFS {
@@ -179,6 +180,10 @@ func TestSetupEnvironmentNonInteractive(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(appHome, "mods", "sheepdog", "main.js")); err != nil {
 		t.Errorf("panel was not installed: %v", err)
+	}
+	// Setup says what it installed, so the daemon can update it later.
+	if m, err := panelsync.ReadMarker(filepath.Join(appHome, "mods", "sheepdog")); err != nil || m.Version != version || m.Layout == "" || len(m.Files) == 0 {
+		t.Errorf("install marker = %+v, %v", m, err)
 	}
 	text := out.String()
 	for _, want := range []string{

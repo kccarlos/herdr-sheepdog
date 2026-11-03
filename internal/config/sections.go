@@ -142,6 +142,14 @@ type Update struct {
 	AutoRestart bool `toml:"auto_restart"`
 }
 
+// Panel configures the herdr-app panel the daemon ships (docs/dev/update.md).
+type Panel struct {
+	// AutoUpdate replaces the installed panel and layout with this
+	// build's when sheepdog installed them and they are unchanged.
+	// Default true.
+	AutoUpdate bool `toml:"auto_update"`
+}
+
 // Computer names this computer for the apps (GET /api/hello).
 type Computer struct {
 	// Name is what the app calls this computer; empty means the

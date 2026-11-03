@@ -22,6 +22,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/observe"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -85,6 +86,8 @@ type Options struct {
 	Version string
 	// Update, when set, is the update notice /api/state reports.
 	Update func() update.Status
+	// Panel, when set, is the herdr-app panel state /api/state reports.
+	Panel func() panelsync.State
 	// Stderr receives one-line warnings; nil means os.Stderr.
 	Stderr io.Writer
 	// Drain bounds the HTTP shutdown (default 5 s).

@@ -520,6 +520,13 @@ before a line is written.
 | `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, and the setup and voice pages. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
 | `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one, but only while it is idle: no voice client connected, no orchestrator turn running, no approval waiting, no demo running on the setup page. It checks every minute and never interrupts a live session. `false` leaves the restart to you (`sheepdog restart`); the pages and `sheepdog status` still say "update installed, restart to finish". |
 
+
+## `[panel]`
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `panel.auto_update` | `SHEEPDOG_PANEL_AUTO_UPDATE` | `true` | After an upgrade, the daemon replaces the herdr-app panel (`<herdr-app home>/mods/sheepdog`) and the Sheepdog layout (`layouts/sheepdog.json`) with the versions built into it, when `sheepdog setup` installed them and you have not changed a file (checked against `.sheepdog-install.json` in the panel folder). herdr-app reloads the panel by itself. A panel you changed, or one that was not installed by `sheepdog setup`, is never touched: the panel shows "A newer panel is available" and `sheepdog setup` updates it. The daemon never creates the panel folder. `false` turns the replacement off; the notice stays. Logged as `panel.updated`. |
+
 ## `[computer]`
 
 | Key | Env override | Default | Meaning |

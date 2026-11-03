@@ -55,6 +55,7 @@ type Config struct {
 	Log        Log        `toml:"log"`
 	Events     Events     `toml:"events"`
 	Update     Update     `toml:"update"`
+	Panel      Panel      `toml:"panel"`
 	Computer   Computer   `toml:"computer"`
 }
 
@@ -91,6 +92,7 @@ func Default() Config {
 		Log:         Log{Level: "info", MaxSizeMB: 10, MaxFiles: 3},
 		Events:      Events{RetentionDays: 14},
 		Update:      Update{Check: true, AutoRestart: true},
+		Panel:       Panel{AutoUpdate: true},
 		Push:        Push{Relay: PushRelay{URL: DefaultRelayURL}},
 	}
 }

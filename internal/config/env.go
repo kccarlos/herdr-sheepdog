@@ -114,6 +114,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Update.AutoRestart = b
 	}
+	if v, ok := lookup("SHEEPDOG_PANEL_AUTO_UPDATE"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_PANEL_AUTO_UPDATE=%q: want true or false", v)
+		}
+		cfg.Panel.AutoUpdate = b
+	}
 	if v, ok := lookup("SHEEPDOG_COMPUTER_NAME"); ok {
 		cfg.Computer.Name = v
 	}

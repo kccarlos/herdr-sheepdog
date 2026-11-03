@@ -30,6 +30,7 @@ import * as overlay from "./model/overlay-actions.js";
 import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
 import { sheepdogProgram, startDaemon } from "./model/host-app.js";
 import { later } from "./model/later.js";
+import { panelUpdateNotice } from "./model/panel-update.js";
 import { openSetup } from "./model/setup-link.js";
 import { deriveStatus } from "./model/status.js";
 import { createStore } from "./model/store.js";
@@ -536,8 +537,10 @@ export default class Sheepdog extends View {
       const outbox = this.outbox.getState();
       const questionCards = this.answers.cards(snapshot.app);
       const questionHeights = questionCards.map((card) => estimateHeight(card.pending, { width: this.size.width }));
+      const panelNotice = status.phase === "ok" ? panelUpdateNotice(snapshot.app?.panel) : null;
       const bannerHeights = [];
       if (this.offerDock) bannerHeights.push(150);
+      if (panelNotice) bannerHeights.push(120);
       if (status.phase === "setup") bannerHeights.push(150);
       if (status.paused && status.phase !== "down") bannerHeights.push(40);
       const voiceHeight = status.phase === "ok"
@@ -570,6 +573,7 @@ export default class Sheepdog extends View {
         questions,
         voice: { controls, state: voice, on: this.voiceHandlers(controls) },
         layout,
+        panelNotice,
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
         onSetup: (_e, cx) => this.runSetup(cx),

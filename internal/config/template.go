@@ -178,6 +178,11 @@ func Template() string {
 # check = %[51]t
 # After an upgrade the daemon restarts itself when nobody is using it.
 # auto_restart = %[52]t
+
+[panel]
+# After an upgrade the daemon replaces the herdr-app panel (and its layout)
+# with the new version, when you have not changed them.
+# auto_update = %[57]t
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -206,5 +211,6 @@ func Template() string {
 		d.Events.RetentionDays,
 		d.Update.Check, d.Update.AutoRestart,
 		d.Anthropic.BaseURL, d.Anthropic.Effort, d.Anthropic.EventEffort, d.Anthropic.Fallbacks,
+		d.Panel.AutoUpdate,
 	)
 }
