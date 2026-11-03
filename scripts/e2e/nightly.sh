@@ -47,6 +47,14 @@ EOF
 
 case "${1:-}" in
   __vm-boot)
+    # Under launchd, the first read of an external disk waits for a macOS
+    # consent dialog ("bash" would like to access files on a removable
+    # volume); without a click it never returns.
+    if ! perl -e 'alarm 30; exec @ARGV' ls "$TART_HOME" >/dev/null 2>&1; then
+      echo "cannot read $TART_HOME within 30 s: under launchd, allow /bin/bash to access removable volumes"
+      echo "(System Settings > Privacy & Security > Files and Folders, or click Allow on the dialog), or mount the disk"
+      exit 1
+    fi
     tart list --quiet 2>/dev/null | grep -qx "$VM_BASE" || { echo "no VM $VM_BASE (the clean snapshot)"; exit 1; }
     tart stop "$VM" >/dev/null 2>&1
     tart delete "$VM" >/dev/null 2>&1
