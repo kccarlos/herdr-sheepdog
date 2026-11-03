@@ -2,11 +2,13 @@
 # One-command private end-to-end environment (docs/dev/e2e.md).
 #
 #   scripts/e2e/up.sh [--port N] [--panel-from <dir>] [--no-herdr-app]
-#                     [--herdr mock|socket] [--brain fake|off] [--cli on|off]
+#                     [--herdr mock|socket|hc] [--brain fake|off] [--cli on|off]
+#                     [--push-stub]
 #
 # Builds the daemon from this worktree and runs it privately (fake
-# orchestrator, mock herdr, no voice, dev routes; --herdr socket points it at
-# the private core instead) beside a private herdr-core
+# orchestrator, mock herdr, no voice, dev routes; --herdr socket, or hc, points
+# it at the private core instead; --push-stub starts a local stand-in for the
+# push relay and aims the daemon's push at it) beside a private herdr-core
 # and, unless --no-herdr-app, a private Herdr window showing the panel from
 # --panel-from (a worktree root or a mods/sheepdog folder; default: this
 # worktree). Prints the environment directory; `down.sh <dir>` removes it.
@@ -20,15 +22,22 @@ WITH_APP=1
 HERDR_MODE=mock
 BRAIN_MODE=fake
 CLI_MODE=on
+PUSH_STUB=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT="${2:?--port needs a number}"; shift 2;;
     --panel-from) PANEL_FROM="${2:?--panel-from needs a directory}"; shift 2;;
     --no-herdr-app) WITH_APP=0; shift;;
-    --herdr) HERDR_MODE="${2:?--herdr needs mock or socket}"; shift 2;;
+    --herdr)
+      HERDR_MODE="${2:?--herdr needs mock, socket or hc}"
+      # hc is the design's name for socket: the daemon on the private core.
+      [ "$HERDR_MODE" = hc ] && HERDR_MODE=socket
+      case "$HERDR_MODE" in mock|socket) ;; *) e2e_die "--herdr needs mock, socket or hc";; esac
+      shift 2;;
+    --push-stub) PUSH_STUB=1; shift;;
     --brain) BRAIN_MODE="${2:?--brain needs fake or off}"; shift 2;;
     --cli) CLI_MODE="${2:?--cli needs on or off}"; shift 2;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0;;
     *) e2e_die "unknown argument: $1";;
   esac
 done
@@ -72,6 +81,23 @@ APP_HOME="$DIR/app-home"
 echo "building the daemon from $E2E_ROOT ..."
 (cd "$E2E_ROOT" && GOFLAGS=-trimpath go build -o "$DIR/sheepdog" ./cmd/sheepdog)
 
+# The push relay stand-in: a loopback port, and a file of what it was sent.
+PUSH_RELAY=""
+if [ "$PUSH_STUB" = 1 ]; then
+  RP=""
+  for p in $(seq 18300 18400); do
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 || { RP=$p; break; }
+  done
+  [ -n "$RP" ] || e2e_die "no free port for the push stub"
+  (cd "$E2E_ROOT" && GOFLAGS=-trimpath go build -o "$DIR/relaystub" ./scripts/e2e/relaystub)
+  : >"$DIR/relay.jsonl"
+  nohup "$DIR/relaystub" -addr "127.0.0.1:$RP" -log "$DIR/relay.jsonl" </dev/null >"$DIR/relay.log" 2>&1 &
+  echo $! >"$DIR/relay.pid"
+  PUSH_RELAY="http://127.0.0.1:$RP"
+  e2e_wait 10 curl -fs --max-time 2 "$PUSH_RELAY/v1/health" || e2e_die "push stub did not come up; see $DIR/relay.log"
+  echo "push stub up on $PUSH_RELAY (pid $(cat "$DIR/relay.pid")), log $DIR/relay.jsonl"
+fi
+
 cat >"$DIR/env.sh" <<ENV
 # Written by scripts/e2e/up.sh. Source it to use the private environment.
 export E2E_DIR=$DIR
@@ -86,6 +112,8 @@ export E2E_VOICE=off
 export E2E_HERDR=$HERDR_MODE
 export E2E_BRAIN=$BRAIN_MODE
 export E2E_CLI=$CLI_MODE
+export E2E_PUSH_RELAY=$PUSH_RELAY
+export E2E_PUSH_LOG=$DIR/relay.jsonl
 export HERDR_APP_HOME=$APP_HOME
 export HC_SESSION=$HC_SESSION
 export HC_SOCKET=$HC_SOCKET
@@ -154,7 +182,7 @@ cat <<OUT
 
 environment: $DIR
   source $DIR/env.sh      # E2E_URL, HERDR_APP_HOME, HC_SESSION, HC_SOCKET
-  scripts/e2e/scenario.sh $DIR <approval|voice-client|voice-on|agent-blocked|agent-working|agent-done|daemon-down|daemon-up>
+  scripts/e2e/scenario.sh $DIR <approval|voice-client|voice-on|agent-blocked|agent-working|agent-done|agent-unread|agent-seen|agent-pin|space-mute|label-sync|daemon-down|daemon-up>
   scripts/e2e/shot.sh $DIR <name>
   scripts/e2e/down.sh $DIR
 OUT

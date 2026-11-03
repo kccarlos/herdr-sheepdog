@@ -87,6 +87,13 @@ const (
 	// /api/spaces and the /api/spaces/{id}/… routes, POST /api/agents (new agent) and POST
 	// /api/agents/{pane_id}/rename|interrupt|close.
 	FeatureAgentActions = "agent-actions"
+	// FeatureAttention: /api/state gives each agent an "attention" (group,
+	// unread, pinned, …) beside attention_counts; POST
+	// /api/agents/{pane_id}/seen and /pin; the agent.attention event.
+	FeatureAttention = "attention"
+	// FeatureSpaceMute: POST /api/spaces/{id}/mute, space_mutes in
+	// /api/state, muted on a space and the space.muted event.
+	FeatureSpaceMute = "space-mute"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,

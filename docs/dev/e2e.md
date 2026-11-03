@@ -9,7 +9,8 @@ anywhere.
 
 ```sh
 scripts/e2e/up.sh [--port N] [--panel-from <dir>] [--no-herdr-app]
-                  [--herdr mock|socket] [--brain fake|off] [--cli on|off]
+                  [--herdr mock|socket|hc] [--brain fake|off] [--cli on|off]
+                  [--push-stub]
 scripts/e2e/scenario.sh <dir> <scenario> [arg]
 scripts/e2e/shot.sh <dir> <name>
 scripts/e2e/down.sh <dir>
@@ -56,7 +57,14 @@ To use the tools by hand: `source /tmp/sde-<id>/env.sh`, then `herdr-app status`
 `--herdr socket` aims the daemon at the private core (`SHEEPDOG_HERDR_BACKEND=hc`
 and `SHEEPDOG_HC_SOCKET` set explicitly), so real programs started there with
 `hc run` are its agents; the real-agent check uses it with `--brain off --cli
-off`. The core starts before the daemon.
+off`. The core starts before the daemon. `--herdr hc` means the same.
+
+`--push-stub` starts `scripts/e2e/relaystub`, a loopback stand-in for sheepdog's
+push relay, and starts the daemon with `SHEEPDOG_PUSH_MODE=relay` and
+`SHEEPDOG_PUSH_RELAY_URL` pointing at it (`E2E_PUSH_RELAY`), so a push the
+daemon sends is one line in `$E2E_PUSH_LOG` (`path`, `kind`, `priority`) and
+nothing reaches Apple or the shared relay. A phone is registered for it with
+`POST /api/push/register {"relay_token":"e2e-stub-relay-token-0001"}`.
 
 ## Scenarios
 
@@ -65,6 +73,11 @@ off`. The core starts before the daemon.
 | `approval` | `POST /api/inject/blocked` with the Codex approval screen from `testdata/herdr/`: the supervisor's real blocked path parses it and records a real `answer_prompt` pending, so the question card and the conversation's approval item appear. Nothing is faked in state. |
 | `agent-blocked` | An agent blocked on a free-form question (no approval card). |
 | `agent-working`, `agent-done` | An agent working, then finishing (`/api/inject/pane`, `/api/inject/state`). |
+| `agent-unread` | The injected agent `build` finishes a turn nobody looked at: `/api/state` shows `attention.group: done, unread: true` and a non-zero `attention_counts.done_unread`. |
+| `agent-seen` | `POST /api/agents/e2e:work/seen` with the agent's turn: unread is false, the `agent.attention` event is on `/api/events`; then Mark as unread brings it back. |
+| `agent-pin [pane]` | Pin through the API: `attention.pinned`, and the event. With a real pane and `--herdr socket` it also restarts the daemon and checks the pin survived (the label is on the terminal). |
+| `space-mute` | Needs `--herdr hc --push-stub`. Two spaces on the private core (terminals labelled `herdr.space`); one muted through `POST /api/spaces/{id}/mute`. An approval injected in the muted space (`cwd` puts the synthetic pane in its folder) reaches neither the stub nor the voice (`push_quiet` `space_muted`, `pending.created` `muted: true`) and its question card stays in `/api/state`; the same approval in the other space reaches the stub as `approval` at priority 10 and logs `push.sent`. |
+| `label-sync` | Needs `--herdr hc`; takes one agent from the budget. A real Claude Code at its prompt (no task, no tokens) on the private core: pinning through the API shows `herdr.pinned=1` in `hc get`, `hc label` of `herdr.pinned=` and `herdr.seen=0` shows in `/api/state` within 2 s (`agent.attention` with `via: herdr`), and the pin survives `daemon-down` / `daemon-up`. |
 | `voice-client [connected\|speaking\|disconnected]` | `scripts/e2e/wsclient` attaches to `/ws` as a `macos` client with no audio, so `/api/state` `voice.client` is real and `client_connected` is true. `speaking` also sends a text message; it needs `voice-on`. `disconnected` stops the client. |
 | `voice-on` / `voice-off` | Restart the daemon with `--voice=fake` / `--voice=off`. |
 | `daemon-down` / `daemon-up` | Stop and start the private daemon (same port). |

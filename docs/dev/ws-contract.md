@@ -84,6 +84,8 @@ binary version.
   | `cards` | the client's `visibility` reports and the daemon's `card` messages (*Cards*) | when the daemon has a supervisor (always, in practice) |
   | `screen-ansi` | coloured window frames: every `screen` frame, and `?ansi=1` on the screen route (*Agent window over /ws*) | with `screen` |
   | `agent-actions` | the user's own New agent, Rename, Stop and Close routes (*Agent actions*) | with `screen` |
+  | `attention` | each agent of `/api/state` has an `attention`, plus `attention_counts`; `POST /api/agents/{pane_id}/seen` and `/pin`; the `agent.attention` event (*Attention*) | when the daemon keeps seen and pinned marks (always, in practice) |
+  | `space-mute` | `POST /api/spaces/{id}/mute`, `space_mutes` in `/api/state`, `muted` on a space, the `space.muted` event (*Attention*) | when the daemon keeps space mutes (always, in practice) |
   | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer, or herdr-core has `terminal.attach` (not with `--herdr=mock`) |
 
   A new optional part of the contract is a new feature, not a new
@@ -1289,11 +1291,12 @@ System Settings, Privacy & Security, Files and Folders" instead of
 | `DELETE /api/spaces/{id}/commands/{cid}` | | `{"ok": true}` |
 | `POST /api/spaces/{id}/commands/{cid}/run` | | `{"ok": true, "pane_id"}` |
 | `POST /api/spaces/{id}/run` | `{"command", "name"?}` | `{"ok": true, "pane_id"}` |
+| `POST /api/spaces/{id}/mute` | `{"muted": true, "until"?: "RFC 3339"}` or `{"muted": false}` | `{"ok": true, "space": {"id", "path", "muted", "until"?}}` (feature `space-mute`, see [Attention](#attention)) |
 
 A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
 "worktree", "agents": [{"pane_id", "alias", "name", "kind", "state",
 "title"?}], "shells": ["<pane_id>"], "commands": [{"id", "name",
-"command"}]}`:
+"command"}], "muted", "until"?}`:
 
 - `id` is herdr's workspace id and `name` its label. `path` is its
   folder: the checkout of a worktree space, else the folder of its first
@@ -1301,6 +1304,9 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
   repository's folder name and `branch` its checked-out branch (a short
   commit when detached), read from `.git` without running git.
   `worktree` marks a linked worktree, not the repository's main checkout.
+- `muted` is true while the space's notifications are muted
+  ([Attention](#attention)); `until` is when that ends, absent for "until
+  I turn them back on". An old phone ignores both.
 - `agents` are the space's tracked agents with their spoken `name`;
   `shells` are its panes with no agent.
 - **Folders** are the folders directly inside `supervisor.project_roots`
@@ -1341,6 +1347,132 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
   /api/spaces/{id}/run`) runs a one-off `command` the same way without
   saving it, in a tab named `name` or after the command's first word,
   behind the same gate.
+
+## Attention
+
+Features `attention` and `space-mute`. Which agents want a person's eyes,
+and which spaces the user asked not to hear about. The design and its
+decisions are in `design/unread-pinned-mute.md` (PR 538); words follow
+the [glossary](glossary.md). "Space mute" is not the voice mute
+(`POST /api/voice/mute`, which turns the microphone off).
+
+**Marks.** The seen and pinned state of one terminal. They belong to the
+terminal, not to the agent in it: an agent that exits and a new one started
+in the same shell keep them, and they end when the terminal closes. On
+herdr-core they are the terminal labels `herdr.seen=<turn>` and
+`herdr.pinned=1` that herdr-app uses too, so a pin set on the phone shows in
+every Herdr window and the other way round. On the original herdr, which has
+no labels, the daemon keeps them in `<data_dir>/agent_marks.json`
+(`attention.shared` is then false: "Seen and pinned on this computer only").
+
+**`GET /api/state`.** Every agent gains `attention`; the top level gains
+`attention_counts` and `space_mutes`. A daemon without the feature sends none
+of them, and a client then groups by `state` alone.
+
+```text
+{"pane_id": "w5:p1", "alias": "auth", "state": "done", "...": "...",
+ "attention": {"group": "done", "unread": true, "pinned": false,
+               "turn": 7, "seen": 6, "muted": false, "shared": true}}
+"attention_counts": {"needs_you": 1, "working": 2, "done_unread": 1},
+"space_mutes": [{"path": "/Users/u/code/auth", "name": "auth",
+                 "until": "2026-11-03T11:00:00Z"}]
+```
+
+- `group` is `needs_you` (blocked, or herdr-core's status word `error`),
+  `working`, `done` (idle or done) or `not_running`. `unread` is true only
+  for a `done` agent that finished a turn nobody looked at: `turn` (the
+  backend's count of finished turns) is above `seen`; with no `seen` record
+  the backend's own word decides (`done` is unread, `idle` is read).
+  `pinned` is set in every group. The daemon computes all three once
+  (`attention.Classify`); the order is the client's: groups in that order,
+  pinned first within a group, unread first within Done, then by spoken name.
+- `seen` is absent when there is no record. `shared` says the marks are hc
+  labels every Herdr client shares. `muted` is true when the agent's space is
+  muted.
+- `attention_counts` count the same groups across all agents. **The badges do
+  not count unread done agents**: the Agents badge and the panel's amber
+  stay "needs you" only; unread shows as a dot. (Product default, design
+  question Q3.)
+- `space_mutes` lists the muted spaces (folder, the space's name, the end
+  time when there is one). A mute that ended is not listed.
+
+| Route | Body | Answer |
+|---|---|---|
+| `POST /api/agents/{pane_id}/seen` | `{"turn": 7}` | `{"ok": true, "attention": {…}}` |
+| `POST /api/agents/{pane_id}/seen` | `{"unread": true}` | `{"ok": true, "attention": {…}}` |
+| `POST /api/agents/{pane_id}/pin` | `{"pinned": true}` | `{"ok": true, "attention": {…}}` |
+| `POST /api/spaces/{id}/mute` | `{"muted": true, "until"?: "RFC 3339"}` | `{"ok": true, "space": {"id", "path", "muted", "until"?}}` |
+
+All of them are for a paired device (or this computer), take an
+`Idempotency-Key`, use the usual `{"error"}` body and log metadata only
+(`web.agent_action` `seen`, `unread`, `pin`; `web.space_action` `mute`).
+`400` is a bad body, `404` an agent or space the daemon does not track, `502`
+herdr refused the write, `503` a daemon without the feature.
+
+- **`seen` with `turn`** is the turn the client showed. The daemon writes
+  `min(turn, current turn)` only when that raises the mark: it never goes
+  down, and never above a turn nobody saw. A lower value is not an error (the
+  answer shows the marks as they are); a `turn` above the current one is
+  clamped, not refused. `turn: 0` is a valid turn. Exactly one of `turn` and
+  `unread: true` is required (`400` otherwise).
+- **`seen` with `unread: true`** is Mark as unread: `seen` becomes one turn
+  short of the current turn. At turn 0 nothing changes and the answer says so.
+- **Hearing the voice announce a finish does not mark it seen.** The agent
+  stays under Done, unread, until a client shows it. (Product default,
+  design question Q2.)
+- **`mute`.** The space `id` is resolved to its folder (the `path` of
+  `GET /api/spaces`) and the mute is stored by that folder in
+  `<data_dir>/space_mutes.json` (mode 0600), so it survives herdr renumbering
+  its workspaces; two spaces in one folder share a mute. `muted: false`
+  removes it (`until` with it is `400`). `until` is when it ends; in the past
+  is `400`; absent means until it is turned off. A mute that ended while the
+  daemon was down, and one whose folder no longer exists, are dropped at
+  start. The phone offers "For 1 hour", "Until tomorrow morning" (08:00
+  local) and "Until I turn them back on", and sends the instant. (Product
+  defaults, design question Q4: `attention.MuteForHour`,
+  `attention.UntilTomorrowMorning`.)
+
+**What a space mute silences**, and nothing else. The lists, the groups, the
+unread dots, the badges, the question cards, answering by tap or by voice
+and "what needs me" are unchanged. The check is in code, next to the
+chattiness ceiling, not in a prompt.
+
+| Channel | Muted space | Still comes through |
+|---|---|---|
+| Voice announcements (a block, a finish) | No orchestrator turn and no sentence; `supervisor.push_quiet` with `reason: "space_muted"`. The worker event still reaches the orchestrator's window as context. | A **kept promise** ("tell me when auth finishes") and the finish of the user's **own instruction** still speak. |
+| Phone alerts (`approval`, `blocked`) | Not sent: the phone hears what the voice would, as before ([`push.md`](push.md#when-a-notification-is-sent)). | A kept-promise push still goes. |
+| Live Activity | A new waiting agent in a muted space updates the banner at priority 5, not 10, so it does not alert. | The rows and counts. |
+| Sheepdog.app notifications | `pending.created` and `herdr.transition` events carry `muted: true` for the agent; the app drops their notifications. | Voice-error notices. |
+| Phone haptics for `pending.created` | Off for events with `muted: true`. | |
+
+Prompt reminders ("Still waiting for your answer") are held back in a muted
+space too. Exit-while-busy notices and "started" lines are not about a block
+or a finish and are not muted.
+
+**Events** (`GET /events`, `GET /api/events`; the families `agent` and
+`space`):
+
+| Type | Fields | Who reacts |
+|---|---|---|
+| `agent.attention` | `group, unread, pinned, turn, seen?, via` (`phone`, `panel`, `herdr`, `tui_focus`) | clients re-read `/api/state` (debounced, as for `herdr.transition`) |
+| `space.muted` | `path, name, muted, until?, via` (`phone`, `panel`, `expired`) | phone, panel, Sheepdog.app |
+
+`agent.attention` is logged when a mark changes and the new attention differs
+from the last one logged for the pane. `via: "herdr"` covers a change that
+came in on a label (herdr-app, another `hc` client); `tui_focus` a pane
+looked at in the original herdr's own window; an own write carries the
+caller's `via`. The orchestrator gets one line for a space mute ("the user
+muted auth's notifications from the phone") and none for seen or pin.
+
+**Back-compat.** A client uses the fields and routes only when `bot-ready`
+lists the feature (the panel, which never opens `/ws`, checks whether
+`attention` is in `/api/state`). A new phone on an old daemon sees no
+`attention`, groups by state, offers no pin or mute and writes nothing. An
+old phone on a new daemon ignores the new fields, never writes seen (unread
+then clears only from another client) and never mutes. `/ws` protocol stays
+1. A pane the daemon's marker does not follow (the debug injector's panes on
+herdr-core) has an `attention` computed from its state alone and answers
+seen and pin with `404`.
 
 ## Attachments
 
@@ -1551,6 +1683,9 @@ session (`voice.connect_error`, `voice.session_error`, `daemon.voice_error`,
 `daemon.voice_provider_error`, or a `voice.closed` other than `shutdown`,
 `replaced`, and `voice_off`). The voice wording comes from `LocalNotice`, so
 it matches the phone's own notice text.
+
+An event with `muted: true` (the agent's space is muted, [Attention](#attention))
+does not become a notification.
 
 The app asks for notification permission when the first such event arrives,
 not at launch. Until the panel reports whether it is visible, the stand-in is

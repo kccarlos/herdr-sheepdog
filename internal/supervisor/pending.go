@@ -84,7 +84,29 @@ func (s *Supervisor) newSendInstruction(paneID, text, echo string) state.Pending
 // an unanswered question from another pane, the "dropping …; now …"
 // sentence; otherwise p.SpokenSummary. Caller holds s.mu.
 func (s *Supervisor) setPending(p state.PendingAction) string {
+	return s.setPendingMuted(p, s.paneMutedCached(p.PaneID))
+}
+
+// setPendingMuted is setPending with the answer of the space mute check for
+// p's pane. A question from a muted space is not announced, so it must not
+// take over the pending answer to a question the user was told about
+// ("yes" belongs to what they heard, and the "Dropping …; now …" line that
+// would tell them is itself an announcement the mute silences): it is
+// listed for the phone, answerable by tap, and held (heldQuestion) until
+// nothing else is pending to be taken over.
+func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 	spoken := p.SpokenSummary
+	if old, had := s.store.Pending(); muted && had && old.ID != p.ID && old.PaneID != p.PaneID && p.Kind == state.PendingAnswerPrompt {
+		if err := s.store.SetQuestion(p); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.holdQuestion(p.ID)
+		s.invalidateBriefingLocked()
+		created := s.pendingCreated(p)
+		created["held"] = true
+		s.log.Log(logSource, "pending.created", p.PaneID, created)
+		return spoken
+	}
 	if old, had := s.store.Pending(); had && old.ID != p.ID {
 		s.log.Log(logSource, "pending.replaced", p.PaneID, map[string]any{
 			"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": p.ID, "new_kind": p.Kind,
@@ -104,6 +126,12 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 		}
 	}
 	s.invalidateBriefingLocked()
+	s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
+	return spoken
+}
+
+// pendingCreated is the payload of pending.created.
+func (s *Supervisor) pendingCreated(p state.PendingAction) map[string]any {
 	created := map[string]any{
 		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question,
 		"options": PendingOptions(p), "yes_keys": p.YesKeys, "no_keys": p.NoKeys, "agent": s.aliasOf(p.PaneID),
@@ -114,8 +142,7 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 	if p.Command != "" {
 		created["command"] = p.Command
 	}
-	s.log.Log(logSource, "pending.created", p.PaneID, created)
-	return spoken
+	return created
 }
 
 // clearPending drops the pending action with a pending.cancelled event.

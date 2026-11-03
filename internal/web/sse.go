@@ -24,7 +24,7 @@ type eventFilter struct {
 // emitted. Keep this list beside the event type catalog in
 // docs/dev/architecture.md when adding a family.
 var eventKinds = map[string]bool{
-	"brain": true, "card": true, "cli": true, "context": true,
+	"agent": true, "space": true, "brain": true, "card": true, "cli": true, "context": true,
 	"conversation": true, "daemon": true, "eventlog": true, "events": true,
 	"herdr": true, "investigation": true, "note": true, "observe": true,
 	"pending": true, "promise": true, "prompts": true, "push": true,

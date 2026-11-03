@@ -75,6 +75,10 @@ type Space struct {
 	// Shells are its panes with no agent.
 	Shells   []string `json:"shells"`
 	Commands []WrapUp `json:"commands"`
+	// Muted is set while the space's notifications are muted (attention.go);
+	// Until is when that ends, absent for "until unmuted".
+	Muted bool       `json:"muted"`
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // SpaceAgent is one agent of a space.
@@ -146,6 +150,9 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 	for _, w := range snap.Workspaces {
 		sp := spaceOf(snap, w, rows, access.OK)
 		sp.Commands = append([]WrapUp{}, cmds[sp.Path]...)
+		if m, ok := s.SpaceMutedPath(sp.Path); ok {
+			sp.Muted, sp.Until = true, m.Until
+		}
 		if sp.Path != "" {
 			taken[sp.Path] = true
 		}
@@ -180,23 +187,9 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 		}
 	}
 	sort.Slice(panes, func(i, j int) bool { return paneLess(panes[i].PaneID, panes[j].PaneID) })
-	raw := ""
-	if w.Worktree != nil && w.Worktree.CheckoutPath != "" {
-		raw = w.Worktree.CheckoutPath
-		if readable(raw) {
-			sp.Path = herdr.RealDir(raw)
-		}
-		sp.Worktree = w.Worktree.Linked
-	}
-	if sp.Path == "" && len(panes) > 0 {
-		if raw = panes[0].Cwd; readable(raw) {
-			sp.Path = herdr.RealDir(raw)
-		}
-	}
-	unreadable := sp.Path == "" && raw != "" && !readable(raw)
-	if unreadable {
-		sp.Path = raw
-	} else if sp.Path != "" {
+	var unreadable bool
+	sp.Path, unreadable, sp.Worktree = spaceFolder(w, panes, readable)
+	if !unreadable && sp.Path != "" {
 		g, ok := herdr.GitInfo(sp.Path)
 		sp.Git, sp.Repo, sp.Branch = ok, g.Repo, g.Branch
 		if w.Worktree != nil && w.Worktree.RepoName != "" {
@@ -214,6 +207,32 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 		sp.Agents = append(sp.Agents, SpaceAgent{PaneID: p.PaneID, Alias: row.Alias, Name: state.Say(row), Kind: row.Kind, State: row.State, Title: row.Title})
 	}
 	return sp
+}
+
+// spaceFolder is a workspace's folder, the one rule GET /api/spaces and the
+// space mute share (a mute is stored under it): the checkout of a worktree
+// workspace, else the folder of its first pane, resolved to a real
+// directory. panes are the workspace's own, in pane order. unreadable is set
+// for a folder that may not be read yet (macOS has not been allowed in): the
+// path is then what herdr reported. linked marks a linked worktree.
+func spaceFolder(w herdr.WorkspaceInfo, panes []herdr.PaneInfo, readable func(string) bool) (path string, unreadable, linked bool) {
+	raw := ""
+	if w.Worktree != nil && w.Worktree.CheckoutPath != "" {
+		raw = w.Worktree.CheckoutPath
+		if readable(raw) {
+			path = herdr.RealDir(raw)
+		}
+		linked = w.Worktree.Linked
+	}
+	if path == "" && len(panes) > 0 {
+		if raw = panes[0].Cwd; readable(raw) {
+			path = herdr.RealDir(raw)
+		}
+	}
+	if path == "" && raw != "" && !readable(raw) {
+		return raw, true, linked
+	}
+	return path, false, linked
 }
 
 // paneLess orders pane ids by workspace, then pane number (w2:p10 after

@@ -56,7 +56,8 @@ e2e_api() {
 
 # e2e_daemon_start: start the private daemon and record its pid in
 # <dir>/daemon.pid. Modes: E2E_VOICE (default off), E2E_BRAIN (fake),
-# E2E_HERDR (mock; socket aims it at the private core through hc), E2E_CLI
+# E2E_HERDR (mock; socket aims it at the private core through hc), E2E_PUSH_RELAY
+# (the push stub's URL, when up.sh started one), E2E_CLI
 # (on). E2E_WRAP, when set, is a command the daemon runs under (the nightly's
 # real voice uses `op run ... --`, which puts the key into the daemon's
 # environment only); the recorded pid is then the one listening on the port.
@@ -64,6 +65,11 @@ e2e_daemon_start() {
   local herdr_env=() wrap=()
   if [ "${E2E_HERDR:-mock}" = socket ]; then
     herdr_env=(SHEEPDOG_HERDR_BACKEND=hc "SHEEPDOG_HC_SOCKET=$E2E_HC_SOCKET")
+  fi
+  # up.sh --push-stub: push goes to a local stand-in for the relay, never to
+  # the shared one.
+  if [ -n "${E2E_PUSH_RELAY:-}" ]; then
+    herdr_env+=(SHEEPDOG_PUSH_MODE=relay "SHEEPDOG_PUSH_RELAY_URL=$E2E_PUSH_RELAY")
   fi
   # shellcheck disable=SC2206 # E2E_WRAP is a word list on purpose
   [ -n "${E2E_WRAP:-}" ] && wrap=($E2E_WRAP)

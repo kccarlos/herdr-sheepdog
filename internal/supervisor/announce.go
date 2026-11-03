@@ -123,6 +123,19 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	}
 	kept := s.keepMatching(a.row.PaneID, events...)
 	level := s.chattiness()
+	if s.mutedQuiet(ctx, a, kept) {
+		// The user muted this space's notifications and nothing here is owed
+		// (no kept promise, not the finish of their own instruction): no
+		// orchestrator turn, no sentence, no push. The worker event still
+		// reached the orchestrator's window as context, and the question
+		// card, if any, is already in the state.
+		if s.brain != nil {
+			s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "space_muted"}, brain.Reply{}, kept, false)
+		}
+		s.recordFinish(a, doneResult)
+		s.logMutedQuiet(a, level)
+		return
+	}
 	if s.brain == nil {
 		s.codePath(a, kept, level, "no_brain")
 		return
@@ -387,6 +400,12 @@ func fallbackReason(err error) string {
 func (s *Supervisor) pendingStillOpen(a announcement) bool {
 	if a.pending == "" || a.event != brain.PromiseEventBlocked {
 		return true
+	}
+	if s.heldQuestion(a.pending) {
+		// Held back from the pending slot by the space mute (attention.go):
+		// open while it is still listed.
+		_, listed := s.store.Question(a.pending)
+		return listed
 	}
 	p, has := s.store.Pending()
 	return has && p.ID == a.pending
