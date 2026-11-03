@@ -41,6 +41,11 @@ final class VoiceEngineTests: XCTestCase {
 
     private var defaults: UserDefaults!
     private let suite = "sheepdog.tests.voice-engine"
+    /// `VoiceEngine.host` is weak: a host made inline (`engine(host: Host())`)
+    /// would be gone at once and the engine would run its effects for real
+    /// (a socket to a closed port, the microphone), racing the assertions.
+    /// Holding every host until tearDown keeps the effects with the test.
+    private var hosts: [Host] = []
     private var modes: (active: MicrophoneModeName, preferred: MicrophoneModeName) = (.standard, .standard)
 
     override func setUp() {
@@ -48,9 +53,11 @@ final class VoiceEngineTests: XCTestCase {
         UserDefaults().removePersistentDomain(forName: suite)
         defaults = UserDefaults(suiteName: suite)
         modes = (.standard, .standard)
+        hosts = []
     }
 
     override func tearDown() {
+        hosts = []
         UserDefaults().removePersistentDomain(forName: suite)
         super.tearDown()
     }
@@ -59,6 +66,7 @@ final class VoiceEngineTests: XCTestCase {
         let engine = VoiceEngine(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 9), talkMode: talkMode,
                                  keepListeningWhenLocked: false, defaults: defaults,
                                  microphoneModes: { [unowned self] in self.modes })
+        hosts.append(host)
         engine.host = host
         return engine
     }
