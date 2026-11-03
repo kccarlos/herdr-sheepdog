@@ -38,6 +38,6 @@
   <key>StandardErrorPath</key>
   <string>@HOME@/Library/Logs/sheepdog-nightly/launchd.log</string>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
 </dict>
 </plist>
