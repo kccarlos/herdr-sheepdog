@@ -30,7 +30,7 @@ const chip = (t, id, label, enabled) =>
 
 // `controls`: model/voice.js's voiceControls. `state`: the controller's
 // snapshot ({ ptt, notice }). `on`: { talk, mute, stop, pttDown, pttUp,
-// useHere }, each (cx) => void.
+// useHere, action }, each (cx) => void.
 export function voiceBar(t, controls, state, on) {
   const press = (id, label, enabled, handler) => chip(t, id, label, enabled).on_mouse_down("left", stop).on_click(enabled ? (_e, cx) => handler(cx) : () => {});
   const hold = controls.ptt.enabled;
@@ -64,6 +64,7 @@ export function voiceBar(t, controls, state, on) {
         ),
     )
     .when(controls.useHere, (el) => el.child(h_flex().child(button(t, "voice-use-here", "Use here", controls.useHereEnabled ? (_e, cx) => on.useHere(cx) : () => {}).when(!controls.useHereEnabled, (s) => s.opacity(0.4)))))
+    .when(Boolean(controls.action), (el) => el.child(h_flex().child(button(t, "voice-" + controls.action.id, controls.action.label, (_e, cx) => on.action(cx), true))))
     .when(Boolean(controls.hint), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(controls.hint)))
     .when(Boolean(controls.install), (el) => el.child(command(t, controls.install)))
     .when(Boolean(state.notice), (el) => el.child(div().text_size(11.5).text_color(state.notice.tone === "error" ? t.blocked : t.muted).child(state.notice.text)));

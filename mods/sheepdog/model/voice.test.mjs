@@ -62,7 +62,7 @@ test("no daemon, a setup problem or no voice: every button is off, and the voice
 test("Sheepdog.app not installed: no voice on this Mac, with the brew command", () => {
   const c = controls(voice(), { installed: false });
   assert.deepEqual(enabled(c), [false, false, false, false]);
-  assert.equal(c.install, "brew install --cask sheepdog-app");
+  assert.equal(c.install, "brew install --cask kccarlos/tap/sheepdog-app");
   assert.equal(c.install, INSTALL_COMMAND);
   assert.match(c.hint, /not installed/);
   // Not looked yet is not a reason to turn Talk off.
@@ -140,7 +140,7 @@ test("Use here that cannot start the app, or exits non-zero, says to install it"
   for (const execResult of [new Error("no such program"), { code: 1, stdout: "", stderr: "Unable to find application" }]) {
     const { voice } = setup({ execResult });
     await voice.send("use-here");
-    assert.match(voice.getState().notice.text, /brew install --cask sheepdog-app/);
+    assert.match(voice.getState().notice.text, /brew install --cask kccarlos\/tap\/sheepdog-app/);
     assert.equal(voice.getState().notice.tone, "error");
   }
 });

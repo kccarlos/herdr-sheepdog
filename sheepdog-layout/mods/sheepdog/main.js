@@ -13,11 +13,10 @@ import { View } from "gpui-kit";
 import { TextareaState } from "gpui-base";
 import { exists } from "fs/promises";
 import { connect } from "net";
-import { closeOverlay, exec, home, nextCommand, openOverlay, props, run, setShared, shared, theme } from "herdr";
+import { closeOverlay, exec, home, nextCommand, openOverlay, props, run, setShared, shared, theme, window as appWindow } from "herdr";
 import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
-import { agentDetails } from "./model/agents.js";
 import { focusCommand } from "./model/cards.js";
 import { keyMaker, restored, submission } from "./model/composer.js";
 import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
@@ -27,23 +26,11 @@ import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
 import { keyAction } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
-import {
-  addLanguage,
-  askToRemoveDevice,
-  beginSettingsAction,
-  brainSelectionMatches,
-  cancelDeviceRemoval,
-  defaultBrainModel,
-  emptySettingsForm,
-  finishSettingsAction,
-  moveLanguage,
-  removeLanguage,
-  settingsFailed,
-  settingsLoadFinished,
-  SETTINGS_OPEN_KEY,
-  settingsLoaded,
-  toggleSection,
-} from "./model/settings.js";
+import * as overlay from "./model/overlay-actions.js";
+import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
+import { startDaemon } from "./model/host-app.js";
+import { later } from "./model/later.js";
+import { openSetup } from "./model/setup-link.js";
 import { deriveStatus } from "./model/status.js";
 import { createStore } from "./model/store.js";
 import { layoutEntries } from "./model/timeline.js";
@@ -69,6 +56,10 @@ export default class Sheepdog extends View {
     this.dockNote = null;
     this.url = p.url || shared("sheepdog.url");
     const base = baseUrl(this.url);
+    // What model/overlay-actions.js needs of the view (it has no herdr imports).
+    this.base = base;
+    this.exec = exec;
+    this.platform = () => appWindow()?.platform;
     this.size = this.overlay ? { width: WINDOW.width, height: WINDOW.height } : { width: DOCKED_WIDTH, height: 640 };
     this.technical = false;
     this.wantOlder = false; // the end of the list was drawn
@@ -84,7 +75,7 @@ export default class Sheepdog extends View {
         // What has stayed long enough (a note, a settled card) goes.
         this.outbox.prune();
         this.answers.prune(this.store.getState().app);
-        this.voice.prune();
+        this.voice.prune(this.watchRunning());
       });
     } else if (this.overlayRole === "settings") this.initSettings(cx);
     else if (this.overlayRole === "pair") this.initPair(cx);
@@ -152,7 +143,7 @@ export default class Sheepdog extends View {
     this.answers = createAnswers({ http, newKey, refresh });
     this.outbox.subscribe(() => cx.notify());
     this.answers.subscribe(() => cx.notify());
-    this.voice = createVoice({ http, exec, exists, home, newKey, refresh });
+    this.voice = createVoice({ http, exec, exists, home, newKey, refresh, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
     this.voice.subscribe(() => cx.notify());
     // Is Sheepdog.app installed? (Read-only; the timer looks again.)
     this.voice.check();
@@ -173,23 +164,23 @@ export default class Sheepdog extends View {
   initSettings(cx) {
     // Which sections are open is remembered between openings.
     this.settingsForm = emptySettingsForm(shared(SETTINGS_OPEN_KEY));
-    this.loadSettings(cx);
+    overlay.loadSettings(this, cx);
   }
 
   toggleSettingsSection(id, cx) {
-    this.setSettings(toggleSection(this.settingsForm, id), cx);
+    overlay.toggleSettingsSection(this, id, cx);
     setShared(SETTINGS_OPEN_KEY, this.settingsForm.open);
   }
 
   initPair(cx) {
     this.pairForm = { loading: true, error: "", link: "", matrix: null };
-    this.loadPair(cx, false);
+    overlay.loadPair(this, cx, false);
   }
 
   initAgent(name, cx) {
     this.agentName = String(name || "");
     this.agentForm = { loading: true, error: "", agent: null };
-    this.loadAgent(cx);
+    overlay.loadAgent(this, cx);
   }
 
   initReset() {
@@ -197,182 +188,6 @@ export default class Sheepdog extends View {
     const newKey = keyMaker();
     this.newResetKey = newKey;
     this.resetKey = newKey();
-  }
-
-  setSettings(form, cx) {
-    this.settingsForm = form;
-    cx.notify();
-  }
-
-  words(error) {
-    return error?.message || String(error || "It did not answer.");
-  }
-
-  async loadSettings(cx) {
-    this.setSettings({ ...this.settingsForm, loading: true, notice: "" }, cx);
-    const [state, voice, brain, settings, devices] = await Promise.allSettled([
-      this.http.state(),
-      this.http.voiceProviders(),
-      this.http.brainModels(),
-      this.http.settings(),
-      this.http.devices(),
-    ]);
-    let form = this.settingsForm;
-    for (const [part, result] of [["state", state], ["voice", voice], ["brain", brain], ["settings", settings], ["devices", devices]]) {
-      form = result.status === "fulfilled"
-        ? settingsLoaded(form, part, result.value)
-        : settingsFailed(form, part, this.words(result.reason));
-    }
-    this.setSettings(settingsLoadFinished(form), cx);
-  }
-
-  async chooseVoiceProvider(id, cx) {
-    if (this.settingsForm.busy || id === this.settingsForm.voice?.provider) return;
-    this.setSettings(beginSettingsAction(this.settingsForm, "voice"), cx);
-    try {
-      const voice = await this.http.setVoiceProvider(id);
-      let form = finishSettingsAction(this.settingsForm, "voice", { notice: "Voice model changed." });
-      form = settingsLoaded(form, "voice", voice);
-      this.setSettings(form, cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "voice", { error: this.words(error) }), cx);
-    }
-  }
-
-  async chooseBrainProvider(id, cx) {
-    if (this.settingsForm.busy || id === this.settingsForm.brain?.provider) return;
-    this.setSettings(beginSettingsAction(this.settingsForm, "brain"), cx);
-    try {
-      const catalog = await this.http.brainModels(id);
-      const model = defaultBrainModel(catalog, id);
-      if (!model) {
-        throw new Error(`No model list for ${id}${catalog.error ? `: ${catalog.error}` : ""} — the orchestrator was left as it is.`);
-      }
-      const brain = await this.http.setBrainModel(id, model);
-      let form = finishSettingsAction(this.settingsForm, "brain", { notice: "Orchestrator changed." });
-      form = settingsLoaded(form, "brain", brain);
-      this.setSettings(form, cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "brain", { error: this.words(error) }), cx);
-    }
-  }
-
-  async chooseBrainModel(provider, model, cx) {
-    if (this.settingsForm.busy || brainSelectionMatches(this.settingsForm.brain, provider, model)) return;
-    this.setSettings(beginSettingsAction(this.settingsForm, "brain"), cx);
-    try {
-      const brain = await this.http.setBrainModel(provider, model);
-      let form = finishSettingsAction(this.settingsForm, "brain", { notice: "Orchestrator changed." });
-      form = settingsLoaded(form, "brain", brain);
-      this.setSettings(form, cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "brain", { error: this.words(error) }), cx);
-    }
-  }
-
-  async chooseChattiness(level, cx) {
-    if (this.settingsForm.busy || level === this.settingsForm.settings?.chattiness) return;
-    this.setSettings(beginSettingsAction(this.settingsForm, "settings"), cx);
-    try {
-      const settings = await this.http.setSettings({ chattiness: level });
-      let form = finishSettingsAction(this.settingsForm, "settings", { notice: "Reply style changed." });
-      form = settingsLoaded(form, "settings", settings);
-      this.setSettings(form, cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "settings", { error: this.words(error) }), cx);
-    }
-  }
-
-  async setLanguages(codes, cx) {
-    if (this.settingsForm.busy) return;
-    this.setSettings(beginSettingsAction(this.settingsForm, "settings"), cx);
-    try {
-      const settings = await this.http.setSettings({ languages: codes });
-      let form = finishSettingsAction(this.settingsForm, "settings", { notice: "Languages changed." });
-      form = settingsLoaded(form, "settings", settings);
-      this.setSettings(form, cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "settings", { error: this.words(error) }), cx);
-    }
-  }
-
-  addLanguage(code, cx) {
-    const codes = this.settingsForm.settings?.languages || [];
-    this.setLanguages(addLanguage(codes, code), cx);
-  }
-
-  removeLanguage(code, cx) {
-    const codes = this.settingsForm.settings?.languages || [];
-    this.setLanguages(removeLanguage(codes, code), cx);
-  }
-
-  moveLanguage(code, delta, cx) {
-    const codes = this.settingsForm.settings?.languages || [];
-    this.setLanguages(moveLanguage(codes, code, delta), cx);
-  }
-
-  askRemoveDevice(id, cx) {
-    this.setSettings(askToRemoveDevice(this.settingsForm, id), cx);
-  }
-
-  cancelRemoveDevice(cx) {
-    this.setSettings(cancelDeviceRemoval(this.settingsForm), cx);
-  }
-
-  async removeDevice(id, cx) {
-    if (this.settingsForm.busy) return;
-    const name = this.settingsForm.devices.find((device) => device.id === id)?.name || "The device";
-    this.setSettings(beginSettingsAction(this.settingsForm, "devices"), cx);
-    try {
-      await this.http.removeDevice(id);
-      let form = finishSettingsAction(this.settingsForm, "devices", { notice: `${name} was unpaired.` });
-      form = settingsLoaded(form, "devices", this.settingsForm.devices.filter((device) => device.id !== id));
-      this.setSettings(cancelDeviceRemoval(form), cx);
-    } catch (error) {
-      this.setSettings(finishSettingsAction(this.settingsForm, "devices", { error: this.words(error) }), cx);
-    }
-  }
-
-  async loadPair(cx, fresh) {
-    this.pairForm = { ...this.pairForm, loading: true, error: "" };
-    cx.notify();
-    try {
-      // The first request may mint the code; the matrix request reuses it.
-      const pair = await this.http.pair(fresh);
-      const matrix = await this.http.pairQR();
-      this.pairForm = { loading: false, error: "", link: String(pair.link || ""), matrix };
-    } catch (error) {
-      this.pairForm = { loading: false, error: this.words(error), link: "", matrix: null };
-    }
-    cx.notify();
-  }
-
-  async loadAgent(cx) {
-    try {
-      const agents = await this.http.agents();
-      this.agentForm = { loading: false, error: "", agent: agentDetails(agents, this.agentName) };
-    } catch (error) {
-      this.agentForm = { loading: false, error: this.words(error), agent: null };
-    }
-    cx.notify();
-  }
-
-  async resetConversation(cx) {
-    if (this.resetForm.busy) return;
-    this.resetForm = { busy: true, error: "" };
-    cx.notify();
-    let answered = false;
-    try {
-      await this.http.reset(this.resetKey);
-      answered = true;
-      closeOverlay(props().overlay);
-      return;
-    } catch (error) {
-      answered = error?.kind !== "down";
-      this.resetForm = { busy: false, error: this.words(error) };
-    }
-    if (answered) this.resetKey = this.newResetKey();
-    cx.notify();
   }
 
   // Sends a typed line: what the textarea held (`fromComposer`) or a tapped
@@ -563,6 +378,7 @@ export default class Sheepdog extends View {
       mute: send("mute"),
       stop: send("stop"),
       useHere: send("use-here"),
+      action: send(controls.action?.id),
       pttDown: (cx) => {
         cx.spawn(async () => {
           await this.voice.pttDown();
@@ -574,6 +390,40 @@ export default class Sheepdog extends View {
         });
       },
     };
+  }
+
+  // The facts about this computer that model/host-app.js words: where the
+  // app is looked for and whether it runs. Read-only.
+  host() {
+    const { installed, running } = this.voice.getState();
+    return { platform: this.platform(), installed, running };
+  }
+
+  // Is "is Sheepdog.app running" worth asking: macOS, daemon up, no holder.
+  watchRunning() {
+    const host = this.host();
+    return host.platform === "macos" && deriveStatus(this.store.getState(), host).voice.noHolder === true;
+  }
+
+  // Start Sheepdog (daemon down): `sheepdog start`, then look again. `cx` is
+  // the click's; the async part uses only the spawned context (model/later.js).
+  startDaemon(cx) {
+    if (this.starting) return;
+    this.starting = true;
+    this.downNote = "Starting Sheepdog…";
+    cx.notify();
+    later(cx, async (acx) => {
+      const result = await startDaemon(exec);
+      this.starting = false;
+      this.downNote = result.ok ? null : result.text;
+      acx.notify();
+      try {
+        await this.store.refresh();
+      } catch {
+        // the next poll tells
+      }
+      acx.notify();
+    });
   }
 
   // Run in a tab: `sheepdog setup` starts the daemon if needed and walks through the key.
@@ -596,19 +446,20 @@ export default class Sheepdog extends View {
       const view = settingsOverlay(t, {
         form: this.settingsForm,
         onClose: () => this.closeOverlaySelf(),
-        onReload: (_e, cx) => this.loadSettings(cx),
+        onReload: (_e, cx) => overlay.loadSettings(this, cx),
         actions: {
-          voice: (id, cx) => this.chooseVoiceProvider(id, cx),
-          brainProvider: (id, cx) => this.chooseBrainProvider(id, cx),
-          brainModel: (provider, model, cx) => this.chooseBrainModel(provider, model, cx),
-          chattiness: (level, cx) => this.chooseChattiness(level, cx),
+          voice: (id, cx) => overlay.chooseVoiceProvider(this, id, cx),
+          brainRow: (id, cx) => overlay.toggleBrainRow(this, id, cx),
+          brainModel: (provider, model, cx) => overlay.chooseBrainModel(this, provider, model, cx),
+          chattiness: (level, cx) => overlay.chooseChattiness(this, level, cx),
           toggleSection: (id, cx) => this.toggleSettingsSection(id, cx),
-          languageAdd: (code, cx) => this.addLanguage(code, cx),
-          languageRemove: (code, cx) => this.removeLanguage(code, cx),
-          languageMove: (code, delta, cx) => this.moveLanguage(code, delta, cx),
-          askRemove: (id, cx) => this.askRemoveDevice(id, cx),
-          cancelRemove: (cx) => this.cancelRemoveDevice(cx),
-          remove: (id, cx) => this.removeDevice(id, cx),
+          languageAdd: (code, cx) => overlay.addLanguage(this, code, cx),
+          languageRemove: (code, cx) => overlay.removeLanguage(this, code, cx),
+          languageMove: (code, delta, cx) => overlay.moveLanguage(this, code, delta, cx),
+          askRemove: (id, cx) => overlay.askRemoveDevice(this, id, cx),
+          cancelRemove: (cx) => overlay.cancelRemoveDevice(this, cx),
+          remove: (id, cx) => overlay.removeDevice(this, id, cx),
+          openSetup: (cx) => overlay.openSetupPage(this, cx),
         },
       });
       return view.track_focus(this.overlayFocus).on_key_down((event, cx) => {
@@ -622,7 +473,7 @@ export default class Sheepdog extends View {
       const view = pairOverlay(t, {
         form: this.pairForm,
         onClose: () => this.closeOverlaySelf(),
-        onRefresh: (_e, cx) => this.loadPair(cx, true),
+        onRefresh: (_e, cx) => overlay.loadPair(this, cx, true),
       });
       return view.track_focus(this.overlayFocus).on_key_down((event, cx) => {
         if (event.key === "escape") {
@@ -648,7 +499,7 @@ export default class Sheepdog extends View {
       const view = resetOverlay(t, {
         ...this.resetForm,
         onClose: () => this.closeOverlaySelf(),
-        onReset: (_e, cx) => this.resetConversation(cx),
+        onReset: (_e, cx) => overlay.resetConversation(this, cx),
       });
       return view.track_focus(this.overlayFocus).on_key_down((event, cx) => {
         if (event.key === "escape") {
@@ -658,7 +509,7 @@ export default class Sheepdog extends View {
       });
     }
     const snapshot = this.store.getState();
-    const status = deriveStatus(snapshot);
+    const status = deriveStatus(snapshot, this.host());
     const onSize = (size, cx) => {
       const changed = Math.round(size.width) !== Math.round(this.size.width) || Math.round(size.height) !== Math.round(this.size.height);
       this.size = size;
@@ -676,7 +527,7 @@ export default class Sheepdog extends View {
       if (status.phase === "setup") bannerHeights.push(150);
       if (status.paused && status.phase !== "down") bannerHeights.push(40);
       const voiceHeight = status.phase === "ok"
-        ? (controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
+        ? (controls.action ? 130 : controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
         : 0;
       const composerHeight = derived.live ? 116 : 80;
       const budgetFor = (question) =>
@@ -708,6 +559,8 @@ export default class Sheepdog extends View {
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
         onSetup: () => this.runSetup(),
+        onStart: (_e, cx) => this.startDaemon(cx),
+        downNote: this.downNote ?? null,
         onToggleTechnical: (_e, cx) => {
           this.technical = !this.technical;
           cx.notify();

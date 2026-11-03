@@ -47,6 +47,34 @@ function updateBlock(t, update) {
     .when(Boolean(notice.after), (el) => el.child(mutedText(t, notice.after)));
 }
 
+// A provider that cannot be chosen: greyed out with the daemon's reason, and a
+// button that opens the daemon's setup page, where its key is added. The
+// button sits outside the greyed part so it stays readable.
+function unavailableRow(t, id, { title, detail, onSetup, busy }) {
+  return h_flex()
+    .id(id)
+    .w_full()
+    .min_h(36)
+    .px(9)
+    .py(6)
+    .gap(8)
+    .items_center()
+    .rounded(7)
+    .border(1)
+    .border_color(t.border)
+    .bg(t.raised)
+    .child(
+      v_flex()
+        .flex_1()
+        .min_w(0)
+        .gap(1)
+        .opacity(0.52)
+        .child(div().text_size(12.5).text_color(t.muted).child(title))
+        .when(Boolean(detail), (el) => el.child(div().text_size(11).text_color(t.muted).child(detail))),
+    )
+    .child(smallButton(t, `${id}-setup`, "Add a key in Setup", (_e, cx) => onSetup(cx), { disabled: Boolean(busy) }));
+}
+
 function voiceBody(t, form, actions) {
   const list = form.voice;
   const rows = [];
@@ -57,12 +85,16 @@ function voiceBody(t, form, actions) {
   } else {
     for (const provider of list.providers) {
       const id = String(provider.id || "");
+      if (provider.available === false) {
+        rows.push(unavailableRow(t, `settings-voice-${id}`, { title: provider.label || id, detail: voiceProviderDetail(provider), onSetup: actions.openSetup }));
+        continue;
+      }
       rows.push(
         choice(t, `settings-voice-${id}`, {
           title: provider.label || id,
           detail: voiceProviderDetail(provider),
           selected: id === list.provider,
-          disabled: provider.available === false || Boolean(form.busy),
+          disabled: Boolean(form.busy),
           onClick: (_e, cx) => actions.voice(id, cx),
         }),
       );
@@ -74,37 +106,35 @@ function voiceBody(t, form, actions) {
   });
 }
 
-function brainProviderHeading(t, form, group, actions) {
-  const canSwitch = group.available && !group.current && !form.busy;
+// One provider, collapsed to its name and a summary (the chosen model, or
+// whether it is available); pressing it lists only that provider's models.
+function brainProviderRow(t, form, group, actions) {
+  if (!group.available) {
+    return unavailableRow(t, `settings-brain-provider-${group.id}`, { title: group.label, detail: group.summary, onSetup: actions.openSetup });
+  }
   return h_flex()
     .id(`settings-brain-provider-${group.id}`)
     .w_full()
-    .min_h(32)
+    .min_h(36)
     .px(9)
-    .py(5)
+    .py(6)
     .gap(8)
     .items_center()
     .rounded(7)
     .bg(group.current ? t.selected : t.raised)
     .border(1)
     .border_color(group.current ? t.accent : t.border)
-    .when(canSwitch, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => actions.brainProvider(group.id, cx)))
-    .when(!group.available, (el) => el.opacity(0.52))
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => actions.brainRow(group.id, cx))
+    .child(div().w(12).flex_none().text_size(11).text_color(t.muted).child(group.expanded ? "▾" : "▸"))
     .child(
       v_flex()
         .flex_1()
         .min_w(0)
         .gap(1)
-        .child(div().text_size(11.5).font_semibold().text_color(group.available ? t.foreground : t.muted).child(group.label))
-        .when(Boolean(group.reason), (el) => el.child(div().text_size(11).text_color(t.muted).child(`Unavailable — ${group.reason}`))),
-    )
-    .child(
-      div()
-        .flex_none()
-        .text_size(11)
-        .font_semibold()
-        .text_color(group.current ? t.accent : t.muted)
-        .child(group.current ? "Current" : group.available ? "Choose" : ""),
+        .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(group.label))
+        .child(div().text_size(11).text_color(group.current ? t.accent : t.muted).truncate().child(group.summary)),
     );
 }
 
@@ -114,27 +144,38 @@ function brainBody(t, form, actions) {
   if (!brain) {
     rows.push(mutedText(t, form.errors.brain || "Loading orchestrator models…"));
   } else {
-    const groups = brainProviderGroups(brain);
-    for (const group of groups) {
-      rows.push(brainProviderHeading(t, form, group, actions));
+    for (const group of brainProviderGroups(brain, form.brainCatalogs, form.brainOpen)) {
+      rows.push(brainProviderRow(t, form, group, actions));
+      if (group.loading) rows.push(div().pl(21).child(mutedText(t, "Loading models…")));
+      if (group.error) rows.push(div().pl(21).child(mutedText(t, `No model list: ${group.error}`)));
       for (const model of group.models) {
         const name = String(model.name || "");
         rows.push(
-          choice(t, `settings-brain-model-${group.id}-${name}`, {
-            title: model.display_name || name,
-            detail: model.recommended ? "Recommended" : "",
-            selected: model.selected,
-            disabled: Boolean(form.busy),
-            onClick: (_e, cx) => actions.brainModel(group.id, name, cx),
-          }),
+          div().pl(21).w_full().child(
+            choice(t, `settings-brain-model-${group.id}-${name}`, {
+              title: model.display_name || name,
+              detail: model.recommended ? "Recommended" : "",
+              selected: model.selected,
+              disabled: Boolean(form.busy),
+              onClick: (_e, cx) => actions.brainModel(group.id, name, cx),
+            }),
+          ),
         );
       }
-      if (group.current && group.models.length === 0 && !brain.error) {
-        rows.push(mutedText(t, "No models were discovered for this provider."));
+      if (group.expanded && group.models.length === 0 && !group.loading && !group.error) {
+        rows.push(div().pl(21).child(mutedText(t, "No models were discovered for this provider.")));
       }
     }
     if (brain.error) rows.push(mutedText(t, `Model list not fresh: ${brain.error}`));
   }
+  rows.push(
+    h_flex()
+      .w_full()
+      .gap(8)
+      .items_center()
+      .child(div().flex_1().min_w(0).text_size(11).text_color(t.dim).child("API keys are added in the Setup page."))
+      .child(smallButton(t, "settings-open-setup", "Open Setup", (_e, cx) => actions.openSetup(cx))),
+  );
   return body(rows, {
     footer: "The model that decides what the voice says and does. It takes effect on the next turn.",
     error: form.errors.brain,
@@ -287,6 +328,7 @@ export function settingsOverlay(t, { form, onClose, onReload, actions }) {
     .p(14)
     .gap(16)
     .when(Boolean(form.notice), (el) => el.child(div().text_size(11.5).text_color(t.done).child(form.notice)))
+    .when(Boolean(form.alert), (el) => el.child(errorText(t, form.alert)))
     .children(sections);
   return overlayFrame(t, {
     id: "sheepdog-settings",

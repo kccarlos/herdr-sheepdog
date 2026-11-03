@@ -444,10 +444,11 @@ and commands, with `exec` and the file check passed in; no herdr imports),
 
 | State | Seen when | Panel shows |
 |---|---|---|
-| Daemon down | connect refused, no SSE, no poll | "Sheepdog isn't running", the start command, retry timer. |
+| Daemon down | connect refused, no SSE, no poll | "The Sheepdog daemon isn't running", `sheepdog start`, buttons **Start Sheepdog** (runs it) and **Run setup** (`sheepdog setup` in a tab), retry timer. |
 | Setup needed | `/api/state` voice `problem` set | The daemon's words and a button to Settings. |
-| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check, every 30 s), and nobody holds the voice | Voice buttons off; "brew install --cask kccarlos/tap/sheepdog-app" in a box. Text still works. With the phone holding the voice its controls still work (the daemon relays them) and only **Use here** is off. |
-| Sheepdog.app not running | installed, no `voice.client` | "Talk" runs `open sheepdog://talk`. |
+| Sheepdog.app not installed | no app in `/Applications` or `~/Applications` (read-only check, every 30 s), and nobody holds the voice | Voice buttons off; "Sheepdog.app isn't installed", "brew install --cask kccarlos/tap/sheepdog-app" in a box and **Open Setup**. Text still works. With the phone holding the voice its controls still work (the daemon relays them) and only **Use here** is off. |
+| Sheepdog.app not running | macOS, installed, no process named `Sheepdog` (`pgrep -x`, every 3 s while shown), no `voice.client` | "Sheepdog.app isn't running", "Open it to talk from this Mac, or use your phone.", **Open Sheepdog.app** (`open -a Sheepdog`). "Talk" runs `open sheepdog://talk`. |
+| Sheepdog.app running, not connected | macOS, the process exists, no `voice.client` | "Connecting to Sheepdog.app"; no button. Other systems: "Open Sheepdog on your phone to talk." |
 | Voice elsewhere | `voice.client.platform` is another device | "Voice on iPhone" and **Use here**; Mute, Stop and hold-to-talk go to the phone. |
 | No voice client | a voice control answered 409 | "No voice is connected" and **Use here**. |
 | Muted, speaking, listening | `voice.muted`, `voice.speaking` | Dot and label; Talk unmutes, Mute while not muted, Stop only while speaking, hold-to-talk while someone holds the voice. |
