@@ -86,7 +86,12 @@ export function emptySettingsForm(saved) {
     busy: "",
     errors: { ...EMPTY_ERRORS },
     notice: "",
+    alert: "",
     deviceToRemove: "",
+    // Orchestrator: the one provider whose models show, and the model lists
+    // fetched for providers other than the daemon's current one.
+    brainOpen: "",
+    brainCatalogs: {},
   };
 }
 
@@ -112,7 +117,7 @@ export function settingsLoadFinished(form) {
 }
 
 export function beginSettingsAction(form, name) {
-  return { ...form, busy: name, notice: "" };
+  return { ...form, busy: name, notice: "", alert: "" };
 }
 
 export function finishSettingsAction(form, name, { error = "", notice = "" } = {}) {
@@ -173,10 +178,12 @@ export function orderedBrainModels(brain) {
   return [...recommended, ...current, ...rest];
 }
 
-// The daemon reports one provider's model catalog at a time. Put that
-// catalog under its provider heading and leave the other providers as
-// headings to switch through. Only the daemon's exact current pair is checked.
-export function brainProviderGroups(brain) {
+// One row per orchestrator provider, collapsed to its name and a summary:
+// the chosen model for the current provider, else its availability. Only the
+// provider in `open` lists models. The daemon sends one provider's catalog at
+// a time (`models_provider`); the others are fetched when their row opens
+// (`form.brainCatalogs`). Only the daemon's exact current pair is checked.
+export function brainProviderGroups(brain, catalogs = {}, open = "") {
   const currentProvider = String(brain?.provider || "");
   const catalogProvider = String(brain?.models_provider || "");
   let providers = Array.isArray(brain?.providers) ? brain.providers : [];
@@ -186,36 +193,79 @@ export function brainProviderGroups(brain) {
   return providers.map((provider) => {
     const id = String(provider?.id || "");
     const available = provider?.available !== false;
-    const models = available && id === catalogProvider
-      ? orderedBrainModels(brain).map((model) => ({
+    const current = id === currentProvider;
+    const expanded = available && id === open;
+    const own = id === catalogProvider ? brain : catalogs[id];
+    const catalog = own ? { models: own.models, model: current ? brain.model : "", error: own.error, loading: own.loading } : null;
+    const models = available && catalog && !catalog.loading
+      ? orderedBrainModels(catalog).map((model) => ({
         ...model,
         provider: id,
         selected: brainSelectionMatches(brain, id, model?.name),
       }))
       : [];
+    const reason = String(provider?.reason || "");
     return {
       id,
       label: String(provider?.label || id),
       available,
       selectable: available,
-      reason: String(provider?.reason || ""),
-      current: id === currentProvider,
-      models,
+      reason,
+      current,
+      expanded,
+      summary: brainRowSummary({ available, current, reason, brain, models }),
+      loading: Boolean(expanded && (!catalog || catalog.loading)),
+      error: expanded && catalog && !catalog.loading && catalog.error && models.length === 0 ? String(catalog.error) : "",
+      models: expanded ? models : [],
     };
   });
+}
+
+function brainRowSummary({ available, current, reason, brain, models }) {
+  if (!available) return reason ? `Unavailable — ${reason}` : "Unavailable";
+  if (!current) return "Available";
+  const name = String(brain?.model || "");
+  if (!name) return "No model chosen";
+  const model = models.find((m) => m.name === name) || (brain.models || []).find((m) => m.name === name);
+  return String(model?.display_name || name);
+}
+
+// A press on a provider's row: it opens (closing any other), or closes. An
+// unavailable provider has nothing to show.
+export function toggleBrainProvider(form, id) {
+  const provider = form.brain?.providers?.find((p) => String(p?.id || "") === id);
+  if (provider?.available === false) return form;
+  return { ...form, brainOpen: form.brainOpen === id ? "" : id };
+}
+
+// Does opening `id` need its model list fetched? The current catalog is the
+// daemon's own; a failed fetch is tried again on the next opening.
+export function brainNeedsCatalog(form, id) {
+  if (!form.brain || String(form.brain.models_provider || "") === id) return false;
+  const cached = form.brainCatalogs[id];
+  return !cached || Boolean(cached.error);
+}
+
+export function brainCatalogLoading(form, id) {
+  return { ...form, brainCatalogs: { ...form.brainCatalogs, [id]: { models: [], error: "", loading: true } } };
+}
+
+export function brainCatalogLoaded(form, id, catalog) {
+  return { ...form, brainCatalogs: { ...form.brainCatalogs, [id]: { models: catalog?.models || [], error: String(catalog?.error || ""), loading: false } } };
+}
+
+export function brainCatalogFailed(form, id, message) {
+  return { ...form, brainCatalogs: { ...form.brainCatalogs, [id]: { models: [], error: String(message || "It did not answer."), loading: false } } };
+}
+
+// "Open Setup" worked, or did not: a failure says where to go instead.
+export function setupOpened(form, result) {
+  return result.ok ? { ...form, alert: "", notice: "Setup opened in your browser." } : { ...form, notice: "", alert: result.error };
 }
 
 export function brainSelectionMatches(brain, provider, model) {
   return String(brain?.provider || "") === String(provider || "") &&
     String(brain?.model || "") === String(model || "");
-}
-
-// The model to try after a provider-only catalog request, as the phone does:
-// its first recommended model, else its first. A failed catalog is no choice.
-export function defaultBrainModel(brain, provider) {
-  if (!brain || brain.models_provider !== provider || brain.error) return "";
-  const models = Array.isArray(brain.models) ? brain.models : [];
-  return models.find((model) => model.recommended === true)?.name || models[0]?.name || "";
 }
 
 export function voiceProviderDetail(provider) {

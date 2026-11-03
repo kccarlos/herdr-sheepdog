@@ -8,8 +8,13 @@ import {
   brainProviderGroups,
   brainSelectionMatches,
   cancelDeviceRemoval,
-  defaultBrainModel,
+  brainCatalogFailed,
+  brainCatalogLoaded,
+  brainCatalogLoading,
+  brainNeedsCatalog,
   emptySettingsForm,
+  setupOpened,
+  toggleBrainProvider,
   finishSettingsAction,
   languageChoices,
   moveLanguage,
@@ -82,9 +87,6 @@ test("brain choices put recommended models first and keep an unlisted current mo
     ],
   };
   assert.deepEqual(orderedBrainModels(brain).map((model) => model.name), ["recommended", "custom", "other"]);
-  assert.equal(defaultBrainModel({ models_provider: "deepseek", models: [{ name: "first" }, { name: "best", recommended: true }] }, "deepseek"), "best");
-  assert.equal(defaultBrainModel({ model: "old", models_provider: "openai", models: [{ name: "first" }] }, "openai"), "first");
-  assert.equal(defaultBrainModel({ models_provider: "deepseek", error: "catalog down", models: [{ name: "first" }] }, "deepseek"), "");
 });
 
 test("brain choices group models under providers and check only the current pair", () => {
@@ -102,7 +104,11 @@ test("brain choices group models under providers and check only the current pair
       { name: "fake-reflex", display_name: "Scripted reflex (no network)" },
     ],
   };
-  const groups = brainProviderGroups(brain);
+  // Collapsed, no row lists a model; the current one's summary names its model.
+  const closed = brainProviderGroups(brain);
+  assert.deepEqual(closed.flatMap((group) => group.models), []);
+  assert.deepEqual(closed.map((group) => group.summary), ["Scripted reflex (no network)", "Available", "Unavailable — no OPENAI_API_KEY"]);
+  const groups = brainProviderGroups(brain, {}, "fake");
   assert.deepEqual(groups.map((group) => group.label), ["Fake", "Fake 2", "OpenAI"]);
   assert.deepEqual(groups[0].models.map((model) => model.name), ["gemini-3.8-flash", "fake-reflex"]);
   assert.deepEqual(groups.flatMap((group) => group.models).filter((model) => model.selected).map((model) => `${model.provider}/${model.name}`), ["fake/fake-reflex"]);
@@ -124,11 +130,73 @@ test("switching provider moves the one checked row into that provider's group", 
       { name: "fake-reflex" },
     ],
   };
-  const groups = brainProviderGroups(brain);
+  const groups = brainProviderGroups(brain, {}, "fake2");
   assert.deepEqual(groups[0].models, []);
   assert.deepEqual(groups[1].models.filter((model) => model.selected).map((model) => model.name), ["deepseek-flash"]);
   assert.equal(brainSelectionMatches(brain, "fake2", "deepseek-flash"), true);
   assert.equal(brainSelectionMatches(brain, "fake", "deepseek-flash"), false);
+});
+
+const dropdownBrain = {
+  provider: "gemini",
+  model: "g-2",
+  models_provider: "gemini",
+  providers: [
+    { id: "gemini", label: "Gemini" },
+    { id: "claude", label: "Claude" },
+    { id: "openai", label: "OpenAI", available: false, reason: "no OPENAI_API_KEY" },
+  ],
+  models: [{ name: "g-1", display_name: "G One" }, { name: "g-2", display_name: "G Two" }],
+};
+
+test("only one provider row is open at a time, and an unavailable one never opens", () => {
+  let form = settingsLoaded(emptySettingsForm(), "brain", dropdownBrain);
+  assert.equal(form.brainOpen, "");
+  form = toggleBrainProvider(form, "gemini");
+  assert.deepEqual(brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen).filter((g) => g.expanded).map((g) => g.id), ["gemini"]);
+  form = toggleBrainProvider(form, "claude");
+  assert.deepEqual(brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen).filter((g) => g.expanded).map((g) => g.id), ["claude"]);
+  assert.equal(toggleBrainProvider(form, "openai"), form);
+  assert.equal(toggleBrainProvider(form, "claude").brainOpen, "");
+});
+
+test("another provider's models come from a fetched list, once", () => {
+  let form = settingsLoaded(emptySettingsForm(), "brain", dropdownBrain);
+  assert.equal(brainNeedsCatalog(form, "gemini"), false);
+  assert.equal(brainNeedsCatalog(form, "claude"), true);
+  form = toggleBrainProvider(brainCatalogLoading(form, "claude"), "claude");
+  let claude = brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen)[1];
+  assert.equal(claude.loading, true);
+  assert.deepEqual(claude.models, []);
+  form = brainCatalogLoaded(form, "claude", { models: [{ name: "c-1", recommended: true }, { name: "c-2" }] });
+  claude = brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen)[1];
+  assert.deepEqual(claude.models.map((m) => `${m.provider}/${m.name}/${m.selected}`), ["claude/c-1/false", "claude/c-2/false"]);
+  assert.equal(claude.summary, "Available");
+  assert.equal(brainNeedsCatalog(form, "claude"), false);
+  // A failed fetch shows its reason and is tried again.
+  form = brainCatalogFailed(form, "claude", "catalog down");
+  claude = brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen)[1];
+  assert.equal(claude.error, "catalog down");
+  assert.equal(brainNeedsCatalog(form, "claude"), true);
+});
+
+test("the current provider's row names the chosen model without opening", () => {
+  const form = settingsLoaded(emptySettingsForm(), "brain", dropdownBrain);
+  const [gemini, claude, openai] = brainProviderGroups(form.brain, form.brainCatalogs, form.brainOpen);
+  assert.equal(gemini.summary, "G Two");
+  assert.equal(gemini.current, true);
+  assert.equal(gemini.expanded, false);
+  assert.equal(claude.summary, "Available");
+  assert.equal(openai.summary, "Unavailable — no OPENAI_API_KEY");
+  assert.equal(openai.available, false);
+});
+
+test("Open Setup leaves a notice when it worked and an alert with the address when it did not", () => {
+  const form = emptySettingsForm();
+  assert.equal(setupOpened(form, { ok: true }).notice, "Setup opened in your browser.");
+  const failed = setupOpened(form, { ok: false, error: "Open http://x/setup yourself" });
+  assert.equal(failed.alert, "Open http://x/setup yourself");
+  assert.equal(beginSettingsAction(failed, "voice").alert, "");
 });
 
 test("provider detail and update notices say what the daemon reported", () => {
