@@ -30,6 +30,8 @@ Both are listed on https://herdr.dev/mods/ and https://herdr.dev/layouts/.
 
 To install by hand, copy this folder into `~/.config/herdr-app/mods/` (leave `README.md` and the `*.test.mjs` files out if you like), copy `sheepdog-layout/layouts/sheepdog.json` into `~/.config/herdr-app/layouts/`, run `herdr-app check` on the copied folder, then run `herdr-app do layout.switch '{"name":"sheepdog"}'`. A layout that ships with herdr-app cannot be changed by a mod. As a last fallback, `herdr-app do mod.open --name sheepdog` opens the panel as a window with **Copy my layout** (`layout.clone`); add a block for the mod `sheepdog` to that copy. Written and checked with the runtime `herdr-app check` reports as gpui-shell 0.7.1.
 
+**Updates.** The panel ships inside the `sheepdog` program. `sheepdog setup` writes `.sheepdog-install.json` into the installed folder (the version and a hash per file); when the daemon starts after an upgrade it replaces the folder with its own copy if every file still matches that marker (herdr-app reloads it), and does nothing to a folder you changed, one without a marker, or one that is a symlink. A panel left behind shows "A newer panel is available" (`model/panel-update.js`, from `/api/state`'s `panel`) with a button that runs `sheepdog setup`. The mod itself still never writes a file. See [docs/desktop.md](../../docs/desktop.md#updating-the-panel).
+
 To point it at another address, set `url` in the layout block's `props` or the shared key `sheepdog.url`. Only plain `http://host[:port]` works (the stream is read over a raw socket).
 
 ## What it does on your computer
