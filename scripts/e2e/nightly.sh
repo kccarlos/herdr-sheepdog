@@ -137,6 +137,22 @@ if [ "${SHEEPDOG_NIGHTLY_UPDATE:-0}" = 1 ] && [ -z "${SHEEPDOG_NIGHTLY_UPDATED:-
   fi
 fi
 
+# Go's caches on an external disk: under launchd the first read waits for a
+# consent dialog (see __vm-boot), so use internal caches when that disk does
+# not answer within 20 s.
+CACHE_NOTE=""
+for v in GOMODCACHE GOCACHE; do
+  d=$(perl -e 'alarm 20; exec @ARGV' go env "$v" 2>/dev/null || true)
+  case "$d" in
+    /Volumes/*)
+      if ! perl -e 'alarm 20; exec @ARGV' ls "$d" >/dev/null 2>&1; then
+        export "$v=$HOME/Library/Caches/sheepdog-nightly/$v"
+        CACHE_NOTE="Go caches moved to ~/Library/Caches/sheepdog-nightly: the external disk did not answer (launchd needs the removable-volume consent)."
+      fi
+      ;;
+  esac
+done
+
 DAY=$(date +%F)
 OUT="$LOGROOT/$DAY"
 [ -e "$OUT" ] && OUT="$LOGROOT/$DAY-$(date +%H%M%S)"
@@ -198,7 +214,7 @@ if want vm; then
       step vm-panel 900 "$0" __vm-run "$REMOTE_REF" 'rm -rf /tmp/nightly-shots; scripts/e2e/panel-auto.sh --shots /tmp/nightly-shots'
       step vm-shots 120 "$0" __vm-fetch /tmp/nightly-shots "$OUT/shots/vm"
     fi
-    step vm-stop 120 "$0" __vm-stop "$OUT"
+    [ -f "$OUT/tart.pid" ] && step vm-stop 120 "$0" __vm-stop "$OUT"
   fi
 fi
 
@@ -239,6 +255,7 @@ REPORT="$OUT/report.md"
   echo
   echo "**$STATUS**$([ "$STATUS" = FAIL ] && echo ": ${FAILED[*]}") · commit \`$SHORT\` · $(( ($(date +%s) - STARTED) / 60 )) min · parts: $ONLY"
   [ -n "$REMOTE_NOTE" ] && { echo; echo "$REMOTE_NOTE"; }
+  [ -n "$CACHE_NOTE" ] && { echo; echo "$CACHE_NOTE"; }
   echo
   echo "| Step | Result | Time | Log |"
   echo "|---|---|---|---|"
@@ -299,7 +316,13 @@ run_fixer() {
   left=$(codexbar usage --provider claude --no-color 2>/dev/null | sed -n 's/^Session: *\([0-9][0-9]*\)% left.*/\1/p' | head -1)
   [ -n "$left" ] || { fixer_note "skipped (Claude quota unknown: codexbar gave no Session line)"; return; }
   [ "$left" -gt 20 ] || { fixer_note "skipped (only $left% of the 5-hour Claude quota left)"; return; }
-  first="${FAILED[0]}"
+  # Machine failures (VM disk or boot, ssh, disk space) are not code to fix.
+  first=""
+  local f
+  for f in "${FAILED[@]}"; do
+    case "$f" in vm-boot|vm-stop|vm-shots|linux-ssh|real-disk) ;; *) first="$f"; break;; esac
+  done
+  [ -n "$first" ] || { fixer_note "skipped (only machine failures: ${FAILED[*]})"; return; }
   if command -v gh >/dev/null 2>&1; then
     local open
     open=$(gh pr list --repo "$REPO_SLUG" --state open --search "nightly in:title" --json title,url \

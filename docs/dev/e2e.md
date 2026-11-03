@@ -199,6 +199,8 @@ is in `fixer.log`.
 The fixer does not start when any of these is true:
 
 - you passed `--no-fixer`;
+- only machine steps failed (`vm-boot`, `vm-stop`, `vm-shots`, `linux-ssh`,
+  `real-disk`), which are not code to fix;
 - another fixer holds `fixer.lock`;
 - an open PR whose title has "nightly" already names the same check;
 - `codexbar usage --provider claude` shows 20 % or less of the session left.
@@ -228,7 +230,10 @@ The VM lives on an external disk, and macOS asks once before a launchd job
 reads a removable volume: "bash" would like to access files on a removable
 volume. Until someone clicks Allow, or allows `/bin/bash` under System
 Settings, Privacy & Security, Files and Folders, the `vm` part fails with
-that reason after 30 s. The other parts run anyway.
+that reason after 30 s. The other parts run anyway. Go's caches can live on
+the same disk (`go env GOMODCACHE GOCACHE`). When that disk does not answer,
+the run uses internal caches in `~/Library/Caches/sheepdog-nightly` and says
+so in the report.
 
 By hand, from any checkout:
 
