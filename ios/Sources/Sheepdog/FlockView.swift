@@ -99,8 +99,11 @@ struct FlockView: View {
                         .padding(.top, 40)
                 }
             }
-            ForEach(Array(flock.running.enumerated()), id: \.element.paneID) { index, agent in
-                card(agent, primary: isFirstQuestion(agent))
+            ForEach(flock.sections) { section in
+                AgentSectionHeader(group: section.group, count: section.agents.count)
+                ForEach(section.agents) { agent in
+                    card(agent, primary: isFirstQuestion(agent))
+                }
             }
             if !flock.notRunning.isEmpty {
                 notRunningRow
@@ -231,6 +234,31 @@ struct FlockView: View {
     }
 }
 
+/// "Needs you", "Working" or "Done" over its agents. VoiceOver reaches it
+/// with the headings rotor.
+struct AgentSectionHeader: View {
+    let group: AgentGroup
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(group.title)
+                .font(.footnote.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(group == .needsYou ? Theme.blockedText : Theme.muted)
+            Text("\(count)")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(Theme.muted)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 6)
+        .padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("flock.section.\(group.rawValue)")
+    }
+}
+
 /// No agent is running: the sleeping mascot and the one next step.
 struct NoAgentsView: View {
     var onNewAgent: (() -> Void)?
@@ -293,8 +321,11 @@ struct AgentCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openAgentWindow) private var openWindow
+    @EnvironmentObject private var model: SessionViewModel
 
     private var waiting: Bool { question != nil }
+    /// This computer's own agent: pin and unread are written here only.
+    private var controllable: Bool { showsWindowButton && agent.hasAttention }
     private var showsDetails: Bool { !waiting && expanded }
     private var tint: Color { Theme.color(for: agent.state) }
 
@@ -309,12 +340,14 @@ struct AgentCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(summaryLabel)
+                .accessibilityValue(AgentAttentionWords.value(agent))
                 .accessibilityHint(waiting ? "" : (expanded ? "Hides the details" : "Shows the details"))
                 .accessibilityAddTraits(waiting ? [] : .isButton)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).toggle")
                 if showsWindowButton { windowButton }
             }
             if let question {
+                if agent.isMuted { heldNotice }
                 ApprovalCardView(
                     card: question,
                     embedded: true,
@@ -338,8 +371,54 @@ struct AgentCard: View {
         )
         // The window zooms out of the whole card.
         .zoomSource(agent.paneID)
+        // The unread dot sits in the card's left margin, as in Mail.
+        .overlay(alignment: .topLeading) {
+            if agent.isUnread {
+                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                    .padding(.leading, 3)
+                    .padding(.top, 18)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("flock.agent.\(agent.alias).unread")
+            }
+        }
+        .contextMenu {
+            if controllable { attentionActions }
+        }
+        // The card looks seen while it is open on a screen that is in front.
+        .modifier(SeenWhileVisible(paneID: agent.paneID, visible: expanded && controllable, attention: agent.attention))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flock.agent.\(agent.alias)")
+    }
+
+    /// Pin / Unpin and Mark as unread: the card's context menu and the
+    /// expanded card's buttons.
+    @ViewBuilder
+    private var attentionActions: some View {
+        Button {
+            model.setPinned(agent, !agent.isPinned)
+        } label: {
+            Label(agent.isPinned ? "Unpin" : "Pin to top", systemImage: agent.isPinned ? "pin.slash" : "pin")
+        }
+        .accessibilityIdentifier("flock.agent.\(agent.alias).pin")
+        if agent.group == .done, !agent.isUnread {
+            Button {
+                model.markUnread(agent)
+            } label: {
+                Label("Mark as unread", systemImage: "circle.fill")
+            }
+            .accessibilityIdentifier("flock.agent.\(agent.alias).markUnread")
+        }
+    }
+
+    /// A question from a muted space is not announced: say so, and that
+    /// answering here works as always.
+    private var heldNotice: some View {
+        Label("Muted space. Sheepdog did not announce this, so answer it here.", systemImage: "bell.slash")
+            .font(.footnote)
+            .foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 15)
+            .accessibilityIdentifier("flock.agent.\(agent.alias).held")
     }
 
     private var borderColor: Color {
@@ -409,10 +488,27 @@ struct AgentCard: View {
     }
 
     private var name: some View {
-        Text(agent.alias)
-            .font(.body.weight(.semibold))
-            .foregroundStyle(Theme.ink)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        HStack(spacing: 5) {
+            Text(agent.alias)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            // Said by the card's VoiceOver value, so the glyphs are silent.
+            if agent.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("flock.agent.\(agent.alias).pinned")
+            }
+            if agent.isMuted {
+                Image(systemName: "bell.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("flock.agent.\(agent.alias).muted")
+            }
+        }
     }
 
     @ViewBuilder
@@ -487,6 +583,36 @@ struct AgentCard: View {
             }
             journal
             if showsEarlier { earlier }
+            if controllable {
+                HStack(spacing: 10) {
+                    Button {
+                        model.setPinned(agent, !agent.isPinned)
+                    } label: {
+                        Label(agent.isPinned ? "Unpin" : "Pin to top", systemImage: agent.isPinned ? "pin.slash" : "pin")
+                            .font(.subheadline.weight(.medium))
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityIdentifier("flock.agent.\(agent.alias).pinButton")
+                    if agent.group == .done, !agent.isUnread {
+                        Button {
+                            model.markUnread(agent)
+                        } label: {
+                            Label("Mark as unread", systemImage: "circle")
+                                .font(.subheadline.weight(.medium))
+                                .frame(minHeight: 44)
+                        }
+                        .accessibilityIdentifier("flock.agent.\(agent.alias).markUnreadButton")
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.primaryText)
+                if let attention = agent.attention, !attention.shared {
+                    Text("Seen and pinned on this computer only")
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("flock.agent.\(agent.alias).localOnly")
+                }
+            }
             if let answered = agent.answeredQuestion {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Last question (answered)")
@@ -623,5 +749,44 @@ extension String {
     var trimmedOrNil: String? {
         let t = trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
+    }
+}
+
+/// What VoiceOver adds to an agent: "Unread", "Pinned", "Muted space".
+enum AgentAttentionWords {
+    static func value(_ agent: Agent) -> String {
+        var words: [String] = []
+        if agent.isUnread { words.append("Unread") }
+        if agent.isPinned { words.append("Pinned") }
+        if agent.isMuted { words.append("Muted space") }
+        return words.joined(separator: ", ")
+    }
+}
+
+/// Marks an agent seen while it is on screen: its window is open or its
+/// card is expanded, and the app is in front. `SeenTracker` writes once per
+/// turn, so a window left open marks each new turn as it ends.
+struct SeenWhileVisible: ViewModifier {
+    let paneID: String
+    let visible: Bool
+    /// Read so a new turn (or a mark that changed) looks again.
+    let attention: AgentAttention?
+
+    @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: Key(visible: visible, turn: attention?.turn, seen: attention?.seen, phase: scenePhase == .active)) {
+                guard visible else { return }
+                model.markVisible([paneID], appActive: scenePhase == .active)
+            }
+    }
+
+    private struct Key: Equatable {
+        var visible: Bool
+        var turn: Int?
+        var seen: Int?
+        var phase: Bool
     }
 }

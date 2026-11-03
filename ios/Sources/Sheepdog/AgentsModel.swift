@@ -30,8 +30,37 @@ final class AgentsModel {
         if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
         if DebugLaunch.demoSecondQuestion { all.append(DebugLaunch.secondQuestionAgent) }
         #endif
-        return Flock.sorted(all)
+        return Flock.sorted(overlay.applying(to: all, now: Date()))
     }
+
+    /// What the user just changed (a pin, a look, a mute) shown before the
+    /// daemon's state says so; see `AttentionOverlay`.
+    private(set) var overlay = AttentionOverlay()
+    /// Which turns were already marked seen; not shown, so not observed.
+    @ObservationIgnored private var seenTracker = SeenTracker()
+
+    /// Changes the overlay and settles it five seconds on, in case the
+    /// daemon's state never shows the change.
+    func change(_ edit: (inout AttentionOverlay) -> Void) {
+        edit(&overlay)
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((AttentionOverlay.lifetime + 0.2) * 1_000_000_000))
+            self?.settleAttention()
+        }
+    }
+
+    /// A fresh state: drop the overlay entries it now shows.
+    func settleAttention() {
+        guard !overlay.isEmpty, let current else { return }
+        overlay.settle(with: current.agents, now: Date())
+    }
+
+    func takeSeenWrites(visible: [Agent], appActive: Bool) -> [SeenTracker.Write] {
+        seenTracker.writes(visible: visible, appActive: appActive)
+    }
+
+    func seenFailed(_ write: SeenTracker.Write) { seenTracker.failed(write) }
+    func forgetSeen(_ paneID: String) { seenTracker.forget(paneID) }
 
     /// The voice's own open question (`/api/state` `pending_action`); it goes
     /// through the approval card.

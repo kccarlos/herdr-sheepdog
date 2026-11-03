@@ -18,6 +18,7 @@ struct SpacesSheet: View {
     @State private var renaming: SpacesView.Space?
     @State private var newName = ""
     @State private var closing: SpacesView.Space?
+    @State private var muting: SpacesView.Space?
     @State private var notice: String?
 
     var body: some View {
@@ -75,6 +76,7 @@ struct SpacesSheet: View {
         } message: { space in
             Text(SpaceSummary.closeMessage(space))
         }
+        .muteDialog(space: $muting) { space, choice in await setMute(space, choice) }
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button("OK", role: .cancel) {}
         }
@@ -113,6 +115,16 @@ struct SpacesSheet: View {
                     NavigationLink(value: space.id) {
                         SpaceRow(space: space)
                     }
+                    .swipeActions(edge: .leading) {
+                        if space.supportsMute {
+                            Button {
+                                if space.isMuted { Task { await setMute(space, nil) } } else { muting = space }
+                            } label: {
+                                Label(space.isMuted ? "Unmute" : "Mute", systemImage: space.isMuted ? "bell" : "bell.slash")
+                            }
+                            .tint(Theme.working)
+                        }
+                    }
                     .swipeActions(edge: .trailing) {
                         Button {
                             askClose(space)
@@ -133,6 +145,21 @@ struct SpacesSheet: View {
                         renaming = space
                     }
                     .accessibilityAction(named: "Close") { askClose(space) }
+                    .accessibilityAction(named: space.isMuted ? "Unmute" : "Mute notifications") {
+                        guard space.supportsMute else { return }
+                        if space.isMuted { Task { await setMute(space, nil) } } else { muting = space }
+                    }
+                    .contextMenu {
+                        if space.supportsMute {
+                            if space.isMuted {
+                                Button { Task { await setMute(space, nil) } } label: { Label("Unmute notifications", systemImage: "bell") }
+                                    .accessibilityIdentifier("spaces.row.unmute")
+                            } else {
+                                Button { muting = space } label: { Label("Mute notifications…", systemImage: "bell.slash") }
+                                    .accessibilityIdentifier("spaces.row.mute")
+                            }
+                        }
+                    }
                     .accessibilityIdentifier("spaces.row.\(space.name)")
                 }
             }
@@ -171,6 +198,20 @@ struct SpacesSheet: View {
 
     private func close(_ space: SpacesView.Space) async {
         await act("close:\(space.id)") { try await $0.closeSpace(id: space.id) }
+    }
+
+    /// Mute a space (the choice's end time is worked out on this phone) or,
+    /// with nil, unmute it.
+    private func setMute(_ space: SpacesView.Space, _ choice: MuteChoice?) async {
+        do {
+            try await model.setSpaceMute(space, choice)
+        } catch {
+            notice = (error as? DaemonError)?.meansFeatureAbsent == true
+                ? "Update sheepdog on your computer to mute a space."
+                : "Couldn't \(choice == nil ? "unmute" : "mute") \(space.name). " + model.requestFailure(error).message
+            Haptics.answerFailed()
+        }
+        await fetch()
     }
 
     private func newSpace(_ folder: SpacesView.Folder) async {
@@ -212,6 +253,12 @@ struct SpaceRow: View {
             Text(SpaceSummary.line(space))
                 .font(.footnote)
                 .foregroundStyle(space.agents.contains { $0.state == "blocked" } ? Theme.blockedText : Theme.muted)
+            if space.isMuted {
+                Label(MuteChoice.status(until: space.until, now: Date()), systemImage: "bell.slash.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("spaces.row.\(space.name).muted")
+            }
         }
         .frame(minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -237,6 +284,7 @@ struct SpaceDetailView: View {
     @State private var newName = ""
     @State private var notice: String?
     @State private var running: String?
+    @State private var muting: SpacesView.Space?
 
     var body: some View {
         List {
@@ -273,6 +321,7 @@ struct SpaceDetailView: View {
                     .accessibilityIdentifier("space.agent.\(agent.alias)")
                 }
             }
+            if space.supportsMute { notificationsSection }
             if space.git {
                 Section("Worktrees") { worktreeRows }
             }
@@ -361,6 +410,7 @@ struct SpaceDetailView: View {
             }
         }
         .task { await loadWorktrees() }
+        .muteDialog(space: $muting) { space, choice in await setMute(space, choice) }
         .sheet(item: $editor) { mode in
             CommandSheet(mode: mode, spaceName: space.name) { name, command, save in
                 switch mode {
@@ -414,6 +464,44 @@ struct SpaceDetailView: View {
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button("OK", role: .cancel) {}
         }
+    }
+
+    /// Mute this space's notifications: for an hour, until tomorrow morning
+    /// or until the user turns them back on.
+    private var notificationsSection: some View {
+        Section {
+            if space.isMuted {
+                Label(MuteChoice.status(until: space.until, now: Date()), systemImage: "bell.slash.fill")
+                    .foregroundStyle(Theme.ink)
+                    .frame(minHeight: 44, alignment: .leading)
+                    .accessibilityIdentifier("space.muteStatus")
+                Button { Task { await setMute(space, nil) } } label: {
+                    Label("Unmute", systemImage: "bell").frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("space.unmute")
+            } else {
+                Button { muting = space } label: {
+                    Label("Mute notifications…", systemImage: "bell.slash").frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("space.mute")
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text(MuteDialog.footer)
+        }
+    }
+
+    private func setMute(_ space: SpacesView.Space, _ choice: MuteChoice?) async {
+        do {
+            try await model.setSpaceMute(space, choice)
+        } catch {
+            notice = (error as? DaemonError)?.meansFeatureAbsent == true
+                ? "Update sheepdog on your computer to mute a space."
+                : "Couldn't \(choice == nil ? "unmute" : "mute") \(space.name). " + model.requestFailure(error).message
+            Haptics.answerFailed()
+        }
+        await reload()
     }
 
     private var placeLine: String {
@@ -548,4 +636,30 @@ struct SpaceDetailView: View {
 private struct WorktreeMenuValue: Equatable {
     var canOpen: Bool
     var canRemove: Bool
+}
+
+/// The mute choices, in a confirmation dialog over a space, and what muting
+/// does and does not silence.
+enum MuteDialog {
+    static let footer = "Sheepdog won't notify your phone or speak up about this space. Its agents still show here, and the voice still answers when you ask."
+}
+
+extension View {
+    /// Asks how long to mute `space` and calls `mute` with the choice.
+    func muteDialog(space: Binding<SpacesView.Space?>, mute: @escaping (SpacesView.Space, MuteChoice) async -> Void) -> some View {
+        confirmationDialog(
+            space.wrappedValue.map { "Mute \($0.name)?" } ?? "",
+            isPresented: Binding(get: { space.wrappedValue != nil }, set: { if !$0 { space.wrappedValue = nil } }),
+            titleVisibility: .visible,
+            presenting: space.wrappedValue
+        ) { target in
+            ForEach(MuteChoice.allCases) { choice in
+                Button(choice.title) { Task { await mute(target, choice) } }
+                    .accessibilityIdentifier("mute.\(choice.rawValue)")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text(MuteDialog.footer)
+        }
+    }
 }

@@ -200,6 +200,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// The agent's own session title (Claude Code's, Codex's thread
     /// name), when it has one.
     public var title: String?
+    /// Group, unread, pinned and muted (`attention`), from a daemon that
+    /// keeps them; nil from an older one.
+    public var attention: AgentAttention?
 
     public var id: String { paneID }
 
@@ -210,7 +213,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic, spoken, cwd, title
+        case alias, kind, name, state, journal, synthetic, spoken, cwd, title, attention
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -236,7 +239,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         synthetic: Bool? = nil,
         spoken: String? = nil,
         cwd: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        attention: AgentAttention? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -254,6 +258,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.spoken = spoken
         self.cwd = cwd
         self.title = title
+        self.attention = attention
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an
@@ -704,17 +709,26 @@ public struct DaemonState: Codable, Equatable, Sendable {
     /// The daemon's update notice; nil on a daemon too old to report one
     /// or with `update.check` off.
     public var update: UpdateInfo?
+    /// How many agents are in each group (feature `attention`); nil from an
+    /// older daemon.
+    public var attentionCounts: AttentionCounts?
+    /// The muted spaces (feature `space-mute`); nil from an older daemon.
+    public var spaceMutes: [SpaceMute]?
 
     enum CodingKeys: String, CodingKey {
         case agents, voice, herdr, version, brain, update, questions
+        case attentionCounts = "attention_counts"
+        case spaceMutes = "space_mutes"
         case pendingAction = "pending_action"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil, attentionCounts: AttentionCounts? = nil, spaceMutes: [SpaceMute]? = nil) {
         self.update = update
+        self.attentionCounts = attentionCounts
+        self.spaceMutes = spaceMutes
         self.agents = agents
         self.pendingAction = pendingAction
         self.questions = questions

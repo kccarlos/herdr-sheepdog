@@ -140,6 +140,11 @@ enum DebugLaunch {
     /// question with descriptions instead of its command approval
     /// (`DemoWorld.longQuestion`), which goes to the compact bar on a phone.
     static var demoLongQuestion: Bool { arguments.contains("-sheepdogDemoLongQuestion") }
+    /// `-sheepdogDemoAttention`: the demo with a fixed agent list and nothing
+    /// scripted to change it: one unread done agent, one read one, one
+    /// waiting and one working (`DemoWorld.seedAttention`), for the unread,
+    /// pin and mute tests and screenshots.
+    static var demoAttention: Bool { arguments.contains("-sheepdogDemoAttention") }
     static let secondQuestionAgent = Agent(
         paneID: "demo-blog", alias: "blog", kind: "claude", state: .blocked, stateSince: Date().addingTimeInterval(-60)
     )

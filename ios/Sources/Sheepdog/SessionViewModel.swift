@@ -945,8 +945,9 @@ final class SessionViewModel: ObservableObject {
             if let pending = PendingAction(event: event) {
                 fleet.current?.questionCreated(pending)
                 // The needs-you cue: a new open question with options, once
-                // per question, and only when it is news (not a replay).
-                if pending.isAnswerPrompt, isFresh(event), cuedPendingIDs.insert(pending.id).inserted {
+                // per question, and only when it is news (not a replay). A
+                // question in a muted space makes no sound or tap.
+                if pending.isAnswerPrompt, isFresh(event), !AttentionEvents.isMuted(event), cuedPendingIDs.insert(pending.id).inserted {
                     Haptics.needsYou()
                 }
             }
@@ -968,7 +969,8 @@ final class SessionViewModel: ObservableObject {
             refreshSoon()
         default:
             if event.type.hasPrefix("herdr.") || event.type.hasPrefix("supervisor.") || event.type.hasPrefix("web.inject")
-                || event.type.hasPrefix("investigation.") || event.type.hasPrefix("promise.") || event.type == "daemon.start" {
+                || event.type.hasPrefix("investigation.") || event.type.hasPrefix("promise.") || event.type == "daemon.start"
+                || AttentionEvents.refreshesState(event.type) {
                 refreshSoon()
             }
         }
@@ -1026,6 +1028,7 @@ final class SessionViewModel: ObservableObject {
     /// answer phases are already on its model; here the cues, the Live
     /// Activity and the rest of the state follow.
     private func apply(_ state: DaemonState) {
+        agentsModel.settleAttention()
         let agents = agentsModel.agents
         let agentsChanged = agents != appliedAgents
         appliedAgents = agents
@@ -1695,6 +1698,7 @@ final class SessionViewModel: ObservableObject {
         demo.update = DebugLaunch.demoUpdate
         demo.recording = DebugLaunch.demoRecording
         demo.longQuestion = DebugLaunch.demoLongQuestion
+        if DebugLaunch.demoAttention { demo.seedAttention() }
         #else
         let demo = DemoDaemon()
         #endif
