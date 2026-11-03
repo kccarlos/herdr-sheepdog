@@ -158,3 +158,34 @@ test("observed events keep the orchestrator's replies, and tell subscribers only
   assert.deepEqual(store.getState().replies, [{ id: 10, options: ["Yes"], pending: false }]);
   assert.equal(heard, 1);
 });
+
+test("an approval card and its question appear from pending.created and settle at once, before any refetch", () => {
+  const store = createStore({ http: fakeHttp(), now: () => 0 });
+  store.observe({ type: "pending.created", ts: "t", payload: { id: "ap-1", kind: "answer_prompt", agent: "auth", summary: "auth asks to run git diff.", options: [{ index: 0, label: "Yes" }] } }, 100);
+  // No state has been read yet: the item shows, the question list waits for the state.
+  assert.equal(store.getState().history.items[0].resolution, "open");
+  assert.equal(store.getState().app, null);
+  return store.refresh({ state: true, conversation: false }).then(() => {
+    let heard = 0;
+    store.subscribe(() => heard++);
+    store.observe({ type: "pending.created", ts: "t", payload: { id: "ap-2", kind: "answer_prompt", summary: "docs asks.", options: [{ index: 0, label: "Yes" }] } }, 101);
+    assert.deepEqual(store.getState().app.questions.map((q) => q.id), ["ap-2"]);
+    assert.equal(heard, 2, "the item and the question, each once");
+    store.observe({ type: "pending.confirmed", ts: "t", payload: { id: "ap-2", answer: "Yes", via: "tap" } }, 102);
+    const item = store.getState().history.items.find((i) => i.pending_id === "ap-2");
+    assert.deepEqual([item.resolution, item.answered, item.answer], ["confirmed", true, "Yes"]);
+    assert.deepEqual(store.getState().app.questions, []);
+    // The daemon's own page replaces the shown item (same id) later.
+    store.observe({ type: "pending.cancelled", ts: "t", payload: { id: "ap-2", reason: "closed" } }, 103);
+    assert.equal(store.getState().history.items.find((i) => i.pending_id === "ap-2").resolution, "confirmed", "an answered one is not cancelled after");
+  });
+});
+
+test("the rail's store (no conversation) folds the question state too", () => {
+  const store = createStore({ http: fakeHttp(), now: () => 0, conversation: false });
+  return store.refresh().then(() => {
+    store.observe({ type: "pending.created", ts: "t", payload: { id: "ap-1", kind: "answer_prompt", summary: "s", options: [{ index: 0, label: "Yes" }] } }, 1);
+    assert.equal(store.getState().app.questions.length, 1);
+    assert.equal(store.getState().history.items.length, 0);
+  });
+});

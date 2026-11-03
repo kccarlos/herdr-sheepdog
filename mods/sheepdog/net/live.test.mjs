@@ -92,8 +92,8 @@ test("a burst of events is one or two rounds, and only events that change someth
   h.socket().feed(HEAD + h.chunk(": hi\n\n"));
   await h.clock.advance(MIN_GAP_MS * 2);
   h.asked.length = 0;
-  h.socket().feed(h.event(1, "pending.created") + h.event(2, "pending.created") + h.event(3, "voice.tool_result") + h.event(4, "web.client.stats"));
-  await h.clock.advance(MIN_GAP_MS * 3);
+  h.socket().feed(h.event(1, "pending.created") + h.event(2, "pending.created") + h.event(3, "voice.tool_result") + h.event(4, "web.client.stats") + h.event(7, "card.shown"));
+  await h.clock.advance(QUIET_MS + MIN_GAP_MS * 3); // card.shown asks now; the settled ones once things are quiet
   assert.ok(h.asked.length >= 1 && h.asked.length <= 2, `asked ${h.asked.length} times`);
   assert.deepEqual(h.asked[0], { state: true, conversation: true });
   h.asked.length = 0;

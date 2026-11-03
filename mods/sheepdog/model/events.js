@@ -10,10 +10,13 @@
 // (audio stats, usage, playback) changes nothing the panel shows.
 const NOW = new Set([
   "daemon.start", "conversation.reset", "card.shown",
-  "voice.tool_result", "voice.push_held", "voice.push_dropped",
+  "voice.push_held", "voice.push_dropped",
   "voice.resume", "voice.handle_dropped", "voice.closed",
 ]);
-const SETTLE = new Set(["web.utterance", "voice.text", "voice.push", "voice.transcript.in", "voice.transcript.out"]);
+const SETTLE = new Set([
+  "web.utterance", "voice.text", "voice.push", "voice.transcript.in", "voice.transcript.out", "voice.tool_result",
+  "pending.created", "pending.confirmed", "pending.expired", "pending.cancelled", "pending.replaced",
+]);
 const STATE = new Set([
   "web.client.connect", "web.client.attach", "web.client.disconnect", "web.client.mute", "web.client.speaking",
   "voice.client", "voice.connect", "voice.connect_error", "voice.disconnected", "voice.muted",
@@ -22,11 +25,11 @@ const STATE = new Set([
 ]);
 
 export function eventEffect(type) {
-  if (NOW.has(type) || type.startsWith("pending.")) return "now";
+  if (NOW.has(type)) return "now";
   if (SETTLE.has(type)) return "settle";
   return STATE.has(type) ? "state" : null;
 }
 
 // The first dotted component of each type above: what `GET /events?kinds=`
 // selects, so the stream carries only what the panel reads.
-export const KINDS = [...new Set([...NOW, ...SETTLE, ...STATE, "pending.created"].map((type) => type.split(".")[0]))].sort();
+export const KINDS = [...new Set([...NOW, ...SETTLE, ...STATE].map((type) => type.split(".")[0]))].sort();
