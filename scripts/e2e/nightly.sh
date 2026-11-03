@@ -289,7 +289,8 @@ REPORT="$OUT/report.md"
   echo '```'
 } >"$REPORT"
 
-write_latest() { # write_latest <fixer_pr>
+write_latest() { # write_latest <fixer_pr>; full runs only (a partial run is not the night's state)
+  [ "$ONLY" = "vm,linux,real" ] || return 0
   jq -n --arg date "$DAY" --arg status "$STATUS" --arg report "$REPORT" --arg commit "$SHA" \
     --arg failed "${FAILED[*]:-}" --arg pr "$1" \
     '{date:$date, status:$status, report:$report, commit:$commit,

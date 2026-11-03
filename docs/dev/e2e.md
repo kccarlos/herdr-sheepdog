@@ -174,8 +174,8 @@ Each run writes `~/Library/Logs/sheepdog-nightly/<YYYY-MM-DD>/`. It holds:
 - one log per step.
 - `shots/vm/*.png`.
 
-A second run on the same day gets `-HHMMSS` added to the folder name. The run
-also writes `~/Library/Logs/sheepdog-nightly/latest.json`
+A second run on the same day gets `-HHMMSS` added to the folder name. A full
+run (no `--only`) also writes `~/Library/Logs/sheepdog-nightly/latest.json`
 (`{date, status, report, commit, failed, fixer_pr}`), which an interactive
 Claude loop can read. The script exits non-zero when any step failed.
 
