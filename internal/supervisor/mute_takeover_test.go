@@ -1,8 +1,11 @@
 package supervisor
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -45,24 +48,98 @@ func TestMutedQuestionDoesNotTakeOverAnAnnouncedOne(t *testing.T) {
 	}
 }
 
-// With nothing else pending a muted question is the pending one as always:
-// the card and a tap work, and nothing is held.
-func TestMutedQuestionIsPendingWhenNothingElseIs(t *testing.T) {
+// keysTo lists the panes pane.send_keys went to.
+func keysTo(w *muteWorld) []string {
+	var out []string
+	for _, r := range w.sendKeysRequests() {
+		out = append(out, r[0])
+	}
+	return out
+}
+
+// A question nobody was told about is never what a spoken or typed "yes"
+// answers, even when it is the only one open: the voice says so in plain
+// words and sends nothing. A tap on the question's own id still works; the
+// orchestrator may not answer it either.
+func TestOnlyHeldQuestionIsNotAnsweredByAYes(t *testing.T) {
 	w := newMuteWorld(t, nil, Quiet)
 	w.mute(t)
 	w.block("w5:p1", "codex-approval-prompt.screen.txt")
-	p, ok := w.pending()
-	if !ok || p.PaneID != "w5:p1" || w.sup.heldQuestion(p.ID) {
-		t.Fatalf("pending = %+v (held %v)", p, w.sup.heldQuestion(p.ID))
+	if p, ok := w.pending(); ok {
+		t.Fatalf("a held question took the pending slot: %+v", p)
+	}
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("questions = %+v, want the one held question", qs)
 	}
 	if got := w.pushTexts(); len(got) != 0 {
 		t.Errorf("the muted question was spoken: %v", got)
 	}
+
+	for _, word := range []string{"yes", "approve it", "no"} {
+		res := w.say(word)
+		if !strings.Contains(res.Spoken, "Nothing is waiting for an answer here") || !strings.Contains(res.Spoken, "muted space") || !strings.Contains(res.Spoken, "phone") {
+			t.Errorf("%q answered %q, want the plain words about the muted question", word, res.Spoken)
+		}
+	}
+	if got := keysTo(w); len(got) != 0 {
+		t.Fatalf("a bare answer sent keys to %v", got)
+	}
+
+	// The orchestrator's answer_prompt is refused too.
+	_, err := brainHost{w.sup}.AnswerPrompt(context.Background(), "w5:p1", []string{"y"})
+	if !errors.Is(err, brain.ErrNotPermitted) || !strings.Contains(err.Error(), "muted") {
+		t.Errorf("AnswerPrompt = %v, want a refusal that names the mute", err)
+	}
+	if got := keysTo(w); len(got) != 0 {
+		t.Fatalf("the orchestrator sent keys to %v", got)
+	}
+
+	// The user's own tap on the card still answers it.
+	if _, err := w.sup.AnswerTap(context.Background(), w.store.Questions()[0].ID, 1); err != nil {
+		t.Fatalf("tap: %v", err)
+	}
+	if got := keysTo(w); len(got) != 1 || got[0] != "w5:p1" {
+		t.Errorf("tap keys went to %v, want w5:p1", got)
+	}
 }
 
-// A promise to be told when the agent blocks is kept even when the question
-// is held back from the pending slot, and the pending answer stays the one
-// the user heard.
+// Unmuting the space announces the held question once; from then on it is
+// the pending answer and a "yes" answers it.
+func TestUnmuteAnnouncesHeldQuestionsSoTheyAreAnswerableByVoice(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	ctx := context.Background()
+	if _, err := w.sup.SetSpaceMute(ctx, "auth", true, nil, ViaPhone); err != nil {
+		t.Fatal(err)
+	}
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if _, ok := w.pending(); ok || len(w.pushTexts()) != 0 {
+		t.Fatalf("pending %v, pushes %v: the muted question must be silent and held", ok, w.pushTexts())
+	}
+	if _, err := w.sup.SetSpaceMute(ctx, "auth", false, nil, ViaPhone); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if p, ok := w.pending(); ok && p.PaneID == "w5:p1" && len(w.pushTexts()) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("held question not announced after unmute: pushes %v", w.pushTexts())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := w.log.count("pending.promoted"); n != 1 {
+		t.Errorf("pending.promoted = %d, want 1", n)
+	}
+	w.say("yes")
+	if got := keysTo(w); len(got) != 1 || got[0] != "w5:p1" {
+		t.Errorf("after it was announced, yes sent keys to %v, want w5:p1", got)
+	}
+}
+
+// A promise to be told when the agent blocks is kept even in a muted space,
+// and the question, now announced, becomes the pending answer.
 func TestHeldQuestionStillKeepsABlockedPromise(t *testing.T) {
 	w := newMuteWorld(t, nil, Quiet)
 	w.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
@@ -77,8 +154,10 @@ func TestHeldQuestionStillKeepsABlockedPromise(t *testing.T) {
 	if len(got) != before+1 || !strings.HasPrefix(got[len(got)-1], "As you asked:") {
 		t.Fatalf("pushes = %v, want the kept promise spoken", got)
 	}
-	if p, _ := w.pending(); p.PaneID != "w6:p1" {
-		t.Errorf("the held question took over the pending answer: %+v", p)
+	// The kept-promise line was spoken, so this question was heard and is
+	// now the pending answer.
+	if p, _ := w.pending(); p.PaneID != "w5:p1" {
+		t.Errorf("pending = %+v, want the question that was just announced", p)
 	}
 	if n := len(w.fn.all()); n != 2 {
 		t.Errorf("notifications = %d, want docs's approval and the kept promise", n)

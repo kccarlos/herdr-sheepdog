@@ -1445,6 +1445,21 @@ chattiness ceiling, not in a prompt.
 | Sheepdog.app notifications | `pending.created` and `herdr.transition` events carry `muted: true` for the agent; the app drops their notifications. | Voice-error notices. |
 | Phone haptics for `pending.created` | Off for events with `muted: true`. | |
 
+**A held question is never answered by "yes".** A question from a muted
+space is not announced, and a spoken or typed "yes" may only answer what the
+user was told about, so it never takes the voice's pending slot, not even
+when it is the only open question (nor does it replace a question the user
+did hear). It is listed in `questions` for the phone and answerable by tap
+or API on its own id (`pending.created` carries `held: true`). With only
+held questions open, a bare yes or no sends nothing and the voice says
+"Nothing is waiting for an answer here. auth has a question in a muted
+space; you can answer it on your phone."; the orchestrator's `answer_prompt`
+on it is refused for the same reason. A held question becomes the pending
+answer (`pending.promoted`) only when it is announced: by a kept promise or
+the user's own instruction (the exceptions above), or when the space is
+unmuted or its mute ends, which announces the held questions once. So a
+question is answerable by voice only after it was heard.
+
 Prompt reminders ("Still waiting for your answer") are held back in a muted
 space too. Exit-while-busy notices and "started" lines are not about a block
 or a finish and are not muted.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -331,6 +332,7 @@ func (s *Supervisor) RunAttention(ctx context.Context) {
 // muteExpired is told by the mute store when a mute ended.
 func (s *Supervisor) muteExpired(m attention.Mute) {
 	name := s.mutedName(m.Path)
+	defer s.announceHeld(m.Path)
 	s.log.Log(logSource, "space.muted", "", map[string]any{"path": m.Path, "name": name, "muted": false, "via": ViaExpired})
 	s.tellBrain(fmt.Sprintf("the mute on %s's notifications ended", name))
 }
@@ -391,6 +393,7 @@ func (s *Supervisor) SetSpaceMute(ctx context.Context, spaceID string, muted boo
 		s.tellBrain(fmt.Sprintf("the user muted %s's notifications from the %s", sp.Name, viaPlace(via)))
 	} else {
 		s.tellBrain(fmt.Sprintf("the user turned %s's notifications back on from the %s", sp.Name, viaPlace(via)))
+		s.announceHeld(sp.Path)
 	}
 	return res, nil
 }
@@ -588,6 +591,83 @@ func (s *Supervisor) heldQuestion(id string) bool {
 	s.attMu.Lock()
 	defer s.attMu.Unlock()
 	return s.held[id]
+}
+
+// heldQuestions are the open questions the space mute holds back, oldest
+// first.
+func (s *Supervisor) heldQuestions() []state.PendingAction {
+	var out []state.PendingAction
+	for _, q := range s.store.Questions() {
+		if s.heldQuestion(q.ID) {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// heldQuestionsLine is what a bare yes or no gets when the only open
+// questions are held ones: plain words, no keys sent. "" when none is held.
+// Caller holds s.mu (it reads the store only).
+func (s *Supervisor) heldQuestionsLine() string {
+	held := s.heldQuestions()
+	switch len(held) {
+	case 0:
+		return ""
+	case 1:
+		return "Nothing is waiting for an answer here. " + aliasOr(s.sayOf(held[0].PaneID)) + " has a question in a muted space; you can answer it on your phone."
+	}
+	return fmt.Sprintf("Nothing is waiting for an answer here. %d questions are in muted spaces; you can answer them on your phone.", len(held))
+}
+
+// promoteHeld makes a held question the voice's pending answer because it is
+// being announced now (a kept promise or the finish of the user's own
+// instruction on a muted space, or the space being unmuted): from here it is
+// answerable by voice, as any question the user was told about. Without
+// that announcement it stays out of the slot.
+func (s *Supervisor) promoteHeld(a announcement) {
+	if a.pending == "" || !s.heldQuestion(a.pending) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q, ok := s.store.Question(a.pending)
+	if !ok {
+		return
+	}
+	s.attMu.Lock()
+	delete(s.held, a.pending)
+	s.attMu.Unlock()
+	if old, had := s.store.Pending(); had && old.ID != q.ID {
+		s.log.Log(logSource, "pending.replaced", q.PaneID, map[string]any{"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": q.ID, "new_kind": q.Kind})
+	}
+	if err := s.store.SetPending(q); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
+		return
+	}
+	s.invalidateBriefingLocked()
+	s.log.Log(logSource, "pending.promoted", q.PaneID, map[string]any{"id": q.ID, "agent": s.aliasOf(q.PaneID)})
+}
+
+// announceHeld announces, once, the questions that were held in the space at
+// path now that it is not muted: each is spoken like a new block (and so
+// becomes answerable by voice when it is heard). A question whose agent has
+// moved on is dropped quietly.
+func (s *Supervisor) announceHeld(path string) {
+	idx := s.folders(context.Background())
+	for _, q := range s.heldQuestions() {
+		row, ok := s.store.Get(q.PaneID)
+		if !ok || s.folderOfPane(idx, row) != path {
+			continue
+		}
+		if row.State != herdr.StateBlocked && row.State != herdr.StateDone && row.State != herdr.StateIdle {
+			continue
+		}
+		go func(row state.Agent, q state.PendingAction) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, pending: q.ID})
+		}(row, q)
+	}
 }
 
 // mutedQuiet reports whether the space mute silences a: it is muted and

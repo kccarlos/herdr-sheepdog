@@ -83,20 +83,24 @@ func (s *Supervisor) newSendInstruction(paneID, text, echo string) state.Pending
 // It returns the announcement to speak: for a new question that replaces
 // an unanswered question from another pane, the "dropping …; now …"
 // sentence; otherwise p.SpokenSummary. Caller holds s.mu.
-func (s *Supervisor) setPending(p state.PendingAction) string {
-	return s.setPendingMuted(p, s.paneMutedCached(p.PaneID))
+func (s *Supervisor) setPending(p state.PendingAction) {
+	s.setPendingMuted(p, s.paneMutedCached(p.PaneID))
 }
 
 // setPendingMuted is setPending with the answer of the space mute check for
-// p's pane. A question from a muted space is not announced, so it must not
-// take over the pending answer to a question the user was told about
-// ("yes" belongs to what they heard, and the "Dropping …; now …" line that
-// would tell them is itself an announcement the mute silences): it is
-// listed for the phone, answerable by tap, and held (heldQuestion) until
-// nothing else is pending to be taken over.
+// p's pane. A question from a muted space is not announced, and a spoken or
+// typed "yes" may only answer what the user was told about, so it never
+// takes the voice's pending slot: it is listed for the phone, answerable by
+// tap on its own id, and held (holdQuestion) until it is announced
+// (promoteHeld: a kept promise, or the space being unmuted). The pending
+// answer to a question the user did hear stays as it is.
 func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 	spoken := p.SpokenSummary
-	if old, had := s.store.Pending(); muted && had && old.ID != p.ID && old.PaneID != p.PaneID && p.Kind == state.PendingAnswerPrompt {
+	if muted && p.Kind == state.PendingAnswerPrompt {
+		if old, had := s.store.Pending(); had && old.PaneID == p.PaneID && old.Kind == state.PendingAnswerPrompt {
+			// The same pane asks again: what was pending is out of date.
+			s.clearPending(old, "superseded")
+		}
 		if err := s.store.SetQuestion(p); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 		}

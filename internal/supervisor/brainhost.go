@@ -245,6 +245,9 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 		p = revived
+		if s.heldQuestion(p.ID) {
+			return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+		}
 	}
 	allowed := allowedKeys(p)
 	for _, k := range keys {

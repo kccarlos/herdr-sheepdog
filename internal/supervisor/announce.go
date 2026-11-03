@@ -255,6 +255,9 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
+	if u != voice.UrgencySilent {
+		s.promoteHeld(a)
+	}
 	s.notify(a, kept, spoken)
 	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
 	if u != voice.UrgencySilent {
@@ -357,6 +360,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
+		s.promoteHeld(a)
 		s.notify(a, kept, spoken)
 		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(keptTags(nil, kept)))
 		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
@@ -439,9 +443,11 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		case a.owed:
 			// The user's own instruction ended: owed like a promise,
 			// so no chattiness level silences it.
+			s.promoteHeld(a)
 			s.notify(a, kept, sentence)
 			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(fromDaemon(nil)))
 		default:
+			s.promoteHeld(a)
 			s.notify(a, kept, sentence)
 			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(fromDaemon(nil)))
 		}
@@ -454,6 +460,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
+	s.promoteHeld(a)
 	s.notify(a, kept, line)
 	s.pushTagged(a.row.PaneID, line, u, a.tags(fromDaemon(keptTags(announceTags(u, duePassed, false, ""), kept))))
 }

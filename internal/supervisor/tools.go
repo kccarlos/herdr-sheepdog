@@ -367,7 +367,8 @@ func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voi
 	alias := aliasOr(state.Say(row))
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince))
+	// The tool result says it aloud, so it is heard even in a muted space.
+	spoken := s.setPendingMuted(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince), false)
 	s.mu.Unlock()
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }
