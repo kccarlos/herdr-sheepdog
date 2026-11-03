@@ -13,7 +13,8 @@ from the formula's because both live in one tap.
   sha256 sums (darwin/arm64, linux/amd64; the targets release.yml builds).
   Homebrew reads the version from the URL.
 - `sheepdog-app.rb.tmpl`: the cask (`app "Sheepdog.app"`, macOS 14 or newer,
-  arm64, `zap` for the app's preferences), with placeholders for the tag, the
+  arm64, `uninstall quit:` so an upgrade quits and reopens the running app,
+  `zap` for the app's preferences), with placeholders for the tag, the
   version and the zip's sha256.
 - `render.sh [--cask] <tag>`: fills a template from the release's
   `checksums.txt` and prints the formula, or with `--cask` the cask.

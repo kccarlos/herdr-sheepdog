@@ -32,6 +32,8 @@ check "cask fills the app sum" grep -q "sha256 \"$a\"" "$work/sheepdog-app.rb"
 check "cask fills the version" grep -q '^  version "9.9.9"$' "$work/sheepdog-app.rb"
 check "cask fills the tag" grep -q 'download/v9.9.9/Sheepdog-#{version}-macos.zip' "$work/sheepdog-app.rb"
 check "cask leaves no placeholder" bash -c "! grep -q @ '$work/sheepdog-app.rb'"
+check "cask quits the app on upgrade" grep -q '^  uninstall quit: "com.github.kccarlos.herdr-sheepdog-mac"$' "$work/sheepdog-app.rb"
+check "cask uses the symbol macos form" grep -q '^  depends_on macos: :sonoma$' "$work/sheepdog-app.rb"
 check "cask installs Sheepdog.app" grep -q '^  app "Sheepdog.app"$' "$work/sheepdog-app.rb"
 if command -v ruby >/dev/null; then check "cask is valid ruby" ruby -c "$work/sheepdog-app.rb"; fi
 # A pre-release tag keeps the zip's name (no suffix) and the tag in the URL.

@@ -23,9 +23,16 @@ cask "sheepdog-app" do
   end
 
   depends_on arch: :arm64
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Sheepdog.app"
+
+  # `brew upgrade` quits the running app before it swaps the bundle and,
+  # when it quit one, opens the new version afterwards (a fresh install never
+  # launches it). Without this a menu-bar app keeps the old code and icon in
+  # memory until the user relaunches it by hand. The quit runs from the
+  # cask being replaced, so it first applies on the upgrade after this one.
+  uninstall quit: "com.github.kccarlos.herdr-sheepdog-mac"
 
   zap trash: [
     "~/Library/Caches/com.github.kccarlos.herdr-sheepdog-mac",
