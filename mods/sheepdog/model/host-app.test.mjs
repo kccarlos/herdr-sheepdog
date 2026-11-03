@@ -2,7 +2,7 @@
 // the daemon-down actions: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { INSTALL_COMMAND, noHolderView, OPEN_COMMAND, RUNNING_COMMAND, runningFrom, sheepdogPaths, sheepdogProgram, startDaemon } from "./host-app.js";
+import { INSTALL_COMMAND, noHolderView, OPEN_COMMAND, RUNNING_COMMAND, pathExists, runningFrom, sheepdogPaths, sheepdogProgram, startDaemon } from "./host-app.js";
 import { deriveStatus } from "./status.js";
 import { voiceControls, commandFor, createVoice, RUN_CHECK_MS } from "./voice.js";
 
@@ -166,4 +166,21 @@ test("Run setup uses a known install place, else the bare name", async () => {
   assert.equal(await sheepdogProgram({ exists: async (p) => p === "/h/.local/bin/sheepdog", home: "/h" }), "/h/.local/bin/sheepdog");
   assert.equal(await sheepdogProgram({ exists: async () => false, home: "/h" }), "sheepdog");
   assert.equal(await sheepdogProgram({ exists: async () => { throw new Error("denied"); }, home: "/h" }), "sheepdog");
+});
+
+test("the install places outside the home folder are found with test -e when fs/promises refuses them", async () => {
+  const exists = async (path) => {
+    if (!path.startsWith("/Users/me/")) throw new Error("outside every granted read root");
+    return false;
+  };
+  const seen = [];
+  const exec = async (command, args) => {
+    seen.push([command, ...args]);
+    if (command === "sheepdog") throw new Error("cannot run sheepdog");
+    if (command === "test") return { code: args[1] === "/opt/homebrew/bin/sheepdog" ? 0 : 1 };
+    return { code: 0 };
+  };
+  assert.deepEqual(await startDaemon(exec, { exists, home: "/Users/me" }), { ok: true, text: "Starting Sheepdog…" });
+  assert.deepEqual(seen.at(-1), ["/opt/homebrew/bin/sheepdog", "start"]);
+  assert.equal(await sheepdogProgram({ exists, exec, home: "/Users/me" }), "/opt/homebrew/bin/sheepdog");
 });

@@ -440,7 +440,7 @@ export default class Sheepdog extends View {
   // Run in a tab: `sheepdog setup` starts the daemon if needed and walks through the key.
   runSetup(cx) {
     later(cx, async () => {
-      const program = await sheepdogProgram({ exists, home: home() });
+      const program = await sheepdogProgram({ exists, exec, home: home() });
       run("terminal.open", { argv: [program, "setup"], place: "tab" });
     });
   }

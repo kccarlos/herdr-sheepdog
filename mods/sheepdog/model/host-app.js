@@ -59,14 +59,30 @@ export const sheepdogPaths = (home) => [
   "/usr/local/bin/sheepdog",
 ];
 
+// Does a file or folder exist? true, false, or null when it cannot be told.
+// herdr's `fs/promises` reads only under the home folder and rejects anything
+// else ("outside every granted read root": /Applications, /opt/homebrew), so
+// a rejection falls back to `test -e`, which says by its exit code: 0 yes, 1 no.
+// Read-only, and never rejects.
+export async function pathExists(path, { exists, exec }) {
+  try {
+    return Boolean(await exists(path));
+  } catch {
+    // outside the home folder, or unreadable: ask the system
+  }
+  if (!exec) return null;
+  try {
+    const res = await exec("test", ["-e", path]);
+    return res?.code === 0 ? true : res?.code === 1 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 // The first of those that exists, or null. Never rejects.
-export async function findSheepdog({ exists, home }) {
+export async function findSheepdog({ exists, exec, home }) {
   for (const path of sheepdogPaths(home)) {
-    try {
-      if (await exists(path)) return path;
-    } catch {
-      // look at the next place
-    }
+    if ((await pathExists(path, { exists, exec })) === true) return path;
   }
   return null;
 }
@@ -89,7 +105,7 @@ export async function startDaemon(exec, places = null) {
   try {
     res = await exec(command, args);
   } catch {
-    const path = places ? await findSheepdog(places) : null;
+    const path = places ? await findSheepdog({ ...places, exec }) : null;
     if (!path) return NOT_RUN;
     try {
       res = await exec(path, args);

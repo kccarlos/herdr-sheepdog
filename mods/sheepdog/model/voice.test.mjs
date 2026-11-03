@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deriveStatus } from "./status.js";
+import { pathExists } from "./host-app.js";
 import { appPaths, commandFor, createVoice, INSTALL_COMMAND, NO_VOICE, NOTICE_MS, PTT_MAX_MS, TALK_URL, voiceControls } from "./voice.js";
 
 const phone = { name: "Test Phone", platform: "ios", since: "2026-10-30T10:00:00Z" };
@@ -231,8 +232,39 @@ test("the app is looked for read-only in both Applications folders, at most ever
   assert.equal(user.voice.getState().installed, true);
 });
 
-test("a look that throws leaves the answer unknown", async () => {
-  const voice = createVoice({ http: {}, exec: async () => ({ code: 0 }), exists: async () => { throw new Error("denied"); }, home: () => "/Users/test", newKey: () => "k" });
+test("a look that cannot be made leaves the answer unknown", async () => {
+  const denied = async () => { throw new Error("denied"); };
+  const voice = createVoice({ http: {}, exec: denied, exists: denied, home: () => "/Users/test", newKey: () => "k" });
   await voice.check();
   assert.equal(voice.getState().installed, null);
+  const odd = createVoice({ http: {}, exec: async () => ({ code: 127 }), exists: denied, home: () => "/Users/test", newKey: () => "k" });
+  await odd.check();
+  assert.equal(odd.getState().installed, null, "an exit code that is neither yes nor no is not an answer");
+});
+
+test("fs/promises reads only under the home folder, so /Applications is looked at with test -e", async () => {
+  // herdr rejects a read outside the home folder; the user's own folder works.
+  const exists = async (path) => {
+    if (!path.startsWith("/Users/test/")) throw new Error("`" + path + "` is outside every granted read root");
+    return false;
+  };
+  const tested = [];
+  const exec = (code) => async (command, args) => (tested.push([command, ...args]), { code });
+  const yes = createVoice({ http: {}, exec: exec(0), exists, home: () => "/Users/test", newKey: () => "k" });
+  await yes.check();
+  assert.equal(yes.getState().installed, true);
+  assert.deepEqual(tested[0], ["test", "-e", "/Applications/Sheepdog.app"]);
+  const no = createVoice({ http: {}, exec: exec(1), exists, home: () => "/Users/test", newKey: () => "k" });
+  await no.check();
+  assert.equal(no.getState().installed, false);
+});
+
+test("pathExists: the fs answer, else test -e, else unknown", async () => {
+  assert.equal(await pathExists("/h/x", { exists: async () => true }), true);
+  assert.equal(await pathExists("/h/x", { exists: async () => false }), false);
+  const denied = async () => { throw new Error("outside every granted read root"); };
+  assert.equal(await pathExists("/opt/x", { exists: denied, exec: async () => ({ code: 0 }) }), true);
+  assert.equal(await pathExists("/opt/x", { exists: denied, exec: async () => ({ code: 1 }) }), false);
+  assert.equal(await pathExists("/opt/x", { exists: denied, exec: async () => { throw new Error("no test"); } }), null);
+  assert.equal(await pathExists("/opt/x", { exists: denied }), null);
 });
