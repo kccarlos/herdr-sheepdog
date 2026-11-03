@@ -1,6 +1,6 @@
 # Unread, pinned and mute
 
-Status: design, 2026-11-03. Not built yet.
+Status: PRs 1 to 3 merged, 2026-11-03. Open questions decided (§12).
 
 Three features for the agent list on the phone, in the herdr-app panel and
 for the voice:
@@ -344,7 +344,7 @@ forwards calls ([ios-state-architecture.md](ios-state-architecture.md)).
 - The agent strip keeps its order rule (blocked first) but adds the unread
   dot.
 - Spaces (`SpacesView`, space detail): "Mute notifications" with "For 1
-  hour" and "Until I turn them back on"; "Unmute" when muted. A `bell.slash`
+  hour", "Until tomorrow morning" and "Until I turn them back on"; "Unmute" when muted. A `bell.slash`
   glyph shows on the space and its agents' rows.
 - Footer text in the mute sheet: "Sheepdog won't notify your phone or speak
   up about this space. Its agents still show here, and the voice still
@@ -377,26 +377,15 @@ no eval run (§9).
 
 ## 8. herdr-app panel
 
-The panel shows the same groups. herdr-app's own sidebar already shows
-labels-based done and pins on hc, so the panel's list is a compact
-fold. It is useful mainly for the counts and for agents on the phone's
-terms (open question Q1).
+The panel has no agent list (Q1). herdr-app's own sidebar already shows
+labels-based done and pins on hc, from the same labels, so a second list
+would only repeat it.
 
-- `model/agents.js`: `groupAgents(agents)` (§5, fixture-tested) and
-  `attentionCounts(state)`. When the `attention` field is missing it falls
-  back to state-only grouping.
-- `ui/`: an "Agents" fold under the questions, closed by default. Its header
-  reads "1 needs you · 2 working · 1 done". The status line and the rail
-  badge stay as they are (needs you only).
-- Rows show the unread dot, the pin glyph and the muted glyph. Pressing a
-  row runs herdr-app's `agent.focus` (as "Show … in herdr-app" does today).
-  herdr-app then writes `herdr.seen` itself, so **the panel never writes
-  seen**.
-- Pin and unpin use herdr-app's `terminal.pin {terminal, pinned}`. That is
-  the upstream rule for mods, and the label then comes back to the daemon
-  as `agent.attention via: "herdr"`.
+- `model/agents.js`: `attentionCounts(state)`. When the `attention` field is
+  missing it falls back to counting by state.
+- The status line reads "1 needs you · 2 working · 1 done". The rail badge
+  and the amber stay as they are (needs you only, Q3).
 - `net/live.js`: `agent.attention` and `space.muted` re-read `/api/state`.
-- The README's "What it does on your computer" gains `terminal.pin`.
 
 ## 9. Voice and orchestrator
 
@@ -517,19 +506,17 @@ QA:
 - Screenshots in light and dark mode and at an accessibility text size,
   with no truncated row.
 
-### PR 4. `feat(panel): agents fold with groups, unread and pins`
+### PR 4. `feat(panel): attention counts in the status line`
 
 §8.
 
 QA:
 
-- `make test-panel`: `groupAgents` on the shared fixture, the fallback
+- `make test-panel`: `attentionCounts` on the shared fixture, the fallback
   without `attention`, and `live.js` refetch on both events.
 - `herdr-app check mods/sheepdog`.
-- e2e with `up.sh --herdr hc`: an agent finishing shows unread in the fold.
-  Pressing it focuses it in the private Herdr window, and the dot clears
-  within 2 s (herdr-app wrote the label). Pin from the panel shows a pin
-  in herdr-app's own sidebar. Add these steps to
+- e2e with `up.sh --herdr hc`: the counts change as an agent starts,
+  finishes and blocks. Add this to
   [`e2e/checklists/panel.md`](../e2e/checklists/panel.md).
 
 ### PR 5. `feat(supervisor): status in attention order` (eval-gated)
@@ -538,18 +525,15 @@ QA:
 `renderRoster`. The eval report goes in `docs/dev/eval/` with its row in
 the index, and the decision follows the gate in §9.
 
-## 12. Open questions for KC
+## 12. Decisions
 
-- **Q1.** Does the panel need its own agent list? On hc, herdr-app's sidebar
-  already shows done and pins from the same labels. The proposal is a
-  folded "Agents" section, mainly for the counts. The alternative is no
-  list, with only the counts in the status line.
-- **Q2.** Does hearing the voice announce a finish count as "seen"? The
-  upstream rule counts only a screen in front of someone. Sheepdog is
-  ear-first, so an announced finish could clear unread. The proposal is
-  **no**: you still find it under Done, unread.
-- **Q3.** Should the Agents badge and the panel amber also count unread done
-  agents? The proposal is **no**: the badge stays "needs you" only, and
-  unread shows as dots.
-- **Q4.** Mute durations: "1 hour" and "until I unmute" are enough. Should
-  there also be "until tomorrow morning"?
+KC decided these on 2026-11-03.
+
+- **Q1. No agent list in the panel.** Only the counts, in the status line
+  (§8). herdr-app's sidebar already shows done and pins.
+- **Q2. Hearing the voice announce a finish does not count as seen.** Only a
+  screen in front of someone does, so the agent stays unread under Done.
+- **Q3. The Agents badge and the panel amber count needs you only.** Unread
+  shows as dots.
+- **Q4. Three mute durations:** 1 hour, until tomorrow morning (08:00 local)
+  and until unmuted.
