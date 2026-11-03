@@ -12,11 +12,13 @@ import (
 )
 
 // stateVoice reads /api/state's voice object.
-func stateVoice(t *testing.T, base string) (v struct {
+type stateVoiceSnapshot struct {
 	Status      string `json:"status"`
 	Problem     string `json:"problem"`
 	SetupNeeded bool   `json:"setup_needed"`
-}) {
+}
+
+func stateVoice(t *testing.T, base string) (v stateVoiceSnapshot) {
 	t.Helper()
 	resp, err := http.Get(base + "/api/state")
 	if err != nil {
@@ -75,13 +77,19 @@ func TestVoiceConnectFailureKeepsTheDaemonUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := runApp(t, a)
+	// The issue text is set just before the closed status is reported,
+	// and every retry flips the status to connecting again, so wait for
+	// the whole condition at once rather than for the first Problem.
+	failed := func(v stateVoiceSnapshot) bool {
+		return strings.Contains(v.Problem, "The voice cannot connect") && strings.Contains(v.Problem, "Retrying in") && !v.SetupNeeded && v.Status == "closed"
+	}
 	deadline := time.Now().Add(10 * time.Second)
-	var v = stateVoice(t, a.URL())
-	for v.Problem == "" && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
+	v := stateVoice(t, a.URL())
+	for !failed(v) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 		v = stateVoice(t, a.URL())
 	}
-	if !strings.Contains(v.Problem, "The voice cannot connect") || !strings.Contains(v.Problem, "Retrying in") || v.SetupNeeded || v.Status != "closed" {
+	if !failed(v) {
 		t.Fatalf("voice = %+v", v)
 	}
 	time.Sleep(400 * time.Millisecond) // a few retries
