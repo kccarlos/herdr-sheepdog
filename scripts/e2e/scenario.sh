@@ -30,7 +30,8 @@ daemon_stop() {
 
 set_voice() {
   E2E_VOICE="$1"
-  sed -i '' "s/^export E2E_VOICE=.*/export E2E_VOICE=$1/" "$E2E_DIR/env.sh"
+  # Portable in-place edit (BSD sed on macOS and GNU sed on Linux differ on -i).
+  sed "s/^export E2E_VOICE=.*/export E2E_VOICE=$1/" "$E2E_DIR/env.sh" >"$E2E_DIR/env.sh.new" && mv "$E2E_DIR/env.sh.new" "$E2E_DIR/env.sh"
 }
 
 ws_stop() {
