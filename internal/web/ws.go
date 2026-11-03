@@ -312,8 +312,10 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.mu.Lock()
 		h.status, h.reason, h.stalled = e.Status, e.Reason, e.Stalled
 		h.mu.Unlock()
-		h.send(h.statusMsg())
+		// End the account problem before announcing the status, so a
+		// client that sees "connected" never finds the problem in force.
 		h.voiceConnected(e)
+		h.send(h.statusMsg())
 	case voice.EventInterrupted:
 		h.mu.Lock()
 		h.endTurnLocked() // cut on purpose: what was not heard is not owed
