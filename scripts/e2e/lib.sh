@@ -54,16 +54,40 @@ e2e_api() {
   fi
 }
 
-# e2e_daemon_start: start the private daemon (voice mode E2E_VOICE, default
-# off) and record its pid in <dir>/daemon.pid.
+# e2e_daemon_start: start the private daemon and record its pid in
+# <dir>/daemon.pid. Modes: E2E_VOICE (default off), E2E_BRAIN (fake),
+# E2E_HERDR (mock; socket aims it at the private core through hc), E2E_CLI
+# (on). E2E_WRAP, when set, is a command the daemon runs under (the nightly's
+# real voice uses `op run ... --`, which puts the key into the daemon's
+# environment only); the recorded pid is then the one listening on the port.
 e2e_daemon_start() {
-  env HOME="$E2E_DIR/home" XDG_CONFIG_HOME="$E2E_DIR/xdg/config" \
+  local herdr_env=() wrap=()
+  if [ "${E2E_HERDR:-mock}" = socket ]; then
+    herdr_env=(SHEEPDOG_HERDR_BACKEND=hc "SHEEPDOG_HC_SOCKET=$E2E_HC_SOCKET")
+  fi
+  # shellcheck disable=SC2206 # E2E_WRAP is a word list on purpose
+  [ -n "${E2E_WRAP:-}" ] && wrap=($E2E_WRAP)
+  nohup ${wrap[@]+"${wrap[@]}"} env HOME="$E2E_DIR/home" XDG_CONFIG_HOME="$E2E_DIR/xdg/config" \
       XDG_DATA_HOME="$E2E_DIR/xdg/data" XDG_STATE_HOME="$E2E_DIR/xdg/state" \
-      XDG_CACHE_HOME="$E2E_DIR/xdg/cache" \
-      nohup "$E2E_DIR/sheepdog" serve --brain=fake --herdr=mock --voice="${E2E_VOICE:-off}" --dev \
-      --port "$E2E_PORT" --data-dir "$E2E_DIR/data" >"$E2E_DIR/daemon.log" 2>&1 &
+      XDG_CACHE_HOME="$E2E_DIR/xdg/cache" ${herdr_env[@]+"${herdr_env[@]}"} \
+      "$E2E_DIR/sheepdog" serve --brain="${E2E_BRAIN:-fake}" --herdr="${E2E_HERDR:-mock}" \
+      --voice="${E2E_VOICE:-off}" --cli="${E2E_CLI:-on}" --dev \
+      --port "$E2E_PORT" --data-dir "$E2E_DIR/data" </dev/null >"$E2E_DIR/daemon.log" 2>&1 &
   echo $! >"$E2E_DIR/daemon.pid"
-  e2e_wait 30 curl -fs --max-time 2 "$E2E_URL/api/state" || e2e_die "daemon did not come up; see $E2E_DIR/daemon.log"
+  if ! e2e_wait "${E2E_START_WAIT:-30}" curl -fs --max-time 2 "$E2E_URL/api/state"; then
+    e2e_kill "$(cat "$E2E_DIR/daemon.pid")"
+    e2e_die "daemon did not come up; see $E2E_DIR/daemon.log"
+  fi
+  if [ -n "${E2E_WRAP:-}" ]; then
+    # The wrapper's pid is $!; the daemon is its child, found by its port.
+    local lp
+    lp=$(lsof -t -nP -iTCP:"$E2E_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)
+    if [ -n "$lp" ]; then
+      cat "$E2E_DIR/daemon.pid" >"$E2E_DIR/wrap.pid"
+      echo "$lp" >"$E2E_DIR/daemon.pid"
+    fi
+  fi
+  return 0
 }
 
 # e2e_app <herdr-app args...>: the herdr-app CLI aimed at the private window.

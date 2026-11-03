@@ -24,7 +24,8 @@ post() { e2e_api POST "$1" "$2" >/dev/null; }
 
 daemon_stop() {
   [ -f "$E2E_DIR/daemon.pid" ] && e2e_kill "$(cat "$E2E_DIR/daemon.pid")"
-  rm -f "$E2E_DIR/daemon.pid"
+  [ -f "$E2E_DIR/wrap.pid" ] && e2e_kill "$(cat "$E2E_DIR/wrap.pid")"
+  rm -f "$E2E_DIR/daemon.pid" "$E2E_DIR/wrap.pid"
   e2e_wait 10 bash -c "! curl -fs --max-time 1 '$E2E_URL/api/state'" || e2e_die "daemon still answers on $E2E_URL"
 }
 
