@@ -169,6 +169,17 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertEqual(items.first { $0.title == "⌥ Space" }?.checked, true)
     }
 
+    func testTheUpdateRowShowsOnlyWhenThereIsAnOffer() {
+        let offer = MacUpdateOffer(info: UpdateInfo(current: "v0.2.5", latest: "v0.2.6", available: true), appVersion: "0.2.5")
+        let idle = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: offer, state: .idle))
+        XCTAssertTrue(idle.contains(.item(title: "Update available — v0.2.6", action: .updateApp, enabled: true, checked: false)))
+        let busy = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: offer, state: .upgrading))
+        XCTAssertTrue(busy.contains(.status("Updating Sheepdog to v0.2.6…")))
+        XCTAssertFalse(items(busy).contains { $0.title.hasPrefix("Update") })
+        let none = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
+        XCTAssertFalse(items(none).contains { $0.title.hasPrefix("Update") })
+    }
+
     func testTheVoiceRowsWithTheDaemonUpAndNoSessionHere() {
         let rows = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
         let voice = items(rows).filter { ["Talk", "Mute", "Stop", "Use here"].contains($0.title) }
