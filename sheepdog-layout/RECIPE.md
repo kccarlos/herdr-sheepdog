@@ -1,6 +1,6 @@
 # Sheepdog
 
-This is herdr-app's usual window with the Sheepdog voice panel docked on the right. Spaces, tabs and agent terminals stay where they are, while the panel shows the shared Sheepdog conversation, the question that needs an answer and controls for the voice.
+Manage your Herdr agents by voice. This is Herdr's usual window with the Sheepdog panel docked on the right: your spaces, tabs and terminals stay where they are, and the panel shows what your agents did and which one needs you. Reply by voice, by typing or with a tap. Needs the Sheepdog program on the same computer.
 
 ![Sheepdog](preview.png)
 
@@ -36,19 +36,42 @@ that holds the voice.
 - The runtime files from `mods/sheepdog/` copied byte for byte into
   `mods/sheepdog/`.
 
-The panel's build brief is [the panel recipe](../RECIPE.md).
+The panel's build brief is [the panel recipe](https://github.com/kccarlos/herdr-sheepdog/blob/main/RECIPE.md).
 
 ## Watch out
 
-The window is herdr-app's main layout as shipped with version 0.1.10. It does not
-follow later changes to that layout. It needs the sheepdog daemon on the same
-machine; `sheepdog setup` installs the panel and offers this layout. The panel
-never opens `/ws`.
+- **Adding it: `sheepdog` comes first.** The panel is a view of the sheepdog
+  daemon on the same computer; alone it only says "Sheepdog isn't running". Run
+  `sheepdog status` before copying anything. If there is no such program, stop,
+  tell the person and have them install it in their own terminal, because setup
+  asks them questions:
+  `curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh`.
+  Carry on when they say it is done.
+- **Adding it: prefer `sheepdog setup` to copying.** It asks, then installs this
+  panel and layout, offers to switch, and keeps them up to date. Nothing is left
+  to copy. After copying by hand, have the person run `sheepdog setup` too: the
+  daemon does not update a copied panel until then.
+- **Adding it: a taken name here is this same panel, so do not rename it.** The
+  usual rename is for a different mod. If `mods/sheepdog/` or
+  `layouts/sheepdog.json` is already there, `sheepdog setup` put it there. Keep
+  it, copy only what is missing, then switch:
+  `herdr-app do layout.switch '{"name":"sheepdog"}'`. A renamed copy would never
+  be updated.
+- **What the panel reaches, to say before adding it:** see "Network and
+  programs" in [the panel recipe](https://github.com/kccarlos/herdr-sheepdog/blob/main/RECIPE.md).
+  In short, only the daemon's address, and a few local programs (`open`,
+  `pgrep`, `test`, `sheepdog`).
+- **Talking needs Sheepdog.app on a Mac:**
+  `brew install --cask kccarlos/tap/sheepdog-app`. Without it, typing and
+  tapping still work, and the panel says how to get it.
+- The window is herdr-app's main layout as shipped with version 0.1.10. It does
+  not follow later changes to that layout.
+- The panel never opens `/ws`.
 
 ## Done when
 
-1. `herdr-app check sheepdog-layout/mods/sheepdog` passes.
+1. `herdr-app check` passes on the copied `mods/sheepdog` (it takes a mod folder,
+   not a layout file).
 2. The Sheepdog block is docked on the right and its rail appears below 160 px.
 3. With the daemon running, the panel shows the conversation, an open question
    and its options, and the current voice state.
-4. `make test` passes, including the layout's sync and shape checks.
