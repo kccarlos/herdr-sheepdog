@@ -283,7 +283,7 @@ osascript -e "display notification \"Failed: ${FAILED[*]}. Report: $REPORT\" wit
 # with tests, and opens a PR (never merges). Guarded: --no-fixer, one at a
 # time, not when an open nightly PR already names that check, and not with
 # 20 % or less of the 5-hour Claude quota left.
-fixer_note() { echo "$1" >"$OUT/fixer.txt"; echo "nightly: fixer: $1"; }
+fixer_note() { echo "$1" >"$OUT/fixer.txt"; echo "nightly: fixer: $1" >&2; }
 run_fixer() {
   [ "$FIXER" = 1 ] || { fixer_note "skipped (--no-fixer)"; return; }
   command -v claude >/dev/null 2>&1 || { fixer_note "skipped (no claude CLI)"; return; }
@@ -320,12 +320,22 @@ Do this:
 6. Write a short summary (cause, fix, evidence, PR link) to $OUT/FIX.md.
 
 Rules: follow AGENTS.md (Conventional Commits; no Co-authored-by, session links or claude.ai URLs in commits or PRs). Never touch the live daemon on port 7777, ~/.config/sheepdog, ~/.local/share/sheepdog, ~/.config/herdr-app, the user's own hc core, Herdr window or Sheepdog.app. No pkill by pattern. Never print or store secrets. Never create Oracle Cloud disks, volumes, backups or instances. Before each heavy batch, check 'codexbar usage --provider claude --no-color'; at 5% session left or less, write what you have to FIX.md and stop."
-  echo "nightly: fixer running in $wt (45 min limit)"
-  (cd "$wt" && perl -e '$t = shift; alarm $t; exec @ARGV or die "exec: $!\n"' 2700 \
-    claude -p "$prompt" --model sonnet --permission-mode auto) >"$OUT/fixer.log" 2>&1
-  fixer_note "ran (exit $?); see fixer.log and FIX.md"
+  printf '%s\n' "$prompt" >"$OUT/fixer-prompt.txt"
+  if [ "${SHEEPDOG_NIGHTLY_FIXER_DRYRUN:-0}" = 1 ]; then
+    # Tests of the guards: everything but the Claude session.
+    fixer_note "dry run: would run claude in $wt (prompt in fixer-prompt.txt)"
+  else
+    echo "nightly: fixer running in $wt (45 min limit)" >&2
+    (cd "$wt" && perl -e '$t = shift; alarm $t; exec @ARGV or die "exec: $!\n"' 2700 \
+      claude -p "$prompt" --model sonnet --permission-mode auto) >"$OUT/fixer.log" 2>&1
+    fixer_note "ran (exit $?); see fixer.log and FIX.md"
+  fi
   pr=$(gh pr list --repo "$REPO_SLUG" --state open --search "nightly $DAY in:title" --json url -q '.[0].url' 2>/dev/null)
-  git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1
+  if [ -n "$pr" ] || [ "${SHEEPDOG_NIGHTLY_FIXER_DRYRUN:-0}" = 1 ]; then
+    git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1
+  else
+    echo "no PR; the fixer's worktree is kept at $wt" >>"$OUT/fixer.txt"
+  fi
   rm -rf "$flock"
   echo "$pr"
 }

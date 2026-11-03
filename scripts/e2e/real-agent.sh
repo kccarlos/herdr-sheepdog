@@ -139,7 +139,15 @@ fi
 [ "$DETECTED" = 1 ] || fail "never detected as an agent"
 [ "$BLOCKED" = 1 ] || fail "never seen blocked"
 if [ "$ASKED" -ge 1 ] && [ "$ANSWERED" -ge 1 ]; then pass "raised $ASKED answer_prompt question(s), answered $ANSWERED through /api/pending/answer"; else fail "no answer_prompt raised and answered (asked $ASKED, answered $ANSWERED)"; fi
-if [ -e "$REPO/$MARK" ]; then pass "unblocked: the task ran ($MARK exists)"; else fail "the task never ran ($MARK missing after ${LIMIT}s)"; fi
+if [ -e "$REPO/$MARK" ]; then
+  pass "unblocked: the task ran ($MARK exists)"
+else
+  fail "the task never ran ($MARK missing after ${LIMIT}s)"
+  echo "--- the agent's screen now (last 20 lines) ---"
+  e2e_hc read "$TERM_ID" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -20
+  echo "--- the daemon's answers (keys sent) ---"
+  cat "$E2E_DIR"/data/events/*.jsonl 2>/dev/null | jq -c 'select(.type=="pending.confirmed" or .type=="herdr.send_keys") | {type, keys: .payload.keys, answer: .payload.answer}' 2>/dev/null | tail -10
+fi
 # Not blocked any more once answered.
 if e2e_wait 30 bash -c "curl -fsS --max-time 5 '$E2E_URL/api/state' | jq -e --arg k '$AGENT' '[.agents[]? | select(.kind==\$k and .state==\"blocked\")] | length == 0'"; then
   pass "no longer blocked"
