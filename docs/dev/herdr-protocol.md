@@ -682,6 +682,7 @@ and account e-mail redacted). Screens are the `text` field of
 | `codex-approval-prompt.prompt-wait-response.json` | `agent.prompt` + `wait until blocked` response |
 | `codex-prompt-while-blocked.error.json` | the `agent_blocked` error |
 | `codex-trust-dialog.screen.txt` | Codex startup trust dialog (classified `idle`) |
+| `codex-folder-access-dialog.screen.txt` | Codex 0.166 "Folder access" trust dialog: footer "enter continue", the digit only moves the cursor (nightly 2026-11-03) |
 | `codex-after-approval.screen.txt` | after Enter; command ran |
 | `codex-declined-esc.screen.txt` | after Esc; command not run |
 | `codex-working.screen.txt` / `codex-after-ctrl-c.screen.txt` | working turn / interrupted by `ctrl+c` |

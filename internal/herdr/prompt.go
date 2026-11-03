@@ -53,6 +53,9 @@ var (
 	// then the label (Claude Code 2.1.288's trust dialog draws
 	// "❯ No, exit" over "  Yes, I trust this folder", agy "> Yes, …").
 	reCursorRow = regexp.MustCompile(`^(\s*)([›❯>])\s+(\S.*?)\s*$`)
+	// reEnterFooter is the footer of Codex 0.166's "Folder access" dialog
+	// ("enter continue · esc back"): its digits only move the cursor.
+	reEnterFooter = regexp.MustCompile(`(?i)^\s*enter\s+continue\b`)
 	// reRecommended is the marker an agent puts after the option it
 	// recommends: Claude Code's AskUserQuestion asks for "(Recommended)"
 	// at the end of the label, and a model writing Chinese translates it.
@@ -163,11 +166,18 @@ func isChatOption(label string) bool { return labelKey(label) == "chat about thi
 func ParsePrompt(screen string) (Prompt, bool) {
 	lines := tailLines(screen, promptTailLines)
 	opts, first, cursor, ok := findOptions(lines)
+	numbered := ok
 	if !ok {
 		opts, first, cursor, ok = findCursorMenu(lines)
 	}
 	if !ok {
 		return Prompt{}, false
+	}
+	if numbered && enterFooter(lines) {
+		// The digit does not confirm here: move the cursor, then enter.
+		for i := range opts {
+			opts[i].Keys = navKeys(i - cursor)
+		}
 	}
 	// "Chat about this" is dropped; "Type something." is kept but marked.
 	kept, def := make([]Option, 0, len(opts)), -1
@@ -480,6 +490,17 @@ func findCursorMenu(lines []string) (opts []Option, first, cursor int, ok bool) 
 		opts = append(opts, recommended(Option{Number: i - first + 1, Label: truncate(text, promptMaxOptionLabel), Keys: navKeys(i - c)}))
 	}
 	return opts, first, c - first, true
+}
+
+// enterFooter reports whether the last non-blank line of lines is an
+// "enter continue" footer.
+func enterFooter(lines []string) bool {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return reEnterFooter.MatchString(lines[i])
+		}
+	}
+	return false
 }
 
 // navKeys is the arrow sequence that moves the cursor by d rows (down
