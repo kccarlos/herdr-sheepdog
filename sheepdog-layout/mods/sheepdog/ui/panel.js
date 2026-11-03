@@ -101,15 +101,16 @@ function dockHint(t, { note, onCopyLayout }, compact) {
 }
 
 // Daemon down: the whole body is the explanation.
-function down(t, status, retryMs, onSetup) {
+function down(t, status, retryMs, { onStart, onSetup, note }) {
   return v_flex()
     .p(16)
     .gap(10)
-    .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Sheepdog isn't running"))
+    .child(div().text_size(14).font_semibold().text_color(t.foreground).child("The Sheepdog daemon isn't running"))
     .child(div().text_size(12.5).text_color(t.muted).child(status.detail || "Sheepdog is the daemon that lets you manage your agents by voice. Nothing answered on this computer."))
-    .child(div().text_size(12.5).text_color(t.muted).child("Start it with:"))
-    .child(command(t, "sheepdog setup"))
-    .child(h_flex().child(button(t, "run-setup", "Run it in a tab", onSetup, true)))
+    .child(div().text_size(12.5).text_color(t.muted).child("Start it, or run setup if this is the first time. In a terminal:"))
+    .child(command(t, "sheepdog start"))
+    .child(h_flex().gap(8).child(button(t, "start-sheepdog", "Start Sheepdog", onStart, true)).child(button(t, "run-setup", "Run setup", onSetup)))
+    .when(Boolean(note), (el) => el.child(div().text_size(12).text_color(t.blocked).child(note)))
     .child(div().text_size(11.5).text_color(t.dim).child(`Looking again every ${retryMs / 1000} seconds.`));
 }
 
@@ -180,11 +181,11 @@ function empty(t, text, minHeight = 0) {
 // block's, { note, onCopyLayout }, else null. `sheet`: what is open over the
 // list, or null: { type: "card", card, note, onFocus, onClose } or { type:
 // "questions", onClose }.
-export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, sheet, onSetup, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, sheet, onSetup, onStart, downNote, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
   const up = status.phase === "ok" || status.phase === "setup";
   let body;
   if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
-  else if (status.phase === "down") body = down(t, status, retryMs, onSetup);
+  else if (status.phase === "down") body = down(t, status, retryMs, { onStart, onSetup, note: downNote });
   else if (sheet?.type === "card") body = cardSheet(t, sheet.card, sheet);
   else if (sheet?.type === "questions") body = questionSheet(t, questions.cards, { busy: questions.busy, onAnswer: questions.onAnswer, onClose: sheet.onClose });
   else if (!paging.synced) body = empty(t, "Loading the conversation…");

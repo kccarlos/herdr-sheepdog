@@ -28,6 +28,9 @@ import { keyAction } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
 import * as overlay from "./model/overlay-actions.js";
 import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
+import { startDaemon } from "./model/host-app.js";
+import { later } from "./model/later.js";
+import { openSetup } from "./model/setup-link.js";
 import { deriveStatus } from "./model/status.js";
 import { createStore } from "./model/store.js";
 import { layoutEntries } from "./model/timeline.js";
@@ -56,7 +59,7 @@ export default class Sheepdog extends View {
     // What model/overlay-actions.js needs of the view (it has no herdr imports).
     this.base = base;
     this.exec = exec;
-    this.platform = () => appWindow().platform;
+    this.platform = () => appWindow()?.platform;
     this.size = this.overlay ? { width: WINDOW.width, height: WINDOW.height } : { width: DOCKED_WIDTH, height: 640 };
     this.technical = false;
     this.wantOlder = false; // the end of the list was drawn
@@ -72,7 +75,7 @@ export default class Sheepdog extends View {
         // What has stayed long enough (a note, a settled card) goes.
         this.outbox.prune();
         this.answers.prune(this.store.getState().app);
-        this.voice.prune();
+        this.voice.prune(this.watchRunning());
       });
     } else if (this.overlayRole === "settings") this.initSettings(cx);
     else if (this.overlayRole === "pair") this.initPair(cx);
@@ -140,7 +143,7 @@ export default class Sheepdog extends View {
     this.answers = createAnswers({ http, newKey, refresh });
     this.outbox.subscribe(() => cx.notify());
     this.answers.subscribe(() => cx.notify());
-    this.voice = createVoice({ http, exec, exists, home, newKey, refresh });
+    this.voice = createVoice({ http, exec, exists, home, newKey, refresh, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
     this.voice.subscribe(() => cx.notify());
     // Is Sheepdog.app installed? (Read-only; the timer looks again.)
     this.voice.check();
@@ -375,6 +378,7 @@ export default class Sheepdog extends View {
       mute: send("mute"),
       stop: send("stop"),
       useHere: send("use-here"),
+      action: send(controls.action?.id),
       pttDown: (cx) => {
         cx.spawn(async () => {
           await this.voice.pttDown();
@@ -386,6 +390,40 @@ export default class Sheepdog extends View {
         });
       },
     };
+  }
+
+  // The facts about this computer that model/host-app.js words: where the
+  // app is looked for and whether it runs. Read-only.
+  host() {
+    const { installed, running } = this.voice.getState();
+    return { platform: this.platform(), installed, running };
+  }
+
+  // Is "is Sheepdog.app running" worth asking: macOS, daemon up, no holder.
+  watchRunning() {
+    const host = this.host();
+    return host.platform === "macos" && deriveStatus(this.store.getState(), host).voice.noHolder === true;
+  }
+
+  // Start Sheepdog (daemon down): `sheepdog start`, then look again. `cx` is
+  // the click's; the async part uses only the spawned context (model/later.js).
+  startDaemon(cx) {
+    if (this.starting) return;
+    this.starting = true;
+    this.downNote = "Starting Sheepdog…";
+    cx.notify();
+    later(cx, async (acx) => {
+      const result = await startDaemon(exec);
+      this.starting = false;
+      this.downNote = result.ok ? null : result.text;
+      acx.notify();
+      try {
+        await this.store.refresh();
+      } catch {
+        // the next poll tells
+      }
+      acx.notify();
+    });
   }
 
   // Run in a tab: `sheepdog setup` starts the daemon if needed and walks through the key.
@@ -471,7 +509,7 @@ export default class Sheepdog extends View {
       });
     }
     const snapshot = this.store.getState();
-    const status = deriveStatus(snapshot);
+    const status = deriveStatus(snapshot, this.host());
     const onSize = (size, cx) => {
       const changed = Math.round(size.width) !== Math.round(this.size.width) || Math.round(size.height) !== Math.round(this.size.height);
       this.size = size;
@@ -489,7 +527,7 @@ export default class Sheepdog extends View {
       if (status.phase === "setup") bannerHeights.push(150);
       if (status.paused && status.phase !== "down") bannerHeights.push(40);
       const voiceHeight = status.phase === "ok"
-        ? (controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
+        ? (controls.action ? 130 : controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
         : 0;
       const composerHeight = derived.live ? 116 : 80;
       const budgetFor = (question) =>
@@ -521,6 +559,8 @@ export default class Sheepdog extends View {
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
         onSetup: () => this.runSetup(),
+        onStart: (_e, cx) => this.startDaemon(cx),
+        downNote: this.downNote ?? null,
         onToggleTechnical: (_e, cx) => {
           this.technical = !this.technical;
           cx.notify();

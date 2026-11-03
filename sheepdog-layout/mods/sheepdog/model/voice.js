@@ -9,7 +9,8 @@
 // `exec`, both passed in, and tells subscribers when something changed; it
 // never draws. No herdr imports: node tests it.
 
-export const INSTALL_COMMAND = "brew install --cask sheepdog-app";
+import { INSTALL_COMMAND, OPEN_COMMAND, RUNNING_COMMAND, runningFrom } from "./host-app.js";
+export { INSTALL_COMMAND };
 export const TALK_URL = "sheepdog://talk";
 
 // Where Sheepdog.app is looked for, read-only: the system's and the user's.
@@ -20,6 +21,8 @@ export const appPaths = (home) => ["/Applications/Sheepdog.app", home + "/Applic
 // button is never seen, so the mic is not left open).
 export const NOTICE_MS = 8000;
 export const CHECK_MS = 30000;
+// How often "is Sheepdog.app running" is looked at, only while it matters.
+export const RUN_CHECK_MS = 3000;
 export const PTT_MAX_MS = 30000;
 
 export const NO_VOICE = "No voice is connected";
@@ -36,15 +39,17 @@ const OFF = { enabled: false };
 // `useHere` says whether the separate Use here button shows; `install` is the
 // command to show when the app is missing.
 export function voiceControls({ phase, voice, view, installed = null, noVoice = false }) {
-  const off = { talk: { ...OFF, action: null }, mute: OFF, stop: OFF, ptt: OFF, useHere: false, useHereEnabled: false, hint: "", install: null };
+  const off = { talk: { ...OFF, action: null }, mute: OFF, stop: OFF, ptt: OFF, useHere: false, useHereEnabled: false, hint: "", install: null, action: null };
   if (phase !== "ok") return off;
   if (voice?.mode === "off") return { ...off, hint: "The voice is off." };
   const missing = installed === false;
   const held = view.holder != null || Boolean(voice?.client_connected);
   if (!held) {
     // Nobody holds the voice: only the Mac's own app can start it.
-    if (missing) return { ...off, hint: MISSING, install: INSTALL_COMMAND };
-    return { ...off, talk: { enabled: true, action: "use-here" }, useHere: noVoice, useHereEnabled: true };
+    // `view.action` is the one step for this Mac (model/host-app.js).
+    const action = view.action ?? null;
+    if (missing) return { ...off, hint: MISSING, install: INSTALL_COMMAND, action };
+    return { ...off, talk: { enabled: true, action: "use-here" }, useHere: noVoice, useHereEnabled: true, hint: action ? view.note : "", action };
   }
   const muted = Boolean(voice?.muted);
   const elsewhere = view.elsewhere;
@@ -66,6 +71,8 @@ export function voiceControls({ phase, voice, view, installed = null, noVoice = 
 export function commandFor(action) {
   switch (action) {
     case "use-here": return { exec: ["open", [TALK_URL]] };
+    case "open-app": return { exec: OPEN_COMMAND };
+    case "open-setup": return { setup: true };
     case "unmute": return { call: "mute", args: [false] };
     case "mute": return { call: "mute", args: [true] };
     case "stop": return { call: "stop", args: [] };
@@ -77,13 +84,15 @@ export function commandFor(action) {
 
 // What a failed command tells the user.
 function failure(err, action) {
-  if (action === "use-here") return { tone: "error", text: "Sheepdog.app did not start. Install it with: " + INSTALL_COMMAND, code: "exec" };
+  if (action === "open-setup") return { tone: "error", text: err.message || "Could not open the setup page.", code: "setup" };
+  if (action === "use-here" || action === "open-app") return { tone: "error", text: "Sheepdog.app did not start. Install it with: " + INSTALL_COMMAND, code: "exec" };
   if (err.status === 409) return { tone: "error", text: NO_VOICE, code: "no-voice" };
   return { tone: "error", text: err.status ? err.message : "Sheepdog did not answer. Try again.", code: "http" };
 }
 
-export function createVoice({ http, exec, exists, home, newKey, now = Date.now, refresh = async () => {} }) {
+export function createVoice({ http, exec, exists, home, newKey, openSetup = async () => ({ ok: true }), now = Date.now, refresh = async () => {} }) {
   let snapshot = {
+    running: null, // a process named Sheepdog exists; null until looked (model/host-app.js)
     installed: null, // Sheepdog.app is in /Applications or ~/Applications; null until looked
     busy: null, // the action on its way (mute, stop and Use here go one at a time)
     ptt: false, // the hold-to-talk button is held
@@ -92,6 +101,8 @@ export function createVoice({ http, exec, exists, home, newKey, now = Date.now, 
   };
   let chain = Promise.resolve(); // hold-to-talk's on and off go in order
   let lastCheck = -Infinity;
+  let lastRun = -Infinity;
+  let looking = false;
   let checking = false;
   const listeners = new Set();
 
@@ -107,13 +118,18 @@ export function createVoice({ http, exec, exists, home, newKey, now = Date.now, 
     if (!command || snapshot.busy) return;
     set({ busy: action, notice: null });
     try {
-      if (command.exec) {
+      if (command.setup) {
+        const res = await openSetup();
+        if (!res.ok) throw new Error(res.error);
+      } else if (command.exec) {
         const res = await exec(...command.exec);
         if (res.code !== 0) throw new Error(res.stderr);
       } else {
         await http[command.call](...command.args, newKey());
       }
-      set({ busy: null, notice: action === "use-here" ? { tone: "info", text: "Starting Sheepdog on this Mac…", code: "starting", at: now() } : null });
+      const starts = action === "use-here" || action === "open-app";
+      if (starts) lastRun = -Infinity; // look again at once: the app is on its way up
+      set({ busy: null, notice: starts ? { tone: "info", text: "Starting Sheepdog on this Mac…", code: "starting", at: now() } : null });
     } catch (err) {
       set({ busy: null, notice: { ...failure(err, action), at: now() } });
     }
@@ -161,13 +177,32 @@ export function createVoice({ http, exec, exists, home, newKey, now = Date.now, 
     }
   }
 
+  // Is Sheepdog.app running? An exact-name look, at most every RUN_CHECK_MS.
+  // A look that fails leaves the answer as it was.
+  async function checkRunning() {
+    if (looking || now() - lastRun < RUN_CHECK_MS) return;
+    looking = true;
+    lastRun = now();
+    try {
+      const running = runningFrom(await exec(...RUNNING_COMMAND));
+      if (running != null && running !== snapshot.running) set({ running });
+    } catch {
+      // pgrep missing: unknown stays unknown.
+    } finally {
+      looking = false;
+    }
+  }
+
   // Drops a note that has stayed long enough, closes a hold nobody released,
   // and looks for the app again when it is time.
-  function prune() {
+  // `watchRunning`: the panel is showing the state where it matters (macOS,
+  // daemon up, nobody holds the voice), so the app is looked for often.
+  function prune(watchRunning = false) {
     const at = now();
     if (snapshot.notice && at - snapshot.notice.at >= NOTICE_MS) set({ notice: null });
     if (snapshot.ptt && at - snapshot.pttAt >= PTT_MAX_MS) pttUp();
     check();
+    if (watchRunning) checkRunning();
   }
 
   return {

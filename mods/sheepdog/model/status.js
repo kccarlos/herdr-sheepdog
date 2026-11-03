@@ -3,6 +3,8 @@
 // 6.4, that apply without sending anything. Words and a theme colour name
 // per state; the views only draw them. No herdr imports.
 
+import { noHolderView } from "./host-app.js";
+
 // What the user calls the device that holds the voice, from the `platform` of
 // its client-ready (docs/dev/ws-contract.md "Protocol version and handshake").
 const DEVICES = { ios: "iPhone", macos: "this Mac", web: "a browser" };
@@ -17,7 +19,9 @@ export function holderOf(voice) {
 
 // What the voice is doing, in words, from /api/state's `voice`. `tone` is a
 // theme colour name.
-export function voiceView(voice) {
+// `host` (optional) is { platform, installed, running } of this computer, for
+// the state where nobody holds the voice (model/host-app.js).
+export function voiceView(voice, host) {
   const v = voice ?? {};
   const holder = holderOf(v);
   const elsewhere = holder != null && !holder.here;
@@ -27,7 +31,7 @@ export function voiceView(voice) {
   if (v.status === "closed") return { ...base, label: "Voice not connected", note: "", tone: "dim" };
   if (v.stalled) return { ...base, label: "Waiting for the voice", note: "The model is slow to answer.", tone: "working" };
   if (!holder && !v.client_connected) {
-    return { ...base, label: "Ready", note: "Open Sheepdog on your phone or computer to talk.", tone: "dim" };
+    return { ...base, ...noHolderView(host) };
   }
   const where = elsewhere ? `Voice on ${holder.name}` : "Listening";
   if (v.muted) return { ...base, label: elsewhere ? `${where}, muted` : "Muted", note: "", tone: "idle" };
@@ -42,9 +46,9 @@ export function voiceView(voice) {
 //  ok       the daemon is up
 // `paused`: the daemon answers but the live stream is down, so the panel is
 // polling ("Live updates paused"). `needsYou`: open questions.
-export function deriveStatus(snapshot) {
+export function deriveStatus(snapshot, host) {
   const { daemon, detail, app, stream } = snapshot;
-  const voice = voiceView(app?.voice);
+  const voice = voiceView(app?.voice, host);
   const needsYou = app?.questions?.length ?? 0;
   if (daemon === "unknown" && !app) return { phase: "loading", detail: "", paused: false, needsYou: 0, voice };
   if (daemon === "down") return { phase: "down", detail, paused: false, needsYou: 0, voice };
