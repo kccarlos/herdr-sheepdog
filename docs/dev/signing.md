@@ -353,7 +353,10 @@ certificate](#testing-without-the-real-certificate)).
 `brew install --cask kccarlos/tap/sheepdog-app` installs the zip into
 `/Applications` (`packaging/homebrew/sheepdog-app.rb.tmpl`: `app
 "Sheepdog.app"`, arm64, macOS 14 or newer, `zap` for the app's
-preferences). The token is `sheepdog-app` because the daemon's formula is
+preferences). `uninstall quit:` makes `brew upgrade --cask` quit the
+running app and reopen the new one (Homebrew reopens only apps it quit, so a
+fresh install never launches it); the old cask does the quitting, so it first
+takes effect on the upgrade after the one that installs it. The token is `sheepdog-app` because the daemon's formula is
 already `sheepdog`. Its `livecheck` follows `v*` tags only, so the iOS app's
 `ios-v*` tags do not count as a new version.
 

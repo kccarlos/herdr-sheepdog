@@ -278,7 +278,7 @@ The installer above is the supported path. The daemon is also a plain binary:
 - **Sheepdog.app (Mac only):** the menu-bar app that holds the microphone,
   `brew install --cask kccarlos/tap/sheepdog-app` (signed, notarized, arm64,
   macOS 14 or newer). It talks to the daemon above, so install that too.
-  `brew upgrade --cask sheepdog-app` updates it.
+  `brew upgrade --cask sheepdog-app` updates it and restarts it if it was running.
 
 Then run `sheepdog setup`. `sheepdog update` prints the upgrade steps for the
 way you installed.
