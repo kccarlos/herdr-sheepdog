@@ -30,11 +30,15 @@ Useful `serve` flags:
 ```sh
 sheepdog serve --voice=off --herdr=mock --dev              # no voice, no herdr: drive it from /debug
 sheepdog serve --brain=fake --voice=off --herdr=mock --dev # the orchestrator loop over a scripted model, no key
+sheepdog serve --voice=fake --dev                          # a voice with no model or network (private e2e: e2e.md)
 sheepdog serve --voice=openai                              # start on GPT-Live (on | gemini | openai | off)
 sheepdog serve --brain=off                                 # no orchestrator: code sentences only, nothing sent to a worker
 sheepdog serve --cli=off                                   # no read-only CLI lookups
 sheepdog serve --verbose --port 8080                       # echo every event to stderr
 ```
+
+`scripts/e2e/up.sh` starts a private daemon, core and Herdr window to verify a
+change end to end ([`e2e.md`](e2e.md)).
 
 `--config`, `--env-file` (default `./.env`) and `--data-dir` point it at
 other files.

@@ -10,6 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/fakevoice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gptlive"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
@@ -33,7 +34,7 @@ func (a *App) setVoiceIssue(s string) {
 // state file is consulted: the --voice flag when it names one, else
 // voice.provider.
 func initialVoiceProvider(cfg config.Config, opts Options) string {
-	if opts.Voice == VoiceGemini || opts.Voice == VoiceOpenAI {
+	if opts.Voice == VoiceGemini || opts.Voice == VoiceOpenAI || opts.Voice == VoiceFake {
 		return opts.Voice
 	}
 	return cfg.Voice.Provider
@@ -42,6 +43,12 @@ func initialVoiceProvider(cfg config.Config, opts Options) string {
 // voiceProviders lists both voice providers for the switcher, the one
 // without a key unavailable with the reason.
 func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []voice.Provider {
+	if a.opts.Voice == VoiceFake {
+		return []voice.Provider{{
+			ProviderInfo: voice.ProviderInfo{ID: VoiceFake, Label: "Fake voice", Model: "none", Available: true},
+			New:          func() (voice.Session, error) { return fakevoice.New(), nil },
+		}}
+	}
 	cfg := a.cfg
 	_, _, missing := GeminiLive(cfg.Gemini)
 	g := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceGemini, Label: geminiLabel(gcfg.Vertex), Model: gcfg.Model, Available: missing == ""}}
