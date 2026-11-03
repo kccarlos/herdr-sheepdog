@@ -36,12 +36,9 @@ func StartFaultProxy(target string, f Faults) (*FaultProxy, error) {
 		return nil, err
 	}
 	p := &FaultProxy{URL: "http://" + ln.Addr().String(), ln: ln, faults: f} // the target path is prepended by the proxy
-	rp := httputil.NewSingleHostReverseProxy(u)
-	base := rp.Director
-	rp.Director = func(r *http.Request) {
-		base(r)
-		r.Host = u.Host
-	}
+	rp := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(u) // joins the target path and sets the outgoing Host to the target's
+	}}
 	rp.FlushInterval = -1
 	p.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
