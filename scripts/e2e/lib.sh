@@ -3,6 +3,11 @@
 # it); no script here ever touches the live daemon, ~/.config/sheepdog,
 # ~/.local/share/sheepdog, ~/.config/herdr-app or the default hc core.
 
+# Private agents run with a private XDG_DATA_HOME. A Claude Code auto-update
+# there re-points the real ~/.local/bin/claude at a version under that folder,
+# which down.sh deletes, so no agent started by this kit may update itself.
+export DISABLE_AUTOUPDATER=1
+
 E2E_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 e2e_die() { echo "e2e: $*" >&2; exit 1; }
