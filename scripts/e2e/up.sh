@@ -94,19 +94,17 @@ echo "private core up (session $HC_SESSION, pid ${HC_PID:-unknown})"
 
 if [ "$WITH_APP" = 1 ]; then
   mkdir -p "$APP_HOME/mods/sheepdog" "$APP_HOME/layouts"
-  # The panel, minus its tests; its daemon address points at the private one.
+  # The panel as shipped, unchanged (so the daemon does not see it as
+  # modified); it finds the private daemon through the shared key
+  # sheepdog.url written below, not by editing net/config.js.
   cp -R "$PANEL_MOD/." "$APP_HOME/mods/sheepdog/"
-  find "$APP_HOME/mods/sheepdog" \( -name '*.test.mjs' -o -name '.gitignore' \) -delete
-  CFG="$APP_HOME/mods/sheepdog/net/config.js"
-  sed -i '' "s#http://127.0.0.1:7777#$E2E_URL#" "$CFG"
-  grep -q "$E2E_URL" "$CFG" || e2e_die "could not point the panel at $E2E_URL"
   cp "$PANEL_LAYOUT" "$APP_HOME/layouts/sheepdog.json"
   # No welcome dialog (no command closes it): write the key it sets when
   # finished, and the layout, before the first start.
   # Likewise the what's-new dialog an update opens once by itself.
   AV=$(herdr-app --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
   [ -n "$AV" ] && printf '{"last_run":"%s","presented":["%s"]}\n' "$AV" "$AV" >"$APP_HOME/update-notes.json"
-  printf '{"frame.welcomed":"skipped","layout":"sheepdog"}\n' >"$APP_HOME/shared.json"
+  printf '{"frame.welcomed":"skipped","layout":"sheepdog","sheepdog.url":"%s"}\n' "$E2E_URL" >"$APP_HOME/shared.json"
 
   APP="$HOME/Applications/Herdr.app"
   [ -d "$APP" ] || e2e_die "$APP not found"
