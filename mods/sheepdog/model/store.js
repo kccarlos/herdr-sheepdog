@@ -4,8 +4,8 @@
 // something changed; it never draws. No herdr imports: node tests it.
 
 import { sameValue } from "./equal.js";
-import { foldFragment, noRuns } from "./fragments.js";
-import { applyNewest, applyOlder, canLoadOlder, emptyHistory, newestId, upsertItem } from "./history.js";
+import { foldApproval, foldFragment, foldQuestions, noRuns } from "./fragments.js";
+import { applyNewest, applyOlder, canLoadOlder, emptyHistory, newestId, patchApproval, upsertItem } from "./history.js";
 import { foldReply } from "./replies.js";
 
 // How many items one page asks for.
@@ -112,7 +112,17 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     observe(event, id) {
       const replies = foldReply(snapshot.replies, event, id);
       if (replies !== snapshot.replies) set({ replies });
+      // The question card follows the approval at once (the rail has it too).
+      const app = foldQuestions(snapshot.app, event);
+      if (app !== snapshot.app) set({ app });
       if (!conversation) return;
+      const approval = foldApproval(event, id);
+      if (approval) {
+        const history = approval.item
+          ? upsertItem(snapshot.history, approval.item)
+          : patchApproval(snapshot.history, approval.pendingId, approval.patch, approval.onlyOpen);
+        if (history !== snapshot.history) set({ history });
+      }
       const folded = foldFragment(runs, event, id);
       runs = folded.runs;
       if (folded.item) {

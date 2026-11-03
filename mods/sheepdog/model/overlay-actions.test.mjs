@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as actions from "./overlay-actions.js";
-import { emptySettingsForm, settingsLoaded } from "./settings.js";
+import { brainProviderGroups, emptySettingsForm, sectionSummary, settingsLoaded } from "./settings.js";
 
 // A cx for one host call: valid until the call returns. `spawn` hands its
 // body an async context that stays valid across awaits.
@@ -180,4 +180,44 @@ test("New conversation closes its window when it worked, and a failed key is rep
   await click({ notifies: 0, async: 0, tasks: [] }, (cx) => actions.resetConversation(host, cx));
   assert.equal(host.resetForm.error, "busy");
   assert.equal(host.resetKey, "k2");
+});
+
+test("switching provider reloads the catalog: the answer lists nothing cached, so rows and summary follow the refetch", async () => {
+  const { host, calls } = fakeHost();
+  host.settingsForm = { ...host.settingsForm, brainOpen: "claude", brainCatalogs: { claude: { models: [{ name: "stale" }], error: "", loading: false } } };
+  // What the daemon answers: the new provider's cache is empty the first time.
+  host.http.setBrainModel = async (provider, model) => (calls.push(["setBrainModel", provider, model]), { ...brain, provider, model, models_provider: provider, models: [] });
+  host.http.brainModels = async (id) => {
+    calls.push(["brainModels", id]);
+    return { ...brain, provider: "claude", model: "c-1", models_provider: "claude", models: [{ name: "c-1", display_name: "Claude One" }, { name: "c-2", display_name: "Claude Two" }], providers: [{ id: "gemini", label: "Gemini", available: true }, { id: "claude", label: "Claude", available: true }] };
+  };
+  const log = { notifies: 0, async: 0, tasks: [] };
+  await click(log, (cx) => actions.chooseBrainModel(host, "claude", "c-1", cx));
+  assert.deepEqual(calls.map((c) => c[0]), ["setBrainModel", "brainModels"], "the catalog is asked for again, for the current provider");
+  assert.equal(calls[1][1], undefined);
+  assert.deepEqual(host.settingsForm.brain.models.map((m) => m.name), ["c-1", "c-2"]);
+  assert.equal(host.settingsForm.brainOpen, "");
+  assert.deepEqual(host.settingsForm.brainCatalogs, {}, "a list fetched earlier is not kept beside the daemon's");
+  assert.equal(sectionSummary(host.settingsForm, "brain"), "Claude One");
+  const groups = brainProviderGroups(host.settingsForm.brain, host.settingsForm.brainCatalogs, "claude");
+  assert.deepEqual(groups.map((g) => [g.id, g.current, g.summary]), [["gemini", false, "Available"], ["claude", true, "Claude One"]]);
+  assert.deepEqual(groups[1].models.map((m) => [m.name, m.selected]), [["c-1", true], ["c-2", false]]);
+  assert.equal(host.settingsForm.busy, "");
+  assert.equal(host.settingsForm.notice, "Orchestrator changed.");
+});
+
+test("the catalog refetch is dropped when it fails or the choice has moved on", async () => {
+  const failing = fakeHost();
+  failing.host.http.brainModels = async () => { throw new Error("offline"); };
+  await click({ notifies: 0, async: 0, tasks: [] }, (cx) => actions.chooseBrainModel(failing.host, "claude", "c-1", cx));
+  assert.equal(failing.host.settingsForm.brain.provider, "claude", "the change's own answer stays");
+  assert.equal(failing.host.settingsForm.errors.brain, "");
+
+  const moved = fakeHost();
+  moved.host.http.brainModels = async () => {
+    moved.host.settingsForm = settingsLoaded(moved.host.settingsForm, "brain", { ...brain, provider: "gemini", model: "g-1" });
+    return { ...brain, provider: "claude", model: "c-1", models_provider: "claude", models: [{ name: "c-1" }] };
+  };
+  await click({ notifies: 0, async: 0, tasks: [] }, (cx) => actions.chooseBrainModel(moved.host, "claude", "c-1", cx));
+  assert.equal(moved.host.settingsForm.brain.provider, "gemini", "a late answer for the old choice is not shown");
 });

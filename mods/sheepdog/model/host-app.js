@@ -50,13 +50,69 @@ export const DOWN_ACTIONS = [
 ];
 export const START_COMMAND = ["sheepdog", ["start"]];
 
-// The note after `sheepdog start`: it resolves to { ok, text }. Never rejects.
-export async function startDaemon(exec) {
+// herdr's `exec` runs a program with the PATH of the app itself, and an app
+// opened from the Dock has a short one that lacks these folders. Where the
+// installer and Homebrew put the program, in this order.
+export const sheepdogPaths = (home) => [
+  `${String(home).replace(/\/+$/, "")}/.local/bin/sheepdog`,
+  "/opt/homebrew/bin/sheepdog",
+  "/usr/local/bin/sheepdog",
+];
+
+// Does a file or folder exist? true, false, or null when it cannot be told.
+// herdr's `fs/promises` reads only under the home folder and rejects anything
+// else ("outside every granted read root": /Applications, /opt/homebrew), so
+// a rejection falls back to `test -e`, which says by its exit code: 0 yes, 1 no.
+// Read-only, and never rejects.
+export async function pathExists(path, { exists, exec }) {
   try {
-    const res = await exec(...START_COMMAND);
-    if (res && res.code !== 0) return { ok: false, text: "Sheepdog did not start. Run setup, or run sheepdog doctor in a terminal." };
-    return { ok: true, text: "Starting Sheepdog…" };
+    return Boolean(await exists(path));
   } catch {
-    return { ok: false, text: "Could not run sheepdog. Is it installed? Run setup to check." };
+    // outside the home folder, or unreadable: ask the system
   }
+  if (!exec) return null;
+  try {
+    const res = await exec("test", ["-e", path]);
+    return res?.code === 0 ? true : res?.code === 1 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+// The first of those that exists, or null. Never rejects.
+export async function findSheepdog({ exists, exec, home }) {
+  for (const path of sheepdogPaths(home)) {
+    if ((await pathExists(path, { exists, exec })) === true) return path;
+  }
+  return null;
+}
+
+// The program for a terminal tab (`terminal.open` argv), where nothing can be
+// retried: a known install place, else the bare name for the shell's PATH.
+export async function sheepdogProgram(places) {
+  return (await findSheepdog(places)) ?? START_COMMAND[0];
+}
+
+const NOT_RUN = { ok: false, text: "Could not run sheepdog. Is it installed? Run setup to check." };
+
+// The note after `sheepdog start`: it resolves to { ok, text }. Never rejects.
+// `exec` is herdr's: it rejects when the program cannot start (not on its
+// PATH), and then the known install places are tried, using `places` ({ exists,
+// home }) when given.
+export async function startDaemon(exec, places = null) {
+  const [command, args] = START_COMMAND;
+  let res;
+  try {
+    res = await exec(command, args);
+  } catch {
+    const path = places ? await findSheepdog({ ...places, exec }) : null;
+    if (!path) return NOT_RUN;
+    try {
+      res = await exec(path, args);
+    } catch {
+      return NOT_RUN;
+    }
+  }
+  if (res && res.code !== 0) return { ok: false, text: "Sheepdog did not start. Run setup, or run sheepdog doctor in a terminal." };
+  return { ok: true, text: "Starting Sheepdog…" };
 }

@@ -60,17 +60,22 @@ export function loadSettings(host, cx) {
 
 // One request that changes a part of the form: `call` makes it, `part` is the
 // form part its answer replaces, and `notice` is shown when it worked.
-function change(host, cx, { name, part, notice, call, done = (form) => form }) {
+// `after(cx, value)` runs once the answer is shown, for what the answer left
+// out (it uses only the spawned `cx`; a failure there changes nothing).
+function change(host, cx, { name, part, notice, call, done = (form) => form, after = null }) {
   setSettings(host, beginSettingsAction(host.settingsForm, name), cx);
   return later(cx, async (cx) => {
+    let value;
     try {
-      const value = await call();
+      value = await call();
       let form = finishSettingsAction(host.settingsForm, name, { notice });
       if (part) form = settingsLoaded(form, part, value);
       setSettings(host, done(form, value), cx);
     } catch (error) {
       setSettings(host, finishSettingsAction(host.settingsForm, name, { error: words(error) }), cx);
+      return;
     }
+    if (after) await after(cx, value);
   });
 }
 
@@ -86,8 +91,27 @@ export function chooseBrainModel(host, provider, model, cx) {
     part: "brain",
     notice: "Orchestrator changed.",
     call: () => host.http.setBrainModel(provider, model),
-    done: (form) => ({ ...form, brainOpen: "" }),
+    // The answer is the new provider's catalog as the daemon has it cached, so
+    // a list fetched before is not kept beside it.
+    done: (form) => ({ ...form, brainOpen: "", brainCatalogs: withoutKey(form.brainCatalogs, provider) }),
+    after: (cx) => reloadBrain(host, cx, provider, model),
   });
+}
+
+const withoutKey = (object, key) => Object.fromEntries(Object.entries(object || {}).filter(([k]) => k !== key));
+
+// The change's own answer lists only what the daemon had cached for the new
+// provider (nothing, the first time), so ask for the catalog again: the rows,
+// the summary beside the section title and the open row then show the new
+// provider's models. Dropped when the selection has changed again meanwhile.
+async function reloadBrain(host, cx, provider, model) {
+  try {
+    const brain = await host.http.brainModels();
+    if (!brainSelectionMatches(host.settingsForm.brain, provider, model) || !brainSelectionMatches(brain, provider, model)) return;
+    setSettings(host, settingsLoaded(host.settingsForm, "brain", brain), cx);
+  } catch {
+    // The answer of the change stays; opening the row asks again.
+  }
 }
 
 // A press on a provider's row: open it (fetching its models if the daemon has

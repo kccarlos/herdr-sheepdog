@@ -9,7 +9,7 @@
 // `exec`, both passed in, and tells subscribers when something changed; it
 // never draws. No herdr imports: node tests it.
 
-import { INSTALL_COMMAND, OPEN_COMMAND, RUNNING_COMMAND, runningFrom } from "./host-app.js";
+import { INSTALL_COMMAND, OPEN_COMMAND, pathExists, RUNNING_COMMAND, runningFrom } from "./host-app.js";
 export { INSTALL_COMMAND };
 export const TALK_URL = "sheepdog://talk";
 
@@ -167,9 +167,11 @@ export function createVoice({ http, exec, exists, home, newKey, openSetup = asyn
     checking = true;
     lastCheck = now();
     try {
-      const found = await Promise.all(appPaths(home()).map((path) => exists(path)));
-      const installed = found.some(Boolean);
-      if (installed !== snapshot.installed) set({ installed });
+      const found = await Promise.all(appPaths(home()).map((path) => pathExists(path, { exists, exec })));
+      // One place with the app is enough; with none and a place that could not
+      // be told, it stays unknown rather than "not installed".
+      const installed = found.includes(true) ? true : found.includes(null) ? null : false;
+      if (installed != null && installed !== snapshot.installed) set({ installed });
     } catch {
       // Unknown stays unknown: the buttons are not turned off on a guess.
     } finally {

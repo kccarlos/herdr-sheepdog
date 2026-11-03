@@ -59,6 +59,19 @@ export function upsertItem(history, item) {
   return trimFront({ ...history, items: normalise([...history.items, item]) });
 }
 
+// How an approval ended, shown before the daemon's page says it (the builder's
+// resolve): the approval item of `pendingId` takes `patch`; one that is not
+// open any more keeps how it ended when `onlyOpen`. No such item: unchanged.
+export function patchApproval(history, pendingId, patch, onlyOpen) {
+  if (!pendingId) return history;
+  const at = history.items.findIndex((i) => i.kind === "approval" && i.pending_id === pendingId);
+  const item = history.items[at];
+  if (at < 0 || (onlyOpen && item.resolution !== "open")) return history;
+  const next = { ...item, ...patch };
+  if (sameValue(item, next)) return history;
+  return { ...history, items: history.items.map((i, k) => (k === at ? next : i)) };
+}
+
 // An older page (`before` set): merged by id, the server's copy wins.
 export function applyOlder(history, page) {
   let items = normalise([...history.items, ...(page.items ?? [])]);

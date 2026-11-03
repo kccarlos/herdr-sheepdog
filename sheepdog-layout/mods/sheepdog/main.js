@@ -13,7 +13,7 @@ import { View } from "gpui-kit";
 import { TextareaState } from "gpui-base";
 import { exists } from "fs/promises";
 import { connect } from "net";
-import { closeOverlay, exec, home, nextCommand, openOverlay, props, run, setShared, shared, theme, window as appWindow } from "herdr";
+import { closeOverlay, exec, focused, home, nextCommand, openOverlay, props, run, setShared, shared, theme, window as appWindow } from "herdr";
 import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
@@ -24,11 +24,11 @@ import { createOutbox, pendingItems } from "./model/outbox.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
-import { keyAction } from "./model/keys.js";
+import { keyAction, leaveCommand } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
 import * as overlay from "./model/overlay-actions.js";
 import { emptySettingsForm, SETTINGS_OPEN_KEY } from "./model/settings.js";
-import { startDaemon } from "./model/host-app.js";
+import { sheepdogProgram, startDaemon } from "./model/host-app.js";
 import { later } from "./model/later.js";
 import { openSetup } from "./model/setup-link.js";
 import { deriveStatus } from "./model/status.js";
@@ -126,9 +126,20 @@ export default class Sheepdog extends View {
     cx.stop_propagation();
     if (action.type === "composer") this.composer.focus();
     else if (action.type === "panel") this.panelFocus.focus();
-    else if (action.type === "leave") run("pane.go", { direction: "left" });
+    else if (action.type === "leave") this.leave();
     else if (action.type === "answer") this.answer(action.question, action.option, cx);
     else if (action.type === "send") this.send(action.text, cx, false);
+  }
+
+  // Esc on the panel: the keys go back to the pane that had them (a click
+  // into the panel leaves `pane.go` without a starting point, so not pane.go).
+  leave() {
+    const { name, args } = leaveCommand(focused());
+    try {
+      run(name, args);
+    } catch {
+      run("pane.go", { direction: "left" });
+    }
   }
 
   // The composer's textarea (made here, it needs a live host call), the typed
@@ -413,7 +424,7 @@ export default class Sheepdog extends View {
     this.downNote = "Starting Sheepdog…";
     cx.notify();
     later(cx, async (acx) => {
-      const result = await startDaemon(exec);
+      const result = await startDaemon(exec, { exists, home: home() });
       this.starting = false;
       this.downNote = result.ok ? null : result.text;
       acx.notify();
@@ -427,8 +438,11 @@ export default class Sheepdog extends View {
   }
 
   // Run in a tab: `sheepdog setup` starts the daemon if needed and walks through the key.
-  runSetup() {
-    run("terminal.open", { argv: ["sheepdog", "setup"], place: "tab" });
+  runSetup(cx) {
+    later(cx, async () => {
+      const program = await sheepdogProgram({ exists, exec, home: home() });
+      run("terminal.open", { argv: [program, "setup"], place: "tab" });
+    });
   }
 
   render() {
@@ -558,7 +572,7 @@ export default class Sheepdog extends View {
         layout,
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
         sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
-        onSetup: () => this.runSetup(),
+        onSetup: (_e, cx) => this.runSetup(cx),
         onStart: (_e, cx) => this.startDaemon(cx),
         downNote: this.downNote ?? null,
         onToggleTechnical: (_e, cx) => {
