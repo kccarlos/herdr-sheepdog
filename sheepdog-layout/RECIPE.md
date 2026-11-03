@@ -36,23 +36,31 @@ that holds the voice.
 - The runtime files from `mods/sheepdog/` copied byte for byte into
   `mods/sheepdog/`.
 
-The panel's build brief is [the panel recipe](../RECIPE.md).
+The panel's build brief is [the panel recipe](https://github.com/kccarlos/herdr-sheepdog/blob/main/RECIPE.md).
 
 ## Watch out
 
 - **Adding it: `sheepdog` comes first.** The panel is a view of the sheepdog
-  daemon on the same computer; alone it only says "Sheepdog isn't running". If
-  `sheepdog status` finds no program, tell the person and let them install it
-  in their own terminal, because setup asks them questions:
+  daemon on the same computer; alone it only says "Sheepdog isn't running". Run
+  `sheepdog status` before copying anything. If there is no such program, stop,
+  tell the person and have them install it in their own terminal, because setup
+  asks them questions:
   `curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh`.
-  `sheepdog setup` installs this panel and layout itself and offers to switch,
-  so nothing is left to copy.
-- **Adding it: a taken name is this panel, so do not rename it.** If
-  `mods/sheepdog/` or `layouts/sheepdog.json` is already there, `sheepdog setup`
-  put it there. Keep it, copy only what is missing and switch to the layout. A
-  renamed copy would never be updated.
-- **Adding it: run `sheepdog setup` once after copying by hand.** Until then the
-  daemon does not update a copied panel.
+  Carry on when they say it is done.
+- **Adding it: prefer `sheepdog setup` to copying.** It asks, then installs this
+  panel and layout, offers to switch, and keeps them up to date. Nothing is left
+  to copy. After copying by hand, have the person run `sheepdog setup` too: the
+  daemon does not update a copied panel until then.
+- **Adding it: a taken name here is this same panel, so do not rename it.** The
+  usual rename is for a different mod. If `mods/sheepdog/` or
+  `layouts/sheepdog.json` is already there, `sheepdog setup` put it there. Keep
+  it, copy only what is missing, then switch:
+  `herdr-app do layout.switch '{"name":"sheepdog"}'`. A renamed copy would never
+  be updated.
+- **What the panel reaches, to say before adding it:** see "Network and
+  programs" in [the panel recipe](https://github.com/kccarlos/herdr-sheepdog/blob/main/RECIPE.md).
+  In short, only the daemon's address, and a few local programs (`open`,
+  `pgrep`, `test`, `sheepdog`).
 - **Talking needs Sheepdog.app on a Mac:**
   `brew install --cask kccarlos/tap/sheepdog-app`. Without it, typing and
   tapping still work, and the panel says how to get it.
@@ -62,7 +70,8 @@ The panel's build brief is [the panel recipe](../RECIPE.md).
 
 ## Done when
 
-1. `herdr-app check` passes on the copied `mods/sheepdog`.
+1. `herdr-app check` passes on the copied `mods/sheepdog` (it takes a mod folder,
+   not a layout file).
 2. The Sheepdog block is docked on the right and its rail appears below 160 px.
 3. With the daemon running, the panel shows the conversation, an open question
    and its options, and the current voice state.
