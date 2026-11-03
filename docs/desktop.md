@@ -88,6 +88,23 @@ Run `sheepdog setup` after herdr-app is installed. It installs or updates the
 panel, offers the Sheepdog layout, and switches herdr-app to it. The layout is
 herdr-app's usual window with the panel docked on the right.
 
+#### Updating the panel
+
+The panel comes with the `sheepdog` program. After you upgrade sheepdog (and
+the daemon restarts into the new version), the daemon replaces the installed
+panel and layout with the new ones by itself, and herdr-app reloads the panel
+without a restart. It does this only for a panel that `sheepdog setup`
+installed and that you have not changed (setup leaves a small
+`.sheepdog-install.json` in the panel folder to tell). It never creates the
+panel folder; that is setup's job. Turn it off with `panel.auto_update = false`
+([CONFIG.md](../CONFIG.md#panel)).
+
+If you changed a panel file, or installed the panel another way (herdr.dev, by
+hand, an agent), sheepdog leaves it alone. The panel then says "A newer panel is
+available" with a button that runs `sheepdog setup`; `sheepdog status` says it
+too. Setup replaces the panel with the new one (it asks first). A layout you
+edited is never replaced.
+
 You can also ask a coding agent to add the panel:
 
 ```text
@@ -100,7 +117,9 @@ or the layout:
 Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/kccarlos/herdr-sheepdog/tree/main/sheepdog-layout
 ```
 
-Both are listed on https://herdr.dev/mods/ and https://herdr.dev/layouts/.
+Both are listed on https://herdr.dev/mods/ and https://herdr.dev/layouts/. A
+panel added this way is not updated by the daemon; run `sheepdog setup` to
+hand its updates to sheepdog.
 
 If you need to install it by hand from a checkout of this repository, copy both
 the panel and the layout:

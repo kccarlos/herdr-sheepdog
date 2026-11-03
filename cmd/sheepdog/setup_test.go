@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,6 +30,8 @@ func TestMain(m *testing.M) {
 	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		_ = os.Setenv(k, home)
 	}
+	// The daemon replaces an installed herdr-app panel: never the real one.
+	_ = os.Setenv("HERDR_APP_HOME", filepath.Join(home, "herdr-app"))
 	// Commands that inspect the host during setup see a Linux test home
 	// with no herdr tools. Focused setup tests inject their own probe.
 	setupEnvironmentProbe = func() onboard.Probe {

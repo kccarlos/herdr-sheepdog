@@ -238,6 +238,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	// and the daemon is idle.
 	tracker := update.NewTracker(cfg.DataDir, version, installHow(), cfg.Update.AutoRestart)
 	opts.Update = tracker.Status
+	panelTr := newPanelTracker(cfg)
+	opts.Panel = panelTr.State
 	var pendingUpdate atomic.Pointer[[2]string] // from, to version lines
 
 	// SIGHUP re-reads the prompt override directory (docs/dev/roles.md
@@ -315,6 +317,11 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 			fprintf(stdout, "  events      %s/events\n", a.URL())
 			fprintf(stdout, "  log         %s\n", rot.Path())
+			// After an upgrade this is a fresh process: bring an unchanged
+			// herdr-app panel up to the version built into it.
+			if line := panelTr.Sync(a.Log()); line != "" {
+				fprintf(stdout, "  panel       %s\n", line)
+			}
 			// Event retention (events.retention_days): at startup, then daily.
 			go pruneEvents(ctx, cfg, func() logging.Logger { return cur.Load().Log() }, stdout)
 			startUpdateWatchers(ctx, cfg, tracker,

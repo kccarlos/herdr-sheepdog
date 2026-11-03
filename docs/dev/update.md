@@ -55,3 +55,56 @@ No loop: `<data_dir>/update-restart.json` records the target; a daemon never res
 `version` line again within 30 minutes. A new program that reports the same version line as the
 running one, or that cannot report one after five tries, or an `exec` that fails (the daemon takes the
 lock back and carries on), leaves only the notice.
+
+## The panel after an upgrade
+
+Code: `internal/panelsync` (the logic), `cmd/sheepdog/panel.go` (the daemon's tracker),
+`cmd/sheepdog/setup_cmd.go` (the marker), `mods/sheepdog/model/panel-update.js` (the notice). The
+user's view is [desktop.md](../desktop.md#updating-the-panel); the key is `panel.auto_update` in
+[CONFIG.md](../../CONFIG.md#panel).
+
+The daemon binary carries the panel and the layout it was built with: the root package's
+`herdrsheepdog.Panel` (an `embed.FS` of `mods/sheepdog`, runtime files only) and
+`herdrsheepdog.Layout` (`sheepdog-layout/layouts/sheepdog.json`). `mods/sheepdog` is the one source;
+`make sync-layout` still produces the copy herdr.dev lists, and `TestEmbeddedPanelMatchesTheModFolder`
+fails if the embed and the folder disagree or a runtime file is not embedded.
+
+**The marker.** `sheepdog setup` (when it installs the panel, or finds it identical to its own) writes
+`<herdr-app home>/mods/sheepdog/.sheepdog-install.json`:
+
+```json
+{ "version": "v1.2.3", "files": { "main.js": "<sha256>", "model/store.js": "<sha256>" }, "layout": "<sha256>" }
+```
+
+`files` is every embedded file as written; `layout` is the hash of `layouts/sheepdog.json` when setup
+wrote it (absent when the user's own layout was kept). If any file on disk differs from what the
+binary ships, no marker is written. herdr-app tolerates the extra dotfile (`herdr-app check` passes).
+`version` is for display; whether an update exists is decided by file hashes, so a development build
+(`dev`) works too.
+
+**At startup** (`panelTracker.Sync`, a fresh process after the restart for an upgrade; `$HERDR_APP_HOME`
+or `~/.config/herdr-app`), with `panel.auto_update` on:
+
+- No `mods/sheepdog` folder: nothing happens, nothing is created.
+- Marker present, every file listed in it still matches, and the binary's files differ: the folder is
+  replaced. The new tree is built in a temporary directory in the herdr-app home (same file system),
+  files that are not ours (`gpui-kit.d.ts`, `jsconfig.json`, `.gitignore`) are carried over, files the
+  new version dropped are not, and two renames swap it in (the old folder is put back if the second
+  fails). `panel.updated {from, to, files, layout}` is logged; a failure logs `panel.update_failed`
+  and leaves the old panel.
+- The layout is replaced the same way (a temporary file and a rename) when its hash is still the
+  marker's; a layout the user edited is left alone, with no notice, and the marker's `layout` hash
+  follows a replacement.
+- A changed file, a missing file, no marker, a marker that does not parse, or a symlinked folder (a
+  development checkout): nothing is written.
+
+**`/api/state`** has `panel` `{installed, version, modified, update_available, auto_update}`
+(re-read from disk at most every 10 s, so it follows a user's edits and `sheepdog setup`). The panel
+shows "A newer panel is available" when `update_available && (modified || !auto_update)`. A
+panel with no marker that is identical to the binary's reports `modified: false, update_available:
+false`. `sheepdog status` prints the same as a `panel` line. The panel does not read its own version:
+the daemon compares the files, which is the same fact and also covers a panel herdr-app has not
+reloaded yet.
+
+Tests never touch the real herdr-app: `internal/panelsync` tests use temp homes, and the `cmd/sheepdog`
+`TestMain` points `HERDR_APP_HOME` at a temp directory.

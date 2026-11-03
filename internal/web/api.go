@@ -12,6 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/lang"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
@@ -49,6 +50,10 @@ type StateResponse struct {
 	// running yet. Omitted when the daemon does not track updates. The
 	// voice never speaks it.
 	Update *update.Status `json:"update,omitempty"`
+	// Panel is the herdr-app panel installed by `sheepdog setup`, against
+	// the one in this daemon (docs/dev/update.md). Omitted when the daemon
+	// does not track it.
+	Panel *panelsync.State `json:"panel,omitempty"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -156,6 +161,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		VoiceModel:            s.voiceModel(),
 		ConversationStartedAt: s.conversationStartedAt(),
 		Update:                s.updateStatus(),
+		Panel:                 s.panelState(),
 	})
 }
 
@@ -248,6 +254,15 @@ func (s *Server) handleVoicePTT(w http.ResponseWriter, r *http.Request) {
 	s.hub.send(wsproto.VoicePTT(*req.On))
 	s.log.Log(logSource, "web.client.ptt", "", map[string]any{"on": *req.On})
 	writeJSON(w, http.StatusOK, VoiceCommandResponse{OK: true})
+}
+
+// panelState is /api/state's panel object (nil without a tracker).
+func (s *Server) panelState() *panelsync.State {
+	if s.deps.Panel == nil {
+		return nil
+	}
+	st := s.deps.Panel()
+	return &st
 }
 
 // updateStatus is /api/state's update object (nil without a tracker).

@@ -18,6 +18,7 @@ import (
 	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
 
 func printSetupUsage(w io.Writer) {
@@ -355,6 +356,12 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	}
 	if env.HerdrApp && installedPanel {
 		setupSheepdogLayout(ctx, env, o)
+		// Say what was installed, so the daemon can keep it current after an
+		// upgrade (docs/dev/update.md).
+		src := panelsync.Source{Panel: o.Panel, Layout: o.Layout, Version: version}
+		if err := panelsync.Record(env.HerdrAppHome, src); err != nil {
+			fprintf(o.Out, "Warning: could not record the panel install: %v\n", err)
+		}
 	}
 	if env.OS == "darwin" && env.HerdrApp && !env.SheepdogApp {
 		fprintln(o.Out, "")

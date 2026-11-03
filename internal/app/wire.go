@@ -231,6 +231,7 @@ func (a *App) wire() error {
 		Router:     &inject.Router{},
 		Version:    opts.Version,
 		Update:     opts.Update,
+		Panel:      opts.Panel,
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
 
