@@ -824,21 +824,44 @@ private struct Triangle: Shape {
 struct DemoHeader: View {
     @EnvironmentObject private var model: SessionViewModel
 
+    private var demoLabel: some View {
+        Label("Demo", systemImage: "play.circle.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.primaryText)
+    }
+
+    private var demoNote: some View {
+        Text("Scripted agents, on this device only")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var leaveButton: some View {
+        Button("Leave") { model.leaveDemo() }
+            .font(.subheadline.weight(.medium))
+            .tint(Theme.primaryText)
+            .accessibilityIdentifier("demo.leave")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Label("Demo", systemImage: "play.circle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                Text("Scripted agents, on this device only")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Button("Leave") { model.leaveDemo() }
-                    .font(.subheadline.weight(.medium))
-                    .tint(Theme.primaryText)
-                    .accessibilityIdentifier("demo.leave")
+            // One line while the sentence fits; else the label and Leave
+            // share the first line and the sentence wraps in full below.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    demoLabel
+                    demoNote.lineLimit(1).fixedSize()
+                    Spacer(minLength: 4)
+                    leaveButton
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        demoLabel
+                        Spacer(minLength: 4)
+                        leaveButton
+                    }
+                    demoNote.fixedSize(horizontal: false, vertical: true)
+                }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {

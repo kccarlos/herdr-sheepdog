@@ -15,6 +15,27 @@ final class AgentCardModelTests: XCTestCase {
         XCTAssertEqual(agent.cardLine, "Fix the flake", "blank is absent")
     }
 
+    func testTheFirstMessageHintShowsOnlyBeforeTheAgentHasSaidAnything() {
+        var agent = Agent(paneID: "p", alias: "docs", state: .idle)
+        XCTAssertTrue(agent.awaitsFirstMessage)
+        agent.lastResult = Agent.Result(spoken: "  ", detail: nil, at: nil)
+        XCTAssertTrue(agent.awaitsFirstMessage, "a blank result says nothing")
+        agent.lastResult = Agent.Result(spoken: "docs finished: the page is written.", detail: nil, at: nil)
+        XCTAssertFalse(agent.awaitsFirstMessage, "it stopped and reported: no promise of a first message")
+        agent.lastResult = nil
+        agent.journal = [Agent.JournalEntry(at: nil, event: "done", lastAssistant: "Done.")]
+        XCTAssertFalse(agent.awaitsFirstMessage)
+    }
+
+    func testTheDemosFinishedAgentsHaveTheirMessage() {
+        var world = DemoWorld(now: Date(timeIntervalSince1970: 0))
+        world.seedAttention()
+        for agent in world.state.agents where agent.lastResult != nil {
+            XCTAssertNotNil(agent.lastWorkerMessage, "\(agent.alias) shows its message with its result")
+            XCTAssertFalse(agent.awaitsFirstMessage)
+        }
+    }
+
     func testTheAnsweredQuestionCarriesTheChosenAnswer() {
         var agent = Agent(paneID: "p", alias: "search", state: .working)
         agent.lastBlock = Agent.Block(question: "Run the benchmark against staging?", answered: false)

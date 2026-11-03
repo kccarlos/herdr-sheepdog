@@ -7,10 +7,11 @@ import SwiftUI
 ///
 /// Every control sits in a fixed 44 pt slot, so a hidden one never shifts
 /// the others. The capsule grows with the text size up to a cap. At the
-/// accessibility sizes it stacks: the controls on one row, the name and
-/// the status (which wraps at word boundaries) full width below. It is Liquid
-/// Glass, or a solid card under Reduce Transparency. The look comes from
-/// `CapsuleMode`; what the orb does from `VoiceBarModel`.
+/// accessibility sizes its own text stops at the largest regular size and
+/// the status may take two lines, so it stays one compact row
+/// (`CapsuleSizing`) and never covers the content it floats over. It is
+/// Liquid Glass, or a solid card under Reduce Transparency. The look comes
+/// from `CapsuleMode`; what the orb does from `VoiceBarModel`.
 struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     let state: SessionState
     /// Read only by the orb and the mic ring (`MeteredOrb`,
@@ -69,12 +70,9 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
         if mode == .elsewhere { return elsewhereLabel }
         return mode.statusOverride ?? statusText
     }
-    private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
-    private var height: CGFloat { min(max(scaledHeight, 60), cap) }
-    /// Past this the capsule would cover the conversation it serves: the
-    /// name and status scroll inside it instead. The stacked layout has
-    /// two rows, so it gets more room.
-    private var cap: CGFloat { stacked ? 240 : 150 }
+    /// An accessibility size is set: the capsule's text is capped (below),
+    /// so this only gives the status two lines.
+    private var largeText: Bool { dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
         // As tall as its text up to the cap, then the row scrolls inside.
@@ -87,10 +85,14 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                     if rounded != rowHeight { rowHeight = rounded }
                 }
         }
-        .scrollDisabled(rowHeight <= cap)
+        .scrollDisabled(!CapsuleSizing.scrolls(row: rowHeight, accessibility: largeText))
         .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(rowHeight > cap ? .visible : .hidden)
-        .frame(height: min(max(rowHeight, height), cap))
+        .scrollIndicators(CapsuleSizing.scrolls(row: rowHeight, accessibility: largeText) ? .visible : .hidden)
+        .frame(height: CapsuleSizing.height(scaled: scaledHeight, row: rowHeight, accessibility: largeText))
+        // Past the cap the name and status scroll inside the capsule. The
+        // text stops at the largest regular size: a third of the screen
+        // for a status line is not a floating control.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.horizontal, 7)
         .capsuleSurface()
         .accessibilityElement(children: .contain)
@@ -98,30 +100,13 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
     }
 
     private var row: some View {
-        Group {
-            if stacked {
-                VStack(spacing: 2) {
-                    HStack(spacing: 8) {
-                        micSlot
-                        orb
-                        Spacer(minLength: 0)
-                        trailingButton
-                    }
-                    voiceMenu
-                }
-                // Clear of the capsule's rounded ends.
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            } else {
-                HStack(spacing: 8) {
-                    micSlot
-                    orb
-                    voiceMenu
-                    trailingButton
-                }
-            }
+        HStack(spacing: 8) {
+            micSlot
+            orb
+            voiceMenu
+            trailingButton
         }
-        .frame(minHeight: height)
+        .frame(minHeight: CapsuleSizing.minimumHeight(scaled: scaledHeight, accessibility: largeText))
     }
 
     private var voiceMenu: some View {
@@ -237,8 +222,7 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                 Text(name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.7 : 1)
+                    .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.ink)
@@ -254,10 +238,11 @@ struct VoiceCapsule<MenuValue: Equatable, VoiceMenu: View>: View {
                 Text(shownStatus)
                     .font(.caption)
                     .foregroundStyle(statusColor)
-                    // Wraps at the accessibility sizes; never cut there.
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                    .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.85)
+                    // Two lines at the accessibility sizes, where the text
+                    // itself is capped; one line, shrunk a little, otherwise.
+                    .lineLimit(largeText ? 2 : 1)
+                    .fixedSize(horizontal: false, vertical: largeText)
+                    .minimumScaleFactor(largeText ? 1 : 0.85)
                     .accessibilityIdentifier("controls.statusLine")
                 if let route {
                     Image(systemName: route.symbol)

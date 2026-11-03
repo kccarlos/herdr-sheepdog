@@ -294,6 +294,13 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         journal?.last { !($0.lastAssistant?.trimmed.isEmpty ?? true) }
     }
 
+    /// The card has said nothing yet: no last result and no worker message.
+    /// Only then does it promise that the first message shows when the
+    /// agent stops; an agent that has stopped, with a result, has its say.
+    public var awaitsFirstMessage: Bool {
+        lastWorkerMessage == nil && (lastResult?.spoken?.trimmed.isEmpty ?? true)
+    }
+
     /// "4 min", "2 h 5 min", "just now": how long the agent has been in its
     /// state at `now`. Nil without a `state_since`.
     public func timeInState(at now: Date) -> String? {

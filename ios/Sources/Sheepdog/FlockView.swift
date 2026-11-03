@@ -530,7 +530,10 @@ struct AgentCard: View {
                 .foregroundStyle(Theme.textColor(for: agent.state))
                 .contentTransition(.numericText())
                 .animation(Theme.ease, value: since)
-                .lineLimit(1)
+                // Wraps at the accessibility sizes, where "Blocked · just
+                // now" does not fit a line; never cut there.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).state")
         }
     }
@@ -584,7 +587,12 @@ struct AgentCard: View {
             journal
             if showsEarlier { earlier }
             if controllable {
-                HStack(spacing: 10) {
+                // Side by side; stacked at the accessibility sizes, where two
+                // labels would break inside their words.
+                let rowLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                    : AnyLayout(HStackLayout(spacing: 10))
+                rowLayout {
                     Button {
                         model.setPinned(agent, !agent.isPinned)
                     } label: {
@@ -679,7 +687,7 @@ struct AgentCard: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.fill))
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("flock.agent.\(agent.alias).message")
-        } else {
+        } else if agent.awaitsFirstMessage {
             Text("Nothing from \(agent.alias) yet. Its first message shows here when it stops.")
                 .font(.footnote)
                 .foregroundStyle(Theme.muted)
