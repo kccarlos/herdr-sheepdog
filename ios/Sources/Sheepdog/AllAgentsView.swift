@@ -147,7 +147,7 @@ struct AllAgentsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 let sections = model.sectionSnapshots
                 if sections.isEmpty {
-                    columns(shown, computer: nil)
+                    sectioned(shown)
                 } else {
                     ForEach(sections) { computer in
                         let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
@@ -169,7 +169,7 @@ struct AllAgentsView: View {
                         .padding(.top, computer.id == sections.first?.id ? 0 : 10)
                         if model.agentsModel.isComputerExpanded(computer.id) {
                             if computer.isCurrent {
-                                columns(shown, computer: nil)
+                                sectioned(shown)
                             } else if offline {
                                 OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
                             } else {
@@ -192,6 +192,19 @@ struct AllAgentsView: View {
             reachability: computer.reachability,
             showsComputers: model.showsComputerLabels
         )
+    }
+
+    /// The current computer's agents under Needs you / Working / Done, each
+    /// section in its two columns.
+    @ViewBuilder
+    private func sectioned(_ agents: [Agent]) -> some View {
+        ForEach([AgentGroup.needsYou, .working, .done], id: \.self) { group in
+            let members = agents.filter { $0.group == group }
+            if !members.isEmpty {
+                AgentSectionHeader(group: group, count: members.count)
+                columns(members, computer: nil)
+            }
+        }
     }
 
     /// Two columns of independent heights (no row gaps), one at the

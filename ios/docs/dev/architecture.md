@@ -138,6 +138,31 @@ and `PinnedTrustDelegate`); see
 failed reconnect, `GET /api/state` (where a 401 is plain) tells whether the
 phone was revoked: that opens "Please scan again".
 
+## Unread, pins and space mute
+
+The daemon computes each agent's `attention` (group, unread, pinned, muted);
+the app only orders and writes (docs/dev/ws-contract.md "Attention").
+Everything is in SheepdogKit and tested there:
+
+- `Attention.swift`: `AgentAttention` (`Agent.attention`, nil from a daemon
+  without the feature), `AgentGroup`, `AgentOrder` (the one sort: group,
+  pinned, unread within Done, spoken name) and `Flock.sections`. The order is
+  tested against `Tests/Fixtures/agent-attention.json`, which the daemon's Go
+  tests share. Without `attention` the app groups by state and shows no pin,
+  unread or mute control.
+- `AttentionActions.swift`: the `DaemonClient` routes (`markSeen`,
+  `markUnread`, `setPinned`, `setSpaceMute`), `MuteChoice` (the end time is
+  worked out on the phone from its calendar, `attention.UntilTomorrowMorning`
+  is the same rule), `AttentionOverlay` (a tap shows at once and settles when
+  the state agrees, after 5 s, or rolls back when the write fails),
+  `SeenTracker` (one seen write per finished turn while the agent is on
+  screen and the app is in front) and the event rules (`agent.attention`
+  and `space.muted` re-read the state; a `muted` event makes no haptic).
+- `SessionViewModel+Attention.swift` only forwards taps and says "Couldn't
+  pin auth. Try again." when a write fails.
+- The offline demo serves the same fields; `-sheepdogDemoAttention` gives it a
+  fixed list (one unread agent) for the tests.
+
 ## Events
 
 `GET /events` is the app's second input. It carries agent state changes

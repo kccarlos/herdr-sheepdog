@@ -16,6 +16,9 @@ struct DemoSpaces {
         var commands: [(id: String, name: String, command: String)]
         /// The worktree has uncommitted changes: Remove needs `force`.
         var dirty = false
+        /// Notifications are muted, until `until` (nil: until unmuted).
+        var muted = false
+        var until: Date?
     }
 
     private(set) var spaces: [Space] = [
@@ -33,6 +36,11 @@ struct DemoSpaces {
     /// not let the daemon into Documents; the next one (Retry) finds it
     /// allowed. For the banner's screenshots and UI test.
     private var blocked = ProcessInfo.processInfo.arguments.contains("-sheepdogDemoNeedsAccess")
+
+    /// The muted spaces, as `/api/state` lists them.
+    var mutes: [SpaceMute] {
+        spaces.filter(\.muted).map { SpaceMute(path: $0.path, name: $0.name, until: $0.until) }
+    }
 
     /// `GET /api/spaces`, with the scripted agents in "shop".
     mutating func view(agents: [Agent]) -> [String: Any] {
@@ -52,6 +60,8 @@ struct DemoSpaces {
                     "commands": space.commands.map { ["id": $0.id, "name": $0.name, "command": $0.command] },
                 ]
                 if let branch = space.branch { object["branch"] = branch }
+                object["muted"] = space.muted
+                if space.muted, let until = space.until { object["until"] = ISO8601DateFormatter.sheepdog.string(from: until) }
                 return object
             },
             "folders": folders.map { ["name": $0.name, "path": $0.path, "git": $0.git] },
@@ -83,6 +93,20 @@ struct DemoSpaces {
             guard !name.isEmpty, name.count <= 60 else { return (400, ["error": "a name is 1 to 60 characters"]) }
             spaces[index].name = name
             return (200, ["ok": true, "spoken": "Renamed it \(name)."])
+        case ("POST", ["mute"]):
+            guard let muted = body["muted"] as? Bool else { return (400, ["error": "muted must be a boolean"]) }
+            var until: Date?
+            if let text = body["until"] as? String {
+                guard muted else { return (400, ["error": "until goes with muted: true"]) }
+                guard let date = ISO8601DateFormatter().date(from: text) else { return (400, ["error": "until must be RFC 3339"]) }
+                guard date > Date() else { return (400, ["error": "until is in the past"]) }
+                until = date
+            }
+            spaces[index].muted = muted
+            spaces[index].until = muted ? until : nil
+            var space: [String: Any] = ["id": spaces[index].id, "path": spaces[index].path, "muted": muted]
+            if let until = spaces[index].until { space["until"] = ISO8601DateFormatter.sheepdog.string(from: until) }
+            return (200, ["ok": true, "space": space])
         case ("POST", ["close"]):
             if spaces[index].hasAgents, busy { return (409, ["error": "an agent there is still working or waiting"]) }
             let gone = spaces.remove(at: index)

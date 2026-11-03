@@ -55,6 +55,17 @@ public struct DemoWorld: Sendable {
     /// question bar's tests and screenshots).
     public var longQuestion = false
 
+    /// One terminal's seen and pinned marks, as the demo keeps them
+    /// (`/api/agents/{pane}/seen` and `/pin`).
+    struct Marks: Equatable {
+        var turn = 0
+        var seen: Int?
+        var pinned = false
+    }
+
+    /// By pane id. A pane with no entry has not finished a turn.
+    private(set) var marks: [String: Marks] = [:]
+
     enum Step: Sendable {
         case finishAuth, askPayments, failMigration, finishDocs, finishPayments
     }
@@ -96,6 +107,72 @@ public struct DemoWorld: Sendable {
         say(Self.greeting, urgency: "normal")
     }
 
+    // MARK: - Attention
+
+    /// A fixed list for the unread, pin and mute tests and screenshots
+    /// (`-sheepdogDemoAttention`): nothing moves by itself. claude-auth
+    /// finished a turn nobody looked at, claude-migration finished one that
+    /// was seen, codex-docs waits on you, codex-payments works.
+    public mutating func seedAttention() {
+        steps = []
+        update(Self.authPane) { agent, at in
+            agent.state = .done
+            agent.stateSince = at
+            agent.lastTask = agent.currentTask
+            agent.currentTask = nil
+            agent.lastResult = Agent.Result(spoken: "claude-auth finished: the login redirect loop is fixed.", detail: "The session cookie was set on the wrong path.", at: at)
+        }
+        update(Self.migrationPane) { agent, at in
+            agent.state = .idle
+            agent.stateSince = at
+            agent.lastTask = agent.currentTask
+            agent.currentTask = nil
+            agent.lastResult = Agent.Result(spoken: "claude-migration finished: the migration ran on the staging copy.", detail: nil, at: at)
+        }
+        update(Self.docsPane) { agent, at in
+            agent.state = .blocked
+            agent.stateSince = at
+        }
+        marks[Self.authPane] = Marks(turn: 2, seen: 1)
+        marks[Self.migrationPane] = Marks(turn: 1, seen: 1)
+        marks[Self.docsPane] = Marks(turn: 0)
+        marks[Self.paymentsPane] = Marks(turn: 0)
+    }
+
+    /// `POST /api/agents/{pane}/seen`: raises the mark, never above the
+    /// turn the terminal is at. Nil for a pane the demo does not have.
+    public mutating func markSeen(pane: String, turn: Int?, unread: Bool) -> Bool {
+        guard agents.contains(where: { $0.paneID == pane }) else { return false }
+        var mark = marks[pane] ?? Marks()
+        if unread {
+            if mark.turn > 0 { mark.seen = mark.turn - 1 }
+        } else if let turn {
+            let value = min(turn, mark.turn)
+            if mark.seen.map({ value > $0 }) ?? true { mark.seen = value }
+        }
+        marks[pane] = mark
+        log(source: "web", type: "agent.attention", pane: pane, payload: ["via": .string("phone")])
+        return true
+    }
+
+    /// `POST /api/agents/{pane}/pin`.
+    public mutating func setPinned(pane: String, _ pinned: Bool) -> Bool {
+        guard agents.contains(where: { $0.paneID == pane }) else { return false }
+        marks[pane, default: Marks()].pinned = pinned
+        log(source: "web", type: "agent.attention", pane: pane, payload: ["via": .string("phone")])
+        return true
+    }
+
+    /// The agent with the group, unread and pinned the daemon would send.
+    private func withAttention(_ agent: Agent, mutedWorkspaces: Set<String>) -> Agent {
+        let mark = marks[agent.paneID] ?? Marks()
+        var copy = agent
+        copy.attention = AgentAttention.classify(
+            state: agent.state, turn: mark.turn, seen: mark.seen, word: agent.state.rawValue, pinned: mark.pinned,
+            muted: agent.workspaceLabel.map(mutedWorkspaces.contains) ?? false)
+        return copy
+    }
+
     // MARK: - Time
 
     /// Runs every scripted step due at `date`.
@@ -128,6 +205,7 @@ public struct DemoWorld: Sendable {
                    detail: "codex-payments installed p-retry, wrapped the webhook handler in three retries with exponential backoff, and added two tests for a flaky provider.",
                    files: ["package.json", "src/webhook.ts", "test/webhook.test.ts"])
         case .failMigration:
+            marks[Self.migrationPane, default: Marks()].turn += 1
             update(Self.migrationPane) { agent, at in
                 agent.state = .idle
                 agent.stateSince = at
@@ -429,11 +507,22 @@ public struct DemoWorld: Sendable {
 
     // MARK: - Snapshots
 
-    public var state: DaemonState {
-        DaemonState(agents: agents, pendingAction: pending, questions: pending.map { [$0] } ?? [],
-                    voice: .init(mode: "demo", name: "Sheepdog", status: "connected", clientConnected: true),
-                    herdr: "demo", version: "demo",
-                    conversationStartedAt: start)
+    public var state: DaemonState { state(mutes: []) }
+
+    /// The state with the muted spaces the demo's spaces hold.
+    func state(mutes: [SpaceMute]) -> DaemonState {
+        let names = Set(mutes.compactMap(\.name))
+        let list = agents.map { withAttention($0, mutedWorkspaces: names) }
+        let groups = list.compactMap(\.attention)
+        return DaemonState(agents: list, pendingAction: pending, questions: pending.map { [$0] } ?? [],
+                           voice: .init(mode: "demo", name: "Sheepdog", status: "connected", clientConnected: true),
+                           herdr: "demo", version: "demo",
+                           conversationStartedAt: start,
+                           attentionCounts: AttentionCounts(
+                               needsYou: groups.filter { $0.group == .needsYou }.count,
+                               working: groups.filter { $0.group == .working }.count,
+                               doneUnread: groups.filter { $0.group == .done && $0.unread }.count),
+                           spaceMutes: mutes)
     }
 
     /// Lines to say since the last call.
@@ -445,6 +534,7 @@ public struct DemoWorld: Sendable {
     // MARK: - Helpers
 
     private mutating func finish(_ pane: String, spoken: String, detail: String, files: [String]) {
+        marks[pane, default: Marks()].turn += 1
         update(pane) { agent, at in
             agent.state = .done
             agent.stateSince = at

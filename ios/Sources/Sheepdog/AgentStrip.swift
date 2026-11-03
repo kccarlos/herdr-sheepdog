@@ -85,6 +85,11 @@ struct AgentChip: View {
             Text(agent.alias)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.ink)
+            if agent.isUnread {
+                Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("agent.chip.\(agent.alias).unread")
+            }
             if let computer {
                 Text(computer)
                     .font(.caption)
@@ -102,7 +107,7 @@ struct AgentChip: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([agent.alias, computer, Theme.word(for: agent.state)].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(subtitle ?? "")
+        .accessibilityValue([AgentAttentionWords.value(agent).trimmedOrNil, subtitle].compactMap { $0 }.joined(separator: ". "))
         .accessibilityHint("Opens this agent's window")
         .accessibilityAddTraits(.isButton)
     }

@@ -17,6 +17,9 @@ struct NotificationNotice: Equatable {
     var body: String
 
     init?(event: DaemonEvent) {
+        // A question or a finish in a muted space makes no notification
+        // (the daemon marks the event `muted: true`); voice errors still do.
+        if event.type == "pending.created" || event.type == "herdr.transition", AttentionEvents.isMuted(event) { return nil }
         switch event.type {
         case "pending.created":
             guard let pending = PendingAction(event: event), pending.isAnswerPrompt else { return nil }

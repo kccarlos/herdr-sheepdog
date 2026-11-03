@@ -29,6 +29,29 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(notice.body, "auth asks to run the tests.")
     }
 
+    func testAMutedSpacesQuestionAndFinishMakeNoNotification() {
+        let question = DaemonEvent(
+            seq: 9, source: "supervisor", type: "pending.created", paneID: "w1:p2",
+            payload: [
+                "id": .string("pending-2"), "kind": .string("answer_prompt"), "agent": .string("auth"),
+                "summary": .string("auth asks to run the tests."), "muted": .bool(true),
+                "options": .array([.object(["index": .number(1), "label": .string("Yes")])]),
+            ]
+        )
+        XCTAssertNil(NotificationNotice(event: question))
+        let finish = DaemonEvent(
+            seq: 10, source: "herdr", type: "herdr.transition", paneID: "w1:p2",
+            payload: ["from": .string("working"), "to": .string("done"), "name": .string("auth"), "muted": .bool(true)]
+        )
+        XCTAssertNil(NotificationNotice(event: finish))
+        // The same events without the mark still notify; voice errors are never muted.
+        var open = finish
+        open.payload["muted"] = .bool(false)
+        XCTAssertNotNil(NotificationNotice(event: open))
+        let voiceError = DaemonEvent(seq: 11, source: "voice", type: "voice.connect_error", payload: ["message": .string("no key"), "muted": .bool(true)])
+        XCTAssertNotNil(NotificationNotice(event: voiceError))
+    }
+
     func testAWorkerFinishUsesTheTransitionAndIgnoresOtherStates() throws {
         func transition(from: String, to: String) -> DaemonEvent {
             DaemonEvent(

@@ -19,6 +19,14 @@ public struct SpacesView: Codable, Equatable, Sendable {
         public var agents: [SpaceAgent]
         public var shells: [String]
         public var commands: [WrapUp]
+        /// Notifications for this space are muted (feature `space-mute`);
+        /// nil from a daemon without it, which hides the mute controls.
+        public var muted: Bool?
+        /// When the mute ends; nil means until the user unmutes.
+        public var until: Date?
+
+        public var supportsMute: Bool { muted != nil }
+        public var isMuted: Bool { muted == true }
     }
 
     public struct SpaceAgent: Codable, Equatable, Sendable {

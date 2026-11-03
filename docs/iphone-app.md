@@ -177,7 +177,17 @@ With one computer, none of this shows: no names and no Talk to.
   log.
 - **Approvals.** A card shows who is asking, the command and one button per
   option. Tap an answer or say it.
-- **Agents.** One compact card per agent: its state and for how long, and
+- **Agents.** The cards sit under **Needs you**, **Working** and **Done**
+  (an empty section is left out). Pinned agents come first in their
+  section, and in Done the ones that finished something you have not looked
+  at yet come before the rest, marked by a blue dot. Opening an agent's
+  window, or expanding its card, marks it seen; **Mark as unread** (on the
+  card's buttons and its long-press menu) turns the dot back on, and **Pin
+  to top** keeps an agent first in its section. Pins and the dot are shared
+  with Herdr on a core backend; on the original herdr they are kept on your
+  computer only, and the card says so. A computer that predates this shows
+  the same sections without dots or pins. The badge on the tab counts the
+  agents that need you, never the unread ones. One compact card per agent: its state and for how long, and
   what it works on. Tap a card for the details (the last result, what the
   agent last wrote, the files it touched, the last question it was asked
   and your answer, its space). Every waiting agent shows its question and
@@ -368,6 +378,15 @@ and sends no typed line until you agree again (turn the switch on, or tap
 **Turn it back on** on the screen the app shows). Your agents keep working.
 
 ## Notifications
+
+**Mute a space.** ⋯ ▸ **Spaces**, then swipe a space right (or long-press it,
+or open it and tap **Mute notifications**) and choose **For 1 hour**,
+**Until tomorrow morning** (08:00 on your phone's clock) or **Until I turn
+them back on**. Sheepdog then sends no alert and says nothing about that
+space, but nothing is hidden: its agents, the unread dots and their
+questions still show (a question in a muted space is marked and answered by
+tap), and the voice still answers when you ask. A muted space shows a
+crossed bell. A computer without this feature does not show the controls.
 
 When an agent needs you, the daemon sends a time-sensitive notification through
 Apple's push service, even if the app is closed. **Approve** and **Decline**

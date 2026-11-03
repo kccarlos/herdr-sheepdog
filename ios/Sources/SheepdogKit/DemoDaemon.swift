@@ -62,6 +62,12 @@ public final class DemoDaemon: @unchecked Sendable {
         set { lock.withLock { world.longQuestion = newValue } }
     }
 
+    /// The fixed attention list (`-sheepdogDemoAttention`); set before
+    /// `start()`. See `DemoWorld.seedAttention`.
+    public func seedAttention() {
+        lock.withLock { world.seedAttention() }
+    }
+
     /// A `URLSession` whose every request is answered by this daemon.
     public static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -159,7 +165,7 @@ public final class DemoDaemon: @unchecked Sendable {
                 "audio": ["in_hz": 16000, "out_hz": 24000, "format": "pcm16le mono"],
             ])
         case ("GET", "/api/state"):
-            var state = world.state
+            var state = world.state(mutes: spaces.mutes)
             state.update = update
             return encoded(state)
         case ("GET", "/api/conversation"):
@@ -227,6 +233,24 @@ public final class DemoDaemon: @unchecked Sendable {
                 return json(reply.body, status: reply.status)
             }
             if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {
+                return json(["ok": true])
+            }
+            if path.hasPrefix("/api/agents/"), method == "POST",
+               let last = path.split(separator: "/").last, ["seen", "pin"].contains(String(last)) {
+                let parts = path.dropFirst("/api/agents/".count).split(separator: "/")
+                let pane = parts.first.flatMap { String($0).removingPercentEncoding } ?? ""
+                let found: Bool
+                if last == "pin" {
+                    guard let pinned = object["pinned"] as? Bool else { return json(["error": "pinned must be a boolean"], status: 400) }
+                    found = world.setPinned(pane: pane, pinned)
+                } else {
+                    let turn = object["turn"] as? Int
+                    let unread = object["unread"] as? Bool == true
+                    guard (turn != nil) != unread else { return json(["error": "send exactly one of turn and unread"], status: 400) }
+                    found = world.markSeen(pane: pane, turn: turn, unread: unread)
+                }
+                guard found else { return json(["error": "no such agent"], status: 404) }
+                DispatchQueue.global().async { [weak self] in self?.publish() }
                 return json(["ok": true])
             }
             if path.hasPrefix("/api/agents/"), method == "POST",

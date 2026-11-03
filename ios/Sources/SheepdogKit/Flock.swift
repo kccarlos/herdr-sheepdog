@@ -10,46 +10,42 @@ extension Agent.State {
         case .unknown, .exited: return false
         }
     }
-
-    /// Where the agent sorts: the ones waiting on a person first, then the
-    /// busy ones, then the quiet ones, then what is not running.
-    public var flockRank: Int {
-        switch self {
-        case .blocked: return 0
-        case .working: return 1
-        case .idle, .done: return 2
-        case .unknown, .exited: return 3
-        }
-    }
 }
 
 /// The agents as the screen shows it: the running agents in the order that
-/// matters (blocked, working, then idle and done; by alias within each),
-/// and the rest folded away. A blocked agent is always running, so it can
-/// never be folded.
+/// matters (needs you, working, then done; pinned first within a group and
+/// unread first within Done; see `AgentOrder`), and the rest folded away.
+/// A blocked agent is always running, so it can never be folded.
 public struct Flock: Equatable, Sendable {
     public private(set) var running: [Agent]
     public private(set) var notRunning: [Agent]
 
     public init(_ agents: [Agent]) {
         let sorted = Flock.sorted(agents)
-        running = sorted.filter { $0.state.isRunning }
-        notRunning = sorted.filter { !$0.state.isRunning }
+        running = sorted.filter { $0.group != .notRunning }
+        notRunning = sorted.filter { $0.group == .notRunning }
     }
 
     /// Every agent, running ones first, in display order.
     public var all: [Agent] { running + notRunning }
 
+    /// The running agents under their headers: Needs you, Working, Done.
+    /// An empty section is left out.
+    public var sections: [FlockSection] {
+        [AgentGroup.needsYou, .working, .done].compactMap { group in
+            let members = running.filter { $0.group == group }
+            return members.isEmpty ? nil : FlockSection(group: group, agents: members)
+        }
+    }
+
     /// Agents waiting on the user: what the Agents pane tab's badge counts.
+    /// Blocked only: unread done agents show as a dot, not in the badge.
     public var waitingCount: Int { running.filter { $0.state == .blocked }.count }
 
     public var isEmpty: Bool { running.isEmpty && notRunning.isEmpty }
 
     public static func sorted(_ agents: [Agent]) -> [Agent] {
-        agents.sorted { lhs, rhs in
-            if lhs.state.flockRank != rhs.state.flockRank { return lhs.state.flockRank < rhs.state.flockRank }
-            return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
-        }
+        AgentOrder.sorted(agents)
     }
 }
 

@@ -111,8 +111,12 @@ private struct AgentWindowView: View {
     @EnvironmentObject private var model: SessionViewModel
 
     var body: some View {
+        let inputs = inputs
         AgentWindowContent(agent: agent, pane: pane, onSwitch: onSwitch, model: model, inputs: inputs)
             .equatable()
+            // Opening the window is looking at the agent: what it finished
+            // is seen, and so is each turn that ends while it stays open.
+            .modifier(SeenWhileVisible(paneID: agent.paneID, visible: inputs.live.hasAttention, attention: inputs.live.attention))
     }
 
     private var inputs: AgentWindowInputs {
