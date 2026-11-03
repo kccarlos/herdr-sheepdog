@@ -147,7 +147,9 @@ func (s *Server) Add(t hc.Terminal) {
 	s.noteAddressLocked(t.Address)
 }
 
-// SetStatus updates a terminal's root status and emits a status event.
+// SetStatus updates a terminal's root status and emits a status event. Like
+// herdr-core, a status that leaves working ends a turn: the terminal's turn
+// counter goes up and a turn event follows the status event.
 func (s *Server) SetStatus(address string, status *hc.Status) {
 	s.mu.Lock()
 	t, ok := s.terminals[address]
@@ -158,6 +160,10 @@ func (s *Server) SetStatus(address string, status *hc.Status) {
 	if status != nil {
 		t.Reported = true
 	}
+	endsTurn := t.Status != nil && t.Status.State == "working" && status != nil && status.State != "working"
+	if endsTurn {
+		t.Turn++
+	}
 	t.Status = status
 	s.terminals[address] = t
 	s.mu.Unlock()
@@ -167,6 +173,38 @@ func (s *Server) SetStatus(address string, status *hc.Status) {
 		"records":  map[string]any{},
 		"reported": t.Reported,
 	})
+	if endsTurn {
+		s.emitEvent(address, &t, "turn", hc.TurnData{State: status.State, Turn: t.Turn})
+	}
+}
+
+// SetLabels sets labels as another client would: the keys given change (an
+// empty value removes one) and a labels event carries the whole map. It
+// reports whether the terminal exists.
+func (s *Server) SetLabels(address string, labels map[string]string) (hc.Terminal, bool) {
+	s.mu.Lock()
+	t, ok := s.resolveLocked(address)
+	if !ok {
+		s.mu.Unlock()
+		return hc.Terminal{}, false
+	}
+	merged := cloneMap(t.Labels)
+	if merged == nil {
+		merged = map[string]string{}
+	}
+	for key, value := range labels {
+		if value == "" {
+			delete(merged, key)
+			continue
+		}
+		merged[key] = value
+	}
+	t.Labels = merged
+	s.terminals[t.Address] = t
+	s.mu.Unlock()
+
+	s.emitEvent(t.Address, &t, "labels", hc.LabelsData{Labels: cloneMap(merged)})
+	return t, true
 }
 
 // SetScreen sets the text returned by terminal.read.
@@ -252,6 +290,13 @@ func (s *Server) Heartbeat() {
 	for _, sub := range subs {
 		s.writeNotification(sub, "heartbeat", map[string]any{"seq": seq})
 	}
+}
+
+// Subscribers returns the number of open event subscriptions.
+func (s *Server) Subscribers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.subscribers)
 }
 
 // DropSubscribers closes every open subscription connection.
@@ -346,7 +391,7 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			Methods: []string{
 				"hello", "terminal.list", "terminal.get", "terminal.read",
 				"terminal.send", "terminal.keys", "terminal.interrupt",
-				"terminal.run", "terminal.kill", "terminal.attach",
+				"terminal.run", "terminal.kill", "terminal.label", "terminal.attach",
 				"events.subscribe",
 			},
 			Core: hc.CoreInfo{ID: "fake-core", Name: "hctest"},
@@ -415,6 +460,19 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return s.kill(p.Terminal)
+	case "terminal.label":
+		var p struct {
+			Terminal string            `json:"terminal"`
+			Labels   map[string]string `json:"labels"`
+		}
+		if err := decodeParams(params, &p); err != nil {
+			return nil, err
+		}
+		t, ok := s.SetLabels(p.Terminal, p.Labels)
+		if !ok {
+			return nil, notFound(p.Terminal)
+		}
+		return t, nil
 	default:
 		return nil, &wireError{
 			Code:    -32601,

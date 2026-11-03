@@ -174,6 +174,18 @@ func (c *Client) Run(ctx context.Context, p RunParams) (Terminal, error) {
 	return result, err
 }
 
+// Label sets labels on a terminal and returns the terminal afterwards. Only
+// the keys given change; a key with an empty value is removed. Labels are
+// free-form: herdr-core never interprets them.
+func (c *Client) Label(ctx context.Context, terminal string, labels map[string]string) (Terminal, error) {
+	var result Terminal
+	err := c.Call(ctx, "terminal.label", struct {
+		Terminal string            `json:"terminal"`
+		Labels   map[string]string `json:"labels"`
+	}{Terminal: terminal, Labels: labels}, &result)
+	return result, err
+}
+
 // Kill ends a terminal's program.
 func (c *Client) Kill(ctx context.Context, terminal string) (Terminal, error) {
 	var result Terminal

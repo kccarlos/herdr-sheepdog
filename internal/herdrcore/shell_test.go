@@ -43,7 +43,7 @@ func TestPhoneShellOpensInTheFoldersExistingSpace(t *testing.T) {
 	if run.Cwd != dir || len(run.Argv) != 0 || run.Line != "" || !run.NoParent || !run.Keep ||
 		!maps.Equal(run.Env, map[string]string{"DISABLE_AUTO_UPDATE": "true"}) ||
 		run.Labels["sheepdog"] != "shell" || run.Labels["herdr.space"] != space || run.Labels["herdr.tab"] != pane.TabID ||
-		len(run.Labels) != 3 {
+		run.Labels["herdr.seen"] != "0" || len(run.Labels) != 4 {
 		t.Fatalf("terminal.run params = %+v", run)
 	}
 }

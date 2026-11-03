@@ -73,6 +73,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.runWatcher(inner) }()
 	}
+	if a.marksRun != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.marksRun(inner) }()
+	}
 	if a.voice != nil {
 		// The voice starts in the background and never stops the
 		// daemon: without a key it stays off (setup mode); a failed
@@ -195,6 +199,9 @@ func (a *App) runWatcher(ctx context.Context) {
 		errc := make(chan error, 1)
 		go func() { errc <- w.Run(ctx) }()
 		for t := range w.Transitions() {
+			if a.marksPoke != nil {
+				a.marksPoke() // the marks follow every state change
+			}
 			wg.Add(1)
 			go func(t herdr.Transition) {
 				defer wg.Done()

@@ -172,6 +172,13 @@ type App struct {
 	herdr   *inject.Herdr
 	backend herdr.Backend // nil in mock mode
 	wref    *watcherRef   // nil in mock mode
+	// marker keeps the seen and pinned marks: the backend's labels on
+	// herdr-core, else attention.Local. marksRun keeps it current until
+	// the daemon stops, and marksPoke asks it to look again after a state
+	// change (nil when the backend needs neither).
+	marker    herdr.Marker
+	marksRun  func(ctx context.Context)
+	marksPoke func()
 	// term backs /term (the live terminal); nil in mock mode.
 	term     *web.TermDeps
 	sup      *supervisor.Supervisor

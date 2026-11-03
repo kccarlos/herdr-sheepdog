@@ -43,6 +43,7 @@ func (a *App) wire() error {
 		a.wref = &watcherRef{}
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
+	a.wireMarks(cfg, opts.Stderr)
 
 	// The supervisor is built before the voice session (its Handler is the
 	// session's tool handler); the pusher is filled in below. The querier

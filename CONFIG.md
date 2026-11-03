@@ -547,6 +547,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions and your runtime settings (`state.path`). | Overwritten as it changes. |
+| `~/.local/share/sheepdog/agent_marks.json` | With the original herdr, which has no labels: for each terminal, how many turns it finished, the last one you looked at, and whether you pinned it (mode 0600). herdr-core keeps these in terminal labels instead. No text from your sessions. | Each terminal's entry is removed when the terminal closes. |
 | `~/.local/share/sheepdog/attachments/<pane>/` | Photos and files you attached from the iPhone app for an agent (mode 0600). | 7 days. |
 | `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications: device tokens, relay tokens and each phone's notification content key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
