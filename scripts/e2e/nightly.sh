@@ -359,7 +359,8 @@ Rules: follow AGENTS.md (Conventional Commits; no Co-authored-by, session links 
   else
     echo "nightly: fixer running in $wt (45 min limit)" >&2
     (cd "$wt" && perl -e '$t = shift; alarm $t; exec @ARGV or die "exec: $!\n"' 2700 \
-      claude -p "$prompt" --model sonnet --permission-mode auto) >"$OUT/fixer.log" 2>&1
+      claude -p "$prompt" --model sonnet --permission-mode auto \
+      --settings '{"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":""}}') >"$OUT/fixer.log" 2>&1
     fixer_note "ran (exit $?); see fixer.log and FIX.md"
   fi
   pr=$(gh pr list --repo "$REPO_SLUG" --state open --search "nightly $DAY in:title" --json url -q '.[0].url' 2>/dev/null)
