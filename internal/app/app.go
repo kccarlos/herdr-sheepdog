@@ -40,6 +40,11 @@ const (
 	VoiceGemini = "gemini"
 	VoiceOpenAI = "openai"
 	VoiceOff    = "off"
+	// VoiceFake runs a voice session with no model and no network
+	// (internal/voice/fakevoice): open at once, holds a /ws client, answers
+	// a text message with a canned transcript. Dev only (needs --dev), for
+	// the private end-to-end environment (docs/dev/e2e.md).
+	VoiceFake   = "fake"
 	HerdrSocket = "socket"
 	HerdrMock   = "mock"
 	CLIOn       = "on"
@@ -63,7 +68,8 @@ const (
 
 // Options select the daemon's mode; zero values take the defaults noted.
 type Options struct {
-	// Voice is VoiceOn (default), VoiceGemini, VoiceOpenAI or VoiceOff.
+	// Voice is VoiceOn (default), VoiceGemini, VoiceOpenAI, VoiceFake (dev
+	// only) or VoiceOff.
 	Voice string
 	// Herdr is HerdrSocket (default) or HerdrMock.
 	Herdr string
@@ -276,8 +282,12 @@ func Check(cfg config.Config, opts Options) error {
 	opts = opts.withDefaults()
 	switch opts.Voice {
 	case VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff:
+	case VoiceFake:
+		if !opts.Dev && !cfg.Web.Dev {
+			return errors.New("app: --voice=fake is a developer mode; add --dev")
+		}
 	default:
-		return fmt.Errorf("app: --voice must be %s, %s, %s or %s", VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff)
+		return fmt.Errorf("app: --voice must be %s, %s, %s, %s or %s", VoiceOn, VoiceGemini, VoiceOpenAI, VoiceFake, VoiceOff)
 	}
 	if opts.Herdr != HerdrSocket && opts.Herdr != HerdrMock {
 		return fmt.Errorf("app: --herdr must be %s or %s", HerdrSocket, HerdrMock)
