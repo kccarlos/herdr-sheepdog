@@ -86,5 +86,14 @@ raise the window, then tick each step. Shoot with `shot.sh` when a step says
 
 ## Panel auto-update
 
-TODO: once PR #534 lands, add steps (update available note, apply, panel
-reload). Not testable before.
+1. Build the daemon from a tree whose embedded panel has `DEFAULT_URL` set to
+   the private port, and `up.sh --port N --panel-from <older checkout>`.
+2. Write `mods/sheepdog/.sheepdog-install.json` in the app home (version, a
+   sha256 per panel file as on disk, and the layout hash), then restart the
+   daemon (`voice-off`). Expect `/api/state` `panel` to go from
+   `update_available: true, modified: false` to `update_available: false`,
+   the log line "updated the herdr-app panel", `model/panel-update.js` on
+   disk and `herdr-app status` `errors` empty.
+3. Edit any panel file in the app home. Within about 10 s expect
+   `modified: true` and the window to show "A newer panel is available" with
+   "Run sheepdog setup" (this proves the replaced panel is the one running).
