@@ -82,7 +82,8 @@ func TestOpenShell(t *testing.T) {
 		r := runs[i]
 		if r.Cwd != cwd || len(r.Argv) != 0 || r.Line != "" || !r.NoParent || !r.Keep ||
 			!maps.Equal(r.Env, map[string]string{"DISABLE_AUTO_UPDATE": "true"}) ||
-			r.Labels["sheepdog"] != "spawn" || r.Labels["herdr.space"] == "" || r.Labels["herdr.tab"] == "" || len(r.Labels) != 3 {
+			r.Labels["sheepdog"] != "spawn" || r.Labels["herdr.space"] == "" || r.Labels["herdr.tab"] == "" ||
+			r.Labels["herdr.seen"] != "0" || len(r.Labels) != 4 {
 			t.Errorf("run %d params = %+v", i, r)
 		}
 	}

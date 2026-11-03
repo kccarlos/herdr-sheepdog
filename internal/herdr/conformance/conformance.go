@@ -50,6 +50,39 @@ type Driver interface {
 	// NewAgent creates the terminal for a new agent in cwd, joining the
 	// folder's existing space when it has one.
 	NewAgent(context.Context, string, string) (herdr.PaneInfo, error)
+
+	// The seen and pinned marks (marks.go). Marker is the backend's
+	// herdr.Marker: hc over terminal labels, the old herdr over
+	// attention.Local with a temporary store.
+	Marker() herdr.Marker
+	// Settle brings the marker up to date with the machine. hc follows its
+	// event stream and needs nothing; attention.Local is refreshed by the
+	// daemon after every state change, which Settle does once.
+	Settle(context.Context) error
+	// StartAgent starts an agent of kind in a new terminal in cwd the way
+	// sheepdog does (its own spawn path), and the agent comes up idle.
+	StartAgent(context.Context, string, string) (herdr.PaneInfo, error)
+	// ForeignAgent is an idle or done agent of kind in a terminal some
+	// other client started: it has no seen record.
+	ForeignAgent(context.Context, string, string, herdr.State) (herdr.PaneInfo, error)
+	// EndTurn runs one turn to its end: working, then done.
+	EndTurn(context.Context, string) error
+	// SetState changes the agent's state without working it (blocked,
+	// idle, working): no turn finishes.
+	SetState(context.Context, string, herdr.State) error
+	// OtherClientSeen is another client marking the agent seen: hc, a
+	// herdr.seen label from another client; the old herdr, a person
+	// focusing the pane in a TUI client (done turns idle).
+	OtherClientSeen(context.Context, string) error
+	// OtherClientPin is another client pinning the terminal. The old
+	// herdr's TUI has no pins, so there it is the marker's own write.
+	OtherClientPin(context.Context, string, bool) error
+	// MarkWrites counts the writes the backend made to its mark store: hc,
+	// terminal.label requests; the old herdr, saves of the marks file.
+	MarkWrites() int
+	// RestartDaemon is a fresh marker over the same machine and the same
+	// store, as after a daemon restart.
+	RestartDaemon(*testing.T) Driver
 }
 
 // ShellHost is the phone shell seam shared with internal/web.
@@ -73,7 +106,7 @@ type Scenario struct {
 // Scenarios is the backend conformance contract. Add an edge case here
 // first; a fix for one backend may not be accepted without the other.
 func Scenarios() []Scenario {
-	return []Scenario{
+	return append([]Scenario{
 		{
 			Name: "plain shell is never an agent",
 			Run:  plainShellIsNeverAnAgent,
@@ -106,7 +139,7 @@ func Scenarios() []Scenario {
 			Name: "a periodic snapshot with no change logs nothing and emits no transition",
 			Run:  unchangedSnapshotIsSilent,
 		},
-	}
+	}, markScenarios()...)
 }
 
 // RunAll runs every scenario against one backend through newDriver.

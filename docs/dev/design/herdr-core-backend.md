@@ -265,6 +265,22 @@ the program shows in the terminal, and not found after the start timeout.
 The phone shell uses the same run helper with `sheepdog=shell`; its space
 comes from `herdr.PaneInDir`, which shares `herdr.PaneDirs`' real-path
 folder match with agent spawning.
+Every terminal sheepdog opens also gets `herdr.seen=0` ("a terminal a client
+starts gets `herdr.seen=0`", herdr-app's `docs/labels.md`), and `StartAgent`
+writes `herdr.seen=<turn>` into a terminal that has no such label. The seen
+and pinned marks are the `herdr.seen` and `herdr.pinned` labels, shared with
+every Herdr window: `Backend` is the `herdr.Marker` (`marks.go`). `RunMarks`
+holds one unfiltered `events.subscribe`, caches the marks of every local
+terminal from its snapshot and from `turn`, `labels`, `status`, `created`,
+`removed` and `finished` events, and re-reads everything after a `missed`
+notification or a reconnect. `MarkSeen` writes only `herdr.seen`, only when it
+raises the mark (never above the terminal's `turn`), and `SetPinned(false)`
+writes `herdr.pinned=` (an empty value removes it). Writes are serialised and
+set the cache before they call `terminal.label`, so the `labels` event that
+echoes one does not count as another client's change on `MarkChanges`. While
+`RunMarks` is not running, reads and writes ask `terminal.list` and
+`terminal.get` instead. `error` stays `done` for the Watcher, and
+`Marks.Error` carries it for the list.
 The fleet stream asks `terminal.get` on `created`, `restarted`, a
 `foreground` change to a known agent program (one typed into an existing
 shell) and a terminal's status, to decide whether it is an agent or has

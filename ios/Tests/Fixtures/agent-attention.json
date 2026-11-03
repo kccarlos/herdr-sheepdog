@@ -1,0 +1,69 @@
+{
+  "about": "How the agent list groups and orders agents. `classify`: an agent's state and its terminal's marks in, its group, unread and pinned out. `orders`: agents in any order in, their names in list order out. Run by internal/attention (classify_test.go). The phone's AgentGroups and the herdr-app panel's model/agents.js read the same cases when they land; change any implementation and this file in the same PR. `marks.turn` counts finished turns of the terminal; `marks.seen` is the last turn a person looked at, absent when there is no record; `marks.word` is the backend's own word (done or idle), which decides unread when `seen` is absent; `marks.error` is the hc status word `error`. `state` is blocked, working, idle, done or unknown.",
+  "classify": [
+    {"name": "blocked is needs you, unread or not", "state": "blocked", "marks": {"turn": 3, "seen": 1, "word": "idle"}, "group": "needs_you", "unread": false, "pinned": false},
+    {"name": "an error status needs you", "state": "done", "marks": {"turn": 2, "seen": 2, "word": "done", "error": true}, "group": "needs_you", "unread": false, "pinned": false},
+    {"name": "working is never unread", "state": "working", "marks": {"turn": 3, "seen": 1, "word": "done"}, "group": "working", "unread": false, "pinned": false},
+    {"name": "idle with an unseen turn is unread", "state": "idle", "marks": {"turn": 3, "seen": 2, "word": "idle"}, "group": "done", "unread": true, "pinned": false},
+    {"name": "done with an unseen turn is unread", "state": "done", "marks": {"turn": 3, "seen": 0, "word": "done"}, "group": "done", "unread": true, "pinned": false},
+    {"name": "seen up to the turn is read", "state": "done", "marks": {"turn": 3, "seen": 3, "word": "done"}, "group": "done", "unread": false, "pinned": false},
+    {"name": "seen above the turn is read", "state": "idle", "marks": {"turn": 1, "seen": 5, "word": "idle"}, "group": "done", "unread": false, "pinned": false},
+    {"name": "no record and the backend says done is unread", "state": "done", "marks": {"turn": 0, "word": "done"}, "group": "done", "unread": true, "pinned": false},
+    {"name": "no record and the backend says idle is read", "state": "idle", "marks": {"turn": 4, "word": "idle"}, "group": "done", "unread": false, "pinned": false},
+    {"name": "a record beats the backend's word", "state": "done", "marks": {"turn": 4, "seen": 4, "word": "done"}, "group": "done", "unread": false, "pinned": false},
+    {"name": "a pinned read agent", "state": "idle", "marks": {"turn": 2, "seen": 2, "word": "idle", "pinned": true}, "group": "done", "unread": false, "pinned": true},
+    {"name": "a pinned blocked agent stays in needs you", "state": "blocked", "marks": {"turn": 2, "seen": 2, "word": "idle", "pinned": true}, "group": "needs_you", "unread": false, "pinned": true},
+    {"name": "unknown is not running", "state": "unknown", "marks": {"turn": 0, "word": "unknown"}, "group": "not_running", "unread": false, "pinned": false}
+  ],
+  "orders": [
+    {
+      "name": "groups first, unread first within done",
+      "agents": [
+        {"name": "delta", "state": "idle", "marks": {"turn": 2, "seen": 2, "word": "idle"}},
+        {"name": "echo", "state": "unknown", "marks": {"word": "unknown"}},
+        {"name": "bravo", "state": "working", "marks": {"turn": 1, "seen": 1, "word": "done"}},
+        {"name": "alpha", "state": "done", "marks": {"turn": 5, "seen": 3, "word": "done"}},
+        {"name": "charlie", "state": "blocked", "marks": {"turn": 1, "seen": 1, "word": "idle"}},
+        {"name": "foxtrot", "state": "done", "marks": {"turn": 2, "seen": 2, "word": "done"}}
+      ],
+      "expected": ["charlie", "bravo", "alpha", "delta", "foxtrot", "echo"]
+    },
+    {
+      "name": "pinned first within a group, not out of it",
+      "agents": [
+        {"name": "auth", "state": "idle", "marks": {"turn": 2, "seen": 2, "word": "idle"}},
+        {"name": "zed", "state": "idle", "marks": {"turn": 2, "seen": 2, "word": "idle", "pinned": true}},
+        {"name": "build", "state": "blocked", "marks": {"turn": 1, "seen": 1, "word": "idle"}},
+        {"name": "mid", "state": "working", "marks": {"turn": 1, "seen": 1, "word": "idle", "pinned": true}},
+        {"name": "ant", "state": "working", "marks": {"turn": 1, "seen": 1, "word": "idle"}}
+      ],
+      "expected": ["build", "mid", "ant", "zed", "auth"]
+    },
+    {
+      "name": "pinned beats unread inside done",
+      "agents": [
+        {"name": "alpha", "state": "done", "marks": {"turn": 3, "seen": 1, "word": "done"}},
+        {"name": "omega", "state": "idle", "marks": {"turn": 3, "seen": 3, "word": "idle", "pinned": true}},
+        {"name": "beta", "state": "done", "marks": {"turn": 3, "seen": 1, "word": "done", "pinned": true}}
+      ],
+      "expected": ["beta", "omega", "alpha"]
+    },
+    {
+      "name": "names sort without regard to case",
+      "agents": [
+        {"name": "beta", "state": "idle", "marks": {"turn": 1, "seen": 1, "word": "idle"}},
+        {"name": "Alpha", "state": "idle", "marks": {"turn": 1, "seen": 1, "word": "idle"}},
+        {"name": "Charlie", "state": "idle", "marks": {"turn": 1, "seen": 1, "word": "idle"}}
+      ],
+      "expected": ["Alpha", "beta", "Charlie"]
+    },
+    {
+      "name": "unread does not lift an agent out of working",
+      "agents": [
+        {"name": "b", "state": "done", "marks": {"turn": 2, "seen": 1, "word": "done"}},
+        {"name": "a", "state": "working", "marks": {"turn": 2, "seen": 1, "word": "done"}}
+      ],
+      "expected": ["a", "b"]
+    }
+  ]
+}

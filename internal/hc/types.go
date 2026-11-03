@@ -186,6 +186,19 @@ type FinishedData struct {
 	ExitCode *int   `json:"exit_code"`
 }
 
+// TurnData is the data of a turn event: the status left working and the
+// terminal's turn counter went up.
+type TurnData struct {
+	State string `json:"state"`
+	Turn  uint64 `json:"turn"`
+}
+
+// LabelsData is the data of a labels event: the terminal's whole label map
+// after a change, not just the keys that changed.
+type LabelsData struct {
+	Labels map[string]string `json:"labels"`
+}
+
 // TitleData is the data of a title event.
 type TitleData struct {
 	Title string `json:"title"`

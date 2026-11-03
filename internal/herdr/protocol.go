@@ -106,6 +106,9 @@ type AgentInfo struct {
 	Revision      uint64 `json:"revision"`
 	// StateChangeSeq increases on every state change; absent from PaneInfo.
 	StateChangeSeq uint64 `json:"state_change_seq,omitempty"`
+	// CompletionSeq is the old herdr's count of finished turns; null while
+	// the agent works. It is the turn behind Marks.Turn.
+	CompletionSeq *uint64 `json:"completion_seq,omitempty"`
 	// LaunchPending is true while an `agent.start` launch has not reached
 	// its first ready state (an agent at its first-run trust question is
 	// still pending). herdr refuses a rename until it is false.
@@ -141,7 +144,10 @@ const (
 // PaneInfo is herdr's PaneInfo: AgentInfo minus the agent-only fields, plus
 // the user pane label.
 type PaneInfo struct {
-	PaneID        string `json:"pane_id"`
+	PaneID string `json:"pane_id"`
+	// TerminalID names the terminal in the pane. Unlike the pane id it is
+	// not reused after the terminal closes.
+	TerminalID    string `json:"terminal_id,omitempty"`
 	WorkspaceID   string `json:"workspace_id"`
 	TabID         string `json:"tab_id"`
 	Status        State  `json:"agent_status"`

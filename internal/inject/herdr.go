@@ -19,6 +19,11 @@ type Herdr struct {
 	inner supervisor.Herdr
 	log   logging.Logger
 
+	// AfterStart, when set, runs after StartAgent has typed an agent's
+	// command into a pane. The old herdr uses it to mark the pane seen
+	// (herdr-core does that in its own StartAgent). Set it before use.
+	AfterStart func(ctx context.Context, paneID string)
+
 	mu    sync.Mutex
 	panes map[string]*synthetic
 }
@@ -245,7 +250,13 @@ func (h *Herdr) StartAgent(ctx context.Context, paneID, name, kind string, args 
 	if err != nil {
 		return err
 	}
-	return sp.StartAgent(ctx, paneID, name, kind, args, timeout)
+	if err := sp.StartAgent(ctx, paneID, name, kind, args, timeout); err != nil {
+		return err
+	}
+	if h.AfterStart != nil {
+		h.AfterStart(ctx, paneID)
+	}
+	return nil
 }
 
 // GetAgent implements supervisor.Spawner.

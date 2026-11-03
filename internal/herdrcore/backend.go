@@ -40,6 +40,13 @@ type Backend struct {
 	// launches are StartAgent's launches not yet seen as agents, by
 	// terminal (agents.go).
 	launches map[string]launch
+
+	// cache is the marks of every terminal, current while RunMarks runs
+	// (marks.go). markWrite serialises label writes; changes carries the
+	// MarkChanges signals.
+	cache     markCache
+	markWrite sync.Mutex
+	changes   chan string
 }
 
 // New returns a backend over client. A nil log discards events.
@@ -53,6 +60,7 @@ func New(client *hc.Client, log herdr.Logger) *Backend {
 		log:      log,
 		resync:   make(chan struct{}, 1),
 		launches: map[string]launch{},
+		changes:  make(chan string, markChangeBuffer),
 	}
 }
 

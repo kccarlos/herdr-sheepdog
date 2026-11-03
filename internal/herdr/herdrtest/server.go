@@ -64,8 +64,12 @@ type Server struct {
 	screens    map[string]string
 	nextSpace  int
 	nextTab    int
-	requests   []Request
-	subs       map[*subConn]struct{}
+	nextTerm   int
+	// completions counts the finished turns of each terminal (herdr's
+	// completion_seq), by terminal id.
+	completions map[string]uint64
+	requests    []Request
+	subs        map[*subConn]struct{}
 	// Handlers lets a test override or add a method. The returned error may
 	// be *herdr.Error to produce a protocol error.
 	handlers map[string]Handler
@@ -86,16 +90,17 @@ func New(t testing.TB) *Server {
 	// Removed even when Listen below fails (a TMPDIR too long for a socket).
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	s := &Server{
-		Path:       filepath.Join(dir, "h.sock"),
-		dir:        dir,
-		quit:       make(chan struct{}),
-		version:    "0.9.0",
-		workspaces: map[string]herdr.WorkspaceInfo{},
-		panes:      map[string]herdr.PaneInfo{},
-		agents:     map[string]herdr.AgentInfo{},
-		screens:    map[string]string{},
-		subs:       map[*subConn]struct{}{},
-		handlers:   map[string]Handler{},
+		Path:        filepath.Join(dir, "h.sock"),
+		dir:         dir,
+		quit:        make(chan struct{}),
+		version:     "0.9.0",
+		workspaces:  map[string]herdr.WorkspaceInfo{},
+		panes:       map[string]herdr.PaneInfo{},
+		agents:      map[string]herdr.AgentInfo{},
+		completions: map[string]uint64{},
+		screens:     map[string]string{},
+		subs:        map[*subConn]struct{}{},
+		handlers:    map[string]Handler{},
 	}
 	s.ln, err = net.Listen("unix", s.Path)
 	if err != nil {
@@ -143,9 +148,15 @@ func (s *Server) SetPane(p herdr.PaneInfo) {
 func (s *Server) SetAgent(a herdr.AgentInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.agents[a.PaneID] = a
 	p := s.panes[a.PaneID]
+	if a.TerminalID == "" {
+		a.TerminalID = p.TerminalID
+	}
+	s.agents[a.PaneID] = a
 	p.PaneID, p.WorkspaceID, p.TabID, p.Status, p.Agent = a.PaneID, a.WorkspaceID, a.TabID, a.Status, a.Agent
+	if a.TerminalID != "" {
+		p.TerminalID = a.TerminalID
+	}
 	s.panes[a.PaneID] = p
 	if _, ok := s.workspaces[a.WorkspaceID]; !ok && a.WorkspaceID != "" {
 		s.workspaces[a.WorkspaceID] = herdr.WorkspaceInfo{WorkspaceID: a.WorkspaceID, Label: a.WorkspaceID}
@@ -164,6 +175,51 @@ func (s *Server) SetStatus(paneID string, st herdr.State) {
 	if p, ok := s.panes[paneID]; ok {
 		p.Status = st
 		s.panes[paneID] = p
+	}
+}
+
+// StartTurn makes the agent work. It broadcasts the status change.
+func (s *Server) StartTurn(paneID string) {
+	s.EmitStatus(paneID, herdr.StateWorking)
+}
+
+// EndTurn finishes the agent's turn in state final (done or idle): the
+// terminal's completion_seq goes up by one. It broadcasts the status change.
+func (s *Server) EndTurn(paneID string, final herdr.State) {
+	s.mu.Lock()
+	s.completions[s.terminalKeyLocked(paneID)]++
+	s.mu.Unlock()
+	s.EmitStatus(paneID, final)
+}
+
+// terminalKeyLocked is the key of a pane's completion counter: its terminal
+// id, which survives the agent in it.
+func (s *Server) terminalKeyLocked(paneID string) string {
+	if id := s.panes[paneID].TerminalID; id != "" {
+		return id
+	}
+	return paneID
+}
+
+// withSeq fills the agent's completion_seq the way herdr reports it: the
+// terminal's count of finished turns, null while it works or before the
+// first. The caller holds s.mu.
+func (s *Server) withSeq(a herdr.AgentInfo) herdr.AgentInfo {
+	a.CompletionSeq = nil
+	if n := s.completions[s.terminalKeyLocked(a.PaneID)]; n > 0 && a.Status != herdr.StateWorking {
+		a.CompletionSeq = &n
+	}
+	return a
+}
+
+// Focus is what a TUI client does when it shows the pane: a done agent
+// reads idle, with no new turn. It broadcasts the status change.
+func (s *Server) Focus(paneID string) {
+	s.mu.Lock()
+	a, ok := s.agents[paneID]
+	s.mu.Unlock()
+	if ok && a.Status == herdr.StateDone {
+		s.EmitStatus(paneID, herdr.StateIdle)
 	}
 }
 
@@ -596,7 +652,7 @@ func (s *Server) builtin(method string) Handler {
 			defer s.mu.Unlock()
 			agents := make([]herdr.AgentInfo, 0, len(s.agents))
 			for _, a := range s.agents {
-				agents = append(agents, a)
+				agents = append(agents, s.withSeq(a))
 			}
 			return map[string]any{"type": "agent_list", "agents": agents}, nil
 		}
@@ -621,9 +677,26 @@ func (s *Server) builtin(method string) Handler {
 				snap.Panes = append(snap.Panes, p)
 			}
 			for _, a := range s.agents {
-				snap.Agents = append(snap.Agents, a)
+				snap.Agents = append(snap.Agents, s.withSeq(a))
 			}
 			return map[string]any{"type": "session_snapshot", "snapshot": snap}, nil
+		}
+	case "agent.start":
+		// Only records the request: a test makes the agent appear itself.
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				PaneID string `json:"pane_id"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			s.mu.Lock()
+			_, ok := s.panes[params.PaneID]
+			s.mu.Unlock()
+			if !ok {
+				return nil, &herdr.Error{Code: "pane_not_found", Message: "pane " + params.PaneID + " not found"}
+			}
+			return map[string]any{"type": "agent_started"}, nil
 		}
 	case "pane.read", "agent.read":
 		return func(p json.RawMessage) (any, error) {
@@ -724,6 +797,7 @@ func (s *Server) createPane(cwd, workspaceID, label string) herdr.PaneInfo {
 		}
 	}
 	s.nextTab++
+	s.nextTerm++
 	tabID := fmt.Sprintf("%s:t%d", workspaceID, s.nextTab)
 	var paneID string
 	for n := 1; ; n++ {
@@ -743,7 +817,9 @@ func (s *Server) createPane(cwd, workspaceID, label string) herdr.PaneInfo {
 	s.workspaces[workspaceID] = w
 	pane := herdr.PaneInfo{
 		PaneID: paneID, WorkspaceID: workspaceID, TabID: tabID,
-		Status: herdr.StateUnknown, Cwd: cwd,
+		// Like herdr's, a terminal id is never reused after the terminal closes.
+		TerminalID: fmt.Sprintf("term_%d", s.nextTerm),
+		Status:     herdr.StateUnknown, Cwd: cwd,
 	}
 	s.panes[paneID] = pane
 	return pane
@@ -786,11 +862,11 @@ func (s *Server) resolveAgent(p json.RawMessage) (herdr.AgentInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if a, ok := s.agents[params.Target]; ok {
-		return a, nil
+		return s.withSeq(a), nil
 	}
 	for _, a := range s.agents {
 		if a.Name != "" && a.Name == params.Target {
-			return a, nil
+			return s.withSeq(a), nil
 		}
 	}
 	return herdr.AgentInfo{}, &herdr.Error{Code: "agent_not_found", Message: "agent target " + params.Target + " not found"}

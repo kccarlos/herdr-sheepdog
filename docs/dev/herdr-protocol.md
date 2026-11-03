@@ -170,7 +170,8 @@ matches `Action Required` in the OSC window title) with `live_strong_blocker`
 | `terminal_title`, `terminal_title_stripped` | string\|null | latest OSC 0/2 window title; Codex puts `[ ! ] Action Required \| <task summary> \| <dir>` here when blocked and `⠸ <task summary> \| <dir>` while working; Claude Code puts `✳ <task summary>` |
 | `agent_session` | object\|null | `{source:"herdr:codex",agent:"codex",kind:"id"\|"path",value:"…"}` |
 | `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | |
-| `state_change_seq` | uint64 | monotonically increases per state change, useful for ordering/dedup |
+| `state_change_seq` | uint64 | monotonically increases per state change, useful for ordering/dedup. It is not a count of finished turns: it goes up on every state change. |
+| `completion_seq` | uint64\|null | finished turns of the terminal; null while the agent works (herdr 0.9.5). sheepdog's turn for the seen mark (`attention.Local`), kept in its own store because of the null |
 
 Observed while blocked (`testdata/herdr/codex-approval-prompt.agent-get.json`):
 
@@ -194,7 +195,9 @@ Observed while blocked (`testdata/herdr/codex-approval-prompt.agent-get.json`):
 `PaneInfo` = `AgentInfo` minus `name`/`interactive_ready`/`launch_pending`/
 `state_change_seq`, plus `label` (user pane label, `pane.rename`) and `scroll`.
 `WorkspaceInfo.label` is the workspace name shown in the sidebar (derived from
-the cwd basename unless renamed).
+the cwd basename unless renamed). A pane's `terminal_id` (`term_…`) is not
+reused after its terminal closes, unlike the positional pane id (`w5:p1`), so
+`attention.Local` keys the seen and pinned marks by it.
 
 **Default alias derivation (proposal):** `agent.name` if set; else
 `workspace.label` (+ `-<n>` when the workspace has more than one agent pane,

@@ -135,6 +135,7 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 	return herdr.PaneInfo{
 		PaneID:        t.Address,
+		TerminalID:    t.Address,
 		WorkspaceID:   spaceOf(t),
 		TabID:         t.Labels[labelTab],
 		Status:        state,

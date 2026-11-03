@@ -41,9 +41,11 @@ func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane
 func (b *Backend) openShell(ctx context.Context, cwd, space, role string) (herdr.PaneInfo, error) {
 	tab := newID()
 	t, err := b.client.Run(ctx, hc.RunParams{
-		Cwd:      cwd,
-		Env:      herdr.PaneEnv,
-		Labels:   map[string]string{spawnLabel: role, labelSpace: space, labelTab: tab},
+		Cwd: cwd,
+		Env: herdr.PaneEnv,
+		// herdr.seen=0: a terminal a client starts is read, not unread
+		// (herdr-app docs/labels.md).
+		Labels:   map[string]string{spawnLabel: role, labelSpace: space, labelTab: tab, labelSeen: "0"},
 		Keep:     true,
 		NoParent: true,
 	})
@@ -94,6 +96,7 @@ func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args [
 		return translate(err)
 	}
 	b.startLaunch(paneID, kind, timeout)
+	b.startedSeen(ctx, paneID)
 	return nil
 }
 
