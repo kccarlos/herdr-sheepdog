@@ -85,7 +85,7 @@ final class AgentAttentionUITests: XCTestCase {
 
         // Expand the read agent and pin it from its card.
         tapWhenTappable(toggle(app, "claude-migration"), "claude-migration's card")
-        tapWhenTappable(app.buttons["flock.agent.claude-migration.pinButton"].firstMatch, "Pin to top")
+        tapWhenTappable(revealAboveCapsule(app, app.buttons["flock.agent.claude-migration.pinButton"].firstMatch), "Pin to top")
         let pinned = element(app, "flock.agent.claude-migration.pinned")
         XCTAssertTrue(pinned.waitForExistence(timeout: 10), "the pin glyph")
         XCTAssertEqual(toggle(app, "claude-migration").value as? String, "Pinned")
@@ -93,7 +93,7 @@ final class AgentAttentionUITests: XCTestCase {
         shot("pinned")
 
         // And back.
-        tapWhenTappable(app.buttons["flock.agent.claude-migration.pinButton"].firstMatch, "Unpin")
+        tapWhenTappable(revealAboveCapsule(app, app.buttons["flock.agent.claude-migration.pinButton"].firstMatch), "Unpin")
         let gone = NSPredicate(format: "exists == false")
         expectation(for: gone, evaluatedWith: pinned)
         waitForExpectations(timeout: 10)
