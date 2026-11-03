@@ -484,3 +484,26 @@ func TestParsePromptDescriptions(t *testing.T) {
 		t.Errorf("option 2 = %+v", o)
 	}
 }
+
+// TestParsePromptFolderAccessNeedsEnter pins Codex 0.166's "Folder access"
+// dialog (nightly 2026-11-02 and 11-03): its footer says "enter continue",
+// and the digit only moves the cursor, so the one key "1" left the dialog
+// open for good. Every option moves the cursor, then presses enter.
+func TestParsePromptFolderAccessNeedsEnter(t *testing.T) {
+	p, ok := herdr.ParsePrompt(screen(t, "codex-folder-access-dialog.screen.txt"))
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	want := []string{"enter", "down enter"}
+	if len(p.Options) != 2 || p.Default != 0 {
+		t.Fatalf("options = %+v, default %d", p.Options, p.Default)
+	}
+	for i, w := range want {
+		if got := strings.Join(p.Options[i].Keys, " "); got != w {
+			t.Errorf("option %d keys = %q, want %q", i+1, got, w)
+		}
+	}
+	if got := strings.Join(p.YesKeys, " "); got != "enter" {
+		t.Errorf("yes keys = %q, want enter", got)
+	}
+}
