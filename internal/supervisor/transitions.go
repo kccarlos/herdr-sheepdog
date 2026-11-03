@@ -34,6 +34,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	}
 	defer s.syncNames()
 	s.invalidateBriefing()
+	if !t.Closed && !t.Released {
+		s.attentionAfterTransition(ctx, row)
+	}
 	if t.Renamed && !t.Closed && (t.From == "" || t.From == t.To) {
 		// A name-only update (herdr's own rename, found by the
 		// snapshot diff): the row has the new name and the voice gets

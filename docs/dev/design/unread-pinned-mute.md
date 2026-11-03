@@ -216,7 +216,7 @@ Top level, new:
 
 | Type | Fields | Who reacts |
 |---|---|---|
-| `agent.attention` | `pane_id, group, unread, pinned, turn, seen?, via` (`phone`, `panel`, `herdr`, `tui_focus`) | phone and panel re-read `/api/state` (debounced, like `herdr.transition`) |
+| `agent.attention` | `pane_id, group, unread, pinned, turn, seen?, via` (`phone`, `panel`, `herdr`, `tui_focus`) | phone and panel re-read `/api/state` (debounced, like `herdr.transition`). Also logged when an agent's state change moves its group or unread, so the event never lags `/api/state` (not for a pane's first transition, which only sets the baseline) |
 | `space.muted` | `path, name, muted, until?, via` (`phone`, `expired`) | phone, panel, Sheepdog.app |
 
 `via: "herdr"` covers every change that came in on `MarkChanges` (herdr-app,

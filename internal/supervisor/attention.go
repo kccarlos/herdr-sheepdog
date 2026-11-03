@@ -226,15 +226,7 @@ func (s *Supervisor) seedAttention(ctx context.Context, row state.Agent) {
 	if !ok {
 		return
 	}
-	a := attentionOf(row, m, false)
-	s.attMu.Lock()
-	defer s.attMu.Unlock()
-	if s.attLast == nil {
-		s.attLast = map[string]AgentAttention{}
-	}
-	if _, had := s.attLast[row.PaneID]; !had {
-		s.attLast[row.PaneID] = a
-	}
+	s.seedAttentionWith(row.PaneID, attentionOf(row, m, false))
 }
 
 // noteAttention logs agent.attention unless a is what the last event for the
@@ -298,6 +290,47 @@ func (s *Supervisor) attentionChanged(ctx context.Context, paneID string) {
 		via = ViaTUI
 	}
 	s.noteAttention(paneID, a, via)
+}
+
+// attentionAfterTransition says the agent's attention again once its state
+// has moved: the group follows the state, and herdr's turn label can arrive
+// before the transition that ends the turn, so the event it caused may still
+// name the old group. It says nothing when the attention is what the last
+// event said.
+func (s *Supervisor) attentionAfterTransition(ctx context.Context, row state.Agent) {
+	if s.cfg.Marker == nil {
+		return
+	}
+	all, err := s.cfg.Marker.AllMarks(ctx)
+	if err != nil {
+		return
+	}
+	a := attentionOf(row, marksOf(all, row), false)
+	s.attMu.Lock()
+	_, had := s.attLast[row.PaneID]
+	s.attMu.Unlock()
+	if !had {
+		// First sight of the pane: a baseline for the next change, not a
+		// change (every agent's first transition would say so); clients
+		// learn of the transition itself from herdr.transition.
+		s.seedAttentionWith(row.PaneID, a)
+		return
+	}
+	s.noteAttention(row.PaneID, a, ViaHerdr)
+}
+
+// seedAttentionWith remembers a as the attention last told for the pane,
+// unless an event already did.
+func (s *Supervisor) seedAttentionWith(paneID string, a AgentAttention) {
+	a.Muted = false
+	s.attMu.Lock()
+	defer s.attMu.Unlock()
+	if s.attLast == nil {
+		s.attLast = map[string]AgentAttention{}
+	}
+	if _, had := s.attLast[paneID]; !had {
+		s.attLast[paneID] = a
+	}
 }
 
 // RunAttention logs the marks that change on their own and removes space
