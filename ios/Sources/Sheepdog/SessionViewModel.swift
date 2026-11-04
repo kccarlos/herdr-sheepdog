@@ -63,6 +63,9 @@ final class SessionViewModel: ObservableObject {
     var approval: ApprovalFlow.Card? { fleet.current?.approval }
     /// The agents, the open questions and the view state with them.
     let agentsModel = AgentsModel()
+    /// The Settings sheet reads this directly so the nested AgentsModel's
+    /// term-ready update invalidates the sheet after it has opened.
+    @Published private(set) var shellOffered: Bool?
     /// The agents as the screen groups them: running (blocked, working,
     /// idle and done) and the rest.
     var flock: Flock { agentsModel.flock }
@@ -492,7 +495,7 @@ final class SessionViewModel: ObservableObject {
         voice.update(endpoint: channelEndpoint(endpoint))
         if demo == nil {
             termHub.update(endpoint: channelEndpoint(endpoint))
-            agentsModel.setShellOffered(nil)
+            setShellOffered(nil)
         }
         notices.banner = nil
         linkModel.setHello(fleet.current?.hello)
@@ -1296,6 +1299,38 @@ final class SessionViewModel: ObservableObject {
         return try await current { try await $0.agentDiff(paneID: paneID, path: path) }
     }
 
+    // MARK: - Files and Changes (the read-only browser)
+
+    /// Whether the daemon has the file browser (`files`): the entry points
+    /// show only then. The demo has it.
+    var filesAvailable: Bool {
+        if demo != nil { return true }
+        return DaemonFeatureSupport.has(FileBrowser.feature, handshake: linkModel.handshake,
+                                        helloFeatures: linkModel.hello?.features,
+                                        remembered: fleet.current?.features)
+    }
+
+    /// The browser's reads, on the current computer. `changesPane` names the
+    /// agent whose changes the Changes tab shows; nil leaves the tab out.
+    func browserServices(scope: FileScope, changesPane: String?) -> BrowserServices {
+        let computer = fleet.current
+        func daemon<T>(_ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
+            guard settings.endpoint != nil, let computer else { throw DaemonError.malformed("no daemon address set") }
+            return try await computer.request(as: DaemonClient.self, body)
+        }
+        return BrowserServices(
+            list: { path, query in try await daemon { try await $0.files(scope, path: path, query: query) } },
+            read: { path in try await daemon { try await $0.file(scope, path: path) } },
+            image: { path in try await daemon { try await $0.fileImage(scope, path: path) } },
+            changes: changesPane.map { pane in { try await daemon { try await $0.agentChanges(paneID: pane) } } },
+            diff: { path in
+                guard let pane = changesPane else { return nil }
+                return try await daemon { try await $0.agentDiff(paneID: pane, path: path) }
+            },
+            describe: { self.requestFailure($0) }
+        )
+    }
+
     /// `POST /api/agents/{pane}/attachments`.
     func uploadAttachment(paneID: String, data: Data, fileName: String, mimeType: String) async throws -> AttachmentReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
@@ -1309,10 +1344,15 @@ final class SessionViewModel: ObservableObject {
     private(set) lazy var termHub: TermHub = {
         let hub = makeTermHub()
         hub.onReady = { [weak self] ready in
-            self?.agentsModel.setShellOffered(ready.shell)
+            self?.setShellOffered(ready.shell)
         }
         return hub
     }()
+
+    private func setShellOffered(_ offered: Bool?) {
+        agentsModel.setShellOffered(offered)
+        shellOffered = offered
+    }
 
 
     /// Whether to show the shell's entry points: the daemon has `/term` and

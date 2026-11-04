@@ -70,14 +70,16 @@ final class AttachmentsTests: XCTestCase {
     }
 
     func testDecodesWireShapes() throws {
-        let json = #"{"repo":true,"root":"/r","branch":"main","files":[{"path":"a/b.go","old_path":"a/c.go","status":"renamed","added":1,"deleted":2,"binary":false}],"added":1,"deleted":2}"#
+        let json = #"{"repo":true,"root":"/r","branch":"main","files":[{"path":"a/b.go","old_path":"a/c.go","status":"renamed","added":1,"deleted":2,"binary":false}],"added":1,"deleted":2,"hidden":3}"#
         let changes = try DaemonClient.decoder.decode(AgentChanges.self, from: Data(json.utf8))
+        XCTAssertEqual(changes.hidden, 3)
         XCTAssertEqual(changes.files.first?.oldPath, "a/c.go")
         XCTAssertEqual(changes.files.first?.fileName, "b.go")
         XCTAssertEqual(changes.files.first?.folder, "a")
         XCTAssertEqual(changes.summary, "main · 1 file")
         let none = try DaemonClient.decoder.decode(AgentChanges.self, from: Data(#"{"repo":false,"reason":"not_repo","files":[],"added":0,"deleted":0}"#.utf8))
         XCTAssertEqual(none.noRepoMessage, "This folder is not a git repository.")
+        XCTAssertEqual(none.hidden, 0)
     }
 }
 
@@ -104,7 +106,7 @@ final class DemoChangesTests: XCTestCase {
         let fetched = try await client.agentChanges(paneID: pane)
         let changes = try XCTUnwrap(fetched)
         XCTAssertTrue(changes.repo)
-        XCTAssertEqual(changes.files.count, 3)
+        XCTAssertEqual(changes.files.count, 5)
         let fetchedDiff = try await client.agentDiff(paneID: pane, path: "internal/auth/token.go")
         let diff = try XCTUnwrap(fetchedDiff)
         XCTAssertFalse(DiffParser.parse(diff.diff).isEmpty)

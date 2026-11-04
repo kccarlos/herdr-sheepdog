@@ -43,7 +43,7 @@ struct SettingsView: View {
                     } footer: {
                         Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
-                    if model.agentsModel.shellOffered == false {
+                    if model.shellOffered == false {
                         Section {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
@@ -80,7 +80,7 @@ struct SettingsView: View {
                             MenuRow(title: "Languages", symbol: "globe", value: model.settingsModel.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
-                        if model.agentsModel.shellOffered == false {
+                        if model.shellOffered == false {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
                         }
@@ -90,7 +90,7 @@ struct SettingsView: View {
                     } header: {
                         Text("Computer")
                     } footer: {
-                        if model.agentsModel.shellOffered == false {
+                        if model.shellOffered == false {
                             Text(PhoneShell.offExplanation)
                         }
                     }
@@ -186,7 +186,7 @@ struct SettingsView: View {
         } header: {
             Text("Computers")
         } footer: {
-            if model.agentsModel.shellOffered == false {
+            if model.shellOffered == false {
                 Text(PhoneShell.offExplanation)
             }
         }
@@ -234,12 +234,21 @@ struct SettingsView: View {
     }
 
     private func load() {
+        if model.isDemo {
+            loaded = true
+            firstRun = false
+            path = []
+            model.navigation.settingsRoute = nil
+            return
+        }
         guard !loaded, path.isEmpty else { return }
         loaded = true
         firstRun = !model.settings.hasBeenConfigured
         // Health's "Change in Settings" opens straight on Models; the first
         // run opens on the Daemon screen.
-        if let route = model.navigation.settingsRoute {
+        if model.isDemo {
+            model.navigation.settingsRoute = nil
+        } else if let route = model.navigation.settingsRoute {
             switch route {
             case .models: path = [.models]
             case .languages: path = [.languages]

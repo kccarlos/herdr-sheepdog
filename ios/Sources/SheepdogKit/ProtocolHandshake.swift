@@ -117,6 +117,17 @@ public struct ProtocolHandshake: Equatable, Sendable {
     public var isMismatch: Bool { state.isMismatch }
 }
 
+/// Resolves an optional daemon feature while preferring the live handshake,
+/// then the pre-voice REST hello, then a previously observed handshake.
+public enum DaemonFeatureSupport {
+    public static func has(_ feature: String, handshake: ProtocolHandshake.State,
+                           helloFeatures: [String]?, remembered: [String]?) -> Bool {
+        if case let .ready(_, _, features) = handshake { return features.contains(feature) }
+        if let helloFeatures { return helloFeatures.contains(feature) }
+        return remembered?.contains(feature) ?? false
+    }
+}
+
 extension ProtocolHandshake.State {
     /// The protocol in use, once known.
     public var negotiatedProtocol: Int? {

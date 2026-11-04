@@ -27,6 +27,7 @@ final class ProtocolGoldenTests: XCTestCase {
         "term/server": ["term-closed", "term-error", "term-free", "term-opened", "term-ready"],
         "term/client": ["term-close", "term-hello", "term-mouse", "term-open", "term-open-shell", "term-resize", "term-scroll"],
         "rest": ["hello", "state"],
+        "rest/files": ["image", "list", "text"],
     ]
 
     private func goldens(_ dir: String) throws -> [(name: String, data: Data)] {
@@ -93,6 +94,23 @@ final class ProtocolGoldenTests: XCTestCase {
         XCTAssertEqual(hello.ws, "/ws")
         XCTAssertEqual(hello.audio.inHz, 16000)
         XCTAssertNotNil(hello.computer, "the computer's id and name")
+        XCTAssertTrue(hello.features?.contains(FileBrowser.feature) == true, "Files capability is available before voice connects")
+    }
+
+    func testFilesDecode() throws {
+        let files = try goldens("rest/files")
+        let list = try DaemonClient.decoder.decode(FileListing.self, from: try XCTUnwrap(files.first { $0.name == "list" }).data)
+        XCTAssertEqual(list.rootName, "shop")
+        XCTAssertEqual(list.hidden, 1)
+        XCTAssertEqual(list.entries.map(\.kind), [.dir, .link, .link, .file])
+        XCTAssertEqual(list.entries.map(\.isBlocked), [false, false, true, false])
+        XCTAssertNotNil(list.entries.first?.modified, "modified must decode as a date")
+        let text = try DaemonClient.decoder.decode(FileContent.self, from: try XCTUnwrap(files.first { $0.name == "text" }).data)
+        XCTAssertEqual(text.kind, .text)
+        XCTAssertEqual(text.text, "# Report\n\nThe tests pass.\n")
+        let image = try DaemonClient.decoder.decode(FileContent.self, from: try XCTUnwrap(files.first { $0.name == "image" }).data)
+        XCTAssertEqual(image.kind, .image)
+        XCTAssertNil(image.text)
     }
 
     func testStateDecodes() throws {

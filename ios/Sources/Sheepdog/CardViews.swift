@@ -292,28 +292,59 @@ struct CardSheet: View {
 /// one-`Text` version for rows and bubbles.)
 struct MarkdownBlocksView: View {
     private let blocks: [MarkdownRenderer.Block]
+    /// Draws a picture block (alt text, source). Without one, a picture is
+    /// its alt text, as in a card or a bubble.
+    private let image: ((String, String) -> AnyView)?
+    /// Blocks are drawn as they scroll into view (a long document), not all
+    /// at once (a card).
+    private let lazy: Bool
+    /// A path such as `/login` is not broken across two lines.
+    private let keepsPathsWhole: Bool
 
-    init(_ source: String) {
-        blocks = MarkdownRenderer.blocks(source)
+    init(_ source: String, image: ((String, String) -> AnyView)? = nil) {
+        self.init(blocks: MarkdownRenderer.blocks(source), image: image)
+    }
+
+    /// For blocks made already (off the main actor, for a document).
+    init(
+        blocks: [MarkdownRenderer.Block], lazy: Bool = false, keepsPathsWhole: Bool = false,
+        image: ((String, String) -> AnyView)? = nil
+    ) {
+        self.blocks = blocks
+        self.lazy = lazy
+        self.keepsPathsWhole = keepsPathsWhole
+        self.image = image
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                view(for: block)
+        Group {
+            if lazy {
+                LazyVStack(alignment: .leading, spacing: 14) { items }
+            } else {
+                VStack(alignment: .leading, spacing: 14) { items }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var items: some View {
+        ForEach(blocks.indices, id: \.self) { index in
+            view(for: blocks[index])
+        }
+    }
+
+    private func inline(_ text: String) -> AttributedString {
+        MarkdownRenderer.inline(text, keepingPaths: keepsPathsWhole)
     }
 
     @ViewBuilder
     private func view(for block: MarkdownRenderer.Block) -> some View {
         switch block {
         case let .paragraph(text):
-            Text(MarkdownRenderer.inline(text))
+            Text(inline(text))
                 .fixedSize(horizontal: false, vertical: true)
         case let .heading(text):
-            Text(MarkdownRenderer.inline(text))
+            Text(inline(text))
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
@@ -325,7 +356,7 @@ struct MarkdownBlocksView: View {
                         Text(item.marker)
                             .monospacedDigit()
                             .foregroundStyle(Theme.muted)
-                        Text(MarkdownRenderer.inline(item.text))
+                        Text(inline(item.text))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.depth) * 18)
@@ -336,6 +367,13 @@ struct MarkdownBlocksView: View {
             CodeBlockView(text: text)
         case let .table(table):
             MarkdownTableView(table: table)
+        case let .image(alt, source):
+            if let image {
+                image(alt, source)
+            } else {
+                Text(MarkdownRenderer.inline("![\(alt)](\(source))"))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

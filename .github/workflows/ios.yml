@@ -91,9 +91,10 @@ jobs:
           fi
           echo "::notice::iOS tier: $tier"
 
-  # Five Mac jobs at most: GitHub runs five macOS jobs of an account at
-  # once, and a separate build job beside five test jobs could wait for a
-  # slot while the test jobs wait for it. So one test job builds: the
+  # Only test jobs use a Mac (smoke and five shards; GitHub runs five macOS
+  # jobs of an account at once, so the last waits for a slot), and a
+  # separate build job beside them could wait for a slot while the test
+  # jobs wait for it. So one test job builds: the
   # first to start (a job named in advance could get its Mac last, with
   # the others waiting). It boots its own simulator only after the upload
   # (a simulator booting beside the build made it 12 minutes instead of

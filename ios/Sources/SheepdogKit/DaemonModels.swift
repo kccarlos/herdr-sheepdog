@@ -33,6 +33,9 @@ public struct Hello: Codable, Equatable, Sendable {
     /// on daemons that can switch provider. Absent on older ones.
     public var voiceProvider: String?
     public var voiceModel: String?
+    /// Optional contract features, available before `/ws` opens. Missing
+    /// on older daemons; in that case callers can use a handshake if any.
+    public var features: [String]?
     /// The `/ws` protocol the daemon speaks and the oldest client protocol
     /// it serves (docs/ws-contract.md "Protocol version and handshake").
     /// Absent on daemons from before the handshake: protocol 1.
@@ -66,6 +69,7 @@ public struct Hello: Codable, Equatable, Sendable {
         case voiceName = "voice_name"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
+        case features
         case idempotencyKeys = "idempotency_keys"
         case termUnavailable = "term_unavailable"
     }
@@ -75,7 +79,7 @@ public struct Hello: Codable, Equatable, Sendable {
 
     public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio,
                 voiceProvider: String? = nil, voiceModel: String? = nil, protocol p: Int? = nil,
-                minProtocol: Int? = nil, termUnavailable: String? = nil) {
+                minProtocol: Int? = nil, termUnavailable: String? = nil, features: [String]? = nil) {
         self.name = name
         self.version = version
         self.voiceName = voiceName
@@ -84,6 +88,7 @@ public struct Hello: Codable, Equatable, Sendable {
         self.audio = audio
         self.voiceProvider = voiceProvider
         self.voiceModel = voiceModel
+        self.features = features
         self.protocol = p
         self.minProtocol = minProtocol
         self.termUnavailable = termUnavailable

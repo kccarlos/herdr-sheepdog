@@ -259,6 +259,26 @@ With one computer, none of this shows: no names and no Talk to.
     lines added and removed; tap one for its diff. It only shows changes
     and never edits anything. "No repository" means the agent's folder is
     not a git repository.
+  - **⋯ ▸ Files** (and **Files** on a space's page) opens a read-only browser
+    for the agent's or space's folder; it never changes a file. Folders come
+    first, then files by name or modified date, with a path bar to step back
+    up and a file-name search (which skips `.git`, `node_modules` and hidden
+    names). Tap a file to read it: Markdown with a **Raw** toggle, text and
+    code with line numbers, and images with pinch-to-zoom (SVG is shown as
+    text so the app never runs active content; other binary files show only
+    their size and date). On iPad the list and the file sit side by side.
+    - **Hidden for safety.** Because a phone can be lost, a safety rail in the
+      daemon hides common secret and key names, such as `.env`, `.ssh`,
+      `.git` and key files: they aren't listed, searched or read, and the
+      screen says how many are hidden. Only regular files inside the folder
+      can be read; symlinks
+      that leave the folder are marked blocked, and folders with a hidden
+      name on their own path are refused.
+    - **Limits.** A folder shows up to 2,000 entries (reading at most 20,000
+      names), search returns up to 200 matches (across 20,000 entries or 2
+      seconds), text files show the first 1 MiB before marking the rest
+      truncated, and images are served up to 16 MiB. Needs a daemon with the
+      file browser; an older daemon hides the button.
   - **⋯ ▸ Open shell here** opens a plain shell in the agent's folder,
     titled "Shell · folder". It has the same terminal and keys, no prompt
     field, and starts in typing mode. **+ ▸ New shell** opens one

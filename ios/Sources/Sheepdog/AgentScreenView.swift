@@ -93,6 +93,8 @@ struct AgentWindowInputs: Equatable {
     var computerLine: String?
     var shellShown: Bool
     var actionsAvailable: Bool
+    /// ⋯ ▸ Files.
+    var filesAvailable: Bool
     /// ⋯ ▸ Switch agent.
     var others: [AgentWindowMenu.Other]
     var handshake: ProtocolHandshake.State
@@ -132,6 +134,7 @@ private struct AgentWindowView: View {
             computerLine: computerLine,
             shellShown: model.shellEntryShown,
             actionsAvailable: model.agentActionsAvailable,
+            filesAvailable: model.filesAvailable,
             others: model.flock.running.filter { $0.paneID != agent.paneID }
                 .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
             handshake: model.linkModel.handshake,
@@ -167,7 +170,7 @@ private struct AgentWindowContent: View, Equatable {
     @State private var showsMoreKeys = false
     @State private var action: AgentWindowAction?
     @State private var confirmTakeover = false
-    @State private var showChanges = false
+    @State private var browser: BrowserTab?
     /// The window's height above the keyboard (`FloatingQuestions.area`).
     @State private var questionArea: CGFloat = 0
     @FocusState private var promptFocused: Bool
@@ -250,12 +253,17 @@ private struct AgentWindowContent: View, Equatable {
             window.onActivity = pane?.onInteract
         }
         .onDisappear { window.detach() }
-        .sheet(isPresented: $showChanges) {
-            ChangesView(
-                paneID: agent.paneID, name: name,
-                load: { try await model.agentChanges(paneID: agent.paneID) },
-                loadDiff: { try await model.agentDiff(paneID: agent.paneID, path: $0) }
+        .sheet(item: $browser) { tab in
+            BrowserSheet(
+                target: BrowserTarget(
+                    title: name, subtitle: computerLine ?? live.workspaceLabel?.trimmedOrNil,
+                    scope: .agent(paneID: agent.paneID), changesPane: agent.paneID, folder: live.cwd,
+                    filesAvailable: inputs.filesAvailable
+                ),
+                services: model.browserServices(scope: .agent(paneID: agent.paneID), changesPane: agent.paneID),
+                start: tab
             )
+            .presentationSizing(.page)
         }
         .onChange(of: colorScheme) { _, _ in window.surface.apply(theme: theme) }
         .onChange(of: scenePhase) { _, phase in
@@ -311,6 +319,7 @@ private struct AgentWindowContent: View, Equatable {
             shellCwd: inputs.shellShown && !cwd.isEmpty ? cwd : nil,
             canResetTextSize: window.fontSize != SwiftTermSurface.defaultFontSize,
             actionsAvailable: inputs.actionsAvailable,
+            filesAvailable: inputs.filesAvailable,
             working: live.state == .working,
             others: inputs.others,
             extra: pane?.extraMenu,
@@ -325,7 +334,8 @@ private struct AgentWindowContent: View, Equatable {
         case .copy:
             UIPasteboard.general.string = window.surface.snapshotText()
             Haptics.tap()
-        case .changes: showChanges = true
+        case .changes: browser = .changes
+        case .files: browser = .files
         case let .shell(cwd): openWindow(.shell(cwd: cwd))
         case .resetTextSize: window.resetFontSize()
         case let .action(action): self.action = action
