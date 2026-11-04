@@ -137,21 +137,10 @@ if [ "${SHEEPDOG_NIGHTLY_UPDATE:-0}" = 1 ] && [ -z "${SHEEPDOG_NIGHTLY_UPDATED:-
   fi
 fi
 
-# Go's caches on an external disk: under launchd the first read waits for a
-# consent dialog (see __vm-boot), so use internal caches when that disk does
-# not answer within 20 s.
-CACHE_NOTE=""
-for v in GOMODCACHE GOCACHE; do
-  d=$(perl -e 'alarm 20; exec @ARGV' go env "$v" 2>/dev/null || true)
-  case "$d" in
-    /Volumes/*)
-      if ! perl -e 'alarm 20; exec @ARGV' ls "$d" >/dev/null 2>&1; then
-        export "$v=$HOME/Library/Caches/sheepdog-nightly/$v"
-        CACHE_NOTE="Go caches moved to ~/Library/Caches/sheepdog-nightly: the external disk did not answer (launchd needs the removable-volume consent)."
-      fi
-      ;;
-  esac
-done
+# Go's caches stay on this disk: under launchd a go build reading an external
+# disk can wait for a consent dialog nobody answers, even when ls gets through.
+export GOMODCACHE="$HOME/Library/Caches/sheepdog-nightly/GOMODCACHE"
+export GOCACHE="$HOME/Library/Caches/sheepdog-nightly/GOCACHE"
 
 DAY=$(date +%F)
 OUT="$LOGROOT/$DAY"
@@ -171,15 +160,30 @@ ROWS=()
 FAILED=()
 STARTED=$(date +%s)
 
-# step <name> <seconds> <cmd...>: run it under a time limit (perl alarm: the
-# VM has no timeout(1), and neither has a stock Mac) into <name>.log.
+# limited <seconds> <cmd...>: runs it in its own process group, and at the
+# limit ends the whole group with exit 142 (a plain alarm dies with the first
+# process and bash ignores it, so a hung child would run on for ever). The VM
+# has no timeout(1), and neither has a stock Mac.
+limited() {
+  perl -e '
+    my $t = shift;
+    my $p = fork // die "fork: $!\n";
+    if (!$p) { setpgrp(0, 0); exec @ARGV or die "exec: $!\n"; }
+    $SIG{ALRM} = sub { kill "TERM", -$p; sleep 5; kill "KILL", -$p; exit 142 };
+    alarm $t;
+    waitpid $p, 0;
+    exit($? >> 8);
+  ' "$@"
+}
+
+# step <name> <seconds> <cmd...>: run it under a time limit into <name>.log.
 # Exit 0 is PASS, 3 SKIP, anything else FAIL (a time-out: 124 or 142).
 step() {
   local name="$1" limit="$2" t0 rc res
   shift 2
   t0=$(date +%s)
   echo "nightly: $name ..."
-  perl -e '$t = shift; alarm $t; exec @ARGV or die "exec: $!\n"' "$limit" "$@" >"$OUT/$name.log" 2>&1
+  limited "$limit" "$@" >"$OUT/$name.log" 2>&1
   rc=$?
   case "$rc" in
     0) res=PASS;;
@@ -255,7 +259,6 @@ REPORT="$OUT/report.md"
   echo
   echo "**$STATUS**$([ "$STATUS" = FAIL ] && echo ": ${FAILED[*]}") · commit \`$SHORT\` · $(( ($(date +%s) - STARTED) / 60 )) min · parts: $ONLY"
   [ -n "$REMOTE_NOTE" ] && { echo; echo "$REMOTE_NOTE"; }
-  [ -n "$CACHE_NOTE" ] && { echo; echo "$CACHE_NOTE"; }
   echo
   echo "| Step | Result | Time | Log |"
   echo "|---|---|---|---|"
