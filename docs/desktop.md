@@ -27,7 +27,9 @@ The Sheepdog block in herdr-app's sidebar contains:
   buttons control whichever device holds the voice, including your phone.
 - **Settings** for models, languages, reply style, paired devices and the
   update notice. **Pair a phone** shows a QR code and link. **New conversation**
-  clears Sheepdog's working memory after you confirm.
+  clears Sheepdog's working memory after you confirm (or say *"new
+  conversation"* or *"start over"* and confirm within 20 seconds with *"yes,
+  start over"* or *"confirm reset"*).
 - **Agent details** when you tap an agent's name, and cards the orchestrator
   shows. A card can bring its agent forward in herdr-app.
 

@@ -711,9 +711,27 @@ other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
 - the setup page, `/setup` and `/api/setup/*`, which also wants a change
   from its own origin as JSON (*Auth*).
 
-The model picker (`GET /api/brain/models`, `PUT /api/brain/model`) and
-the composer stay open to the app. Typed text goes to
-`POST /api/utterance {"text":"…"}` (it was `/api/inject/utterance`).
+The model picker (`GET /api/brain/models`, `PUT /api/brain/model`), the
+composer (`POST /api/utterance`) and pending cancellation
+(`POST /api/pending/cancel`) stay open to a paired device (`accessDevice`):
+
+- `GET /api/brain/models[?provider=<id>&refresh=1]` →
+  `{"provider":"…","model":"…","providers":[{"id":"…","label":"…","default_model":"…","available":true|false,"reason":"…"?}],"models":["…"],"notes":{"<model>":"…"}?,"account_problem":{"provider":"…","kind":"…","status":401,"detail":"…","fix":"…","at":"…"}?,"error":"…"?}`
+  (`503` when the orchestrator is off).
+- `PUT /api/brain/model {"provider":"…"?, "model":"…"}` switches the
+  orchestrator's provider and/or model at runtime (`brain.SetModel`),
+  persists `session.brain_provider` and `session.brain_model` in the
+  state file, and returns `{"provider":"…","model":"…"}` (`400` on an
+  invalid or unavailable provider/model, `503` when the orchestrator is
+  off).
+- `POST /api/utterance {"text":"…"}` (was `/api/inject/utterance`) feeds
+  a user utterance through `HandleUtterance` (`400` when `text` is empty,
+  `503` without a supervisor) and returns `{"ok":true}`.
+- `POST /api/pending/cancel {"id":"…"}` cancels the open pending question
+  matching `id` (`pending.cancelled {reason:"manual"}`, `200 {"ok":true}`,
+  `409 {"error":"no matching pending action"}` when `id` does not match,
+  `503` without a supervisor).
+
 `internal/web/routes_test.go` walks the route table: every route has
 exactly one of public, device, loopback or setup.
 
@@ -910,7 +928,7 @@ with the provider**: 16 kHz PCM16 in, 24 kHz PCM16 out, the same
 control messages; the daemon resamples for GPT-Live (which runs at
 24 kHz both ways).
 
-- `GET /api/voice/providers` (token-protected) →
+- `GET /api/voice/providers` (device-authenticated) →
   `{"provider":"gemini","model":"gemini-3.8-live","providers":[{"id":"gemini","label":"Gemini Live","model":"gemini-3.8-live","available":true},{"id":"openai","label":"GPT-Live","model":"gpt-live-1","available":false,"reason":"no OPENAI_API_KEY","billing":"per_minute"}]}`.
   `reason` appears only on an unavailable provider, `billing:"per_minute"`
   only on one billed by session time (GPT-Live, $0.05/min). With
@@ -963,12 +981,17 @@ control messages; the daemon resamples for GPT-Live (which runs at
   Disconnecting, muting or letting the silence gate close all let the
   idle timer run.
 
-Every comparison is constant-time (`crypto/subtle.ConstantTimeCompare`);
-there is no rate limiting or lockout on a wrong token.
+Off-loopback connections and auth endpoints are rate-limited per source IP
+(`internal/web/limits.go`): `maxRemoteConns = 32` concurrent non-loopback
+connections, `challengesPerMinute = 30` (`POST /api/auth/challenge`),
+`badSignaturesPerMinute = 10` (`POST /api/auth/session` and `POST /api/pair`),
+and `badCodesPerMinute = 5` (`POST /api/pair`), with a 5-minute block
+(`limitBlock`) after a limit is exceeded (`429` with `Retry-After: 60` and
+`{"error":"…","reason":"rate_limited"}`).
 
 ## Settings
 
-`GET /api/settings` (token-protected; also the `settings` field of
+`GET /api/settings` (device-authenticated; also the `settings` field of
 `GET /api/state`) →
 `{"chattiness":"normal","levels":["quiet","normal","chatty"],"languages":["zh-Hans","en"],"language_options":[{"code":"en","name":"English","native":"English","providers":["gemini","openai"]},{"code":"zh-Hans","name":"Chinese (Simplified)","native":"简体中文","providers":["gemini","openai"]},…]}`.
 
@@ -1016,11 +1039,12 @@ answer a question by tap. All three need a paired device under "Auth".
 - **`GET /events?kinds=<kind,...>`** keeps only events whose `type` has
   one of the comma-separated first dotted components as its kind:
   `herdr.state` is `herdr`, `pending.created` is `pending`, and
-  `supervisor.relay` is `supervisor`. The current kinds are `brain`,
-  `card`, `cli`, `context`, `conversation`, `daemon`, `eventlog`,
-  `events`, `herdr`, `investigation`, `note`, `observe`, `pending`,
-  `promise`, `prompts`, `push`, `question`, `supervisor`, `turn`,
-  `user`, `voice`, `web`, and `worker`. An unknown kind is a 400 with
+  `supervisor.relay` is `supervisor`. The current kinds are `agent`,
+  `brain`, `card`, `cli`, `context`, `conversation`, `daemon`,
+  `eventlog`, `events`, `files`, `herdr`, `investigation`, `note`,
+  `observe`, `pending`, `promise`, `prompts`, `push`, `question`,
+  `space`, `supervisor`, `turn`, `user`, `voice`, `web`, and `worker`.
+  An unknown kind is a 400 with
   `{"error":"unknown event kind \"…\""}`. Without `kinds`, the existing
   `source`, `pane`, and `type` filters behave as before. `GET /api/events`
   accepts the same filters. The herdr-app panel (`mods/sheepdog`,
@@ -1050,7 +1074,8 @@ answer a question by tap. All three need a paired device under "Auth".
   1 000) older than `before` (omit it for the newest page); pass
   `next_before` as the next `before` to page back, until it is `null`.
   Each item is `{id, ts, kind, text, via?, agent?, urgency?, pending_id?,
-  options?, answered?, answer?, resolution?, subkind?, reason?, version?}`
+  options?, answered?, answer?, resolution?, subkind?, reason?, version?,
+  card_id?, card?}`
   with `kind`:
   - `shepherd` — what the user said (voice transcript fragments
     merged per turn, `via: "voice"`) or typed (`via: "typed"`);
@@ -1139,7 +1164,7 @@ answer a question by tap. All three need a paired device under "Auth".
 
 ## Agent window: screen and input
 
-Not part of `/ws`: two token-authenticated JSON routes let the app show an
+Not part of `/ws`: two device-authenticated JSON routes let the app show an
 agent's live terminal window and operate it. Both serve only the agents
 the daemon tracks (the rows of `GET /api/agents`); any other pane id is
 `404 {"error":"no such agent"}`, so the user's other herdr panes are never
@@ -1196,7 +1221,7 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
 
 ## Agent actions
 
-Feature `agent-actions`. Token-authenticated JSON routes for what the
+Feature `agent-actions`. Device-authenticated JSON routes for what the
 user does with a tap in the app: start, rename, stop or close an agent.
 The tap is the user's own, so these do not pass the words rail that
 guards the orchestrator's writes ([roles.md](roles.md#the-users-own-actions));
@@ -1341,8 +1366,9 @@ A `Space` is `{"id", "name", "path", "git", "repo"?, "branch"?,
   1 to 40 characters and a one-line `command` of at most 1000 bytes. GET
   `/api/spaces` carries them too. **Run** opens a new tab in the space,
   in its folder, waits for the shell and types the command with Enter
-  (herdr's `pane run`), then answers with the tab's pane, which the app
-  opens as a shell window. Running a command is shell-equivalent, so it
+  (herdr's `pane run`), then answers with `{"ok": true, "pane_id"}` (the
+  app shows a confirmation notice, `Started "…" in a new tab of …`).
+  Running a command is shell-equivalent, so it
   sits behind the [phone shell's](term-contract.md#the-plain-shell) gate
   (`403` where the shell is off). **Run a line** (`POST
   /api/spaces/{id}/run`) runs a one-off `command` the same way without
@@ -1548,7 +1574,10 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
   of a rename; see *Files*) is left out of the list and of the totals, and
   counted in `hidden` (absent when 0). When there
   is no repository the answer is still `200`, with `{"repo": false,
-  "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`.
+  "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`. An untracked
+  `pane_id` is `404 {"error":"not a tracked agent"}`; when the agent's
+  `cwd` itself has a sensitive segment it is
+  `403 {"error":"hidden for safety","reason":"sensitive"}`.
 - **`GET /api/agents/{pane_id}/changes/{path}`** — one file's unified
   diff: the file's fields plus `"diff": "…"` (empty for a binary file)
   and `truncated` past 512 KB. `path` is the file's `path` from the list,
@@ -1760,7 +1789,7 @@ way to answer (the user answers through the existing approval card,
   | `card` | `markdown` (at most 6 000 bytes; a longer one is cut and ends `…(cut)`) | rendered markdown: headings, lists, tables, code fences |
   | `agent` | `agent` (alias), `spoken`, `pane_id` | a way into that agent's window (*Agent window*) |
   | `excerpt` | `agent`, `spoken`, `pane_id`, `text` (the last lines of its screen, verbatim, read by the daemon) | monospace text |
-  | `approval` | `agent`, `spoken`, `pane_id`, `pending_id`, `question`, `command`, `options` (as `pending_action`'s) | the question, read-only, pointing at the approval card that answers it |
+  | `approval` | `agent`, `spoken`, `pane_id`, `pending_id`, `question`, `command`, `options` (`{index, label, keys, default}`, `supervisor.PendingOption`) | the question, read-only, pointing at the approval card that answers it |
 
   A client shows a new card once by itself (a sheet), keeps it in the
   conversation as a row that opens it again, and never pops up a card
