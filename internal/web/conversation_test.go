@@ -151,6 +151,18 @@ func TestConversationRebuiltFromTheLog(t *testing.T) {
 	}
 }
 
+func TestConsecutiveDaemonStartsCollapse(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	start := func(id int64, v string) eventlog.Event {
+		return eventlog.Event{ID: id, TS: t0.Add(time.Duration(id) * time.Minute), Type: "daemon.start",
+			Payload: []byte(`{"version":"` + v + `"}`)}
+	}
+	items := buildConversation([]eventlog.Event{start(1, "v1"), start(2, "v2")})
+	if len(items) != 1 || items[0].Version != "v2" || !items[0].TS.Equal(t0.Add(2*time.Minute)) {
+		t.Fatalf("items = %+v, want one start with v2 at the latest time", items)
+	}
+}
+
 func TestConversationPagesBackwards(t *testing.T) {
 	_, hs := convoServer(t, syntheticLog(t))
 	all := getConversation(t, hs, "").Items
