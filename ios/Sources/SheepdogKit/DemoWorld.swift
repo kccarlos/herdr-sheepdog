@@ -121,6 +121,7 @@ public struct DemoWorld: Sendable {
             agent.lastTask = agent.currentTask
             agent.currentTask = nil
             agent.lastResult = Agent.Result(spoken: "claude-auth finished: the login redirect loop is fixed.", detail: "The session cookie was set on the wrong path.", at: at)
+            agent.journal = [Agent.JournalEntry(at: at, event: "done", lastAssistant: "Fixed the login redirect loop: the session cookie was set on the wrong path.", instruction: agent.lastTask, filesTouched: ["auth/session.go"])]
         }
         update(Self.migrationPane) { agent, at in
             agent.state = .idle
@@ -128,6 +129,7 @@ public struct DemoWorld: Sendable {
             agent.lastTask = agent.currentTask
             agent.currentTask = nil
             agent.lastResult = Agent.Result(spoken: "claude-migration finished: the migration ran on the staging copy.", detail: nil, at: at)
+            agent.journal = [Agent.JournalEntry(at: at, event: "done", lastAssistant: "The migration ran on the staging copy without errors.", instruction: agent.lastTask, filesTouched: ["db/migrate.sql"])]
         }
         update(Self.docsPane) { agent, at in
             agent.state = .blocked

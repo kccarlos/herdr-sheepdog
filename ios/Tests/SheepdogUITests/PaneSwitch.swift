@@ -51,13 +51,25 @@ extension XCTestCase {
         func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+            if app.buttons[item].isTappable, tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
             if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
-                if app.buttons[item].waitForExistence(timeout: 3), tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+                if app.buttons[item].waitForExistence(timeout: 3) {
+                    scrollMenuToItem(app, item)
+                    if tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+                }
             }
             usleep(300_000)
         } while Date() < deadline
         XCTFail("no \(item) in \(menu)" + (until.map { ", or it never opened \($0)" } ?? ""), file: file, line: line)
+    }
+
+    /// At the accessibility sizes a menu is taller than the screen and
+    /// scrolls: swipes up inside the open menu until `item` can be tapped.
+    private func scrollMenuToItem(_ app: XCUIApplication, _ item: String) {
+        let button = app.buttons[item]
+        for _ in 0 ..< 4 where !button.isTappable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
+        }
     }
 
     /// Taps `element` once it is on screen and hittable: a sheet or cover
@@ -134,6 +146,33 @@ extension XCTestCase {
         }
         XCTAssertTrue(element.exists && element.isTappable, "\(element) is not on screen", file: file, line: line)
         return element
+    }
+
+    /// Swipes down until the top of the list shows, for a test that scrolled
+    /// past what it needs next.
+    func scrollToTop(_ app: XCUIApplication, maxSwipes: Int = 6) {
+        for _ in 0 ..< maxSwipes { app.swipeDown(velocity: .fast) }
+    }
+
+    /// Asserts that the elements with these identifiers come in this order
+    /// from the top of the list. At the accessibility sizes only the rows
+    /// near the screen are in the tree, so each is found by scrolling down,
+    /// and two rows are compared whenever both are in the tree.
+    func assertListOrder(_ app: XCUIApplication, _ identifiers: [String], file: StaticString = #filePath, line: UInt = #line) {
+        scrollToTop(app)
+        var previous: XCUIElement?
+        for id in identifiers {
+            let element = app.descendants(matching: .any).matching(identifier: id).firstMatch
+            for _ in 0 ..< 10 {
+                if element.exists, let frame = try? element.snapshot().frame, app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) { break }
+                app.swipeUp(velocity: .slow)
+            }
+            XCTAssertTrue(element.exists, "\(id) is in the list", file: file, line: line)
+            if let previous, previous.exists, element.exists {
+                XCTAssertLessThan(previous.frame.minY, element.frame.minY, "\(previous.identifier) comes before \(id)", file: file, line: line)
+            }
+            previous = element
+        }
     }
 
     /// Swipes the screen up until `element` sits clear of the voice

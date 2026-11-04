@@ -6,7 +6,14 @@ import XCTest
 /// turn nobody looked at, claude-migration finished one that was seen.
 ///
 /// `TEST_RUNNER_SHEEPDOG_REDESIGN_SHOTS=<dir>` saves screenshots there.
-final class AgentAttentionUITests: XCTestCase {
+///
+/// `AgentAttentionLargestTextUITests` runs the same tests at the largest
+/// accessibility text size, where only a few rows fit and the voice capsule
+/// is a row of its own: they scroll to a row before they use it.
+class AgentAttentionUITests: XCTestCase {
+    /// Extra launch arguments; the largest-text subclass sets the size.
+    var textSizeArguments: [String] { [] }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -14,13 +21,13 @@ final class AgentAttentionUITests: XCTestCase {
     private func shot(_ name: String) {
         let env = ProcessInfo.processInfo.environment
         guard let dir = env["SHEEPDOG_REDESIGN_SHOTS"] else { return }
-        let suffix = env["SHEEPDOG_SHOTS_SUFFIX"] ?? "light"
+        let suffix = (env["SHEEPDOG_SHOTS_SUFFIX"] ?? "light") + (textSizeArguments.isEmpty ? "" : "-xxxl")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("attention-\(name)-\(suffix).png"))
     }
 
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoAttention", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoAttention", "-sheepdogOpenDemo"] + textSizeArguments
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
         showAgentsPane(app)
@@ -35,69 +42,67 @@ final class AgentAttentionUITests: XCTestCase {
         app.buttons["flock.agent.\(alias).toggle"].firstMatch
     }
 
+    /// The agent's card header, scrolled into view from the top of the list.
+    private func showToggle(_ app: XCUIApplication, _ alias: String) -> XCUIElement {
+        scrollToTop(app)
+        return scrollToVisible(app, toggle(app, alias))
+    }
+
     func testSectionsAreInOrderAndAgentsSitUnderTheirs() throws {
         let app = launch()
-        let needs = element(app, "flock.section.needs_you")
-        let working = element(app, "flock.section.working")
-        let done = element(app, "flock.section.done")
-        for header in [needs, working, done] { XCTAssertTrue(header.waitForExistence(timeout: 10), header.identifier) }
-        XCTAssertLessThan(needs.frame.minY, working.frame.minY)
-        XCTAssertLessThan(working.frame.minY, done.frame.minY)
-
-        let docs = element(app, "flock.agent.codex-docs")
-        let payments = element(app, "flock.agent.codex-payments")
-        let auth = element(app, "flock.agent.claude-auth")
-        let migration = element(app, "flock.agent.claude-migration")
-        XCTAssertTrue(migration.waitForExistence(timeout: 5))
-        XCTAssertTrue(needs.frame.minY < docs.frame.minY && docs.frame.minY < working.frame.minY, "codex-docs is under Needs you")
-        XCTAssertTrue(working.frame.minY < payments.frame.minY && payments.frame.minY < done.frame.minY, "codex-payments is under Working")
-        XCTAssertTrue(done.frame.minY < auth.frame.minY, "claude-auth is under Done")
-        XCTAssertLessThan(auth.frame.minY, migration.frame.minY, "unread first within Done")
+        // Top to bottom, as the list is read: at large text only the rows
+        // on screen are in the tree, so each is found by scrolling down.
+        assertListOrder(app, [
+            "flock.section.needs_you", "flock.agent.codex-docs",
+            "flock.section.working", "flock.agent.codex-payments",
+            "flock.section.done", "flock.agent.claude-auth", "flock.agent.claude-migration",
+        ])
         shot("list")
     }
 
     func testOnlyTheUnreadAgentIsUnreadAndOpeningItMarksItSeen() throws {
         let app = launch()
-        XCTAssertTrue(toggle(app, "claude-auth").waitForExistence(timeout: 10))
-        XCTAssertTrue(toggle(app, "claude-auth").value as? String == "Unread", "got \(String(describing: toggle(app, "claude-auth").value))")
+        let auth = showToggle(app, "claude-auth")
+        XCTAssertTrue(auth.value as? String == "Unread", "got \(String(describing: auth.value))")
         XCTAssertTrue(element(app, "flock.agent.claude-auth.unread").exists)
         XCTAssertFalse(element(app, "flock.agent.claude-migration.unread").exists)
-        XCTAssertNotEqual(toggle(app, "claude-migration").value as? String, "Unread")
+        XCTAssertNotEqual(showToggle(app, "claude-migration").value as? String, "Unread")
 
         // Open its window and come back: the daemon marked the turn seen.
-        tapWhenTappable(app.buttons["flock.agent.claude-auth.window"].firstMatch, "claude-auth's window button")
+        _ = showToggle(app, "claude-auth")
+        tapWhenTappable(scrollToVisible(app, app.buttons["flock.agent.claude-auth.window"].firstMatch), "claude-auth's window button")
         XCTAssertTrue(element(app, "agentScreen.terminal").waitForExistence(timeout: 15))
         sleep(1)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         showAgentsPane(app)
         let read = NSPredicate(format: "value != 'Unread'")
-        expectation(for: read, evaluatedWith: toggle(app, "claude-auth"))
+        expectation(for: read, evaluatedWith: showToggle(app, "claude-auth"))
         waitForExpectations(timeout: 15)
         XCTAssertFalse(element(app, "flock.agent.claude-auth.unread").exists)
     }
 
     func testPinningMovesAnAgentToTheTopOfItsSection() throws {
         let app = launch()
-        let auth = element(app, "flock.agent.claude-auth")
-        let migration = element(app, "flock.agent.claude-migration")
-        XCTAssertTrue(migration.waitForExistence(timeout: 10))
-        XCTAssertLessThan(auth.frame.minY, migration.frame.minY)
+        let pinButton = app.buttons["flock.agent.claude-migration.pinButton"].firstMatch
+        assertListOrder(app, ["flock.agent.claude-auth", "flock.agent.claude-migration"])
 
         // Expand the read agent and pin it from its card.
-        tapWhenTappable(toggle(app, "claude-migration"), "claude-migration's card")
-        tapWhenTappable(revealAboveCapsule(app, app.buttons["flock.agent.claude-migration.pinButton"].firstMatch), "Pin to top")
+        tapWhenTappable(showToggle(app, "claude-migration"), "claude-migration's card")
+        tapWhenTappable(revealAboveCapsule(app, scrollToVisible(app, pinButton)), "Pin to top")
+        // The card moved up the list: find it again from the top.
         let pinned = element(app, "flock.agent.claude-migration.pinned")
+        XCTAssertEqual(showToggle(app, "claude-migration").value as? String, "Pinned")
         XCTAssertTrue(pinned.waitForExistence(timeout: 10), "the pin glyph")
-        XCTAssertEqual(toggle(app, "claude-migration").value as? String, "Pinned")
-        XCTAssertLessThan(migration.frame.minY, auth.frame.minY, "pinned first within Done")
+        assertListOrder(app, ["flock.agent.claude-migration", "flock.agent.claude-auth"])
         shot("pinned")
 
         // And back.
-        tapWhenTappable(revealAboveCapsule(app, app.buttons["flock.agent.claude-migration.pinButton"].firstMatch), "Unpin")
+        _ = showToggle(app, "claude-migration")
+        tapWhenTappable(revealAboveCapsule(app, scrollToVisible(app, pinButton)), "Unpin")
         let gone = NSPredicate(format: "exists == false")
         expectation(for: gone, evaluatedWith: pinned)
         waitForExpectations(timeout: 10)
-        XCTAssertLessThan(auth.frame.minY, migration.frame.minY)
+        assertListOrder(app, ["flock.agent.claude-auth", "flock.agent.claude-migration"])
     }
 
     func testMuteASpaceShowsItOnItsAgentsAndInSpaces() throws {
@@ -106,19 +111,27 @@ final class AgentAttentionUITests: XCTestCase {
         let shop = app.buttons["spaces.row.shop"]
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.spaces", until: shop)
         shop.tap()
-        tapWhenTappable(app.buttons["space.mute"].firstMatch, "Mute notifications")
-        tapWhenTappable(app.buttons["mute.hour"].firstMatch, "For 1 hour")
-        XCTAssertTrue(element(app, "space.muteStatus").waitForExistence(timeout: 10), "the detail says it is muted")
+        tapWhenTappable(scrollToVisible(app, app.buttons["space.mute"].firstMatch), "Mute notifications")
+        tapWhenTappable(scrollToVisible(app, app.buttons["mute.hour"].firstMatch), "For 1 hour")
+        XCTAssertTrue(scrollToVisible(app, element(app, "space.muteStatus")).exists, "the detail says it is muted")
         shot("space-muted")
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(element(app, "spaces.row.shop.muted").waitForExistence(timeout: 10), "the row says until when")
-        app.buttons["spaces.done"].tap()
+        XCTAssertTrue(scrollToVisible(app, element(app, "spaces.row.shop.muted")).exists, "the row says until when")
+        tapWhenTappable(scrollToVisible(app, app.buttons["spaces.done"]), "Done")
         showAgentsPane(app)
+        // codex-docs waits on you in a muted space: it is listed and answerable.
+        _ = showToggle(app, "codex-docs")
         XCTAssertTrue(element(app, "flock.agent.codex-docs.muted").waitForExistence(timeout: 15), "bell.slash on its agents")
+        _ = showToggle(app, "claude-auth")
         XCTAssertTrue(element(app, "flock.agent.claude-auth.muted").exists)
         XCTAssertEqual(toggle(app, "claude-auth").value as? String, "Unread, Muted space")
-        // codex-docs waits on you in a muted space: it is listed and answerable.
-        XCTAssertTrue(toggle(app, "codex-docs").exists)
+    }
+}
+
+/// The same tests at the largest accessibility text size.
+final class AgentAttentionLargestTextUITests: AgentAttentionUITests {
+    override var textSizeArguments: [String] {
+        ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
     }
 }
