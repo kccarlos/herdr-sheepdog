@@ -70,6 +70,9 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	out = append(out, CheckBind(cfg.Web))
 	out = append(out, CheckProjectRoots(cfg.Supervisor.ProjectRoots)...)
 	out = append(out, CheckPush(ctx, o.Endpoints, cfg.Push))
+	if o.ConfigPath != "" {
+		out = append(out, CheckSecretFile("config file", o.ConfigPath))
+	}
 	if o.EnvPath != "" {
 		out = append(out, CheckSecretFile("env file", o.EnvPath))
 	}

@@ -36,7 +36,7 @@ func printDemoUsage(w io.Writer) {
 	fprintln(w, "safe next to a running daemon. Ctrl-C ends it.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
-	fprintln(w, "  --port N          port (default 7778)")
+	fprintln(w, "  --port N          port (default 7778, or the next free one)")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH   env file (default ./.env, else ~/.config/sheepdog/.env, as serve)")
 	fprintln(w, "  --dir DIR         keep the demo's data here (default: a temp dir, removed at exit)")
@@ -58,7 +58,7 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("demo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printDemoUsage(stderr) }
-	port := fs.Int("port", demo.DefaultPort, "port")
+	port := fs.Int("port", 0, "port")
 	configPath := fs.String("config", "", "config file")
 	envFile := fs.String("env-file", "", "env file")
 	dirFlag := fs.String("dir", "", "data dir")
@@ -86,10 +86,9 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintln(stderr, "sheepdog demo: "+msg)
 		return 1
 	}
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(*port))
-	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = c.Close()
-		fprintf(stderr, "sheepdog demo: %s is in use; pick another --port\n", addr)
+	chosenPort, err := pickDemoPort(*port, demoPorts())
+	if err != nil {
+		fprintf(stderr, "sheepdog demo: %v\n", err)
 		return 1
 	}
 
@@ -101,7 +100,7 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
 	}
-	d, err := startDemo(ctx, cfg, *port, dir, stderr)
+	d, err := startDemo(ctx, cfg, chosenPort, dir, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog demo: %v\n", err)
 		return 1
@@ -190,6 +189,42 @@ func demoKeyProblem(cfg config.Config) string {
 		return ""
 	}
 	return "no GEMINI_API_KEY: create a free key at https://aistudio.google.com/apikey, then run sheepdog setup (or put GEMINI_API_KEY in ./.env)"
+}
+
+// demoPorts returns the candidate ports for a demo when --port is not set.
+func demoPorts() []int {
+	ports := make([]int, 0, 10)
+	for p := demo.DefaultPort; len(ports) < 10; p++ {
+		if p != 7777 {
+			ports = append(ports, p)
+		}
+	}
+	return ports
+}
+
+// pickDemoPort validates an explicit --port (explicit > 0) or chooses the
+// first free port from candidates when explicit <= 0.
+func pickDemoPort(explicit int, candidates []int) (int, error) {
+	if explicit > 0 {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(explicit))
+		if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+			_ = c.Close()
+			return 0, fmt.Errorf("%s is in use; pick another --port", addr)
+		}
+		return explicit, nil
+	}
+	for _, p := range candidates {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(p))
+		if c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond); err == nil {
+			_ = c.Close()
+			continue
+		}
+		return p, nil
+	}
+	if len(candidates) == 0 {
+		return 0, errors.New("no free port for the demo")
+	}
+	return 0, fmt.Errorf("no free port for the demo (tried %d to %d); pass --port", candidates[0], candidates[len(candidates)-1])
 }
 
 // waitForClient waits until a browser or the app is attached to /ws, so

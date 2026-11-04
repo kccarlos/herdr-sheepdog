@@ -24,17 +24,32 @@ func TestTemplateIsValidTOML(t *testing.T) {
 }
 
 // TestTemplateMentionsEveryKey proves every documented config key (see
-// CONFIG.md and its own completeness test) also appears in the config
-// init template, so a fresh install has every knob visible in one file.
+// CONFIG.md and its own completeness test) also appears in its own
+// [section] of the config init template, so a fresh install has every
+// knob visible in one file.
 func TestTemplateMentionsEveryKey(t *testing.T) {
-	tmpl := Template()
-	for _, k := range tomlKeys(configType, "") {
-		leaf := k
-		if i := strings.LastIndexByte(k, '.'); i >= 0 {
-			leaf = k[i+1:]
+	sections := map[string]string{}
+	cur := ""
+	for _, line := range strings.Split(Template(), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			cur = strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")
+			continue
 		}
-		if !strings.Contains(tmpl, leaf) {
-			t.Errorf("Template() does not mention key %q (leaf %q)", k, leaf)
+		sections[cur] += line + "\n"
+	}
+	for _, k := range tomlKeys(configType, "") {
+		sec, leaf := "", k
+		if i := strings.LastIndexByte(k, '.'); i >= 0 {
+			sec, leaf = k[:i], k[i+1:]
+		}
+		block, ok := sections[sec]
+		if !ok {
+			t.Errorf("Template() is missing section [%s] for key %q", sec, k)
+			continue
+		}
+		if !strings.Contains(block, leaf) {
+			t.Errorf("Template() section [%s] does not mention key %q (leaf %q)", sec, k, leaf)
 		}
 	}
 }

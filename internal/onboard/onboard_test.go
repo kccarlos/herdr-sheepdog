@@ -286,16 +286,20 @@ func TestDoctor(t *testing.T) {
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	cfg.Web.Port = l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
-	rs := Doctor(context.Background(), cfg, DoctorOptions{Endpoints: f.endpoints(), Probe: true})
+	cfgFile := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("# config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rs := Doctor(context.Background(), cfg, DoctorOptions{Endpoints: f.endpoints(), Probe: true, ConfigPath: cfgFile})
 	byName := map[string]Result{}
 	var all strings.Builder
 	for _, r := range rs {
 		byName[r.Name] = r
 		all.WriteString(r.Line() + "\n")
 	}
-	for name, want := range map[string]Status{"herdr-tui": Fail, "gemini key": OK, "openrouter key": OK, "openrouter tools": OK, "groq key": Skip, "orchestrator": OK, "voice": OK, "web port": OK, "bind/token": OK, "push": Skip, "openai voice key": Skip} {
-		if byName[name].Status != want {
-			t.Errorf("%s = %+v, want %v\n%s", name, byName[name], want, all.String())
+	for name, want := range map[string]Status{"herdr-tui": Fail, "gemini key": OK, "openrouter key": OK, "openrouter tools": OK, "groq key": Skip, "orchestrator": OK, "voice": OK, "web port": OK, "bind": OK, "push": Skip, "openai voice key": Skip, "config file": Warn} {
+		if r, ok := byName[name]; !ok || r.Status != want {
+			t.Errorf("%s = %+v (present=%v), want %v\n%s", name, r, ok, want, all.String())
 		}
 	}
 	if strings.Contains(all.String(), goodKey) || strings.Contains(all.String(), "Bearer good") {

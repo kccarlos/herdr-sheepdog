@@ -43,17 +43,25 @@ func TestPruneKeepsRetentionDaysAndNothingElse(t *testing.T) {
 }
 
 func TestPruneNeverTouchesRepoBenchData(t *testing.T) {
-	data := filepath.Join(t.TempDir(), "docs", "bench", "results", "run1")
-	old := filepath.Join(data, "events", "2020-01-01.jsonl")
-	touch(t, old)
-	if r, _ := Prune(data, 1, time.Now()); len(r) != 0 {
-		t.Errorf("pruned %q under docs/dev/bench", r)
-	}
-	if r, _ := Clear(data); len(r) != 0 {
-		t.Errorf("cleared %q under docs/dev/bench", r)
-	}
-	if _, err := os.Stat(old); err != nil {
-		t.Error("docs/dev/bench file deleted")
+	for _, sub := range [][]string{
+		{"docs", "dev", "bench", "results", "run1"},
+		{"docs", "dev", "eval", "runs", "run1"},
+		{"docs", "bench", "results", "run1"},
+		{"docs", "eval", "runs", "run1"},
+		{"testdata", "run1"},
+	} {
+		data := filepath.Join(append([]string{t.TempDir()}, sub...)...)
+		old := filepath.Join(data, "events", "2020-01-01.jsonl")
+		touch(t, old)
+		if r, _ := Prune(data, 1, time.Now()); len(r) != 0 {
+			t.Errorf("pruned %q under %v", r, sub)
+		}
+		if r, _ := Clear(data); len(r) != 0 {
+			t.Errorf("cleared %q under %v", r, sub)
+		}
+		if _, err := os.Stat(old); err != nil {
+			t.Errorf("%v file deleted", sub)
+		}
 	}
 }
 
@@ -103,5 +111,41 @@ func TestPruneBrainTranscripts(t *testing.T) {
 	}
 	if r, _ := Clear(data); len(r) != 2 {
 		t.Errorf("Clear removed %q", r)
+	}
+}
+
+func TestPruneAndClearCards(t *testing.T) {
+	data := t.TempDir()
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	cardsPath := filepath.Join(data, "cards.jsonl")
+	content := `{"card_id":"c1","kind":"card","at":"2026-09-29T23:59:59Z","title":"old"}` + "\n" +
+		`{"card_id":"c2","kind":"card","at":"2026-09-30T00:00:00Z","title":"cutoff"}` + "\n" +
+		`{"card_id":"c3","kind":"card","at":"2026-10-14T10:00:00Z","title":"today"}` + "\n"
+	if err := os.WriteFile(cardsPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := Prune(data, 14, now)
+	if err != nil || len(removed) != 1 || removed[0] != cardsPath {
+		t.Fatalf("Prune removed %q (%v), want [%q]", removed, err, cardsPath)
+	}
+	got, err := os.ReadFile(cardsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"card_id":"c2","kind":"card","at":"2026-09-30T00:00:00Z","title":"cutoff"}` + "\n" +
+		`{"card_id":"c3","kind":"card","at":"2026-10-14T10:00:00Z","title":"today"}` + "\n"
+	if string(got) != want {
+		t.Errorf("cards.jsonl after Prune =\n%s\nwant\n%s", got, want)
+	}
+	// Second prune with no expired cards does nothing.
+	if r, err := Prune(data, 14, now); err != nil || len(r) != 0 {
+		t.Errorf("second Prune removed %q (%v), want nothing", r, err)
+	}
+	// Clear removes cards.jsonl.
+	if r, err := Clear(data); err != nil || len(r) != 1 || r[0] != cardsPath {
+		t.Errorf("Clear removed %q (%v), want [%q]", r, err, cardsPath)
+	}
+	if _, err := os.Stat(cardsPath); !os.IsNotExist(err) {
+		t.Errorf("cards.jsonl still exists after Clear: %v", err)
 	}
 }

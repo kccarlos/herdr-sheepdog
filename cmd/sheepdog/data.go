@@ -111,7 +111,7 @@ func runData(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	files, _ := eventlog.DayFiles(data)
 	brain, _ := eventlog.BrainFiles(data)
-	if len(files)+len(brain) == 0 {
+	if len(files)+len(brain) == 0 && eventlog.CardsFile(data) == "" {
 		fprintf(stdout, "nothing to delete: no event log in %s\n", filepath.Join(data, "events"))
 		return 0
 	}
@@ -147,7 +147,7 @@ func checkDataDir(dir string) error {
 			return errors.New("refusing to delete " + abs + ": it holds your home directory")
 		}
 	}
-	for _, mark := range []string{"events", "logs", "brain", "state.json", "sheepdog.pid", "notes.jsonl", "push_devices.json"} {
+	for _, mark := range []string{"events", "logs", "brain", "state.json", "sheepdog.pid", "notes.jsonl", "push_devices.json", "cards.jsonl", "wrapups.json"} {
 		if fileExists(filepath.Join(abs, mark)) {
 			return nil
 		}
