@@ -278,3 +278,27 @@ func TestFilesRefusalsNamePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestFilesDisabled(t *testing.T) {
+	h := newHarness(t, harnessOpts{filesOff: true})
+	for _, path := range []string{"/api/agents/w1:p2/files", "/api/agents/w1:p2/files/a.txt", "/api/spaces/w3/files", "/api/spaces/w3/files/a.txt?raw=1"} {
+		var body map[string]string
+		if code := h.getJSON(path, &body); code != http.StatusForbidden || body["reason"] != "files_off" || body["error"] == "" {
+			t.Errorf("%s: status %d, body %v", path, code, body)
+		}
+	}
+	var hello HelloResponse
+	h.getJSON("/api/hello", &hello)
+	if slices.Contains(hello.Features, wsproto.FeatureFiles) {
+		t.Error("hello advertises files")
+	}
+	_, features := readyClient(t, h)
+	if slices.Contains(features, wsproto.FeatureFiles) {
+		t.Error("bot-ready advertises files")
+	}
+	// Changes has its own handler and remains reachable.
+	var body map[string]any
+	if code := h.getJSON("/api/agents/w1:p2/changes", &body); code == http.StatusForbidden {
+		t.Errorf("changes blocked: %v", body)
+	}
+}

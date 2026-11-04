@@ -101,6 +101,10 @@ const filesListTimeout = changesTimeout
 // handleFilesList is GET …/files?path=&q=: a folder's list, or with q a
 // search of the names under it.
 func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
+	if !s.deps.Files {
+		writeJSON(w, http.StatusForbidden, map[string]string{"reason": "files_off", "error": "file browsing is disabled on this computer"})
+		return
+	}
 	root, _, _, err := s.filesRoot(r)
 	if err != nil {
 		filesError(w, err)
@@ -126,6 +130,10 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 // handleFileRead is GET …/files/{path}: one file as JSON, or with ?raw=1
 // an image's bytes under its own content type.
 func (s *Server) handleFileRead(w http.ResponseWriter, r *http.Request) {
+	if !s.deps.Files {
+		writeJSON(w, http.StatusForbidden, map[string]string{"reason": "files_off", "error": "file browsing is disabled on this computer"})
+		return
+	}
 	root, pane, space, err := s.filesRoot(r)
 	if err != nil {
 		filesError(w, err)
