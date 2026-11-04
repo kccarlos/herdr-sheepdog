@@ -254,7 +254,7 @@ func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 		t.Errorf("keys = %v", got)
 	}
 	if h.log.count("brain.rail_blocked") != 0 {
-		t.Errorf("rail_blocked = %d, want 0 (an authorised, revived answer)", h.log.count("brain.rail_blocked"))
+		t.Errorf("rail_blocked = %v, want 0 (an authorised, revived answer)", h.log.ofType("brain.rail_blocked"))
 	}
 	revived := h.log.ofType("pending.revived")
 	if len(revived) != 1 {

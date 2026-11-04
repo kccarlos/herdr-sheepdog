@@ -119,7 +119,7 @@ export function foldQuestions(app, event) {
       if (p.kind !== "answer_prompt" || !p.id) return app;
       const options = Array.isArray(p.options) ? p.options : [];
       const q = { id: p.id, kind: p.kind, summary: text(p.summary), spoken_summary: text(p.summary), question: text(p.question), options, ...present({ agent: p.agent, command: p.command }) };
-      return { ...app, pending_action: q, questions: [...dropped(questions), q] };
+      return { ...app, pending_action: p.held ? app.pending_action : q, questions: [...dropped(questions), q] };
     }
     case "pending.confirmed":
     case "pending.cancelled":

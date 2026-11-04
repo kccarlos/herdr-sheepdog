@@ -24,6 +24,10 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
+	// Apply drops the pane's question when it leaves blocked or closes.
+	s.mu.Lock()
+	s.toldGoneLocked(t.PaneID) // displaced.go
+	s.mu.Unlock()
 	if !t.Closed && !t.Released {
 		// The worker's own session title, read as a fact: it may
 		// change the spoken names (names.go).

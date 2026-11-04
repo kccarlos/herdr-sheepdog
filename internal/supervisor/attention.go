@@ -572,22 +572,23 @@ func (s *Supervisor) paneMuted(ctx context.Context, paneID string) bool {
 	}
 	idx := s.folders(ctx)
 	if s.folderOfPane(idx, row) == "" {
-		// Not in the index: a space opened since it was read.
-		now := s.cfg.Now()
+		// Serialize misses so concurrent panes see the completed refresh.
+		s.missMu.Lock()
 		s.idxMu.Lock()
-		refresh := s.missAt.IsZero() || now.Sub(s.missAt) >= folderMissAge
-		if refresh {
-			s.missAt = now
-		}
+		idx = s.idx
+		now := s.cfg.Now()
+		refresh := s.folderOfPane(idx, row) == "" && (s.missAt.IsZero() || now.Sub(s.missAt) >= folderMissAge)
 		s.idxMu.Unlock()
 		if refresh {
 			if fresh, err := s.readFolders(ctx); err == nil {
 				s.idxMu.Lock()
 				s.idx = fresh
+				s.missAt = s.cfg.Now()
 				s.idxMu.Unlock()
 				idx = fresh
 			}
 		}
+		s.missMu.Unlock()
 	}
 	return s.rowMuted(idx, row)
 }
@@ -692,6 +693,7 @@ func (s *Supervisor) promoteHeld(a announcement) {
 	if old, had := s.store.Pending(); had && old.ID != q.ID {
 		s.log.Log(logSource, "pending.replaced", q.PaneID, map[string]any{"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": q.ID, "new_kind": q.Kind})
 	}
+	s.installedLocked(q) // displaced.go
 	if err := s.store.SetPending(q); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
 		return

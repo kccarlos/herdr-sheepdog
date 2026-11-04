@@ -94,6 +94,7 @@ func (s *Supervisor) promptPushedLocked(text string) {
 	}
 	if h.lines[text] {
 		h.sentAt, h.done, h.buriedAt, h.unheardAt = now, false, time.Time{}, time.Time{}
+		s.deliveredLocked(h.pendingID) // displaced.go
 		return
 	}
 	s.promptBuriedLocked(now)
@@ -161,11 +162,10 @@ func (s *Supervisor) ceoSpokeSinceLocked(t time.Time) bool {
 func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, reason string, ok bool) {
 	h := s.promptHeard
 	p, has := s.store.Pending()
-	if !has || p.Kind != state.PendingAnswerPrompt {
+	// A prompt not announced yet is no business of this file: the
+	// displacement rail (displaced.go) keeps a yes off it in code.
+	if !has || p.Kind != state.PendingAnswerPrompt || p.ID != h.pendingID || h.sentAt.IsZero() || h.sentAt.After(at) {
 		return state.PendingAction{}, "", false
-	}
-	if p.ID != h.pendingID || h.sentAt.IsZero() || h.sentAt.After(at) {
-		return p, "unannounced", true
 	}
 	switch {
 	case !h.unheardAt.IsZero() && !h.unheardAt.After(at):
@@ -203,11 +203,8 @@ func (s *Supervisor) openPromptFact(start time.Time) string {
 		return ""
 	}
 	why := "another line was spoken right after it, before the user said anything"
-	switch reason {
-	case "unheard":
+	if reason == "unheard" {
 		why = "the voice judged that it did not reach the user"
-	case "unannounced":
-		why = "it had not been announced when the user spoke"
 	}
 	return fmt.Sprintf("%s's prompt is still open and the user has likely not heard it: %q (%s). Their words may not be about it.", s.sayOf(p.PaneID), p.SpokenSummary, why)
 }
@@ -227,6 +224,9 @@ func (s *Supervisor) remindBuriedPrompt() {
 	if !ok {
 		s.mu.Unlock()
 		return
+	}
+	if h.lines == nil {
+		h.lines = map[string]bool{}
 	}
 	h.reminded = true
 	text := reminderLine(p.SpokenSummary, s.ceoChineseLocked())

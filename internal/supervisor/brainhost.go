@@ -61,7 +61,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 			}
 		}
 	}
-	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
+	if has && !pending.Held && !h.s.heldQuestion(pending.ID) && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
 			// Meta goes along as a fact: the orchestrator must know the
@@ -244,6 +244,11 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
+	for _, q := range s.store.Questions() {
+		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
+			return "", fmt.Errorf("%w: %s's question is held in a muted space; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+		}
+	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
 		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys")
 		if !ok {

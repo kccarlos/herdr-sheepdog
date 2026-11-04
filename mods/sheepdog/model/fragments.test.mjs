@@ -114,3 +114,10 @@ test("a tool result spoken without a voice model is the voice's line; a typed on
     assert.equal(r.runs, runs);
   }
 });
+
+test("held questions do not replace the pinned approval", () => {
+  const first = foldQuestions({ questions: [], pending_action: null }, created());
+  const held = foldQuestions(first, created({ id: "held", held: true, muted: true }));
+  assert.equal(held.pending_action.id, "ap-1");
+  assert.equal(held.questions.length, 2);
+});

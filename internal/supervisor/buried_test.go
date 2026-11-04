@@ -185,3 +185,16 @@ func TestUtteranceRequestSaysThePromptIsUnheard(t *testing.T) {
 		t.Errorf("fact repeated after the user spoke:\n%s", text)
 	}
 }
+
+func TestUnannouncedPromptIsNotReminded(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.sup.mu.Lock()
+	h.sup.promptHeard = promptHearing{}
+	h.sup.mu.Unlock()
+	h.sup.remindBuriedPrompt()
+	if n := h.log.count("supervisor.prompt_reminded"); n != 0 {
+		t.Fatalf("unannounced reminder: %d", n)
+	}
+}

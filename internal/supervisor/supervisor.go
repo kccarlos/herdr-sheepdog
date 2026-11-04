@@ -285,6 +285,7 @@ type Supervisor struct {
 	attMu   sync.Mutex
 	attLast map[string]AgentAttention
 	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
+	missMu  sync.Mutex
 	idxMu   sync.Mutex
 	idx     *folderIndex
 	missAt  time.Time
@@ -371,6 +372,9 @@ type Supervisor struct {
 	// promptHeard is whether the user has likely heard the open prompt's
 	// announcement (buried.go).
 	promptHeard promptHearing
+	// told is which questions the user was told about, for the
+	// displacement rail (displaced.go).
+	told toldState
 	// acceptedSeq counts the user's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (reply.go). Unlike

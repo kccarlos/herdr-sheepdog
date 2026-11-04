@@ -120,6 +120,7 @@ func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 			spoken = replacedLine(s.sayOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
 		}
 	}
+	s.installedLocked(p) // displaced.go
 	if err := s.store.SetPending(p); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
@@ -172,6 +173,7 @@ func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
 	if err := s.store.DropQuestion(p.PaneID); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	s.closedLocked(p) // displaced.go
 }
 
 // questionByID finds an open answer_prompt by id: the one the voice is

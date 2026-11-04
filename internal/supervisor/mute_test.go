@@ -59,7 +59,7 @@ func (w *muteWorld) mute(t *testing.T) {
 	}
 }
 
-func TestMutedPromptToolKeepsQuestionHeld(t *testing.T) {
+func TestMutedPromptToolSurfacesQuestionForNextAnswer(t *testing.T) {
 	w := newMuteWorld(t, nil, Quiet)
 	w.mute(t)
 	w.block("w5:p1", "codex-approval-prompt.screen.txt")
@@ -67,14 +67,22 @@ func TestMutedPromptToolKeepsQuestionHeld(t *testing.T) {
 	if !ok {
 		t.Fatal("prompt did not parse")
 	}
+	w.sup.ShepherdInput(InputTyped, "tell auth to deploy")
+	// The orchestrator's prompt tool runs after the words that led to it.
+	w.clock.Advance(time.Second)
 	row, _ := w.store.Get("w5:p1")
 	w.sup.pendingFromPrompt(row, prompt)
-	if p, ok := w.store.Pending(); ok {
-		t.Fatalf("muted prompt became pending: %+v", p)
+	p, ok := w.store.Pending()
+	if !ok || p.Held {
+		t.Fatalf("surfaced prompt = %+v", p)
 	}
-	qs := w.store.Questions()
-	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
-		t.Fatalf("question is not held: %+v", qs)
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err == nil {
+		t.Fatal("same input approved surfaced question")
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err != nil {
+		t.Fatalf("follow-up answer: %v", err)
 	}
 }
 

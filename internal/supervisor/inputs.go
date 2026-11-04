@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -71,6 +70,9 @@ type shepherdInput struct {
 	kind InputKind
 	text string
 	at   time.Time
+	// began is the seq of its first fragment (seq moves with each one):
+	// what the user had been told when they started (displaced.go).
+	began uint64
 	// open is a voice input still collecting transcript fragments.
 	open bool
 	// claimed is set once a to_supervisor call was accepted on it: a
@@ -299,6 +301,7 @@ func (s *Supervisor) closeVoiceLocked() {
 func (s *Supervisor) addInputLocked(in *shepherdInput) {
 	s.inputSeq++
 	in.seq, in.at = s.inputSeq, s.cfg.Now()
+	in.began = in.seq
 	s.inputs = append(s.inputs, in)
 	s.promptCEOSpokeLocked() // buried.go
 	if len(s.inputs) > maxInputs {
@@ -428,9 +431,11 @@ func (s *Supervisor) promptSinceLocked(p state.PendingAction) time.Time {
 
 // railInputLocked is the one rail's reading of the user for keys
 // that answer p: the newest input, which must have arrived after the
-// prompt appeared and within Config.AuthoriseWindow, not already have
-// answered a prompt, be non-empty, and — when the keys approve — not be
-// a "no". It returns the input, or the refusal reason. Caller holds s.mu.
+// prompt appeared and within Config.AuthoriseWindow, not have begun
+// before a prompt that displaced another one was told (displaced.go), not
+// already have answered a prompt, be non-empty, and — when the keys
+// approve — not be a "no". It returns the input, or the refusal reason.
+// Caller holds s.mu.
 func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*shepherdInput, string) {
 	alias := s.aliasOf(p.PaneID)
 	in := s.lastInputLocked()
@@ -440,6 +445,8 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, fmt.Sprintf("the user has said nothing that could answer %s's prompt", alias)
 	case in.at.Before(s.promptSinceLocked(p)):
 		return nil, fmt.Sprintf("the user has said nothing since %s's prompt appeared", alias)
+	case s.displacedLocked(p, in) != "": // displaced.go
+		return nil, s.displacedLocked(p, in)
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return nil, fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case in.used:
@@ -554,8 +561,8 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	row, exists := s.store.Get(p.PaneID)
-	if (!slot || (exists && row.State == herdr.StateBlocked)) && !s.stillAskingLocked(ctx, p) {
+	_, exists := s.store.Get(p.PaneID)
+	if (!slot || exists) && !s.stillAskingLocked(ctx, p) {
 		if slot {
 			s.clearPending(p, "prompt_gone")
 		} else {

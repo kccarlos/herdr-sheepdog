@@ -367,7 +367,14 @@ func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voi
 	alias := aliasOr(state.Say(row))
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	spoken := s.setPendingMuted(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince), s.paneMutedCached(row.PaneID))
+	// The tool result says it aloud, so it is heard even in a muted space,
+	// and only from now: the words that led to this call came before it and
+	// cannot answer it (inputs.go's promptSinceLocked).
+	now := s.cfg.Now()
+	p := s.newAnswerPrompt(row.PaneID, prompt, alias, now)
+	s.promptSeenAt[row.PaneID] = now
+	spoken := s.setPendingMuted(p, false)
+	s.deliveredLocked(p.ID) // displaced.go: the reply tells it
 	s.mu.Unlock()
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }
