@@ -24,6 +24,8 @@ type Web struct {
 	// Shell lets paired devices open the phone shell and send
 	// attachments. On by default; the setup page switches it.
 	Shell bool `toml:"shell"`
+	// Files allows paired devices to browse files.
+	Files bool `toml:"files"`
 	// Advertise lists more host:port addresses for the pairing code,
 	// after the daemon's own: a router's port forward, which the daemon
 	// cannot see (docs/remote-access.md).

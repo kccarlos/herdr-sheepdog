@@ -96,6 +96,7 @@ func Template() string {
 # dev = false
 # dev_testdata_dir = ""   # default: testdata/audio relative to the working directory
 # shell = true   # paired devices may open the phone shell and send attachments; set on the setup page
+# files = true   # paired devices may browse files
 # advertise = []   # more host:port addresses for the pairing code, e.g. ["100.101.1.1:7777"] for a router's port forward
 # tailscale_https = false   # a real *.ts.net certificate for browsers; logs the machine name publicly; set on the setup page
 

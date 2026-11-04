@@ -288,7 +288,7 @@ func (a *App) wire() error {
 		deps.Watcher = a.wref
 	}
 	deps.Term = a.term
-	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
+	deps.Shell, deps.Files, deps.Advertise = cfg.Web.Shell, cfg.Web.Files, cfg.Web.Advertise
 	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {

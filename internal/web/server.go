@@ -239,6 +239,8 @@ type Deps struct {
 	// Shell is config web.shell: paired devices may open the phone shell
 	// and send attachments (on by default; the setup page switches it).
 	Shell bool
+	// Files is config web.files: paired devices may browse files.
+	Files bool
 	// Advertise is config web.advertise: more host:port addresses the
 	// pairing code lists after the daemon's own (a router's port forward).
 	Advertise []string

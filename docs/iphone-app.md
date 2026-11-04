@@ -269,6 +269,7 @@ With one computer, none of this shows: no names and no Talk to.
     lines added and removed; tap one for its diff. It only shows changes
     and never edits anything. "No repository" means the agent's folder is
     not a git repository.
+  - Set `web.files = false` on the computer to hide Files; Changes stays available.
   - **⋯ ▸ Files** (and **Files** on a space's page) opens a read-only browser
     for the agent's or space's folder; it never changes a file. Folders come
     first, then files by name or modified date, with a path bar to step back
