@@ -228,7 +228,12 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &termConn{t: t, conn: conn, id: id, kind: s.kindOf(r.RemoteAddr), device: deviceOf(r), ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
-	defer s.track(r, func() { c.end("device_revoked") })()
+	untrack, tracked := s.track(r, func(reason string) { c.end(reason) })
+	if !tracked {
+		_ = conn.CloseNow()
+		return
+	}
+	defer untrack()
 	t.mu.Lock()
 	if t.conns == nil {
 		t.conns = map[*termConn]struct{}{}

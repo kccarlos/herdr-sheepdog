@@ -454,6 +454,7 @@ final class FileProblemTests: XCTestCase {
         XCTAssertEqual(FileProblem.notFound.words(subject: .folder).title, "That folder is gone")
         XCTAssertEqual(FileProblem.notFound.words(subject: .file).title, "That file is gone")
         XCTAssertEqual(FileProblem.sensitive.words().title, "Hidden for safety")
+        XCTAssertTrue(FileProblem.sensitive.words().message.contains("home folder"))
         let big = FileProblem.tooLarge.words(subject: .file, name: "photo.png", size: 38_000_000)
         XCTAssertEqual(big.message, "photo.png is 38 MB. The phone shows images up to 16 MB, so open it on your computer.")
         XCTAssertTrue(FileProblem.denied.words().message.contains("Files and Folders"))

@@ -119,6 +119,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	after, n := replayFrom(r)
 
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	untrack, tracked := s.track(r, func(string) { cancel() })
+	if !tracked {
+		writeError(w, http.StatusUnauthorized, "session expired or device revoked")
+		return
+	}
+	defer untrack()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -127,9 +135,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, ": sheepdog events %s\n\n", s.deps.Version)
 	flusher.Flush()
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	defer s.track(r, cancel)()
 	// Subscribe before replaying so nothing logged in between is lost;
 	// duplicates are skipped by id.
 	live := s.deps.Log.Subscribe(ctx)
@@ -150,6 +155,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		replay = s.deps.Log.Tail(n)
 	}
 	for _, ev := range replay {
+		if ctx.Err() != nil {
+			return
+		}
 		last = max(last, ev.ID)
 		if filter.match(ev) {
 			writeEvent(w, ev)

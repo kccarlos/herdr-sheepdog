@@ -97,11 +97,9 @@ a long s, or a Kelvin sign for `k`): `.git`, `.env` and `.env.*` (except
 `.kube`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`, and names ending
 `.pem`, `.key`, `.p12`, `.pfx`, `.keystore`, `.p8`, `.tfvars`, plus
 `credentials`, `credentials.json`, `secrets.json`, `secrets.yaml`,
-`secrets.yml`. The home-folder secrets are hidden too, for an agent or a
-space whose folder is `$HOME`: `.codex`, `.claude`, `.config`, `.local`,
-`.cache`, `.bash_history`, `.zsh_history`, `.python_history`, `.psql_history`,
-`.mysql_history`, `.node_repl_history` (they hold the agent CLIs' tokens,
-sheepdog's own config and data, and history). `node_modules` is skipped by a search under the same fold.
+`secrets.yml`, `.codex`, `.claude`, `Library`, `.credentials.json`, `auth.json`, `.gcloud`, and shell and REPL history names. `node_modules` is skipped by a search under the same fold. Repository `.config`, `.local` and `.cache` folders remain visible.
+
+The home folder and the daemon's data folder, their parents, and folders inside the data folder are refused as `sensitive`, including when reached through a symlink. Choose a project folder instead.
 
 A root with a sensitive segment anywhere on its path (an agent working in
 `.git` or `~/.ssh`, spelled or reached through a link) is refused as

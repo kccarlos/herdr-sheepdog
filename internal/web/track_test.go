@@ -25,7 +25,8 @@ func TestTrackClosesAStreamOfARevokedDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	closed := make(chan struct{})
-	defer h.srv.track(r, func() { close(closed) })()
+	untrack, _ := h.srv.track(r, func(string) { close(closed) })
+	defer untrack()
 	select {
 	case <-closed:
 	case <-time.After(time.Second):
@@ -46,7 +47,7 @@ func TestTrackClosesAStreamWhenItsTicketExpires(t *testing.T) {
 	h.srv.auth.mu.Unlock()
 
 	closed := make(chan struct{})
-	untrack := h.srv.track(r, func() { close(closed) })
+	untrack, _ := h.srv.track(r, func(string) { close(closed) })
 	select {
 	case <-closed:
 	case <-time.After(3 * time.Second):
@@ -60,7 +61,8 @@ func TestTrackClosesAStreamWhenItsTicketExpires(t *testing.T) {
 	h.srv.auth.tickets[d.ticket] = tk
 	h.srv.auth.mu.Unlock()
 	late := make(chan struct{})
-	h.srv.track(r, func() { close(late) })()
+	untrackLate, _ := h.srv.track(r, func(string) { close(late) })
+	untrackLate()
 	select {
 	case <-late:
 		t.Fatal("close ran after the stream ended")

@@ -18,7 +18,7 @@ var (
 		// Home-folder secrets, for an agent or space whose folder is $HOME:
 		// the agent CLIs' tokens, other tools' config and sheepdog's own
 		// config and data, caches, and shell and REPL history.
-		".codex", ".claude", ".config", ".local", ".cache",
+		".codex", ".claude", "Library", ".credentials.json", "auth.json", ".gcloud",
 		".bash_history", ".zsh_history", ".python_history", ".psql_history",
 		".mysql_history", ".node_repl_history",
 	)

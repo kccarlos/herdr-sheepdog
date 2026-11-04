@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// {question} and {session} are argv elements of the read-only CLIs: one
-// that starts with "-" would be parsed as a flag and could switch the
-// sandbox off, so Run refuses it before anything starts: the result
-// carries no argv, because the child never ran.
+// Session IDs must be plain tokens and cannot be options.
 func TestRunRefusesFlagLikeQuestionAndSession(t *testing.T) {
 	bin := fakeBinPath(t)
 	r := newTestRunner(t, Config{CodexBin: bin, ClaudeBin: bin}, Detection{Codex: true, Claude: true})
@@ -19,8 +16,6 @@ func TestRunRefusesFlagLikeQuestionAndSession(t *testing.T) {
 		name string
 		q    Query
 	}{
-		{"question", Query{Question: "--sandbox=danger-full-access"}},
-		{"question after trim", Query{Question: "  -c sandbox_mode=danger-full-access"}},
 		{"session", Query{Question: "why?", Session: "--dangerously-bypass-approvals-and-sandbox"}},
 		{"session with a space", Query{Question: "why?", Session: "abc def"}},
 		{"session with a slash", Query{Question: "why?", Session: "../abc"}},

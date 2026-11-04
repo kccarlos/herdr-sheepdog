@@ -146,7 +146,7 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if info, err := os.Stat(row.Cwd); err != nil || !info.IsDir() {
 		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, http.StatusOK
 	}
-	if sensitiveDir(row.Cwd) {
+	if sensitiveDir(row.Cwd) || s.privateRoot(row.Cwd) {
 		return gitRunner{}, nil, http.StatusForbidden
 	}
 	bin := s.deps.GitBin
@@ -161,7 +161,7 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if err != nil || root == "" {
 		return gitRunner{}, &ChangesResponse{Reason: "not_repo", Files: []ChangedFile{}}, http.StatusOK
 	}
-	if sensitiveDir(root) {
+	if sensitiveDir(root) || s.privateRoot(root) {
 		return gitRunner{}, nil, http.StatusForbidden
 	}
 	return gitRunner{bin: bin, dir: root}, nil, http.StatusOK

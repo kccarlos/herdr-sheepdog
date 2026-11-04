@@ -20,8 +20,7 @@ func TestScrubEnvStripsDaemonKeys(t *testing.T) {
 	}
 	got := scrubEnv(environ, "MY_GROQ_KEY", "OPENROUTER_API_KEY")
 	want := []string{"PATH=/bin", "HOME=/h", "HTTPS_PROXY=http://p", "LANG=C", "FAKE_EXIT=0",
-		"GEMINI_API_KEY=g", "GEMINI_API_KEY_2=g2", "VERTEX_API_KEY=v", "VERTEX_PROJECT=p",
-		"DEEPSEEK_API_KEY=d", "OPENAI_API_KEY=o", "OPENAI_ORCH_API_KEY=oo", "ANTHROPIC_API_KEY=a"}
+		"OPENAI_API_KEY=o", "ANTHROPIC_API_KEY=a"}
 	if !slices.Equal(got, want) {
 		t.Errorf("scrubEnv = %v, want %v", got, want)
 	}

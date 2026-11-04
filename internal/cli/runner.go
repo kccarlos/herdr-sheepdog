@@ -188,6 +188,9 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 		return Result{}, err
 	}
 	question := strings.TrimSpace(q.Question)
+	if strings.HasPrefix(question, "-") {
+		question = " " + question
+	}
 	vars := map[string]string{
 		"question":  question,
 		"cwd":       q.Workspace,
@@ -237,16 +240,9 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 	return result, resErr
 }
 
-// checkArguments refuses a question or session id the child would parse
-// as an option. Both are argv elements of a command whose read-only flags
-// stand beside them, so a leading "-" could override those flags. A
-// session id is a short token of letters, digits, dots, dashes and
-// underscores that does not start with a dash (codex's and claude's are
-// UUIDs).
+// checkArguments refuses session IDs that could be parsed as options or
+// contain anything outside the supported plain-token format.
 func checkArguments(q Query) error {
-	if strings.HasPrefix(strings.TrimSpace(q.Question), "-") {
-		return fmt.Errorf("%w: the question starts with %q", ErrBadArgument, "-")
-	}
 	if q.Session == "" {
 		return nil
 	}

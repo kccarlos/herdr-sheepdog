@@ -6,7 +6,7 @@ import "testing"
 // tools keep tokens and history are hidden like .ssh.
 func TestHomeSecretsAreSensitive(t *testing.T) {
 	for _, name := range []string{
-		".codex", ".claude", ".config", ".local", ".cache",
+		".codex", ".claude", "Library", ".credentials.json", "auth.json", ".gcloud",
 		".bash_history", ".zsh_history", ".python_history", ".psql_history",
 		".mysql_history", ".node_repl_history", ".CODEX",
 	} {
@@ -14,12 +14,9 @@ func TestHomeSecretsAreSensitive(t *testing.T) {
 			t.Errorf("Sensitive(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"config", "local", "cache", "claude.md", "history.txt"} {
+	for _, name := range []string{"config", "local", "cache", ".config", ".local", ".cache", "claude.md", "history.txt"} {
 		if Sensitive(name) {
 			t.Errorf("Sensitive(%q) = true, want false", name)
 		}
-	}
-	if !SensitivePath(".config/gh/hosts.yml") {
-		t.Error("a file under .config must be sensitive")
 	}
 }

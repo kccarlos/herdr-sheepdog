@@ -211,7 +211,7 @@ public enum FileProblem: String, Equatable, Sendable {
                          symbol: "folder")
         case .sensitive:
             return Words(title: "Hidden for safety",
-                         message: "Sheepdog keeps files like .env and keys off your phone. Open it on your computer.",
+                         message: "Sheepdog hides files like .env and keys, and cannot open your home folder or its data folder. Choose a project folder or open it on your computer.",
                          symbol: "lock")
         case .notFile:
             return Words(title: "Not a regular file",

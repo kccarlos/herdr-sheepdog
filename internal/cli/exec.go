@@ -108,7 +108,7 @@ func scrubEnv(environ []string, withhold ...string) []string {
 			key = kv[:i]
 		}
 		if strings.HasPrefix(key, "HERDR_") || key == "CLAUDECODE" || strings.HasPrefix(key, "CLAUDE_CODE_") ||
-			strings.HasPrefix(key, "SHEEPDOG_") || slices.Contains(withhold, key) {
+			strings.HasPrefix(key, "SHEEPDOG_") || strings.HasPrefix(key, "GEMINI_API_KEY") || strings.HasPrefix(key, "VERTEX_") || key == "DEEPSEEK_API_KEY" || key == "OPENAI_ORCH_API_KEY" || slices.Contains(withhold, key) {
 			continue
 		}
 		out = append(out, kv)

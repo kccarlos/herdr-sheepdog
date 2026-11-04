@@ -168,9 +168,14 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(s.auth.challenges) >= 4096 {
-		s.auth.mu.Unlock()
-		writeError(w, http.StatusTooManyRequests, "too many open challenges")
-		return
+		var oldest string
+		var expiry time.Time
+		for n, exp := range s.auth.challenges {
+			if oldest == "" || exp.Before(expiry) {
+				oldest, expiry = n, exp
+			}
+		}
+		delete(s.auth.challenges, oldest)
 	}
 	s.auth.challenges[nonce] = now.Add(challengeLifetime)
 	s.auth.mu.Unlock()
@@ -193,7 +198,7 @@ type SessionRequest struct {
 // app keeps both pins and tells a missed rotation from an interception by
 // CertExpires.
 type SessionResponse struct {
-	Ticket      string        `json:"ticket"`
+	Ticket      string        `json:"ticket,omitempty"`
 	ExpiresIn   int           `json:"expires_in"`
 	Device      SessionDevice `json:"device"`
 	CertExpires time.Time     `json:"cert_expires"`
@@ -216,6 +221,10 @@ func SignedText(daemonID, pin, deviceID, nonce string, unix int64) string {
 
 // handleSession checks a signed challenge and issues a ticket.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackAddr(r.RemoteAddr) && s.limits.isBlocked("signature", sourceIP(r.RemoteAddr), s.deps.Now()) {
+		writeRateLimited(w)
+		return
+	}
 	var req SessionRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
@@ -260,7 +269,13 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		fail("bad_signature")
 		return
 	}
-	pins := []string{s.deps.TLS.Pin(), s.deps.TLS.NextPin(), ""}
+	pins := []string{s.deps.TLS.Pin()}
+	if next := s.deps.TLS.NextPin(); next != "" {
+		pins = append(pins, next)
+	}
+	if d.Kind == DeviceBrowser {
+		pins = append(pins, "")
+	}
 	valid := false
 	for _, pin := range pins {
 		if verifySignature(pub, []byte(SignedText(s.deps.Computer.ID, pin, d.ID, req.Nonce, req.Time)), sig) {
@@ -294,8 +309,12 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode,
 		})
 	}
+	responseTicket := t
+	if req.Client == "browser" {
+		responseTicket = ""
+	}
 	writeJSON(w, http.StatusOK, SessionResponse{
-		Ticket: t, ExpiresIn: int(TicketLifetime / time.Second),
+		Ticket: responseTicket, ExpiresIn: int(TicketLifetime / time.Second),
 		Device:      SessionDevice{ID: d.ID, Name: d.Name},
 		CertExpires: s.deps.TLS.Expires().UTC(),
 		NextPin:     s.deps.TLS.NextPin(),
@@ -343,10 +362,10 @@ type liveConns struct {
 // unregisters it. A device revoked before the stream registers (the revoke
 // ran after authenticate) is closed at once, and a stream ends when its
 // ticket expires, as the next request with it would be refused.
-func (s *Server) track(r *http.Request, close func()) func() {
+func (s *Server) track(r *http.Request, close func(string)) (func(), bool) {
 	dev := deviceOf(r)
 	if dev == "" || dev == localDevice {
-		return func() {}
+		return func() {}, true
 	}
 	l := &s.live
 	l.mu.Lock()
@@ -354,8 +373,16 @@ func (s *Server) track(r *http.Request, close func()) func() {
 	// checking under the lock sees every revoke this stream missed.
 	if d, ok := s.devices.get(dev); !ok || d.Revoked != nil {
 		l.mu.Unlock()
-		close()
-		return func() {}
+		close(reasonDeviceRevoked)
+		return func() {}, false
+	}
+	s.auth.mu.Lock()
+	tk, ok := s.auth.tickets[presentedTicket(r)]
+	s.auth.mu.Unlock()
+	if !ok || !s.deps.Now().Before(tk.expires) {
+		l.mu.Unlock()
+		close(reasonSessionExpired)
+		return func() {}, false
 	}
 	if l.conns == nil {
 		l.conns = map[string]map[int]func(){}
@@ -365,14 +392,8 @@ func (s *Server) track(r *http.Request, close func()) func() {
 	if l.conns[dev] == nil {
 		l.conns[dev] = map[int]func(){}
 	}
-	l.conns[dev][n] = close
-	var expiry *time.Timer
-	s.auth.mu.Lock()
-	tk, ok := s.auth.tickets[presentedTicket(r)]
-	s.auth.mu.Unlock()
-	if ok {
-		expiry = time.AfterFunc(max(tk.expires.Sub(s.deps.Now()), 0), close)
-	}
+	l.conns[dev][n] = func() { close(reasonDeviceRevoked) }
+	expiry := time.AfterFunc(tk.expires.Sub(s.deps.Now()), func() { close(reasonSessionExpired) })
 	l.mu.Unlock()
 	return func() {
 		if expiry != nil {
@@ -381,7 +402,7 @@ func (s *Server) track(r *http.Request, close func()) func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		delete(l.conns[dev], n)
-	}
+	}, true
 }
 
 // closeDevices closes every live connection of the given devices.

@@ -102,9 +102,11 @@ func redactValue(v any, redact func(string) string) any {
 			x[i] = redactValue(x[i], redact)
 		}
 	case map[string]any:
+		out := make(map[string]any, len(x))
 		for k, e := range x {
-			x[k] = redactValue(e, redact)
+			out[redact(k)] = redactValue(e, redact)
 		}
+		return out
 	}
 	return v
 }
