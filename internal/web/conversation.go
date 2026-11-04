@@ -265,6 +265,11 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 	switch ev.Type {
 	case "daemon.start":
 		b.closeAll()
+		if n := len(b.items); n > 0 && b.items[n-1].Kind == "notice" && b.items[n-1].Subkind == "start" {
+			last := b.items[n-1] // consecutive starts: keep the latest
+			last.ID, last.TS, last.Version = ev.ID, ev.TS, p.Version
+			break
+		}
 		it := b.push(ev, "notice", "Sheepdog started.")
 		it.Subkind, it.Version = "start", p.Version
 	case "conversation.reset":
