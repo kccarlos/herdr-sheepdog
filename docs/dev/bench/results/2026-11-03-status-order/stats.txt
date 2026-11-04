@@ -1,0 +1,40 @@
+main 15
+a 15
+b 15
+== main -> a (all 45 runs per arm)
+| Safe, segments | 624/648 (96 %) | 618/644 (96 %) | -0 pp (-2 to +2) |
+| answered | 497/525 (95 %) | 498/523 (95 %) | +1 pp (-2 to +3) |
+| no_unintended_action | 625/648 (96 %) | 618/644 (96 %) | -0 pp (-3 to +2) |
+| right_agent | 524/525 (100 %) | 521/523 (100 %) | -0 pp (-1 to +0) |
+| no_hallucination | 559/648 (86 %) | 555/644 (86 %) | -0 pp (-4 to +4) |
+| length_fits | 596/648 (92 %) | 592/644 (92 %) | -0 pp (-3 to +3) |
+| language | 643/648 (99 %) | 639/644 (99 %) | -0 pp (-1 to +1) |
+| ear_friendly | 639/648 (99 %) | 637/644 (99 %) | +0 pp (-1 to +2) |
+== main -> b (all 45 runs per arm)
+| Safe, segments | 624/648 (96 %) | 630/650 (97 %) | +1 pp (-1 to +3) |
+| answered | 497/525 (95 %) | 501/521 (96 %) | +1 pp (-1 to +4) |
+| no_unintended_action | 625/648 (96 %) | 632/650 (97 %) | +1 pp (-1 to +3) |
+| right_agent | 524/525 (100 %) | 519/521 (100 %) | -0 pp (-1 to +0) |
+| no_hallucination | 559/648 (86 %) | 549/650 (84 %) | -2 pp (-6 to +2) |
+| length_fits | 596/648 (92 %) | 599/650 (92 %) | +0 pp (-3 to +3) |
+| language | 643/648 (99 %) | 645/650 (99 %) | +0 pp (-1 to +1) |
+| ear_friendly | 639/648 (99 %) | 642/650 (99 %) | +0 pp (-1 to +1) |
+== a -> b (all 45 runs per arm)
+| Safe, segments | 618/644 (96 %) | 630/650 (97 %) | +1 pp (-1 to +3) |
+| answered | 498/523 (95 %) | 501/521 (96 %) | +1 pp (-2 to +4) |
+| no_unintended_action | 618/644 (96 %) | 632/650 (97 %) | +1 pp (-1 to +3) |
+| right_agent | 521/523 (100 %) | 519/521 (100 %) | -0 pp (-1 to +1) |
+| no_hallucination | 555/644 (86 %) | 549/650 (84 %) | -2 pp (-6 to +2) |
+| length_fits | 592/644 (92 %) | 599/650 (92 %) | +0 pp (-3 to +3) |
+| language | 639/644 (99 %) | 645/650 (99 %) | +0 pp (-1 to +1) |
+| ear_friendly | 637/644 (99 %) | 642/650 (99 %) | -0 pp (-1 to +1) |
+== workday-scale-ten main -> a (subset)
+| Safe, segments | 201/207 (97 %) | 198/209 (95 %) | -2 pp (-6 to +1) |
+| answered | 158/162 (98 %) | 156/164 (95 %) | -2 pp (-5 to +1) |
+| no_unintended_action | 201/207 (97 %) | 198/209 (95 %) | -2 pp (-6 to +1) |
+| right_agent | 162/162 (100 %) | 163/164 (99 %) | -1 pp (-2 to +0) |
+== workday-scale-ten main -> b (subset)
+| Safe, segments | 201/207 (97 %) | 194/206 (94 %) | -3 pp (-6 to +1) |
+| answered | 158/162 (98 %) | 158/163 (97 %) | -1 pp (-4 to +2) |
+| no_unintended_action | 201/207 (97 %) | 196/206 (95 %) | -2 pp (-5 to +1) |
+| right_agent | 162/162 (100 %) | 161/163 (99 %) | -1 pp (-3 to +0) |
