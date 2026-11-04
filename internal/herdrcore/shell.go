@@ -29,7 +29,7 @@ func (b *Backend) OpenShell(ctx context.Context, workspaceID, cwd string) (herdr
 	if workspaceID == "" {
 		workspaceID = newID()
 	}
-	return b.openShell(ctx, cwd, workspaceID, shellValue)
+	return b.openShell(ctx, cwd, workspaceID, shellValue, nil)
 }
 
 // CloseShell kills paneID only when it carries sheepdog=shell.

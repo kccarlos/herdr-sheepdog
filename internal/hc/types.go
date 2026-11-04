@@ -97,6 +97,12 @@ type InterruptResult struct {
 	Outcome string `json:"outcome"`
 }
 
+// InitialSize specifies the initial terminal width and height for terminal.run.
+type InitialSize struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
 // RunParams selects the program and attributes for terminal.run.
 type RunParams struct {
 	Argv     []string          `json:"argv,omitempty"`
@@ -107,6 +113,7 @@ type RunParams struct {
 	Labels   map[string]string `json:"labels,omitempty"`
 	Keep     bool              `json:"keep,omitempty"`
 	NoParent bool              `json:"no_parent,omitempty"`
+	Size     *InitialSize      `json:"size,omitempty"`
 }
 
 // Error is a JSON-RPC error returned by herdr-core.

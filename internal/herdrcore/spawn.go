@@ -17,12 +17,14 @@ import (
 // The space has no name of its own, so label is ignored and herdr-app names
 // it after the folder.
 func (b *Backend) CreateWorkspace(ctx context.Context, cwd, _ string) (herdr.PaneInfo, error) {
-	return b.openShell(ctx, cwd, newID(), spawnValue)
+	return b.openShell(ctx, cwd, newID(), spawnValue, nil)
 }
 
 // SplitPane opens a new shell terminal in cwd, in a new tab of the space
 // paneID is in. hc has no splits. A pane that is in no space (a terminal
 // herdr-app does not show) has none to join, so it gets a new space.
+// When the anchor pane has known dimensions, the new terminal inherits
+// its size so the new agent does not start in a wrong-sized pane.
 func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
 	anchor, err := b.client.Get(ctx, paneID)
 	if err != nil {
@@ -32,13 +34,18 @@ func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane
 	if space == "" {
 		space = newID()
 	}
-	return b.openShell(ctx, cwd, space, spawnValue)
+	var size *hc.InitialSize
+	if anchor.Cols > 0 && anchor.Rows > 0 {
+		size = &hc.InitialSize{Cols: anchor.Cols, Rows: anchor.Rows}
+	}
+	return b.openShell(ctx, cwd, space, spawnValue, size)
 }
 
 // openShell runs the machine's own shell (no argv) in cwd, kept by the
 // core, in a new tab of space. role is sheepdog's label value: spawn for an
-// agent's shell, shell for the phone's plain shell.
-func (b *Backend) openShell(ctx context.Context, cwd, space, role string) (herdr.PaneInfo, error) {
+// agent's shell, shell for the phone's plain shell. size sets initial
+// terminal dimensions when non-nil.
+func (b *Backend) openShell(ctx context.Context, cwd, space, role string, size *hc.InitialSize) (herdr.PaneInfo, error) {
 	tab := newID()
 	t, err := b.client.Run(ctx, hc.RunParams{
 		Cwd: cwd,
@@ -48,6 +55,7 @@ func (b *Backend) openShell(ctx context.Context, cwd, space, role string) (herdr
 		Labels:   map[string]string{spawnLabel: role, labelSpace: space, labelTab: tab, labelSeen: "0"},
 		Keep:     true,
 		NoParent: true,
+		Size:     size,
 	})
 	b.logEvent("herdr.open_shell", t.Address, map[string]any{"cwd": cwd, "space": space, "tab": tab, "role": role, "error": errString(err)})
 	if err != nil {

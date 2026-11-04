@@ -50,6 +50,9 @@ type Driver interface {
 	// NewAgent creates the terminal for a new agent in cwd, joining the
 	// folder's existing space when it has one.
 	NewAgent(context.Context, string, string) (herdr.PaneInfo, error)
+	// TerminalSize reports the terminal dimensions if the backend supports
+	// querying or setting them; ok is false on backends that do not.
+	TerminalSize(context.Context, string) (cols, rows int, ok bool)
 
 	// The seen and pinned marks (marks.go). Marker is the backend's
 	// herdr.Marker: hc over terminal labels, the old herdr over
@@ -130,6 +133,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "new agent in an existing folder joins its space",
 			Run:  newAgentJoinsTheFoldersSpace,
+		},
+		{
+			Name: "split pane inherits anchor initial size",
+			Run:  splitPaneInheritsAnchorInitialSize,
 		},
 		{
 			Name: "blocked question with options is parsed",
@@ -408,6 +415,32 @@ func newAgentJoinsTheFoldersSpace(t *testing.T, newDriver NewDriver) {
 	}
 	if len(agents) != 2 {
 		t.Fatalf("agents = %+v, want Claude and Codex", agents)
+	}
+}
+
+func splitPaneInheritsAnchorInitialSize(t *testing.T, newDriver NewDriver) {
+	d := newDriver(t)
+	ctx := testContext(t)
+	dir := t.TempDir()
+	first, err := d.NewAgent(ctx, dir, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, rows, ok := d.TerminalSize(ctx, first.PaneID)
+	if !ok {
+		// Unsupported on the old herdr backend: graceful no-op.
+		return
+	}
+	second, err := d.NewAgent(ctx, dir, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCols, secondRows, ok := d.TerminalSize(ctx, second.PaneID)
+	if !ok {
+		t.Fatal("expected second pane size to be queryable")
+	}
+	if secondCols != cols || secondRows != rows {
+		t.Fatalf("split pane size = %dx%d, want anchor size %dx%d", secondCols, secondRows, cols, rows)
 	}
 }
 

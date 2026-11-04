@@ -61,6 +61,14 @@ func newCoreDriverOver(t *testing.T, srv *hctest.Server) *coreDriver {
 
 func (d *coreDriver) Marker() herdr.Marker { return d.backend }
 
+func (d *coreDriver) TerminalSize(ctx context.Context, paneID string) (int, int, bool) {
+	t, err := d.client.Get(ctx, paneID)
+	if err != nil {
+		return 0, 0, false
+	}
+	return int(t.Cols), int(t.Rows), true
+}
+
 // Settle: hc follows its event stream, so there is nothing to do.
 func (d *coreDriver) Settle(context.Context) error { return nil }
 

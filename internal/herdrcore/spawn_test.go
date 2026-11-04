@@ -118,6 +118,41 @@ func TestSpawnLabelsNewAndExistingSpace(t *testing.T) {
 		runs[2].Labels["herdr.tab"] == runs[0].Labels["herdr.tab"] {
 		t.Fatalf("terminal.run labels = %+v", runs)
 	}
+	if runs[2].Size == nil || runs[2].Size.Cols != 80 || runs[2].Size.Rows != 24 {
+		t.Fatalf("split terminal.run size = %+v, want 80x24", runs[2].Size)
+	}
+}
+
+func TestSplitPaneInheritsCustomAnchorSize(t *testing.T) {
+	b, srv := newBackend(t)
+	ctx := testContext(t)
+	app := liveTerminal("t1", "zsh")
+	app.Cols = 110
+	app.Rows = 35
+	srv.Add(app)
+
+	joined, err := b.SplitPane(ctx, "t1", "/work/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.PaneID != "t2" {
+		t.Fatalf("joined pane = %s, want t2", joined.PaneID)
+	}
+	runs := requestParams[hc.RunParams](t, srv, "terminal.run")
+	if len(runs) != 1 {
+		t.Fatalf("terminal.run count = %d, want 1", len(runs))
+	}
+	if runs[0].Size == nil || runs[0].Size.Cols != 110 || runs[0].Size.Rows != 35 {
+		t.Fatalf("runs[0].Size = %+v, want 110x35", runs[0].Size)
+	}
+	client := hc.NewClient(srv.Path)
+	t2, err := client.Get(ctx, "t2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t2.Cols != 110 || t2.Rows != 35 {
+		t.Fatalf("t2 size = %dx%d, want 110x35", t2.Cols, t2.Rows)
+	}
 }
 
 // A split of a space herdr-app already has (a terminal it started, with
