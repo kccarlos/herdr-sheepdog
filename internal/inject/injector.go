@@ -138,7 +138,7 @@ func (i *Injector) Pane(ctx context.Context, req PaneRequest) (state.Agent, erro
 		from = row.State
 	} else {
 		var err error
-		row, _, err = i.store.Apply(herdr.Transition{PaneID: req.PaneID, To: to, At: i.now(), Agent: req.Kind, WorkspaceID: "synthetic", Source: state.SourceInject})
+		row, _, err = i.store.Apply(herdr.Transition{PaneID: req.PaneID, To: to, At: i.now(), Agent: req.Kind, Cwd: strings.TrimSpace(req.Cwd), WorkspaceID: "synthetic", Source: state.SourceInject})
 		if err != nil {
 			return state.Agent{}, err
 		}
@@ -224,8 +224,9 @@ func (i *Injector) Remove(ctx context.Context, paneID string) error {
 func (i *Injector) ensureRow(paneID, kind, alias string) (herdr.State, error) {
 	row, ok := i.store.Get(paneID)
 	if !ok {
+		cwd, _ := i.herdr.PaneCwd(paneID)
 		var err error
-		row, _, err = i.store.Apply(herdr.Transition{PaneID: paneID, To: herdr.StateWorking, At: i.now(), Agent: kind, WorkspaceID: "synthetic", Source: state.SourceInject})
+		row, _, err = i.store.Apply(herdr.Transition{PaneID: paneID, To: herdr.StateWorking, At: i.now(), Agent: kind, Cwd: cwd, WorkspaceID: "synthetic", Source: state.SourceInject})
 		if err != nil {
 			return "", err
 		}
@@ -245,8 +246,9 @@ func (i *Injector) ensureRow(paneID, kind, alias string) (herdr.State, error) {
 // would and hands the transition to the supervisor.
 func (i *Injector) transition(ctx context.Context, paneID, kind string, from, to herdr.State) {
 	at := i.now()
+	cwd, _ := i.herdr.PaneCwd(paneID)
 	i.log.Log("herdr", "herdr.state", paneID, map[string]any{"state": to, "source": state.SourceInject, "agent": kind})
-	t := herdr.Transition{PaneID: paneID, From: from, To: to, At: at, Agent: kind, WorkspaceID: "synthetic", Source: state.SourceInject}
+	t := herdr.Transition{PaneID: paneID, From: from, To: to, At: at, Agent: kind, Cwd: cwd, WorkspaceID: "synthetic", Source: state.SourceInject}
 	i.log.Log("herdr", "herdr.transition", paneID, t)
 	i.herdr.notifyChanged()
 	i.sup.HandleTransition(ctx, t)

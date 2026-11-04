@@ -57,6 +57,7 @@ check "agent-unread: build is done and unread" jq_state '[.agents[] | select(.al
 check "agent-seen: build was marked unread again after a seen" jq_state '[.agents[] | select(.alias=="build" and .attention.unread==true and .attention.seen==0)] | length == 1'
 "$HERE/scenario.sh" "$DIR" agent-pin >/dev/null
 check "agent-pin: build is pinned" jq_state '[.agents[] | select(.alias=="build" and .attention.pinned==true)] | length == 1'
+check "files: list, read, sensitive, symlinks, FIFO, limits, auth, and audit log" "$HERE/scenario.sh" "$DIR" files
 
 "$HERE/scenario.sh" "$DIR" voice-client connected >/dev/null
 check "voice-client: a macos client holds the voice" jq_state '.voice.client_connected == true and .voice.client.platform == "macos"'

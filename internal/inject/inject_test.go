@@ -90,11 +90,11 @@ func newHarness(t *testing.T) *harness {
 
 func TestBlockedRunsFullChain(t *testing.T) {
 	h := newHarness(t)
-	row, err := h.inj.Blocked(context.Background(), BlockedRequest{PaneID: "fake:1", Alias: "auth", Screen: codexScreen(t)})
+	row, err := h.inj.Blocked(context.Background(), BlockedRequest{PaneID: "fake:1", Alias: "auth", Screen: codexScreen(t), Cwd: "/tmp/work/auth"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !row.Synthetic || row.Alias != "auth" || row.State != herdr.StateBlocked || row.Kind != "codex" {
+	if !row.Synthetic || row.Alias != "auth" || row.State != herdr.StateBlocked || row.Kind != "codex" || row.Cwd != "/tmp/work/auth" {
 		t.Fatalf("row = %+v", row)
 	}
 	types := strings.Join(h.log.types(), " ")
