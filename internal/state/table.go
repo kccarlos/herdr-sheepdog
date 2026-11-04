@@ -265,6 +265,7 @@ type PendingAction struct {
 	// YesKeys / NoKeys are the keystrokes for a plain yes / no.
 	YesKeys []string `json:"yes_keys,omitempty"`
 	NoKeys  []string `json:"no_keys,omitempty"`
+	Held    bool     `json:"held,omitempty"`
 }
 
 // Option is one selectable choice of an answer_prompt action.

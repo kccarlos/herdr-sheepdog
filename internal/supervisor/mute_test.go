@@ -13,6 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
 // muteWorld puts auth's pane in a real folder, so the space has a path, and
@@ -55,6 +56,109 @@ func (w *muteWorld) mute(t *testing.T) {
 	t.Helper()
 	if _, err := w.mutes.Set(w.path, nil, ViaPhone); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMutedPromptToolKeepsQuestionHeld(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	prompt, ok := herdr.ParsePrompt(fixture(t, "codex-approval-prompt.screen.txt"))
+	if !ok {
+		t.Fatal("prompt did not parse")
+	}
+	row, _ := w.store.Get("w5:p1")
+	w.sup.pendingFromPrompt(row, prompt)
+	if p, ok := w.store.Pending(); ok {
+		t.Fatalf("muted prompt became pending: %+v", p)
+	}
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("question is not held: %+v", qs)
+	}
+}
+
+func TestMutedQuestionExcludedFromDecisions(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if got := w.sup.openDecisions(); len(got) != 0 {
+		t.Fatalf("muted decision announced: %v", got)
+	}
+}
+
+func TestWindowAnswerFindsHeldQuestion(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	qs := w.store.Questions()
+	if len(qs) != 1 {
+		t.Fatal("missing question")
+	}
+	q := qs[0]
+	id, option, ok := w.sup.windowAnswer("w5:p1", q.Options[0].Keys)
+	if !ok || id != q.ID || option != 1 {
+		t.Fatalf("window answer = %q, %d, %v", id, option, ok)
+	}
+}
+
+func TestMutedRepromptIsRecognized(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	prompt, ok := herdr.ParsePrompt(fixture(t, "codex-approval-prompt.screen.txt"))
+	if !ok {
+		t.Fatal("prompt did not parse")
+	}
+	row, _ := w.store.Get("w5:p1")
+	if !w.sup.raiseReprompt(context.Background(), row, prompt, "test", 0) {
+		t.Fatal("held reprompt was not recognized")
+	}
+}
+
+func TestReconciledMutedQuestionRemainsHeld(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	q := w.store.Questions()[0]
+	w.srv.SetScreen(q.PaneID, fixture(t, "claude-permission-prompt.screen.txt"))
+	row, _ := w.store.Get(q.PaneID)
+	w.sup.checkQuestion(context.Background(), row, q)
+	qs := w.store.Questions()
+	if len(qs) != 1 || qs[0].ID == q.ID || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("replacement not held: %+v", qs)
+	}
+	if w.log.count("pending.cancelled") != 1 || w.log.count("pending.created") != 2 {
+		t.Fatal("replacement events missing")
+	}
+}
+
+func TestMuteLookupRefreshesRecentIndexOnNewPane(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.sup.WarmFolders(context.Background())
+	w.addAgent("w6:p1", "new", "codex", herdr.StateWorking)
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "new", Cwd: w.path})
+	if !w.sup.paneMuted(context.Background(), "w6:p1") {
+		t.Fatal("new pane in muted folder was not recognized")
+	}
+}
+
+func TestHeldQuestionSurvivesRestart(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	store, err := state.Open(w.store.Path(), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup, err := New(store, w.client, nil, w.pusher, w.log, Config{Now: w.clock.Now, Mutes: w.mutes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qs := store.Questions()
+	if len(qs) != 1 || !sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("held question lost on restart: %+v", qs)
 	}
 }
 

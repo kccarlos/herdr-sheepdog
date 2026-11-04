@@ -97,6 +97,7 @@ func (s *Supervisor) setPending(p state.PendingAction) {
 func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 	spoken := p.SpokenSummary
 	if muted && p.Kind == state.PendingAnswerPrompt {
+		p.Held = true
 		if old, had := s.store.Pending(); had && old.PaneID == p.PaneID && old.Kind == state.PendingAnswerPrompt {
 			// The same pane asks again: what was pending is out of date.
 			s.clearPending(old, "superseded")

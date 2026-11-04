@@ -367,8 +367,7 @@ func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voi
 	alias := aliasOr(state.Say(row))
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	// The tool result says it aloud, so it is heard even in a muted space.
-	spoken := s.setPendingMuted(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince), false)
+	spoken := s.setPendingMuted(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince), s.paneMutedCached(row.PaneID))
 	s.mu.Unlock()
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }
@@ -458,7 +457,7 @@ func findAlias(rows []state.Agent, name string) (state.Agent, bool) {
 	var hit state.Agent
 	hits := 0
 	for _, r := range rows {
-		if slug != "" && (strings.HasPrefix(r.Alias, slug) || strings.Contains(r.Alias, slug) || strings.Contains(slug, r.Alias)) {
+		if slug != "" && (strings.HasPrefix(r.Alias, slug) || strings.Contains(r.Alias, slug)) {
 			hit, hits = r, hits+1
 		}
 	}

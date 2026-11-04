@@ -161,8 +161,11 @@ func (s *Supervisor) ceoSpokeSinceLocked(t time.Time) bool {
 func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, reason string, ok bool) {
 	h := s.promptHeard
 	p, has := s.store.Pending()
-	if !has || p.Kind != state.PendingAnswerPrompt || p.ID != h.pendingID || h.sentAt.IsZero() || h.sentAt.After(at) {
+	if !has || p.Kind != state.PendingAnswerPrompt {
 		return state.PendingAction{}, "", false
+	}
+	if p.ID != h.pendingID || h.sentAt.IsZero() || h.sentAt.After(at) {
+		return p, "unannounced", true
 	}
 	switch {
 	case !h.unheardAt.IsZero() && !h.unheardAt.After(at):
@@ -200,8 +203,11 @@ func (s *Supervisor) openPromptFact(start time.Time) string {
 		return ""
 	}
 	why := "another line was spoken right after it, before the user said anything"
-	if reason == "unheard" {
+	switch reason {
+	case "unheard":
 		why = "the voice judged that it did not reach the user"
+	case "unannounced":
+		why = "it had not been announced when the user spoke"
 	}
 	return fmt.Sprintf("%s's prompt is still open and the user has likely not heard it: %q (%s). Their words may not be about it.", s.sayOf(p.PaneID), p.SpokenSummary, why)
 }

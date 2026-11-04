@@ -573,7 +573,21 @@ func (s *Supervisor) paneMuted(ctx context.Context, paneID string) bool {
 	idx := s.folders(ctx)
 	if s.folderOfPane(idx, row) == "" {
 		// Not in the index: a space opened since it was read.
-		idx = s.foldersWithin(ctx, folderMissAge)
+		now := s.cfg.Now()
+		s.idxMu.Lock()
+		refresh := s.missAt.IsZero() || now.Sub(s.missAt) >= folderMissAge
+		if refresh {
+			s.missAt = now
+		}
+		s.idxMu.Unlock()
+		if refresh {
+			if fresh, err := s.readFolders(ctx); err == nil {
+				s.idxMu.Lock()
+				s.idx = fresh
+				s.idxMu.Unlock()
+				idx = fresh
+			}
+		}
 	}
 	return s.rowMuted(idx, row)
 }
@@ -665,6 +679,11 @@ func (s *Supervisor) promoteHeld(a announcement) {
 	defer s.mu.Unlock()
 	q, ok := s.store.Question(a.pending)
 	if !ok {
+		return
+	}
+	q.Held = false
+	if err := s.store.SetQuestion(q); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
 		return
 	}
 	s.attMu.Lock()

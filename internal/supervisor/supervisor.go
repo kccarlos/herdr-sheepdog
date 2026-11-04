@@ -287,6 +287,7 @@ type Supervisor struct {
 	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
 	idxMu   sync.Mutex
 	idx     *folderIndex
+	missAt  time.Time
 
 	store   *state.Store
 	herdr   Herdr
@@ -458,6 +459,11 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(), conversationStartedAt: cfg.Now(),
 		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, promptSeenAt: map[string]time.Time{}, inputWake: make(chan struct{}), investigating: map[string]*liveInvestigation{}}
 	s.life, s.endLife = context.WithCancel(context.Background())
+	for _, q := range store.Questions() {
+		if q.Held {
+			s.holdQuestion(q.ID)
+		}
+	}
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.

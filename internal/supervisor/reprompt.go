@@ -216,10 +216,30 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "prompt_gone"})
 	case promptSignature(prompt) != pendingSignature(q):
 		p := s.newAnswerPrompt(row.PaneID, prompt, aliasOr(state.Say(row)), row.StateSince)
+		held := s.heldQuestion(q.ID)
+		if held {
+			p.Held = true
+			s.holdQuestion(p.ID)
+		}
 		if err := s.store.SetQuestion(p); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 		}
-		s.log.Log(logSource, "question.replaced", p.PaneID, map[string]any{"old_id": q.ID, "id": p.ID, "question": p.Question})
+		if _, err := s.store.Update(row.PaneID, func(a *state.Agent) {
+			if a.LastBlock == nil {
+				a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
+			}
+			a.LastBlock.Question = prompt.Phrase()
+			a.LastBlock.Answered = false
+		}); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.invalidateBriefingLocked()
+		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "superseded"})
+		created := s.pendingCreated(p)
+		if held {
+			created["held"] = true
+		}
+		s.log.Log(logSource, "pending.created", p.PaneID, created)
 	}
 }
 
@@ -292,7 +312,15 @@ func (s *Supervisor) raiseReprompt(ctx context.Context, row state.Agent, prompt 
 	s.log.Log(logSource, "herdr.transition", row.PaneID, t)
 	s.HandleTransition(ctx, t)
 	p, has := s.store.Pending()
-	return has && p.PaneID == row.PaneID && p.Kind == state.PendingAnswerPrompt && pendingSignature(p) == promptSignature(prompt)
+	if has && p.PaneID == row.PaneID && p.Kind == state.PendingAnswerPrompt && pendingSignature(p) == promptSignature(prompt) {
+		return true
+	}
+	for _, q := range s.store.Questions() {
+		if q.PaneID == row.PaneID && pendingSignature(q) == promptSignature(prompt) {
+			return true
+		}
+	}
+	return false
 }
 
 // promptSignature is what tells one parsed prompt from another for this

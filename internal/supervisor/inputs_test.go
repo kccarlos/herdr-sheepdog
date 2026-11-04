@@ -292,6 +292,22 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 	}
 }
 
+func TestTapRejectsStalePendingScreen(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	p, _ := h.pending()
+	h.srv.SetScreen(p.PaneID, "No question here")
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+		t.Fatalf("tap error = %v, want ErrPendingGone", err)
+	}
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Fatalf("sent stale keys: %v", got)
+	}
+	if _, ok := h.store.Pending(); ok {
+		t.Fatal("stale pending was retained")
+	}
+}
+
 // A tap is answered at once: the voice relaying the silent "tapped" line
 // back finds no fresh input.
 func TestTapIsNotFreshInputForTheRelay(t *testing.T) {

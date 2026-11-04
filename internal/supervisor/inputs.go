@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -553,9 +554,14 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	if !slot && !s.stillAskingLocked(ctx, p) {
-		s.dropQuestionLocked(p)
-		s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
+	row, exists := s.store.Get(p.PaneID)
+	if (!slot || (exists && row.State == herdr.StateBlocked)) && !s.stillAskingLocked(ctx, p) {
+		if slot {
+			s.clearPending(p, "prompt_gone")
+		} else {
+			s.dropQuestionLocked(p)
+			s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
+		}
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}

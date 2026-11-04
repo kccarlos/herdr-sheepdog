@@ -30,6 +30,20 @@ func (h *harness) lastPushText() string {
 
 const staleReply = "I told auth to rerun the shop tests, and it is on it now."
 
+func TestOrchestratorSeesDisplacedQuestion(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.block("w6:p1", "codex-approval-prompt.screen.txt")
+	for _, a := range (brainHost{h.sup}).Agents() {
+		if a.PaneID == "w5:p1" && a.Pending != nil {
+			return
+		}
+	}
+	t.Fatal("displaced question missing from orchestrator roster")
+}
+
 // Tier-3 bench 2026-10-03 #9 (t3-codex-report): Codex's approval push
 // was followed four seconds later by the stale reply to the user's
 // previous words; the user waited, the prompt stayed open for three
