@@ -119,8 +119,10 @@ The iPhone app can open a plain shell in a project folder ("Open shell
 here" in an agent's ⋯ menu). **Shell from your phone** on the setup page
 switches it for every paired device of this computer; it is on by default
 and takes effect at once (`web.shell` in [CONFIG.md](../CONFIG.md)).
-Turned off, the app hides the shell and attachments; agent windows still
-work.
+Turned off, the app hides the shell, attachments and wrap-up commands;
+agent windows, git changes and the read-only file browser still work
+(with `.env`, `.ssh`, private keys and other sensitive filenames hidden in
+code).
 
 A tunnel or reverse proxy on the computer itself (one that reaches sheepdog
 on `127.0.0.1`) looks like this computer to sheepdog. `tailscale serve` is

@@ -158,3 +158,32 @@ test("a new send clears the last note, and subscribers hear every change", async
   assert.equal(h.outbox.getState().notice, null);
   assert.ok(heard > before);
 });
+
+test("a reply the stream showed before the turn returned is not shown twice", async () => {
+  // The daemon logs the result before it answers the request, so the
+  // conversation can already hold the exchange when `turn` resolves.
+  const history = [];
+  const http = {
+    async turn() {
+      const at = outbox.getState().entries[0].at;
+      history.push(line(at + 5, "run the tests"), answer(at + 9, "Done."));
+      outbox.reconcile(history); // the stream's update: the entry has no reply yet
+      return reply("Done.");
+    },
+  };
+  const outbox = createOutbox({ http, newKey: () => "k1", now: () => 1_000_000, items: () => history, refresh: async () => {} });
+  await outbox.submit("run the tests");
+  assert.deepEqual(pendingItems(outbox.getState().entries), []);
+  assert.deepEqual(outbox.getState().entries, []);
+});
+
+test("a failed turn removes an entry already matched by the stream", async () => {
+  let outbox;
+  const http = { async turn() {
+    outbox.reconcile([line(outbox.getState().entries[0].at + 1, "hello")]);
+    throw new DaemonError("down", "nothing answered");
+  } };
+  outbox = createOutbox({ http, newKey: () => "k1", now: () => 1_000_000 });
+  assert.deepEqual(await outbox.submit("hello"), { restore: "hello" });
+  assert.deepEqual(outbox.getState().entries, []);
+});

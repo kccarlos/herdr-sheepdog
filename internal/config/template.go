@@ -152,13 +152,27 @@ func Template() string {
 [prompts]
 # dir = %[29]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
 
+[push]
+# How phone notifications reach APNs (docs/dev/push.md): "relay" (the
+# shared relay or your own), "apns" (directly with [push.apns]) or "off".
+# Empty picks "apns" when [push.apns] is complete, else "relay".
+# mode = ""
+
+[push.relay]
+# url = %[58]q
+
 [push.apns]
-# Phone notifications for the iOS companion app (docs/dev/push.md). All four
-# are needed; leave them unset to keep push disabled.
+# Direct APNs for a self-built iOS app (docs/dev/push.md). All four are
+# needed; leave them unset to use the relay instead.
 # key_path = ""   # the .p8 APNs auth key (ES256); never logged
 # key_id = ""     # the key's 10-character id
 # team_id = ""    # the Apple Developer team id the key belongs to
 # topic = ""      # the iOS app's bundle id
+
+[computer]
+# What this computer is called in the phone app; empty uses the macOS
+# ComputerName (or os.Hostname).
+# name = ""
 
 [log]
 # The runtime log, <data_dir>/logs/sheepdog.log (sheepdog logs). Secrets
@@ -212,5 +226,6 @@ func Template() string {
 		d.Update.Check, d.Update.AutoRestart,
 		d.Anthropic.BaseURL, d.Anthropic.Effort, d.Anthropic.EventEffort, d.Anthropic.Fallbacks,
 		d.Panel.AutoUpdate,
+		d.Push.Relay.URL,
 	)
 }

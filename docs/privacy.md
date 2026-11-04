@@ -104,16 +104,19 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.config/sheepdog/prompts/` | Your prompt overrides, if any. | Until you delete it. |
 | `~/.local/share/sheepdog/events/YYYY-MM-DD.jsonl` | The event log: every event of the daemon, including **transcripts of what you said**, the voice's and the orchestrator's answers, and agent screen excerpts. | 14 days (`events.retention_days`). |
 | `~/.local/share/sheepdog/brain/` | The orchestrator's transcripts and the requests it sent to its model; they include what you said. | `events.retention_days`, deleted with the event log. |
+| `~/.local/share/sheepdog/cards.jsonl` | Cards the orchestrator showed on your screen (`show` tool): markdown notes, agent cards, terminal excerpts and approval prompt snapshots. | `events.retention_days`, deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | Notes the orchestrator wrote about your agents. | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions, your runtime settings. | Overwritten as it changes. |
 | `~/.local/share/sheepdog/agent_marks.json` | With the original herdr: per terminal, how many turns it finished, the last one you looked at, and whether you pinned it. No text from your sessions. | Each terminal's entry goes when the terminal closes. |
 | `~/.local/share/sheepdog/space_mutes.json` | The spaces you muted notifications for: the folder path, when, until when, and from which of your devices. No text from your sessions. | Until the mute ends, you turn it off, or the folder is gone. |
+| `~/.local/share/sheepdog/wrapups.json` | Wrap-up commands you saved per project folder from the iPhone app: label, shell command and folder path. | Until you delete a command in the app or run `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/attachments/` | Photos and files you attach in the iPhone app. They are stored on your computer; the agent gets their path in your prompt and reads the file. | 7 days. |
 | `~/.local/share/sheepdog/devices.json` | Your paired phones and browsers: their names, kinds, public keys and when each was last seen. No secret. | Until you delete it or revoke a device on the setup page. |
-| `~/.local/share/sheepdog/tls/` | This computer's id and its own TLS certificate and key. | Until you delete it. |
+| `~/.local/share/sheepdog/tls/` | This computer's id, its own TLS certificate and key, and when `web.tailscale_https = true` the cached Tailscale certificate and key (`tsnet.crt`, `tsnet.key`). | Until you delete it. |
 | `~/.local/share/sheepdog/push_devices.json` | Your phones' notification tokens and each phone's notification encryption key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log, with secrets redacted. | Rotated at 10 MB, 3 old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log; normally empty. | Until `sheepdog data clear --all`. |
+| `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version. | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
@@ -206,7 +209,11 @@ The live agent window and the phone shell send your keystrokes to the daemon
 and show the pane's screen. The daemon passes them through without storing
 them: its event log records only that a window or shell opened and closed
 (which pane, which folder, how long, how many bytes), never what was typed or
-shown.
+shown. The read-only **Changes** and **Files** views let a paired phone browse
+an agent's or space's working directory and git diffs; secret filenames
+(`.env`, `.ssh`, `.aws`, `.gnupg`, `.netrc`, private keys and certificates) are
+hidden in code (`403 hidden for safety`), and the event log records only the
+path, size and line count read (`files.read`), never file contents.
 
 **Files.** A paired phone can read the files in an agent's or a space's
 folder through your daemon ([iphone-app.md](iphone-app.md)). Those reads go

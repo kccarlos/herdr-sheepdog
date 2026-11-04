@@ -11,7 +11,7 @@
 |---|---|
 | `sheepdog setup` | The browser wizard: key, checks, start at login, phone, talk. Starts the daemon if needed. Run it again any time. `--terminal` asks in the terminal; `--no-open` prints the URL only. |
 | `sheepdog init` | The Models step in the terminal (also `sheepdog setup --terminal`): starting point, voice, orchestrator, keys checked live, a summary, then saved like the setup page. `--non-interactive` for scripts: [flags](#flags-of-sheepdog-init). |
-| `sheepdog doctor` | One line per check with its fix: herdr, every key, the orchestrator's tool calling, the web port, bind and token, push, file permissions, and a warning when your keys live in a `./.env` instead of `~/.config/sheepdog/.env`. Exit 1 on any FAIL. `--no-probe` spends no tokens. |
+| `sheepdog doctor` | One line per check with its fix: herdr, the herdr-app panel and `Sheepdog.app` on macOS, every key, the orchestrator's tool calling, the web port, bind, project folders, push, config and env file permissions, and a warning when your keys live in a `./.env` instead of `~/.config/sheepdog/.env`. Exit 1 on any FAIL. `--no-probe` spends no tokens. |
 | `sheepdog doctor --report` | A redacted diagnostic bundle for a bug report. `--out FILE` writes it (mode 0600); `--lines N` sets the log lines (default 200). |
 | `sheepdog pair` | The QR code the iPhone app scans. `--compact` for a small window, `--plain` for no colour. |
 | `sheepdog demo` | Three scripted agents, no herdr needed (needs the Gemini key: the one `sheepdog setup` saved, or `GEMINI_API_KEY`). `--port N`, `--no-open`. |

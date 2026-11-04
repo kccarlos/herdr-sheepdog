@@ -9,8 +9,9 @@ sheepdog needs two models. They never share a role:
   remembers and acts on the agents behind code-enforced safety rails.
 
 **The simplest setup is one free Gemini API key** from
-<https://aistudio.google.com/apikey>. It runs both. The setup page
-(`sheepdog setup`) asks for nothing else.
+<https://aistudio.google.com/apikey>. On the setup page (`sheepdog setup`),
+click **Free quick start** (a fresh install preselects **Recommended**, which
+also asks for a DeepSeek key): one Gemini key then runs both.
 
 ## Voice
 

@@ -75,9 +75,13 @@ export function patchApproval(history, pendingId, patch, onlyOpen) {
 // An older page (`before` set): merged by id, the server's copy wins.
 export function applyOlder(history, page) {
   let items = normalise([...history.items, ...(page.items ?? [])]);
-  // Paging back far enough is a deliberate act; keep the old end and let the
-  // newest page bring the rest back.
-  if (items.length > MEMORY_CAPACITY) items = items.slice(0, MEMORY_CAPACITY);
+  // Past the memory the oldest go, so what is kept still reaches the newest
+  // item (a gap there would be spliced by the next newest page). Paging stops
+  // here (`canLoadOlder`), but retain a cursor to say older items exist.
+  if (items.length > MEMORY_CAPACITY) {
+    items = items.slice(items.length - MEMORY_CAPACITY);
+    return { items, nextBefore: items[0].id, synced: true };
+  }
   return { items, nextBefore: page.next_before ?? null, synced: true };
 }
 
@@ -88,4 +92,5 @@ function trimFront(history) {
 }
 
 export const newestId = (history) => history.items[history.items.length - 1]?.id ?? 0;
-export const canLoadOlder = (history) => history.nextBefore != null;
+export const canLoadOlder = (history) => history.nextBefore != null && history.items.length < MEMORY_CAPACITY;
+export const atMemoryLimit = (history) => history.nextBefore != null && history.items.length >= MEMORY_CAPACITY;

@@ -1,9 +1,9 @@
 // Package onboard holds the checks behind `sheepdog init` and `sheepdog
 // doctor`: live, cheap validation of each API key (with the balance or
 // quota where the API exposes it), herdr's reachability, the web port,
-// the bind/token pairing, the push config and the voice backends. Each
-// check returns a Result with a one-line fix. No check ever prints or
-// returns a key.
+// the bind address, the project folders, the push config and the voice
+// backends. Each check returns a Result with a one-line fix. No check
+// ever prints or returns a key.
 package onboard
 
 import (

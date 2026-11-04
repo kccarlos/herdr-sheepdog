@@ -57,16 +57,15 @@ Install the sheepdog daemon on the same Mac as herdr-app:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
-sheepdog setup
 brew install --cask kccarlos/tap/sheepdog-app
 ```
 
-The installer downloads the latest release, verifies its sha256, and puts
-`sheepdog` in `~/.local/bin`. `sheepdog setup` installs the panel and offers
-to switch herdr-app to the Sheepdog layout. Sheepdog.app provides the
-microphone, speaker, notifications and global shortcut on the Mac. Keep the
-conversation in herdr-app's sidebar and use Sheepdog.app for voice:
-[Sheepdog on your Mac](desktop.md).
+The installer downloads the latest release, verifies its sha256, puts
+`sheepdog` in `~/.local/bin`, and offers to run `sheepdog setup` (which
+installs the panel and offers to switch herdr-app to the Sheepdog layout).
+Sheepdog.app provides the microphone, speaker, notifications and global
+shortcut on the Mac. Keep the conversation in herdr-app's sidebar and use
+Sheepdog.app for voice: [Sheepdog on your Mac](desktop.md).
 
 ## herdr-core without herdr-app, or on a Linux server
 
@@ -74,7 +73,6 @@ Install the sheepdog daemon directly:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kccarlos/herdr-sheepdog/main/scripts/install.sh | sh
-sheepdog setup
 ```
 
 On a Linux server over SSH, run `sheepdog setup --terminal` instead. Talk from
@@ -109,9 +107,11 @@ Your port is 7777 unless you changed `web.port`. The last line appears only
 when a browser could be opened; over SSH use the URL above, see
 [Over SSH](#over-ssh-with-no-browser). The page has five steps:
 
-1. **Models.** Paste a free key from <https://aistudio.google.com/apikey>. It is
-   checked on the spot ("Valid key"), then **Save and start the voice**.
-   Nothing is saved until the key passes.
+1. **Models.** On a fresh install **Recommended** (Gemini Live + DeepSeek) is
+   selected first; if you are starting with only a free Gemini key from
+   <https://aistudio.google.com/apikey>, click **Free quick start** first, then
+   paste the key. It is checked on the spot ("Valid key"), then **Save and
+   start the voice**. Nothing is saved until the key passes.
 2. **Checks.** The same checks as `sheepdog doctor`, with the fix next to
    each problem.
 3. **Start at login.** On by default. It installs a login service (a launchd

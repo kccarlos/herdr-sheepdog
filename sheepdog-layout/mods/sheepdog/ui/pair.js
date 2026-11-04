@@ -11,13 +11,12 @@ const MODULE = 5;
 const QR_DARK = "#000000";
 const QR_LIGHT = "#ffffff";
 
-// The daemon's error is one sentence in the panel. Pairing can fail twice in
-// one load (the link and its matrix); show that once, in sentence case.
+// The daemon's error, whole: the fix is often its second sentence. Pairing can
+// fail twice in one load (the link and its matrix); it is shown once.
 function pairError(text) {
   const line = String(text ?? "").trim().replace(/\s+/g, " ");
   if (!line) return "";
-  const first = /^.*?[.!?](?:\s|$)/.exec(line)?.[0]?.trim() || line;
-  return first[0].toUpperCase() + first.slice(1);
+  return line[0].toUpperCase() + line.slice(1);
 }
 
 function matrixView(rows) {
@@ -35,10 +34,14 @@ function matrixView(rows) {
 export function pairOverlay(t, { form, onClose, onRefresh }) {
   let rows = [];
   let codeError = "";
-  try {
-    rows = qrRows(form.matrix);
-  } catch (error) {
-    codeError = error.message;
+  // No matrix yet is loading (or the link failed, which says why), not a
+  // malformed code.
+  if (form.matrix) {
+    try {
+      rows = qrRows(form.matrix);
+    } catch (error) {
+      codeError = error.message;
+    }
   }
   const message = pairError(form.error || codeError);
   const body = v_flex()
@@ -50,7 +53,7 @@ export function pairOverlay(t, { form, onClose, onRefresh }) {
     .p(16)
     .gap(12)
     .items_center()
-    .when(Boolean(message), (el) => el.child(errorText(t, message).w_full().truncate()))
+    .when(Boolean(message), (el) => el.child(errorText(t, message).w_full()))
     .when(rows.length > 0, (el) => el.child(matrixView(rows)))
     .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Scan this with the Sheepdog app"))
     .child(mutedText(t, "Open the iPhone app, choose Scan a new code, and point the camera here."))
