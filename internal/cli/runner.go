@@ -161,6 +161,9 @@ func (r *Runner) resolveBackend(prefer string) (Backend, error) {
 // call per slot runs at a time; a concurrent call for the same slot
 // returns ErrBusy immediately rather than queueing.
 func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
+	if err := checkArguments(q); err != nil {
+		return Result{}, err
+	}
 	backend := q.Backend
 	if backend == "" {
 		var err error
@@ -205,7 +208,7 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
-	exec := runCommand(runCtx, argv, q.Workspace, r.cfg.MaxOutputBytes)
+	exec := runCommand(runCtx, argv, q.Workspace, r.cfg.MaxOutputBytes, r.cfg.WithholdEnv)
 	dur := time.Since(start)
 
 	result := Result{
@@ -232,6 +235,29 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 	}
 	r.log(result, argv, question, resErr)
 	return result, resErr
+}
+
+// checkArguments refuses a question or session id the child would parse
+// as an option. Both are argv elements of a command whose read-only flags
+// stand beside them, so a leading "-" could override those flags. A
+// session id is a short token of letters, digits, dots, dashes and
+// underscores that does not start with a dash (codex's and claude's are
+// UUIDs).
+func checkArguments(q Query) error {
+	if strings.HasPrefix(strings.TrimSpace(q.Question), "-") {
+		return fmt.Errorf("%w: the question starts with %q", ErrBadArgument, "-")
+	}
+	if q.Session == "" {
+		return nil
+	}
+	ok := len(q.Session) <= 128 && q.Session[0] != '-'
+	for _, c := range q.Session {
+		ok = ok && (c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-' || c == '_' || c == '.')
+	}
+	if !ok {
+		return fmt.Errorf("%w: the session id is not a plain token", ErrBadArgument)
+	}
+	return nil
 }
 
 // template returns the argv template and binary for backend; resume

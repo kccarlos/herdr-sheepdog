@@ -340,7 +340,9 @@ type liveConns struct {
 }
 
 // track registers close for the request's device; the returned func
-// unregisters it.
+// unregisters it. A device revoked before the stream registers (the revoke
+// ran after authenticate) is closed at once, and a stream ends when its
+// ticket expires, as the next request with it would be refused.
 func (s *Server) track(r *http.Request, close func()) func() {
 	dev := deviceOf(r)
 	if dev == "" || dev == localDevice {
@@ -348,7 +350,13 @@ func (s *Server) track(r *http.Request, close func()) func() {
 	}
 	l := &s.live
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	// Revoke marks the device before it closes the registered streams, so
+	// checking under the lock sees every revoke this stream missed.
+	if d, ok := s.devices.get(dev); !ok || d.Revoked != nil {
+		l.mu.Unlock()
+		close()
+		return func() {}
+	}
 	if l.conns == nil {
 		l.conns = map[string]map[int]func(){}
 	}
@@ -358,7 +366,18 @@ func (s *Server) track(r *http.Request, close func()) func() {
 		l.conns[dev] = map[int]func(){}
 	}
 	l.conns[dev][n] = close
+	var expiry *time.Timer
+	s.auth.mu.Lock()
+	tk, ok := s.auth.tickets[presentedTicket(r)]
+	s.auth.mu.Unlock()
+	if ok {
+		expiry = time.AfterFunc(max(tk.expires.Sub(s.deps.Now()), 0), close)
+	}
+	l.mu.Unlock()
 	return func() {
+		if expiry != nil {
+			expiry.Stop()
+		}
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		delete(l.conns[dev], n)

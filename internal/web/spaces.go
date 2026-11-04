@@ -195,6 +195,10 @@ func (s *Server) handleSpaceCommands(w http.ResponseWriter, r *http.Request) {
 // handleSaveCommand is POST /api/spaces/{id}/commands {"name",
 // "command"} (a new one) and PUT /api/spaces/{id}/commands/{cid}.
 func (s *Server) handleSaveCommand(w http.ResponseWriter, r *http.Request) {
+	if !s.term.shellAllowed() {
+		writeError(w, http.StatusForbidden, "running commands is off on this computer, like the shell")
+		return
+	}
 	var req struct {
 		Name    string `json:"name"`
 		Command string `json:"command"`
@@ -212,6 +216,10 @@ func (s *Server) handleSaveCommand(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteCommand is DELETE /api/spaces/{id}/commands/{cid}.
 func (s *Server) handleDeleteCommand(w http.ResponseWriter, r *http.Request) {
+	if !s.term.shellAllowed() {
+		writeError(w, http.StatusForbidden, "running commands is off on this computer, like the shell")
+		return
+	}
 	cid := r.PathValue("cid")
 	s.spaceAction(w, r, "command_delete", func(ctx context.Context, a AgentActions, id string) (map[string]any, error) {
 		return nil, a.DeleteCommand(ctx, id, cid)

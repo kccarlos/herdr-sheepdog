@@ -339,6 +339,11 @@ func (a *App) buildQuerier() (*cli.Runner, error) {
 		MaxOutputBytes:  a.cfg.CLI.MaxOutputKB << 10,
 		Log:             a.log,
 	}
+	for _, o := range a.cfg.Brain.OpenAICompat {
+		if o.APIKeyEnv != "" {
+			cfg.WithholdEnv = append(cfg.WithholdEnv, o.APIKeyEnv)
+		}
+	}
 	det := cli.Detect(cfg, a.log)
 	if !det.Codex && !det.Claude {
 		return nil, nil

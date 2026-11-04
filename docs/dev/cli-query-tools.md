@@ -431,8 +431,15 @@ Runner notes:
 - `exec.Command` with `Stdin = nil` (→ `/dev/null`), `Dir = cwd` (Claude) plus
   `-C cwd` (Codex), `Setpgid` and kill the whole group on timeout (both tools
   spawn children: `/bin/zsh -lc …` for Codex, `rg` for Claude).
-- Strip `HERDR_*` from `cmd.Env`; keep `HOME`, `PATH`, and the tools' own
-  auth env untouched. Node for Claude is installed via nvm; `claude` resolved on
+- Strip `HERDR_*` from `cmd.Env`, and the daemon's own settings and keys
+  (`SHEEPDOG_*`, `GEMINI_API_KEY*`, `VERTEX_*`, `DEEPSEEK_API_KEY`,
+  `OPENAI_API_KEY`, `OPENAI_ORCH_API_KEY`, `ANTHROPIC_API_KEY`,
+  `OPENROUTER_API_KEY` and each `[[brain.openai_compat]]` `api_key_env`): the
+  tools log in with their own credentials, and a prompt-injected sub-agent
+  could read the daemon's keys out of its environment. Keep `HOME`, `PATH`
+  and the rest untouched. A `question` or `session` that starts with `-` is
+  refused (`ErrBadArgument`) so it can never be read as a flag that undoes
+  `--sandbox read-only`. Node for Claude is installed via nvm; `claude` resolved on
   `PATH` in this shell, but a launchd-started daemon needs an explicit `PATH`
   containing `~/.nvm/versions/node/*/bin` and `~/.local/bin` (herdr).
 - Parse: Codex → the last `agent_message` item of the `--json` stream

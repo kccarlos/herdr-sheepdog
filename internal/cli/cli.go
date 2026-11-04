@@ -26,6 +26,10 @@ var (
 	// ErrBusy is returned when a query is already running for the same
 	// workspace; the caller should not block waiting for it.
 	ErrBusy = errors.New("cli: a query is already running for this workspace")
+	// ErrBadArgument is returned when the question or the session id
+	// could be read as a command-line flag by the child, which would let
+	// it undo the read-only flags.
+	ErrBadArgument = errors.New("cli: refused an argument the tool would read as a flag")
 	// ErrNotForked is returned when a fork run reported the session it
 	// was asked to fork: the backend continued the worker's own session
 	// instead of copying it.
@@ -205,6 +209,10 @@ type Config struct {
 	Timeout time.Duration
 	// MaxOutputBytes caps captured stdout; the tail is kept. Default 16 KiB.
 	MaxOutputBytes int
+	// WithholdEnv names environment variables the child must not see, on
+	// top of the daemon's own keys scrubEnv always drops: the keys named by
+	// the config's api_key_env.
+	WithholdEnv []string
 	// Log receives cli.detected and cli.run events; nil discards.
 	Log logging.Logger
 }

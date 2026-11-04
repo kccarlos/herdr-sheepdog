@@ -40,3 +40,32 @@ func TestSpacesRoutes(t *testing.T) {
 		t.Errorf("worktree without a branch = %d, want 400", code)
 	}
 }
+
+// A saved command is shell text that a later run sends to a shell tab, so
+// saving, changing and deleting one is behind the phone shell's gate too;
+// listing stays open.
+func TestSavedCommandEditsAreGatedLikeTheShell(t *testing.T) {
+	h, _, _ := newShellHarness(t, false)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/spaces/w1/commands"},
+		{http.MethodPut, "/api/spaces/w1/commands/abc"},
+		{http.MethodDelete, "/api/spaces/w1/commands/abc"},
+	} {
+		code, body := h.sendJSON(tc.method, tc.path, map[string]any{"name": "Run tests", "command": "make"}, nil)
+		if code != http.StatusForbidden || !strings.Contains(body, "like the shell") {
+			t.Errorf("%s %s with the shell off = %d %s", tc.method, tc.path, code, body)
+		}
+	}
+	if code := h.getJSON("/api/spaces/w1/commands", nil); code == http.StatusForbidden {
+		t.Error("listing saved commands is refused with the shell off")
+	}
+	h.srv.shellOn.Store(true)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/spaces/w1/commands"},
+		{http.MethodDelete, "/api/spaces/w1/commands/abc"},
+	} {
+		if code, _ := h.sendJSON(tc.method, tc.path, map[string]any{"name": "x", "command": "make"}, nil); code == http.StatusForbidden {
+			t.Errorf("%s %s refused with the shell on", tc.method, tc.path)
+		}
+	}
+}

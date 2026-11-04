@@ -25,6 +25,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
@@ -348,6 +349,9 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The event files and /events are readable by paired devices: mask the
+	// daemon's keys in them as in daemon.log (serve.go).
+	elog.SetRedactor(redact.ForConfig(cfg).String)
 	var log logging.Logger = elog
 	if opts.Echo != nil {
 		log = teeLogger{elog, opts.Echo}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -62,6 +63,8 @@ func (o Options) withDefaults() Options {
 type Log struct {
 	dir  string // "" keeps the log in memory only
 	opts Options
+
+	redact atomic.Pointer[func(string) string]
 
 	mu       sync.Mutex
 	seq      uint64
@@ -120,6 +123,25 @@ func (l *Log) Path(ts time.Time) string {
 
 func dayOf(ts time.Time) string { return ts.UTC().Format("2006-01-02") }
 
+// SetRedactor makes every event logged from now on pass through redact
+// before it is written, kept in the ring or sent to a subscriber or tap
+// (the daemon's secrets must not be readable from the event files or
+// /events). nil turns it off.
+func (l *Log) SetRedactor(redact func(string) string) {
+	if redact == nil {
+		l.redact.Store(nil)
+		return
+	}
+	l.redact.Store(&redact)
+}
+
+func (l *Log) redactFn() func(string) string {
+	if f := l.redact.Load(); f != nil {
+		return *f
+	}
+	return nil
+}
+
 // Log implements logging.Logger.
 func (l *Log) Log(source, typ, paneID string, payload any) {
 	l.mu.Lock()
@@ -130,7 +152,7 @@ func (l *Log) Log(source, typ, paneID string, payload any) {
 	l.seq++
 	now := l.opts.Now()
 	l.lastID = nextID(l.lastID, now)
-	ev := newEvent(l.seq, l.lastID, now, source, typ, paneID, payload)
+	ev := newEvent(l.seq, l.lastID, now, source, typ, paneID, payload, l.redactFn())
 	l.writeLocked(ev)
 	l.pushRingLocked(ev)
 	dropped := l.fanOutLocked(ev)

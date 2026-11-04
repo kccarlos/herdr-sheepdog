@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -35,13 +36,14 @@ type execResult struct {
 }
 
 // runCommand starts argv[0] with argv[1:] in dir, stdin closed, env
-// scrubbed of HERDR_* / CLAUDECODE / CLAUDE_CODE_*, in its own process
+// scrubbed of HERDR_* / CLAUDECODE / CLAUDE_CODE_* and the daemon's own
+// keys (scrubEnv; withhold names more), in its own process
 // group. It blocks until the process exits or ctx is done, in which case
 // the whole process group is killed (SIGKILL) so no grandchild survives.
-func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes int) execResult {
+func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes int, withhold []string) execResult {
 	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // argv is built from config templates, not a shell
 	cmd.Dir = dir
-	cmd.Env = scrubEnv(os.Environ())
+	cmd.Env = scrubEnv(os.Environ(), withhold...)
 	cmd.Stdin = nil // exec.Cmd connects a nil Stdin to the null device
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -96,17 +98,34 @@ func killGroup(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
+// daemonEnvPrefixes and daemonEnvNames are the daemon's own settings and
+// keys (CONFIG.md): the agents log in with their own credentials, so none
+// of these reach them.
+var (
+	daemonEnvPrefixes = []string{"SHEEPDOG_", "GEMINI_API_KEY", "VERTEX_"}
+	daemonEnvNames    = []string{
+		"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_ORCH_API_KEY",
+		"ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
+	}
+)
+
 // scrubEnv drops HERDR_*, CLAUDECODE and CLAUDE_CODE_* so the child's own
 // herdr / Claude Code integration hooks do not see the daemon's session
-// (docs/dev/cli-query-tools.md, WP4 environment rules).
-func scrubEnv(environ []string) []string {
+// (docs/dev/cli-query-tools.md, WP4 environment rules), and the daemon's
+// own settings and keys (daemonEnvPrefixes, daemonEnvNames, and withhold:
+// the names of the keys the config reads, such as an
+// [[brain.openai_compat]] api_key_env). Everything else, what the tools
+// need to run, passes.
+func scrubEnv(environ []string, withhold ...string) []string {
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {
 		key := kv
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			key = kv[:i]
 		}
-		if strings.HasPrefix(key, "HERDR_") || key == "CLAUDECODE" || strings.HasPrefix(key, "CLAUDE_CODE_") {
+		if strings.HasPrefix(key, "HERDR_") || key == "CLAUDECODE" || strings.HasPrefix(key, "CLAUDE_CODE_") ||
+			slices.ContainsFunc(daemonEnvPrefixes, func(p string) bool { return strings.HasPrefix(key, p) }) ||
+			slices.Contains(daemonEnvNames, key) || slices.Contains(withhold, key) {
 			continue
 		}
 		out = append(out, kv)
