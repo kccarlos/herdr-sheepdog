@@ -502,14 +502,14 @@ struct SpaceDetailView: View {
     private var filesSection: some View {
         Section {
             Button { browser = .files } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "folder").foregroundStyle(Theme.muted).frame(width: 26)
+                BrowserRow(chevron: true) {
+                    Image(systemName: "folder").foregroundStyle(Theme.muted)
+                } content: {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Files").foregroundStyle(Theme.ink)
                         Text("Browse and read").font(.caption).foregroundStyle(Theme.muted)
                     }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.chevron)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(minHeight: 44)
             }
@@ -519,21 +519,20 @@ struct SpaceDetailView: View {
             .accessibilityIdentifier("space.files")
             if changesPane != nil {
                 Button { browser = .changes } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "plusminus").foregroundStyle(Theme.muted).frame(width: 26)
+                    BrowserRow(chevron: true) {
+                        Image(systemName: "plusminus").foregroundStyle(Theme.muted)
+                    } content: {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("Changes").foregroundStyle(Theme.ink)
                             Text(changesLine).font(.caption).foregroundStyle(Theme.muted)
                         }
-                        Spacer(minLength: 8)
+                        .fixedSize(horizontal: false, vertical: true)
+                    } accessory: {
+                        // At the largest sizes the counts go under the title,
+                        // whole ("+49 −4"), not squeezed beside it.
                         if let changed, changed.repo, !changed.files.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("+\(changed.added)").foregroundStyle(DiffColors.added)
-                                Text("−\(changed.deleted)").foregroundStyle(DiffColors.removed)
-                            }
-                            .font(.footnote.monospacedDigit().weight(.medium))
+                            LineCounts(added: changed.added, deleted: changed.deleted)
                         }
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.chevron)
                     }
                     .frame(minHeight: 44)
                 }

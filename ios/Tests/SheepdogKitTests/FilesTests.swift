@@ -1,4 +1,5 @@
 @testable import SheepdogKit
+import ImageIO
 import XCTest
 
 private let utc: Calendar = {
@@ -69,12 +70,6 @@ final class FileTextTests: XCTestCase {
         XCTAssertEqual(text(400 * 86400), "Sep 30, 2025")
     }
 
-    func testClock() {
-        let date = Date(timeIntervalSince1970: 1_793_793_600 - 86400 + 4 * 3600 + 12 * 60 - 12 * 3600)
-        let text = FileTimeText.clock(date, calendar: utc).replacingOccurrences(of: "\u{202F}", with: " ")
-        XCTAssertEqual(text, "4:12 AM")
-    }
-
     func testRowDetail() {
         let file = FileEntry(name: "install.md", kind: .file, size: 12_300, modified: ago(3 * 60))
         XCTAssertEqual(FileRowText.detail(file, now: now, calendar: utc), "12 KB · 3 min ago")
@@ -88,12 +83,12 @@ final class FileTextTests: XCTestCase {
         XCTAssertEqual(FileRowText.detail(bare, now: now, calendar: utc), "0 B")
     }
 
-    func testYesterdayReadsTheClockInTheRecentOrder() {
-        let date = now.addingTimeInterval(-18 * 3600) // yesterday 18:00
-        let file = FileEntry(name: "api.md", kind: .file, size: 28_000, modified: date)
-        let spoken = FileRowText.detail(file, sort: .recent, now: now, calendar: utc).replacingOccurrences(of: "\u{202F}", with: " ")
-        XCTAssertEqual(spoken, "28 KB · 6:00 PM")
-        XCTAssertEqual(FileRowText.detail(file, sort: .name, now: now, calendar: utc), "28 KB · yesterday")
+    func testYesterdayReadsTheSameInEveryOrder() {
+        // One word for one file wherever it shows: the day word above a
+        // group does not change what the row says.
+        let file = FileEntry(name: "api.md", kind: .file, size: 28_000, modified: now.addingTimeInterval(-18 * 3600)) // yesterday 18:00
+        XCTAssertEqual(FileRowText.detail(file, now: now, calendar: utc), "28 KB · yesterday")
+        XCTAssertEqual(FileGroup.bucket(for: file.modified, now: now, calendar: utc), .yesterday)
     }
 
     func testSpokenRow() {
@@ -107,7 +102,8 @@ final class FileTextTests: XCTestCase {
         let one = FileListing(rootName: "shop", entries: [FileEntry(name: "a")])
         XCTAssertEqual(FileRowText.searchSummary(one, query: "a", scope: "shop"), "1 file named “a” in shop")
         let mixed = FileListing(rootName: "shop", entries: [FileEntry(name: "a"), FileEntry(name: "ab", kind: .dir)])
-        XCTAssertEqual(FileRowText.searchSummary(mixed, query: "a", scope: "docs"), "2 items named “a” in docs")
+        XCTAssertEqual(FileRowText.searchSummary(mixed, query: "a", scope: "docs"), "2 files named “a” in docs", "one word, whatever is found")
+        XCTAssertNil(FileRowText.searchSummary(FileListing(rootName: "shop"), query: "ledger", scope: "shop"), "no results: the empty state says it")
         XCTAssertNil(FileRowText.hiddenNote(0))
         XCTAssertEqual(FileRowText.hiddenNote(1), "1 file hidden for safety, like .env and keys.")
         XCTAssertEqual(FileRowText.hiddenNote(2), "2 files hidden for safety, like .env and keys.")
@@ -202,6 +198,114 @@ final class CodeLinesTests: XCTestCase {
         XCTAssertEqual(CodeLines.split("\n").map(\.text), [""])
         XCTAssertEqual(CodeLines.split("a\r\nb\rc").map(\.text), ["a", "b", "c"])
         XCTAssertEqual(CodeLines.split("no newline").count, 1)
+        XCTAssertEqual(CodeLines.split("a\n\nb\r\n\r\nc\n").map(\.text), ["a", "", "b", "", "c"], "a blank line is a line, in either line ending")
+    }
+
+    func testAPlainLineIsOnePiece() {
+        XCTAssertEqual(CodeLine(number: 1, text: "plain").pieces, [CodeLine.Piece(text: "plain", kind: nil)])
+        XCTAssertEqual(CodeLine(number: 1, text: "").pieces, [CodeLine.Piece(text: "", kind: nil)])
+    }
+
+    func testPiecesCutTheLineAtItsColours() {
+        let line = CodeLines.split("func run() { // go", language: SyntaxLanguage.of(name: "main.go")).first
+        XCTAssertEqual(line?.pieces, [
+            .init(text: "func", kind: .keyword), .init(text: " ", kind: nil), .init(text: "run", kind: .call),
+            .init(text: "() { ", kind: nil), .init(text: "// go", kind: .comment),
+        ])
+        XCTAssertEqual(line?.pieces.map(\.text).joined(), "func run() { // go", "the pieces are the line")
+    }
+
+    func testNonASCIITextKeepsItsColoursAligned() {
+        let line = CodeLines.split("let café = \"naïve\" // ünï", language: SyntaxLanguage.of(name: "a.swift")).first
+        XCTAssertEqual(line?.pieces.map(\.text).joined(), "let café = \"naïve\" // ünï")
+        XCTAssertEqual(line?.pieces.filter { $0.kind == .string }.map(\.text), ["\"naïve\""])
+        XCTAssertEqual(line?.pieces.filter { $0.kind == .comment }.map(\.text), ["// ünï"])
+    }
+
+    func testAMegabyteIsSplitAndColouredQuickly() {
+        let line = "func handle(w http.ResponseWriter, r *http.Request) { // answers /login with 200 and \"ok\"\n"
+        let text = String(repeating: line, count: (1 << 20) / line.utf8.count)
+        let started = Date()
+        let lines = CodeLines.split(text, language: SyntaxLanguage.of(name: "server.go"))
+        let seconds = Date().timeIntervalSince(started)
+        XCTAssertGreaterThan(lines.count, 10_000)
+        XCTAssertFalse(lines[100].spans.isEmpty)
+        // A debug build, on a slow runner: the bound is for a slip to
+        // something quadratic, not for the speed of a release build.
+        XCTAssertLessThan(seconds, 6, "split and colour 1 MB in \(seconds) s")
+    }
+}
+
+final class SyntaxHighlighterTests: XCTestCase {
+    private func kinds(_ source: String, _ name: String) -> [[(String, SyntaxKind)]] {
+        CodeLines.split(source, language: SyntaxLanguage.of(name: name)).map { line in
+            line.pieces.compactMap { piece in piece.kind.map { (piece.text, $0) } }
+        }
+    }
+
+    private func flat(_ source: String, _ name: String) -> [String] {
+        kinds(source, name).flatMap { $0 }.map { "\($0.0)=\($0.1)" }
+    }
+
+    func testLanguagesByNameAndExtension() {
+        XCTAssertNotNil(SyntaxLanguage.of(name: "main.GO"))
+        XCTAssertNotNil(SyntaxLanguage.of(name: "Makefile"))
+        XCTAssertNotNil(SyntaxLanguage.of(name: "config.yaml"))
+        XCTAssertNil(SyntaxLanguage.of(name: "build.log"), "a log has no colours")
+        XCTAssertNil(SyntaxLanguage.of(name: "LICENSE"))
+        XCTAssertNil(SyntaxLanguage.of(name: ".gitignore"))
+    }
+
+    func testKeywordsStringsNumbersCallsAndComments() {
+        XCTAssertEqual(
+            flat("return add(1, \"two\") // done", "a.go"),
+            ["return=keyword", "add=call", "1=number", "\"two\"=string", "// done=comment"]
+        )
+    }
+
+    func testAKeywordInsideAWordIsNotAKeyword() {
+        XCTAssertEqual(flat("format := ifelse + for2", "a.go"), [])
+        XCTAssertEqual(flat("for i := 0; i < 10; i++ {", "a.go"), ["for=keyword", "0=number", "10=number"])
+    }
+
+    func testAStringKeepsItsEscapedQuoteAndHidesWhatIsInIt() {
+        XCTAssertEqual(flat(#"x = "a \" // not a comment" + 'b'"#, "a.py"), [#""a \" // not a comment"=string"#, "'b'=string"])
+    }
+
+    func testABlockCommentRunsOverLines() {
+        XCTAssertEqual(
+            kinds("a /* one\ntwo\nthree */ b\nc", "a.c").map { $0.map(\.1) },
+            [[.comment], [.comment], [.comment], []]
+        )
+        XCTAssertEqual(flat("/* x */ if", "a.c"), ["/* x */=comment", "if=keyword"], "a block comment closed on its line")
+    }
+
+    func testAMultilineStringRunsOverLines() {
+        let source = "x = \"\"\"\nreturn 1\n\"\"\"\nreturn 2"
+        XCTAssertEqual(kinds(source, "a.py").map { $0.map(\.1) }, [[.string], [.string], [.string], [.keyword, .number]])
+    }
+
+    func testAGoRawStringTakesNoEscapes() {
+        // The backslash before the closing backtick is not an escape.
+        XCTAssertEqual(flat("re := `^\\d+\\`\nreturn", "a.go"), ["`^\\d+\\`=string", "return=keyword"])
+    }
+
+    func testHashCommentsAndConfigFiles() {
+        XCTAssertEqual(flat("# note\nkey: true", "a.yaml"), ["# note=comment", "true=keyword"])
+        XCTAssertEqual(flat("echo hi # x", "run.sh"), ["echo=keyword", "# x=comment"])
+    }
+
+    func testAnUnclosedQuoteEndsWithItsLine() {
+        XCTAssertEqual(kinds("s = 'open\nreturn", "a.py").map { $0.map(\.1) }, [[.string], [.keyword]])
+    }
+
+    func testAVeryLongLineIsLeftPlain() {
+        let long = "return " + String(repeating: "x", count: SyntaxLanguage.longestLine)
+        XCTAssertEqual(CodeLines.split(long, language: SyntaxLanguage.of(name: "a.go")).first?.spans, [])
+    }
+
+    func testNumbersAreNotTheEndOfAName() {
+        XCTAssertEqual(flat("x1 = 0x1F + 3.5", "a.py"), ["0x1F=number", "3.5=number"])
     }
 }
 
@@ -244,6 +348,77 @@ final class ChangeIndexTests: XCTestCase {
         XCTAssertFalse(ChangeIndex(AgentChanges(repo: false), folder: nil).isChanged("a"))
         XCTAssertFalse(ChangeIndex(nil, folder: nil).isChanged("a"))
     }
+
+    func testAFolderWithAChangeBelowIsMarkedToo() {
+        let index = ChangeIndex(changes(root: "/Users/me/shop"), folder: "/Users/me/shop")
+        XCTAssertTrue(index.isChanged("internal"))
+        XCTAssertTrue(index.isChanged("internal/auth"))
+        XCTAssertTrue(index.isChanged("docs"))
+        XCTAssertFalse(index.isChanged("web"))
+        XCTAssertNil(index.change(at: "docs"), "a folder is marked, but it has no diff of its own")
+        XCTAssertFalse(index.isChanged("intern"), "a name that merely starts alike")
+    }
+
+    func testFoldersAreMarkedFromTheBrowsedFoldersView() {
+        let index = ChangeIndex(changes(root: "/Users/me/shop"), folder: "/Users/me/shop/internal")
+        XCTAssertTrue(index.isChanged("auth"))
+        XCTAssertFalse(index.isChanged("internal"), "the browsed folder is not one of its own entries")
+        XCTAssertFalse(index.isChanged("docs"))
+    }
+}
+
+final class LineCountTextTests: XCTestCase {
+    func testASideThatIsNothingIsLeftOut() {
+        XCTAssertEqual(LineCountText.parts(added: 41, deleted: 0).map(\.text), ["+41"])
+        XCTAssertEqual(LineCountText.parts(added: 0, deleted: 13).map(\.text), ["−13"])
+        XCTAssertEqual(LineCountText.parts(added: 49, deleted: 4).map(\.text), ["+49", "−4"])
+        XCTAssertTrue(LineCountText.parts(added: 0, deleted: 0).isEmpty)
+        XCTAssertEqual(LineCountText.parts(added: 3, deleted: 1).map(\.isAddition), [true, false])
+    }
+
+    func testSpokenCounts() {
+        XCTAssertEqual(LineCountText.spoken(added: 41, deleted: 0), "41 added")
+        XCTAssertEqual(LineCountText.spoken(added: 3, deleted: 3), "3 added, 3 removed")
+        XCTAssertEqual(LineCountText.spoken(added: 0, deleted: 13), "13 removed")
+        XCTAssertEqual(LineCountText.spoken(added: 0, deleted: 0), "no line changes")
+    }
+
+    func testTheImageHintStaysMeaningfulWhenZoomed() {
+        XCTAssertEqual(ImageZoomText.hint(zoom: 0.4, fitting: true), "Pinch or double-tap to zoom")
+        XCTAssertEqual(ImageZoomText.hint(zoom: 1, fitting: false), "100% · double-tap to fit")
+        XCTAssertEqual(ImageZoomText.hint(zoom: 2.504, fitting: false), "250% · double-tap to fit")
+    }
+}
+
+final class MarkdownPathTests: XCTestCase {
+    private let joiner = "\u{2060}"
+
+    func testAPathIsGluedAfterItsSlashes() {
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("/login"), "/\(joiner)login")
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("see docs/reports/a.md now"), "see docs/\(joiner)reports/\(joiner)a.md now")
+    }
+
+    func testNothingIsAddedWhereThereIsNoMore() {
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("no slash here"), "no slash here")
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("docs/ then"), "docs/ then", "a slash that ends its word")
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("a / b"), "a / b")
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("end/"), "end/")
+        XCTAssertEqual(MarkdownRenderer.gluingPaths("/\(joiner)login"), "/\(joiner)login", "gluing twice changes nothing")
+    }
+
+    func testStyledTextKeepsItsStyleAndGluesAcrossRuns() {
+        let text = MarkdownRenderer.inline("open `/login` and **/logout** or /a **/b**", keepingPaths: true)
+        XCTAssertEqual(String(text.characters), "open /\(joiner)login and /\(joiner)logout or /\(joiner)a /\(joiner)b")
+        let code = text.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }.map { String(text[$0.range].characters) }
+        XCTAssertEqual(code, ["/\(joiner)login"], "the code style stays on its run")
+        let strong = text.runs.filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }.map { String(text[$0.range].characters) }
+        XCTAssertEqual(strong, ["/\(joiner)logout", "/\(joiner)b"])
+    }
+
+    func testTheDefaultLeavesTextAsWritten() {
+        XCTAssertEqual(String(MarkdownRenderer.inline("open /login").characters), "open /login")
+        XCTAssertEqual(MarkdownRenderer.plain("open /login"), "open /login", "VoiceOver text has no marks")
+    }
 }
 
 final class FileProblemTests: XCTestCase {
@@ -264,6 +439,14 @@ final class FileProblemTests: XCTestCase {
         let big = FileProblem.tooLarge.words(subject: .file, name: "photo.png", size: 38_000_000)
         XCTAssertEqual(big.message, "photo.png is 38 MB. The phone shows images up to 16 MB, so open it on your computer.")
         XCTAssertTrue(FileProblem.denied.words().message.contains("Files and Folders"))
+    }
+
+    func testAPictureTooBigShowsThePictureSymbol() {
+        XCTAssertEqual(FileProblem.tooLarge.words(subject: .image, name: "p.png", size: 38_000_000).symbol, "photo")
+        XCTAssertEqual(FileProblem.tooLarge.words(subject: .file, name: "a.bin", size: 38_000_000).symbol, "doc")
+        XCTAssertEqual(FileProblem.notFound.words(subject: .image).symbol, "photo")
+        XCTAssertEqual(FileProblem.notFound.words(subject: .image).title, "That file is gone")
+        XCTAssertEqual(FileProblem.tooLarge.words(subject: .image).title, "Too big to show here")
     }
 
     func testEveryProblemHasWords() {
@@ -515,6 +698,15 @@ final class FileBrowserModelTests: XCTestCase {
         XCTAssertNil(model.searchSummary)
     }
 
+    func testNoResultsHaveNoSummary() async throws {
+        let model = model { _, query in query == nil ? self.listing() : self.listing("", []) }
+        await model.start()
+        model.query = "ledger"
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(model.results?.value?.entries.count, 0, "the search ran and found nothing")
+        XCTAssertNil(model.searchSummary, "the empty state says it, so the summary does not repeat it")
+    }
+
     func testOnlyTheLastKeystrokeAsks() async throws {
         var asked: [String?] = []
         let model = model(debounce: .milliseconds(80)) { _, query in
@@ -614,10 +806,42 @@ final class FileViewerModelTests: XCTestCase {
         XCTAssertEqual(md.folder, "docs")
         await md.load()
         XCTAssertEqual(md.phase, .text(truncated: false))
-        XCTAssertEqual(md.lines.map(\.text), ["# Hi"])
-        XCTAssertEqual(md.source, "# Hi\n")
+        XCTAssertEqual(md.blocks, [.heading("Hi")])
+        XCTAssertTrue(md.lines.isEmpty, "the lines are made when Raw is asked for")
         let code = model("main.go", content: FileContent(path: "main.go", size: 1, kind: .text, text: "x"))
         XCTAssertEqual(code.mode, .raw)
+        await code.load()
+        XCTAssertEqual(code.lines.map(\.text), ["x"])
+        XCTAssertTrue(code.blocks.isEmpty, "a code file has no document")
+    }
+
+    func testTheOtherViewOfADocumentIsMadeBeforeItShows() async {
+        let md = model("a.md", content: FileContent(path: "a.md", size: 9, kind: .text, text: "# Hi\n\nline\n"))
+        await md.load()
+        await md.select(.raw)
+        XCTAssertEqual(md.mode, .raw)
+        XCTAssertEqual(md.lines.map(\.text), ["# Hi", "", "line"])
+        XCTAssertEqual(md.blocks.count, 2, "the document is kept for the way back")
+        await md.select(.rendered)
+        XCTAssertEqual(md.mode, .rendered)
+        await md.select(.rendered)
+        XCTAssertEqual(md.mode, .rendered)
+    }
+
+    func testAFileThatIsNotMarkdownHasNoOtherView() async {
+        let code = model("main.go", content: FileContent(path: "main.go", size: 1, kind: .text, text: "x"))
+        await code.load()
+        await code.select(.rendered)
+        XCTAssertEqual(code.mode, .raw)
+    }
+
+    func testCodeCarriesItsColoursAndAPlainTextDoesNot() async {
+        let code = model("main.go", content: FileContent(path: "main.go", size: 8, kind: .text, text: "return 1\n"))
+        await code.load()
+        XCTAssertEqual(code.lines.first?.spans.map(\.kind), [.keyword, .number])
+        let log = model("build.log", content: FileContent(path: "build.log", size: 8, kind: .text, text: "return 1\n"))
+        await log.load()
+        XCTAssertEqual(log.lines.first?.spans, [])
     }
 
     func testAnEmptyTextHasNoLines() async {
@@ -633,12 +857,36 @@ final class FileViewerModelTests: XCTestCase {
         XCTAssertEqual(big.phase, .text(truncated: true))
     }
 
-    func testAnImageFetchesItsBytesAfterTheKindIsKnown() async {
-        let bytes = Data([1, 2, 3])
-        let image = model("a.png", content: FileContent(path: "a.png", size: 3, kind: .image), image: bytes)
+    func testAnImageFetchesItsBytesAfterTheKindIsKnownAndKeepsOnlyThePicture() async {
+        var fetched = 0
+        let bytes = FileImageTests.png(width: 40, height: 20)
+        let image = FileViewerModel(
+            path: "a.png",
+            read: { _ in FileContent(path: "a.png", size: bytes.count, kind: .image) },
+            image: { _ in fetched += 1; return bytes },
+            describe: { RequestFailure($0, linkUsable: true) }
+        )
         await image.load()
-        XCTAssertEqual(image.phase, .image(bytes))
-        XCTAssertEqual(image.content?.size, 3)
+        XCTAssertEqual(fetched, 1)
+        guard case let .image(picture) = image.phase else { return XCTFail("\(image.phase)") }
+        XCTAssertEqual(picture.sizeText, "40 × 20")
+        XCTAssertEqual(image.content?.size, bytes.count)
+    }
+
+    func testBytesThatAreNotAPictureSaySo() async {
+        let image = model("a.png", content: FileContent(path: "a.png", size: 3, kind: .image), image: Data([1, 2, 3]))
+        await image.load()
+        XCTAssertEqual(image.phase, .unreadableImage)
+    }
+
+    func testARefusalNamesAPictureWithThePictureSymbol() async {
+        let png = model("big.png", content: FileContent(path: "big.png", size: FileBrowser.imageLimit + 1, kind: .image))
+        XCTAssertEqual(png.failureSubject, .image, "by its name before it is read")
+        await png.load()
+        XCTAssertEqual(png.failureSubject, .image)
+        let text = model("a.md", content: FileContent(path: "a.md", kind: .text, text: ""))
+        await text.load()
+        XCTAssertEqual(text.failureSubject, .file)
     }
 
     func testATooLargeImageIsNotFetched() async {
@@ -682,7 +930,88 @@ final class FileViewerModelTests: XCTestCase {
         await viewer.load()
         text = "two"
         await viewer.load()
-        XCTAssertEqual(viewer.source, "two")
+        XCTAssertEqual(viewer.lines.map(\.text), ["two"])
+    }
+
+    func testLoadingAgainKeepsTheOtherViewOfADocumentCurrent() async {
+        var text = "# one"
+        let viewer = FileViewerModel(
+            path: "a.md",
+            read: { _ in FileContent(path: "a.md", size: 5, kind: .text, text: text) },
+            image: { _ in Data() },
+            describe: { RequestFailure($0, linkUsable: true) }
+        )
+        await viewer.load()
+        await viewer.select(.raw)
+        text = "# two"
+        await viewer.load()
+        XCTAssertEqual(viewer.lines.map(\.text), ["# two"])
+        await viewer.select(.rendered)
+        XCTAssertEqual(viewer.blocks, [.heading("two")], "not the document of the first read")
+    }
+}
+
+final class FileImageTests: XCTestCase {
+    /// A solid-colour PNG of the given size, made with ImageIO.
+    static func png(width: Int, height: Int) -> Data {
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return data as Data
+    }
+
+    /// Decodes and unwraps: a picture, or the test fails.
+    private func decode(_ data: Data, maxPixel: Int, file: StaticString = #filePath, line: UInt = #line) async throws -> FileImage {
+        let image = await FileImage.decode(data, maxPixel: maxPixel)
+        return try XCTUnwrap(image, "not a picture", file: file, line: line)
+    }
+
+    func testASmallPictureIsKeptWhole() async throws {
+        let image = try await decode(Self.png(width: 40, height: 20), maxPixel: 100)
+        XCTAssertEqual([image.cgImage.width, image.cgImage.height], [40, 20])
+        XCTAssertEqual([image.originalWidth, image.originalHeight], [40, 20])
+        XCTAssertEqual(image.scale, 1, accuracy: 0.0001)
+        XCTAssertEqual(image.sizeText, "40 × 20")
+    }
+
+    func testALargePictureIsCutDownAndRemembersItsRealSize() async throws {
+        let image = try await decode(Self.png(width: 400, height: 200), maxPixel: 100)
+        XCTAssertEqual([image.cgImage.width, image.cgImage.height], [100, 50])
+        XCTAssertEqual([image.originalWidth, image.originalHeight], [400, 200])
+        XCTAssertEqual(image.scale, 0.25, accuracy: 0.0001, "drawn at this scale it is 400 points wide, so 100% is the real picture")
+        XCTAssertEqual(image.sizeText, "400 × 200")
+    }
+
+    func testATallPictureIsCutByItsLongSide() async throws {
+        let image = try await decode(Self.png(width: 50, height: 500), maxPixel: 100)
+        XCTAssertEqual([image.cgImage.width, image.cgImage.height], [10, 100])
+    }
+
+    func testTheCapsAreWhatThePhoneCanHold() {
+        XCTAssertEqual(FileImage.viewerMaxPixel, 4_096)
+        XCTAssertLessThan(FileImage.inlineMaxPixel, FileImage.viewerMaxPixel)
+    }
+
+    func testBytesThatAreNotAPictureGiveNothing() async {
+        let none = await FileImage.decode(Data([1, 2, 3, 4]), maxPixel: 100)
+        XCTAssertNil(none)
+        let empty = await FileImage.decode(Data(), maxPixel: 100)
+        XCTAssertNil(empty)
+    }
+
+    func testTwoDecodesOfOneFileAreTwoPictures() async throws {
+        let bytes = Self.png(width: 8, height: 8)
+        let a = try await decode(bytes, maxPixel: 100)
+        let b = try await decode(bytes, maxPixel: 100)
+        XCTAssertEqual(a, a)
+        XCTAssertNotEqual(a, b, "a picture is itself, not its pixels")
     }
 }
 

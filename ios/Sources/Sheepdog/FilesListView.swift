@@ -237,7 +237,7 @@ struct FilesListView: View {
     private func row(_ entry: FileEntry) -> some View {
         let detail = model.isSearching
             ? FileRowText.location(entry, rootName: model.rootName)
-            : FileRowText.detail(entry, sort: model.sort, now: model.now)
+            : FileRowText.detail(entry, now: model.now)
         let changed = changes.isChanged(entry.path)
         return Button {
             tap(entry)
@@ -281,35 +281,37 @@ struct FilesListView: View {
 }
 
 /// One row: the kind's symbol, the name, a line under it, and a chevron for
-/// what opens a folder. A name wraps; nothing truncates.
+/// what opens a folder. A name wraps; nothing truncates. The icon column
+/// grows with the text, and at the accessibility sizes the icon goes above
+/// the text (`BrowserRow`), so it never overlaps a name.
 struct FileRowView: View {
     let entry: FileEntry
     let detail: String
     let changed: Bool
     let selected: Bool
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         let kind = FileKind(entry)
-        HStack(spacing: 12) {
+        BrowserRow(chevron: kind == .folder) {
             Image(systemName: kind.symbol)
                 .font(.title3)
                 .foregroundStyle(entry.isBlocked ? Theme.blockedText : Theme.muted)
-                .frame(width: 26)
                 .accessibilityHidden(true)
+        } content: {
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+                // The mark sits after the name, or under it where the name
+                // takes the whole line.
+                let nameAndMark = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                    : AnyLayout(HStackLayout(spacing: 6))
+                nameAndMark {
                     Text(entry.name)
                         .font(.body.weight(.medium))
                         .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    if changed {
-                        Text("changed")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Theme.mutedOnFill)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.fill))
-                    }
+                    if changed { ChangedMark() }
                 }
                 if !detail.isEmpty {
                     Text(detail)
@@ -318,18 +320,24 @@ struct FileRowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if kind == .folder {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.chevron)
-                    .accessibilityHidden(true)
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(minHeight: 54)
         .background(selected ? Theme.accentSoft : Color.clear)
         .contentShape(Rectangle())
+    }
+}
+
+/// The "changed" chip: a file the agent changed, or a folder with one in it.
+private struct ChangedMark: View {
+    var body: some View {
+        Text("changed")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Theme.mutedOnFill)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.fill))
+            .fixedSize()
     }
 }

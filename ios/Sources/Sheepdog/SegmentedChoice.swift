@@ -78,15 +78,25 @@ struct SegmentedChoice<Value: Hashable & Identifiable>: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Text(selected.map(title) ?? accessibilityName)
+                Text(menuTitle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: fills ? .infinity : nil, alignment: .leading)
                 Image(systemName: "chevron.up.chevron.down").font(.footnote.weight(.semibold))
             }
-            .font(.headline)
+            // A calmer size than the screen's text: the chosen word and its
+            // count, in a bar, not a block.
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 14)
             .frame(maxWidth: fills ? .infinity : nil, minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
         }
+    }
+
+    /// "Changes · 5": the chosen choice with its count, as the segments show it.
+    private var menuTitle: String {
+        guard let selected else { return accessibilityName }
+        return [title(selected), detail(selected)].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func label(_ option: Value) -> some View {

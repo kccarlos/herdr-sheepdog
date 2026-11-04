@@ -233,14 +233,55 @@ public enum MarkdownRenderer {
     // MARK: - Inline
 
     /// Bold, italic, `code`, strikethrough and links; the text as written
-    /// if Foundation will not parse it.
-    public static func inline(_ text: String) -> AttributedString {
+    /// if Foundation will not parse it. With `keepingPaths`, a path such as
+    /// `/login` or `docs/reports/a.md` is not broken across two lines.
+    public static func inline(_ text: String, keepingPaths: Bool = false) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let parsed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        return keepingPaths ? gluingPaths(parsed) : parsed
+    }
+
+    /// An invisible mark that forbids a line break on either side (U+2060,
+    /// WORD JOINER): the text engine would otherwise break after a "/".
+    static let wordJoiner: Character = "\u{2060}"
+
+    /// `text` with a word joiner after each "/" that has more of its word
+    /// behind it, so a path is wrapped whole or not at all. Words with no
+    /// slash are left alone. (A copy of the text carries the invisible marks.)
+    static func gluingPaths(_ text: String) -> String {
+        guard text.contains("/") else { return text }
+        var out = ""
+        out.reserveCapacity(text.count + 8)
+        var previous: Character?
+        for ch in text {
+            if previous == "/", !ch.isWhitespace, ch != wordJoiner { out.append(wordJoiner) }
+            out.append(ch)
+            previous = ch
+        }
+        return out
+    }
+
+    /// The same for styled text: each run keeps its own style.
+    static func gluingPaths(_ text: AttributedString) -> AttributedString {
+        guard text.characters.contains("/") else { return text }
+        var out = AttributedString()
+        var carry: Character?
+        for run in text.runs {
+            let words = String(text[run.range].characters)
+            // A "/" ending the previous run still has this run's first
+            // character behind it.
+            var glued = gluingPaths(words)
+            if carry == "/", let first = words.first, !first.isWhitespace { glued.insert(wordJoiner, at: glued.startIndex) }
+            var piece = AttributedString(glued)
+            piece.mergeAttributes(run.attributes)
+            out += piece
+            carry = words.last
+        }
+        return out
     }
 
     // MARK: - Rendering

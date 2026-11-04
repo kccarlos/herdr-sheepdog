@@ -111,16 +111,46 @@ public enum FileTimeText {
         return date.formatted(style.locale(Locale(identifier: "en_US")))
     }
 
-    /// "4:12 PM".
-    public static func clock(_ date: Date, calendar: Calendar = .current) -> String {
-        date.formatted(Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute().locale(Locale(identifier: "en_US")))
-    }
-
     /// Whole calendar days from `from` to `to` (0: the same day).
     static func dayDistance(from: Date, to: Date, calendar: Calendar) -> Int {
         let a = calendar.startOfDay(for: from)
         let b = calendar.startOfDay(for: to)
         return calendar.dateComponents([.day], from: a, to: b).day ?? 0
+    }
+}
+
+// MARK: - Line counts and zoom
+
+/// "+41 −3" for a changed file, without the side that is nothing: a new
+/// file has no "−0", a deleted one no "+0".
+public enum LineCountText {
+    public struct Part: Equatable, Sendable {
+        public var text: String
+        public var isAddition: Bool
+    }
+
+    /// The sides to show, in order: none for a file with no line changes.
+    public static func parts(added: Int, deleted: Int) -> [Part] {
+        var out: [Part] = []
+        if added > 0 { out.append(Part(text: "+\(added)", isAddition: true)) }
+        if deleted > 0 { out.append(Part(text: "−\(deleted)", isAddition: false)) }
+        return out
+    }
+
+    /// What VoiceOver says: "41 added", "3 added, 3 removed".
+    public static func spoken(added: Int, deleted: Int) -> String {
+        var words: [String] = []
+        if added > 0 { words.append("\(added) added") }
+        if deleted > 0 { words.append("\(deleted) removed") }
+        return words.isEmpty ? "no line changes" : words.joined(separator: ", ")
+    }
+}
+
+public enum ImageZoomText {
+    /// The line in the image bar: how to zoom while the picture fits, and
+    /// the zoom with the way back once it does not.
+    public static func hint(zoom: Double, fitting: Bool) -> String {
+        fitting ? "Pinch or double-tap to zoom" : "\(Int((zoom * 100).rounded()))% · double-tap to fit"
     }
 }
 
@@ -203,22 +233,17 @@ public struct FileGroup: Equatable, Identifiable, Sendable {
 public enum FileRowText {
     /// The line under a name: "12 KB · 3 min ago". A folder has only its
     /// time (the daemon does not count what is inside); a link says where
-    /// it stands. In the recent order, yesterday's files read the time of
-    /// day, which is what the day word above them leaves out.
-    public static func detail(_ entry: FileEntry, sort: FileSort = .name, now: Date, calendar: Calendar = .current) -> String {
+    /// it stands. The time reads the same in every order and under every
+    /// day word ("yesterday" under Yesterday too), so one file is told one
+    /// way wherever it shows.
+    public static func detail(_ entry: FileEntry, now: Date, calendar: Calendar = .current) -> String {
         var parts: [String] = []
         switch entry.kind {
         case .file: parts.append(FileSizeText.text(entry.size))
         case .link: parts.append(entry.isBlocked ? "Link out of this folder" : "Link")
         case .dir: break
         }
-        if let date = entry.modified {
-            if sort == .recent, FileGroup.bucket(for: date, now: now, calendar: calendar) == .yesterday {
-                parts.append(FileTimeText.clock(date, calendar: calendar))
-            } else {
-                parts.append(FileTimeText.relative(date, now: now, calendar: calendar))
-            }
-        }
+        if let date = entry.modified { parts.append(FileTimeText.relative(date, now: now, calendar: calendar)) }
         return parts.joined(separator: " · ")
     }
 
@@ -238,12 +263,13 @@ public enum FileRowText {
         return parts.joined(separator: ", ")
     }
 
-    /// "3 files named “login” in shop".
-    public static func searchSummary(_ listing: FileListing, query: String, scope: String) -> String {
+    /// "3 files named “login” in shop"; nil with no results, where the empty
+    /// state already says so. One word for what is found (a folder is
+    /// listed among them), so the line does not change with the results.
+    public static func searchSummary(_ listing: FileListing, query: String, scope: String) -> String? {
         let count = listing.entries.count
-        let allFiles = listing.entries.allSatisfy { !$0.isFolder }
-        let noun = allFiles ? (count == 1 ? "file" : "files") : (count == 1 ? "item" : "items")
-        return "\(count) \(noun) named “\(query)” in \(scope)"
+        guard count > 0 else { return nil }
+        return "\(count) \(count == 1 ? "file" : "files") named “\(query)” in \(scope)"
     }
 
     /// The footer for what the sensitive rule left out.
@@ -326,20 +352,60 @@ public struct FileCrumb: Equatable, Identifiable, Sendable {
 
 /// A text cut into numbered lines, for the code view.
 public struct CodeLine: Equatable, Identifiable, Sendable {
+    /// A run of the line in one colour (`kind` nil: the plain text colour).
+    public struct Piece: Equatable, Sendable {
+        public var text: String
+        public var kind: SyntaxKind?
+    }
+
     public var number: Int
     public var text: String
+    /// The coloured runs, when the file's language has colours.
+    public var spans: [SyntaxSpan] = []
     public var id: Int { number }
+
+    public init(number: Int, text: String, spans: [SyntaxSpan] = []) {
+        self.number = number
+        self.text = text
+        self.spans = spans
+    }
+
+    /// The line cut at its colour changes, to draw; the whole line when
+    /// it has no colours.
+    public var pieces: [Piece] {
+        guard !spans.isEmpty else { return [Piece(text: text, kind: nil)] }
+        let utf8 = text.utf8
+        var out: [Piece] = []
+        var cursor = utf8.startIndex
+        for span in spans {
+            guard let start = utf8.index(utf8.startIndex, offsetBy: span.start, limitedBy: utf8.endIndex),
+                  let end = utf8.index(start, offsetBy: span.length, limitedBy: utf8.endIndex), start >= cursor else { continue }
+            if start > cursor { out.append(Piece(text: String(text[cursor ..< start]), kind: nil)) }
+            out.append(Piece(text: String(text[start ..< end]), kind: span.kind))
+            cursor = end
+        }
+        if cursor < utf8.endIndex { out.append(Piece(text: String(text[cursor...]), kind: nil)) }
+        return out
+    }
 }
 
 public enum CodeLines {
     /// The lines of `text`, tabs as four spaces; a final newline does not
-    /// make an extra empty line, and an empty text has none.
-    public static func split(_ text: String) -> [CodeLine] {
+    /// make an empty line after it, and an empty text has none. With a
+    /// `language`, each line carries its colours. Splitting copies each
+    /// line once and never the whole text, so it is cheap for the 1 MB the
+    /// daemon sends; the caller runs it off the main actor.
+    public static func split(_ text: String, language: SyntaxLanguage? = nil) -> [CodeLine] {
         guard !text.isEmpty else { return [] }
-        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // "\r\n" is one Character, so one split covers all three line ends.
+        var lines = text.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r" || $0 == "\r\n" }
+            .map { line -> String in
+                let plain = String(line)
+                return plain.contains("\t") ? plain.replacingOccurrences(of: "\t", with: "    ") : plain
+            }
         if lines.last == "" { lines.removeLast() }
-        return lines.enumerated().map { CodeLine(number: $0.offset + 1, text: $0.element.replacingOccurrences(of: "\t", with: "    ")) }
+        let spans = language.map { SyntaxHighlighter.spans(of: lines, in: $0) }
+        return lines.enumerated().map { CodeLine(number: $0.offset + 1, text: $0.element, spans: spans?[$0.offset] ?? []) }
     }
 }
 
@@ -351,6 +417,9 @@ public enum CodeLines {
 /// folder's own path is cut from the front.
 public struct ChangeIndex: Equatable, Sendable {
     private var byPath: [String: ChangedFile] = [:]
+    /// Folders (as the browsed folder names them) with a changed file
+    /// somewhere below.
+    private var foldersWithChanges: Set<String> = []
 
     public init(_ changes: AgentChanges?, folder: String?) {
         guard let changes, changes.repo else { return }
@@ -360,10 +429,18 @@ public struct ChangeIndex: Equatable, Sendable {
             prefix = String(folder.dropFirst(root.count + 1)) + "/"
         }
         for file in changes.files {
+            let relative: String
             if prefix.isEmpty {
-                byPath[file.path] = file
+                relative = file.path
             } else if file.path.hasPrefix(prefix) {
-                byPath[String(file.path.dropFirst(prefix.count))] = file
+                relative = String(file.path.dropFirst(prefix.count))
+            } else {
+                continue
+            }
+            byPath[relative] = file
+            var parent = FilePath.parent(of: relative)
+            while !parent.isEmpty, foldersWithChanges.insert(parent).inserted {
+                parent = FilePath.parent(of: parent)
             }
         }
         self.prefix = prefix
@@ -373,7 +450,9 @@ public struct ChangeIndex: Equatable, Sendable {
     public private(set) var prefix = ""
 
     public func change(at path: String) -> ChangedFile? { byPath[path] }
-    public func isChanged(_ path: String) -> Bool { byPath[path] != nil }
+
+    /// A changed file, or a folder with one below it: the "changed" mark.
+    public func isChanged(_ path: String) -> Bool { byPath[path] != nil || foldersWithChanges.contains(path) }
 }
 
 private extension String {

@@ -68,14 +68,15 @@ extension XCTestCase {
     /// screen the item opens); otherwise the menu is opened again.
     func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
         let deadline = Date().addingTimeInterval(timeout)
+        let items = app.buttons.matching(identifier: item)
         func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if app.buttons[item].isTappable, tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+            if isOnScreen(app, items), tapOnScreen(app, items), landed() { return }
             if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
                 if app.buttons[item].waitForExistence(timeout: 3) {
-                    scrollMenuToItem(app, item)
-                    if tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+                    scrollMenuToItem(app, items)
+                    if tapOnScreen(app, items), landed() { return }
                 }
             }
             usleep(300_000)
@@ -83,14 +84,29 @@ extension XCTestCase {
         XCTFail("no \(item) in \(menu)" + (until.map { ", or it never opened \($0)" } ?? ""), file: file, line: line)
     }
 
-    /// At the accessibility sizes a menu is taller than the screen and
-    /// scrolls: swipes up inside the open menu until `item` can be tapped.
-    private func scrollMenuToItem(_ app: XCUIApplication, _ item: String) {
-        let button = app.buttons[item]
-        for _ in 0 ..< 4 where !button.isTappable {
+    /// Brings `items` (the open menu's item) onto the screen. A menu that is
+    /// still opening has its items in the tree before they have a place on
+    /// screen, so wait for that first: a drag across the middle of the
+    /// screen closes the menu it was meant to scroll. Only at the
+    /// accessibility sizes, where a menu is taller than the screen and
+    /// scrolls, does the item stay off screen, and then swipes up inside
+    /// the open menu until it shows.
+    private func scrollMenuToItem(_ app: XCUIApplication, _ items: XCUIElementQuery) {
+        let settled = Date().addingTimeInterval(2)
+        while !isOnScreen(app, items), Date() < settled { usleep(150_000) }
+        for _ in 0 ..< 4 where !isOnScreen(app, items) {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
         }
     }
+
+    /// Whether some match of `query` has a place on screen. `isHittable` on
+    /// the element is no answer: with the same identifier on several
+    /// elements (the demo keeps the real main view under its cover) the
+    /// element is ambiguous and it reports "not tappable" for all of them.
+    private func isOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        onScreenCenter(app, query) != nil
+    }
+
 
     /// Taps `element` once it is on screen and hittable: a sheet or cover
     /// still moving leaves it in the tree but not tappable, and a tap then
@@ -234,14 +250,21 @@ extension XCTestCase {
     /// notices one that landed nowhere. The copy under the demo's cover
     /// sits at the same place, and a coordinate tap reaches the top one.
     private func tapOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        guard let point = onScreenCenter(app, query) else { return false }
+        let screen = app.frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x - screen.minX, dy: point.y - screen.minY)).tap()
+        return true
+    }
+
+    /// The middle of the first match that has a place on screen.
+    private func onScreenCenter(_ app: XCUIApplication, _ query: XCUIElementQuery) -> CGPoint? {
         let screen = app.frame
         for i in 0 ..< query.count {
             guard let frame = try? query.element(boundBy: i).snapshot().frame else { continue }
-            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty,
-                  screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - screen.minX, dy: frame.midY - screen.minY)).tap()
-            return true
+            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { continue }
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            if screen.contains(center) { return center }
         }
-        return false
+        return nil
     }
 }

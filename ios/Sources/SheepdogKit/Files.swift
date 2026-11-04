@@ -176,8 +176,9 @@ public enum FileProblem: String, Equatable, Sendable {
         self = reason.flatMap(FileProblem.init(rawValue:)) ?? .failed
     }
 
-    /// What was being opened, for words that name it.
-    public enum Subject: Sendable { case folder, file }
+    /// What was being opened, for words that name it. An image reads as a
+    /// file, with the image's symbol.
+    public enum Subject: Sendable { case folder, file, image }
 
     /// The problem as a short state: a headline, a plain sentence with the
     /// fix, and the symbol. `root` is the folder's name ("shop") and
@@ -190,6 +191,7 @@ public enum FileProblem: String, Equatable, Sendable {
 
     public func words(subject: Subject = .folder, root: String = "the folder", name: String = "This file", size: Int? = nil) -> Words {
         let what = subject == .folder ? "folder" : "file"
+        let fileSymbol = subject == .image ? "photo" : "doc"
         switch self {
         case .noAgent:
             return Words(title: "That agent is gone", message: "Its pane closed or herdr no longer reports it.", symbol: "terminal")
@@ -202,7 +204,7 @@ public enum FileProblem: String, Equatable, Sendable {
                          message: subject == .folder
                              ? "It was moved or deleted on your computer, or the space was closed."
                              : "It was moved or deleted on your computer.",
-                         symbol: subject == .folder ? "folder" : "doc")
+                         symbol: subject == .folder ? "folder" : fileSymbol)
         case .outside:
             return Words(title: "This \(what) is outside \(root)",
                          message: "Sheepdog only shows what is inside the space's folder. Open it on your computer, or ask the agent to copy it in.",
@@ -224,7 +226,7 @@ public enum FileProblem: String, Equatable, Sendable {
             let how = size.map { "\(name) is \(FileSizeText.text($0)). " } ?? "\(name) is too big. "
             return Words(title: "Too big to show here",
                          message: "\(how)The phone shows images up to \(limit), so open it on your computer.",
-                         symbol: "doc")
+                         symbol: fileSymbol)
         case .notImage:
             return Words(title: "This file is not an image", message: "There is nothing to show here, so open it on your computer.", symbol: "doc")
         case .badPath:

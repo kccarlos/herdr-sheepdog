@@ -219,7 +219,12 @@ public final class FileBrowserModel {
 
 // MARK: - One file
 
-/// An open file: its text, an image's bytes, or why not.
+/// An open file: its text, a picture, or why not.
+///
+/// The slow parts run off the main actor and the model keeps only what the
+/// screen shows: a picture is decoded and cut down (the file's bytes are let
+/// go at once), a code file is cut into lines (its source is not kept), and
+/// a Markdown file keeps its source only to make its other view when asked.
 @MainActor
 @Observable
 public final class FileViewerModel {
@@ -228,9 +233,11 @@ public final class FileViewerModel {
 
     public enum Phase: Equatable, Sendable {
         case loading
-        /// A text: `lines` holds it, cut into numbered lines.
+        /// A text: `lines` or `blocks` (by `mode`) hold it.
         case text(truncated: Bool)
-        case image(Data)
+        case image(FileImage)
+        /// Bytes the phone could not open as a picture.
+        case unreadableImage
         case binary
         case failed(FilesFailure)
     }
@@ -246,9 +253,12 @@ public final class FileViewerModel {
     public private(set) var phase: Phase = .loading
     /// What the daemon said about the file (its size and time), once it did.
     public private(set) var content: FileContent?
+    /// The numbered lines, in the raw view (every file but a document).
     public private(set) var lines: [CodeLine] = []
-    public private(set) var source = ""
-    public var mode: Mode
+    /// The document's blocks, in the rendered view of a Markdown file.
+    public private(set) var blocks: [MarkdownRenderer.Block] = []
+    /// What is shown. Changed by `select`, once that view is ready.
+    public private(set) var mode: Mode
     /// Lines wrap, or scroll sideways.
     public var wraps = true
 
@@ -256,6 +266,10 @@ public final class FileViewerModel {
     @ObservationIgnored private let image: Image
     @ObservationIgnored private let describe: (Error) -> RequestFailure
     @ObservationIgnored private var reads = 0
+    /// A Markdown file's text, for the view not made yet; nil otherwise.
+    @ObservationIgnored private var markdown: String?
+    @ObservationIgnored private var hasLines = false
+    @ObservationIgnored private var hasBlocks = false
 
     public init(path: String, read: @escaping Read, image: @escaping Image, describe: @escaping (Error) -> RequestFailure) {
         self.path = path
@@ -269,6 +283,11 @@ public final class FileViewerModel {
     public var folder: String { FilePath.parent(of: path) }
     public var isMarkdown: Bool { FileKind.of(name: name) == .markdown }
 
+    /// What the symbol and words of a refusal name: a picture, or a file.
+    public var failureSubject: FileProblem.Subject {
+        (content?.kind == .image || FileKind.of(name: name) == .image) ? .image : .file
+    }
+
     public func load() async {
         reads += 1
         let mine = reads
@@ -281,9 +300,7 @@ public final class FileViewerModel {
             content = found
             switch found.kind {
             case .text:
-                source = found.text ?? ""
-                lines = CodeLines.split(source)
-                phase = .text(truncated: found.truncated)
+                guard await showText(found.text ?? "", truncated: found.truncated, loadNumber: mine) else { return }
             case .binary:
                 phase = .binary
             case .image:
@@ -292,13 +309,85 @@ public final class FileViewerModel {
                     phase = .failed(.problem(.tooLarge))
                     return
                 }
-                let bytes = try await image(path)
+                let decoded = try await fetchImage()
                 guard mine == reads else { return }
-                phase = .image(bytes)
+                phase = decoded.map(Phase.image) ?? .unreadableImage
             }
         } catch {
             guard mine == reads, let failure = filesFailure(error, describe: describe) else { return }
             phase = .failed(failure)
         }
+    }
+
+    /// Shows the other view of a Markdown file. It is made first, off the
+    /// main actor, and the old view stays until it is ready.
+    public func select(_ newMode: Mode) async {
+        guard newMode != mode, isMarkdown else { return }
+        guard let text = markdown else {
+            mode = newMode
+            return
+        }
+        let mine = reads
+        let ready = newMode == .raw ? hasLines : hasBlocks
+        if !ready {
+            let made = await Self.make(text, name: name, mode: newMode)
+            guard mine == reads else { return }
+            adopt(made)
+        }
+        mode = newMode
+    }
+
+    // MARK: Making the views
+
+    /// What a view of the text is made of: one of the two, as the mode asks.
+    private struct Made: Sendable {
+        var lines: [CodeLine]?
+        var blocks: [MarkdownRenderer.Block]?
+    }
+
+    /// Makes the view `mode` shows off the main actor, and keeps the text
+    /// only when the other view may be asked for. False when a newer read
+    /// has taken over.
+    private func showText(_ text: String, truncated: Bool, loadNumber: Int) async -> Bool {
+        let made = await Self.make(text, name: name, mode: mode)
+        guard loadNumber == reads else { return false }
+        // The new views replace the old ones only now, so a refresh does
+        // not blank the screen while it works.
+        lines = []
+        blocks = []
+        hasLines = false
+        hasBlocks = false
+        markdown = isMarkdown ? text : nil
+        adopt(made)
+        phase = .text(truncated: truncated)
+        return true
+    }
+
+    private func adopt(_ made: Made) {
+        if let newLines = made.lines {
+            lines = newLines
+            hasLines = true
+        }
+        if let newBlocks = made.blocks {
+            blocks = newBlocks
+            hasBlocks = true
+        }
+    }
+
+    private static func make(_ text: String, name: String, mode: Mode) async -> Made {
+        switch mode {
+        case .rendered:
+            return await Task.detached(priority: .userInitiated) { Made(blocks: MarkdownRenderer.blocks(text)) }.value
+        case .raw:
+            let language = SyntaxLanguage.of(name: name)
+            return await Task.detached(priority: .userInitiated) { Made(lines: CodeLines.split(text, language: language)) }.value
+        }
+    }
+
+    /// The picture, decoded and cut down. The file's bytes live only in
+    /// here: they are gone when this returns.
+    private func fetchImage() async throws -> FileImage? {
+        let bytes = try await image(path)
+        return await FileImage.decode(bytes, maxPixel: FileImage.viewerMaxPixel)
     }
 }

@@ -77,15 +77,18 @@ struct FileViewer: View {
     }
 
     /// At the accessibility sizes the bar cannot hold the name: it is the
-    /// first thing on the page instead.
+    /// first thing on the page instead, in a calmer size than the text of
+    /// the file below it (a headline at the largest size would fill the
+    /// top of the screen).
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(viewer.name).font(.headline).fixedSize(horizontal: false, vertical: true)
-            Text(location).font(.subheadline).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            Text(viewer.name).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(location).font(.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
@@ -131,8 +134,16 @@ struct FileViewer: View {
                 .accessibilityIdentifier("viewer.loading")
         case let .text(truncated):
             text(truncated: truncated)
-        case let .image(data):
-            ImageViewer(data: data, name: viewer.name, bytes: viewer.content?.size ?? data.count)
+        case let .image(image):
+            ImageViewer(image: image, name: viewer.name, bytes: viewer.content?.size ?? 0)
+                .id(ObjectIdentifier(image.cgImage))
+        case .unreadableImage:
+            BrowserState(
+                symbol: "photo", title: "This image can't be shown",
+                message: "\(viewer.name) is not a picture this phone can open.",
+                action: backAction, identifier: "viewer.image.failed"
+            )
+            .scrolling()
         case .binary:
             let size = viewer.content.map { FileSizeText.text($0.size) } ?? ""
             BrowserState(
@@ -150,7 +161,7 @@ struct FileViewer: View {
         var back: (title: String, run: () -> Void)?
         if let onBack { back = (title: "Back", run: onBack) }
         return BrowserWords.state(
-            failure, subject: .file, root: rootName, name: viewer.name, size: viewer.content?.size,
+            failure, subject: viewer.failureSubject, root: rootName, name: viewer.name, size: viewer.content?.size,
             retry: { Task { await viewer.load() } }, back: back, changes: showChanges
         )
     }
@@ -163,7 +174,7 @@ struct FileViewer: View {
         VStack(spacing: 0) {
             infoBar
             if viewer.isMarkdown && viewer.mode == .rendered {
-                MarkdownDocument(source: viewer.source, path: path, services: services, openPath: openPath, truncated: truncated)
+                MarkdownDocument(blocks: viewer.blocks, path: path, services: services, openPath: openPath, truncated: truncated)
                     .accessibilityIdentifier("viewer.markdown")
             } else {
                 CodeView(lines: viewer.lines, wraps: viewer.wraps, truncated: truncated)
@@ -184,7 +195,7 @@ struct FileViewer: View {
                 SegmentedChoice(
                     options: FileViewerModel.Mode.allCases, selected: viewer.mode, title: { $0.title },
                     identifier: "viewer.mode", accessibilityName: "View"
-                ) { viewer.mode = $0 }
+                ) { mode in Task { await viewer.select(mode) } }
             }
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
             Text(meta)
@@ -211,13 +222,7 @@ struct FileViewer: View {
                 HStack(spacing: 8) {
                     Image(systemName: "plusminus").accessibilityHidden(true)
                     Text(Self.changeWord(change)).frame(maxWidth: .infinity, alignment: .leading)
-                    if !change.isBinary {
-                        HStack(spacing: 6) {
-                            Text("+\(change.added)").foregroundStyle(DiffColors.added)
-                            if change.deleted > 0 { Text("−\(change.deleted)").foregroundStyle(DiffColors.removed) }
-                        }
-                        .font(.footnote.monospacedDigit().weight(.medium))
-                    }
+                    if !change.isBinary { LineCounts(added: change.added, deleted: change.deleted) }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.chevron)
@@ -232,7 +237,7 @@ struct FileViewer: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(Self.changeWord(change)), \(change.added) added, \(change.deleted) removed. Opens its diff.")
+            .accessibilityLabel("\(Self.changeWord(change)), \(LineCountText.spoken(added: change.added, deleted: change.deleted)). Opens its diff.")
             .accessibilityIdentifier("viewer.changes")
         }
     }
@@ -249,9 +254,11 @@ struct FileViewer: View {
 
 /// A Markdown file as a document: the app's own Markdown blocks (paragraphs,
 /// lists, code, tables), pictures from the folder, and links to the folder's
-/// other files. A link to anywhere else goes to the system, or nowhere.
+/// other files. A link to anywhere else goes to the system, or nowhere. The
+/// blocks are made off the main actor (`FileViewerModel`) and drawn lazily,
+/// so a long document costs what is on screen.
 private struct MarkdownDocument: View {
-    let source: String
+    let blocks: [MarkdownRenderer.Block]
     let path: String
     let services: BrowserServices
     let openPath: (String) -> Void
@@ -260,7 +267,7 @@ private struct MarkdownDocument: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                MarkdownBlocksView(source) { alt, source in
+                MarkdownBlocksView(blocks: blocks, lazy: true, keepsPathsWhole: true) { alt, source in
                     AnyView(MarkdownPicture(alt: alt, source: source, from: path, services: services, openPath: openPath))
                 }
                 .textSelection(.enabled)
@@ -269,6 +276,7 @@ private struct MarkdownDocument: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
+        .softTopEdge()
         .environment(\.openURL, OpenURLAction { url in
             if let scheme = url.scheme?.lowercased() {
                 return scheme == "http" || scheme == "https" ? .systemAction : .discarded
@@ -288,7 +296,7 @@ private struct MarkdownPicture: View {
     let services: BrowserServices
     let openPath: (String) -> Void
 
-    @State private var image: UIImage?
+    @State private var image: FileImage?
     @State private var failed = false
 
     init(alt: String, source: String, from: String, services: BrowserServices, openPath: @escaping (String) -> Void) {
@@ -308,7 +316,7 @@ private struct MarkdownPicture: View {
                 Button {
                     if let target { openPath(target) }
                 } label: {
-                    Image(uiImage: image)
+                    Image(decorative: image.cgImage, scale: 1)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
@@ -334,8 +342,10 @@ private struct MarkdownPicture: View {
         .task {
             guard let target else { return }
             do {
+                // The bytes live only in this scope: what stays is the
+                // picture, decoded and cut down to the width of the page.
                 let data = try await services.image(target)
-                image = await Task.detached { UIImage(data: data) }.value
+                image = await FileImage.decode(data, maxPixel: FileImage.inlineMaxPixel)
                 failed = image == nil
             } catch {
                 failed = true
@@ -382,9 +392,12 @@ private struct CodeView: View {
                             .frame(width: gutter, alignment: .trailing)
                             .padding(.trailing, 10)
                             .accessibilityHidden(true)
-                        Text(line.text.isEmpty ? " " : line.text)
+                        // Selection is on the text of the line only, so the
+                        // numbers never come along with a copy.
+                        Text(Self.styled(line))
                             .fixedSize(horizontal: !wraps, vertical: true)
                             .frame(maxWidth: wraps ? .infinity : nil, alignment: .leading)
+                            .textSelection(.enabled)
                     }
                     .font(.system(.footnote, design: .monospaced))
                     .padding(.trailing, 12)
@@ -394,57 +407,92 @@ private struct CodeView: View {
                 if truncated { TruncatedNote().padding(16) }
             }
             .padding(.vertical, 10)
-            .textSelection(.enabled)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .softTopEdge()
     }
+
+    /// A line in its colours: made for the lines on screen only.
+    private static func styled(_ line: CodeLine) -> AttributedString {
+        guard !line.text.isEmpty else { return AttributedString(" ") }
+        var out = AttributedString()
+        for piece in line.pieces {
+            var part = AttributedString(piece.text)
+            if let kind = piece.kind { part.foregroundColor = SyntaxColors.color(kind) }
+            out += part
+        }
+        return out
+    }
+}
+
+/// The colours of the code viewer, from the design's code board.
+private enum SyntaxColors {
+    static func color(_ kind: SyntaxKind) -> Color {
+        switch kind {
+        case .keyword: keyword
+        case .string: string
+        case .number: number
+        case .comment: Theme.muted
+        case .call: call
+        }
+    }
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        func ui(_ hex: UInt32) -> UIColor {
+            UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        }
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? ui(dark) : ui(light) })
+    }
+
+    private static let keyword = dynamic(light: 0x6A46B0, dark: 0xB195F0)
+    private static let string = dynamic(light: 0x1D6B46, dark: 0x5CC792)
+    private static let number = dynamic(light: 0x8A5700, dark: 0xF5B83D)
+    private static let call = dynamic(light: 0x1F5F9E, dark: 0x6AA8EB)
 }
 
 // MARK: - Image
 
 /// An image, fitted, with pinch and double-tap to zoom, and a Fit | 100%
-/// switch under it. The bytes stay in memory, in this view.
+/// switch under it. What is held is the decoded picture (cut down to what
+/// the phone can draw); the file's own bytes are already gone.
 private struct ImageViewer: View {
-    let data: Data
+    let image: FileImage
     let name: String
     let bytes: Int
 
-    @State private var image: UIImage?
-    @State private var failed = false
+    @State private var picture: UIImage
     @State private var zoom: CGFloat = 1
     @State private var fitting = true
     @State private var command: ZoomChoice?
+
+    init(image: FileImage, name: String, bytes: Int) {
+        self.image = image
+        self.name = name
+        self.bytes = bytes
+        // The scale makes its size in points the original's size in pixels,
+        // so 100% is the real picture even when it was cut down.
+        _picture = State(initialValue: UIImage(cgImage: image.cgImage, scale: image.scale, orientation: .up))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
                 Theme.fill
-                if let image {
-                    ZoomableImage(image: image, name: name, zoom: $zoom, fitting: $fitting, command: $command)
-                } else if failed {
-                    BrowserState(symbol: "photo", title: "This image can't be shown", message: "\(name) is not a picture this phone can open.", identifier: "viewer.image.failed")
-                } else {
-                    ProgressView()
-                }
+                ZoomableImage(image: picture, name: name, zoom: $zoom, fitting: $fitting, command: $command)
             }
-            if let image { bar(image) }
-        }
-        .task {
-            let decoded = await Task.detached { UIImage(data: data) }.value
-            image = decoded
-            failed = decoded == nil
+            bar
         }
     }
 
-    private func bar(_ image: UIImage) -> some View {
+    private var bar: some View {
         let selected: ZoomChoice? = fitting ? .fit : (abs(zoom - 1) < 0.005 ? .actual : nil)
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(fitting ? "Pinch or double-tap to zoom" : "\(Int((zoom * 100).rounded()))%")
+                Text(ImageZoomText.hint(zoom: Double(zoom), fitting: fitting))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.ink)
                     .accessibilityIdentifier("viewer.image.zoom")
-                Text("\(Int(image.size.width)) × \(Int(image.size.height)) · \(FileSizeText.text(bytes))")
+                Text("\(image.sizeText) · \(FileSizeText.text(bytes))")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
             }

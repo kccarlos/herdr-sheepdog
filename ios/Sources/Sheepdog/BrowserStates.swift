@@ -22,18 +22,25 @@ struct BrowserState: View {
         let run: () -> Void
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// At the accessibility sizes the words already fill the screen, so the
+    /// symbol, the mascot and the spacing give way: the title, the sentence
+    /// and the action all stay in reach.
+    private var compact: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: compact ? 6 : 10) {
             if sleeping {
-                MascotCard(name: "MascotSleeping", width: 150)
+                MascotCard(name: "MascotSleeping", width: compact ? 80 : 150)
             } else if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 40, weight: .light))
+                    .font(.system(size: compact ? 26 : 40, weight: .light))
                     .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }
             Text(title)
-                .font(.system(.title2, design: .rounded, weight: .bold))
+                .font(.system(compact ? .title3 : .title2, design: .rounded, weight: .bold))
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
             if !message.isEmpty {
@@ -70,8 +77,8 @@ struct BrowserState: View {
                     .accessibilityIdentifier(action.identifier)
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 32)
+        .padding(.horizontal, compact ? 20 : 28)
+        .padding(.vertical, compact ? 12 : 32)
         .frame(maxWidth: 520)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)

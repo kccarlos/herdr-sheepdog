@@ -80,6 +80,12 @@ struct BrowserSheet: View {
         return nil
     }
 
+    /// Every changed file, for the diff's jump to another.
+    private var changedFiles: [ChangedFile] {
+        if case let .loaded(loaded) = changes, loaded.repo { return loaded.files }
+        return []
+    }
+
     var body: some View {
         Group {
             if isCompact {
@@ -193,8 +199,11 @@ struct BrowserSheet: View {
             )
             .id(path)
         case let .change(file):
-            DiffView(file: file, load: { try await services.diff(file.path) })
-                .id(file.path)
+            DiffView(
+                file: file, load: { try await services.diff(file.path) },
+                files: changedFiles, jump: { self.selection = .change($0) }
+            )
+            .id(file.path)
         }
     }
 
