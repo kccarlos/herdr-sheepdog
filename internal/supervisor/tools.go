@@ -175,24 +175,57 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	if res, err, blocked := s.menuOnScreen(ctx, row); blocked {
 		return res, err
 	}
+	ps := s.paneSend(row.PaneID)
+	ps.Lock()
+
+	// The row records the instruction before the RPC, as sendInterrupt
+	// marks before its own: a transition the send causes can be handled
+	// before Prompt returns, and must find the task it finishes.
 	s.mu.Lock()
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
-	_, err := s.herdr.Prompt(ctx, row.PaneID, text)
-	if errors.Is(err, herdr.ErrNoReply) {
-		// The text may be typed already; the action's cancel has nothing to interrupt.
-		s.clearPending(p, "send_no_reply")
-	} else if err != nil {
-		s.clearPending(p, "send_failed")
-	} else {
-		now := s.cfg.Now()
-		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = text, &now }); uerr != nil {
-			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
+	task, now := withoutSignOff(text), s.cfg.Now()
+	prev, hadRow := s.store.Get(row.PaneID)
+	if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = task, &now }); uerr != nil {
+		s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
+	}
+	s.invalidateBriefingLocked()
+	sctx, flight := s.beginSendLocked(ctx, row.PaneID)
+	s.mu.Unlock()
+
+	_, err := s.herdr.Prompt(sctx, row.PaneID, text)
+
+	s.mu.Lock()
+	// A turn cancelled by the stop (ctx done) aborted its Prompt before
+	// anything was sent: the pending action is dropped as before. Only a
+	// send aborted by abortSend alone leaves it to the stop procedure.
+	byStop := s.endSendLocked(row.PaneID, flight) && ctx.Err() == nil
+	if err != nil {
+		if hadRow {
+			// Undo the mark unless a transition has moved the row on.
+			_, _ = s.store.Update(row.PaneID, func(a *state.Agent) {
+				if a.CurrentTask == task && a.LastInteraction != nil && a.LastInteraction.Equal(now) {
+					a.CurrentTask, a.LastInteraction = prev.CurrentTask, prev.LastInteraction
+				}
+			})
+			s.invalidateBriefingLocked()
 		}
-		s.invalidateBriefingLocked()
+		// A send the stop procedure aborted leaves its pending action
+		// for the stop to settle (it may need to interrupt the pane).
+		if cur, has := s.store.Pending(); has && cur.ID == p.ID && !byStop {
+			// For no reply the text may be typed already; the action's cancel has nothing to interrupt.
+			reason := "send_failed"
+			if errors.Is(err, herdr.ErrNoReply) {
+				reason = "send_no_reply"
+			}
+			s.clearPending(p, reason)
+		}
 	}
 	s.mu.Unlock()
+	// Nothing below holds the pane's send lock: the reads that follow
+	// would keep a Stop waiting behind them.
+	ps.Unlock()
 
 	if errors.Is(err, herdr.ErrNoReply) {
 		// Written, but herdr's reply never came: the text may well have
@@ -377,10 +410,78 @@ func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voi
 // (pending.confirmed {via}, with extra fields such as a tap's option) and
 // starts the post-answer poll (reprompt.go): herdr may already be showing
 // the next prompt within its own poll window with no state change in
-// between. ok reports whether the keys were sent. Caller holds s.mu.
+// between. ok reports whether the keys were sent. Caller holds
+// s.paneSend(p.PaneID) and s.mu (released across SendKeys and re-taken).
 func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label string, say func(label string) string, via string, extra map[string]any) (voice.ToolResult, bool) {
 	alias := s.sayOf(p.PaneID)
-	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
+
+	// The answer is recorded before the keys go out, as sendInterrupt
+	// marks before its own RPC: the transition they cause (blocked ->
+	// done, or a new prompt) can be handled before SendKeys returns, and
+	// must see this block answered, not have its own overwritten.
+	now := s.cfg.Now()
+	answerVia := "voice"
+	if via == "tap" {
+		answerVia = "tap"
+	}
+	var seenAt time.Time
+	var prevBlock state.Block
+	hadBlock := false
+	prevInteraction := (*time.Time)(nil)
+	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
+		prevInteraction = a.LastInteraction
+		if a.LastBlock != nil {
+			prevBlock, hadBlock, seenAt = *a.LastBlock, true, a.LastBlock.SeenAt
+			a.LastBlock.Answered = true
+			a.LastBlock.Answer = label
+			a.LastBlock.Via = answerVia
+		}
+		a.LastInteraction = &now
+	}); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+	prevSeen, hadSeen := s.promptSeenAt[p.PaneID]
+	// Answered: the next prompt on this pane appeared after now, even if
+	// it reads the same (inputs.go's promptSinceLocked).
+	delete(s.promptSeenAt, p.PaneID)
+	prevDecl, hadDecl := s.declined[p.PaneID]
+	declined := declines(p, keys)
+	if declined {
+		if s.declined == nil {
+			s.declined = map[string]declineMark{}
+		}
+		s.declined[p.PaneID] = declineMark{at: now, question: p.Question}
+	}
+	s.invalidateBriefingLocked()
+	s.mu.Unlock()
+	err := s.herdr.SendKeys(ctx, p.PaneID, keys...)
+	s.mu.Lock()
+	if err != nil {
+		// Undo what is still ours: a transition that moved the pane on
+		// while the keys were in flight keeps its own record.
+		_, _ = s.store.Update(p.PaneID, func(a *state.Agent) {
+			if hadBlock && a.LastBlock != nil && a.LastBlock.SeenAt.Equal(seenAt) && a.LastBlock.Answer == label && a.LastBlock.Via == answerVia {
+				*a.LastBlock = prevBlock
+			}
+			if a.LastInteraction != nil && a.LastInteraction.Equal(now) {
+				a.LastInteraction = prevInteraction
+			}
+		})
+		if hadSeen {
+			if _, ok := s.promptSeenAt[p.PaneID]; !ok {
+				s.promptSeenAt[p.PaneID] = prevSeen
+			}
+		}
+		if declined {
+			if cur, ok := s.declined[p.PaneID]; ok && cur.at.Equal(now) {
+				if hadDecl {
+					s.declined[p.PaneID] = prevDecl
+				} else {
+					delete(s.declined, p.PaneID)
+				}
+			}
+		}
+		s.invalidateBriefingLocked()
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, false
 	}
@@ -392,34 +493,10 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 		}
 	}
 	s.dropQuestionLocked(p)
-	now := s.cfg.Now()
-	answerVia := "voice"
-	if via == "tap" {
-		answerVia = "tap"
-	}
-	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
-		if a.LastBlock != nil {
-			a.LastBlock.Answered = true
-			a.LastBlock.Answer = label
-			a.LastBlock.Via = answerVia
-		}
-		a.LastInteraction = &now
-	}); err != nil {
-		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
-	}
-	// Answered: the next prompt on this pane appeared after now, even if
-	// it reads the same (inputs.go's promptSinceLocked).
-	delete(s.promptSeenAt, p.PaneID)
 	if s.answeredPrompt == nil {
 		s.answeredPrompt = map[string]string{}
 	}
 	s.answeredPrompt[p.PaneID] = p.ID
-	if declines(p, keys) {
-		if s.declined == nil {
-			s.declined = map[string]declineMark{}
-		}
-		s.declined[p.PaneID] = declineMark{at: now, question: p.Question}
-	}
 	s.invalidateBriefingLocked()
 	s.lastSubject = p.PaneID
 	confirmed := map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via}

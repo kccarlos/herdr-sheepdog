@@ -88,7 +88,7 @@ type Watcher struct {
 	log    Logger
 
 	inject chan StatusEvent // Inject()
-	status chan StatusEvent // fan-in of per-pane subscriptions
+	status chan paneStatus  // fan-in of per-pane subscriptions
 	fired  chan uint64      // debounce timers
 	out    chan Transition
 	done   chan struct{}
@@ -134,6 +134,11 @@ type pendingBlock struct {
 	timer  *time.Timer
 }
 
+type paneStatus struct {
+	pane *paneState
+	ev   StatusEvent
+}
+
 // NewWatcher builds a Watcher over client (a *Client or another backend's
 // EventSource). log may be nil.
 func NewWatcher(client EventSource, cfg WatcherConfig, log Logger) *Watcher {
@@ -145,7 +150,7 @@ func NewWatcher(client EventSource, cfg WatcherConfig, log Logger) *Watcher {
 		cfg:      cfg.withDefaults(),
 		log:      log,
 		inject:   make(chan StatusEvent, 64),
-		status:   make(chan StatusEvent, 64),
+		status:   make(chan paneStatus, 64),
 		fired:    make(chan uint64, 64),
 		out:      make(chan Transition, 64),
 		done:     make(chan struct{}),
@@ -226,11 +231,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 			}
 			w.alive()
 			w.handleFleet(ctx, ev)
-		case ev := <-w.status:
+		case ps := <-w.status:
 			w.alive()
-			w.handleStatus(ctx, ev)
+			w.handlePaneStatus(ctx, ps)
 		case ev := <-w.inject:
-			w.handleStatus(ctx, ev)
+			w.handleInject(ctx, ev)
 		case seq := <-w.fired:
 			w.handleFired(ctx, seq)
 		case <-w.client.Resync():
@@ -352,7 +357,21 @@ func (w *Watcher) handleFleet(ctx context.Context, ev FleetEvent) {
 	}
 }
 
-func (w *Watcher) handleStatus(ctx context.Context, ev StatusEvent) {
+func (w *Watcher) handlePaneStatus(ctx context.Context, ps paneStatus) {
+	ev := ps.ev
+	if ps.pane == nil || ev.PaneID == "" || !ev.State.Valid() {
+		return
+	}
+	if w.panes[ev.PaneID] != ps.pane {
+		return
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now()
+	}
+	w.applyEvent(ctx, ps.pane, ev)
+}
+
+func (w *Watcher) handleInject(ctx context.Context, ev StatusEvent) {
 	if ev.PaneID == "" || !ev.State.Valid() {
 		return
 	}
@@ -424,6 +443,7 @@ func (p *paneState) activate() {
 		return
 	}
 	p.state, p.lastEv, p.lastEvAt = "", "", time.Time{}
+	p.name, p.session = "", nil
 	p.released = false
 }
 
@@ -521,11 +541,12 @@ func (w *Watcher) ensurePane(ctx context.Context, id, workspace, agent string) *
 		p = &paneState{id: id, workspace: workspace, agent: agent, cancel: cancel}
 		w.panes[id] = p
 	}
+	pane := p
 	ch := w.client.Subscribe(subCtx, id)
 	go func() {
 		for ev := range ch {
 			select {
-			case w.status <- ev:
+			case w.status <- paneStatus{pane: pane, ev: ev}:
 			case <-subCtx.Done():
 				return
 			}
