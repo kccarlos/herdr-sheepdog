@@ -65,6 +65,7 @@ final class MacAudioEngine: VoiceAudio {
 
     var metrics: AudioMetrics {
         var combined = engineMetrics
+        capture.apply(to: &combined)
         playback.apply(to: &combined)
         return combined
     }
@@ -74,7 +75,7 @@ final class MacAudioEngine: VoiceAudio {
     private var stoppedByItself = false
 
     private let engine = AVAudioEngine()
-    private let capture = AudioCapture()
+    private let capture = AudioCapture(followsInputFormat: true)
     private let playback = AudioPlayback()
     private var observer: NSObjectProtocol?
     private let log: AppLogging
@@ -85,6 +86,9 @@ final class MacAudioEngine: VoiceAudio {
         // processing is on (the phone's reason, and the same here: a graph
         // wired before the I/O unit changed can play nothing).
         playback.attach(to: engine)
+        capture.onSignalChange = { [weak self] change in
+            self?.signalChanged(change)
+        }
         // The engine stops itself when the hardware format changes under it.
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.configurationChanged() }
@@ -113,7 +117,7 @@ final class MacAudioEngine: VoiceAudio {
         guard format.channelCount > 0, format.sampleRate > 0 else {
             throw Failure.format(AudioCapture.noMicrophoneMessage)
         }
-        capture.reset()
+        capture.reset(isStart: true)
         engineMetrics.hardwareSampleRate = format.sampleRate
 
         // 4 096 frames is a hint; the system hands over what it likes, which
@@ -170,11 +174,12 @@ final class MacAudioEngine: VoiceAudio {
 
     func stop() {
         guard isRunning else { return }
-        isRunning = false
         engine.inputNode.removeTap(onBus: 0)
-        playback.stop()
-        engine.stop()
-        capture.stop()
+        playback.stop(in: engine) {
+            capture.resetOnStop()
+            isRunning = false
+            capture.disarmWatchdog()
+        }
     }
 
     func setMuted(_ muted: Bool) {
@@ -230,9 +235,7 @@ final class MacAudioEngine: VoiceAudio {
     private func captureOnMain(_ buffer: AVAudioPCMBuffer) {
         guard isRunning else { return }
         do {
-            if let change = try capture.process(buffer, metrics: &engineMetrics) {
-                signalChanged(change)
-            }
+            try capture.process(buffer)
         } catch {
             log.log("convert failed: \(String(describing: error))")
         }
@@ -253,9 +256,7 @@ final class MacAudioEngine: VoiceAudio {
 
     /// The watchdog and the playback metrics, on the host timer's cadence.
     func tick() {
-        if let change = capture.tickWatchdog(running: isRunning) {
-            signalChanged(change)
-        }
+        capture.tickWatchdog(running: isRunning)
         playback.tick()
     }
 

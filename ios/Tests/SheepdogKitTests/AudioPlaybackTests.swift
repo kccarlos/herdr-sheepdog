@@ -78,8 +78,7 @@ final class AudioPlaybackTests: XCTestCase {
         try engine.start()
         playback.start()
         defer {
-            playback.stop()
-            engine.stop()
+            playback.stop(in: engine)
         }
         XCTAssertTrue(playback.isRunning)
 
@@ -198,21 +197,96 @@ final class AudioPlaybackTests: XCTestCase {
         playback.flush()
         XCTAssertEqual(reports.map(\.state), [.started, .flushed, .flushed])
 
-        // `stop()` halts playback, flushes, and resets state.
+        // `stop(in:)` halts playback and `engine`, flushes, and resets state.
         for _ in 0 ..< 5 {
             playback.enqueue(Self.toneChunk(milliseconds: 40))
         }
-        playback.stop()
+        playback.stop(in: engine)
+        XCTAssertFalse(engine.isRunning)
         XCTAssertFalse(playback.isRunning)
         XCTAssertEqual(playback.currentRate, 1.0)
         XCTAssertEqual(reports.last?.state, .flushed)
         XCTAssertEqual(speaking.last, false)
 
         // `stopForFailure()` halts steering without emitting a flush report.
+        try engine.start()
         playback.start()
         let reportCount = reports.count
         playback.stopForFailure()
         XCTAssertFalse(playback.isRunning)
         XCTAssertEqual(reports.count, reportCount)
+    }
+
+    func testStopTeardownOrderStopsEngineAndFlushesWhileRunningBeforeHostTeardownAndSpeakingReset() throws {
+        var now = 0.0
+        let (engine, playback) = try Self.makeOfflineRig(clock: { now })
+        let capture = AudioCapture(watchdogThreshold: 3, clock: { now })
+        try engine.start()
+        playback.start()
+        capture.didStart()
+        defer { engine.stop() }
+
+        playback.setProvider("openai")
+        for _ in 0 ..< 10 {
+            playback.enqueue(Self.toneChunk(milliseconds: 40))
+        }
+        now = 0.30
+        playback.steer()
+        now = 0.32
+        playback.steer()
+        XCTAssertLessThan(playback.currentRate, 1.0)
+
+        now = 3.5
+        XCTAssertEqual(capture.tickWatchdog(running: true), .lost(restart: true))
+        XCTAssertTrue(capture.noSignal)
+
+        var hostRunning = true
+        var hostInterrupted = true
+        var events: [String] = []
+        capture.onGate = { events.append("gate:\($0)") }
+        capture.onMicSignal = { events.append("micSignal:\($0)") }
+        playback.onPlaybackReport = { report in
+            // `engine.stop()` has already run, while `isRunning` and host
+            // state are still intact when `flushed` is reported.
+            XCTAssertFalse(engine.isRunning)
+            XCTAssertTrue(playback.isRunning)
+            XCTAssertTrue(hostRunning)
+            XCTAssertTrue(hostInterrupted)
+            events.append("report:\(report.state.rawValue)")
+        }
+        playback.onSpeakingChanged = { speaking in
+            events.append("speaking:\(speaking)")
+        }
+        playback.onOutputLevel = { level in
+            events.append("outputLevel:\(level)")
+        }
+
+        playback.stop(in: engine) {
+            XCTAssertFalse(playback.isRunning)
+            XCTAssertEqual(playback.currentRate, 1.0)
+            capture.resetOnStop()
+            hostRunning = false
+            hostInterrupted = false
+            events.append("paused:false")
+            events.append("route:nil")
+            capture.disarmWatchdog()
+        }
+
+        XCTAssertFalse(engine.isRunning)
+        XCTAssertFalse(playback.isRunning)
+        XCTAssertFalse(hostRunning)
+        XCTAssertFalse(capture.noSignal)
+        XCTAssertEqual(playback.currentRate, 1.0)
+        XCTAssertEqual(
+            events,
+            [
+                "report:flushed",
+                "paused:false",
+                "route:nil",
+                "micSignal:false",
+                "speaking:false",
+                "outputLevel:0.0",
+            ]
+        )
     }
 }

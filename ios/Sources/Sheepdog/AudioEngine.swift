@@ -99,6 +99,7 @@ final class AudioEngine {
 
     var metrics: AudioMetrics {
         var combined = engineMetrics
+        capture.apply(to: &combined)
         playback.apply(to: &combined)
         return combined
     }
@@ -131,6 +132,9 @@ final class AudioEngine {
         // a graph wired against the launch-time session (`.soloAmbient`,
         // output only) played nothing once the session changed under it.
         playback.attach(to: engine)
+        capture.onSignalChange = { [weak self] change in
+            self?.signalChanged(change)
+        }
         observe()
     }
 
@@ -174,7 +178,7 @@ final class AudioEngine {
         engine.mainMixerNode.outputVolume = 1
         let format = input.inputFormat(forBus: 0)
         try requireCapturable(format)
-        try capture.prepare(inputFormat: format)
+        try capture.prepare(inputFormat: format, isStart: true)
         engineMetrics.hardwareSampleRate = format.sampleRate
 
         // 4 096 frames is a hint; iOS hands over what it likes, which is why
@@ -242,17 +246,18 @@ final class AudioEngine {
 
     func stop() {
         guard isRunning else { return }
-        isRunning = false
-        interrupted = false
-        sessionActive = false
-        routeChangedWhileHeld = false
-        stoppedByItself = false
         engine.inputNode.removeTap(onBus: 0)
-        playback.stop()
-        engine.stop()
-        capture.stop()
-        setNeedsResume(false)
-        onRoute?(nil)
+        playback.stop(in: engine) {
+            capture.resetOnStop()
+            isRunning = false
+            interrupted = false
+            sessionActive = false
+            routeChangedWhileHeld = false
+            stoppedByItself = false
+            setNeedsResume(false)
+            onRoute?(nil)
+            capture.disarmWatchdog()
+        }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -363,9 +368,7 @@ final class AudioEngine {
     private func captureOnMain(_ buffer: AVAudioPCMBuffer) {
         guard isRunning else { return }
         do {
-            if let change = try capture.process(buffer, metrics: &engineMetrics) {
-                signalChanged(change)
-            }
+            try capture.process(buffer)
         } catch {
             SheepdogLog.audio.error("convert failed: \(String(describing: error), privacy: .public)")
         }
@@ -392,9 +395,7 @@ final class AudioEngine {
     /// The watchdog and the playback metrics, on the UI timer's cadence
     /// (100 ms while audio is moving, 1 s idle).
     func tick() {
-        if let change = capture.tickWatchdog(running: isRunning, interrupted: holdsAudio) {
-            signalChanged(change)
-        }
+        capture.tickWatchdog(running: isRunning, interrupted: holdsAudio)
         playback.tick()
     }
 

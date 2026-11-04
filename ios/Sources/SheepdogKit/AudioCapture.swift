@@ -9,7 +9,7 @@ import Foundation
 /// Platform-only work stays in each app's engine — `AVAudioSession` and
 /// interruptions on iOS, the render-thread multi-channel mix-down and
 /// `AVAudioEngineConfigurationChange` on macOS — which copies each tap buffer
-/// off the audio render thread and hands it to `process(_:metrics:)`.
+/// off the audio render thread and hands it to `process(_:)`.
 @MainActor
 public final class AudioCapture {
     /// A change in the microphone watchdog's verdict that the engine logs and,
@@ -32,11 +32,20 @@ public final class AudioCapture {
     public var onLevel: ((Float) -> Void)?
     /// The microphone stopped (`true`) or resumed (`false`) delivering signal.
     public var onMicSignal: ((Bool) -> Void)?
+    /// The watchdog changed state: runs before framing in `process` so a
+    /// capture-chain restart resets `chunker` and `gate` ahead of the
+    /// triggering buffer and counts toward capture latency.
+    public var onSignalChange: ((SignalChange) -> Void)?
 
+    /// True when `process` builds and replaces `PCMConverter` to follow each
+    /// buffer's format (macOS after `MicMixdown`); false when `prepare` owns
+    /// the converter for the current hardware route (iOS).
+    public let followsInputFormat: Bool
     /// The capture-side switch `setMuted` throws: gates `process` and
     /// arms/disarms the watchdog. Not a second source of truth for "muted",
     /// which is `SessionCore`'s.
     public private(set) var isMuted = false
+    public private(set) var metrics = AudioMetrics()
     /// Debounces `onGate`: tracks whether the caller was told the gate closed
     /// so muting can report the reset back to open.
     private var isGateClosed = false
@@ -49,10 +58,12 @@ public final class AudioCapture {
     private let clock: () -> TimeInterval
 
     public init(
+        followsInputFormat: Bool = false,
         tuning: VADTuning = VADTuning(),
         watchdogThreshold: TimeInterval = 3,
         clock: @escaping () -> TimeInterval = { CFAbsoluteTimeGetCurrent() }
     ) {
+        self.followsInputFormat = followsInputFormat
         gate = CaptureGate(tuning: tuning)
         watchdog = MicSignalWatchdog(threshold: watchdogThreshold)
         self.clock = clock
@@ -69,18 +80,24 @@ public final class AudioCapture {
 
     /// Validates and builds the sample-rate converter for `inputFormat` upfront
     /// (start and route-change rebuilds on iOS) and resets framing and the gate.
-    public func prepare(inputFormat: AVAudioFormat) throws {
+    public func prepare(inputFormat: AVAudioFormat, isStart: Bool = false) throws {
         converter = try PCMConverter(inputFormat: inputFormat)
         chunker.reset()
         gate.reset()
+        if isStart { isGateClosed = false }
     }
 
-    /// Resets framing, the gate and any cached converter (start and rebuilds
-    /// where the converter follows the mixed-down tap buffer's format).
-    public func reset() {
+    /// Resets framing, the gate and converter state (clearing a format-following
+    /// converter on macOS; resetting the prepared converter in place on iOS).
+    public func reset(isStart: Bool = false) {
         chunker.reset()
         gate.reset()
-        converter = nil
+        if followsInputFormat {
+            converter = nil
+        } else {
+            converter?.reset()
+        }
+        if isStart { isGateClosed = false }
     }
 
     /// Marks the capture chain running after `AVAudioEngine.start()` succeeds,
@@ -93,10 +110,15 @@ public final class AudioCapture {
         }
     }
 
+    /// Resets framing, the gate, converter state and the reported gate flag
+    /// during `stop()`, before the host clears its state and disarms the watchdog.
+    public func resetOnStop() {
+        reset(isStart: true)
+    }
+
     /// Tears down capture state and disarms the watchdog when the engine stops.
     public func stop() {
-        reset()
-        isGateClosed = false
+        resetOnStop()
         disarmWatchdog()
     }
 
@@ -129,9 +151,7 @@ public final class AudioCapture {
         isMuted = muted
         if muted {
             disarmWatchdog()
-            chunker.reset()
-            gate.reset()
-            converter?.reset()
+            reset()
             if isGateClosed {
                 isGateClosed = false
                 onGate?(false)
@@ -159,19 +179,26 @@ public final class AudioCapture {
     /// Converts one tap buffer to 16 kHz PCM16, checks the signal watchdog,
     /// slices 40 ms frames, runs `CaptureGate` and updates `metrics`.
     @discardableResult
-    public func process(_ buffer: AVAudioPCMBuffer, metrics: inout AudioMetrics) throws -> SignalChange? {
+    public func process(_ buffer: AVAudioPCMBuffer) throws -> SignalChange? {
         guard !isMuted else { return nil }
+        if !followsInputFormat, converter == nil { return nil }
         let started = clock()
-        if converter?.inputFormat != buffer.format {
+        if followsInputFormat, converter?.inputFormat != buffer.format {
             converter = try PCMConverter(inputFormat: buffer.format)
         }
         guard let samples = try converter?.convert(buffer), !samples.isEmpty else { return nil }
         let signal = watchdog.observe(peak: PCMLevel.peak(of: samples), at: clock()).map(recordSignalChange)
+        if let signal {
+            onSignalChange?(signal)
+        }
 
         var level: Float = 0
+        let trackLevel = onLevel != nil
         for frame in chunker.push(samples) {
-            let peak = PCMLevel.peak(of: frame)
-            level = max(level, Float(peak) / 32_768)
+            if trackLevel {
+                let peak = PCMLevel.peak(of: frame)
+                level = max(level, Float(peak) / 32_768)
+            }
             let out = gate.push(frame)
             if let transition = out.transition {
                 let closed = transition == .closed
@@ -188,6 +215,14 @@ public final class AudioCapture {
         return signal
     }
 
+    /// Copies the capture counters onto an engine's `AudioMetrics`.
+    public func apply(to target: inout AudioMetrics) {
+        target.captureFrames = metrics.captureFrames
+        target.captureLatencyMilliseconds = metrics.captureLatencyMilliseconds
+        target.peakCaptureLatencyMilliseconds = max(target.peakCaptureLatencyMilliseconds, metrics.peakCaptureLatencyMilliseconds)
+        target.gatedFrames = metrics.gatedFrames
+    }
+
     /// Advances the zero-signal watchdog on the host timer's cadence, catching
     /// a tap that delivers no buffers at all.
     @discardableResult
@@ -198,7 +233,9 @@ public final class AudioCapture {
             interrupted: interrupted,
             gateClosed: gate.manual == false
         ), let change = watchdog.tick(at: clock()) else { return nil }
-        return recordSignalChange(change)
+        let signal = recordSignalChange(change)
+        onSignalChange?(signal)
+        return signal
     }
 
     private func recordSignalChange(_ noSignal: Bool) -> SignalChange {

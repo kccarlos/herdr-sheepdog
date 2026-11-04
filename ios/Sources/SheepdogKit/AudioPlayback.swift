@@ -85,15 +85,18 @@ public final class AudioPlayback {
         player.play()
     }
 
-    /// Stops steering and the player node, flushes the queue and resets the
-    /// rate and speaking state.
-    public func stop() {
-        isRunning = false
+    /// Stops steering, the player node and `engine`, flushes the queue and
+    /// delivers reports while still running, resets the rate, runs host
+    /// teardown, and clears speaking state.
+    public func stop(in engine: AVAudioEngine, teardown: () -> Void = {}) {
         stopSteering()
         player.stop()
+        engine.stop()
         queue.flush(now: clock())
         deliverReports()
         applyRate(1)
+        isRunning = false
+        teardown()
         setSpeaking(false)
     }
 
