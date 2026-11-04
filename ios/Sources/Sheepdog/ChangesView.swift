@@ -1,173 +1,181 @@
 import SheepdogKit
 import SwiftUI
 
+/// What the Changes tab shows while it reads.
+enum ChangesPhase {
+    case loading
+    case loaded(AgentChanges)
+    /// A daemon from before the route.
+    case olderDaemon
+    /// The words, and the request's own failure when the computer did not
+    /// answer at all.
+    case failed(String, RequestFailure?)
+}
+
 /// The agent's changes, read-only (docs/dev/design/phone-terminal.md §5
-/// "Changes view"): a file list, then a file's diff with word highlights.
-/// Opened from the agent window's ⋯ menu as a sheet.
-struct ChangesView: View {
-    let paneID: String
+/// "Changes view"): what changed in the folder since the last commit, a
+/// file at a time. A tab of the browser sheet beside Files.
+struct ChangesListView: View {
+    let phase: ChangesPhase
     let name: String
-    let load: () async throws -> AgentChanges?
-    let loadDiff: (String) async throws -> FileDiff?
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var phase: Phase = .loading
-
-    enum Phase {
-        case loading
-        case loaded(AgentChanges)
-        case failed(String)
-    }
+    /// The open diff's path, highlighted when the diff sits beside the list.
+    let selectedPath: String?
+    let open: (ChangedFile) -> Void
+    let reload: () async -> Void
+    /// Where the folder's files are, when they can be browsed.
+    let showFiles: (() -> Void)?
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Changes")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                            .accessibilityIdentifier("changes.done")
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            Task { await refresh() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .accessibilityLabel("Refresh")
-                        .accessibilityIdentifier("changes.refresh")
-                    }
-                }
-                .navigationDestination(for: ChangedFile.self) { file in
-                    DiffView(file: file, load: { try await loadDiff(file.path) })
-                }
-        }
-        .task { await refresh() }
-    }
-
-    @ViewBuilder private var content: some View {
         switch phase {
         case .loading:
             ProgressView("Reading changes…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case let .failed(message):
-            ContentUnavailableView {
-                Label("Could not read the changes", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(message)
-            } actions: {
-                Button("Try again") { Task { await refresh() } }
+                .accessibilityIdentifier("changes.loading")
+        case .olderDaemon:
+            BrowserState(
+                symbol: "arrow.clockwise", title: "Update sheepdog", message: "Update sheepdog on your computer to see changes.",
+                identifier: "changes.older"
+            )
+            .scrolling()
+        case let .failed(message, request):
+            if let request, request.isUnreachable {
+                BrowserWords.state(.request(request), subject: .folder, root: name, retry: { Task { await reload() } }).scrolling()
+            } else {
+                BrowserState(
+                    symbol: "exclamationmark.triangle", title: "Could not read the changes", message: message,
+                    action: .init(title: "Try again", identifier: "changes.retry") { Task { await reload() } },
+                    identifier: "changes.failed"
+                )
+                .scrolling()
             }
         case let .loaded(changes) where !changes.repo:
-            ContentUnavailableView {
-                Label("No repository", systemImage: "folder")
-            } description: {
-                Text(changes.noRepoMessage)
-            }
-            .accessibilityIdentifier("changes.noRepo")
+            noRepository(changes)
         case let .loaded(changes) where changes.files.isEmpty:
-            ContentUnavailableView {
-                Label("No changes yet", systemImage: "checkmark.circle")
-            } description: {
-                Text("\(name) has not changed any files\(changes.branch.map { " on \($0)" } ?? "").")
-            }
-            .refreshable { await refresh() }
-            .accessibilityIdentifier("changes.empty")
+            BrowserState(
+                symbol: "checkmark", title: "No changes yet",
+                message: (changes.branch.flatMap { $0.isEmpty ? nil : $0 }.map { "Nothing has changed on \($0) since the last commit." }
+                    ?? "Nothing has changed since the last commit.") + (changes.hidden > 0 ? " \(changes.hidden) hidden files excluded for safety." : ""),
+                action: .init(title: "Refresh", identifier: "changes.empty.refresh") { Task { await reload() } },
+                identifier: "changes.empty"
+            )
+            .scrolling()
         case let .loaded(changes):
             list(changes)
         }
     }
 
-    private func list(_ changes: AgentChanges) -> some View {
-        List {
-            Section {
-                ForEach(changes.files) { file in
-                    NavigationLink(value: file) { FileRow(file: file) }
-                        .accessibilityIdentifier("changes.file.\(file.path)")
-                }
-            } header: {
-                HStack(spacing: 6) {
-                    Text(changes.summary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    LineCounts(added: changes.added, deleted: changes.deleted)
-                }
-                .font(.footnote)
-                .textCase(nil)
-                .accessibilityElement(children: .combine)
-            } footer: {
-                if changes.truncated == true {
-                    Text("Only the first \(changes.files.count) files are shown.")
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .refreshable { await refresh() }
-        .accessibilityIdentifier("changes.list")
+    private func noRepository(_ changes: AgentChanges) -> some View {
+        let filesStillThere = showFiles != nil && changes.reason != "no_cwd"
+        return BrowserState(
+            symbol: "folder", title: "No repository",
+            message: changes.noRepoMessage + (filesStillThere ? " Its files are still here." : ""),
+            action: filesStillThere ? .init(title: "Show Files", identifier: "changes.showFiles") { showFiles?() } : nil,
+            identifier: "changes.noRepo"
+        )
+        .scrolling()
     }
 
-    private func refresh() async {
-        do {
-            guard let changes = try await load() else {
-                phase = .failed("Update sheepdog on your computer to see changes.")
-                return
+    private func list(_ changes: AgentChanges) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(changes.summary)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LineCounts(added: changes.added, deleted: changes.deleted)
+                }
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(changes.files.enumerated()), id: \.element.id) { index, file in
+                        if index > 0 { Divider().overlay(Theme.line) }
+                        Button { open(file) } label: {
+                            ChangeRow(file: file, selected: selectedPath == file.path)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(ChangeRow.spoken(file))
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("changes.file.\(file.path)")
+                    }
+                }
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                if changes.truncated == true {
+                    Text("Only the first \(changes.files.count) files are shown.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                }
+                Text("Everything changed in this folder since the last commit, by any agent. Read only.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4)
             }
-            phase = .loaded(changes)
-        } catch {
-            phase = .failed(changesErrorText(error))
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
         }
+        .refreshable { await reload() }
+        .accessibilityIdentifier("changes.list")
     }
 }
 
-/// One file: its name, folder and counts.
-private struct FileRow: View {
+/// One file: its name, folder and status, and its counts. In the list of
+/// files to jump to, the file being read has a check instead of a chevron.
+struct ChangeRow: View {
     let file: ChangedFile
+    let selected: Bool
+    var current = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        BrowserRow(chevron: !current) {
             Image(systemName: symbol)
-                .font(.body)
+                .font(.title3)
                 .foregroundStyle(tint)
-                .frame(width: 22)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+        } content: {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(file.fileName)
                     .font(.body.weight(.medium))
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                if !detail.isEmpty {
-                    Text(detail)
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !file.detailLine.isEmpty {
+                    Text(file.detailLine)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.head)
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 8)
-            if file.isBinary {
-                Text("binary").font(.caption).foregroundStyle(.secondary)
-            } else {
-                LineCounts(added: file.added, deleted: file.deleted)
+        } accessory: {
+            HStack(spacing: 8) {
+                if file.isBinary {
+                    Text("binary").font(.caption).foregroundStyle(Theme.muted)
+                } else {
+                    LineCounts(added: file.added, deleted: file.deleted)
+                }
+                if current {
+                    Image(systemName: "checkmark")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(Theme.primaryText)
+                        .accessibilityHidden(true)
+                }
             }
         }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(file.path), \(statusWord), \(file.added) added, \(file.deleted) removed")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: 54)
+        .background(selected ? Theme.accentSoft : Color.clear)
+        .contentShape(Rectangle())
     }
 
-    private var detail: String {
-        if let old = file.oldPath { return "from \(old)" }
-        return file.folder
-    }
-
-    private var statusWord: String {
-        switch file.status {
-        case "untracked", "added": "new"
-        case "conflicted": "conflict"
-        default: file.status
-        }
+    static func spoken(_ file: ChangedFile) -> String {
+        let counts = file.isBinary ? "binary" : LineCountText.spoken(added: file.added, deleted: file.deleted)
+        return "\(file.path), \(file.statusWord), \(counts)"
     }
 
     private var symbol: String {
@@ -185,23 +193,8 @@ private struct FileRow: View {
         case "added", "untracked": DiffColors.added
         case "deleted": DiffColors.removed
         case "conflicted": Theme.blockedText
-        default: .secondary
+        default: Theme.muted
         }
-    }
-}
-
-/// "+42 −7" in green and red.
-private struct LineCounts: View {
-    let added: Int
-    let deleted: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text("+\(added)").foregroundStyle(DiffColors.added)
-            Text("−\(deleted)").foregroundStyle(DiffColors.removed)
-        }
-        .font(.footnote.monospacedDigit().weight(.medium))
-        .accessibilityLabel("\(added) added, \(deleted) removed")
     }
 }
 
@@ -218,61 +211,98 @@ enum DiffColors {
 struct DiffView: View {
     let file: ChangedFile
     let load: () async throws -> FileDiff?
+    /// Every changed file, for "go to another file"; one file has no jump.
+    var files: [ChangedFile] = []
+    var jump: (ChangedFile) -> Void = { _ in }
 
     @State private var lines: [DiffLine]?
     @State private var diff: FileDiff?
     @State private var error: String?
     @State private var wrap = true
+    @State private var jumping = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var canJump: Bool { files.count > 1 }
 
     var body: some View {
-        content
-            .navigationTitle(file.fileName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        wrap.toggle()
-                    } label: {
-                        Image(systemName: wrap ? "arrow.left.and.right" : "text.alignleft")
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.fileName).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(file.detailLine).font(.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            }
+            content
+        }
+        .background(Theme.surface)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 0) {
+                        Text(file.fileName).font(.headline).lineLimit(1).truncationMode(.middle)
+                        if !file.detailLine.isEmpty {
+                            Text(file.detailLine).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.head)
+                        }
                     }
-                    .accessibilityLabel(wrap ? "Do not wrap lines" : "Wrap lines")
-                    .accessibilityIdentifier("diff.wrap")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(file.fileName), \(file.detailLine)")
+                    .accessibilityAddTraits(.isHeader)
                 }
             }
-            .task { await refresh() }
+            ToolbarItemGroup(placement: .primaryAction) {
+                if canJump {
+                    Button { jumping = true } label: { Image(systemName: "list.bullet") }
+                        .accessibilityLabel("Go to another file")
+                        .accessibilityIdentifier("diff.jump")
+                }
+                Button {
+                    wrap.toggle()
+                } label: {
+                    Image(systemName: wrap ? "arrow.left.and.right" : "text.alignleft")
+                }
+                .accessibilityLabel(wrap ? "Do not wrap lines" : "Wrap lines")
+                .accessibilityIdentifier("diff.wrap")
+            }
+        }
+        .sheet(isPresented: $jumping) {
+            DiffJumpSheet(files: files, current: file.path, pick: jump)
+        }
+        .task { await refresh() }
     }
 
     @ViewBuilder private var content: some View {
         if let error {
-            ContentUnavailableView {
-                Label("Could not read the diff", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(error)
-            } actions: {
-                Button("Try again") { Task { await refresh() } }
-            }
+            BrowserState(
+                symbol: "exclamationmark.triangle", title: "Could not read the diff", message: error,
+                action: .init(title: "Try again", identifier: "diff.retry") { Task { await refresh() } }, identifier: "diff.failed"
+            )
+            .scrolling()
         } else if let lines {
             if lines.isEmpty {
-                ContentUnavailableView {
-                    Label(file.isBinary || diff?.binary == true ? "Binary file" : "No text changes", systemImage: "doc")
-                } description: {
-                    Text(file.isBinary || diff?.binary == true ? "This file is not text, so there is no diff to show." : "Only the file's mode or name changed.")
-                }
+                let binary = file.isBinary || diff?.binary == true
+                BrowserState(
+                    symbol: "doc", title: binary ? "Binary file" : "No text changes",
+                    message: binary ? "This file is not text, so there is no diff to show." : "Only the file's mode or name changed.",
+                    identifier: binary ? "diff.binary" : "diff.noText"
+                )
+                .scrolling()
             } else {
                 ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
+                    // The file's folder and status are in the bar above, so
+                    // the lines start at once.
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if !file.folder.isEmpty {
-                            Text(file.path)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                        }
                         ForEach(lines) { DiffRow(line: $0, wrap: wrap) }
                         if diff?.truncated == true {
                             Text("The rest of this diff is too long to show here.")
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.muted)
                                 .padding(12)
                         }
                     }
@@ -289,7 +319,7 @@ struct DiffView: View {
     private func refresh() async {
         do {
             guard let got = try await load() else {
-                error = "This file has no changes any more."
+                error = "Update sheepdog on your computer to read diffs."
                 return
             }
             diff = got
@@ -370,8 +400,59 @@ private struct DiffRow: View {
     }
 }
 
+/// "Go to file" (the design's DiffJump board): the files that changed, to
+/// read another one's diff without going back to the list. The one being
+/// read has a check.
+private struct DiffJumpSheet: View {
+    let files: [ChangedFile]
+    let current: String
+    let pick: (ChangedFile) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                        if index > 0 { Divider().overlay(Theme.line) }
+                        Button {
+                            if file.path != current { pick(file) }
+                            dismiss()
+                        } label: {
+                            ChangeRow(file: file, selected: false, current: file.path == current)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(ChangeRow.spoken(file) + (file.path == current ? ", showing" : ""))
+                        .accessibilityAddTraits(file.path == current ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityIdentifier("diff.jump.\(file.path)")
+                    }
+                }
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .background(Theme.surface)
+            .navigationTitle("Go to file")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("diff.jump.done")
+                }
+            }
+        }
+        .tint(Theme.primaryText)
+        .presentationDetents([.medium, .large])
+    }
+}
+
 /// The daemon's own words, or a plain sentence.
 func changesErrorText(_ error: Error) -> String {
+    if let refusal = error as? FilesRefusal { return refusal.problem.words(subject: .file, root: "this folder").message }
     if let daemon = error as? DaemonError {
         if case let .rejected(_, message) = daemon, !message.isEmpty { return message }
         return daemon.message

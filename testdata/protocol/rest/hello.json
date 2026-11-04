@@ -10,6 +10,20 @@
   },
   "voice_provider": "off",
   "voice_model": "",
+  "features": [
+    "playback",
+    "speaking",
+    "silence",
+    "history",
+    "files",
+    "voice-command",
+    "models",
+    "screen",
+    "screen-ansi",
+    "agent-actions",
+    "cards",
+    "feedback"
+  ],
   "protocol": 1,
   "min_protocol": 1,
   "computer": {

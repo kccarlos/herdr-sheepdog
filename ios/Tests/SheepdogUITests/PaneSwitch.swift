@@ -66,31 +66,60 @@ extension XCTestCase {
     /// lost while something still animated.
     /// With `until`, the tap counts only once that element shows up (the
     /// screen the item opens); otherwise the menu is opened again.
-    func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
+    func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 40, file: StaticString = #filePath, line: UInt = #line) {
         let deadline = Date().addingTimeInterval(timeout)
-        func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
+        let items = app.buttons.matching(identifier: item)
+        func landed() -> Bool { until.map { $0.waitForExistence(timeout: max(1, min(10, deadline.timeIntervalSinceNow))) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if app.buttons[item].isTappable, tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
-            if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
-                if app.buttons[item].waitForExistence(timeout: 3) {
-                    scrollMenuToItem(app, item)
-                    if tapOnScreen(app, app.buttons.matching(identifier: item)), landed() { return }
+            // A menu the caller (or an earlier round) already opened has its
+            // item on screen: tapping the menu button again would close it
+            // while it animates, and the round after would find it half
+            // closed. Open it only when no item can be tapped yet.
+            var open = isAnyTappable(items)
+            if !open {
+                let menuButtons = app.buttons.matching(identifier: menu)
+                if tapElementTappable(menuButtons) || tapTappable(app, menuButtons) {
+                    let itemDeadline = Date().addingTimeInterval(8)
+                    while !items.firstMatch.exists && Date() < itemDeadline { usleep(100_000) }
+                    open = items.firstMatch.exists
                 }
+            }
+            if open {
+                scrollMenuToItem(app, items)
+                if (tapElementTappable(items) || tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
             }
             usleep(300_000)
         } while Date() < deadline
         XCTFail("no \(item) in \(menu)" + (until.map { ", or it never opened \($0)" } ?? ""), file: file, line: line)
     }
 
-    /// At the accessibility sizes a menu is taller than the screen and
-    /// scrolls: swipes up inside the open menu until `item` can be tapped.
-    private func scrollMenuToItem(_ app: XCUIApplication, _ item: String) {
-        let button = app.buttons[item]
-        for _ in 0 ..< 4 where !button.isTappable {
+    /// Brings `items` (the open menu's item) into the menu's tappable area.
+    /// A menu still opening has its items in the tree before UIKit finishes
+    /// placing them, so wait briefly first: a drag across the middle of the
+    /// screen closes a small menu it was meant to scroll. At the
+    /// accessibility sizes a menu is taller than its platter and clips lower
+    /// items even while their unclipped frames sit inside `app.frame`, so
+    /// check hittability (`isTappable`) rather than screen bounds and swipe
+    /// up inside the open menu until the item can be tapped.
+    private func scrollMenuToItem(_ app: XCUIApplication, _ items: XCUIElementQuery) {
+        let settled = Date().addingTimeInterval(1)
+        while !isAnyTappable(items), Date() < settled { usleep(150_000) }
+        for _ in 0 ..< 4 {
+            if isAnyTappable(items) { break }
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
         }
     }
+
+    /// Whether some match of `query` is hittable on screen. Indexing each
+    /// match (`element(boundBy:)`) avoids the ambiguity `app.buttons[id]`
+    /// hits when a cover keeps a second copy in the tree, while still asking
+    /// UIKit's hit test so an item clipped below an open menu's scroll view
+    /// is not mistaken for visible.
+    private func isAnyTappable(_ query: XCUIElementQuery) -> Bool {
+        tappableCenter(query) != nil
+    }
+
 
     /// Taps `element` once it is on screen and hittable: a sheet or cover
     /// still moving leaves it in the tree but not tappable, and a tap then
@@ -101,6 +130,46 @@ extension XCTestCase {
         while !element.isTappable, Date() < deadline { usleep(150_000) }
         XCTAssertTrue(element.isTappable, "\(what) never became tappable", file: file, line: line)
         element.tap()
+    }
+
+    /// Opens an agent's window from the Agents list and waits for its
+    /// terminal. The window button can be below the fold (at the largest
+    /// text only a few rows fit) or under the voice capsule, and a tap
+    /// that lands while the cover or list still settles is lost on a slow
+    /// Mac: so scroll to the button, tap it, and look for the terminal; if
+    /// it did not come up, look for the button again and retry.
+    func openAgentWindow(_ app: XCUIApplication, alias: String, terminalTimeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+        let windows = app.buttons.matching(identifier: "flock.agent.\(alias).window")
+        let capsule = app.scrollViews.matching(identifier: "voice.capsule").firstMatch
+        XCTAssertTrue(windows.firstMatch.waitForExistence(timeout: 15), "\(alias)'s window button", file: file, line: line)
+        let deadline = Date().addingTimeInterval(90)
+        var swipes = 0
+        repeat {
+            if terminal.exists { return }
+            let capsuleTop = capsule.exists ? (try? capsule.snapshot().frame.minY) : nil
+            var tapped = false
+            for i in (0 ..< windows.count).reversed() {
+                let button = windows.element(boundBy: i)
+                guard button.isTappable, let frame = try? button.snapshot().frame else { continue }
+                if let capsuleTop, frame.midY >= capsuleTop { continue }
+                button.tap()
+                tapped = true
+                break
+            }
+            if tapped {
+                if terminal.waitForExistence(timeout: terminalTimeout) { return }
+                continue
+            }
+            if swipes < 6 {
+                app.swipeUp(velocity: .slow)
+                swipes += 1
+            } else {
+                scrollToTop(app)
+                swipes = 0
+            }
+        } while Date() < deadline
+        XCTAssertTrue(terminal.exists, "\(alias)'s window never opened its terminal", file: file, line: line)
     }
 
     /// Types into a text field once it has the keyboard focus, tapping it
@@ -234,13 +303,55 @@ extension XCTestCase {
     /// notices one that landed nowhere. The copy under the demo's cover
     /// sits at the same place, and a coordinate tap reaches the top one.
     private func tapOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        guard let point = onScreenCenter(app, query) else { return false }
+        let screen = app.frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x - screen.minX, dy: point.y - screen.minY)).tap()
+        return true
+    }
+
+    /// The middle of the first match that has a place on screen.
+    private func onScreenCenter(_ app: XCUIApplication, _ query: XCUIElementQuery) -> CGPoint? {
         let screen = app.frame
         for i in 0 ..< query.count {
             guard let frame = try? query.element(boundBy: i).snapshot().frame else { continue }
-            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty,
-                  screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - screen.minX, dy: frame.midY - screen.minY)).tap()
-            return true
+            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { continue }
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            if screen.contains(center) { return center }
+        }
+        return nil
+    }
+
+    /// Taps the first match that UIKit reports as hittable, by coordinate.
+    private func tapTappable(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        guard let point = tappableCenter(query) else { return false }
+        let screen = app.frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x - screen.minX, dy: point.y - screen.minY)).tap()
+        return true
+    }
+
+    private func tappableCenter(_ query: XCUIElementQuery) -> CGPoint? {
+        // When the demo covers the real app, both copies can report as
+        // hittable at the same coordinates. SwiftUI exposes the covered
+        // copy first, so prefer the last match (the visible demo copy).
+        for i in (0 ..< query.count).reversed() {
+            let element = query.element(boundBy: i)
+            guard element.isTappable, let frame = try? element.snapshot().frame else { continue }
+            return CGPoint(x: frame.midX, y: frame.midY)
+        }
+        return nil
+    }
+
+    /// Activates the matched accessibility element itself. This preserves
+    /// which copy was selected when the demo and the covered app share an
+    /// identifier; a coordinate tap would hit whichever copy is visually on
+    /// top, which may not be the menu whose item was queried.
+    private func tapElementTappable(_ query: XCUIElementQuery) -> Bool {
+        for i in (0 ..< query.count).reversed() {
+            let element = query.element(boundBy: i)
+            if element.isTappable {
+                element.tap()
+                return true
+            }
         }
         return false
     }

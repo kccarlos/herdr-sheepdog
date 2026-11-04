@@ -167,6 +167,9 @@ func TestHelloProtocol(t *testing.T) {
 	if hello.Protocol != wsproto.ProtocolVersion || hello.MinProtocol != wsproto.MinProtocolVersion {
 		t.Fatalf("hello = %+v", hello)
 	}
+	if !slices.Contains(hello.Features, wsproto.FeatureFiles) {
+		t.Errorf("hello features %v lack files", hello.Features)
+	}
 }
 
 // A client refused for its protocol never replaces the attached one: the

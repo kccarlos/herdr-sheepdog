@@ -19,7 +19,25 @@ test("digits pick an option of the open question, else a suggested reply", () =>
   assert.deepEqual(keyAction("2", { onPanel: true, question, suggestions }), { type: "answer", question: question.pending, option: question.pending.options[1] });
   assert.deepEqual(keyAction("2", { onPanel: true, suggestions }), { type: "send", text: "second" });
   assert.equal(keyAction("3", { onPanel: true, question, suggestions }), null, "no such option");
-  assert.deepEqual(keyAction("1", { onPanel: true, question: { ...question, phase: "sending" }, suggestions }), { type: "send", text: "first" });
+  assert.deepEqual(keyAction("1", { onPanel: true, suggestions }), { type: "send", text: "first" });
+  assert.equal(keyAction("1", { onPanel: true, suggestions, busy: true }), null, "not while an answer is on its way");
+});
+
+test("Cmd, Ctrl and Alt keep their own meaning", () => {
+  assert.equal(keyAction("1", { onPanel: true, question, modified: true }), null);
+  assert.equal(keyAction("enter", { onPanel: true, modified: true }), null);
+  assert.equal(keyAction("escape", { onPanel: true, modified: true }), null);
+});
+
+test("Escape closes an open sheet first, then the panel's window", () => {
+  assert.deepEqual(keyAction("escape", { onPanel: true, sheet: true, window: true }), { type: "sheet" });
+  assert.deepEqual(keyAction("escape", { onPanel: false, sheet: true }), { type: "sheet" });
+  assert.deepEqual(keyAction("escape", { onPanel: true, window: true }), { type: "close" });
+});
+
+test("digits and Enter do nothing while the panel is not showing the conversation", () => {
+  assert.equal(keyAction("1", { onPanel: true, question, suggestions, active: false }), null);
+  assert.equal(keyAction("enter", { onPanel: true, active: false }), null);
 });
 
 test("in the composer digits and Enter are text, and 0 or letters mean nothing", () => {

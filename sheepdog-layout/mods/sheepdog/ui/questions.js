@@ -9,7 +9,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { labelOf, summaryOf } from "../model/questions.js";
-import { button, dot, tint } from "./widgets.js";
+import { button, dot, stopDrag, tint } from "./widgets.js";
 
 // "Codex", or "An agent".
 const askerOf = (q) => q.agent?.trim() || "An agent";
@@ -30,6 +30,7 @@ function optionRow(t, q, option, { sending, enabled, onAnswer }) {
     .bg(t.raised)
     .border(1)
     .border_color(sending ? t.blocked : t.border)
+    .on_mouse_down("left", stopDrag)
     .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => onAnswer(q, option, cx)))
     .when(!enabled && !sending, (el) => el.opacity(0.5))
     .child(
@@ -146,6 +147,7 @@ export function questionBar(t, cards, { onOpen }) {
         .border(1)
         .border_color(tint(t.blocked, "55"))
         .cursor_pointer()
+        .on_mouse_down("left", stopDrag)
         .on_click(onOpen)
         .child(dot(waiting.length ? t.blocked : t.done, 8))
         .child(div().flex_1().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(words))

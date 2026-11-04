@@ -7,15 +7,27 @@
 // whether the panel itself holds the keys; in the composer the digits are
 // text. `question` is the first open question card ({ pending, phase }) or
 // null, `suggestions` the live suggested replies ({ options }) or null.
+// `modified`: Cmd, Ctrl or Alt is down, which is the app's shortcut, not ours.
+// `sheet`: a card or the questions are open over the list. `window`: this is
+// the panel's own window, which Esc closes. `busy`: an answer is on its way,
+// so a digit must not send a suggested reply instead. `active`: the panel
+// shows its conversation (not the daemon-down or rail states).
 // Returns what to do, or null when the key means nothing here:
 //   { type: "composer" }                 Enter: write a message
 //   { type: "answer", question, option } 1-9: tap that option of the question
 //   { type: "send", text }               1-9: send that suggested reply
 //   { type: "panel" }                    Esc in the composer: back to the panel
+//   { type: "sheet" }                    Esc with a sheet open: close it
+//   { type: "close" }                    Esc on the panel's window: close it
 //   { type: "leave" }                    Esc on the panel: give the keys back
-export function keyAction(key, { onPanel, question = null, suggestions = null }) {
-  if (key === "escape") return { type: onPanel ? "leave" : "panel" };
-  if (!onPanel) return null;
+export function keyAction(key, { onPanel, question = null, suggestions = null, modified = false, sheet = false, window = false, busy = false, active = true }) {
+  if (modified) return null;
+  if (key === "escape") {
+    if (sheet) return { type: "sheet" };
+    if (!onPanel) return { type: "panel" };
+    return { type: window ? "close" : "leave" };
+  }
+  if (!onPanel || !active) return null;
   if (key === "enter") return { type: "composer" };
   if (!/^[1-9]$/.test(key)) return null;
   const at = Number(key) - 1;
@@ -23,6 +35,7 @@ export function keyAction(key, { onPanel, question = null, suggestions = null })
     const option = question.pending?.options?.[at];
     return option ? { type: "answer", question: question.pending, option } : null;
   }
+  if (busy) return null;
   const text = suggestions?.options?.[at];
   return text ? { type: "send", text } : null;
 }

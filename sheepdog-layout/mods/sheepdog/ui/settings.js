@@ -126,6 +126,7 @@ function brainProviderRow(t, form, group, actions) {
     .border_color(group.current ? t.accent : t.border)
     .cursor_pointer()
     .hover((s) => s.bg(t.hover))
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_click((_e, cx) => actions.brainRow(group.id, cx))
     .child(div().w(12).flex_none().text_size(11).text_color(t.muted).child(group.expanded ? "▾" : "▸"))
     .child(

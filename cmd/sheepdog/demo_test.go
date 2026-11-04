@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -40,5 +42,33 @@ func TestDemoKeyProblem(t *testing.T) {
 	c.Gemini.Backend = "vertex"
 	if msg := demoKeyProblem(c); msg != "" {
 		t.Errorf("vertex: %q", msg)
+	}
+}
+
+func TestPickDemoPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	_, pStr, _ := net.SplitHostPort(ln.Addr().String())
+	busy, _ := strconv.Atoi(pStr)
+
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, pStr2, _ := net.SplitHostPort(ln2.Addr().String())
+	free, _ := strconv.Atoi(pStr2)
+	_ = ln2.Close()
+
+	// Without an explicit --port, pickDemoPort skips the busy port and picks the next free one.
+	got, err := pickDemoPort(0, []int{busy, free})
+	if err != nil || got != free {
+		t.Errorf("pickDemoPort(0, [%d, %d]) = %d, %v; want %d, nil", busy, free, got, err, free)
+	}
+	// With an explicit --port that is busy, pickDemoPort refuses.
+	if _, err := pickDemoPort(busy, []int{busy, free}); err == nil || !strings.Contains(err.Error(), "is in use") {
+		t.Errorf("pickDemoPort(%d) = %v, want in-use error", busy, err)
 	}
 }

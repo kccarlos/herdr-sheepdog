@@ -12,8 +12,8 @@
   read-only invocation of the agent's CLI.
 - **Stop works at once.** A bare "stop" (or "wait", "cancel") is acknowledged
   by the daemon and interrupts what is in flight. "Never mind" is not a stop.
-- **Network:** loopback by default, a token for anything else, no TLS. See
-  [remote-access.md](remote-access.md).
+- **Network:** loopback by default; off this computer, TLS and paired devices
+  only (each with its own P-256 key). See [remote-access.md](remote-access.md).
 - **Measured, not assumed:** "Safe" (no action beyond your words) is one of four
   numbers every change is gated on ([dev/eval/README.md](dev/eval/README.md)).
 

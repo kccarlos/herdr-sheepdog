@@ -115,8 +115,12 @@ With one computer, none of this shows: no names and no Talk to.
 ## What it does
 
 - **The main screen.** At the top, **Conversation | Agents** (the badge
-  counts the agents waiting on you), **+** (New agent, New shell) and **⋯**
-  (New conversation, Stop, End voice session, Settings).
+  counts the agents waiting on you), a flag button (**Mark this moment**),
+  **+** (New agent, New shell) and **⋯** (New conversation, Spaces, Stop,
+  End voice session, Settings). Hands-free, you can also start a fresh
+  conversation by saying *"new conversation"* or *"start over"* and
+  confirming within 20 seconds with *"yes, start over"* or *"confirm
+  reset"*.
 - **Voice.** The capsule at the bottom holds the microphone, the orb, the
   voice's name and status, and the keyboard. Talk to the voice; the mic
   button turns off only the microphone. While the voice talks or thinks,
@@ -169,7 +173,11 @@ With one computer, none of this shows: no names and no Talk to.
     headphones, car); a banner appears for what needs your tap ("Tap the
     orb to resume", the voice being off, audio stopped).
 
-  For a bug report, turn on **Settings ▸ Health ▸ Show technical events**:
+  For a bug report, tap the flag button (**Mark this moment**) at the top
+  right right after something goes wrong: it asks "What went wrong?" (optional)
+  and records a 30-second diagnostic snapshot (`user.feedback`) in the
+  daemon's event log (`sheepdog dev feedback` lists them). You can also turn on
+  **Settings ▸ Health ▸ Show technical events**:
   every row comes back with its original text, the exact time and a
   three-letter code (DLG, ASK, UPD, CTX, SYS) in a gutter, plumbing in
   monospaced grey, a "Technical events shown" tag marks the page, and a long press on a row copies its
@@ -211,13 +219,15 @@ With one computer, none of this shows: no names and no Talk to.
   agents are doing. Swipe one to **Rename** or **Close** it, or tap **+**
   to open a space in a project folder that has none. Close asks first,
   names what will stop, and waits until no agent there is working or
-  waiting on you. A space's page lists its agents (tap one for its
-  window), its **worktrees** (⋯ opens one as its own space; a worktree
-  space can be removed, and a checkout with uncommitted changes asks a
-  second time) and its **wrap-up commands**, such as "Run tests ·
+  waiting on you. A space's page has **Files** (the read-only file browser
+  for that folder) and **Changes** (its git diff), and lists its agents (tap
+  one for its window), its **worktrees** (⋯ opens one as its own space; a
+  worktree space can be removed, and a checkout with uncommitted changes
+  asks a second time) and its **wrap-up commands**, such as "Run tests ·
   `npm test`": tap one to run it in a new tab of that space on your
-  computer, swipe to delete, or **Add a command…**. Commands are saved on
-  your computer and need the phone shell to be on.
+  computer, swipe to **Edit** or **Delete**, **Run a command…** for a
+  one-off command, or **Save a command…**. Commands are saved on your
+  computer and need the phone shell to be on.
 - **Agent window.** "Open window" on an agent shows its live terminal,
   sized to the phone, in the agent's own colours. While the window is open
   the agent's pane on your computer takes the phone's size; it goes back
@@ -259,6 +269,26 @@ With one computer, none of this shows: no names and no Talk to.
     lines added and removed; tap one for its diff. It only shows changes
     and never edits anything. "No repository" means the agent's folder is
     not a git repository.
+  - **⋯ ▸ Files** (and **Files** on a space's page) opens a read-only browser
+    for the agent's or space's folder; it never changes a file. Folders come
+    first, then files by name or modified date, with a path bar to step back
+    up and a file-name search (which skips `.git`, `node_modules` and hidden
+    names). Tap a file to read it: Markdown with a **Raw** toggle, text and
+    code with line numbers, and images with pinch-to-zoom (SVG is shown as
+    text so the app never runs active content; other binary files show only
+    their size and date). On iPad the list and the file sit side by side.
+    - **Hidden for safety.** Because a phone can be lost, a safety rail in the
+      daemon hides common secret and key names, such as `.env`, `.ssh`,
+      `.git` and key files: they aren't listed, searched or read, and the
+      screen says how many are hidden. Only regular files inside the folder
+      can be read; symlinks
+      that leave the folder are marked blocked, and folders with a hidden
+      name on their own path are refused.
+    - **Limits.** A folder shows up to 2,000 entries (reading at most 20,000
+      names), search returns up to 200 matches (across 20,000 entries or 2
+      seconds), text files show the first 1 MiB before marking the rest
+      truncated, and images are served up to 16 MiB. Needs a daemon with the
+      file browser; an older daemon hides the button.
   - **⋯ ▸ Open shell here** opens a plain shell in the agent's folder,
     titled "Shell · folder". It has the same terminal and keys, no prompt
     field, and starts in typing mode. **+ ▸ New shell** opens one
@@ -298,7 +328,8 @@ With one computer, none of this shows: no names and no Talk to.
   with how the phone reaches it (tap it for the connection), and what
   belongs to that computer: Models, Languages, and the shell's state.
   **This phone:** Voice (microphone mode, hold to talk, keep listening
-  with the screen locked) and Notifications. **Help:** Diagnostics and
+  with the screen locked), Notifications, Privacy, and (when paired with
+  more than one Mac) Computers. **Help:** Diagnostics and
   About. **Try the demo** is at the bottom.
 - **Settings, Models.** Switch the voice and the orchestrator
   ([models.md](models.md)). **Settings, Languages** sets the languages you
@@ -330,7 +361,9 @@ With one computer, none of this shows: no names and no Talk to.
   iOS Settings ▸ Sheepdog ▸ Live Activities.
 - **Earbud remote.** Play/pause on earbuds or AirPods mutes and unmutes the
   microphone; next track stops what is in flight.
-- **Siri, Shortcuts, Action Button.** "Talk to Sheepdog" starts a session.
+- **Siri, Shortcuts, Action Button, Control Center.** "Talk to Sheepdog"
+  starts a session, and a Control Center or Lock Screen control opens the
+  app to talk.
 
 ## On iPad
 
@@ -361,8 +394,8 @@ it looks exactly like the iPhone app.
   session: the first window holds the audio; another window's capsule says
   "In another window" and **Use here** moves the session to it.
 - **Keyboard:** ⌘N new agent, ⌘1 to ⌘9 jump to the agents in sidebar
-  order, ⌘⇧M mute or unmute, and ⌘↩ starts the agent in New agent. Hold ⌘
-  to see the list.
+  order, ⌘K switches to the next computer, ⌘⇧M mute or unmute, and ⌘↩
+  starts the agent in New agent. Hold ⌘ to see the list.
 
 ## AI services and your consent
 

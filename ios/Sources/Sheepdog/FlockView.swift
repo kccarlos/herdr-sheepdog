@@ -322,6 +322,7 @@ struct AgentCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openAgentWindow) private var openWindow
     @EnvironmentObject private var model: SessionViewModel
+    @State private var browser: BrowserTab?
 
     private var waiting: Bool { question != nil }
     /// This computer's own agent: pin and unread are written here only.
@@ -388,6 +389,18 @@ struct AgentCard: View {
         .modifier(SeenWhileVisible(paneID: agent.paneID, visible: expanded && controllable, attention: agent.attention))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flock.agent.\(agent.alias)")
+        .sheet(item: $browser) { tab in
+            BrowserSheet(
+                target: BrowserTarget(
+                    title: agent.displayName, subtitle: agent.workspaceLabel?.trimmedOrNil,
+                    scope: .agent(paneID: agent.paneID), changesPane: agent.paneID, folder: agent.cwd,
+                    filesAvailable: model.filesAvailable
+                ),
+                services: model.browserServices(scope: .agent(paneID: agent.paneID), changesPane: agent.paneID),
+                start: tab
+            )
+            .presentationSizing(.page)
+        }
     }
 
     /// Pin / Unpin and Mark as unread: the card's context menu and the
@@ -563,6 +576,23 @@ struct AgentCard: View {
 
     // MARK: - Expanded
 
+    /// This computer's own agent, on a daemon that has the file browser.
+    private var showsBrowse: Bool { showsWindowButton && model.filesAvailable }
+
+    /// The way into the agent's files and changes (design: EntryCard), from
+    /// the details, where the user is reading what the agent did.
+    private var browseButton: some View {
+        Button { browser = .files } label: {
+            Label("Browse files", systemImage: "folder")
+                .font(.subheadline.weight(.medium))
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.primaryText)
+        .accessibilityHint("Opens this agent's folder and what it changed, to read")
+        .accessibilityIdentifier("flock.agent.\(agent.alias).files")
+    }
+
     private var details: some View {
         VStack(alignment: .leading, spacing: 10) {
             if agent.state == .working, let task = agent.currentTask?.trimmedOrNil {
@@ -621,6 +651,7 @@ struct AgentCard: View {
                         .accessibilityIdentifier("flock.agent.\(agent.alias).localOnly")
                 }
             }
+            if showsBrowse { browseButton }
             if let answered = agent.answeredQuestion {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Last question (answered)")
