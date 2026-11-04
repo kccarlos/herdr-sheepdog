@@ -749,3 +749,27 @@ func TestPushModeConfig(t *testing.T) {
 		t.Errorf("bad url: %v", err)
 	}
 }
+
+func TestWebFiles(t *testing.T) {
+	if !Default().Web.Files {
+		t.Fatal("files should default on")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[web]\nfiles = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, noEnv)
+	if err != nil || cfg.Web.Files {
+		t.Fatalf("file: config=%+v err=%v", cfg.Web, err)
+	}
+	if !strings.Contains(cfg.String(), "web.files=false") {
+		t.Error("config output missing web.files")
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_FILES": "true"}))
+	if err != nil || !cfg.Web.Files {
+		t.Fatalf("env: config=%+v err=%v", cfg.Web, err)
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_FILES": "maybe"})); err == nil {
+		t.Error("invalid boolean accepted")
+	}
+}
