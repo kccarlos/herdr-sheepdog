@@ -279,6 +279,16 @@ func (s *Supervisor) space(ctx context.Context, id string) (Space, error) {
 	return Space{}, ErrNoSuchSpace
 }
 
+// SpaceFolder is space id's folder, its path in GET /api/spaces ("" when
+// it has none): the root the file browser serves for a space.
+func (s *Supervisor) SpaceFolder(ctx context.Context, id string) (string, error) {
+	sp, err := s.space(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return sp.Path, nil
+}
+
 func (s *Supervisor) spaceHost() (SpaceHost, error) {
 	h, ok := s.herdr.(SpaceHost)
 	if !ok {

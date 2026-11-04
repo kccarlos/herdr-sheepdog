@@ -80,6 +80,8 @@ type AgentActions interface {
 	DeleteCommand(ctx context.Context, id, cmdID string) error
 	RunCommand(ctx context.Context, id, cmdID string) (string, error)
 	RunLine(ctx context.Context, id, name, command string) (string, error)
+	// SpaceFolder is the root of a space's file browser (files.go).
+	SpaceFolder(ctx context.Context, id string) (string, error)
 	UserRename(ctx context.Context, paneID, name string) (string, error)
 	UserInterrupt(ctx context.Context, paneID string) (string, error)
 	UserClose(ctx context.Context, paneID string) (string, error)
@@ -522,6 +524,10 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/agents/{pane_id}/attachments", accessDevice, s.handleAttachment},
 		route{"GET /api/agents/{pane_id}/changes", accessDevice, s.handleChanges},
 		route{"GET /api/agents/{pane_id}/changes/{path...}", accessDevice, s.handleChangeDiff},
+		route{"GET /api/agents/{pane_id}/files", accessDevice, s.handleFilesList},
+		route{"GET /api/agents/{pane_id}/files/{path...}", accessDevice, s.handleFileRead},
+		route{"GET /api/spaces/{id}/files", accessDevice, s.handleFilesList},
+		route{"GET /api/spaces/{id}/files/{path...}", accessDevice, s.handleFileRead},
 		route{"GET /api/events", accessDevice, s.handleEventsTail},
 		route{"GET /api/conversation", accessDevice, s.handleConversation},
 		route{"POST /api/conversation/reset", accessDevice, s.handleConversationReset},

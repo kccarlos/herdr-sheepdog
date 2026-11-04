@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/files"
 )
 
 // The changes view (docs/dev/ws-contract.md "Changes"): a read-only look at
@@ -59,11 +62,14 @@ type ChangesResponse struct {
 	Reason string `json:"reason,omitempty"`
 	Root   string `json:"root,omitempty"`
 	// Branch is the checked-out branch ("" when detached).
-	Branch    string        `json:"branch,omitempty"`
-	Files     []ChangedFile `json:"files"`
-	Added     int           `json:"added"`
-	Deleted   int           `json:"deleted"`
-	Truncated bool          `json:"truncated,omitempty"`
+	Branch string        `json:"branch,omitempty"`
+	Files  []ChangedFile `json:"files"`
+	// Hidden counts the changed files the Files rule left out (a sensitive
+	// name on the path, or on either side of a rename).
+	Hidden    int  `json:"hidden,omitempty"`
+	Added     int  `json:"added"`
+	Deleted   int  `json:"deleted"`
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // DiffResponse is the body of GET /api/agents/{pane_id}/changes/{path}.
@@ -140,6 +146,9 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if info, err := os.Stat(row.Cwd); err != nil || !info.IsDir() {
 		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, http.StatusOK
 	}
+	if sensitiveDir(row.Cwd) {
+		return gitRunner{}, nil, http.StatusForbidden
+	}
 	bin := s.deps.GitBin
 	if bin == "" {
 		bin = "git"
@@ -152,29 +161,67 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if err != nil || root == "" {
 		return gitRunner{}, &ChangesResponse{Reason: "not_repo", Files: []ChangedFile{}}, http.StatusOK
 	}
+	if sensitiveDir(root) {
+		return gitRunner{}, nil, http.StatusForbidden
+	}
 	return gitRunner{bin: bin, dir: root}, nil, http.StatusOK
 }
 
-// listChanges reads status and numstat for the repository.
-func listChanges(ctx context.Context, g gitRunner) (ChangesResponse, string, error) {
-	resp := ChangesResponse{Repo: true, Root: g.dir, Files: []ChangedFile{}}
+// sensitiveDir reports whether the folder, cleaned and symlink-resolved,
+// has a sensitive segment, as files.Open refuses.
+func sensitiveDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	if files.SensitivePath(filepath.ToSlash(clean)) {
+		return true
+	}
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		return files.SensitivePath(filepath.ToSlash(real))
+	}
+	return false
+}
+
+// refuseChanges answers a non-OK changesRepo status.
+func refuseChanges(w http.ResponseWriter, status int) {
+	if status == http.StatusForbidden {
+		writeJSON(w, status, map[string]string{"error": "hidden for safety", "reason": "sensitive"})
+		return
+	}
+	writeError(w, status, "not a tracked agent")
+}
+
+// listChanges reads status and numstat for the repository. Files the Files
+// rule hides (sensitive on any segment of the path, or of a rename's old
+// path) are not in resp.Files or its totals, and no line of them is
+// counted; they come back as hidden, so a diff request for one can be
+// refused rather than called missing.
+func listChanges(ctx context.Context, g gitRunner) (resp ChangesResponse, base string, hidden []ChangedFile, err error) {
+	resp = ChangesResponse{Repo: true, Root: g.dir, Files: []ChangedFile{}}
 	out, trunc, err := g.run(ctx, changesStatusMax, false, "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all")
 	if err != nil {
-		return resp, "", err
+		return resp, "", nil, err
 	}
 	resp.Truncated = trunc
-	files, branch := parseStatusV2(out, trunc)
+	all, branch := parseStatusV2(out, trunc)
 	resp.Branch = branch
+	files := all[:0:0]
+	for _, f := range all {
+		if sensitiveChange(f) {
+			hidden = append(hidden, f)
+		} else {
+			files = append(files, f)
+		}
+	}
+	resp.Hidden = len(hidden)
 	if len(files) > changesMaxFiles {
 		files, resp.Truncated = files[:changesMaxFiles], true
 	}
-	base := "HEAD"
+	base = "HEAD"
 	if _, _, err := g.run(ctx, 1<<10, false, "rev-parse", "--verify", "-q", "HEAD"); err != nil {
 		base = emptyTree
 	}
 	ns, nsTrunc, err := g.run(ctx, changesStatusMax, false, "diff", base, "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--no-color", "--")
 	if err != nil {
-		return resp, base, err
+		return resp, base, hidden, err
 	}
 	resp.Truncated = resp.Truncated || nsTrunc
 	counts := parseNumstat(ns)
@@ -189,7 +236,13 @@ func listChanges(ctx context.Context, g gitRunner) (ChangesResponse, string, err
 		resp.Deleted += f.Deleted
 	}
 	resp.Files = files
-	return resp, base, nil
+	return resp, base, hidden, nil
+}
+
+// sensitiveChange says the Files rule hides a changed file: either side of
+// a rename counts.
+func sensitiveChange(f ChangedFile) bool {
+	return files.SensitivePath(f.Path) || (f.OldPath != "" && files.SensitivePath(f.OldPath))
 }
 
 // handleChanges answers the agent's changed files.
@@ -198,7 +251,7 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 	start := s.deps.Now()
 	g, none, status := s.changesRepo(r.Context(), pane)
 	if status != http.StatusOK {
-		writeError(w, status, "not a tracked agent")
+		refuseChanges(w, status)
 		return
 	}
 	if none != nil {
@@ -206,12 +259,12 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, none)
 		return
 	}
-	resp, _, err := listChanges(r.Context(), g)
+	resp, _, _, err := listChanges(r.Context(), g)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "git failed")
 		return
 	}
-	s.log.Log(logSource, "web.changes", pane, map[string]any{"repo": true, "files": len(resp.Files), "truncated": resp.Truncated, "dur_ms": s.deps.Now().Sub(start).Milliseconds()})
+	s.log.Log(logSource, "web.changes", pane, map[string]any{"repo": true, "files": len(resp.Files), "hidden": resp.Hidden, "truncated": resp.Truncated, "dur_ms": s.deps.Now().Sub(start).Milliseconds()})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -221,16 +274,20 @@ func (s *Server) handleChangeDiff(w http.ResponseWriter, r *http.Request) {
 	path := r.PathValue("path")
 	g, none, status := s.changesRepo(r.Context(), pane)
 	if status != http.StatusOK {
-		writeError(w, status, "not a tracked agent")
+		refuseChanges(w, status)
 		return
 	}
 	if none != nil {
 		writeError(w, http.StatusNotFound, "not a git repository")
 		return
 	}
-	list, base, err := listChanges(r.Context(), g)
+	list, base, hidden, err := listChanges(r.Context(), g)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "git failed")
+		return
+	}
+	if files.SensitivePath(path) || slices.ContainsFunc(hidden, func(f ChangedFile) bool { return f.Path == path }) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "hidden for safety", "reason": "sensitive"})
 		return
 	}
 	var file *ChangedFile

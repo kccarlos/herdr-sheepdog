@@ -36,7 +36,8 @@ import (
 //   - term/server, term/client: the /term control messages
 //     (docs/dev/term-contract.md).
 //   - rest: /api/hello and /api/state answered by a test daemon, with
-//     every time and the TLS pin replaced by fixed values.
+//     every time and the TLS pin replaced by fixed values; rest/files the
+//     file browser's list and reads.
 const goldenDir = "../../testdata/protocol"
 
 func TestProtocolGoldens(t *testing.T) {
@@ -59,7 +60,7 @@ func TestProtocolGoldens(t *testing.T) {
 	put("ws/server/flush.json", wsproto.Flush())
 	put("ws/server/pong.json", wsproto.Pong())
 	put("ws/server/bot-ready.json", wsproto.BotReady(wsproto.ProtocolVersion, wsproto.MinProtocolVersion, "v0.2.0", []string{
-		wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence, wsproto.FeatureProvider, wsproto.FeatureHistory,
+		wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence, wsproto.FeatureProvider, wsproto.FeatureHistory, wsproto.FeatureFiles,
 		wsproto.FeaturePush, wsproto.FeatureModels, wsproto.FeatureScreen, wsproto.FeatureScreenANSI, wsproto.FeatureAgentActions,
 		wsproto.FeatureCards, wsproto.FeatureTerm, wsproto.FeatureFeedback,
 	}))
@@ -119,6 +120,23 @@ func TestProtocolGoldens(t *testing.T) {
 	trackWorking(t, h, "fake:2", "docs", "• Writing the README")
 	files["rest/hello.json"] = normalizeGolden(t, getRaw(t, h, "/api/hello"))
 	files["rest/state.json"] = normalizeGolden(t, getRaw(t, h, "/api/state"))
+
+	// The file browser (rest/files, apart so the app's golden test, which
+	// lists rest/ itself, decodes them once it has the types): a folder
+	// with a report, a .env the list hides and links in and out.
+	shop := filepath.Join(t.TempDir(), "shop")
+	writeT(t, filepath.Join(shop, "docs", "report.md"), "# Report\n\nThe tests pass.\n")
+	writeT(t, filepath.Join(shop, "docs", "plots", "speed.png"), testPNG)
+	writeT(t, filepath.Join(shop, "docs", ".env"), "KEY=1\n")
+	for name, target := range map[string]string{"latest": "report.md", "outside": "../../elsewhere"} {
+		if err := os.Symlink(target, filepath.Join(shop, "docs", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trackIn(t, h, "fake:3", shop)
+	files["rest/files/list.json"] = normalizeGolden(t, getRaw(t, h, "/api/agents/fake:3/files?path=docs"))
+	files["rest/files/text.json"] = normalizeGolden(t, getRaw(t, h, "/api/agents/fake:3/files/docs/report.md"))
+	files["rest/files/image.json"] = normalizeGolden(t, getRaw(t, h, "/api/agents/fake:3/files/docs/plots/speed.png"))
 
 	for name, b := range files {
 		var out bytes.Buffer
