@@ -134,6 +134,50 @@ test("a state-only event does not ask for the conversation", async () => {
   await done;
 });
 
+test("an agent's attention and a space mute re-read /api/state only, and the stream asks for their kinds", async () => {
+  const h = harness();
+  const done = h.live.run();
+  await h.clock.advance(MIN_GAP_MS);
+  assert.match(h.socket().written, /kinds=[^ &]*\bagent\b/);
+  assert.match(h.socket().written, /kinds=[^ &]*\bspace\b/);
+  h.socket().feed(HEAD + h.chunk(": hi\n\n"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  for (const [n, type] of [[1, "agent.attention"], [2, "space.muted"]]) {
+    h.asked.length = 0;
+    h.socket().feed(h.event(n, type));
+    await h.clock.advance(MIN_GAP_MS * 2);
+    assert.deepEqual(h.asked, [{ state: true, conversation: false }], type);
+  }
+  h.live.stop();
+  await h.clock.advance(POLL_MS);
+  await done;
+});
+
+test("an agent's state change re-reads /api/state, and a burst of them costs at most two rounds", async () => {
+  const h = harness();
+  const done = h.live.run();
+  await h.clock.advance(MIN_GAP_MS);
+  assert.match(h.socket().written, /kinds=[^ &]*\bherdr\b/);
+  h.socket().feed(HEAD + h.chunk(": hi\n\n"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  h.asked.length = 0;
+  h.socket().feed(h.event(1, "herdr.transition"));
+  await h.clock.advance(MIN_GAP_MS * 2);
+  assert.deepEqual(h.asked, [{ state: true, conversation: false }]);
+  h.asked.length = 0;
+  // Ten transitions (and the herdr kind's other records) in one burst: the
+  // first asks at once, the rest wait for the one round after it.
+  let feed = "";
+  for (let n = 2; n < 12; n++) feed += h.event(n, n % 3 === 0 ? "herdr.read" : "herdr.transition");
+  h.socket().feed(feed);
+  await h.clock.advance(MIN_GAP_MS * 4);
+  assert.ok(h.asked.length <= 2, `${h.asked.length} rounds for one burst`);
+  assert.ok(h.asked.every((w) => w.state && !w.conversation));
+  h.live.stop();
+  await h.clock.advance(POLL_MS);
+  await done;
+});
+
 test("events whose words are already shown wait for a quiet moment, then ask once", async () => {
   const h = harness();
   const done = h.live.run();

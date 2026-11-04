@@ -3,6 +3,7 @@
 // 6.4, that apply without sending anything. Words and a theme colour name
 // per state; the views only draw them. No herdr imports.
 
+import { attentionCounts, attentionLine } from "./agents.js";
 import { noHolderView } from "./host-app.js";
 
 // What the user calls the device that holds the voice, from the `platform` of
@@ -45,15 +46,21 @@ export function voiceView(voice, host) {
 //  setup    the daemon is up but its voice says it needs setting up
 //  ok       the daemon is up
 // `paused`: the daemon answers but the live stream is down, so the panel is
-// polling ("Live updates paused"). `needsYou`: open questions.
+// polling ("Live updates paused"). `needsYou`: open questions (the badge).
+// `agents` counts the agents per group and `agentLine` words them for the
+// status line ("1 needs you · 2 working · 1 done", without the needs-you part when
+// the pill shows that same number); empty unless the daemon is up.
 export function deriveStatus(snapshot, host) {
   const { daemon, detail, app, stream } = snapshot;
   const voice = voiceView(app?.voice, host);
   const needsYou = app?.questions?.length ?? 0;
-  if (daemon === "unknown" && !app) return { phase: "loading", detail: "", paused: false, needsYou: 0, voice };
-  if (daemon === "down") return { phase: "down", detail, paused: false, needsYou: 0, voice };
+  const agents = attentionCounts(app);
+  // The header pill says needs you when it can; the line then does not.
+  const agentLine = attentionLine(agents, needsYou);
+  if (daemon === "unknown" && !app) return { phase: "loading", detail: "", paused: false, needsYou: 0, agents, agentLine: "", voice };
+  if (daemon === "down") return { phase: "down", detail, paused: false, needsYou: 0, agents, agentLine: "", voice };
   const problem = app?.voice?.setup_needed || app?.voice?.problem;
   const paused = stream === "down";
-  if (problem) return { phase: "setup", detail: app.voice.problem || "Run sheepdog setup to add a voice key.", paused, needsYou, voice };
-  return { phase: "ok", detail: "", paused, needsYou, voice };
+  if (problem) return { phase: "setup", detail: app.voice.problem || "Run sheepdog setup to add a voice key.", paused, needsYou, agents, agentLine, voice };
+  return { phase: "ok", detail: "", paused, needsYou, agents, agentLine, voice };
 }

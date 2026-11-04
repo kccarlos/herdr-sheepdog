@@ -67,6 +67,10 @@ function header(t, status, { technical, onToggleTechnical, onMenu, onClose }) {
         )
         .when(!ok, (el) => el.child(div().flex_1()))
         .child(control("technical", technical ? "Hide technical" : "Technical", onToggleTechnical)),
+    )
+    // The agents per group, one quiet line; the badge above stays needs-you only.
+    .when(ok && status.agentLine !== "", (el) =>
+      el.child(div().w_full().truncate().text_size(11).text_color(t.dim).child(status.agentLine)),
     );
 }
 

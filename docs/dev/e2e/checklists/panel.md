@@ -62,6 +62,21 @@ by hand.
    lands with a question open. Computer-use captures Escape globally: send
    key code 53 through System Events with computer-use idle.
 
+## Agent counts in the status line
+
+1. `scenario.sh <dir> agent-blocked`. Expect the line under the voice words
+   to read "1 needs you" (look with `shot.sh`; at the docked 340 px nothing is
+   cut off). The header pill stays absent: it counts open questions, and this
+   agent has no question card.
+2. `scenario.sh <dir> agent-working`, then `agent-done`. Expect the line to
+   follow `/api/state` `agents[].attention.group`, for example
+   "1 working · 1 done", within about 2 s of the state change and without
+   reopening the panel (`herdr.transition` and `agent.attention` events re-read
+   the state; measured with two real Haiku agents on hc). The line leaves out
+   needs you while the pill shows the same count.
+3. `scenario.sh <dir> approval`: the pill shows "1 needs you" for the open
+   question. A working or done agent never raises the pill or the rail's badge.
+
 ## Sheepdog.app not running
 
 1. With the daemon up and no voice client (`voice-client disconnected`), the
