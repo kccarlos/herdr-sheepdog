@@ -96,7 +96,7 @@ test("each action maps to one command", () => {
 });
 
 // A controller over fakes: the http calls and exec runs are recorded.
-function setup({ fail = {}, installed = [], execResult = { code: 0, stdout: "", stderr: "" } } = {}) {
+function setup({ fail = {}, installed = [], execResult = { code: 0, stdout: "", stderr: "" }, platform } = {}) {
   const log = [];
   let at = 1_000_000;
   const call = (name) => async (...args) => {
@@ -116,7 +116,7 @@ function setup({ fail = {}, installed = [], execResult = { code: 0, stdout: "", 
     return installed.includes(path);
   };
   let keys = 0;
-  const voice = createVoice({ http, exec, exists, home: () => "/Users/test", newKey: () => `k${keys++}`, now: () => at, refresh: async () => log.push(["refresh"]) });
+  const voice = createVoice({ http, exec, exists, home: () => "/Users/test", newKey: () => `k${keys++}`, now: () => at, platform: () => platform, refresh: async () => log.push(["refresh"]) });
   return { voice, log, seen, advance: (ms) => (at += ms) };
 }
 
@@ -267,4 +267,27 @@ test("pathExists: the fs answer, else test -e, else unknown", async () => {
   assert.equal(await pathExists("/opt/x", { exists: denied, exec: async () => ({ code: 1 }) }), false);
   assert.equal(await pathExists("/opt/x", { exists: denied, exec: async () => { throw new Error("no test"); } }), null);
   assert.equal(await pathExists("/opt/x", { exists: denied }), null);
+});
+
+test("off the Mac there is no Sheepdog.app to miss and nothing for Talk or Use here to start", async () => {
+  const status = deriveStatus({ daemon: "up", detail: "", stream: "live", app: { voice: voice(), questions: [] } }, { platform: "linux", installed: false });
+  const c = voiceControls({ phase: status.phase, voice: voice(), view: status.voice, installed: false, platform: "linux" });
+  assert.deepEqual(enabled(c), [false, false, false, false]);
+  assert.equal(c.install, null);
+  assert.equal(c.useHereEnabled, false);
+  assert.equal(c.hint, "Open Sheepdog on your phone to talk.");
+  const phoneHolds = voiceControls({ phase: "ok", voice: voice({ client_connected: true, client: phone }), view: { holder: { here: false }, elsewhere: true }, installed: false, platform: "linux" });
+  assert.equal(phoneHolds.useHereEnabled, false);
+  assert.equal(phoneHolds.install, null);
+  assert.equal(phoneHolds.hint, "");
+});
+
+test("off the Mac the app is not looked for", async () => {
+  const linux = setup({ platform: "linux" });
+  await linux.voice.check();
+  assert.deepEqual(linux.seen, []);
+  assert.equal(linux.voice.getState().installed, null);
+  const macos = setup({ platform: "macos" });
+  await macos.voice.check();
+  assert.deepEqual(macos.seen, appPaths("/Users/test"));
 });

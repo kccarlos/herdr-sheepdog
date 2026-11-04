@@ -79,3 +79,28 @@ test("the rail's store, which has no timeline, ignores the words", () => {
   store.observe({ type: "voice.text", payload: { text: "hi" } }, 5);
   assert.equal(store.getState().history.items.length, 0);
 });
+
+test("a stream that dropped mid-utterance does not hand its run to the next utterance", async () => {
+  const store = createStore({ http: fakeHttp(), now: () => 0 });
+  await store.refresh();
+  const ev = (type, payload) => ({ type, ts: "2026-01-01T00:00:00Z", payload });
+  store.observe(ev("voice.transcript.in", { text: "first " }), 100);
+  store.setStream("down");
+  store.setStream("live");
+  store.observe(ev("voice.transcript.in", { text: "second" }), 200);
+  const texts = store.getState().history.items.filter((i) => i.kind === "shepherd").map((i) => `${i.id}:${i.text}`);
+  assert.deepEqual(texts, ["100:first", "200:second"]);
+});
+
+test("a failed round does not hand its run to the next utterance", async () => {
+  const http = fakeHttp();
+  const store = createStore({ http, now: () => 0 });
+  await store.refresh();
+  const ev = (type, payload) => ({ type, ts: "2026-01-01T00:00:00Z", payload });
+  store.observe(ev("voice.transcript.out", { text: "first " }), 100);
+  http.state = async () => { throw new Error("gone"); };
+  await store.refresh();
+  store.observe(ev("voice.transcript.out", { text: "second" }), 200);
+  const texts = store.getState().history.items.filter((i) => i.id >= 100).map((i) => `${i.id}:${i.text}`);
+  assert.deepEqual(texts, ["100:first", "200:second"]);
+});

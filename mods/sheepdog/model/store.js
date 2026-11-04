@@ -50,6 +50,7 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     if (state.status === "fulfilled" && state.value) patch.app = state.value;
     if (page.status === "fulfilled" && page.value) patch.history = applyNewest(snapshot.history, page.value, requestedAt);
     if (failed) {
+      runs = noRuns(); // a closing event may have been missed meanwhile
       // A refused connection says everything; anything else (an error status,
       // something that is not sheepdog) says what it was.
       patch.daemon = "down";
@@ -106,7 +107,11 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     },
     refresh,
     loadOlder,
-    setStream: (stream) => set({ stream }),
+    setStream(stream) {
+      // Events may have been missed while it was not live: no run goes on.
+      if (stream !== "live") runs = noRuns();
+      set({ stream });
+    },
     // A daemon event: the suggested replies, which only its payload says, and
     // the words it carries, shown before the daemon's page has them.
     observe(event, id) {

@@ -18,6 +18,9 @@ export const toneColor = (t, tone) => t[tone] ?? t.dim;
 
 export const dot = (color, size = 8) => div().size(size).rounded(size / 2).flex_none().bg(color);
 
+// A press on a control must not start dragging a floating window.
+export const stopDrag = (_e, cx) => cx.stop_propagation();
+
 // A text button: primary is the theme's solid, else an outline.
 export function button(t, id, label, onClick, primary = false) {
   return h_flex()
@@ -32,6 +35,7 @@ export function button(t, id, label, onClick, primary = false) {
     .font_medium()
     .when(primary, (el) => el.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.opacity(0.88)))
     .when(!primary, (el) => el.border(1).border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+    .on_mouse_down("left", stopDrag)
     .on_click(onClick)
     .child(label);
 }

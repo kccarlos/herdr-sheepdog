@@ -174,10 +174,10 @@ function panelUpdate(t, notice, onSetup, compact) {
 // on screen and asks each row by index, so drawing that last row means the
 // bottom was reached: the panel pages back. A press on a row is the list's
 // `on_item_click`, with the row's key.
-function timeline(t, { entries, canLoadOlder, loadingOlder, minHeight, onEndShown, onOpenRow }) {
+function timeline(t, { entries, canLoadOlder, atMemoryLimit, loadingOlder, minHeight, onEndShown, onOpenRow }) {
   const end = () => {
     onEndShown();
-    return div().w_full().px(12).py(12).child(notice(t, loadingOlder ? "Loading earlier…" : canLoadOlder ? "Earlier messages" : "This is the start of the conversation"));
+    return div().w_full().px(12).py(12).child(notice(t, loadingOlder ? "Loading earlier…" : canLoadOlder ? "Earlier messages" : atMemoryLimit ? "Earlier messages aren't shown here" : "This is the start of the conversation"));
   };
   return v_flex()
     .relative()
@@ -203,7 +203,7 @@ function empty(t, text, minHeight = 0) {
   return div().flex_1().min_h(minHeight).flex().items_center().justify_center().px(24).text_size(12.5).text_color(t.dim).child(text);
 }
 
-// `paging`: { synced, canLoadOlder, loadingOlder } of the history. `compose`:
+// `paging`: { synced, canLoadOlder, atMemoryLimit, loadingOlder } of the history. `compose`:
 // what ui/composer.js draws. `questions`: { cards, presentation, busy,
 // onAnswer, onOpen } for the floating questions (ui/questions.js). `voice`:
 // { controls, state, on } for the voice bar (ui/voice.js). `dock`: the
