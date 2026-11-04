@@ -75,7 +75,8 @@ func names(l Listing) []string {
 func TestSensitive(t *testing.T) {
 	for name, want := range map[string]bool{
 		".git": true, ".GIT": true, ".env": true, ".env.local": true, ".Env.Production": true,
-		".env.example": false, ".env.sample": false, ".env.template": false, ".envrc": false,
+		".env.example": false, ".env.sample": false, ".env.template": false, ".envrc": true, ".ENVRC": true, ".git-credentials": true, "id_dsa": true, "id_dsa.pub": true,
+		".pgpass": true, "prod.tfvars": true, "PROD.TFVARS": true, "tfvars": false, "notes.tfvars.md": false,
 		".ssh": true, ".aws": true, ".gnupg": true, ".netrc": true, ".npmrc": true, ".pypirc": true,
 		".docker": true, ".kube": true, "id_rsa": true, "id_rsa.pub": true, "id_ed25519": true, "id_ecdsa_sk": true,
 		"server.pem": true, "tls.KEY": true, "cert.p12": true, "cert.pfx": true, "release.keystore": true, "AuthKey.p8": true,
@@ -153,7 +154,7 @@ func TestEscapes(t *testing.T) {
 		"..": ErrBadPath, "/": ErrBadPath, outside: ErrBadPath, "updir": ErrOutside, "deep/up": ErrOutside,
 		".git": ErrSensitive, "gitlink": ErrSensitive, "sub/.aws": ErrSensitive, "docs/report.md": ErrNotFound,
 	} {
-		if _, err := r.List(p); !errors.Is(err, want) {
+		if _, err := r.List(context.Background(), p); !errors.Is(err, want) {
 			t.Errorf("List(%q) = %v, want %v", p, err, want)
 		}
 		if _, err := r.Search(context.Background(), p, "e"); !errors.Is(err, want) {
@@ -176,7 +177,7 @@ func TestList(t *testing.T) {
 		},
 		links: map[string]string{"out": "../outside", "in": "b.md", "secret": ".env"},
 	})
-	l, err := r.List("")
+	l, err := r.List(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestList(t *testing.T) {
 	if !byName["out"].Blocked || byName["out"].Kind != KindLink || byName["in"].Blocked || byName["secret"].Blocked {
 		t.Errorf("links = %+v %+v %+v", byName["out"], byName["in"], byName["secret"])
 	}
-	sub, err := r.List("alpha")
+	sub, err := r.List(context.Background(), "alpha")
 	if err != nil || !slices.Equal(names(sub), []string{"alpha/y"}) || sub.Path != "alpha" {
 		t.Errorf("List(alpha) = %v %v", names(sub), err)
 	}
@@ -207,7 +208,7 @@ func TestList(t *testing.T) {
 // refused, and so is a folder swapped the same way.
 func TestSwapAfterListing(t *testing.T) {
 	r, dir := build(t, tree{files: map[string]string{"a.txt": "fine", "sub/b.txt": "fine"}})
-	l, err := r.List("")
+	l, err := r.List(context.Background(), "")
 	if err != nil || len(l.Entries) != 2 {
 		t.Fatalf("list = %v %v", names(l), err)
 	}
@@ -225,7 +226,7 @@ func TestSwapAfterListing(t *testing.T) {
 	if f, err := r.Read("sub/secret.txt"); !errors.Is(err, ErrOutside) {
 		t.Errorf("Read(sub/secret.txt) after the swap = %+v, %v", f, err)
 	}
-	if l, err := r.List("sub"); !errors.Is(err, ErrOutside) {
+	if l, err := r.List(context.Background(), "sub"); !errors.Is(err, ErrOutside) {
 		t.Errorf("List(sub) after the swap = %v, %v", names(l), err)
 	}
 	if _, _, _, err := r.Image("a.txt"); !errors.Is(err, ErrOutside) {
@@ -341,7 +342,7 @@ func TestLargeFolder(t *testing.T) {
 	for i := range ListMax + 500 {
 		write(t, filepath.Join(dir, fmt.Sprintf("f%05d.txt", i)), "")
 	}
-	l, err := r.List("")
+	l, err := r.List(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

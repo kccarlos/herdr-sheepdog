@@ -38,6 +38,7 @@ var (
 	ErrDenied    = errors.New("the system refused")
 	ErrTooLarge  = errors.New("too large to show")
 	ErrNotImage  = errors.New("not an image")
+	ErrFailed    = errors.New("could not be read")
 )
 
 // maxLinks bounds the symlinks one path may pass through.
@@ -50,8 +51,16 @@ type Root struct {
 }
 
 // Open opens dir as a root. A missing folder, or a path that is not a
-// folder, is ErrNotFound.
+// folder, is ErrNotFound; a folder with a sensitive name anywhere on its
+// path (an agent working in .git or ~/.ssh), spelled or linked, is
+// ErrSensitive.
 func Open(dir string) (*Root, error) {
+	if SensitivePath(filepath.ToSlash(filepath.Clean(dir))) {
+		return nil, ErrSensitive
+	}
+	if real, err := filepath.EvalSymlinks(dir); err == nil && SensitivePath(filepath.ToSlash(real)) {
+		return nil, ErrSensitive
+	}
 	// Stat first: os.OpenRoot's own open would wait on a FIFO.
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -160,15 +169,20 @@ func (r *Root) openAt(p string) (*os.File, fs.FileInfo, error) {
 	return f, info, nil
 }
 
-// osErr maps a system error to one of the package's.
+// osErr maps a system error to one of the package's. The result never
+// carries the system's own text, which names a path on the computer: a
+// known error gets a fixed reason, any other is ErrFailed.
 func osErr(err error) error {
 	switch {
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return ErrNotFound
-	case errors.Is(err, fs.ErrPermission):
+	case errors.Is(err, fs.ErrPermission), errors.Is(err, syscall.ELOOP):
 		return ErrDenied
+	case errors.Is(err, syscall.ENXIO), errors.Is(err, syscall.EOPNOTSUPP), errors.Is(err, syscall.ENODEV):
+		// The open of a socket, a device or a FIFO nobody writes.
+		return ErrNotFile
 	}
-	return fmt.Errorf("%w: %v", ErrDenied, err)
+	return ErrFailed
 }
 
 // modified is a file's time as the API shows it: UTC, whole seconds.

@@ -78,22 +78,31 @@ One file: JSON unless `?raw=1`.
 | 403 | `outside` | Left the root. |
 | 403 | `sensitive` | Hidden for safety. |
 | 403 | `not_file` | A read of a folder, FIFO, socket or device. |
-| 403 | `denied` | The system refused. |
+| 403 | `denied` | The system refused, or a link loops. |
 | 413 | `too_large` | Over the image limit. |
 | 415 | `not_image` | `?raw=1` on a file that is not an image. |
 | 400 | `bad_path` | Absolute, or not a clean relative path. |
+| 500 | `failed` | Anything else. The message is fixed words, never a path. |
 
 `not_file` and `not_image` were added in PR 1; the contract is
 [ws-contract.md](../ws-contract.md) "Files".
 
 ## 5. Sensitive names
 
-Matched on any path segment, case-insensitive: `.git`, `.env` and `.env.*`
-(except `.env.example`, `.env.sample`, `.env.template`), `.ssh`, `.aws`,
-`.gnupg`, `.netrc`, `.npmrc`, `.pypirc`, `.docker`, `.kube`, `id_rsa*`,
-`id_ed25519*`, `id_ecdsa*`, and names ending `.pem`, `.key`, `.p12`, `.pfx`,
-`.keystore`, `.p8`, plus `credentials`, `credentials.json`,
-`secrets.json`, `secrets.yaml`, `secrets.yml`.
+Matched on any path segment, under Unicode case folding with NFC (a
+case-folding filesystem such as APFS opens the real file for `id_rſa`, with
+a long s, or a Kelvin sign for `k`): `.git`, `.env` and `.env.*` (except
+`.env.example`, `.env.sample`, `.env.template`), `.envrc`, `.git-credentials`,
+`.pgpass`, `.ssh`, `.aws`, `.gnupg`, `.netrc`, `.npmrc`, `.pypirc`, `.docker`,
+`.kube`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`, and names ending
+`.pem`, `.key`, `.p12`, `.pfx`, `.keystore`, `.p8`, `.tfvars`, plus
+`credentials`, `credentials.json`, `secrets.json`, `secrets.yaml`,
+`secrets.yml`. `node_modules` is skipped by a search under the same fold.
+
+A root with a sensitive segment anywhere on its path (an agent working in
+`.git` or `~/.ssh`, spelled or reached through a link) is refused as
+`sensitive`. Changes ([ws-contract.md](../ws-contract.md) "Changes") uses the
+same rule.
 
 This is a rail against the likely case, not a promise: the docs say a paired
 phone can read the agents' folders.

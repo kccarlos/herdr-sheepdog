@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/files"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
@@ -193,5 +195,53 @@ func TestParseStatusV2(t *testing.T) {
 	}
 	if files[1] != (ChangedFile{Path: "new name.txt", OldPath: "old name.txt", Status: "renamed"}) || files[2].Status != "conflicted" || files[3].Path != "new dir/x" {
 		t.Fatalf("files = %+v", files)
+	}
+}
+
+// The Files rule holds here too: a changed file with a sensitive name on
+// any segment, or a rename with either side sensitive, is not listed (it
+// counts in hidden, and not in the totals) and its diff is 403 sensitive.
+func TestChangesHideSensitive(t *testing.T) {
+	h, dir := changesHarness(t)
+	writeT(t, filepath.Join(dir, "key.pem"), strings.Repeat("private line\n", 20))
+	writeT(t, filepath.Join(dir, ".envrc"), "export A=1\n")
+	gitT(t, dir, "add", "key.pem", ".envrc")
+	gitT(t, dir, "commit", "-qm", "keys", "--", "key.pem", ".envrc")
+	gitT(t, dir, "mv", "key.pem", "plain.txt")  // old side sensitive
+	gitT(t, dir, "mv", ".envrc", "env.txt")     // old side sensitive, small
+	gitT(t, dir, "mv", "a.go", "deploy.tfvars") // new side sensitive
+	writeT(t, filepath.Join(dir, ".env"), "KEY=1\n")
+	writeT(t, filepath.Join(dir, "sub", "id_r\u017Fa"), "private\n")
+	writeT(t, filepath.Join(dir, "cfg", ".ssh", "config"), "Host x\n")
+
+	var got ChangesResponse
+	if code := h.getJSON(windowPath("w1:p2", "changes"), &got); code != http.StatusOK {
+		t.Fatalf("changes = %d", code)
+	}
+	var paths []string
+	added, deleted := 0, 0
+	for _, f := range got.Files {
+		paths = append(paths, f.Path)
+		added, deleted = added+f.Added, deleted+f.Deleted
+		if files.SensitivePath(f.Path) || files.SensitivePath(f.OldPath) {
+			t.Errorf("listed %+v", f)
+		}
+	}
+	if !slices.Contains(paths, "sub/note.md") || !slices.Contains(paths, "new.txt") {
+		t.Errorf("visible files lost: %v", paths)
+	}
+	if got.Hidden != 6 || got.Added != added || got.Deleted != deleted {
+		t.Errorf("hidden %d, totals +%d -%d, want 6, +%d -%d (files %v)", got.Hidden, got.Added, got.Deleted, added, deleted, paths)
+	}
+	for _, p := range []string{".env", "sub/id_r\u017Fa", "cfg/.ssh/config", "plain.txt", "env.txt", "deploy.tfvars"} {
+		var body map[string]string
+		code := h.getJSON(windowPath("w1:p2", "changes/")+url.PathEscape(p), &body)
+		if code != http.StatusForbidden || body["reason"] != "sensitive" {
+			t.Errorf("diff %s = %d %v, want 403 sensitive", p, code, body)
+		}
+	}
+	// A visible file still has its diff.
+	if code := h.getJSON(windowPath("w1:p2", "changes/new.txt"), nil); code != http.StatusOK {
+		t.Errorf("diff new.txt = %d", code)
 	}
 }

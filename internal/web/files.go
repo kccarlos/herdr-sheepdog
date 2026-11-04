@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -51,47 +52,51 @@ func (s *Server) filesRoot(r *http.Request) (root *files.Root, pane, space strin
 	return root, pane, space, err
 }
 
-// filesStatus is an error's status and reason.
-func filesStatus(err error) (int, string) {
+// filesStatus is an error's status, reason and message. The message is
+// fixed words, never the error's own text, which can carry a path on the
+// computer or a system error; an error not listed here is 500 "failed".
+func filesStatus(err error) (status int, reason, message string) {
 	switch {
 	case errors.Is(err, errNoAgent):
-		return http.StatusNotFound, "no_agent"
+		return http.StatusNotFound, "no_agent", "not a tracked agent"
 	case errors.Is(err, supervisor.ErrNoSuchSpace):
-		return http.StatusNotFound, "no_space"
+		return http.StatusNotFound, "no_space", "no such space"
 	case errors.Is(err, errNoCwd):
-		return http.StatusNotFound, "no_cwd"
+		return http.StatusNotFound, "no_cwd", "no folder yet"
 	case errors.Is(err, files.ErrNotFound):
-		return http.StatusNotFound, "not_found"
+		return http.StatusNotFound, "not_found", "not found"
 	case errors.Is(err, files.ErrOutside):
-		return http.StatusForbidden, "outside"
+		return http.StatusForbidden, "outside", "that leaves the folder"
 	case errors.Is(err, files.ErrSensitive):
-		return http.StatusForbidden, "sensitive"
+		return http.StatusForbidden, "sensitive", "hidden for safety"
 	case errors.Is(err, files.ErrNotFile):
-		return http.StatusForbidden, "not_file"
+		return http.StatusForbidden, "not_file", "not a regular file"
 	case errors.Is(err, files.ErrDenied):
-		return http.StatusForbidden, "denied"
+		return http.StatusForbidden, "denied", "the system refused"
 	case errors.Is(err, files.ErrTooLarge):
-		return http.StatusRequestEntityTooLarge, "too_large"
+		return http.StatusRequestEntityTooLarge, "too_large", "too large to show"
 	case errors.Is(err, files.ErrNotImage):
-		return http.StatusUnsupportedMediaType, "not_image"
+		return http.StatusUnsupportedMediaType, "not_image", "not an image"
 	case errors.Is(err, files.ErrBadPath):
-		return http.StatusBadRequest, "bad_path"
+		return http.StatusBadRequest, "bad_path", "not a clean relative path"
 	case errors.Is(err, errNoSpaces):
-		return http.StatusServiceUnavailable, ""
+		return http.StatusServiceUnavailable, "", "spaces are not available here"
 	}
-	// herdr could not say where the space is.
-	return http.StatusBadGateway, ""
+	return http.StatusInternalServerError, "failed", "could not be read"
 }
 
 // filesError answers {"error", "reason"}.
 func filesError(w http.ResponseWriter, err error) {
-	status, reason := filesStatus(err)
-	body := map[string]string{"error": err.Error()}
+	status, reason, message := filesStatus(err)
+	body := map[string]string{"error": message}
 	if reason != "" {
 		body["reason"] = reason
 	}
 	writeJSON(w, status, body)
 }
+
+// filesListTimeout bounds one list or search, as changesTimeout bounds git.
+const filesListTimeout = changesTimeout
 
 // handleFilesList is GET …/files?path=&q=: a folder's list, or with q a
 // search of the names under it.
@@ -102,12 +107,14 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
+	ctx, cancel := context.WithTimeout(r.Context(), filesListTimeout)
+	defer cancel()
 	rel := r.URL.Query().Get("path")
 	var list files.Listing
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
-		list, err = root.Search(r.Context(), rel, q)
+		list, err = root.Search(ctx, rel, q)
 	} else {
-		list, err = root.List(rel)
+		list, err = root.List(ctx, rel)
 	}
 	if err != nil {
 		filesError(w, err)
@@ -161,7 +168,7 @@ func (s *Server) handleFileRead(w http.ResponseWriter, r *http.Request) {
 // logRead logs files.read: the path and the size, or why it was refused.
 func (s *Server) logRead(pane string, fields map[string]any, size int64, err error) {
 	if err != nil {
-		_, fields["reason"] = filesStatus(err)
+		_, fields["reason"], _ = filesStatus(err)
 	} else {
 		fields["size"] = size
 	}

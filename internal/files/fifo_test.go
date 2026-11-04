@@ -29,11 +29,11 @@ func TestFIFO(t *testing.T) {
 			if _, _, _, err := r.Image(p); !errors.Is(err, ErrNotFile) {
 				t.Errorf("Image(%s) = %v, want ErrNotFile", p, err)
 			}
-			if _, err := r.List(p); !errors.Is(err, ErrNotFound) {
+			if _, err := r.List(context.Background(), p); !errors.Is(err, ErrNotFound) {
 				t.Errorf("List(%s) = %v, want ErrNotFound", p, err)
 			}
 		}
-		if l, err := r.List(""); err != nil || !slices.Equal(names(l), []string{"a.txt", "to-pipe"}) {
+		if l, err := r.List(context.Background(), ""); err != nil || !slices.Equal(names(l), []string{"a.txt", "to-pipe"}) {
 			t.Errorf("List = %v %v", names(l), err)
 		}
 		if l, err := r.Search(context.Background(), "", "pipe"); err != nil || !slices.Equal(names(l), []string{"to-pipe"}) {

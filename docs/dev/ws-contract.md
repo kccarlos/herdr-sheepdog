@@ -1543,7 +1543,10 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
 
   `status` is `modified`, `added`, `deleted`, `renamed`, `typechange`,
   `untracked` or `conflicted`; `branch` is empty when detached. At most
-  500 files are listed; `truncated: true` says there were more. When there
+  500 files are listed; `truncated: true` says there were more. A changed
+  file the Files rule hides (a sensitive name on its path, or on either side
+  of a rename; see *Files*) is left out of the list and of the totals, and
+  counted in `hidden` (absent when 0). When there
   is no repository the answer is still `200`, with `{"repo": false,
   "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`.
 - **`GET /api/agents/{pane_id}/changes/{path}`** — one file's unified
@@ -1551,9 +1554,11 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
   and `truncated` past 512 KB. `path` is the file's `path` from the list,
   slashes unescaped. Only a path the status call lists is served, so no
   other file, inside or outside the repository, can be read; anything else
-  is `404`. An untracked symlink is listed as binary and never followed.
+  is `404`. A hidden file, or a path with a sensitive segment, is `403`
+  `{"error", "reason": "sensitive"}`. An untracked symlink is listed as
+  binary and never followed.
 
-Both are logged as metadata only: `web.changes {repo, files, truncated,
+Both are logged as metadata only: `web.changes {repo, files, hidden, truncated,
 dur_ms}` and `web.changes.diff {bytes, truncated, status}`, never a path or
 a line of the diff.
 
@@ -1633,16 +1638,21 @@ JSON unless `?raw=1`:
 | 413 | `too_large` | `?raw=1` on an image over 16 MiB. |
 | 415 | `not_image` | `?raw=1` on a file that is not an image. |
 | 400 | `bad_path` | Absolute, or not a clean relative path. |
+| 500 | `failed` | Any other error. |
 
-A space route is also `502` (no `reason`) when herdr cannot say where the
-space is, and `503` on a daemon without spaces.
+The `error` text is fixed words; it never carries a path on the computer or a
+system error. A list or search that outlasts its 5 s timeout answers what it has, with
+`truncated: true`. A space route is also `503` on a daemon without spaces; when herdr
+cannot say where the space is, it is `500` `failed`.
 
 **Sensitive names** are not listed, searched or read: the list in
 [the design](design/file-browser.md#5-sensitive-names) (`.git`, `.env`,
-`.ssh`, private keys, `credentials`, …), kept in code as `files.Sensitive`
-and matched on any segment of the path or of a link's target, ignoring
-case. This is a rail against the likely case, not a promise: a paired phone
-can read the agents' folders.
+`.envrc`, `.ssh`, private keys, `*.tfvars`, `credentials`, …), kept in code as
+`files.Sensitive` and matched on any segment of the path or of a link's
+target, under Unicode case folding and NFC (so `id_rſa` is `id_rsa`, as on
+APFS). A folder whose own path has a sensitive segment is not served at all:
+`403` `sensitive`. This is a rail against the likely case, not a promise: a
+paired phone can read the agents' folders.
 
 Each read is logged as `files.read {path, raw, size}` (with `space` for a
 space's folder, the agent's pane on the event), or `{path, raw, reason}`

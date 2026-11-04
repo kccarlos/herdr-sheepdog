@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/files"
@@ -191,9 +193,13 @@ func TestFilesAudit(t *testing.T) {
 type stubSpaceFolder struct {
 	*supervisor.Supervisor
 	dirs map[string]string
+	errs map[string]error
 }
 
 func (s *stubSpaceFolder) SpaceFolder(_ context.Context, id string) (string, error) {
+	if err, ok := s.errs[id]; ok {
+		return "", err
+	}
 	dir, ok := s.dirs[id]
 	if !ok {
 		return "", supervisor.ErrNoSuchSpace
@@ -227,7 +233,48 @@ func TestFilesSpace(t *testing.T) {
 	}
 
 	plain := newHarness(t, harnessOpts{})
-	if code := plain.getJSON("/api/spaces/w1/files", nil); code != http.StatusBadGateway {
-		t.Errorf("space list on mock herdr = %d, want 502", code)
+	if code := plain.getJSON("/api/spaces/w1/files", nil); code != http.StatusInternalServerError {
+		t.Errorf("space list on mock herdr = %d, want 500", code)
+	}
+}
+
+// An agent or space whose folder is itself sensitive is refused, and an
+// error the daemon did not expect says so in fixed words: no path, no
+// system text, status 500 failed.
+func TestFilesRefusalsNamePaths(t *testing.T) {
+	dir := filesFolder(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, harnessOpts{wrap: func(s *supervisor.Supervisor) Supervisor {
+		return &stubSpaceFolder{Supervisor: s, dirs: map[string]string{"w3": filepath.Join(dir, ".git")}, errs: map[string]error{
+			"w5": fmt.Errorf("herdr: stat /Users/someone/private: %w", syscall.EIO),
+		}}
+	}})
+	trackIn(t, h, "w1:p2", filepath.Join(dir, ".git", "hooks"))
+	for _, tc := range []struct {
+		path   string
+		code   int
+		reason string
+	}{
+		{windowPath("w1:p2", "files"), 403, "sensitive"},
+		{windowPath("w1:p2", "files/x"), 403, "sensitive"},
+		{"/api/spaces/w3/files", 403, "sensitive"},
+		{"/api/spaces/w5/files", 500, "failed"},
+		{"/api/spaces/w5/files/a.txt", 500, "failed"},
+	} {
+		resp, err := http.Get(h.http.URL + tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var body map[string]string
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		if resp.StatusCode != tc.code || body["reason"] != tc.reason || strings.Contains(string(raw), "/Users") || strings.Contains(string(raw), dir) {
+			t.Errorf("GET %s = %d %s, want %d %s with no path", tc.path, resp.StatusCode, raw, tc.code, tc.reason)
+		}
 	}
 }

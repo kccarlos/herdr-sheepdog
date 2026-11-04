@@ -59,8 +59,9 @@ type Listing struct {
 
 // List lists the folder at rel, folders first, then by name, at most
 // ListMax entries. Sensitive names are left out and counted in Hidden;
-// FIFOs, sockets and devices are left out.
-func (r *Root) List(rel string) (Listing, error) {
+// FIFOs, sockets and devices are left out. When ctx ends, it answers what
+// it has with Truncated set.
+func (r *Root) List(ctx context.Context, rel string) (Listing, error) {
 	dir, f, err := r.openDir(rel)
 	if err != nil {
 		return Listing{}, err
@@ -70,7 +71,7 @@ func (r *Root) List(rel string) (Listing, error) {
 	var ents []fs.DirEntry
 	seen := 0
 	err = eachEntry(f, func(d fs.DirEntry) bool {
-		if seen++; seen > ListReadMax {
+		if seen++; seen > ListReadMax || ctx.Err() != nil {
 			out.Truncated = true
 			return false
 		}
@@ -90,6 +91,11 @@ func (r *Root) List(rel string) (Listing, error) {
 		ents, out.Truncated = ents[:ListMax], true
 	}
 	for _, d := range ents {
+		// Each link costs a walk of its chain.
+		if ctx.Err() != nil {
+			out.Truncated = true
+			break
+		}
 		if e, ok := r.entry(out.Path, dir, d.Name()); ok {
 			out.Entries = append(out.Entries, e)
 		}
@@ -111,27 +117,34 @@ func (r *Root) Search(ctx context.Context, rel, q string) (Listing, error) {
 		return Listing{}, err
 	}
 	out := Listing{RootName: r.name, Path: shown(rel), Entries: []Entry{}}
-	needle := strings.ToLower(q)
+	needle := fold(q)
 	type folder struct{ shown, real string }
 	var queue []folder
 	seen := 0
+	// done says a limit is reached; the walk then stops, truncated.
+	done := func() bool {
+		if seen >= SearchSeenMax || len(out.Entries) >= SearchMatchMax || ctx.Err() != nil {
+			out.Truncated = true
+		}
+		return out.Truncated
+	}
 	scan := func(f *os.File, at folder) error {
 		defer func() { _ = f.Close() }()
 		return eachEntry(f, func(d fs.DirEntry) bool {
-			if seen >= SearchSeenMax || len(out.Entries) >= SearchMatchMax || ctx.Err() != nil {
-				out.Truncated = true
+			if done() {
 				return false
 			}
 			seen++
 			name := d.Name()
-			match := strings.Contains(strings.ToLower(name), needle)
+			folded := fold(name)
+			match := strings.Contains(folded, needle)
 			switch {
 			case Sensitive(name):
 				if match {
 					out.Hidden++
 				}
 				return true
-			case name == "node_modules" || !listable(d.Type()):
+			case folded == nodeModules || !listable(d.Type()):
 				return true
 			}
 			if match {
@@ -148,7 +161,7 @@ func (r *Root) Search(ctx context.Context, rel, q string) (Listing, error) {
 	if err := scan(f, folder{out.Path, dir}); err != nil {
 		return Listing{}, err
 	}
-	for len(queue) > 0 && !out.Truncated {
+	for len(queue) > 0 && !done() {
 		at := queue[0]
 		queue = queue[1:]
 		f, info, err := r.openAt(at.real)
