@@ -42,9 +42,10 @@ check() {
   local shards="${1:-$default_shards}" tests="${2:-$default_tests}"
   [[ -f "$shards" ]] || { echo "ci-plan: no shard list $shards" >&2; return 2; }
   [[ -d "$tests" ]] || { echo "ci-plan: no UI tests in $tests" >&2; return 2; }
-  # Every XCTestCase class in the UI test sources, and every test method.
+  # Every test class in the UI test sources (XCTestCase or a subclass of a
+  # *UITests class), and every test method.
   local classes methods
-  classes="$(grep -rhoE '^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*XCTestCase' "$tests" \
+  classes="$(grep -rhoE '^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*(XCTestCase|[A-Za-z0-9_]+UITests)\b' "$tests" \
     | sed -E 's/.*class[[:space:]]+([A-Za-z0-9_]+).*/\1/' | sort -u)"
   methods="$(grep -rhoE 'func[[:space:]]+test[A-Za-z0-9_]*[[:space:]]*\(' "$tests" \
     | sed -E 's/func[[:space:]]+([A-Za-z0-9_]+).*/\1/' | sort -u)"
