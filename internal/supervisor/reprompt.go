@@ -44,12 +44,33 @@ const defaultRepromptPollInterval = time.Second
 // pane, whichever path sent them (the orchestrator's send_keys, the bare-answer
 // fast path, or a tap). Detached from the caller's context, which ends
 // long before the poll should (a web request, an orchestrator turn, a voice tool
-// call).
+// call), but tracked and bound to s.life: shutdown ends it and waits for
+// it, so a reprompt it raises never runs an orchestrator turn against a
+// closing orchestrator.
 func (s *Supervisor) startReprompt(paneID string) {
 	if s.cfg.RepromptPoll <= 0 {
 		return
 	}
-	go s.pollReprompt(paneID)
+	if !s.track() {
+		return
+	}
+	go func() {
+		defer s.replies.Done()
+		s.pollReprompt(paneID)
+	}()
+}
+
+// startRepromptLocked is startReprompt for a caller that holds s.mu
+// (answerKeys).
+func (s *Supervisor) startRepromptLocked(paneID string) {
+	if s.cfg.RepromptPoll <= 0 || s.shut {
+		return
+	}
+	s.replies.Add(1)
+	go func() {
+		defer s.replies.Done()
+		s.pollReprompt(paneID)
+	}()
 }
 
 // pollReprompt is the post-answer poll: every Config.RepromptPollInterval,
@@ -68,14 +89,20 @@ func (s *Supervisor) pollReprompt(paneID string) {
 
 	polls, outcome, sawSamePrompt := 0, "timeout", false
 	for polls < maxPolls {
-		<-ticker.C
+		select {
+		case <-ticker.C:
+		case <-s.life.Done():
+			outcome = "shutdown"
+			s.log.Log(logSource, "supervisor.reprompt_poll", paneID, map[string]any{"polls": polls, "outcome": outcome})
+			return
+		}
 		polls++
 		row, ok := s.store.Get(paneID)
 		if !ok || row.State != herdr.StateBlocked {
 			outcome = "left_blocked"
 			break
 		}
-		read, err := s.herdr.Read(context.Background(), paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+		read, err := s.herdr.Read(s.life, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 		if err != nil {
 			continue
 		}
@@ -89,7 +116,7 @@ func (s *Supervisor) pollReprompt(paneID string) {
 			sawSamePrompt = true
 			continue
 		}
-		if !s.raiseReprompt(context.Background(), row, prompt, "reprompt", time.Since(start)) {
+		if !s.raiseReprompt(s.life, row, prompt, "reprompt", time.Since(start)) {
 			s.releasePromptClaim(paneID, sig, prev)
 			continue
 		}
@@ -198,7 +225,10 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 // past: no prompt on screen ends it, the same prompt keeps it (on a pane
 // herdr reports done or idle too: agy's prompts, a finish that asks), and
 // a different prompt replaces it quietly on a blocked pane (the voice
-// stays where it is) or ends it on any other. A failed read keeps it.
+// stays where it is) or ends it on any other. A failed read keeps it. The
+// replacement is held when the question was or its space is muted now
+// (read here, outside s.mu): a mute after the question was asked holds
+// its next prompt too.
 func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state.PendingAction) {
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
@@ -206,6 +236,7 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		return
 	}
 	prompt, ok := herdr.ParsePrompt(read.Text)
+	muted := ok && row.State == herdr.StateBlocked && promptSignature(prompt) != pendingSignature(q) && s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cur, has := s.store.Question(q.ID); !has || cur.PaneID != q.PaneID {
@@ -219,11 +250,15 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "prompt_gone"})
 	default:
 		p := s.newAnswerPrompt(row.PaneID, prompt, aliasOr(state.Say(row)), row.StateSince)
-		held := s.heldQuestion(q.ID)
+		held := q.Held || s.heldQuestion(q.ID) || muted
+		s.attMu.Lock()
+		delete(s.held, q.ID)
+		s.attMu.Unlock()
 		if held {
 			p.Held = true
 			s.holdQuestion(p.ID)
 		}
+		s.installedLocked(p) // displaced.go
 		if err := s.store.SetQuestion(p); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 		}

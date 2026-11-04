@@ -72,6 +72,13 @@ func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 // input, allows it (inputs.go). ok is false for anything else, which
 // goes to the orchestrator.
 func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
+	// The space mute of the pending question's pane is read fresh, outside
+	// s.mu (it may read herdr), as send_keys reads it: the folder index a
+	// lock-held check reads can be cold or stale.
+	mutedPane := ""
+	if p, has := s.store.Pending(); has && p.Kind == state.PendingAnswerPrompt && s.paneMuted(ctx, p.PaneID) {
+		mutedPane = p.PaneID
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	text = strings.TrimSpace(text)
@@ -89,6 +96,14 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	keys, label, ok := bareAnswer(p, text)
 	if !ok {
+		return voice.ToolResult{}, false
+	}
+	if p.Held || s.heldQuestion(p.ID) || ((mutedPane == p.PaneID || s.paneMutedCached(p.PaneID)) && !s.toldOpenLocked(p)) {
+		// A muted space's question the user was not told about (recorded
+		// unheld while the folder index was cold, or its space muted
+		// since): a bare word does not answer it, as send_keys would not
+		// (brainHost.AnswerPrompt).
+		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "space_muted", "text": text, "id": p.ID})
 		return voice.ToolResult{}, false
 	}
 	if age := s.cfg.Now().Sub(p.CreatedAt); age > fastAnswerWindow {

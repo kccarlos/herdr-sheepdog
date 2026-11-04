@@ -448,12 +448,15 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, fmt.Sprintf("the user has said nothing that could answer %s's prompt", alias)
 	case in.at.Before(s.promptSinceLocked(p)):
 		return nil, fmt.Sprintf("the user has said nothing since %s's prompt appeared", alias)
+	case in.used:
+		// Before the displacement rule: a second send on words whose
+		// answer was delivered is refused without asking the user again
+		// (displaced.go).
+		return nil, "the user's last words already answered a prompt"
 	case s.displacedLocked(p, in) != "": // displaced.go
 		return nil, s.displacedLocked(p, in)
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return nil, fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
-	case in.used:
-		return nil, "the user's last words already answered a prompt"
 	case strings.TrimSpace(in.text) == "":
 		return nil, "the user's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):

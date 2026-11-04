@@ -160,7 +160,7 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	}
 	if p.Kind == state.PendingAnswerPrompt {
 		s.dropQuestionLocked(p)
-		s.closedLocked(p) // displaced.go: also when the list had dropped it already
+		s.closedLocked() // displaced.go: also when the list had dropped it already
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
@@ -175,7 +175,7 @@ func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
 	if err := s.store.DropQuestion(p.PaneID); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.closedLocked(p) // displaced.go
+	s.closedLocked() // displaced.go
 }
 
 // questionByID finds an open answer_prompt by id: the one the voice is
@@ -255,18 +255,18 @@ func (s *Supervisor) ExpirePending() {
 // screen does not parse as a prompt, or — not blocked — the user's
 // words are not about the menu (why says so). muted is the space mute,
 // read by the caller outside s.mu (paneMuted): a muted space's prompt is
-// revived held.
-func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string, muted bool) (p state.PendingAction, ok bool, why string) {
+// revived held. screen is the pane read the caller took outside s.mu;
+// a missing read cannot safely revive the prompt.
+func (s *Supervisor) revivePrompt(paneID, source string, muted bool, screen *paneScreen) (p state.PendingAction, ok bool, why string) {
 	row, found := s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
 		return state.PendingAction{}, false, ""
 	}
 	blocked := row.State == herdr.StateBlocked
-	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
-	if err != nil {
+	if screen == nil || screen.err != nil {
 		return state.PendingAction{}, false, ""
 	}
-	prompt, parsed := herdr.ParsePrompt(read.Text)
+	prompt, parsed := herdr.ParsePrompt(screen.text)
 	if !parsed {
 		return state.PendingAction{}, false, ""
 	}
@@ -277,6 +277,19 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string, mu
 	s.setPendingMuted(p, muted)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
 	return p, true, ""
+}
+
+// paneScreen is one read of a pane's screen.
+type paneScreen struct {
+	text string
+	err  error
+}
+
+// readScreen reads paneID's screen for revivePrompt. Call it without
+// s.mu: it reads herdr.
+func (s *Supervisor) readScreen(ctx context.Context, paneID string) *paneScreen {
+	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	return &paneScreen{text: read.Text, err: err}
 }
 
 // menuStopWords are words too common to tie the user's words to a

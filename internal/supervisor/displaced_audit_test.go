@@ -188,13 +188,14 @@ func TestReplyThatStatesAQuestionTellsIt(t *testing.T) {
 	if !ok || p.PaneID != docsPane {
 		t.Fatalf("pending = %+v", p)
 	}
-	// A reply about docs that does not say what it asks.
+	// A reply about docs that does not say what it asks. (Words that name
+	// docs are about docs whatever they were told, so these do not.)
 	m.Add(braintest.Step{Text: braintest.Reply("Docs is waiting on you too.", "")})
 	h.say("What about docs?")
 	h.clock.Advance(time.Second)
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
 	m.Add(braintest.Step{Text: braintest.Reply("I could not.", "")})
-	h.say("Yes, let docs go ahead.")
+	h.say("Yes, go ahead.")
 	if n := h.keysTo(docsPane); n != 0 {
 		t.Fatalf("a reply that did not state docs' question let a yes through (%d key presses)", n)
 	}

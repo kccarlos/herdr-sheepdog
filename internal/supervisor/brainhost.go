@@ -44,7 +44,10 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 		info.LastResult = a.LastResult.Spoken
 		info.LastDetail = a.LastResult.Detail
 	}
-	if a.LastBlock != nil && a.LastBlock.Question != "" {
+	if a.LastBlock != nil && a.LastBlock.Question != "" && !h.s.holdsQuestionOf(a.PaneID) {
+		// A held question (muted space) is not the orchestrator's to state:
+		// its prompt is left out here as in Pending below, so a status
+		// reply cannot tell it in passing (displaced.go).
 		info.LastBlock = a.LastBlock.Question
 		if a.LastBlock.Answered {
 			info.LastBlock += " (answered)"
@@ -244,6 +247,15 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// The space mute is read fresh, outside s.mu (it may read herdr): the
 	// folder index a lock-held check reads can be cold or stale.
 	muted := s.paneMuted(ctx, paneID)
+	// So is the screen when the question may have to be revived: a slow
+	// herdr must not stall voice events and transitions on s.mu. The
+	// revival re-checks the pane under s.mu.
+	var screen *paneScreen
+	if p, has := s.store.Pending(); !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
+		if row, ok := s.store.Get(paneID); ok && row.State != herdr.StateWorking {
+			screen = s.readScreen(ctx, paneID)
+		}
+	}
 	defer s.pushReask() // displaced.go: after s.mu is released
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -254,7 +266,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		}
 	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys", muted)
+		revived, ok, why := s.revivePrompt(paneID, "send_keys", muted, screen)
 		if !ok {
 			if why != "" {
 				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)

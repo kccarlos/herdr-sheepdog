@@ -439,7 +439,7 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 		confirmed[k] = v
 	}
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, confirmed)
-	s.startReprompt(p.PaneID)
+	s.startRepromptLocked(p.PaneID)
 	return voice.ToolResult{Spoken: say(label), Scheduling: voice.UrgencyInterrupt}, true
 }
 

@@ -77,6 +77,9 @@ type announcement struct {
 	// created one: a line about a prompt that is no longer open is
 	// dropped.
 	pending string
+	// queued: announced right after another question of the same batch
+	// (announceHeld), so it waits for the one before it to be said.
+	queued bool
 	// eventID is the worker event's id (links.go), set by announce: the
 	// turn's request and every push about the event carry it.
 	eventID string
@@ -259,7 +262,11 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		s.promoteHeld(a)
 	}
 	s.notify(a, kept, spoken)
-	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
+	// A queued announcement (the second of the held questions unmuting
+	// announces) does not claim the needs_user exception that lets an
+	// interrupt cut the voice off: it would cut off the question before it.
+	needsUser := rep.NeedsUser && (!a.queued || u != voice.UrgencyInterrupt)
+	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, needsUser, a.pending), kept)))
 	if u != voice.UrgencySilent {
 		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
 	}
