@@ -60,7 +60,7 @@ func TestShapesAreRedactedWithoutConfig(t *testing.T) {
 		"OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123",
 		"https://example.com/x?key=ZZZsecretZZZ123&alt=json",
 		"GEMINI_API_KEY_2=AIzaSecondKeyFakeFake0123456",
-		`{"token":"plainlongtokenvalue"}`,
+		`{"access_token":"plainlongtokenvalue"}`,
 		"Incorrect API key provided: sk-FakeK****************0000. You can",
 		"-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49\n-----END PRIVATE KEY-----",
 	} {

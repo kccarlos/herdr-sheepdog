@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -40,13 +41,16 @@ var shapes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[0-9A-Za-z._~+/=\-]{8,}`),
 	// token=, key=, api_key=, secret=, password= in URLs, env lines and
 	// key: value text.
-	regexp.MustCompile(`(?i)((?:^|[^0-9A-Za-z])(?:[0-9A-Za-z]*_)?(?:token|api[_-]?key|key|secret|password)["']?\s*[=:]\s*["']?)[^\s"'&,;}]{6,}`),
+	regexp.MustCompile(`(?i)((?:^|[^0-9A-Za-z])(?:api[_-]?key|(?:access|auth|refresh|id|bearer)[_-]?token|client[_-]?secret|password)["']?\s*[=:]\s*["']?)[^\s"'&,;}]{6,}`),
+	regexp.MustCompile(`(?i)([?&](?:key|token)=)[^\s"'&,;}]{6,}`),
 	// PEM private keys (an APNs .p8 pasted into an issue).
 	regexp.MustCompile(`(?s)(-----BEGIN [A-Z ]*PRIVATE KEY-----).*?-----END [A-Z ]*PRIVATE KEY-----`),
 }
 
 // secretEnvName matches environment variables that hold a secret.
 var secretEnvName = regexp.MustCompile(`(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(S|_\d+)?$`)
+
+func IsSecretEnvName(name string) bool { return secretEnvName.MatchString(name) }
 
 // Redactor replaces secrets in text. The zero value redacts shapes only.
 type Redactor struct {
@@ -75,7 +79,7 @@ func New(values ...string) *Redactor {
 // provider's key.
 func ConfigSecrets(cfg config.Config) []string {
 	out := append([]string{}, cfg.Gemini.APIKeys...)
-	out = append(out, cfg.Gemini.Vertex.APIKey, cfg.DeepSeek.APIKey, cfg.Voice.OpenAI.APIKey)
+	out = append(out, cfg.Gemini.Vertex.APIKey, cfg.DeepSeek.APIKey, cfg.Voice.OpenAI.APIKey, cfg.Anthropic.APIKey)
 	for _, c := range cfg.Brain.OpenAICompat {
 		out = append(out, c.APIKey)
 	}
@@ -88,7 +92,7 @@ func EnvSecrets(environ []string) []string {
 	var out []string
 	for _, kv := range environ {
 		k, v, ok := strings.Cut(kv, "=")
-		if ok && secretEnvName.MatchString(k) {
+		if ok && IsSecretEnvName(k) && !filepath.IsAbs(v) {
 			out = append(out, v)
 		}
 	}

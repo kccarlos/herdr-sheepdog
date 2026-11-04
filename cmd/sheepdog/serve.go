@@ -130,13 +130,13 @@ func implicitEnvFile() string {
 // loaded before config.Load so SHEEPDOG_*/GEMINI_API_KEY* from the file
 // take effect, and are never logged (see config.LoadEnvFile).
 func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
-	code, ok, _ = loadServeEnvFileAt(path, stderr)
+	code, ok, _, _ = loadServeEnvFileAt(path, stderr)
 	return code, ok
 }
 
 // loadServeEnvFileAt is loadServeEnvFile that also returns the absolute
 // path of the file it loaded ("" when none existed).
-func loadServeEnvFileAt(path string, stderr io.Writer) (code int, ok bool, loaded string) {
+func loadServeEnvFileAt(path string, stderr io.Writer) (code int, ok bool, loaded string, names []string) {
 	explicit := path != ""
 	if !explicit {
 		path = implicitEnvFile()
@@ -147,18 +147,19 @@ func loadServeEnvFileAt(path string, stderr io.Writer) (code int, ok bool, loade
 		// is simply absent (a fresh install), not an error.
 		if explicit && path != configEnvPath() {
 			fprintf(stderr, "sheepdog: --env-file %s: %v\n", path, err)
-			return 1, false, ""
+			return 1, false, "", nil
 		}
-		return 0, true, "" // no default .env: not an error
+		return 0, true, "", nil // no default .env: not an error
 	}
-	if err := config.LoadEnvFile(path); err != nil {
+	names, err := config.LoadEnvFileNames(path)
+	if err != nil {
 		fprintf(stderr, "sheepdog: %v\n", err)
-		return 1, false, ""
+		return 1, false, "", names
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	return 0, true, path
+	return 0, true, path, names
 }
 
 // runServe implements `sheepdog serve`.
@@ -169,7 +170,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	baseEnv := os.Environ() // before the env file: a reload starts from it
 	startedAt := time.Now().UTC()
-	code, ok, loadedEnv := loadServeEnvFileAt(o.envFile, stderr)
+	code, ok, loadedEnv, envNames := loadServeEnvFileAt(o.envFile, stderr)
 	if !ok {
 		return code
 	}
@@ -179,7 +180,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	applyDataDir(&cfg, o.dataDir)
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version}
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version, EnvFileNames: envNames}
 	if err := app.Check(cfg, opts); err != nil {
 		fprintf(stderr, "sheepdog serve: %v\n", err)
 		return 2
@@ -373,7 +374,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			// The exec failed: the new executable cannot start. Take the lock
 			// back and carry on with this one; the notice stays.
 			tracker.SetRestart(true, next, true)
-			_, _ = loadServeEnvFile(o.envFile, stderr)
+			_, _, _, opts.EnvFileNames = loadServeEnvFileAt(o.envFile, stderr)
 			if lock, err = daemon.Acquire(cfg.DataDir); err != nil {
 				fprintf(stderr, "%v\n", err)
 				return 1
@@ -399,7 +400,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			continue
 		}
 		if errors.Is(err, app.ErrRestart) && ctx.Err() == nil {
-			next, ok := reloadServeConfig(baseEnv, o, stderr)
+			next, names, ok := reloadServeConfig(baseEnv, o, stderr)
+			opts.EnvFileNames = names
 			if ok {
 				cfg = next
 				logw.SetRedactor(redact.ForConfig(cfg))
@@ -528,18 +530,19 @@ func listenRetry(a *app.App, reload bool) error {
 // env file was first loaded (config.LoadEnvFile never overrides a set
 // variable, so a key changed in the file would otherwise be ignored),
 // then the file is loaded over it.
-func reloadServeConfig(baseEnv []string, o serveOpts, stderr io.Writer) (config.Config, bool) {
+func reloadServeConfig(baseEnv []string, o serveOpts, stderr io.Writer) (config.Config, []string, bool) {
 	restoreEnv(baseEnv)
-	if _, ok := loadServeEnvFile(o.envFile, stderr); !ok {
-		return config.Config{}, false
+	_, ok, _, names := loadServeEnvFileAt(o.envFile, stderr)
+	if !ok {
+		return config.Config{}, names, false
 	}
 	cfg, err := config.Load(o.configPath)
 	if err != nil {
 		fprintf(stderr, "sheepdog serve: reload: %v; keeping the old settings\n", err)
-		return config.Config{}, false
+		return config.Config{}, names, false
 	}
 	applyDataDir(&cfg, o.dataDir)
-	return cfg, true
+	return cfg, names, true
 }
 
 // restoreEnv makes the process environment exactly env.

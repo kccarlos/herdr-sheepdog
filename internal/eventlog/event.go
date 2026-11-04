@@ -1,6 +1,7 @@
 package eventlog
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -50,20 +51,64 @@ func (e Event) Encoded() []byte {
 }
 
 // newEvent builds an Event from a Log call: the payload is marshalled now,
-// dur_ms, turn_id and utterance_id are lifted out of it, and the whole
-// line is encoded once.
-func newEvent(seq uint64, id int64, ts time.Time, source, typ, paneID string, payload any) Event {
+// redacted when redact is set, dur_ms, turn_id and utterance_id are lifted
+// out of it, and the whole line is encoded once.
+func newEvent(seq uint64, id int64, ts time.Time, source, typ, paneID string, payload any, redact func(string) string) Event {
 	ev := Event{ID: id, TS: ts.UTC(), Source: source, Type: typ, PaneID: paneID, Seq: seq}
 	if payload != nil {
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			raw, _ = json.Marshal(map[string]string{"encode_error": err.Error()})
 		}
+		if redact != nil {
+			raw = redactJSON(raw, redact)
+		}
 		ev.Payload = raw
 		ev.DurMS, ev.TurnID, ev.UtteranceID = liftFromPayload(raw)
 	}
 	ev.encoded, _ = json.Marshal(ev)
 	return ev
+}
+
+// redactJSON masks the secrets in a marshalled payload. Most payloads
+// hold none, and are returned as they are. For one that does, every string
+// in it is redacted on its own and the payload marshalled again, so the
+// result is valid JSON whatever a mask replaced (a pattern could otherwise
+// swallow the backslash of an escaped quote).
+func redactJSON(raw json.RawMessage, redact func(string) string) json.RawMessage {
+	if redact(string(raw)) == string(raw) {
+		return raw
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		out, _ := json.Marshal(map[string]string{"redacted": redact(string(raw))})
+		return out
+	}
+	out, err := json.Marshal(redactValue(v, redact))
+	if err != nil {
+		out, _ = json.Marshal(map[string]string{"redacted": "unencodable"})
+	}
+	return out
+}
+
+func redactValue(v any, redact func(string) string) any {
+	switch x := v.(type) {
+	case string:
+		return redact(x)
+	case []any:
+		for i := range x {
+			x[i] = redactValue(x[i], redact)
+		}
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[redact(k)] = redactValue(e, redact)
+		}
+		return out
+	}
+	return v
 }
 
 // liftFromPayload returns payload.dur_ms when it is a number and

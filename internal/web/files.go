@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -47,6 +49,9 @@ func (s *Server) filesRoot(r *http.Request) (root *files.Root, pane, space strin
 	}
 	if dir == "" {
 		return nil, "", "", errNoCwd
+	}
+	if s.privateRoot(dir) {
+		return nil, pane, space, files.ErrSensitive
 	}
 	root, err = files.Open(dir)
 	return root, pane, space, err
@@ -181,4 +186,30 @@ func (s *Server) logRead(pane string, fields map[string]any, size int64, err err
 		fields["size"] = size
 	}
 	s.log.Log(logSource, "files.read", pane, fields)
+}
+
+// privateRoot refuses roots that contain home or data, and the data tree itself.
+func (s *Server) privateRoot(dir string) bool {
+	resolve := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		p, _ = filepath.Abs(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	contains := func(parent, child string) bool {
+		if parent == "" || child == "" {
+			return false
+		}
+		rel, err := filepath.Rel(parent, child)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	root := resolve(dir)
+	home, _ := os.UserHomeDir()
+	home = resolve(home)
+	data := resolve(s.deps.DataDir)
+	return contains(root, home) || contains(root, data) || contains(data, root)
 }

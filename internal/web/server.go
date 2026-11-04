@@ -264,11 +264,12 @@ type Deps struct {
 
 // Server is the HTTP server. Create with New, then Listen + Serve.
 type Server struct {
-	deps Deps
-	log  logging.Logger
-	mux  *http.ServeMux
-	hub  *hub
-	term *termServer
+	attachmentMu sync.Mutex
+	deps         Deps
+	log          logging.Logger
+	mux          *http.ServeMux
+	hub          *hub
+	term         *termServer
 	// noAccessLogged are the folders web.spaces.no_access already named
 	// (path -> true), so a phone polling /api/spaces logs each once.
 	noAccessLogged sync.Map

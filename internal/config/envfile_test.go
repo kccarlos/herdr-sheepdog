@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -35,8 +36,12 @@ func TestLoadEnvFile(t *testing.T) {
 		})
 	}
 
-	if err := LoadEnvFile(path); err != nil {
-		t.Fatalf("LoadEnvFile: %v", err)
+	names, err := LoadEnvFileNames(path)
+	if err != nil {
+		t.Fatalf("LoadEnvFileNames: %v", err)
+	}
+	if !slices.Equal(names, []string{"GEMINI_API_KEY", "SHEEPDOG_LLM_MODEL", "SHEEPDOG_CLI_PREFER"}) {
+		t.Errorf("names = %v", names)
 	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "abc123" {
 		t.Errorf("GEMINI_API_KEY = %q", v)
@@ -61,8 +66,12 @@ func TestLoadEnvFileRealEnvWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SHEEPDOG_WEB_PORT", "9090")
-	if err := LoadEnvFile(path); err != nil {
-		t.Fatalf("LoadEnvFile: %v", err)
+	names, err := LoadEnvFileNames(path)
+	if err != nil {
+		t.Fatalf("LoadEnvFileNames: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("shell variable recorded as file-loaded: %v", names)
 	}
 	if v := os.Getenv("SHEEPDOG_WEB_PORT"); v != "9090" {
 		t.Errorf("SHEEPDOG_WEB_PORT = %q, want the real env value 9090 to win", v)

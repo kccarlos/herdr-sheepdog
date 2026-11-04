@@ -185,8 +185,8 @@ func TestSignedSession(t *testing.T) {
 	if st, _, bad := h.signIn(d.key, d.id, "another-pin", time.Now()); st != 401 || bad["reason"] != "bad_signature" {
 		t.Errorf("another daemon's pin = %d %v", st, bad)
 	}
-	// A browser signs an empty pin line.
-	if st, _, _ := h.signIn(d.key, d.id, "", time.Now()); st != 200 {
+	// A phone must sign the certificate pin.
+	if st, _, _ := h.signIn(d.key, d.id, "", time.Now()); st != 401 {
 		t.Errorf("empty pin = %d", st)
 	}
 	if st, _, bad := h.signIn(d.key, "nobody", pin, time.Now()); st != 401 || bad["reason"] != reasonUnknownDevice {

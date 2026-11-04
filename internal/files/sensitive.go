@@ -15,6 +15,12 @@ var (
 		".git", ".env", ".envrc", ".ssh", ".aws", ".gnupg", ".netrc", ".npmrc", ".pypirc",
 		".docker", ".kube", ".git-credentials", ".pgpass",
 		"credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml",
+		// Home-folder secrets, for an agent or space whose folder is $HOME:
+		// the agent CLIs' tokens, other tools' config and sheepdog's own
+		// config and data, caches, and shell and REPL history.
+		".codex", ".claude", "Library", ".credentials.json", "auth.json", ".gcloud",
+		".bash_history", ".zsh_history", ".python_history", ".psql_history",
+		".mysql_history", ".node_repl_history",
 	)
 	// envTemplates are the .env.* files meant to be shared.
 	envTemplates    = foldSet(".env.example", ".env.sample", ".env.template")

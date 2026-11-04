@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -24,7 +25,9 @@ const (
 	// MaxAttachmentBytes is the largest file the daemon accepts.
 	MaxAttachmentBytes = 20 << 20
 	// attachmentMaxAge is how long an attachment is kept.
-	attachmentMaxAge = 7 * 24 * time.Hour
+	attachmentMaxAge        = 7 * 24 * time.Hour
+	attachmentMaxFiles      = 500
+	attachmentMaxTotalBytes = 1 << 30
 	// attachmentNameMax caps the kept part of the client's file name.
 	attachmentNameMax = 64
 )
@@ -115,6 +118,8 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "only images, text and PDF files can be attached")
 		return
 	}
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
 	// Prune first: it removes empty pane folders, this one included.
 	s.pruneAttachments()
 	dir := filepath.Join(root, paneDirName(pane))
@@ -146,6 +151,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, attachmentReadMessage(status))
 		return
 	}
+	s.pruneAttachments()
 	s.log.Log(logSource, "web.attachment", pane, map[string]any{"bytes": written, "type": typ, "remote_kind": remoteKind(r.RemoteAddr)})
 	writeJSON(w, http.StatusCreated, AttachmentResponse{Path: path, Name: name, Bytes: written, Type: typ})
 }
@@ -234,6 +240,13 @@ func (s *Server) pruneAttachments() {
 	}
 	cutoff := s.deps.Now().Add(-attachmentMaxAge)
 	removed := 0
+	type entry struct {
+		path string
+		size int64
+		mod  time.Time
+	}
+	var kept []entry
+	var total int64
 	for _, p := range panes {
 		if !p.IsDir() {
 			continue
@@ -246,10 +259,16 @@ func (s *Server) pruneAttachments() {
 		left, here := len(files), 0
 		for _, f := range files {
 			info, err := f.Info()
-			if err != nil || !info.Mode().IsRegular() || !info.ModTime().Before(cutoff) {
+			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
-			if os.Remove(filepath.Join(dir, f.Name())) == nil {
+			path := filepath.Join(dir, f.Name())
+			if !info.ModTime().Before(cutoff) {
+				kept = append(kept, entry{path, info.Size(), info.ModTime()})
+				total += info.Size()
+				continue
+			}
+			if os.Remove(path) == nil {
 				removed++
 				left--
 				here++
@@ -257,6 +276,16 @@ func (s *Server) pruneAttachments() {
 		}
 		if left == 0 && here > 0 {
 			_ = os.Remove(dir)
+		}
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].mod.Before(kept[j].mod) })
+	for i, f := range kept {
+		if len(kept)-i <= attachmentMaxFiles && total <= attachmentMaxTotalBytes {
+			break
+		}
+		if os.Remove(f.path) == nil {
+			removed++
+			total -= f.size
 		}
 	}
 	if removed > 0 {

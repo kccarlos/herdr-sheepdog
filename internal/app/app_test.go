@@ -350,6 +350,42 @@ func TestBuildQuerierWiresConfiguredResumeCommands(t *testing.T) {
 	}
 }
 
+// TestQuerierEnvFileNamesReachSubprocess checks provenance across the loader,
+// app wiring and subprocess environment, including a custom provider key.
+func TestQuerierEnvFileNamesReachSubprocess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "shell-marker")
+	// Use a non-SHEEPDOG name to exercise the file-name filter itself.
+	t.Setenv("TEST_COMPAT_KEY", "")
+	if err := os.Unsetenv("TEST_COMPAT_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("ANTHROPIC_API_KEY=file-ignored\nTEST_COMPAT_KEY=file-marker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	names, err := config.LoadEnvFileNames(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "fakebin.sh")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf 'shell=%s file=%s' \"$ANTHROPIC_API_KEY\" \"${TEST_COMPAT_KEY-unset}\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{cfg: config.Config{CLI: config.CLI{Prefer: "codex", CodexBin: bin, CodexCmd: []string{bin}, TimeoutS: 5, MaxOutputKB: 16}}, opts: Options{EnvFileNames: names}, log: logging.NopLogger{}}
+	runner, err := a.buildQuerier()
+	if err != nil || runner == nil {
+		t.Fatalf("buildQuerier: runner=%v err=%v", runner, err)
+	}
+	res, err := runner.Run(context.Background(), cli.Query{Backend: cli.Codex, Workspace: dir, Question: "why"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Raw, "shell=shell-marker file=unset") {
+		t.Errorf("subprocess environment = %q", res.Raw)
+	}
+}
+
 // TestRunCLIDetection proves cli.detected is logged after daemon.start
 // (WP4), that neither backend being found does not break ask(), and that
 // --cli=off skips detection entirely.
