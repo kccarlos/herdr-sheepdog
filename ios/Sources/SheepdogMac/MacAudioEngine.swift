@@ -4,18 +4,16 @@ import SheepdogKit
 
 /// The microphone and the speaker on the Mac: the counterpart of the
 /// phone's `AudioEngine` (Sources/Sheepdog/AudioEngine.swift), on the same
-/// Kit pieces.
+/// `AudioCapture` and `AudioPlayback` pipelines in `SheepdogKit`.
 ///
 /// Capture: an `AVAudioEngine` input tap → `MicMixdown` (one mono channel,
-/// whatever the voice-processing input delivers) → `PCMConverter` (16 kHz
-/// mono Int16) → `FrameChunker` (40 ms frames) → `CaptureGate` (the
-/// voice-activity detector, or hold-to-talk) → the caller, which writes each
-/// frame to `/ws`. A `MicSignalWatchdog` watches for a microphone that
-/// delivers only digital zero while unmuted.
+/// whatever the voice-processing input delivers) → `AudioCapture`
+/// (`PCMConverter`, `FrameChunker`, `CaptureGate` and `MicSignalWatchdog`) →
+/// the caller, which writes each 40 ms frame to `/ws`.
 ///
-/// Playback: one `AVAudioPlayerNode` fed 24 kHz chunks back to back through
-/// `PlaybackQueue`, with the same adaptive jitter buffer and the
-/// `AVAudioUnitTimePitch` rate control as the phone.
+/// Playback: `AudioPlayback` (`AVAudioPlayerNode` → `AVAudioUnitTimePitch` →
+/// `mainMixerNode`), plus the macOS mixer → output link at the input's sample
+/// rate that `AUVPAggregate` requires.
 ///
 /// Echo cancellation is the voice-processing I/O unit on the input node, on
 /// before the engine starts; the output node the player feeds is its
@@ -37,41 +35,47 @@ final class MacAudioEngine: VoiceAudio {
         }
     }
 
-    var onFrame: ((Data) -> Void)?
-    var onGate: ((Bool) -> Void)?
-    var onSpeakingChanged: ((Bool) -> Void)?
-    var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
-    var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?
+    var onFrame: ((Data) -> Void)? {
+        get { capture.onFrame }
+        set { capture.onFrame = newValue }
+    }
+    var onGate: ((Bool) -> Void)? {
+        get { capture.onGate }
+        set { capture.onGate = newValue }
+    }
+    var onSpeakingChanged: ((Bool) -> Void)? {
+        get { playback.onSpeakingChanged }
+        set { playback.onSpeakingChanged = newValue }
+    }
+    var onPlaybackReport: ((PlaybackQueue.Report) -> Void)? {
+        get { playback.onPlaybackReport }
+        set { playback.onPlaybackReport = newValue }
+    }
+    var onDrain: ((PlaybackQueue.DrainRecord) -> Void)? {
+        get { playback.onDrain }
+        set { playback.onDrain = newValue }
+    }
     var onNotice: ((LocalNotice) -> Void)?
-    var onMicSignal: ((Bool) -> Void)?
+    var onMicSignal: ((Bool) -> Void)? {
+        get { capture.onMicSignal }
+        set { capture.onMicSignal = newValue }
+    }
     var onStopped: ((String) -> Void)?
     var onAvailable: (() -> Void)?
 
-    private(set) var metrics = AudioMetrics()
+    var metrics: AudioMetrics {
+        var combined = engineMetrics
+        playback.apply(to: &combined)
+        return combined
+    }
+    private var engineMetrics = AudioMetrics()
     private(set) var isRunning = false
-    /// The capture-side switch `setMuted` throws (see `AudioEngine`): not a
-    /// second source of truth for "muted", which is the session core's.
-    private var isMuted = false
-    /// Debounces `onGate`: only the transition into "closed" is reported.
-    private var isGateClosed = false
     /// The engine stopped by itself (`onStopped`) and has not started since.
     private var stoppedByItself = false
 
     private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    /// Pitch-preserving time-stretch between the player and the mixer.
-    private let timePitch = AVAudioUnitTimePitch()
-    /// The 20 ms rate control loop; runs while the engine does.
-    private var steerTimer: Timer?
-    private static let steerInterval: TimeInterval = 0.02
-    private let playbackFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioContract.playbackRate, channels: 1, interleaved: false)!
-
-    private var converter: PCMConverter?
-    private var chunker = FrameChunker()
-    private var gate = CaptureGate()
-    private var watchdog = MicSignalWatchdog()
-    private var queue = PlaybackQueue()
-    private var wasSpeaking = false
+    private let capture = AudioCapture()
+    private let playback = AudioPlayback()
     private var observer: NSObjectProtocol?
     private let log: AppLogging
 
@@ -80,10 +84,7 @@ final class MacAudioEngine: VoiceAudio {
         // Attach only; the player is connected in `start()`, after voice
         // processing is on (the phone's reason, and the same here: a graph
         // wired before the I/O unit changed can play nothing).
-        engine.attach(player)
-        engine.attach(timePitch)
-        timePitch.pitch = 0
-        timePitch.rate = 1
+        playback.attach(to: engine)
         // The engine stops itself when the hardware format changes under it.
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.configurationChanged() }
@@ -110,11 +111,10 @@ final class MacAudioEngine: VoiceAudio {
         engine.mainMixerNode.outputVolume = 1
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else {
-            throw Failure.format("No microphone is available right now — check that nothing else is using it.")
+            throw Failure.format(AudioCapture.noMicrophoneMessage)
         }
-        resetCapture()
-        isGateClosed = false
-        metrics.hardwareSampleRate = format.sampleRate
+        capture.reset()
+        engineMetrics.hardwareSampleRate = format.sampleRate
 
         // 4 096 frames is a hint; the system hands over what it likes, which
         // is why the chunker exists.
@@ -128,14 +128,12 @@ final class MacAudioEngine: VoiceAudio {
             input.removeTap(onBus: 0)
             throw Failure.engineFailed(error.localizedDescription)
         }
-        player.play()
+        playback.start()
         isRunning = true
         stoppedByItself = false
-        startSteering()
-        restartedForSignal = false
-        if !isMuted, gate.manual != false { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
+        capture.didStart()
         recordVoiceProcessing()
-        log.log("audio started: input \(format.sampleRate) Hz, \(format.channelCount) ch, echo cancellation \(metrics.voiceProcessing.summary), time-pitch latency \(timePitch.latency * 1000) ms")
+        log.log("audio started: input \(format.sampleRate) Hz, \(format.channelCount) ch, echo cancellation \(engineMetrics.voiceProcessing.summary), time-pitch latency \(playback.timePitchLatency * 1000) ms")
     }
 
     /// The echo canceller: the voice-processing I/O unit, on before the
@@ -164,99 +162,52 @@ final class MacAudioEngine: VoiceAudio {
             bypassed: engine.inputNode.isVoiceProcessingBypassed,
             voiceChatMode: engine.inputNode.isVoiceProcessingEnabled
         )
-        if status != metrics.voiceProcessing {
-            metrics.voiceProcessing = status
+        if status != engineMetrics.voiceProcessing {
+            engineMetrics.voiceProcessing = status
             log.log("echo cancellation: \(status.summary)")
         }
     }
 
     func stop() {
         guard isRunning else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        stopSteering()
-        player.stop()
-        engine.stop()
-        queue.flush(now: CFAbsoluteTimeGetCurrent())
-        deliverReports()
-        applyRate(1)
-        resetCapture()
         isRunning = false
-        isGateClosed = false
-        watchdog.disarm()
-        reportSignal()
-        setSpeaking(false)
+        engine.inputNode.removeTap(onBus: 0)
+        playback.stop()
+        engine.stop()
+        capture.stop()
     }
 
     func setMuted(_ muted: Bool) {
-        isMuted = muted
-        if muted {
-            watchdog.disarm()
-            reportSignal()
-            // Muted means silence, not zeros: nothing leaves the mic at all,
-            // and the gate starts its bookkeeping again on unmute.
-            resetCapture()
-            if isGateClosed {
-                isGateClosed = false
-                onGate?(false)
-            }
-        } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: false, gateClosed: gate.manual == false) {
-            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
-            restartedForSignal = false
-        }
-    }
-
-    private func resetCapture() {
-        chunker.reset()
-        gate.reset()
-        converter = nil
+        capture.setMuted(muted, running: isRunning)
     }
 
     // MARK: - The gate
 
     /// Hold-to-talk: `true` pressed, `false` released, `nil` open mic.
     func setManualGate(_ manual: Bool?) {
-        let wasClosed = gate.manual == false
-        gate.manual = manual
-        if manual == false {
-            watchdog.disarm()
-            reportSignal()
-        } else if wasClosed,
-                  AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false, gateClosed: false) {
-            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
-            restartedForSignal = false
-        }
+        capture.setManualGate(manual, running: isRunning)
     }
 
-    var gateIsClosed: Bool { gate.isGated }
+    var gateIsClosed: Bool { capture.gateIsClosed }
 
     // MARK: - No signal
 
-    private var reportedNoSignal = false
-    private var restartedForSignal = false
+    var noSignal: Bool { capture.noSignal }
 
-    var noSignal: Bool { watchdog.noSignal }
-
-    private func reportSignal() {
-        guard watchdog.noSignal != reportedNoSignal else { return }
-        reportedNoSignal = watchdog.noSignal
-        onMicSignal?(watchdog.noSignal)
-    }
-
-    private func signalChanged(_ noSignal: Bool) {
-        reportSignal()
-        guard noSignal else {
+    private func signalChanged(_ change: AudioCapture.SignalChange) {
+        switch change {
+        case .recovered:
             log.log("microphone signal is back")
-            return
-        }
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        log.log("no microphone signal for \(watchdog.threshold) s: input \(format.sampleRate) Hz \(format.channelCount) ch, voice processing \(input.isVoiceProcessingEnabled), vp input muted \(input.isVoiceProcessingInputMuted)")
-        // One automatic restart per arm: a capture chain that came up silent
-        // usually comes back when it is rebuilt.
-        if !restartedForSignal {
-            restartedForSignal = true
-            if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted { input.isVoiceProcessingInputMuted = false }
-            restartCapture(routeChanged: false)
+        case let .lost(restart):
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            log.log("no microphone signal for \(capture.watchdogThreshold) s: input \(format.sampleRate) Hz \(format.channelCount) ch, voice processing \(input.isVoiceProcessingEnabled), vp input muted \(input.isVoiceProcessingInputMuted)")
+            // One automatic restart per arm: a capture chain that came up silent
+            // usually comes back when it is rebuilt.
+            if restart {
+                if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted { input.isVoiceProcessingInputMuted = false }
+                restartCapture(routeChanged: false)
+            }
         }
     }
 
@@ -277,112 +228,53 @@ final class MacAudioEngine: VoiceAudio {
     /// One mono buffer from the tap. The converter follows the buffer's rate,
     /// so a route that changed it needs no special case here.
     private func captureOnMain(_ buffer: AVAudioPCMBuffer) {
-        guard isRunning, !isMuted else { return }
-        let started = CFAbsoluteTimeGetCurrent()
-        let samples: [Int16]
+        guard isRunning else { return }
         do {
-            if converter?.inputFormat.sampleRate != buffer.format.sampleRate {
-                converter = try PCMConverter(inputFormat: buffer.format)
+            if let change = try capture.process(buffer, metrics: &engineMetrics) {
+                signalChanged(change)
             }
-            samples = try converter?.convert(buffer) ?? []
         } catch {
             log.log("convert failed: \(String(describing: error))")
-            return
         }
-        guard !samples.isEmpty else { return }
-        if let change = watchdog.observe(peak: PCMLevel.peak(of: samples), at: CFAbsoluteTimeGetCurrent()) {
-            signalChanged(change)
-        }
-
-        for frame in chunker.push(samples) {
-            let out = gate.push(frame)
-            if let transition = out.transition {
-                let closed = transition == .closed
-                isGateClosed = closed
-                onGate?(closed)
-            }
-            for send in out.send {
-                onFrame?(send.pcm16LEData)
-            }
-        }
-        metrics.gatedFrames = gate.gatedFrames
-        metrics.recordCapture(latency: CFAbsoluteTimeGetCurrent() - started, frames: 1)
     }
 
-    var inputPeak: Int { gate.peak }
-    var gatedFrames: Int { gate.gatedFrames }
+    var inputPeak: Int { capture.inputPeak }
+    var gatedFrames: Int { capture.gatedFrames }
 
     // MARK: - Playback
 
     /// One binary frame from the daemon: PCM16 LE mono at 24 kHz.
     func enqueue(_ data: Data) {
-        let samples = [Int16](pcm16LE: data)
-        guard !samples.isEmpty else { return }
-        schedule(queue.push(samples, now: CFAbsoluteTimeGetCurrent()))
-        deliverReports()
-    }
-
-    /// Hands the queue's playback reports to the caller, oldest first.
-    private func deliverReports() {
-        for report in queue.takeReports() {
-            onPlaybackReport?(report)
-        }
-        for drain in queue.takeDrains() {
-            onDrain?(drain)
-        }
+        playback.enqueue(data)
     }
 
     /// What the `ping` says about the engine: `running` or `suspended`.
     var audioState: String { isRunning ? "running" : "suspended" }
 
     /// The watchdog and the playback metrics, on the host timer's cadence.
-    /// Releasing a short utterance that never filled the jitter buffer is
-    /// `steer()`'s job while the engine runs; this only does it when the
-    /// engine is not running (audio can arrive before `start()`).
     func tick() {
-        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false, gateClosed: gate.manual == false),
-           let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
+        if let change = capture.tickWatchdog(running: isRunning) {
             signalChanged(change)
         }
-        let now = CFAbsoluteTimeGetCurrent()
-        if !isRunning {
-            schedule(queue.tick(now: now))
-            deliverReports()
-        }
-        metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
-        metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
-        recordJitterBufferMetrics()
-        setSpeaking(queue.isSpeaking)
+        playback.tick()
     }
 
     /// `flush` from the daemon, a `voice-command` stop or the Stop item:
     /// drop everything queued, now. Reports `flushed` every time.
     func flushPlayback() {
-        let hadAudio = queue.flush(now: CFAbsoluteTimeGetCurrent())
-        deliverReports()
-        if hadAudio {
-            player.stop()
-            if isRunning { player.play() }
-        }
-        applyRate(1)
-        setSpeaking(false)
+        playback.flush()
     }
 
     /// The voice provider changed (from `/ws` `status.provider`): switch the
     /// jitter-buffer target range. A no-op when it is already right.
     func setProvider(_ provider: String?) {
-        let profile = PlaybackProfile.forProvider(provider)
-        guard profile != queue.profile else { return }
-        queue.setProfile(profile)
+        guard let profile = playback.setProvider(provider) else { return }
         log.log("playback profile for \(provider ?? "default"): target \(profile.floorMilliseconds)–\(profile.ceilingMilliseconds) ms")
-        recordJitterBufferMetrics()
     }
 
-    // MARK: - Time-stretch
-
-    /// player → time-pitch → mixer, both edges at the playback format, and
-    /// mixer → output at the input's sample rate. The voice-processing unit
-    /// on the Mac will not initialize unless its two client sides share a
+    /// player → time-pitch → mixer at the playback format (`AudioPlayback`),
+    /// and mixer → output at the input's sample rate. The voice-processing
+    /// unit on the Mac will not initialize unless its two client sides share a
     /// rate (`AUVPAggregate`: "client-side input and output formats do not
     /// match", -10875), and the mixer's implicit link to the output can come
     /// up at 44.1 kHz against a 48 kHz microphone. Called after voice
@@ -390,91 +282,12 @@ final class MacAudioEngine: VoiceAudio {
     private func connectPlayback() {
         let inputRate = engine.inputNode.outputFormat(forBus: 0).sampleRate
         let outputChannels = engine.outputNode.inputFormat(forBus: 0).channelCount
-        engine.disconnectNodeOutput(player)
-        engine.disconnectNodeOutput(timePitch)
-        engine.connect(player, to: timePitch, format: playbackFormat)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: playbackFormat)
+        playback.connect(in: engine)
         if inputRate > 0,
            let mixed = AVAudioFormat(standardFormatWithSampleRate: inputRate, channels: outputChannels > 0 ? outputChannels : 2) {
             engine.disconnectNodeOutput(engine.mainMixerNode)
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: mixed)
         }
-    }
-
-    private func startSteering() {
-        steerTimer?.invalidate()
-        let timer = Timer(timeInterval: Self.steerInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.steer() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        steerTimer = timer
-    }
-
-    private func stopSteering() {
-        steerTimer?.invalidate()
-        steerTimer = nil
-    }
-
-    /// One control-loop step, every 20 ms while the engine runs: release
-    /// anything due, then move the rate one slew step.
-    private func steer() {
-        let now = CFAbsoluteTimeGetCurrent()
-        schedule(queue.tick(now: now))
-        applyRate(queue.steer(now: now))
-        deliverReports()
-    }
-
-    private func applyRate(_ rate: Double) {
-        let value = Float(rate)
-        if timePitch.rate != value { timePitch.rate = value }
-    }
-
-    private func schedule(_ chunks: [PlaybackQueue.Chunk]) {
-        guard !chunks.isEmpty else { return }
-        for chunk in chunks {
-            guard let buffer = Self.buffer(chunk.samples, format: playbackFormat) else { continue }
-            metrics.scheduledChunks += 1
-            // No `at:`: each buffer starts where the last one ended, which is
-            // what "gapless" means here.
-            player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.queue.completed(chunk.id, now: CFAbsoluteTimeGetCurrent())
-                    self.deliverReports()
-                    self.metrics.playedChunks += 1
-                    self.setSpeaking(self.queue.isSpeaking)
-                }
-            }
-        }
-        if isRunning, !player.isPlaying { player.play() }
-        metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
-        recordJitterBufferMetrics()
-        setSpeaking(queue.isSpeaking)
-    }
-
-    private func recordJitterBufferMetrics() {
-        metrics.recordJitterBuffer(
-            underruns: queue.underruns,
-            targetMilliseconds: queue.targetMilliseconds,
-            drains: queue.drains,
-            largestArrivalGapMilliseconds: queue.largestArrivalGapMilliseconds
-        )
-    }
-
-    private func setSpeaking(_ speaking: Bool) {
-        guard speaking != wasSpeaking else { return }
-        wasSpeaking = speaking
-        onSpeakingChanged?(speaking)
-    }
-
-    private static func buffer(_ samples: [Int16], format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
-              let channel = buffer.floatChannelData else { return nil }
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        for (index, sample) in samples.enumerated() {
-            channel[0][index] = Float(sample) / 32_768
-        }
-        return buffer
     }
 
     // MARK: - Route changes
@@ -507,15 +320,15 @@ final class MacAudioEngine: VoiceAudio {
             stopByItself(LocalNotice.microphoneWentAway)
             return
         }
-        metrics.hardwareSampleRate = format.sampleRate
-        resetCapture()
+        engineMetrics.hardwareSampleRate = format.sampleRate
+        capture.reset()
         input.installTap(onBus: 0, bufferSize: 4_096, format: format) { [weak self] buffer, _ in
             self?.handleCaptured(buffer)
         }
         connectPlayback()
         do {
             try engine.start()
-            player.play()
+            playback.play()
             recordVoiceProcessing()
             if routeChanged { onNotice?(.routeChanged(output: nil)) }
         } catch {
@@ -526,7 +339,7 @@ final class MacAudioEngine: VoiceAudio {
     private func stopByItself(_ message: String) {
         isRunning = false
         stoppedByItself = true
-        stopSteering()
+        playback.stopForFailure()
         onStopped?(message)
     }
 }

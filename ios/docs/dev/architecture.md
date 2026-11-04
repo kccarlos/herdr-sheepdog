@@ -30,8 +30,8 @@ accepted and built in phases (its section 6 says which are done).
 │  PlaybackQueue /       SessionState          ApprovalFlow / QuestionFocus     │
 │  PlaybackRatePolicy    VoiceBarModel         BrainActivity / DaemonHealth     │
 │  Metrics               ComputerLink          Push / MarkdownRenderer          │
-│                        SessionPolicies       VoiceProviders                   │
-│                                              ComputerStore / SecretStore      │
+│  AudioCapture          SessionPolicies       VoiceProviders                   │
+│  AudioPlayback                               ComputerStore / SecretStore      │
 └───────────────────────────────────────────────────────────────────────────────┘
                                    │
                         sheepdog daemon on your Mac
@@ -978,9 +978,10 @@ as `voice.client`.
 
 ### Audio (`MacAudioEngine`)
 
-The counterpart of `AudioEngine`, on the same Kit pieces (`PCMConverter`,
-`FrameChunker`, `CaptureGate`, `MicSignalWatchdog`, `PlaybackQueue`,
-`PlaybackRatePolicy` through the time-pitch unit). Differences:
+The counterpart of `AudioEngine`, on the same Kit pipelines (`AudioCapture`
+over `PCMConverter`, `FrameChunker`, `CaptureGate` and `MicSignalWatchdog`;
+`AudioPlayback` over `PlaybackQueue`, `PlaybackRatePolicy` and the
+time-pitch unit). Differences:
 
 - `inputNode.setVoiceProcessingEnabled(true)` is the echo canceller, on before
   the engine starts. There is no `AVAudioSession`.
@@ -1152,12 +1153,13 @@ and matches the browser page's:
   debt resets when a reply ends.
 - The playhead runs at 1/r, and `bufferedMilliseconds(at:)` (the policy's b
   and the ping's `buffer_ms`) measures audio, not wall-clock time.
-  `AudioEngine` runs the 20 ms control loop, and a flush or Stop resets the
+  `AudioPlayback` runs the 20 ms control loop, and a flush or Stop resets the
   rate to 1.0.
 
 `TimeStretchReplayTests` replays recorded and synthetic GPT-Live and Gemini
-arrival timelines through the queue. `TimePitchGraphTests` renders the real
-player → time-pitch → mixer graph offline.
+arrival timelines through the queue. `TimePitchGraphTests` and
+`AudioPlaybackTests` render the real player → time-pitch → mixer graph
+offline.
 
 ### Voice detection (what gets sent)
 

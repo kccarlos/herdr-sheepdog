@@ -2,24 +2,16 @@ import AVFoundation
 import Foundation
 import SheepdogKit
 
-/// The microphone and the speaker.
+/// The microphone and the speaker on iOS.
 ///
 /// Capture: an `AVAudioEngine` input tap at the hardware format →
-/// `PCMConverter` (16 kHz mono Int16) → `FrameChunker` (40 ms frames) →
-/// `CaptureGate` (the voice-activity detector, or hold-to-talk) → the
-/// caller, which writes each frame to `/ws` as a binary frame. A
-/// `MicSignalWatchdog` watches for a microphone that delivers only digital
-/// zero while unmuted.
+/// `AudioCapture` (`PCMConverter`, `FrameChunker`, `CaptureGate` and
+/// `MicSignalWatchdog` in `SheepdogKit`) → the caller, which writes each
+/// 40 ms frame to `/ws` as a binary frame.
 ///
-/// Playback: one `AVAudioPlayerNode` fed 24 kHz chunks back to back through
-/// `PlaybackQueue`, so the node concatenates them itself — gapless, and
-/// never "play this now". `PlaybackQueue` also owns the adaptive jitter
-/// buffer: it grows its target on a real underrun and reports the counters
-/// through `AudioMetrics`. Between the player and the mixer sits an
-/// `AVAudioUnitTimePitch` (pitch 0): every 20 ms the queue's
-/// `PlaybackRatePolicy` picks a rate between 0.85 and 1.05 from how much
-/// audio is buffered, so a provider that delivers slower than real time
-/// (GPT-Live) is stretched a little instead of running dry.
+/// Playback: `AudioPlayback` (`AVAudioPlayerNode` → `AVAudioUnitTimePitch` →
+/// `mainMixerNode`, driven by `PlaybackQueue` and its 20 ms rate-steering
+/// loop in `SheepdogKit`).
 ///
 /// The session is `.playAndRecord` / `.voiceChat`, which turns on the
 /// system's echo canceller: without it the voice hears itself out of the
@@ -47,21 +39,42 @@ final class AudioEngine {
     }
 
     /// A 40 ms frame ready for the socket, with the peak that decided the gate.
-    var onFrame: ((Data) -> Void)?
+    var onFrame: ((Data) -> Void)? {
+        get { capture.onFrame }
+        set { capture.onFrame = newValue }
+    }
     /// The silence gate flipped: `true` when it closed.
-    var onGate: ((Bool) -> Void)?
+    var onGate: ((Bool) -> Void)? {
+        get { capture.onGate }
+        set { capture.onGate = newValue }
+    }
     /// Input level, 0…1, for the orb's ring.
-    var onLevel: ((Float) -> Void)?
+    var onLevel: ((Float) -> Void)? {
+        get { capture.onLevel }
+        set { capture.onLevel = newValue }
+    }
     /// Playback started or stopped (the voice speaking, for the orb).
-    var onSpeakingChanged: ((Bool) -> Void)?
+    var onSpeakingChanged: ((Bool) -> Void)? {
+        get { playback.onSpeakingChanged }
+        set { playback.onSpeakingChanged = newValue }
+    }
     /// Output level, 0…1, as each chunk finishes playing: the speaking
     /// orb's waveform follows it. 0 when the voice stops.
-    var onOutputLevel: ((Float) -> Void)?
+    var onOutputLevel: ((Float) -> Void)? {
+        get { playback.onOutputLevel }
+        set { playback.onOutputLevel = newValue }
+    }
     /// A playback report for the daemon (`started`, `drained`, `flushed`;
     /// docs/ws-contract.md "Playback reports"), in the order they happened.
-    var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
+    var onPlaybackReport: ((PlaybackQueue.Report) -> Void)? {
+        get { playback.onPlaybackReport }
+        set { playback.onPlaybackReport = newValue }
+    }
     /// Every time the player ran dry, for the daemon's `drain` message.
-    var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?
+    var onDrain: ((PlaybackQueue.DrainRecord) -> Void)? {
+        get { playback.onDrain }
+        set { playback.onDrain = newValue }
+    }
     /// An interruption (a call, Siri) or a route change: the voice bar, a
     /// banner or the log say it, not the conversation (`LocalNotice`).
     var onNotice: ((LocalNotice) -> Void)?
@@ -69,7 +82,10 @@ final class AudioEngine {
     /// change; nil once it stops.
     var onRoute: ((AudioRoute?) -> Void)?
     /// The microphone stopped (true) or resumed (false) delivering signal.
-    var onMicSignal: ((Bool) -> Void)?
+    var onMicSignal: ((Bool) -> Void)? {
+        get { capture.onMicSignal }
+        set { capture.onMicSignal = newValue }
+    }
     /// iOS paused the audio and would not resume it (true), or it was
     /// resumed or stopped (false).
     var onPausedChanged: ((Bool) -> Void)?
@@ -81,36 +97,21 @@ final class AudioEngine {
     /// again.
     var onAvailable: (() -> Void)?
 
-    private(set) var metrics = AudioMetrics()
+    var metrics: AudioMetrics {
+        var combined = engineMetrics
+        playback.apply(to: &combined)
+        return combined
+    }
+    private var engineMetrics = AudioMetrics()
     private(set) var isRunning = false
-    /// The capture-side switch `setMuted` throws: gates `captureOnMain` on
-    /// the render thread and arms/disarms the watchdog. Not a second source
-    /// of truth for "muted" — the view model's own `isMuted` (and what it
-    /// tells the daemon) is that; nothing outside `AudioEngine` reads this.
-    private var isMuted = false
-    /// Debounces `onGate`: only the *transition* into "closed" is reported
-    /// (from `setMuted` and `captureOnMain`). The view model reads
-    /// `gateIsClosed` for the gate's state itself.
-    private var isGateClosed = false
     /// Running, but paused after an interruption iOS would not let us
     /// resume from by ourselves: `resume()` is the way back.
     private(set) var needsResume = false
 
     private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    /// Pitch-preserving time-stretch between the player and the mixer.
-    private let timePitch = AVAudioUnitTimePitch()
-    /// The 20 ms rate control loop; runs while the engine does.
-    private var steerTimer: Timer?
-    private static let steerInterval: TimeInterval = 0.02
-    private let playbackFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioContract.playbackRate, channels: 1, interleaved: false)!
+    private let capture = AudioCapture()
+    private let playback = AudioPlayback()
 
-    private var converter: PCMConverter?
-    private var chunker = FrameChunker()
-    private var gate = CaptureGate()
-    private var watchdog = MicSignalWatchdog()
-    private var queue = PlaybackQueue()
-    private var wasSpeaking = false
     private var interrupted = false
     /// The `.playAndRecord` session is active and ours: false until
     /// `configureSession` succeeds, and again while iOS holds the audio.
@@ -129,10 +130,7 @@ final class AudioEngine {
         // `.playAndRecord` session is active and voice processing is on:
         // a graph wired against the launch-time session (`.soloAmbient`,
         // output only) played nothing once the session changed under it.
-        engine.attach(player)
-        engine.attach(timePitch)
-        timePitch.pitch = 0
-        timePitch.rate = 1
+        playback.attach(to: engine)
         observe()
     }
 
@@ -172,16 +170,12 @@ final class AudioEngine {
             SheepdogLog.audio.error("app input was muted at the system level; unmuting")
             try? AVAudioApplication.shared.setInputMuted(false)
         }
-        connectPlayback()
+        playback.connect(in: engine)
         engine.mainMixerNode.outputVolume = 1
         let format = input.inputFormat(forBus: 0)
         try requireCapturable(format)
-        let converter = try PCMConverter(inputFormat: format)
-        self.converter = converter
-        chunker.reset()
-        gate.reset()
-        isGateClosed = false
-        metrics.hardwareSampleRate = format.sampleRate
+        try capture.prepare(inputFormat: format)
+        engineMetrics.hardwareSampleRate = format.sampleRate
 
         // 4 096 frames is a hint; iOS hands over what it likes, which is why
         // the chunker exists.
@@ -195,15 +189,13 @@ final class AudioEngine {
             input.removeTap(onBus: 0)
             throw Failure.engineFailed(error.localizedDescription)
         }
-        player.play()
+        playback.start()
         isRunning = true
         stoppedByItself = false
-        startSteering()
-        restartedForSignal = false
-        if !isMuted, gate.manual != false { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
+        capture.didStart()
         recordVoiceProcessing()
         reportRoute()
-        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, echo cancellation \(self.metrics.voiceProcessing.summary, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
+        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, echo cancellation \(self.engineMetrics.voiceProcessing.summary, privacy: .public), time-pitch latency \(self.playback.timePitchLatency * 1000, privacy: .public) ms")
     }
 
     /// The echo canceller. `.voiceChat` alone does not cancel echo for
@@ -241,58 +233,31 @@ final class AudioEngine {
             outputRoute: session.currentRoute.outputs.map(\.portName).joined(separator: ", "),
             inputRoute: session.currentRoute.inputs.map(\.portName).joined(separator: ", ")
         )
-        metrics.outputRoute = status.outputRoute
-        if status != metrics.voiceProcessing {
-            metrics.voiceProcessing = status
+        engineMetrics.outputRoute = status.outputRoute
+        if status != engineMetrics.voiceProcessing {
+            engineMetrics.voiceProcessing = status
             SheepdogLog.audio.info("echo cancellation: \(status.summary, privacy: .public)")
         }
     }
 
     func stop() {
         guard isRunning else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        stopSteering()
-        player.stop()
-        engine.stop()
-        queue.flush(now: CFAbsoluteTimeGetCurrent())
-        deliverReports()
-        applyRate(1)
-        chunker.reset()
-        gate.reset()
-        converter?.reset()
         isRunning = false
-        isGateClosed = false
         interrupted = false
         sessionActive = false
         routeChangedWhileHeld = false
         stoppedByItself = false
+        engine.inputNode.removeTap(onBus: 0)
+        playback.stop()
+        engine.stop()
+        capture.stop()
         setNeedsResume(false)
         onRoute?(nil)
-        watchdog.disarm()
-        reportSignal()
-        setSpeaking(false)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func setMuted(_ muted: Bool) {
-        isMuted = muted
-        if muted {
-            watchdog.disarm()
-            reportSignal()
-            // Muted means silence, not zeros: nothing leaves the mic at all,
-            // and the gate starts its bookkeeping again on unmute.
-            chunker.reset()
-            gate.reset()
-            converter?.reset()
-            if isGateClosed {
-                isGateClosed = false
-                onGate?(false)
-            }
-            onLevel?(0)
-        } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: interrupted || needsResume, gateClosed: gate.manual == false) {
-            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
-            restartedForSignal = false
-        }
+        capture.setMuted(muted, running: isRunning, interrupted: holdsAudio)
     }
 
     // MARK: - The gate
@@ -300,56 +265,35 @@ final class AudioEngine {
     /// Hold-to-talk: `true` pressed, `false` released, `nil` open mic. The
     /// transition reaches the caller through `onGate` with the next frame.
     func setManualGate(_ manual: Bool?) {
-        let wasClosed = gate.manual == false
-        gate.manual = manual
-        // Hold-to-talk expects audio only while the gate is open: closing it
-        // clears any no-signal state, opening it starts a fresh grace period.
-        if manual == false {
-            watchdog.disarm()
-            reportSignal()
-        } else if wasClosed,
-                  AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume, gateClosed: false) {
-            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
-            restartedForSignal = false
-        }
+        capture.setManualGate(manual, running: isRunning, interrupted: holdsAudio)
     }
 
-    var gateDiagnostics: CaptureGate.Diagnostics { gate.diagnostics }
+    var gateDiagnostics: CaptureGate.Diagnostics { capture.gateDiagnostics }
 
     /// The gate's own state right now (after a start or a reset, before any
     /// frame has told the caller).
-    var gateIsClosed: Bool { gate.isGated }
+    var gateIsClosed: Bool { capture.gateIsClosed }
 
     // MARK: - No signal
 
-    private var reportedNoSignal = false
-    private var restartedForSignal = false
+    var noSignal: Bool { capture.noSignal }
 
-    var noSignal: Bool { watchdog.noSignal }
-
-    private func reportSignal() {
-        guard watchdog.noSignal != reportedNoSignal else { return }
-        reportedNoSignal = watchdog.noSignal
-        onMicSignal?(watchdog.noSignal)
-    }
-
-    private func signalChanged(_ noSignal: Bool) {
-        reportSignal()
-        guard noSignal else {
+    private func signalChanged(_ change: AudioCapture.SignalChange) {
+        switch change {
+        case .recovered:
             SheepdogLog.audio.info("microphone signal is back")
-            return
-        }
-        let input = engine.inputNode
-        let format = input.inputFormat(forBus: 0)
-        SheepdogLog.audio.error("no microphone signal for \(self.watchdog.threshold, privacy: .public) s: input \(format.sampleRate, privacy: .public) Hz \(format.channelCount, privacy: .public) ch, voice processing \(input.isVoiceProcessingEnabled, privacy: .public), vp input muted \(input.isVoiceProcessingInputMuted, privacy: .public), app input muted \(AVAudioApplication.shared.isInputMuted, privacy: .public), route \(AVAudioSession.sharedInstance().currentRoute.inputs.map(\.portName).joined(separator: ","), privacy: .public)")
-        // One automatic restart per arm: a capture chain that came up
-        // silent usually comes back when it is rebuilt.
-        if !restartedForSignal {
-            restartedForSignal = true
-            if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted { input.isVoiceProcessingInputMuted = false }
-            // The watchdog stays tripped until a real sample arrives, so the
-            // screen does not flicker back to "listening" on a guess.
-            restartCapture()
+        case let .lost(restart):
+            let input = engine.inputNode
+            let format = input.inputFormat(forBus: 0)
+            SheepdogLog.audio.error("no microphone signal for \(self.capture.watchdogThreshold, privacy: .public) s: input \(format.sampleRate, privacy: .public) Hz \(format.channelCount, privacy: .public) ch, voice processing \(input.isVoiceProcessingEnabled, privacy: .public), vp input muted \(input.isVoiceProcessingInputMuted, privacy: .public), app input muted \(AVAudioApplication.shared.isInputMuted, privacy: .public), route \(AVAudioSession.sharedInstance().currentRoute.inputs.map(\.portName).joined(separator: ","), privacy: .public)")
+            // One automatic restart per arm: a capture chain that came up
+            // silent usually comes back when it is rebuilt.
+            if restart {
+                if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted { input.isVoiceProcessingInputMuted = false }
+                // The watchdog stays tripped until a real sample arrives, so the
+                // screen does not flicker back to "listening" on a guess.
+                restartCapture()
+            }
         }
     }
 
@@ -384,7 +328,7 @@ final class AudioEngine {
         guard format.channelCount > 0, format.sampleRate > 0 else {
             // The simulator does this while a route settles; so does a device
             // whose microphone another app holds.
-            throw Failure.format("No microphone is available right now — check that nothing else is using it.")
+            throw Failure.format(AudioCapture.noMicrophoneMessage)
         }
     }
 
@@ -417,61 +361,24 @@ final class AudioEngine {
     }
 
     private func captureOnMain(_ buffer: AVAudioPCMBuffer) {
-        guard isRunning, !isMuted, let converter else { return }
-        let started = CFAbsoluteTimeGetCurrent()
-        let samples: [Int16]
+        guard isRunning else { return }
         do {
-            samples = try converter.convert(buffer)
+            if let change = try capture.process(buffer, metrics: &engineMetrics) {
+                signalChanged(change)
+            }
         } catch {
             SheepdogLog.audio.error("convert failed: \(String(describing: error), privacy: .public)")
-            return
         }
-        guard !samples.isEmpty else { return }
-        if let change = watchdog.observe(peak: PCMLevel.peak(of: samples), at: CFAbsoluteTimeGetCurrent()) {
-            signalChanged(change)
-        }
-
-        var level: Float = 0
-        for frame in chunker.push(samples) {
-            let peak = PCMLevel.peak(of: frame)
-            level = max(level, Float(peak) / 32_768)
-            let out = gate.push(frame)
-            if let transition = out.transition {
-                let closed = transition == .closed
-                isGateClosed = closed
-                onGate?(closed)
-            }
-            for send in out.send {
-                onFrame?(send.pcm16LEData)
-            }
-        }
-        metrics.gatedFrames = gate.gatedFrames
-        metrics.recordCapture(latency: CFAbsoluteTimeGetCurrent() - started, frames: 1)
-        onLevel?(level)
     }
 
-    var inputPeak: Int { gate.peak }
-    var gatedFrames: Int { gate.gatedFrames }
+    var inputPeak: Int { capture.inputPeak }
+    var gatedFrames: Int { capture.gatedFrames }
 
     // MARK: - Playback
 
     /// One binary frame from the daemon: PCM16 LE mono at 24 kHz.
     func enqueue(_ data: Data) {
-        let samples = [Int16](pcm16LE: data)
-        guard !samples.isEmpty else { return }
-        schedule(queue.push(samples, now: CFAbsoluteTimeGetCurrent()))
-        deliverReports()
-    }
-
-    /// Hands the queue's playback reports to the caller, oldest first.
-    /// Called after every queue mutation that can produce one.
-    private func deliverReports() {
-        for report in queue.takeReports() {
-            onPlaybackReport?(report)
-        }
-        for drain in queue.takeDrains() {
-            onDrain?(drain)
-        }
+        playback.enqueue(data)
     }
 
     /// What the `ping` says about the engine (the browser sends its
@@ -483,142 +390,25 @@ final class AudioEngine {
     }
 
     /// The watchdog and the playback metrics, on the UI timer's cadence
-    /// (100 ms while audio is moving, 1 s idle). Releasing a short
-    /// utterance that never filled the jitter buffer (`queue.tick`) is
-    /// `steer()`'s job while the engine runs, at its finer 20 ms cadence;
-    /// this only calls it itself when the engine is *not* running, since
-    /// `enqueue` has no `isRunning` guard — audio can arrive (and need
-    /// releasing) before `start()` — and that is the one case `steer()`
-    /// never sees.
+    /// (100 ms while audio is moving, 1 s idle).
     func tick() {
-        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume, gateClosed: gate.manual == false),
-           let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
+        if let change = capture.tickWatchdog(running: isRunning, interrupted: holdsAudio) {
             signalChanged(change)
         }
-        let now = CFAbsoluteTimeGetCurrent()
-        if !isRunning {
-            schedule(queue.tick(now: now))
-            deliverReports()
-        }
-        metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
-        metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
-        recordJitterBufferMetrics()
-        setSpeaking(queue.isSpeaking)
+        playback.tick()
     }
 
     /// `flush` from the daemon, or the Stop button: drop everything queued,
     /// now. Reports `flushed` every time, even with nothing playing.
     func flushPlayback() {
-        let hadAudio = queue.flush(now: CFAbsoluteTimeGetCurrent())
-        deliverReports()
-        if hadAudio {
-            player.stop()
-            if isRunning { player.play() }
-        }
-        applyRate(1)
-        setSpeaking(false)
+        playback.flush()
     }
 
     /// The voice provider changed (from `/ws` `status.provider`): switch
     /// the jitter-buffer target range. A no-op when it is already right.
     func setProvider(_ provider: String?) {
-        let profile = PlaybackProfile.forProvider(provider)
-        guard profile != queue.profile else { return }
-        queue.setProfile(profile)
+        guard let profile = playback.setProvider(provider) else { return }
         SheepdogLog.audio.info("playback profile for \(provider ?? "default", privacy: .public): target \(profile.floorMilliseconds, privacy: .public)–\(profile.ceilingMilliseconds, privacy: .public) ms")
-        recordJitterBufferMetrics()
-    }
-
-    // MARK: - Time-stretch
-
-    /// player → time-pitch → mixer, both edges at the playback format.
-    private func connectPlayback() {
-        engine.disconnectNodeOutput(player)
-        engine.disconnectNodeOutput(timePitch)
-        engine.connect(player, to: timePitch, format: playbackFormat)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: playbackFormat)
-    }
-
-    private func startSteering() {
-        steerTimer?.invalidate()
-        let timer = Timer(timeInterval: Self.steerInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.steer() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        steerTimer = timer
-    }
-
-    private func stopSteering() {
-        steerTimer?.invalidate()
-        steerTimer = nil
-    }
-
-    /// One control-loop step, every 20 ms while the engine runs: release
-    /// anything due (`PlaybackQueue.tick`, which also notices a drain when
-    /// nothing has arrived), then move the rate one slew step and hand it
-    /// to the time-pitch unit. The one exception — audio that arrived
-    /// before the engine started — is `tick()`'s job; see its doc comment.
-    private func steer() {
-        let now = CFAbsoluteTimeGetCurrent()
-        schedule(queue.tick(now: now))
-        applyRate(queue.steer(now: now))
-        deliverReports()
-    }
-
-    private func applyRate(_ rate: Double) {
-        let value = Float(rate)
-        if timePitch.rate != value { timePitch.rate = value }
-    }
-
-    private func schedule(_ chunks: [PlaybackQueue.Chunk]) {
-        guard !chunks.isEmpty else { return }
-        for chunk in chunks {
-            guard let buffer = AudioEngine.buffer(chunk.samples, format: playbackFormat) else { continue }
-            let level = Float(PCMLevel.peak(of: chunk.samples)) / 32_768
-            metrics.scheduledChunks += 1
-            // No `at:`: each buffer starts where the last one ended, which is
-            // what "gapless" means here.
-            player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.queue.completed(chunk.id, now: CFAbsoluteTimeGetCurrent())
-                    self.onOutputLevel?(level)
-                    self.deliverReports()
-                    self.metrics.playedChunks += 1
-                    self.setSpeaking(self.queue.isSpeaking)
-                }
-            }
-        }
-        if isRunning, !player.isPlaying { player.play() }
-        metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
-        recordJitterBufferMetrics()
-        setSpeaking(queue.isSpeaking)
-    }
-
-    private func recordJitterBufferMetrics() {
-        metrics.recordJitterBuffer(
-            underruns: queue.underruns,
-            targetMilliseconds: queue.targetMilliseconds,
-            drains: queue.drains,
-            largestArrivalGapMilliseconds: queue.largestArrivalGapMilliseconds
-        )
-    }
-
-    private func setSpeaking(_ speaking: Bool) {
-        guard speaking != wasSpeaking else { return }
-        wasSpeaking = speaking
-        onSpeakingChanged?(speaking)
-        if !speaking { onOutputLevel?(0) }
-    }
-
-    private static func buffer(_ samples: [Int16], format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
-              let channel = buffer.floatChannelData else { return nil }
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        for (index, sample) in samples.enumerated() {
-            channel[0][index] = Float(sample) / 32_768
-        }
-        return buffer
     }
 
     // MARK: - Interruptions and routes
@@ -652,8 +442,7 @@ final class AudioEngine {
             flushPlayback()
             // Nothing can arrive while iOS holds the audio: silence now is
             // not a broken microphone.
-            watchdog.disarm()
-            reportSignal()
+            capture.disarmWatchdog()
             onNotice?(.pausedForInterruption)
         case .ended:
             guard interrupted else { return }
@@ -743,13 +532,10 @@ final class AudioEngine {
             reportRoute()
         } else {
             try engine.start()
-            player.play()
+            playback.play()
             setNeedsResume(false)
         }
-        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false, gateClosed: gate.manual == false) {
-            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
-            restartedForSignal = false
-        }
+        capture.armWatchdogIfNeeded(running: isRunning, interrupted: false)
     }
 
     private func setNeedsResume(_ paused: Bool) {
@@ -779,7 +565,7 @@ final class AudioEngine {
     private func stopByItself(_ message: String) {
         isRunning = false
         stoppedByItself = true
-        stopSteering()
+        playback.stopForFailure()
         onStopped?(message)
     }
 
@@ -798,22 +584,19 @@ final class AudioEngine {
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         try requireCapturable(format)
-        let converter = try PCMConverter(inputFormat: format)
-        self.converter = converter
-        metrics.hardwareSampleRate = format.sampleRate
-        chunker.reset()
-        gate.reset()
+        try capture.prepare(inputFormat: format)
+        engineMetrics.hardwareSampleRate = format.sampleRate
         input.installTap(onBus: 0, bufferSize: 4_096, format: format) { [weak self] buffer, _ in
             self?.handleCaptured(buffer)
         }
-        connectPlayback()
+        playback.connect(in: engine)
         do {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
             throw Failure.engineFailed(error.localizedDescription)
         }
-        player.play()
+        playback.play()
         recordVoiceProcessing()
     }
 }
