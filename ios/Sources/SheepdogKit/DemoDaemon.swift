@@ -230,6 +230,14 @@ public final class DemoDaemon: @unchecked Sendable {
         default:
             let busy = world.agents.contains { $0.state == .working || $0.state == .blocked }
             if let reply = spaces.handle(method: method, path: path, body: object, busy: busy) {
+                // Like the real daemon, tell the streams a mute changed, so
+                // the phone fetches the state again.
+                let parts = path.split(separator: "/")
+                if method == "POST", reply.status == 200, parts.count == 4, parts[3] == "mute",
+                   let space = spaces.spaces.first(where: { $0.id == String(parts[2]) }) {
+                    world.spaceMuted(name: space.name, path: space.path, muted: space.muted)
+                    DispatchQueue.global().async { [weak self] in self?.publish() }
+                }
                 return json(reply.body, status: reply.status)
             }
             if path.hasPrefix("/api/shells/"), path.hasSuffix("/close"), method == "POST" {

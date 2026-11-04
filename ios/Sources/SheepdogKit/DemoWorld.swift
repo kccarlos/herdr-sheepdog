@@ -163,6 +163,14 @@ public struct DemoWorld: Sendable {
         return true
     }
 
+    /// A space was muted or unmuted from the phone: the daemon's
+    /// `space.muted` event, which tells every client to fetch the state
+    /// again (the agents' bell.slash comes from it, not from the phone's own
+    /// five-second overlay).
+    public mutating func spaceMuted(name: String, path: String, muted: Bool) {
+        log(source: "web", type: "space.muted", payload: ["name": .string(name), "path": .string(path), "muted": .bool(muted), "via": .string("phone")])
+    }
+
     /// The agent with the group, unread and pinned the daemon would send.
     private func withAttention(_ agent: Agent, mutedWorkspaces: Set<String>) -> Agent {
         let mark = marks[agent.paneID] ?? Marks()

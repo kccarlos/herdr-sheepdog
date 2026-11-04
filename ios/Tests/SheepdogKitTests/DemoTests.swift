@@ -254,3 +254,39 @@ final class DemoDaemonTests: XCTestCase {
         XCTAssertTrue(seen.contains("voice.push"))
     }
 }
+
+/// Muting a space in the demo tells the stream, as the real daemon does
+/// (`space.muted`). The phone shows its own mute for five seconds
+/// (`AttentionOverlay.lifetime`) and then what the state says; without the
+/// event nothing fetches the state after the mute, and the agents' bell.slash
+/// goes out again (seen on a slow CI Mac in AgentAttentionUITests).
+final class DemoSpaceMuteTests: XCTestCase {
+    private var daemon: DemoDaemon!
+    private var client: DaemonClient!
+
+    override func setUp() {
+        super.setUp()
+        daemon = DemoDaemon()
+        DemoDaemon.current = daemon
+        client = DaemonClient(endpoint: DemoDaemon.endpoint, session: DemoDaemon.session())
+    }
+
+    override func tearDown() {
+        daemon.stop()
+        super.tearDown()
+    }
+
+    func testMutingASpaceIsAnEventThatRefreshesState() async throws {
+        let spaces = try await client.spaces()
+        let shop = try XCTUnwrap(spaces.spaces.first { $0.name == "shop" })
+        try await client.setSpaceMute(spaceID: shop.id, muted: true, until: Date().addingTimeInterval(3600))
+        let events = try await client.recentEvents(type: "space.muted", limit: 100).filter { $0.type == "space.muted" }
+        let event = try XCTUnwrap(events.last, "no space.muted event after the mute")
+        XCTAssertEqual(event.bool("muted"), true)
+        XCTAssertTrue(AttentionEvents.refreshesState(event.type))
+        try await client.setSpaceMute(spaceID: shop.id, muted: false)
+        let after = try await client.recentEvents(type: "space.muted", limit: 100).filter { $0.type == "space.muted" }
+        XCTAssertEqual(after.count, 2)
+        XCTAssertEqual(after.last?.bool("muted"), false)
+    }
+}
