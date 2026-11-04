@@ -68,8 +68,23 @@ public struct AgentChanges: Codable, Equatable, Sendable {
     public var added: Int
     public var deleted: Int
     public var truncated: Bool?
+    public var hidden: Int
 
-    public init(repo: Bool, reason: String? = nil, root: String? = nil, branch: String? = nil, files: [ChangedFile] = [], added: Int = 0, deleted: Int = 0, truncated: Bool? = nil) {
+    enum CodingKeys: String, CodingKey { case repo, reason, root, branch, files, added, deleted, truncated, hidden }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        repo = try values.decode(Bool.self, forKey: .repo)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        root = try values.decodeIfPresent(String.self, forKey: .root)
+        branch = try values.decodeIfPresent(String.self, forKey: .branch)
+        files = try values.decodeIfPresent([ChangedFile].self, forKey: .files) ?? []
+        added = try values.decodeIfPresent(Int.self, forKey: .added) ?? 0
+        deleted = try values.decodeIfPresent(Int.self, forKey: .deleted) ?? 0
+        truncated = try values.decodeIfPresent(Bool.self, forKey: .truncated)
+        hidden = try values.decodeIfPresent(Int.self, forKey: .hidden) ?? 0
+    }
+
+    public init(repo: Bool, reason: String? = nil, root: String? = nil, branch: String? = nil, files: [ChangedFile] = [], added: Int = 0, deleted: Int = 0, truncated: Bool? = nil, hidden: Int = 0) {
         self.repo = repo
         self.reason = reason
         self.root = root
@@ -78,6 +93,7 @@ public struct AgentChanges: Codable, Equatable, Sendable {
         self.added = added
         self.deleted = deleted
         self.truncated = truncated
+        self.hidden = hidden
     }
 
     /// "fix-login · 3 files"
@@ -154,18 +170,16 @@ extension DaemonClient {
     public func agentChanges(paneID: String) async throws -> AgentChanges? {
         let request = try request(encodedPath: DaemonClient.agentPath(paneID: paneID, suffix: "changes"))
         let (data, response) = try await perform(request)
+        try throwChangesRefusal(data: data, response: response)
         return try decodeAgentReply(AgentChanges.self, data: data, response: response, what: "the changes")
     }
 
     /// `GET /api/agents/{pane}/changes/{path}`.
     public func agentDiff(paneID: String, path: String) async throws -> FileDiff? {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/%?#;")
-        let escaped = path.split(separator: "/", omittingEmptySubsequences: false)
-            .map { String($0).addingPercentEncoding(withAllowedCharacters: allowed) ?? String($0) }
-            .joined(separator: "/")
+        let escaped = Self.escapedFilePath(path)
         let request = try request(encodedPath: DaemonClient.agentPath(paneID: paneID, suffix: "changes/" + escaped))
         let (data, response) = try await perform(request)
+        try throwChangesRefusal(data: data, response: response)
         return try decodeAgentReply(FileDiff.self, data: data, response: response, what: "the diff")
     }
 
@@ -188,6 +202,16 @@ extension DaemonClient {
             throw DaemonError.rejected(status: 404, message: "Update sheepdog on your computer to attach files.")
         }
         return reply
+    }
+}
+
+private extension DaemonClient {
+    func throwChangesRefusal(data: Data, response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 403,
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let message = object["error"] as? String else { return }
+        let problem = FileProblem(reason: object["reason"] as? String)
+        throw FilesRefusal(status: http.statusCode, problem: problem, message: message)
     }
 }
 

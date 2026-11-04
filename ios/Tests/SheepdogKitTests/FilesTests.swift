@@ -355,6 +355,13 @@ final class ChangeIndexTests: XCTestCase {
         XCTAssertTrue(ChangeIndex(changes(root: nil), folder: nil).isChanged("docs/a.md"))
     }
 
+    func testTildeFolderInsideRepositoryUsesRelativeChangedPaths() {
+        let changes = AgentChanges(repo: true, root: "/Users/demo/code/shop", files: [ChangedFile(path: "sub/docs/a.md", status: "modified")])
+        let index = ChangeIndex(changes, folder: "~/code/shop/sub")
+        XCTAssertEqual(index.prefix, "sub/")
+        XCTAssertTrue(index.isChanged("docs/a.md"))
+    }
+
     func testNothingWithoutARepository() {
         XCTAssertFalse(ChangeIndex(AgentChanges(repo: false), folder: nil).isChanged("a"))
         XCTAssertFalse(ChangeIndex(nil, folder: nil).isChanged("a"))

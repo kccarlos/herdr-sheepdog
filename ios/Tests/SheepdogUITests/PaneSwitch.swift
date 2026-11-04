@@ -69,14 +69,16 @@ extension XCTestCase {
     func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
         let deadline = Date().addingTimeInterval(timeout)
         let items = app.buttons.matching(identifier: item)
-        func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
+        func landed() -> Bool { until.map { $0.waitForExistence(timeout: min(10, deadline.timeIntervalSinceNow)) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if tapTappable(app, items), landed() { return }
-            if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
-                if app.buttons[item].waitForExistence(timeout: 3) {
+            let menuButtons = app.buttons.matching(identifier: menu)
+            if tapElementTappable(menuButtons) || tapTappable(app, menuButtons) {
+                let itemDeadline = Date().addingTimeInterval(5)
+                while !items.firstMatch.exists && Date() < itemDeadline { usleep(100_000) }
+                if items.firstMatch.exists {
                     scrollMenuToItem(app, items)
-                    if (tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
+                    if (tapElementTappable(items) || tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
                 }
             }
             usleep(300_000)
@@ -280,11 +282,29 @@ extension XCTestCase {
     }
 
     private func tappableCenter(_ query: XCUIElementQuery) -> CGPoint? {
-        for i in 0 ..< query.count {
+        // When the demo covers the real app, both copies can report as
+        // hittable at the same coordinates. SwiftUI exposes the covered
+        // copy first, so prefer the last match (the visible demo copy).
+        for i in (0 ..< query.count).reversed() {
             let element = query.element(boundBy: i)
             guard element.isTappable, let frame = try? element.snapshot().frame else { continue }
             return CGPoint(x: frame.midX, y: frame.midY)
         }
         return nil
+    }
+
+    /// Activates the matched accessibility element itself. This preserves
+    /// which copy was selected when the demo and the covered app share an
+    /// identifier; a coordinate tap would hit whichever copy is visually on
+    /// top, which may not be the menu whose item was queried.
+    private func tapElementTappable(_ query: XCUIElementQuery) -> Bool {
+        for i in (0 ..< query.count).reversed() {
+            let element = query.element(boundBy: i)
+            if element.isTappable {
+                element.tap()
+                return true
+            }
+        }
+        return false
     }
 }

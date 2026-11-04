@@ -457,9 +457,16 @@ public struct ChangeIndex: Equatable, Sendable {
     public init(_ changes: AgentChanges?, folder: String?) {
         guard let changes, changes.repo else { return }
         var prefix = ""
-        if let root = changes.root?.trimmingTrailingSlash, let folder = folder?.trimmingTrailingSlash,
-           folder.hasPrefix(root + "/") {
-            prefix = String(folder.dropFirst(root.count + 1)) + "/"
+        if let root = changes.root?.trimmingTrailingSlash, let folder = folder?.trimmingTrailingSlash {
+            var expanded = folder
+            if folder.hasPrefix("~/") {
+                let components = root.split(separator: "/")
+                if components.count > 2 {
+                    let home = "/" + components.prefix(2).joined(separator: "/")
+                    expanded = home + "/" + folder.dropFirst(2)
+                }
+            }
+            if expanded.hasPrefix(root + "/") { prefix = String(expanded.dropFirst(root.count + 1)) + "/" }
         }
         for file in changes.files {
             let relative: String

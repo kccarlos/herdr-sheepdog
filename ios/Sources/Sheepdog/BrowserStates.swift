@@ -23,6 +23,7 @@ struct BrowserState: View {
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var stepDiameter = 20.0
 
     /// At the accessibility sizes the words already fill the screen, so the
     /// symbol, the mascot and the spacing give way: the title, the sentence
@@ -56,12 +57,13 @@ struct BrowserState: View {
                             Text("\(index + 1)")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.muted)
-                                .frame(width: 20, height: 20)
+                                .frame(width: stepDiameter, height: stepDiameter)
                                 .background(Circle().fill(Theme.fill))
                                 .accessibilityHidden(true)
                             Text(step).font(.subheadline)
                         }
                         .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Step \(index + 1), \(step)")
                     }
                 }
                 .padding(14)
@@ -114,7 +116,7 @@ enum BrowserWords {
             var action: BrowserState.Action?
             if problem == .olderDaemon, let changes {
                 action = .init(title: "Show Changes", identifier: "browser.state.changes", run: changes)
-            } else if problem == .denied || problem == .failed {
+            } else if problem.canRetry {
                 action = .init(title: problem == .denied ? "Retry" : "Try again", identifier: "browser.state.retry", run: retry)
             } else if let back {
                 action = .init(title: back.title, identifier: "browser.state.back", run: back.run)

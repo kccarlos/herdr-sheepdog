@@ -312,7 +312,7 @@ final class FilesDemoUITests: XCTestCase {
         tapWhenTappable(changes, "Changes")
         XCTAssertTrue(app.buttons["changes.file.docs/reports/login-loop.md"].waitForExistence(timeout: 10) || scrollToVisible(app, app.buttons["changes.file.docs/reports/login-loop.md"]).exists)
         let chosen = any(app, "browser.tab").buttons.firstMatch
-        XCTAssertTrue(chosen.label.contains("Changes · 5"), "the choice keeps its count: \(chosen.label)")
+        XCTAssertEqual(chosen.label, "Changes, 5 files", "VoiceOver speaks the selected choice and count")
         sleep(1)
         shot("largest-changes")
     }

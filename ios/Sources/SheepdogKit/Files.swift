@@ -303,6 +303,7 @@ extension DaemonClient {
     /// the daemon would read `+` as a space).
     func filesRequest(encodedPath: String, query: [(String, String)]) throws -> URLRequest {
         var request = try self.request(encodedPath: encodedPath)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         guard !query.isEmpty, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return request }
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&+=#%;")

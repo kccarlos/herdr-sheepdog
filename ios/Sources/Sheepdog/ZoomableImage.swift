@@ -55,7 +55,7 @@ struct ZoomableImage: UIViewRepresentable {
 final class ZoomScrollView: UIScrollView {
     let imageView: UIImageView
     var onZoom: ((CGFloat, Bool) -> Void)?
-    private var fitScale: CGFloat = 1
+    private var fitScale: CGFloat = 0
     /// Until the user zooms, the picture follows the window (a rotation).
     private var followsFit = true
 
@@ -68,8 +68,10 @@ final class ZoomScrollView: UIScrollView {
         showsVerticalScrollIndicator = false
         bouncesZoom = true
         contentInsetAdjustmentBehavior = .never
+        contentSize = image.size
         isAccessibilityElement = true
         accessibilityTraits = [.image, .adjustable]
+        accessibilityValue = "Fit to screen"
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -99,6 +101,7 @@ final class ZoomScrollView: UIScrollView {
         followsFit = zoomScale <= fitScale * 1.01
         centre()
         onZoom?(zoomScale, followsFit)
+        accessibilityValue = followsFit ? "Fit to screen" : "\(Int((zoomScale * 100).rounded())) percent"
     }
 
     func apply(_ choice: ZoomChoice) {
@@ -106,9 +109,11 @@ final class ZoomScrollView: UIScrollView {
         case .fit:
             followsFit = true
             setZoomScale(fitScale, animated: true)
+            if zoomScale == fitScale { onZoom?(zoomScale, true); accessibilityValue = "Fit to screen" }
         case .actual:
             followsFit = false
             setZoomScale(min(max(1, minimumZoomScale), maximumZoomScale), animated: true)
+            if zoomScale == min(max(1, minimumZoomScale), maximumZoomScale) { onZoom?(zoomScale, false); accessibilityValue = "\(Int((zoomScale * 100).rounded())) percent" }
         }
     }
 

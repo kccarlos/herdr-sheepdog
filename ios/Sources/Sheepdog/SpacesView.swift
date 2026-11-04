@@ -537,7 +537,7 @@ struct SpaceDetailView: View {
                     .frame(minHeight: 44)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Changes, \(changesLine)")
+                .accessibilityLabel("Changes, \(changesLine)" + ((changed?.repo == true && changed?.files.isEmpty == false) ? ", \(LineCountText.spoken(added: changed?.added ?? 0, deleted: changed?.deleted ?? 0))" : ""))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("space.changes")
             }

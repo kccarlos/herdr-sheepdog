@@ -53,8 +53,8 @@ struct ChangesListView: View {
         case let .loaded(changes) where changes.files.isEmpty:
             BrowserState(
                 symbol: "checkmark", title: "No changes yet",
-                message: changes.branch.flatMap { $0.isEmpty ? nil : $0 }.map { "Nothing has changed on \($0) since the last commit." }
-                    ?? "Nothing has changed since the last commit.",
+                message: (changes.branch.flatMap { $0.isEmpty ? nil : $0 }.map { "Nothing has changed on \($0) since the last commit." }
+                    ?? "Nothing has changed since the last commit.") + (changes.hidden > 0 ? " \(changes.hidden) hidden files excluded for safety." : ""),
                 action: .init(title: "Refresh", identifier: "changes.empty.refresh") { Task { await reload() } },
                 identifier: "changes.empty"
             )
@@ -319,7 +319,7 @@ struct DiffView: View {
     private func refresh() async {
         do {
             guard let got = try await load() else {
-                error = "This file has no changes any more."
+                error = "Update sheepdog on your computer to read diffs."
                 return
             }
             diff = got
@@ -452,6 +452,7 @@ private struct DiffJumpSheet: View {
 
 /// The daemon's own words, or a plain sentence.
 func changesErrorText(_ error: Error) -> String {
+    if let refusal = error as? FilesRefusal { return refusal.problem.words(subject: .file, root: "this folder").message }
     if let daemon = error as? DaemonError {
         if case let .rejected(_, message) = daemon, !message.isEmpty { return message }
         return daemon.message

@@ -43,8 +43,10 @@ public struct FileImage: Equatable, @unchecked Sendable {
 
     /// Decodes `data` off the caller's actor, with at most `maxPixel` pixels
     /// on the long side. Nil when the bytes are not a picture ImageIO opens.
-    public static func decode(_ data: Data, maxPixel: Int) async -> FileImage? {
-        await Task.detached(priority: .userInitiated) { decodeNow(data, maxPixel: maxPixel) }.value
+    nonisolated public static func decode(_ data: Data, maxPixel: Int) async -> FileImage? {
+        guard !Task.isCancelled else { return nil }
+        let image = decodeNow(data, maxPixel: maxPixel)
+        return Task.isCancelled ? nil : image
     }
 
     /// The work of `decode`, on the calling thread.

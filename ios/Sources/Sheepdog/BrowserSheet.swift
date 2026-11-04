@@ -170,7 +170,7 @@ struct BrowserSheet: View {
                 return "Changes, \(count) \(count == 1 ? "file" : "files")"
             },
             identifier: "browser.tab", accessibilityName: "Files or Changes", fills: true
-        ) { tab = $0 }
+        ) { files.cancelPendingLink(); tab = $0; selection = nil }
         .padding(.horizontal, 16)
         .padding(.top, 2)
         .padding(.bottom, 8)
@@ -219,6 +219,7 @@ struct BrowserSheet: View {
             )
             .frame(maxHeight: .infinity)
             .background(Theme.surface)
+        .onChange(of: tab) { _, _ in files.cancelPendingLink(); selection = nil }
         }
     }
 

@@ -41,6 +41,7 @@ public enum FilesLoad<Value: Equatable & Sendable>: Equatable, Sendable {
 
 private func filesFailure(_ error: Error, describe: (Error) -> RequestFailure) -> FilesFailure? {
     if error is CancellationError { return nil }
+    if error is ComputerFleet.Moved || error is ComputerModel.Stale { return nil }
     if let url = error as? URLError, url.code == .cancelled { return nil }
     if let refusal = error as? FilesRefusal { return .problem(refusal.problem) }
     return .request(describe(error))
@@ -82,6 +83,7 @@ public final class FileBrowserModel {
     /// Each read takes a number; only the newest one applies.
     @ObservationIgnored private var folderRead = 0
     @ObservationIgnored private var searchRead = 0
+    @ObservationIgnored private var linkTask: Task<Void, Never>?
 
     public init(
         list: @escaping List,
@@ -132,6 +134,8 @@ public final class FileBrowserModel {
 
     /// Opens a folder of the tree (a crumb, a row) and leaves the search.
     public func open(folder newPath: String) async {
+        linkTask?.cancel()
+        folderRead += 1
         searchTask?.cancel()
         query = ""
         results = nil
@@ -152,14 +156,32 @@ public final class FileBrowserModel {
         query = ""
     }
 
+    public func cancelPendingLink() {
+        linkTask?.cancel()
+        linkTask = nil
+        folderRead += 1
+    }
+
     /// A link is a folder or a file, and the list does not say which. A
     /// folder lists; a file's list is a plain "not found", and the viewer
     /// then reads it (or says why it cannot).
     public func resolve(link entry: FileEntry) async -> LinkTarget {
         guard !entry.isBlocked else { return .file }
+        linkTask?.cancel()
+        folderRead += 1
+        let mine = folderRead
         do {
-            if try await list(entry.path, nil) != nil { return .folder(entry.path) }
-        } catch {}
+            if let listing = try await list(entry.path, nil) {
+                guard mine == folderRead else { return .file }
+                path = entry.path
+                folder = .loaded(listing)
+                if !listing.rootName.isEmpty { rootName = listing.rootName }
+                return .folder(entry.path)
+            }
+        } catch is CancellationError { return .file }
+        catch let url as URLError where url.code == .cancelled { return .file }
+        catch let refusal as FilesRefusal where refusal.problem == .notFound { return .file }
+        catch { if mine == folderRead { folder = .failed(filesFailure(error, describe: describe) ?? .request(describe(error))) } }
         return .file
     }
 
@@ -372,15 +394,19 @@ public final class FileViewerModel {
             blocks = newBlocks
             hasBlocks = true
         }
+        if hasLines, hasBlocks { markdown = nil }
     }
 
-    private static func make(_ text: String, name: String, mode: Mode) async -> Made {
+    nonisolated private static func make(_ text: String, name: String, mode: Mode) async -> Made {
+        guard !Task.isCancelled else { return Made() }
         switch mode {
         case .rendered:
-            return await Task.detached(priority: .userInitiated) { Made(blocks: MarkdownRenderer.blocks(text)) }.value
+            let blocks = MarkdownRenderer.blocks(text)
+            return Task.isCancelled ? Made() : Made(blocks: blocks)
         case .raw:
             let language = SyntaxLanguage.of(name: name)
-            return await Task.detached(priority: .userInitiated) { Made(lines: CodeLines.split(text, language: language)) }.value
+            let lines = CodeLines.split(text, language: language)
+            return Task.isCancelled ? Made() : Made(lines: lines)
         }
     }
 

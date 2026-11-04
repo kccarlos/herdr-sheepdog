@@ -105,26 +105,19 @@ final class ShellDemoUITests: XCTestCase {
 
     func testNoShellOfferedMeansNoEntryAndSettingsSaysWhy() throws {
         let app = launch(term: "noShell")
-        tapVisible(app.buttons, "flock.agent.claude-auth.window")
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
-        sleep(1)
-        tapVisible(app.buttons, "agentScreen.menu")
-        XCTAssertTrue(app.buttons["agentScreen.menu.changes"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["agentScreen.menu.shell"].exists, "no button that fails")
-
-        // Settings says why, with the fix.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() // close the menu
-        sleep(1)
-        let navButtons = app.navigationBars.buttons
-        for i in 0 ..< navButtons.count where navButtons.element(boundBy: i).isTappable && navButtons.element(boundBy: i).label != "More" {
-            navButtons.element(boundBy: i).tap()
-            break
-        }
-        sleep(1)
+        // Check Settings while the demo is still the active screen. Opening
+        // an agent window can route its back gesture to the real app scene.
         tapMenuItem(app, menu: "toolbar.more", item: "toolbar.settings")
         let row = app.descendants(matching: .any).matching(identifier: "settings.shell").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'setup page'")).firstMatch.exists)
+        tapWhenTappable(app.buttons["settings.done"], "Done")
+
+        tapVisible(app.buttons, "flock.agent.claude-auth.window")
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.terminal"].waitForExistence(timeout: 10))
+        tapVisible(app.buttons, "agentScreen.menu")
+        XCTAssertTrue(app.buttons["agentScreen.menu.changes"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["agentScreen.menu.shell"].exists, "no button that fails")
         sleep(1)
         shot("settings-shell-off")
     }

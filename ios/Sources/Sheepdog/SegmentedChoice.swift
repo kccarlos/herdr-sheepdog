@@ -42,7 +42,7 @@ struct SegmentedChoice<Value: Hashable & Identifiable>: View {
                         .font(.subheadline.weight(isSelected ? .semibold : .medium))
                         .foregroundStyle(Theme.ink)
                         .padding(.horizontal, 12)
-                        .frame(maxWidth: fills ? .infinity : nil, minHeight: 36)
+                        .frame(maxWidth: fills ? .infinity : nil, minHeight: 44)
                         .background {
                             if isSelected {
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -80,13 +80,15 @@ struct SegmentedChoice<Value: Hashable & Identifiable>: View {
                 Text(menuTitle)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: fills ? .infinity : nil, alignment: .leading)
-                Image(systemName: "chevron.up.chevron.down").font(.footnote.weight(.semibold))
+                Image(systemName: "chevron.up.chevron.down").font(.footnote.weight(.semibold)).accessibilityHidden(true)
             }
             // A calmer size than the screen's text: the chosen word and its
             // count, in a bar, not a block.
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 14)
+            .accessibilityLabel(Text(selected.flatMap { spoken($0) } ?? accessibilityName))
+            .accessibilityValue(selected == nil ? "" : menuTitle)
             .frame(maxWidth: fills ? .infinity : nil, minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.track))
         }

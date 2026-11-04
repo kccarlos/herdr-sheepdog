@@ -44,6 +44,14 @@ struct DaemonSettingsView: View {
                 scanSection(title: "Scan the pairing code")
                 if !dynamicTypeSize.isAccessibilitySize { demoSection }
             }
+            if model.isDemo, model.shellOffered == false {
+                Section {
+                    LabeledContent("Shell", value: "Off on this computer")
+                        .accessibilityIdentifier("settings.shell")
+                } footer: {
+                    Text(PhoneShell.offExplanation)
+                }
+            }
         }
         .navigationTitle(firstRun ? "Welcome" : "Connection")
         .navigationBarTitleDisplayMode(.inline)

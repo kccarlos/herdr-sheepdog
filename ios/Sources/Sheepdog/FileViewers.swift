@@ -145,10 +145,10 @@ struct FileViewer: View {
             )
             .scrolling()
         case .binary:
-            let size = viewer.content.map { FileSizeText.text($0.size) } ?? ""
+            let meta = viewer.content.map { Self.meta($0) } ?? ""
             BrowserState(
                 symbol: "doc", title: "This file is not text",
-                message: "\(viewer.name)\(size.isEmpty ? "" : " · \(size)"). There is nothing to show here, so open it on your computer.",
+                message: "\(viewer.name)\(meta.isEmpty ? "" : " · \(meta)"). There is nothing to show here, so open it on your computer.",
                 action: backAction, identifier: "viewer.binary"
             )
             .scrolling()
@@ -209,9 +209,9 @@ struct FileViewer: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    static func meta(_ content: FileContent) -> String {
+    static func meta(_ content: FileContent, now: Date = Date()) -> String {
         var parts = [FileSizeText.text(content.size)]
-        if let modified = content.modified { parts.append(FileTimeText.relative(modified, now: Date())) }
+        if let modified = content.modified { parts.append(FileTimeText.relative(modified, now: now)) }
         return parts.joined(separator: " · ")
     }
 
@@ -237,7 +237,7 @@ struct FileViewer: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(Self.changeWord(change)), \(LineCountText.spoken(added: change.added, deleted: change.deleted)). Opens its diff.")
+            .accessibilityLabel("\(Self.changeWord(change)), \(change.isBinary ? "binary" : LineCountText.spoken(added: change.added, deleted: change.deleted)). Opens its diff.")
             .accessibilityIdentifier("viewer.changes")
         }
     }
@@ -339,7 +339,9 @@ private struct MarkdownPicture: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .task {
+        .task(id: target) {
+            image = nil
+            failed = false
             guard let target else { return }
             do {
                 // The bytes live only in this scope: what stays is the
@@ -348,7 +350,7 @@ private struct MarkdownPicture: View {
                 image = await FileImage.decode(data, maxPixel: FileImage.inlineMaxPixel)
                 failed = image == nil
             } catch {
-                failed = true
+                if !(error is CancellationError), (error as? URLError)?.code != .cancelled { failed = true }
             }
         }
     }
@@ -464,6 +466,7 @@ private struct ImageViewer: View {
     @State private var zoom: CGFloat = 1
     @State private var fitting = true
     @State private var command: ZoomChoice?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(image: FileImage, name: String, bytes: Int) {
         self.image = image
@@ -486,7 +489,11 @@ private struct ImageViewer: View {
 
     private var bar: some View {
         let selected: ZoomChoice? = fitting ? .fit : (abs(zoom - 1) < 0.005 ? .actual : nil)
-        return HStack(spacing: 10) {
+        let layout: AnyLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(ImageZoomText.hint(zoom: Double(zoom), fitting: fitting))
                     .font(.subheadline.weight(.medium))
@@ -501,6 +508,7 @@ private struct ImageViewer: View {
                 options: ZoomChoice.allCases, selected: selected, title: { $0.title }, spoken: { $0.spoken },
                 identifier: "viewer.image.zoomChoice", accessibilityName: "Zoom"
             ) { command = $0 }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
