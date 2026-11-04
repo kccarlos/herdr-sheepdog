@@ -18,7 +18,7 @@ scripts/e2e/selftest.sh [--no-herdr-app]
 scripts/e2e/panel-auto.sh [--shots <dir>]
 scripts/e2e/real-agent.sh claude|codex
 scripts/e2e/real-voice.sh [--only <scenarios>]
-scripts/e2e/nightly.sh [--only vm,linux,real] [--no-fixer]
+scripts/e2e/nightly.sh [--only vm,linux,real,audit] [--no-fixer]
 ```
 
 ## What `up.sh` makes
@@ -109,7 +109,7 @@ Every wait in the scripts is time-limited.
 ## Nightly regression
 
 `scripts/e2e/nightly.sh` runs every night at 03:00 on the maintainer's Mac and
-checks one commit in three places. Every step has a time limit (perl `alarm`,
+checks one commit in three places and audits it. Every step has a time limit (perl `alarm`,
 because the VM and a stock Mac have no `timeout`). Its log is
 `<report dir>/<step>.log`.
 
@@ -118,6 +118,7 @@ because the VM and a stock Mac have no `timeout`). Its log is
 | `vm` | Tart VM `sd-qa`, reset from the clean snapshot `sd-qa-base` each night | It checks out the commit and runs `selftest.sh` (with the Herdr window), then `panel-auto.sh`, then copies the screenshots back and stops the VM. |
 | `linux` | `ssh oci` (Ubuntu arm64) | It checks out the commit and runs `go test ./...`, `selftest.sh --no-herdr-app` and `real-agent.sh claude` / `codex`. The remote commands also run under `timeout`. |
 | `real` | this Mac, private environment only | `real-voice.sh`, `real-agent.sh claude` and `real-agent.sh codex`. |
+| `audit` | this Mac, disposable checkout | A daily rotating code audit and independent verification; findings do not fail the regression. |
 
 The VM and Linux check out the same commit as the clone that runs the job.
 If that commit is not pushed, they check out `origin/main`, and the report
@@ -164,6 +165,24 @@ says so.
   `cloud-agents` service account token read from
   `~/.config/op/cloud-agents.token`. That token file is what makes `op` work
   under launchd. Without `op` or the token file, the step is a SKIP.
+
+### Daily code audit
+
+`scripts/e2e/audit.sh` selects one scope from daemon security, concurrency and
+lifecycle, approvals and held questions, docs against code, the iPhone app,
+the herdr-app panel, and test gaps, using the local date. It examines a clean,
+read-only archive of the tested commit with agy (Gemini high), then asks a
+separate Gemini medium session to challenge each finding. `audit.md` contains
+the findings and verdicts; the agent streams are in the report directory.
+Missing, signed-out, or quota-exhausted agy sessions are SKIP, with details in
+the logs. The audit has a one-hour limit and does not affect nightly PASS/FAIL.
+
+At most three confirmed high-severity findings go to a Sonnet fixer in a fresh
+worktree. It is asked to reproduce each with a failing test and run relevant
+tests; the script commits and opens one PR on `audit/<date>-<scope>`, without
+merging. An open PR on that scope's audit branch or with label `audit/<scope>`
+prevents another. `--no-fixer` also disables this fixer. The audit uses agy's
+account and quota, independently of the real-check budget below.
 
 ### Budgets
 
@@ -253,7 +272,7 @@ By hand, from any checkout:
 
 ```sh
 scripts/e2e/nightly.sh                    # everything
-scripts/e2e/nightly.sh --only vm          # or linux, real, or a list: vm,linux
+scripts/e2e/nightly.sh --only vm          # or linux, real, audit, or a list: vm,linux
 scripts/e2e/nightly.sh --only real --no-fixer
 ```
 

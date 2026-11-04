@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Nightly regression (docs/dev/e2e.md, "Nightly regression").
 #
-#   scripts/e2e/nightly.sh [--only vm,linux,real] [--no-fixer]
+#   scripts/e2e/nightly.sh [--only vm,linux,real,audit] [--no-fixer]
 #
 #   vm     reset the Tart VM sd-qa from sd-qa-base, check out this commit,
 #          run selftest.sh and panel-auto.sh (real keys) inside, copy the
@@ -97,11 +97,11 @@ case "${1:-}" in __*) echo "nightly: unknown subcommand $1" >&2; exit 2;; esac
 
 # ---- arguments ---------------------------------------------------------------
 
-ONLY="vm,linux,real"
+ONLY="vm,linux,real,audit"
 FIXER=1
 while [ $# -gt 0 ]; do
   case "$1" in
-    --only) ONLY="${2:?--only needs vm, linux and/or real}"; shift 2;;
+    --only) ONLY="${2:?--only needs vm, linux, real and/or audit}"; shift 2;;
     --no-fixer) FIXER=0; shift;;
     -h|--help) sed -n '2,19p' "$0"; exit 0;;
     *) echo "nightly: unknown argument: $1" >&2; exit 2;;
@@ -250,6 +250,18 @@ if want real; then
   fi
 fi
 
+# ---- audit -------------------------------------------------------------------
+if want audit; then
+  # Findings and operational problems do not turn the regression red.
+  step audit 5400 "$HERE/audit.sh" "$OUT" "$SHA" "$DAY" "$FIXER"
+  audit_rc=$?
+  if [ "$audit_rc" != 0 ] && [ "$audit_rc" != 3 ]; then
+    unset 'FAILED[${#FAILED[@]}-1]'
+    ROWS[${#ROWS[@]}-1]="| audit | SKIP | 5400s or less | [audit.log](audit.log) |"
+    echo "SKIP audit did not complete (exit $audit_rc)" >>"$OUT/audit.log"
+  fi
+fi
+
 # ---- report ------------------------------------------------------------------
 STATUS=PASS
 [ "${#FAILED[@]}" -gt 0 ] && STATUS=FAIL
@@ -264,6 +276,7 @@ REPORT="$OUT/report.md"
   echo "|---|---|---|---|"
   printf '%s\n' "${ROWS[@]}"
   echo
+  [ -f "$OUT/audit.md" ] && { echo "[Code audit](audit.md)"; echo; }
   echo "## Checks"
   for f in "$OUT"/*.log; do
     [ -f "$f" ] || continue
@@ -293,7 +306,7 @@ REPORT="$OUT/report.md"
 } >"$REPORT"
 
 write_latest() { # write_latest <fixer_pr>; full runs only (a partial run is not the night's state)
-  [ "$ONLY" = "vm,linux,real" ] || return 0
+  [ "$ONLY" = "vm,linux,real,audit" ] || return 0
   jq -n --arg date "$DAY" --arg status "$STATUS" --arg report "$REPORT" --arg commit "$SHA" \
     --arg failed "${FAILED[*]:-}" --arg pr "$1" \
     '{date:$date, status:$status, report:$report, commit:$commit,
