@@ -7,7 +7,7 @@
 import { div } from "gpui-kit";
 import { h_flex, Textarea, v_flex } from "gpui-base";
 import { isLight } from "../model/palette.js";
-import { button } from "./widgets.js";
+import { button, stopDrag } from "./widgets.js";
 
 // The live suggested replies as buttons that send the option as a typed line.
 // `busy`: another line is on its way, so the buttons wait.
@@ -57,7 +57,7 @@ export function composerView(t, { state, live, notice, busy, compact, maxHeight,
     .border_b(1)
     .border_color(t.border)
     .when(Boolean(live), (el) => el.child(suggestions(t, live, { busy, compact, onSend })))
-    .child(div().w_full().px(10).py(6).rounded(8).bg(input).border(1).border_color(t.border).text_size(13).text_color(t.foreground).child(Textarea.new(state).w_full()))
+    .child(div().w_full().px(10).py(6).rounded(8).bg(input).border(1).border_color(t.border).text_size(13).text_color(t.foreground).on_mouse_down("left", stopDrag).child(Textarea.new(state).w_full()))
     .child(
       notice
         ? div().text_size(11.5).text_color(notice.tone === "error" ? t.blocked : t.muted).child(notice.text)

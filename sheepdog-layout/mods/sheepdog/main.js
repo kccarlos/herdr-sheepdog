@@ -21,6 +21,7 @@ import { focusCommand } from "./model/cards.js";
 import { keyMaker, restored, submission } from "./model/composer.js";
 import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
 import { createOutbox, pendingItems } from "./model/outbox.js";
+import { canLoadOlder } from "./model/history.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
@@ -70,7 +71,7 @@ export default class Sheepdog extends View {
       this.store = createStore({ http, conversation: true });
       this.initPanel(http, cx);
       this.initLive(cx, base);
-      if (this.overlayRole === "block") this.initKeys(cx);
+      this.initKeys(cx);
       cx.timer.every(250, (cx) => {
         this.pageBack(cx);
         // What has stayed long enough (a note, a settled card) goes.
@@ -91,6 +92,11 @@ export default class Sheepdog extends View {
   initLive(cx, base) {
     // The data layer is a task: it keeps asking until close().
     cx.spawn(async (cx) => {
+      // These notify through this task's `cx`: `init`'s ends when init returns,
+      // and a state change after an `await` would throw on it.
+      this.outbox.subscribe(() => cx.notify());
+      this.answers.subscribe(() => cx.notify());
+      this.voice.subscribe(() => cx.notify());
       this.store.subscribe((snapshot) => {
         // The conversation may now show what the outbox is waiting on.
         this.outbox?.reconcile(snapshot.history.items);
@@ -106,10 +112,15 @@ export default class Sheepdog extends View {
     });
   }
 
-  // The docked block can hold the keyboard (`"focusable"` in mod.json):
-  // `pane.go` sends "focus", and the keys are the rules of model/keys.js.
+  // The panel can hold the keyboard: docked, `pane.go` sends "focus"
+  // (`"focusable"` in mod.json); as a window it takes them when it opens. The
+  // keys are the rules of model/keys.js.
   initKeys(cx) {
     this.panelFocus = cx.focus_handle();
+    if (this.overlayRole === "panel") {
+      this.panelFocus.focus();
+      return;
+    }
     cx.spawn(async (cx) => {
       for (;;) {
         if ((await nextCommand()) === "focus") {
@@ -122,11 +133,25 @@ export default class Sheepdog extends View {
 
   onKey(event, cx) {
     const question = this.answers.cards(this.store.getState().app).find((card) => card.phase === "open") ?? null;
-    const action = keyAction(event.key, { onPanel: this.panelFocus.is_focused(), question, suggestions: this.derived().live });
+    const phase = deriveStatus(this.store.getState(), this.host()).phase;
+    const action = keyAction(event.key, {
+      onPanel: this.panelFocus.is_focused(),
+      question,
+      suggestions: this.derived().live,
+      modified: Boolean(event.ctrl || event.alt || event.cmd || event.platform),
+      sheet: this.sheet != null,
+      window: Boolean(this.overlay),
+      busy: this.answers.busy(),
+      active: phase === "ok" || phase === "setup",
+    });
     if (!action) return;
     cx.stop_propagation();
     if (action.type === "composer") this.composer.focus();
     else if (action.type === "panel") this.panelFocus.focus();
+    else if (action.type === "sheet") {
+      this.sheet = null;
+      cx.notify();
+    } else if (action.type === "close") this.closeOverlaySelf();
     else if (action.type === "leave") this.leave();
     else if (action.type === "answer") this.answer(action.question, action.option, cx);
     else if (action.type === "send") this.send(action.text, cx, false);
@@ -151,12 +176,9 @@ export default class Sheepdog extends View {
     this.focusNote = null;
     const newKey = keyMaker();
     const refresh = () => this.store.refresh();
-    this.outbox = createOutbox({ http, newKey, refresh });
+    this.outbox = createOutbox({ http, newKey, refresh, items: () => this.store.getState().history.items });
     this.answers = createAnswers({ http, newKey, refresh });
-    this.outbox.subscribe(() => cx.notify());
-    this.answers.subscribe(() => cx.notify());
-    this.voice = createVoice({ http, exec, exists, home, newKey, refresh, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
-    this.voice.subscribe(() => cx.notify());
+    this.voice = createVoice({ http, exec, exists, home, newKey, refresh, platform: this.platform, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
     // Is Sheepdog.app installed? (Read-only; the timer looks again.)
     this.voice.check();
     this.composer = TextareaState.new({ placeholder: "Message Sheepdog…", rows: 1 });
@@ -533,7 +555,7 @@ export default class Sheepdog extends View {
     if (layoutMode({ width: this.size.width, overlay: this.overlay }) === "panel") {
       const derived = this.derived();
       const voice = this.voice.getState();
-      const controls = voiceControls({ phase: status.phase, voice: snapshot.app?.voice, view: status.voice, installed: voice.installed, noVoice: voice.notice?.code === "no-voice" });
+      const controls = voiceControls({ phase: status.phase, voice: snapshot.app?.voice, view: status.voice, installed: voice.installed, noVoice: voice.notice?.code === "no-voice", platform: this.platform() });
       const outbox = this.outbox.getState();
       const questionCards = this.answers.cards(snapshot.app);
       const questionHeights = questionCards.map((card) => estimateHeight(card.pending, { width: this.size.width }));
@@ -566,7 +588,7 @@ export default class Sheepdog extends View {
       return panelView(t, {
         status,
         entries: status.phase === "down" ? [] : derived.entries,
-        paging: { synced: snapshot.history.synced, canLoadOlder: snapshot.history.nextBefore != null, loadingOlder: snapshot.loadingOlder },
+        paging: { synced: snapshot.history.synced, canLoadOlder: canLoadOlder(snapshot.history), loadingOlder: snapshot.loadingOlder },
         technical: this.technical,
         retryMs: POLL_MS,
         compose: { state: this.composer, live: derived.live, notice: outbox.notice, busy: outbox.busy, compact: layout.compactBanners || layout.detailsScroll, maxHeight: composerHeight, onSend: (text, cx) => this.send(text, cx, false) },

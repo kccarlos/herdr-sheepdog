@@ -38,15 +38,19 @@ const OFF = { enabled: false };
 // "use-here" (nobody holds the voice), "unmute", or null (already listening).
 // `useHere` says whether the separate Use here button shows; `install` is the
 // command to show when the app is missing.
-export function voiceControls({ phase, voice, view, installed = null, noVoice = false }) {
+export function voiceControls({ phase, voice, view, installed = null, noVoice = false, platform = null }) {
   const off = { talk: { ...OFF, action: null }, mute: OFF, stop: OFF, ptt: OFF, useHere: false, useHereEnabled: false, hint: "", install: null, action: null };
   if (phase !== "ok") return off;
   if (voice?.mode === "off") return { ...off, hint: "The voice is off." };
-  const missing = installed === false;
+  // Sheepdog.app and `open sheepdog://talk` are the Mac's: elsewhere there is
+  // no app to be missing and nothing for Talk or Use here to start.
+  const here = platform == null || platform === "macos";
+  const missing = here && installed === false;
   const held = view.holder != null || Boolean(voice?.client_connected);
   if (!held) {
     // Nobody holds the voice: only the Mac's own app can start it.
     // `view.action` is the one step for this Mac (model/host-app.js).
+    if (!here) return { ...off, hint: view.note };
     const action = view.action ?? null;
     if (missing) return { ...off, hint: MISSING, install: INSTALL_COMMAND, action };
     return { ...off, talk: { enabled: true, action: "use-here" }, useHere: noVoice, useHereEnabled: true, hint: action ? view.note : "", action };
@@ -59,7 +63,7 @@ export function voiceControls({ phase, voice, view, installed = null, noVoice = 
     stop: { enabled: Boolean(voice?.speaking) },
     ptt: { enabled: true },
     useHere: elsewhere || noVoice,
-    useHereEnabled: !missing,
+    useHereEnabled: here && !missing,
     hint: elsewhere && missing ? MISSING_HERE : "",
     install: elsewhere && missing ? INSTALL_COMMAND : null,
   };
@@ -90,7 +94,7 @@ function failure(err, action) {
   return { tone: "error", text: err.status ? err.message : "Sheepdog did not answer. Try again.", code: "http" };
 }
 
-export function createVoice({ http, exec, exists, home, newKey, openSetup = async () => ({ ok: true }), now = Date.now, refresh = async () => {} }) {
+export function createVoice({ http, exec, exists, home, newKey, openSetup = async () => ({ ok: true }), now = Date.now, refresh = async () => {}, platform = () => null }) {
   let snapshot = {
     running: null, // a process named Sheepdog exists; null until looked (model/host-app.js)
     installed: null, // Sheepdog.app is in /Applications or ~/Applications; null until looked
@@ -163,6 +167,9 @@ export function createVoice({ http, exec, exists, home, newKey, openSetup = asyn
   // Looks for Sheepdog.app (read-only), at most every CHECK_MS. A look that
   // fails leaves the answer as it was.
   async function check() {
+    // Sheepdog.app is the Mac's: elsewhere "not installed" would be a false report.
+    const os = platform();
+    if (os != null && os !== "macos") return;
     if (checking || now() - lastCheck < CHECK_MS) return;
     checking = true;
     lastCheck = now();

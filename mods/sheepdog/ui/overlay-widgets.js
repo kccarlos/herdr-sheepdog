@@ -60,6 +60,7 @@ export function foldSection(t, id, { title, summary, open, onToggle, content }) 
         .bg(open ? t.raised : t.chrome)
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", stop)
         .on_click(onToggle)
         .child(div().w(12).flex_none().text_size(11).text_color(t.muted).child(open ? "▾" : "▸"))
         .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
@@ -86,6 +87,7 @@ export function choice(t, id, { title, detail = "", selected = false, disabled =
     .border(1)
     .border_color(selected ? t.accent : t.border)
     .bg(selected ? t.selected : t.raised)
+    .on_mouse_down("left", stop)
     .when(!disabled && Boolean(onClick), (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(onClick))
     .when(disabled, (el) => el.opacity(0.52))
     .child(
@@ -112,6 +114,7 @@ export function smallButton(t, id, label, onClick, { disabled = false } = {}) {
     .text_size(11)
     .font_medium()
     .text_color(t.foreground)
+    .on_mouse_down("left", stop)
     .when(disabled, (el) => el.opacity(0.45))
     .when(!disabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(onClick))
     .child(label);

@@ -18,7 +18,9 @@ export const NOTE_MS = 6000;
 
 const same = (a, b) => (a ?? "").trim() === (b ?? "").trim();
 
-export function createOutbox({ http, newKey, now = Date.now, refresh = async () => {} }) {
+// `items` gives the conversation's items as they are now: the stream can show
+// the exchange before `turn` returns, and nothing would match it afterwards.
+export function createOutbox({ http, newKey, now = Date.now, refresh = async () => {}, items = () => [] }) {
   let snapshot = {
     entries: [], // { key, text, at, phase: "sending" | "replied", reply, repliedAt, userId, replyId }
     busy: false, // a turn is running; one at a time, as the daemon claims one typed line per turn
@@ -69,6 +71,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     retry = null;
     const replied = { ...entry, phase: "replied", reply: typeof res.reply === "string" ? res.reply : "", repliedAt: now() };
     set({ entries: snapshot.entries.map((e) => (e === entry ? replied : e)), busy: false });
+    reconcile(items());
     // The conversation has the exchange by now; ask, so it is matched soon.
     await refresh();
     return { restore: null };
