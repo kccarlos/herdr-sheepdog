@@ -107,6 +107,11 @@ func (d *oldDriver) Backend() herdr.Backend { return d.client }
 
 func (d *oldDriver) ShellHost() conformance.ShellHost { return d.client }
 
+func (d *oldDriver) TerminalSize(_ context.Context, _ string) (int, int, bool) {
+	// The old herdr backend does not support setting or querying initial terminal size.
+	return 0, 0, false
+}
+
 func (d *oldDriver) StartPlain(ctx context.Context, cwd string) (herdr.PaneInfo, error) {
 	return d.client.CreateWorkspace(ctx, cwd, "conformance")
 }

@@ -587,6 +587,12 @@ func (s *Server) run(p hc.RunParams) hc.Terminal {
 		argv = []string{"sh", "-c", p.Line}
 	}
 	labels := cloneMap(p.Labels)
+	cols := uint16(80)
+	rows := uint16(24)
+	if p.Size != nil && p.Size.Cols > 0 && p.Size.Rows > 0 {
+		cols = p.Size.Cols
+		rows = p.Size.Rows
+	}
 	t := hc.Terminal{
 		Address:   address,
 		Name:      p.Name,
@@ -595,8 +601,8 @@ func (s *Server) run(p hc.RunParams) hc.Terminal {
 		State:     "live",
 		Labels:    labels,
 		CreatedMS: uint64(time.Now().UnixMilli()),
-		Cols:      80,
-		Rows:      24,
+		Cols:      cols,
+		Rows:      rows,
 		Keep:      p.Keep,
 	}
 	s.terminals[address] = t

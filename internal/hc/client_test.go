@@ -136,6 +136,21 @@ func TestClientCallsRequestsAndResults(t *testing.T) {
 		"no_parent": true,
 	})
 
+	ranSized, err := client.Run(ctx, hc.RunParams{
+		Argv: []string{"zsh"},
+		Size: &hc.InitialSize{Cols: 90, Rows: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ranSized.Cols != 90 || ranSized.Rows != 30 {
+		t.Fatalf("ranSized = %+v, want 90x30", ranSized)
+	}
+	assertParams(t, server, "terminal.run", map[string]any{
+		"argv": []any{"zsh"},
+		"size": map[string]any{"cols": float64(90), "rows": float64(30)},
+	})
+
 	killed, err := client.Kill(ctx, ran.Address)
 	if err != nil {
 		t.Fatal(err)
