@@ -87,6 +87,7 @@ binary version.
   | `attention` | each agent of `/api/state` has an `attention`, plus `attention_counts`; `POST /api/agents/{pane_id}/seen` and `/pin`; the `agent.attention` event (*Attention*) | when the daemon keeps seen and pinned marks (always, in practice) |
   | `space-mute` | `POST /api/spaces/{id}/mute`, `space_mutes` in `/api/state`, `muted` on a space, the `space.muted` event (*Attention*) | when the daemon keeps space mutes (always, in practice) |
   | `term` | the terminal socket `GET /term` for live agent windows ([`term-contract.md`](term-contract.md)) | when herdr is 0.9.2 or newer, or herdr-core has `terminal.attach` (not with `--herdr=mock`) |
+  | `files` | the read-only file browser of an agent's or a space's folder (*Files*) | always |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
@@ -1555,6 +1556,97 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
 Both are logged as metadata only: `web.changes {repo, files, truncated,
 dur_ms}` and `web.changes.diff {bytes, truncated, status}`, never a path or
 a line of the diff.
+
+## Files
+
+Feature `files`. A read-only browser of the agent's folder (`cwd` in
+`GET /api/agents`) or a space's folder (its `path` in `GET /api/spaces`),
+for a paired device or this computer, `GET` only; nothing writes a file.
+The design is [`design/file-browser.md`](design/file-browser.md). A client
+never names a folder, only a path relative to the daemon's: clean, with
+`/` between segments, no `.`, `..`, empty segment or leading `/`
+(`internal/files`).
+
+| Route | Answer |
+|---|---|
+| `GET /api/agents/{pane_id}/files?path=<rel>&q=<text>` | a list |
+| `GET /api/agents/{pane_id}/files/{path...}` | one file |
+| `GET /api/spaces/{id}/files?path=<rel>&q=<text>` | a list |
+| `GET /api/spaces/{id}/files/{path...}` | one file |
+
+**List.** `path` is the folder (absent or empty for the root):
+
+```jsonc
+{"root_name": "shop", "path": "docs", "truncated": false, "hidden": 1,
+ "entries": [{"name": "plots", "path": "docs/plots", "kind": "dir", "size": 0, "modified": "2026-11-03T21:02:11Z"},
+             {"name": "report.md", "path": "docs/report.md", "kind": "file", "size": 1204, "modified": "2026-11-03T21:02:11Z"},
+             {"name": "outside", "path": "docs/outside", "kind": "link", "size": 0, "modified": "2026-11-03T21:02:11Z", "blocked": true}]}
+```
+
+- `root_name` is the folder's own name. `kind` is `file`, `dir` or `link`;
+  `size` is a file's (0 for the others); `modified` is UTC, whole seconds.
+  A link whose target leaves the folder (an absolute target, or one that
+  climbs above it) has `blocked: true`. FIFOs, sockets and devices are not
+  listed.
+- Folders first, then by name ignoring case. At most 2,000 entries, and at
+  most 20,000 names read from one folder; past either, `truncated: true`.
+- `hidden` counts the sensitive names left out (below), so the app can say
+  so.
+- With `q`, the answer is a search instead: the names under `path` that
+  contain `q` ignoring case (names, not contents), in the same shape and
+  order. The walk goes shallowest first, does not follow links, skips
+  `node_modules`, never matches or looks under a sensitive name (`hidden`
+  counts the ones that would have matched), and stops at 20,000 entries
+  seen, 200 matches or 2 s with `truncated: true`.
+
+**One file.** `path` is the file's `path` from a list, slashes unescaped.
+JSON unless `?raw=1`:
+
+```jsonc
+{"path": "docs/report.md", "size": 1204, "modified": "2026-11-03T21:02:11Z", "kind": "text", "text": "…", "truncated": false}
+```
+
+- `kind` comes from the file's first bytes, never its name: `image` for
+  PNG, JPEG, GIF and WebP, `text` for UTF-8 with no NUL byte (SVG is text),
+  else `binary`. Only `text` carries `text` (absent for an empty file):
+  at most 1 MiB, cut on a character boundary, with `truncated: true` past
+  it.
+- `?raw=1` serves an image's bytes with the content type of its format,
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+  'none'; sandbox` and `Cache-Control: no-store`. Over 16 MiB is `413`; a
+  file that is not an image is `415`.
+- Only a regular file is read: its type comes from the open handle (the
+  open does not wait, so a FIFO cannot hang it). A link inside the folder is
+  followed; every name it passes through gets the sensitive rule.
+
+**Errors** are `{"error": "…", "reason": "…"}`:
+
+| Status | `reason` | Meaning |
+|---|---|---|
+| 404 | `no_agent`, `no_space` | No such agent or space. |
+| 404 | `no_cwd` | The agent or space has no folder yet. |
+| 404 | `not_found` | Gone, the folder was removed, or a list of something that is not a folder. |
+| 403 | `outside` | The path leaves the folder through a link. |
+| 403 | `sensitive` | Hidden for safety. |
+| 403 | `not_file` | A read of a folder, FIFO, socket or device. |
+| 403 | `denied` | The system refused. |
+| 413 | `too_large` | `?raw=1` on an image over 16 MiB. |
+| 415 | `not_image` | `?raw=1` on a file that is not an image. |
+| 400 | `bad_path` | Absolute, or not a clean relative path. |
+
+A space route is also `502` (no `reason`) when herdr cannot say where the
+space is, and `503` on a daemon without spaces.
+
+**Sensitive names** are not listed, searched or read: the list in
+[the design](design/file-browser.md#5-sensitive-names) (`.git`, `.env`,
+`.ssh`, private keys, `credentials`, …), kept in code as `files.Sensitive`
+and matched on any segment of the path or of a link's target, ignoring
+case. This is a rail against the likely case, not a promise: a paired phone
+can read the agents' folders.
+
+Each read is logged as `files.read {path, raw, size}` (with `space` for a
+space's folder, the agent's pane on the event), or `{path, raw, reason}`
+when it was refused; never a line of the file. A list logs nothing.
 
 ## Agent window over /ws
 

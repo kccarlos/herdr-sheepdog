@@ -25,7 +25,7 @@ type eventFilter struct {
 // docs/dev/architecture.md when adding a family.
 var eventKinds = map[string]bool{
 	"agent": true, "space": true, "brain": true, "card": true, "cli": true, "context": true,
-	"conversation": true, "daemon": true, "eventlog": true, "events": true,
+	"conversation": true, "daemon": true, "eventlog": true, "events": true, "files": true,
 	"herdr": true, "investigation": true, "note": true, "observe": true,
 	"pending": true, "promise": true, "prompts": true, "push": true,
 	"question": true, "supervisor": true, "turn": true, "user": true,

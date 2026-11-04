@@ -94,6 +94,10 @@ const (
 	// FeatureSpaceMute: POST /api/spaces/{id}/mute, space_mutes in
 	// /api/state, muted on a space and the space.muted event.
 	FeatureSpaceMute = "space-mute"
+	// FeatureFiles: the read-only file browser, GET
+	// /api/agents/{pane_id}/files[/{path}] and /api/spaces/{id}/files[/{path}]
+	// ("Files").
+	FeatureFiles = "files"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,

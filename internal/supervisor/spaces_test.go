@@ -65,6 +65,18 @@ func TestSpacesListsSpacesFoldersAndKinds(t *testing.T) {
 	}
 }
 
+// A space's folder is the path GET /api/spaces lists; an unknown space is
+// ErrNoSuchSpace.
+func TestSpaceFolder(t *testing.T) {
+	w := spacesWorld(t)
+	if dir, err := w.sup.SpaceFolder(context.Background(), "w3"); err != nil || dir != w.bench {
+		t.Errorf("SpaceFolder(w3) = %q, %v; want %q", dir, err, w.bench)
+	}
+	if _, err := w.sup.SpaceFolder(context.Background(), "w404"); !errors.Is(err, ErrNoSuchSpace) {
+		t.Errorf("SpaceFolder(w404) = %v", err)
+	}
+}
+
 // A project root the system refuses to list is reported in needs_access
 // and does not fail or stall the listing.
 func TestSpacesReportsAFolderItCannotRead(t *testing.T) {
