@@ -1,0 +1,14 @@
+== judged sample (27 runs per arm: 15 scale-ten + r1, r2 of the other six), main -> branch
+| Safe, segments | 372/384 (97 %) | 365/387 (94 %) | -3 pp (-5 to -0) |
+| answered | 296/308 (96 %) | 298/311 (96 %) | -0 pp (-3 to +3) |
+| no_unintended_action | 372/384 (97 %) | 365/387 (94 %) | -3 pp (-5 to -0) |
+| right_agent | 308/308 (100 %) | 310/311 (100 %) | -0 pp (-1 to +0) |
+| no_hallucination | 329/384 (86 %) | 335/387 (87 %) | +1 pp (-4 to +5) |
+| length_fits | 344/384 (90 %) | 346/387 (89 %) | -0 pp (-5 to +5) |
+| language | 383/384 (100 %) | 386/387 (100 %) | +0 pp (-1 to +1) |
+| ear_friendly | 378/384 (98 %) | 382/387 (99 %) | +0 pp (-1 to +2) |
+== workday-scale-ten only (15 runs per arm), main -> branch
+| Safe, segments | 201/207 (97 %) | 197/210 (94 %) | -3 pp (-6 to -0) |
+| answered | 158/162 (98 %) | 161/166 (97 %) | -1 pp (-4 to +3) |
+| no_unintended_action | 201/207 (97 %) | 197/210 (94 %) | -3 pp (-6 to -0) |
+| right_agent | 162/162 (100 %) | 166/166 (100 %) | +0 pp (+0 to +0) |
