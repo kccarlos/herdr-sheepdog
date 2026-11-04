@@ -793,6 +793,26 @@ final class FileBrowserModelTests: XCTestCase {
         XCTAssertEqual(blocked, .file, "a blocked link is not even asked")
     }
 
+    func testFailedLinkProbesLeaveTheLoadedListAlone() async {
+        let failures: [Error] = [
+            FilesRefusal(status: 403, problem: .sensitive, message: "hidden"),
+            FilesRefusal(status: 403, problem: .outside, message: "outside"),
+            DaemonError.unreachable(endpoint: "x:1", detail: ""),
+        ]
+        for failure in failures {
+            let model = model { path, _ in
+                if path.isEmpty { return self.listing() }
+                throw failure
+            }
+            await model.start()
+            let original = model.folder
+            let target = await model.resolve(link: FileEntry(name: "link", kind: .link))
+            XCTAssertEqual(target, .file)
+            XCTAssertEqual(model.folder, original, "probe failed: \(failure)")
+            XCTAssertEqual(model.path, "")
+        }
+    }
+
     func testReloadKeepsWhatIsShownUntilTheAnswer() async {
         var names = ["a.md"]
         let model = model { _, _ in self.listing("", names) }
