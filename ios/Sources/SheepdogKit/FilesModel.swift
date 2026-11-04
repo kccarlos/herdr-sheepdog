@@ -178,10 +178,11 @@ public final class FileBrowserModel {
                 if !listing.rootName.isEmpty { rootName = listing.rootName }
                 return .folder(entry.path)
             }
-        } catch is CancellationError { return .file }
-        catch let url as URLError where url.code == .cancelled { return .file }
-        catch let refusal as FilesRefusal where refusal.problem == .notFound { return .file }
-        catch { if mine == folderRead { folder = .failed(filesFailure(error, describe: describe) ?? .request(describe(error))) } }
+        } catch {
+            // The viewer reports any refusal or transport failure; the probe
+            // must leave the current list intact.
+            return .file
+        }
         return .file
     }
 
