@@ -208,12 +208,20 @@ var ErrBridgeClosed = errors.New("herdr: bridge closed")
 type Bridge struct {
 	opts BridgeOptions
 
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	out   *bufio.Reader
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	out    *bufio.Reader
+
+	// reapOnce starts the one cmd.Wait; waitc closes when it returns.
+	reapOnce sync.Once
+	waitc    chan struct{}
 
 	wmu      sync.Mutex
 	released bool
+	// stdinClosed is set (under wmu) when stdin is closed, so sendAll
+	// never writes to a closed pipe.
+	stdinClosed bool
 
 	smu        sync.Mutex // guards cols, rows: the pane size the wheel centres on
 	cols, rows int
@@ -306,10 +314,12 @@ func startOnce(ctx context.Context, opts BridgeOptions) (*Bridge, TerminalFrame,
 	if err != nil {
 		return nil, TerminalFrame{}, err
 	}
-	b := &Bridge{opts: opts, cmd: cmd, stdin: stdin, out: bufio.NewReaderSize(stdout, 64<<10),
+	b := &Bridge{opts: opts, cmd: cmd, stdin: stdin, stdout: stdout, out: bufio.NewReaderSize(stdout, 64<<10),
 		done: make(chan struct{}), stderr: &tailBuffer{max: 2048},
 		cols: opts.Cols, rows: opts.Rows}
 	cmd.Stderr = b.stderr
+	// A grandchild that inherits the pipes must not hold Wait forever.
+	cmd.WaitDelay = 500 * time.Millisecond
 	if err := cmd.Start(); err != nil {
 		return nil, TerminalFrame{}, &AttachError{Closed{CloseHerdr, err.Error()}}
 	}
@@ -318,10 +328,15 @@ func startOnce(ctx context.Context, opts BridgeOptions) (*Bridge, TerminalFrame,
 		err error
 	}
 	ch := make(chan first, 1)
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		f, closed, err := b.next()
 		switch {
 		case err != nil:
+			// Reap first: the stderr copy ends inside Wait, so the tail
+			// is whole only after it.
+			b.reap()
 			ch <- first{err: &AttachError{Closed{CloseHerdr, b.exitMessage(err)}}}
 		case closed != nil:
 			ch <- first{err: &AttachError{*closed}}
@@ -334,15 +349,15 @@ func startOnce(ctx context.Context, opts BridgeOptions) (*Bridge, TerminalFrame,
 	select {
 	case r := <-ch:
 		if r.err != nil {
-			b.kill()
+			b.kill(readerDone)
 			return nil, TerminalFrame{}, r.err
 		}
 		return b, r.f, nil
 	case <-ctx.Done():
-		b.kill()
+		b.kill(readerDone)
 		return nil, TerminalFrame{}, ctx.Err()
 	case <-timer.C:
-		b.kill()
+		b.kill(readerDone)
 		return nil, TerminalFrame{}, &AttachError{Closed{CloseHerdr, "no first frame within " + opts.StartTimeout.String()}}
 	}
 }
@@ -396,16 +411,18 @@ func (b *Bridge) drain() {
 	for {
 		f, closed, err := b.next()
 		if err != nil {
+			b.reap()
 			end = Closed{CloseHerdr, b.exitMessage(err)}
 			break
 		}
 		if closed != nil {
 			end = *closed
-			b.wmu.Lock()
-			_ = b.stdin.Close()
-			b.wmu.Unlock()
-			// Keep draining to EOF so the child never blocks on a full pipe.
-			_, _ = io.Copy(io.Discard, b.out)
+			b.closeStdin()
+			// Keep draining so the child never blocks on a full pipe, but
+			// not before finishing: a grandchild holding stdout open would
+			// keep this read from ever ending. Wait closes the pipe once
+			// the child is gone, which ends the discard.
+			go func() { _, _ = io.Copy(io.Discard, b.out) }()
 			break
 		}
 		if b.opts.OnFrame != nil {
@@ -424,21 +441,29 @@ func (b *Bridge) drain() {
 // finish reaps the child and records how the bridge ended, once.
 func (b *Bridge) finish(end Closed) {
 	b.once.Do(func() {
-		_ = b.stdin.Close()
-		waitc := make(chan struct{})
-		go func() { _ = b.cmd.Wait(); close(waitc) }()
-		select {
-		case <-waitc:
-		case <-time.After(3 * time.Second):
-			_ = b.cmd.Process.Kill()
-			<-waitc
-		}
+		b.closeStdin()
+		b.reap()
 		b.closed = end
 		close(b.done)
 		if b.opts.OnClose != nil {
 			b.opts.OnClose(end)
 		}
 	})
+}
+
+// reap waits for the child to exit and its stderr to be copied, killing
+// it after 3 s. Every caller shares the one cmd.Wait.
+func (b *Bridge) reap() {
+	b.reapOnce.Do(func() {
+		b.waitc = make(chan struct{})
+		go func() { _ = b.cmd.Wait(); close(b.waitc) }()
+	})
+	select {
+	case <-b.waitc:
+	case <-time.After(3 * time.Second):
+		_ = b.cmd.Process.Kill()
+		<-b.waitc
+	}
 }
 
 func (b *Bridge) exitMessage(err error) string {
@@ -451,11 +476,30 @@ func (b *Bridge) exitMessage(err error) string {
 	return err.Error()
 }
 
-// kill ends a bridge that never started (no OnClose).
-func (b *Bridge) kill() {
-	_ = b.cmd.Process.Kill()
+// closeStdinLocked closes the child's stdin once. Callers hold wmu, so a
+// close never overlaps a write in sendAll.
+func (b *Bridge) closeStdinLocked() {
+	if b.stdinClosed {
+		return
+	}
+	b.stdinClosed = true
 	_ = b.stdin.Close()
-	_ = b.cmd.Wait()
+}
+
+func (b *Bridge) closeStdin() {
+	b.wmu.Lock()
+	b.closeStdinLocked()
+	b.wmu.Unlock()
+}
+
+// kill ends a bridge that never started (no OnClose). Wait is bounded by
+// cmd.WaitDelay: if a grandchild inherited the pipes, Wait closes them
+// after the delay, which also ends the startup reader (readerDone).
+func (b *Bridge) kill(readerDone <-chan struct{}) {
+	_ = b.cmd.Process.Kill()
+	b.closeStdin()
+	b.reap()
+	<-readerDone
 }
 
 // Done is closed when the bridge has ended and its process is reaped.
@@ -492,7 +536,7 @@ func (b *Bridge) sendAll(vs ...any) error {
 		return ErrBridgeClosed
 	default:
 	}
-	if b.released {
+	if b.released || b.stdinClosed {
 		return ErrBridgeClosed
 	}
 	if _, err := b.stdin.Write(batch); err != nil {
@@ -599,15 +643,19 @@ func (b *Bridge) Release() {
 	}
 	b.wmu.Lock()
 	b.released = true
-	_ = b.stdin.Close()
+	b.closeStdinLocked()
 	b.wmu.Unlock()
 	if b.opts.Mode == BridgeObserve {
 		_ = b.cmd.Process.Kill()
+		// A grandchild may hold the child's stdout open; closing our end
+		// lets drain end so the bridge finishes.
+		_ = b.stdout.Close()
 	}
 	select {
 	case <-b.done:
 	case <-time.After(3 * time.Second):
 		_ = b.cmd.Process.Kill()
+		_ = b.stdout.Close()
 		<-b.done
 	}
 }

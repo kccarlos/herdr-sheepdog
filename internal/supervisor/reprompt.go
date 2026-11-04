@@ -44,11 +44,12 @@ const defaultRepromptPollInterval = time.Second
 // pane, whichever path sent them (the orchestrator's send_keys, the bare-answer
 // fast path, or a tap). Detached from the caller's context, which ends
 // long before the poll should (a web request, an orchestrator turn, a voice tool
-// call).
+// call), and bounded by s.life so shutdown drains it. Caller holds s.mu.
 func (s *Supervisor) startReprompt(paneID string) {
-	if s.cfg.RepromptPoll <= 0 {
+	if s.cfg.RepromptPoll <= 0 || s.shut {
 		return
 	}
+	s.replies.Add(1)
 	go s.pollReprompt(paneID)
 }
 
@@ -60,6 +61,7 @@ func (s *Supervisor) startReprompt(paneID string) {
 // prompt (which it raises); a tick that finds the same prompt, no
 // prompt, or a failed read keeps waiting.
 func (s *Supervisor) pollReprompt(paneID string) {
+	defer s.replies.Done()
 	interval := s.cfg.RepromptPollInterval
 	maxPolls := int(s.cfg.RepromptPoll / interval)
 	start := time.Now()
@@ -68,15 +70,22 @@ func (s *Supervisor) pollReprompt(paneID string) {
 
 	polls, outcome, sawSamePrompt := 0, "timeout", false
 	for polls < maxPolls {
-		<-ticker.C
+		select {
+		case <-s.life.Done():
+			return
+		case <-ticker.C:
+		}
 		polls++
 		row, ok := s.store.Get(paneID)
 		if !ok || row.State != herdr.StateBlocked {
 			outcome = "left_blocked"
 			break
 		}
-		read, err := s.herdr.Read(context.Background(), paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+		read, err := s.herdr.Read(s.life, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 		if err != nil {
+			if s.life.Err() != nil {
+				return
+			}
 			continue
 		}
 		prompt, ok := herdr.ParsePrompt(read.Text)
@@ -89,8 +98,11 @@ func (s *Supervisor) pollReprompt(paneID string) {
 			sawSamePrompt = true
 			continue
 		}
-		if !s.raiseReprompt(context.Background(), row, prompt, "reprompt", time.Since(start)) {
+		if !s.raiseReprompt(s.life, row, prompt, "reprompt", time.Since(start)) {
 			s.releasePromptClaim(paneID, sig, prev)
+			if s.life.Err() != nil {
+				return
+			}
 			continue
 		}
 		outcome = "raised"
@@ -223,9 +235,9 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 	}
 }
 
-// stillAskingLocked reads p's pane and reports whether it is blocked at
-// p's prompt. Caller holds s.mu.
-func (s *Supervisor) stillAskingLocked(ctx context.Context, p state.PendingAction) bool {
+// stillAsking reads p's pane and reports whether it is blocked at p's
+// prompt. Caller must not hold s.mu.
+func (s *Supervisor) stillAsking(ctx context.Context, p state.PendingAction) bool {
 	row, ok := s.store.Get(p.PaneID)
 	if !ok || row.State != herdr.StateBlocked {
 		return false

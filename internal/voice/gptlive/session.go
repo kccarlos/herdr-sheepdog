@@ -71,8 +71,11 @@ type Session struct {
 	loudSince time.Time
 	up        upsampler
 
-	live     *liveConn // the open, started session; nil in standby
-	opening  bool
+	live    *liveConn // the open, started session; nil in standby
+	opening bool
+	// resets counts Reset calls, so an open in flight can tell it was
+	// reset (live.go's open).
+	resets   int
 	nextOpen time.Time
 	preroll  [][]byte // the last moments of microphone audio in standby
 	pending  [][]byte // audio held while a session opens
@@ -348,9 +351,15 @@ func (s *Session) Reset(reason string) error {
 	}
 	s.recap.Reset()
 	s.held = nil
+	s.inputOpen = false
 	s.inText, s.outText = "", ""
+	s.unclaimed, s.settledText = "", ""
 	s.heard.Reset()
 	s.requeue.Reset()
+	// An open in flight carries the dropped recap and audio: it checks
+	// resets and closes its connection; audio held for it goes too.
+	s.resets++
+	s.pending, s.pendingN = nil, 0
 	lc := s.live
 	s.mu.Unlock()
 	if lc != nil {

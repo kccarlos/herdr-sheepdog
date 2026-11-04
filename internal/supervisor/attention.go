@@ -686,7 +686,7 @@ func (s *Supervisor) promoteHeld(a announcement) {
 // becomes answerable by voice when it is heard). A question whose agent has
 // moved on is dropped quietly.
 func (s *Supervisor) announceHeld(path string) {
-	idx := s.folders(context.Background())
+	idx := s.folders(s.life)
 	for _, q := range s.heldQuestions() {
 		row, ok := s.store.Get(q.PaneID)
 		if !ok || s.folderOfPane(idx, row) != path {
@@ -695,8 +695,12 @@ func (s *Supervisor) announceHeld(path string) {
 		if row.State != herdr.StateBlocked && row.State != herdr.StateDone && row.State != herdr.StateIdle {
 			continue
 		}
+		if !s.track() {
+			return
+		}
 		go func(row state.Agent, q state.PendingAction) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer s.replies.Done()
+			ctx, cancel := context.WithTimeout(s.life, 2*time.Minute)
 			defer cancel()
 			s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, pending: q.ID})
 		}(row, q)

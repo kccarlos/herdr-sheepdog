@@ -103,16 +103,6 @@ type journalState struct {
 	signOff sync.Once
 }
 
-// unsignTask strips the trailer from the row's current task after the
-// send path recorded the instruction as sent.
-func (s *Supervisor) unsignTask(paneID string) {
-	_, err := s.store.Update(paneID, func(a *state.Agent) { a.CurrentTask = withoutSignOff(a.CurrentTask) })
-	if err != nil {
-		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
-	}
-	s.invalidateBriefing()
-}
-
 // noteMissing reports whether reason is new for paneID.
 func (j *journalState) noteMissing(paneID, reason string) bool {
 	j.mu.Lock()

@@ -114,6 +114,26 @@ func TestSubscribeScreenFallback(t *testing.T) {
 	expectNone(t, ch, 150*time.Millisecond)
 }
 
+func TestSubscribeScreenFallbackBlockedAtSeed(t *testing.T) {
+	b, srv := newBackend(t)
+	srv.Add(liveTerminal("t1", "codex"))
+	srv.SetScreen("t1", trustScreen)
+	ctx, cancel := context.WithCancel(testContext(t))
+	defer cancel()
+
+	ch := b.Subscribe(ctx, "t1")
+	ev := receive(t, ch)
+	if ev.State != herdr.StateBlocked || ev.Agent != "codex" {
+		t.Fatalf("initial fallback event = %+v", ev)
+	}
+	expectNone(t, ch, 100*time.Millisecond)
+
+	srv.SetScreen("t1", "OpenAI Codex\n")
+	if ev := receive(t, ch); ev.State != herdr.StateUnknown {
+		t.Fatalf("cleared fallback event = %+v", ev)
+	}
+}
+
 func TestSubscribeFleetEvents(t *testing.T) {
 	b, srv := newBackend(t)
 	srv.Add(liveTerminal("t1", "zsh"))

@@ -548,16 +548,37 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // keys never go into a question the tap was not about.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
+	p, _, has := s.questionByID(id)
+	s.mu.Unlock()
+	if !has {
+		return voice.ToolResult{}, ErrPendingGone
+	}
+
+	ps := s.paneSend(p.PaneID)
+	ps.Lock()
+	defer ps.Unlock()
+
+	s.mu.Lock()
 	p, slot, has := s.questionByID(id)
 	if !has {
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	if !slot && !s.stillAskingLocked(ctx, p) {
-		s.dropQuestionLocked(p)
-		s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
+	if !slot {
 		s.mu.Unlock()
-		return voice.ToolResult{}, ErrPendingGone
+		still := s.stillAsking(ctx, p)
+		s.mu.Lock()
+		p, slot, has = s.questionByID(id)
+		if !has {
+			s.mu.Unlock()
+			return voice.ToolResult{}, ErrPendingGone
+		}
+		if !slot && !still {
+			s.dropQuestionLocked(p)
+			s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
+			s.mu.Unlock()
+			return voice.ToolResult{}, ErrPendingGone
+		}
 	}
 	if option < 1 || option > len(p.Options) || p.Options[option-1].Meta {
 		s.mu.Unlock()
@@ -578,10 +599,11 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, errors.New(reason)
 	}
+	in.used = true
 	alias := s.sayOf(p.PaneID)
 	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
-	if sent {
-		in.used = true
+	if !sent {
+		in.used = false
 	}
 	s.mu.Unlock()
 	if !sent {

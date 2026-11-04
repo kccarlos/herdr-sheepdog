@@ -112,7 +112,7 @@ const stopRestWindow = 10 * time.Second
 func (s *Supervisor) relayStopRest() {
 	s.mu.Lock()
 	last := s.lastInputLocked()
-	if last == nil || last.kind != InputVoice || last.claimed || last.used || s.cfg.Now().Sub(last.at) > stopRestWindow {
+	if s.shut || last == nil || last.kind != InputVoice || last.claimed || last.used || s.cfg.Now().Sub(last.at) > stopRestWindow {
 		s.mu.Unlock()
 		return
 	}
@@ -158,6 +158,25 @@ func stopRest(text string) string {
 	return rest
 }
 
+// stopSendPoll is how often a stop waiting for a pane's send lock aborts
+// the send holding it again: one that registered itself just after the
+// first abort is caught on the next.
+const stopSendPoll = 25 * time.Millisecond
+
+// abortSend aborts the Prompt in flight on paneID, if any, and reports
+// whether there was one.
+func (s *Supervisor) abortSend(paneID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.sends[paneID]
+	if !ok {
+		return false
+	}
+	f.byStop = true
+	f.cancel()
+	return true
+}
+
 // resolveStop works out the phase from state and carries it out.
 func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	// Phases 1 and 2: the relayed words are in flight. Cancelling the
@@ -175,14 +194,11 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 		cancel := u.cancel
 		s.mu.Unlock()
 		cancel()
-		// Re-take the lock behind whatever the cancelled turn was in the
-		// middle of: a send it had already started holds s.mu until its
-		// pending action exists, so phase 4 below sees it.
-		s.mu.Lock()
+	} else {
+		// The later phases take the lock themselves; the investigation phase
+		// must not hold it while it stops a child process.
+		s.mu.Unlock()
 	}
-	// The later phases take the lock themselves; the investigation phase
-	// must not hold it while it stops a child process.
-	s.mu.Unlock()
 
 	// Phase 3: a background look is running. The one the withdrawn
 	// request was about, or — with nothing in flight — the most recent.
@@ -195,24 +211,78 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	// would be a lie and the worker would carry on.
 	p, has := s.store.Pending()
 	if has && p.Kind == state.PendingSendInstruction && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
-		if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
-			alias := aliasOr(state.Say(row))
-			out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "an interrupt (Ctrl-C) was sent to " + alias}
-			if err := s.herdr.Interrupt(ctx, p.PaneID); err != nil {
-				s.log.Log(logSource, "supervisor.cancel_error", p.PaneID, map[string]any{"id": p.ID, "error": err.Error(), "via": "stop"})
-				out.what, out.failed = "I could not interrupt "+alias, true
-			} else {
-				// The next working -> done is the Ctrl-C, not a finish.
-				s.interrupted[p.PaneID] = s.cfg.Now()
-				if row.StateSince.Before(p.CreatedAt) {
-					// Busy before the instruction went in: it was queued
-					// into the running turn.
-					out.queued = withoutSignOff(p.PayloadText)
-				}
+		paneID := p.PaneID
+		s.mu.Unlock()
+		// Wait behind any in-flight send on this pane so an aborted Prompt
+		// settles before we decide whether to interrupt. The send is
+		// aborted here, not waited out: herdr's own timeout is seconds,
+		// herdrcore's up to 30, and a stop must be quick. The wait itself
+		// ends with ctx.
+		ps := s.paneSend(paneID)
+		aborted := false
+		locked := false
+		for !locked {
+			if s.abortSend(paneID) {
+				aborted = true
 			}
-			s.clearPending(p, "stop")
-			s.mu.Unlock()
-			return out
+			wait, stopWait := context.WithTimeout(ctx, stopSendPoll)
+			locked = ps.LockCtx(wait) == nil
+			stopWait()
+			if !locked && ctx.Err() != nil {
+				break
+			}
+		}
+		s.mu.Lock()
+		if locked {
+			p, has = s.store.Pending()
+		}
+		if locked && has && p.Kind == state.PendingSendInstruction && p.PaneID == paneID && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
+			if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
+				alias := aliasOr(state.Say(row))
+				out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "an interrupt (Ctrl-C) was sent to " + alias}
+				prevAt, hadPrev := s.interrupted[p.PaneID]
+				sentAt := s.cfg.Now()
+				s.interrupted[p.PaneID] = sentAt
+				s.mu.Unlock()
+
+				err := s.herdr.Interrupt(ctx, p.PaneID)
+
+				s.mu.Lock()
+				if err != nil {
+					if hadPrev {
+						s.interrupted[p.PaneID] = prevAt
+					} else if cur, ok := s.interrupted[p.PaneID]; ok && cur.Equal(sentAt) {
+						delete(s.interrupted, p.PaneID)
+					}
+					s.log.Log(logSource, "supervisor.cancel_error", p.PaneID, map[string]any{"id": p.ID, "error": err.Error(), "via": "stop"})
+					out.what, out.failed = "I could not interrupt "+alias, true
+				} else {
+					// The next working -> done is the Ctrl-C, not a finish.
+					if cur, ok := s.interrupted[p.PaneID]; ok && cur.Equal(sentAt) {
+						s.interrupted[p.PaneID] = s.cfg.Now()
+					}
+					if row.StateSince.Before(p.CreatedAt) {
+						// Busy before the instruction went in: it was queued
+						// into the running turn.
+						out.queued = withoutSignOff(p.PayloadText)
+					}
+				}
+				if cur, hasCur := s.store.Pending(); hasCur && cur.ID == p.ID {
+					s.clearPending(p, "stop")
+				}
+				s.mu.Unlock()
+				ps.Unlock()
+				return out
+			}
+		}
+		if locked {
+			// No interrupt: a send this stop aborted leaves its action
+			// behind with nothing to cancel.
+			if cur, hasCur := s.store.Pending(); aborted && hasCur && cur.Kind == state.PendingSendInstruction && cur.PaneID == paneID {
+				s.clearPending(cur, "stop")
+				has = false
+			}
+			ps.Unlock()
 		}
 	}
 

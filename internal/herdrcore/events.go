@@ -21,7 +21,7 @@ func (b *Backend) Subscribe(ctx context.Context, paneID string) <-chan herdr.Sta
 		if !isLocal(paneID) {
 			return
 		}
-		feed := &paneFeed{b: b, paneID: paneID, out: out}
+		feed := &paneFeed{b: b, paneID: paneID, out: out, last: herdr.StateUnknown}
 		b.stream(ctx, "status:"+paneID, paneID, hc.SubscribeFilter{Terminal: paneID}, feed.serve)
 	}()
 	return out
@@ -36,11 +36,13 @@ type paneFeed struct {
 	kind     string
 	space    string      // the terminal's herdr.space label
 	fallback bool        // the terminal is an agent that has not reported
-	last     herdr.State // the last state emitted or seeded
+	last     herdr.State // the last state emitted (starts at unknown)
 }
 
 func (f *paneFeed) serve(ctx context.Context, sub *hc.Subscription) bool {
-	f.seed(ctx, sub)
+	if !f.seed(ctx, sub) {
+		return false
+	}
 	ticker := time.NewTicker(f.b.fallbackPoll())
 	defer ticker.Stop()
 	for {
@@ -68,8 +70,10 @@ func (f *paneFeed) serve(ctx context.Context, sub *hc.Subscription) bool {
 }
 
 // seed takes the terminal's kind and fallback need from the subscription's
-// snapshot, and its current screen state as the baseline of the poll.
-func (f *paneFeed) seed(ctx context.Context, sub *hc.Subscription) {
+// snapshot, and polls the screen once so a question already on screen is
+// emitted instead of swallowed as the baseline. It reports false when ctx
+// ended while emitting.
+func (f *paneFeed) seed(ctx context.Context, sub *hc.Subscription) bool {
 	_, terminals := sub.Snapshot()
 	for _, t := range terminals {
 		if t.Address != f.paneID {
@@ -79,9 +83,10 @@ func (f *paneFeed) seed(ctx context.Context, sub *hc.Subscription) {
 		f.space = spaceOf(t)
 		f.fallback = isPane(t) && needsFallback(t)
 		if f.fallback {
-			f.last, _ = f.b.screenState(ctx, f.paneID)
+			return f.poll(ctx)
 		}
 	}
+	return true
 }
 
 // poll reads the screen and emits a status event when the fallback state
