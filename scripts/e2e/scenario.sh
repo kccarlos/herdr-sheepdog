@@ -13,6 +13,9 @@
 #   label-sync            a real idle Claude on the private core: pin through the API shows
 #                         herdr.pinned on `hc get`, labels set with `hc label` show in /api/state
 #                         (needs --herdr socket; one agent from the budget)
+#   files                 file browser routes on a private folder: list, read, raw image,
+#                         hidden names (.env, id_rsa, U+017F, U+200B), symlinks, FIFO, size
+#                          and 2,000-entry limits, .. paths, unpaired refusal, files.read log
 #   voice-client [mode]   a /ws client holds the voice: connected (default) | speaking | disconnected
 #   voice-on              restart the daemon with --voice=fake (voice open, no network)
 #   voice-off             restart the daemon with --voice=off
@@ -70,6 +73,189 @@ jlog() { cat "$E2E_DIR"/data/events/*.jsonl 2>/dev/null | jq -c "$1" 2>/dev/null
 need_socket() { [ "${E2E_HERDR:-mock}" = socket ] || e2e_die "$NAME needs the private core: up.sh --herdr hc"; }
 
 voice_client_attached() { e2e_api GET /api/state | jq -e '.voice.client_connected == true' >/dev/null; }
+
+scenario_files() {
+  local homedir fdir base out code body hdr bin
+  homedir=$(cd "$E2E_DIR/home" && pwd)
+  fdir="$homedir/files"
+  rm -rf "$fdir" "$homedir/outside-secret.txt"
+  mkdir -p "$fdir"
+
+  # Populate the private folder with each fixture case.
+  printf 'OUTSIDE_SECRET_MARKER\n' >"$homedir/outside-secret.txt"
+  printf 'hello files\nline two\n' >"$fdir/hello.txt"
+  printf '# Files Scenario\n\nMarkdown body.\n' >"$fdir/README.md"
+  printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde' >"$fdir/logo.png"
+  printf 'SECRET_ENV_VALUE=never-reveal\n' >"$fdir/.env"
+  printf 'PRIVATE_KEY_MATERIAL_NEVER_REVEAL\n' >"$fdir/id_rsa"
+  printf 'LONGS_KEY_MATERIAL\n' >"$fdir/$(printf 'id_r\xc5\xbfa')"
+  printf 'ZWSP_ENV_MATERIAL\n' >"$fdir/$(printf '.\xe2\x80\x8benv')"
+  printf 'ZWSP_KEY_MATERIAL\n' >"$fdir/$(printf 'id_\xe2\x80\x8brsa')"
+  ln -s ../outside-secret.txt "$fdir/outside"
+  ln -s .env "$fdir/env-link"
+  mkfifo "$fdir/pipe.fifo"
+  dd if=/dev/zero bs=1048576 count=3 2>/dev/null | tr '\0' 'a' >"$fdir/big.txt"
+  {
+    printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
+    dd if=/dev/zero bs=1048576 count=17 2>/dev/null
+  } >"$fdir/huge.png"
+  (cd "$fdir" && touch z{1..3000}.txt)
+
+  post /api/inject/pane "$(jq -n --arg cwd "$fdir" '{pane_id:"e2e:files",alias:"filer",kind:"codex",state:"idle",cwd:$cwd,screen:"Ready.\n"}')"
+  base="/api/agents/e2e:files/files"
+
+  if [ "${E2E_HERDR:-mock}" = socket ]; then
+    e2e_hc get space-files --json >/dev/null 2>&1 ||
+      e2e_hc run --bg --no-parent --name space-files --cwd "$fdir" --label "herdr.space=sF" -- sleep 3000 >/dev/null
+    e2e_wait 15 bash -c "curl -fs '$E2E_URL/api/spaces' | jq -e '[.spaces[].id] | index(\"sF\") != null'" \
+      || e2e_die "files: space sF never showed up in GET /api/spaces"
+  fi
+
+  # 1. List works, caps at 2,000 entries with truncated: true, marks outside link blocked,
+  #    omits FIFO, and hides .env / id_rsa (including U+017F and U+200B spellings).
+  out=$(e2e_api GET "$base") || e2e_die "files: GET $base failed"
+  echo "$out" | jq -e '.root_name == "files" and .path == "" and .truncated == true and (.entries | length) == 2000 and .hidden >= 4' >/dev/null \
+    || e2e_die "files: list did not return 2000 truncated entries with hidden>=4: $(echo "$out" | jq -c '{root_name,path,truncated,len:(.entries|length),hidden}')"
+  echo "$out" | jq -e '
+    ([.entries[] | select(.name=="hello.txt" and .kind=="file")] | length == 1) and
+    ([.entries[] | select(.name=="README.md" and .kind=="file")] | length == 1) and
+    ([.entries[] | select(.name=="logo.png" and .kind=="file")] | length == 1) and
+    ([.entries[] | select(.name=="big.txt" and .kind=="file" and .size==3145728)] | length == 1) and
+    ([.entries[] | select(.name=="huge.png" and .kind=="file")] | length == 1) and
+    ([.entries[] | select(.name=="env-link" and .kind=="link")] | length == 1) and
+    ([.entries[] | select(.name=="outside" and .kind=="link" and .blocked==true)] | length == 1) and
+    ([.entries[] | select(.name=="pipe.fifo")] | length == 0) and
+    ([.entries[].name | select(. == ".env" or . == "id_rsa" or . == "id_r\u017fa" or . == ".\u200benv" or . == "id_\u200brsa")] | length == 0)
+  ' >/dev/null || e2e_die "files: list entries missing expected files or leaked hidden/FIFO entries"
+
+  # Search finds normal files and never leaks hidden names or U+017F / U+200B spellings.
+  e2e_api GET "$base?q=README" | jq -e '[.entries[].path] == ["README.md"]' >/dev/null \
+    || e2e_die "files: search ?q=README did not return README.md"
+  for q in ".env" "id_r" "id_rsa" "id_r%C5%BFa" ".%E2%80%8Benv" "id_%E2%80%8Brsa"; do
+    e2e_api GET "$base?q=$q" | jq -e '(.entries | length) == 0' >/dev/null \
+      || e2e_die "files: search ?q=$q leaked a sensitive file"
+  done
+
+  # 2. Read works for normal text, Markdown, and image (JSON + ?raw=1 bytes).
+  e2e_api GET "$base/hello.txt" | jq -e '.kind == "text" and .path == "hello.txt" and .truncated == false and .text == "hello files\nline two\n"' >/dev/null \
+    || e2e_die "files: read hello.txt failed"
+  e2e_api GET "$base/README.md" | jq -e '.kind == "text" and .path == "README.md" and .truncated == false and .text == "# Files Scenario\n\nMarkdown body.\n"' >/dev/null \
+    || e2e_die "files: read README.md failed"
+  e2e_api GET "$base/logo.png" | jq -e '.kind == "image" and .path == "logo.png" and (.text == null)' >/dev/null \
+    || e2e_die "files: JSON read logo.png did not report kind image without text"
+  hdr="$E2E_DIR/files-logo.hdr"
+  bin="$E2E_DIR/files-logo.bin"
+  curl -fsS --max-time 5 -D "$hdr" -o "$bin" "$E2E_URL$base/logo.png?raw=1" \
+    || e2e_die "files: GET logo.png?raw=1 failed"
+  cmp -s "$fdir/logo.png" "$bin" || e2e_die "files: logo.png?raw=1 bytes do not match disk"
+  grep -qi '^content-type: image/png' "$hdr" || e2e_die "files: logo.png?raw=1 missing Content-Type: image/png"
+  grep -qi '^x-content-type-options: nosniff' "$hdr" || e2e_die "files: logo.png?raw=1 missing nosniff header"
+  grep -qi '^cache-control: no-store' "$hdr" || e2e_die "files: logo.png?raw=1 missing Cache-Control: no-store"
+
+  if [ "${E2E_HERDR:-mock}" = socket ]; then
+    e2e_api GET /api/spaces/sF/files | jq -e '.root_name == "files" and .truncated == true and (.entries | length) == 2000' >/dev/null \
+      || e2e_die "files: space list /api/spaces/sF/files failed"
+    e2e_api GET /api/spaces/sF/files/README.md | jq -e '.kind == "text" and .path == "README.md"' >/dev/null \
+      || e2e_die "files: space read /api/spaces/sF/files/README.md failed"
+  fi
+
+  # 3. Hidden names (.env, id_rsa) and U+017F / U+200B spellings read as 403 sensitive, as does symlink to .env.
+  for p in ".env" ".env?raw=1" "id_rsa" "id_r%C5%BFa" ".%E2%80%8Benv" "id_%E2%80%8Brsa" "env-link"; do
+    out=$(curl -sS --max-time 5 -w '\n%{http_code}' "$E2E_URL$base/$p") || e2e_die "files: curl $p failed"
+    code=$(echo "$out" | tail -n 1)
+    body=$(echo "$out" | sed '$d')
+    [ "$code" = "403" ] || e2e_die "files: expected 403 on $p, got $code ($body)"
+    echo "$body" | jq -e '.reason == "sensitive"' >/dev/null \
+      || e2e_die "files: expected reason=sensitive on $p, got $body"
+  done
+
+  # 4. Symlink out of folder reads (and lists) as 403 outside.
+  for p in "$base/outside" "$base?path=outside"; do
+    out=$(curl -sS --max-time 5 -w '\n%{http_code}' "$E2E_URL$p") || e2e_die "files: curl $p failed"
+    code=$(echo "$out" | tail -n 1)
+    body=$(echo "$out" | sed '$d')
+    [ "$code" = "403" ] || e2e_die "files: expected 403 on $p, got $code ($body)"
+    echo "$body" | jq -e '.reason == "outside"' >/dev/null \
+      || e2e_die "files: expected reason=outside on $p, got $body"
+  done
+
+  # 5. FIFO does not hang and returns 403 not_file.
+  out=$(curl -sS --max-time 3 -w '\n%{http_code}' "$E2E_URL$base/pipe.fifo") \
+    || e2e_die "files: FIFO read timed out or failed"
+  code=$(echo "$out" | tail -n 1)
+  body=$(echo "$out" | sed '$d')
+  [ "$code" = "403" ] || e2e_die "files: expected 403 on pipe.fifo, got $code ($body)"
+  echo "$body" | jq -e '.reason == "not_file"' >/dev/null \
+    || e2e_die "files: expected reason=not_file on pipe.fifo, got $body"
+
+  # 6. 3 MB text file is truncated to 1 MiB (1,048,576 bytes).
+  e2e_api GET "$base/big.txt" | jq -e '.kind == "text" and .size == 3145728 and .truncated == true and (.text | length) == 1048576' >/dev/null \
+    || e2e_die "files: 3 MB big.txt was not truncated to 1048576 bytes"
+
+  # 7. 17 MB image is 413 too_large on ?raw=1 (and 200 image metadata on JSON read).
+  e2e_api GET "$base/huge.png" | jq -e '.kind == "image" and .size > 16777216 and (.text == null)' >/dev/null \
+    || e2e_die "files: huge.png JSON read did not return image metadata"
+  out=$(curl -sS --max-time 5 -w '\n%{http_code}' "$E2E_URL$base/huge.png?raw=1") || e2e_die "files: curl huge.png?raw=1 failed"
+  code=$(echo "$out" | tail -n 1)
+  body=$(echo "$out" | sed '$d')
+  [ "$code" = "413" ] || e2e_die "files: expected 413 on huge.png?raw=1, got $code ($body)"
+  echo "$body" | jq -e '.reason == "too_large"' >/dev/null \
+    || e2e_die "files: expected reason=too_large on huge.png?raw=1, got $body"
+
+  # 8. Paths with .. return 400 bad_path on both list and read.
+  for p in "$base/..%2Foutside-secret.txt" "$base?path=..%2Foutside" "$base?path=.."; do
+    out=$(curl -sS --max-time 5 -w '\n%{http_code}' "$E2E_URL$p") || e2e_die "files: curl $p failed"
+    code=$(echo "$out" | tail -n 1)
+    body=$(echo "$out" | sed '$d')
+    [ "$code" = "400" ] || e2e_die "files: expected 400 on $p, got $code ($body)"
+    echo "$body" | jq -e '.reason == "bad_path"' >/dev/null \
+      || e2e_die "files: expected reason=bad_path on $p, got $body"
+  done
+
+  # 9. Unpaired requests are refused (401 unauthorized with an unpaired bearer/cookie ticket; 403 host_not_allowed off-loopback Host).
+  out=$(curl -sS --max-time 5 -H 'Authorization: Bearer sds_unpaired-ticket' -w '\n%{http_code}' "$E2E_URL$base/hello.txt") \
+    || e2e_die "files: curl with unpaired bearer failed"
+  code=$(echo "$out" | tail -n 1)
+  body=$(echo "$out" | sed '$d')
+  [ "$code" = "401" ] || e2e_die "files: expected 401 for unpaired bearer ticket, got $code ($body)"
+  echo "$body" | jq -e '.error == "unauthorized"' >/dev/null \
+    || e2e_die "files: expected reason=unauthorized for unpaired bearer ticket, got $body"
+
+  out=$(curl -sS --max-time 5 -H 'Cookie: sheepdog_session=unpaired-ticket' -w '\n%{http_code}' "$E2E_URL$base") \
+    || e2e_die "files: curl with unpaired cookie failed"
+  code=$(echo "$out" | tail -n 1)
+  body=$(echo "$out" | sed '$d')
+  [ "$code" = "401" ] || e2e_die "files: expected 401 for unpaired session cookie, got $code ($body)"
+  echo "$body" | jq -e '.error == "unauthorized"' >/dev/null \
+    || e2e_die "files: expected reason=unauthorized for unpaired session cookie, got $body"
+
+  out=$(curl -sS --max-time 5 -H 'Host: example.com' -w '\n%{http_code}' "$E2E_URL$base/hello.txt") \
+    || e2e_die "files: curl with non-loopback Host failed"
+  code=$(echo "$out" | tail -n 1)
+  body=$(echo "$out" | sed '$d')
+  [ "$code" = "403" ] || e2e_die "files: expected 403 for non-loopback Host, got $code ($body)"
+  echo "$body" | jq -e '.error == "host_not_allowed"' >/dev/null \
+    || e2e_die "files: expected reason=host_not_allowed for non-loopback Host, got $body"
+
+  # 10. files.read shows in the event log with metadata and never file content.
+  out=$(e2e_api GET "/api/events?type=files.read&n=200") || e2e_die "files: GET /api/events?type=files.read failed"
+  echo "$out" | jq -e '
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path=="hello.txt" and .payload.raw==false and (.payload.size > 0) and (.payload.reason == null))] | length >= 1) and
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path=="logo.png" and .payload.raw==true and (.payload.size > 0))] | length >= 1) and
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path==".env" and .payload.reason=="sensitive" and (.payload.size == null))] | length >= 1) and
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path=="outside" and .payload.reason=="outside")] | length >= 1) and
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path=="pipe.fifo" and .payload.reason=="not_file")] | length >= 1) and
+    ([.[] | select(.pane_id=="e2e:files" and .payload.path=="huge.png" and .payload.raw==true and .payload.reason=="too_large")] | length >= 1)
+  ' >/dev/null || e2e_die "files: /api/events?type=files.read missing expected metadata records: $out"
+
+  jlog 'select(.type=="files.read" and .pane_id=="e2e:files")' | jq -s -e 'length >= 6' >/dev/null \
+    || e2e_die "files: on-disk event log has no files.read lines for e2e:files"
+  if jlog 'select(.type=="files.read")' | grep -Eq 'hello files|Files Scenario|SECRET_ENV_VALUE|PRIVATE_KEY_MATERIAL|OUTSIDE_SECRET_MARKER|LONGS_KEY_MATERIAL|ZWSP_ENV_MATERIAL'; then
+    e2e_die "files: files.read event log leaked file contents"
+  fi
+
+  echo "files: list (2000/3000+ truncated, hidden>=4), read, raw image, sensitive (.env, id_rsa, U+017F, U+200B, symlink), outside symlink, FIFO, 3 MB text truncation, 17 MB image 413, .. 400, unpaired 401/403, and files.read audit events verified"
+}
 
 case "$NAME" in
   approval)
@@ -215,6 +401,9 @@ case "$NAME" in
     e2e_wait 30 bash -c "curl -fs '$E2E_URL/api/state' | jq -e '[.agents[] | select(.pane_id==\"$PANE\" and .attention.pinned==true)] | length == 1'" || e2e_die "the pin did not survive the daemon restarting"
     echo "label-sync: pin survived daemon-down / daemon-up: $(agent_attention "$PANE")"
     e2e_hc kill "$TERM_ID" >/dev/null 2>&1 || true
+    ;;
+  files)
+    scenario_files
     ;;
   voice-on)
     daemon_stop

@@ -182,7 +182,7 @@ cat <<OUT
 
 environment: $DIR
   source $DIR/env.sh      # E2E_URL, HERDR_APP_HOME, HC_SESSION, HC_SOCKET
-  scripts/e2e/scenario.sh $DIR <approval|voice-client|voice-on|agent-blocked|agent-working|agent-done|agent-unread|agent-seen|agent-pin|space-mute|label-sync|daemon-down|daemon-up>
+  scripts/e2e/scenario.sh $DIR <approval|voice-client|voice-on|agent-blocked|agent-working|agent-done|agent-unread|agent-seen|agent-pin|space-mute|label-sync|files|daemon-down|daemon-up>
   scripts/e2e/shot.sh $DIR <name>
   scripts/e2e/down.sh $DIR
 OUT
