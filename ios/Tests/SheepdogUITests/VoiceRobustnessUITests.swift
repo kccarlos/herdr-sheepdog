@@ -25,7 +25,21 @@ final class VoiceRobustnessUITests: XCTestCase {
 
         // Connect: the first time the voice listens, the coach mark.
         tapWhenReady(app.buttons["controls.orb"], "the orb")
-        XCTAssertTrue(app.staticTexts["Listening — just talk"].waitForExistence(timeout: 15), "the status line says what to do")
+        // The microphone prompt: an earlier test in the job (DemoUITests)
+        // resets the app's microphone permission, undoing the job's
+        // `simctl privacy grant`, so the session start asks. The default
+        // interruption handler only runs on a tap, and a wait is not one, so
+        // the prompt stayed up and the session on "Connecting…" until the
+        // retry (first iteration failed in every shard-4 run).
+        let status = app.staticTexts["Listening — just talk"]
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(20)
+        while !status.exists, Date() < deadline {
+            let allow = springboard.alerts.buttons["Allow"].firstMatch
+            if allow.exists { allow.tap() }
+            usleep(300_000)
+        }
+        XCTAssertTrue(status.waitForExistence(timeout: 5), "the status line says what to do")
         XCTAssertTrue(app.descendants(matching: .any)["controls.coachMark"].waitForExistence(timeout: 5), "first run shows the coach mark")
         let mic = app.buttons["controls.mute"]
         XCTAssertEqual(mic.label, "Mute microphone", "the mic button names its action")
