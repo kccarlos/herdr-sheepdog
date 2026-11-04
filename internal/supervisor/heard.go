@@ -35,6 +35,7 @@ func (s *Supervisor) markUnheard(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.promptUnheardLocked(text) // buried.go
+	s.lineUnheardLocked(text)   // displaced.go
 	for i := len(s.sentPushes) - 1; i >= 0; i-- {
 		if s.sentPushes[i].Text == text {
 			s.sentPushes[i].Unheard = true

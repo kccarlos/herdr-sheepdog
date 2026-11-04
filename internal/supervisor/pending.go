@@ -102,6 +102,7 @@ func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 			// The same pane asks again: what was pending is out of date.
 			s.clearPending(old, "superseded")
 		}
+		s.installedLocked(p) // displaced.go
 		if err := s.store.SetQuestion(p); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 		}
@@ -159,6 +160,7 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	}
 	if p.Kind == state.PendingAnswerPrompt {
 		s.dropQuestionLocked(p)
+		s.closedLocked(p) // displaced.go: also when the list had dropped it already
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
@@ -251,8 +253,10 @@ func (s *Supervisor) ExpirePending() {
 // of its question. The rail then checks those words as for any prompt.
 // Caller holds s.mu; ok is false when the pane is gone or working, its
 // screen does not parse as a prompt, or — not blocked — the user's
-// words are not about the menu (why says so).
-func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p state.PendingAction, ok bool, why string) {
+// words are not about the menu (why says so). muted is the space mute,
+// read by the caller outside s.mu (paneMuted): a muted space's prompt is
+// revived held.
+func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string, muted bool) (p state.PendingAction, ok bool, why string) {
 	row, found := s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
 		return state.PendingAction{}, false, ""
@@ -270,7 +274,7 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p
 		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
-	s.setPending(p)
+	s.setPendingMuted(p, muted)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
 	return p, true, ""
 }

@@ -195,9 +195,10 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 }
 
 // checkQuestion is checkOpenPrompt for an open question the voice moved
-// past: no prompt on screen, or a pane off blocked, ends it; a different
-// prompt replaces it quietly (the voice stays where it is). A failed
-// read keeps it.
+// past: no prompt on screen ends it, the same prompt keeps it (on a pane
+// herdr reports done or idle too: agy's prompts, a finish that asks), and
+// a different prompt replaces it quietly on a blocked pane (the voice
+// stays where it is) or ends it on any other. A failed read keeps it.
 func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state.PendingAction) {
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
@@ -211,10 +212,12 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		return
 	}
 	switch {
+	case ok && promptSignature(prompt) == pendingSignature(q):
+		return
 	case !ok || row.State != herdr.StateBlocked:
 		s.dropQuestionLocked(q)
 		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "prompt_gone"})
-	case promptSignature(prompt) != pendingSignature(q):
+	default:
 		p := s.newAnswerPrompt(row.PaneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 		held := s.heldQuestion(q.ID)
 		if held {
@@ -243,19 +246,24 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 	}
 }
 
-// stillAskingLocked reads p's pane and reports whether it is blocked at
-// p's prompt. Caller holds s.mu.
-func (s *Supervisor) stillAskingLocked(ctx context.Context, p state.PendingAction) bool {
+// stillAsking reads p's pane and reports whether it is still at p's
+// prompt. Only a working pane or a screen without that prompt ends it:
+// agy reports done at its prompts, a finish that asks leaves the pane done
+// or idle, and a menu shows on an idle pane (revivePrompt reads them the
+// same way). known is false when the screen could not be read: nothing is
+// decided then. Call it without s.mu: it reads herdr.
+func (s *Supervisor) stillAsking(ctx context.Context, p state.PendingAction) (asking, known bool) {
 	row, ok := s.store.Get(p.PaneID)
-	if !ok || row.State != herdr.StateBlocked {
-		return false
+	if !ok || row.State == herdr.StateWorking {
+		return false, true
 	}
 	read, err := s.herdr.Read(ctx, p.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
-		return false
+		s.log.Log(logSource, "supervisor.reconcile_error", p.PaneID, map[string]any{"error": err.Error(), "for": "tap"})
+		return false, false
 	}
 	prompt, parsed := herdr.ParsePrompt(read.Text)
-	return parsed && promptSignature(prompt) == pendingSignature(p)
+	return parsed && promptSignature(prompt) == pendingSignature(p), true
 }
 
 // claimPrompt atomically compares sig against s.lastPrompt[paneID] and,

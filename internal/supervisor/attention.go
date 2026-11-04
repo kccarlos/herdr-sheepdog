@@ -682,13 +682,20 @@ func (s *Supervisor) promoteHeld(a announcement) {
 	if !ok {
 		return
 	}
+	s.promoteHeldLocked(q)
+}
+
+// promoteHeldLocked is promoteHeld for the open question q, also when a
+// line that states it reached the user some other way (displaced.go: a
+// reply that says it). It returns q as promoted. Caller holds s.mu.
+func (s *Supervisor) promoteHeldLocked(q state.PendingAction) state.PendingAction {
 	q.Held = false
 	if err := s.store.SetQuestion(q); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
-		return
+		return q
 	}
 	s.attMu.Lock()
-	delete(s.held, a.pending)
+	delete(s.held, q.ID)
 	s.attMu.Unlock()
 	if old, had := s.store.Pending(); had && old.ID != q.ID {
 		s.log.Log(logSource, "pending.replaced", q.PaneID, map[string]any{"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": q.ID, "new_kind": q.Kind})
@@ -696,10 +703,11 @@ func (s *Supervisor) promoteHeld(a announcement) {
 	s.installedLocked(q) // displaced.go
 	if err := s.store.SetPending(q); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
-		return
+		return q
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.promoted", q.PaneID, map[string]any{"id": q.ID, "agent": s.aliasOf(q.PaneID)})
+	return q
 }
 
 // announceHeld announces, once, the questions that were held in the space at

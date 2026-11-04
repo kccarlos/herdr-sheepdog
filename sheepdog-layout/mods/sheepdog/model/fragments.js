@@ -129,6 +129,16 @@ export function foldQuestions(app, event) {
       if (!had && !pendingGone) return app;
       return { ...app, ...(pendingGone ? { pending_action: null } : {}), ...(had ? { questions: dropped(questions) } : {}) };
     }
+    case "pending.promoted": {
+      // A held question was announced: it is the voice's question now. One
+      // not listed yet waits for the state the event also asks for.
+      const q = questions.find((x) => x.id === p.id);
+      if (!q || app.pending_action?.id === p.id) return app;
+      const open = { ...q };
+      delete open.held;
+      delete open.muted;
+      return { ...app, pending_action: open };
+    }
     default:
       return app;
   }

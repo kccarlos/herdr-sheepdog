@@ -104,6 +104,15 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 			reason = "the user said something newer than the words being answered"
 		}
 		s.railBlockedLocked(p, keys, "fast_path", reason)
+		if reason == s.displacedLocked(p, in) {
+			// displaced.go: the user hears why and is asked again, and
+			// that reply tells them the question.
+			if line := s.reaskLocked(p, in); line != "" {
+				s.toldKeyLocked(keyOf(p), "")
+				s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "asked_again", "text": text, "id": p.ID, "input": string(in.kind)})
+				return voice.ToolResult{Spoken: line, Clarify: true, Scheduling: voice.UrgencyInterrupt}, true
+			}
+		}
 		return voice.ToolResult{}, false
 	}
 	alias := s.sayOf(p.PaneID)

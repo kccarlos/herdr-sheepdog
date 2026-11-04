@@ -241,6 +241,10 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // approved") — then the answer send path (answerKeys).
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s
+	// The space mute is read fresh, outside s.mu (it may read herdr): the
+	// folder index a lock-held check reads can be cold or stale.
+	muted := s.paneMuted(ctx, paneID)
+	defer s.pushReask() // displaced.go: after s.mu is released
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
@@ -250,7 +254,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		}
 	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys")
+		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys", muted)
 		if !ok {
 			if why != "" {
 				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)
@@ -261,6 +265,11 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		if s.heldQuestion(p.ID) {
 			return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
+	}
+	if muted && !s.toldOpenLocked(p) {
+		// Recorded unheld while the folder index was cold: still a muted
+		// space's question the user was never told.
+		return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 	}
 	allowed := allowedKeys(p)
 	for _, k := range keys {
@@ -278,6 +287,16 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// model says they were (inputs.go).
 	in, reason := s.railInputLocked(p, keys)
 	if reason != "" {
+		if last := s.lastInputLocked(); reason == s.displacedLocked(p, last) {
+			// displaced.go: the user hears why and is asked again, in
+			// code; the orchestrator must not answer for them.
+			if line := s.reaskLocked(p, last); line != "" {
+				s.queueReaskLocked(p, line)
+				reason += "; the daemon has told the user why and asked them again, so do not ask again yourself"
+			} else {
+				reason += "; the daemon has already told the user why and asked them again"
+			}
+		}
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
 	// A tool result: a fact for the orchestrator, which phrases the reply.

@@ -373,8 +373,10 @@ type Supervisor struct {
 	// announcement (buried.go).
 	promptHeard promptHearing
 	// told is which questions the user was told about, for the
-	// displacement rail (displaced.go).
-	told toldState
+	// displacement rail (displaced.go); reasks are its re-ask lines
+	// waiting to be pushed once s.mu is released.
+	told   toldState
+	reasks []reask
 	// acceptedSeq counts the user's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (reply.go). Unlike
@@ -649,7 +651,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			// markPushed). A silent push is context the voice never
 			// speaks.
 			s.pushSpoken(true)
-			s.markPushed(e.Text)
+			s.markPushed(e.Text, e.PendingID)
 			s.noteNamesSaid(e.Text) // names.go: what the user was told
 		}
 	case voice.EventInterrupted:

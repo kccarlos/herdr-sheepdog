@@ -331,12 +331,15 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 // the gate, the voice relayed the words at 19.414 — refused at 20.9 as
 // its own initiative — and the push only went to the model at 21.9.
 // The instruction was lost (docs/dev/history/bench-2026-10-03.md #10).
-func (s *Supervisor) markPushed(text string) {
+// pendingID is the question the push states, when the voice layer
+// carries its tag (voice.EventPush.PendingID).
+func (s *Supervisor) markPushed(text, pendingID string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq
 	s.lastPush = text
 	s.recordSentLocked(text)
-	s.promptPushedLocked(text) // buried.go
+	s.promptPushedLocked(text)          // buried.go
+	s.linePushedLocked(text, pendingID) // displaced.go
 	s.mu.Unlock()
 }
 
@@ -549,20 +552,42 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // passes the same rail as a spoken answer; the keys go through the same
 // executor (the post-answer poll included), and the voice gets a silent
 // line saying what was tapped. id must name the open question, which
-// lives as long as its pane is blocked at that prompt (pending.go,
+// lives as long as its pane is at that prompt (pending.go,
 // ExpirePending): anything else is ErrPendingGone. It may be the
 // question the voice is on or any other open question (/api/state
-// questions); for the latter the screen is read again first, so the
-// keys never go into a question the tap was not about.
+// questions). The screen is read again first, without s.mu (a slow herdr
+// must not stall voice events and transitions), so the keys never go into
+// a question the tap was not about: a working pane or a screen without
+// that prompt ends the question (ErrPendingGone); a failed read sends
+// nothing and keeps it (ErrNotSent). A pane herdr reports done or idle at
+// its prompt (agy, a finish that asks, a menu) answers as any other.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
 	p, slot, has := s.questionByID(id)
+	_, exists := s.store.Get(p.PaneID)
+	s.mu.Unlock()
 	if !has {
+		return voice.ToolResult{}, ErrPendingGone
+	}
+	// The voice's own question on a pane the table no longer lists is
+	// answered as it is (the keys report any failure); every other is
+	// checked against the screen.
+	asking, known := true, true
+	if !slot || exists {
+		asking, known = s.stillAsking(ctx, p)
+	}
+	s.mu.Lock()
+	cur, slot, has := s.questionByID(id)
+	if !has || cur.PaneID != p.PaneID || pendingSignature(cur) != pendingSignature(p) {
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	_, exists := s.store.Get(p.PaneID)
-	if (!slot || exists) && !s.stillAskingLocked(ctx, p) {
+	p = cur
+	if !known {
+		s.mu.Unlock()
+		return voice.ToolResult{}, fmt.Errorf("%w: the screen could not be read to check the question", ErrNotSent)
+	}
+	if !asking {
 		if slot {
 			s.clearPending(p, "prompt_gone")
 		} else {

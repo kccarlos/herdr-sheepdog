@@ -59,6 +59,9 @@ func (w *muteWorld) mute(t *testing.T) {
 	}
 }
 
+// Review item 4: a prompt tool that finds a muted space's prompt hands it
+// to the orchestrator, not to the user. It stays held until a reply states
+// it to the user; then a fresh answer goes through.
 func TestMutedPromptToolSurfacesQuestionForNextAnswer(t *testing.T) {
 	w := newMuteWorld(t, nil, Quiet)
 	w.mute(t)
@@ -71,18 +74,51 @@ func TestMutedPromptToolSurfacesQuestionForNextAnswer(t *testing.T) {
 	// The orchestrator's prompt tool runs after the words that led to it.
 	w.clock.Advance(time.Second)
 	row, _ := w.store.Get("w5:p1")
-	w.sup.pendingFromPrompt(row, prompt)
-	p, ok := w.store.Pending()
-	if !ok || p.Held {
-		t.Fatalf("surfaced prompt = %+v", p)
+	res := w.sup.pendingFromPrompt(context.Background(), row, prompt)
+	if p, ok := w.store.Pending(); ok && p.PaneID == "w5:p1" {
+		t.Fatalf("a muted space's prompt took the voice's slot before the user heard it: %+v", p)
 	}
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("surfaced prompt not held: %+v", qs)
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes")
 	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err == nil {
-		t.Fatal("same input approved surfaced question")
+		t.Fatal("a yes approved a muted space's prompt the user never heard")
+	}
+	// The orchestrator's reply states it: now the user has heard it.
+	w.sup.toldInReply(qs[0].SpokenSummary + " Answer that first.")
+	if p, ok := w.store.Pending(); !ok || p.ID != qs[0].ID || w.sup.heldQuestion(p.ID) {
+		t.Fatalf("stated prompt not promoted: %+v %v", p, ok)
 	}
 	w.clock.Advance(time.Second)
 	w.sup.ShepherdInput(InputTyped, "yes")
 	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err != nil {
 		t.Fatalf("follow-up answer: %v", err)
+	}
+	_ = res
+}
+
+// Review item 4: send_keys checks the space mute itself, not the folder
+// index as a lock-held check last left it (cold at startup, or stale for a
+// new workspace): a muted space's prompt with no recorded question is not
+// revived for the voice.
+func TestSendKeysChecksTheSpaceMuteFresh(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.srv.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
+	w.srv.SetStatus("w5:p1", herdr.StateBlocked)
+	if _, err := w.store.Update("w5:p1", func(a *state.Agent) { a.State = herdr.StateBlocked }); err != nil {
+		t.Fatal(err)
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes, let auth go ahead")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err == nil {
+		t.Fatal("send_keys answered a muted space's prompt the user never heard")
+	}
+	if n := w.keysTo("w5:p1"); n != 0 {
+		t.Fatalf("keys sent: %d", n)
 	}
 }
 
