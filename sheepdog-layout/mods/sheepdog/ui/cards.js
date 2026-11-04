@@ -83,7 +83,7 @@ function body(t, card) {
         .gap(8)
         .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(summaryOf(card)))
         .when(Boolean(card.command?.trim()), (el) => el.child(mono(t, card.command.trim())))
-        .children((card.options ?? []).map((option) => div().text_size(12).text_color(t.muted).child(`${option.index}. ${option.title?.trim() || option.label}`)))
+        .children((card.options ?? []).map((option) => div().text_size(12).text_color(t.muted).child(option.title?.trim() || option.label)))
         .child(div().text_size(11.5).text_color(t.dim).child("Answer it in the question card."));
     default:
       return card.markdown ? markdown(t, card.markdown) : div().text_size(12.5).text_color(t.muted).child("This card has nothing to show.");
