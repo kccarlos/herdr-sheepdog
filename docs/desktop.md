@@ -17,8 +17,11 @@ The Sheepdog block in herdr-app's sidebar contains:
   your agents did and the questions waiting for you. Drawing the last row loads
   older messages.
 - **A box to type to Sheepdog.** Enter sends; Shift+Enter adds a line. The
-  reply is text and becomes part of the conversation on the phone too.
-- **Questions with one button per answer.** Tap an option to answer the agent.
+  reply is text and becomes part of the conversation on the phone too. When the
+  panel has focus, Enter focuses the box, and Esc leaves the panel (or returns
+  to it from the box).
+- **Questions with one button per answer.** Tap an option to answer the agent,
+  or press 1-9 when the panel has focus. Suggested replies take 1-9 as well.
   Long questions shrink to an **Answer** bar that opens the options.
 - **Voice controls:** **Talk**, **Mute**, **Stop** and **Hold to talk**. The
   buttons control whichever device holds the voice, including your phone.
