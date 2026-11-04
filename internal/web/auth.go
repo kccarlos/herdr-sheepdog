@@ -468,7 +468,7 @@ func (s *Server) handleHello(w http.ResponseWriter, _ *http.Request) {
 		Name: "sheepdog", Version: s.deps.Version, VoiceName: s.deps.VoiceName, Auth: "device", WS: "/ws",
 		Audio:         HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
-		Features:      s.features(),
+		Features: s.features(),
 		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
 		Computer:        s.computer(),
 		Security:        s.helloSecurity(),
