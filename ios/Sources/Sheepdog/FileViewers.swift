@@ -387,7 +387,7 @@ private struct CodeView: View {
                 }
                 ForEach(lines) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text("\(line.number)")
+                        Text(line.showsNumber ? "\(line.number)" : "")
                             .foregroundStyle(Theme.muted)
                             .frame(width: gutter, alignment: .trailing)
                             .padding(.trailing, 10)

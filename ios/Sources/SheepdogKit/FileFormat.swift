@@ -360,14 +360,18 @@ public struct CodeLine: Equatable, Identifiable, Sendable {
 
     public var number: Int
     public var text: String
+    /// Position among display chunks of one source line.
+    public var chunk: Int
     /// The coloured runs, when the file's language has colours.
     public var spans: [SyntaxSpan] = []
-    public var id: Int { number }
+    public var id: String { "\(number).\(chunk)" }
+    public var showsNumber: Bool { chunk == 0 }
 
-    public init(number: Int, text: String, spans: [SyntaxSpan] = []) {
+    public init(number: Int, text: String, spans: [SyntaxSpan] = [], chunk: Int = 0) {
         self.number = number
         self.text = text
         self.spans = spans
+        self.chunk = chunk
     }
 
     /// The line cut at its colour changes, to draw; the whole line when
@@ -390,6 +394,8 @@ public struct CodeLine: Equatable, Identifiable, Sendable {
 }
 
 public enum CodeLines {
+    /// A bounded Text size keeps SwiftUI layout and scrolling responsive.
+    public static let maximumChunkBytes = 512
     /// The lines of `text`, tabs as four spaces; a final newline does not
     /// make an empty line after it, and an empty text has none. With a
     /// `language`, each line carries its colours. Splitting copies each
@@ -405,7 +411,34 @@ public enum CodeLines {
             }
         if lines.last == "" { lines.removeLast() }
         let spans = language.map { SyntaxHighlighter.spans(of: lines, in: $0) }
-        return lines.enumerated().map { CodeLine(number: $0.offset + 1, text: $0.element, spans: spans?[$0.offset] ?? []) }
+        return lines.enumerated().flatMap { index, line in
+            chunks(of: line, number: index + 1, spans: spans?[index] ?? [])
+        }
+    }
+
+    private static func chunks(of line: String, number: Int, spans: [SyntaxSpan]) -> [CodeLine] {
+        let bytes = line.utf8
+        guard bytes.count > maximumChunkBytes else { return [CodeLine(number: number, text: line, spans: spans)] }
+        var result: [CodeLine] = []
+        var start = 0
+        var lower = bytes.startIndex
+        while start < bytes.count {
+            var end = min(start + maximumChunkBytes, bytes.count)
+            // Do not split inside a UTF-8 scalar.
+            var upper = bytes.index(lower, offsetBy: end - start)
+            while upper < bytes.endIndex, bytes[upper] & 0xC0 == 0x80 { end += 1; upper = bytes.index(after: upper) }
+            let text = String(decoding: bytes[lower ..< upper], as: UTF8.self)
+            let chunkSpans = spans.compactMap { span -> SyntaxSpan? in
+                let overlapStart = max(start, span.start)
+                let overlapEnd = min(end, span.start + span.length)
+                guard overlapStart < overlapEnd else { return nil }
+                return SyntaxSpan(start: overlapStart - start, length: overlapEnd - overlapStart, kind: span.kind)
+            }
+            result.append(CodeLine(number: number, text: text, spans: chunkSpans, chunk: result.count))
+            start = end
+            lower = upper
+        }
+        return result
     }
 }
 

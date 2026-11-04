@@ -1302,8 +1302,9 @@ final class SessionViewModel: ObservableObject {
     /// show only then. The demo has it.
     var filesAvailable: Bool {
         if demo != nil { return true }
-        if case let .ready(_, _, features) = linkModel.handshake { return features.contains(FileBrowser.feature) }
-        return fleet.current?.features?.contains(FileBrowser.feature) ?? false
+        return DaemonFeatureSupport.has(FileBrowser.feature, handshake: linkModel.handshake,
+                                        helloFeatures: linkModel.hello?.features,
+                                        remembered: fleet.current?.features)
     }
 
     /// The browser's reads, on the current computer. `changesPane` names the

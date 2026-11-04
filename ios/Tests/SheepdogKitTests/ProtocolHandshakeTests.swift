@@ -5,6 +5,15 @@ import XCTest
 /// "Protocol version and handshake" on the daemon side): every transition,
 /// against a new daemon, an older one, and a mismatch either way.
 final class ProtocolHandshakeTests: XCTestCase {
+    func testRestFeaturesEnableFilesBeforeAnyVoiceHandshake() {
+        XCTAssertTrue(DaemonFeatureSupport.has(FileBrowser.feature, handshake: .idle,
+                                               helloFeatures: [FileBrowser.feature], remembered: nil))
+        XCTAssertFalse(DaemonFeatureSupport.has(FileBrowser.feature, handshake: .idle,
+                                                helloFeatures: nil, remembered: nil), "older daemons without REST features stay unavailable")
+        XCTAssertFalse(DaemonFeatureSupport.has(FileBrowser.feature, handshake: .ready(protocol: 1, daemonVersion: "x", features: []),
+                                                helloFeatures: [FileBrowser.feature], remembered: [FileBrowser.feature]), "live handshake remains authoritative")
+    }
+
     private func waiting() -> ProtocolHandshake {
         var h = ProtocolHandshake()
         h.start()

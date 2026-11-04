@@ -123,7 +123,7 @@ enum BrowserWords {
         case let .request(request):
             if failure.isOffline {
                 return BrowserState(
-                    sleeping: true, title: request.title, message: request.message,
+                    sleeping: true, title: request.title, message: "",
                     steps: offlineSteps, action: .init(title: "Try again", identifier: "browser.state.retry", run: retry),
                     identifier: "browser.state.offline"
                 )

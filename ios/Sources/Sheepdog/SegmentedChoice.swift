@@ -47,7 +47,6 @@ struct SegmentedChoice<Value: Hashable & Identifiable>: View {
                             if isSelected {
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                                     .fill(Theme.selected)
-                                    .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
                             }
                         }
                         .contentShape(Rectangle())

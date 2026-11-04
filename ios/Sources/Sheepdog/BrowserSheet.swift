@@ -76,7 +76,7 @@ struct BrowserSheet: View {
     }
 
     private var changeCount: Int? {
-        if case let .loaded(loaded) = changes, loaded.repo { return loaded.files.count }
+        if case let .loaded(loaded) = changes, loaded.repo, !loaded.files.isEmpty { return loaded.files.count }
         return nil
     }
 

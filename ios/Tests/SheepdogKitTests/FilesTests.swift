@@ -206,6 +206,17 @@ final class CodeLinesTests: XCTestCase {
         XCTAssertEqual(CodeLine(number: 1, text: "").pieces, [CodeLine.Piece(text: "", kind: nil)])
     }
 
+    func testVeryLongLineUsesBoundedChunksAndOneLineNumber() {
+        let text = String(repeating: "a🙂", count: 1000)
+        let chunks = CodeLines.split(text)
+        XCTAssertGreaterThan(chunks.count, 1)
+        XCTAssertTrue(chunks.first?.showsNumber == true)
+        XCTAssertTrue(chunks.dropFirst().allSatisfy { !$0.showsNumber && $0.number == 1 })
+        XCTAssertTrue(chunks.allSatisfy { $0.text.utf8.count <= CodeLines.maximumChunkBytes + 3 })
+        XCTAssertEqual(chunks.map(\.text).joined(), text)
+        XCTAssertEqual(Set(chunks.map(\.id)).count, chunks.count)
+    }
+
     func testPiecesCutTheLineAtItsColours() {
         let line = CodeLines.split("func run() { // go", language: SyntaxLanguage.of(name: "main.go")).first
         XCTAssertEqual(line?.pieces, [

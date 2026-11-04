@@ -94,6 +94,7 @@ final class ProtocolGoldenTests: XCTestCase {
         XCTAssertEqual(hello.ws, "/ws")
         XCTAssertEqual(hello.audio.inHz, 16000)
         XCTAssertNotNil(hello.computer, "the computer's id and name")
+        XCTAssertTrue(hello.features?.contains(FileBrowser.feature) == true, "Files capability is available before voice connects")
     }
 
     func testFilesDecode() throws {
