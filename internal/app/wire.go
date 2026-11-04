@@ -338,11 +338,7 @@ func (a *App) buildQuerier() (*cli.Runner, error) {
 		Timeout:         time.Duration(a.cfg.CLI.TimeoutS) * time.Second,
 		MaxOutputBytes:  a.cfg.CLI.MaxOutputKB << 10,
 		Log:             a.log,
-	}
-	for _, o := range a.cfg.Brain.OpenAICompat {
-		if o.APIKeyEnv != "" {
-			cfg.WithholdEnv = append(cfg.WithholdEnv, o.APIKeyEnv)
-		}
+		WithholdEnv:     a.opts.EnvFileNames,
 	}
 	det := cli.Detect(cfg, a.log)
 	if !det.Codex && !det.Claude {

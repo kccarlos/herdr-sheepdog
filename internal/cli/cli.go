@@ -210,8 +210,8 @@ type Config struct {
 	// MaxOutputBytes caps captured stdout; the tail is kept. Default 16 KiB.
 	MaxOutputBytes int
 	// WithholdEnv names environment variables the child must not see, on
-	// top of the daemon's own keys scrubEnv always drops: the keys named by
-	// the config's api_key_env.
+	// top of the daemon settings scrubEnv always drops: names loaded from
+	// the daemon's env file.
 	WithholdEnv []string
 	// Log receives cli.detected and cli.run events; nil discards.
 	Log logging.Logger

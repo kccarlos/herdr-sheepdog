@@ -90,6 +90,8 @@ type Options struct {
 	// Dev turns on the developer-only web routes (config web.dev; the
 	// `serve --dev` flag). See config.Web.
 	Dev bool
+	// EnvFileNames are the environment names loaded from the daemon env file.
+	EnvFileNames []string
 	// Version is reported in daemon.start and /api/state.
 	Version string
 	// Update, when set, is the update notice /api/state reports.

@@ -98,24 +98,8 @@ func killGroup(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
-// daemonEnvPrefixes and daemonEnvNames are the daemon's own settings and
-// keys (CONFIG.md): the agents log in with their own credentials, so none
-// of these reach them.
-var (
-	daemonEnvPrefixes = []string{"SHEEPDOG_", "GEMINI_API_KEY", "VERTEX_"}
-	daemonEnvNames    = []string{
-		"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "OPENAI_ORCH_API_KEY",
-		"ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
-	}
-)
-
-// scrubEnv drops HERDR_*, CLAUDECODE and CLAUDE_CODE_* so the child's own
-// herdr / Claude Code integration hooks do not see the daemon's session
-// (docs/dev/cli-query-tools.md, WP4 environment rules), and the daemon's
-// own settings and keys (daemonEnvPrefixes, daemonEnvNames, and withhold:
-// the names of the keys the config reads, such as an
-// [[brain.openai_compat]] api_key_env). Everything else, what the tools
-// need to run, passes.
+// scrubEnv removes daemon settings, names loaded from its env file, and
+// integration variables that would attach the child to the daemon's session.
 func scrubEnv(environ []string, withhold ...string) []string {
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {
@@ -124,8 +108,7 @@ func scrubEnv(environ []string, withhold ...string) []string {
 			key = kv[:i]
 		}
 		if strings.HasPrefix(key, "HERDR_") || key == "CLAUDECODE" || strings.HasPrefix(key, "CLAUDE_CODE_") ||
-			slices.ContainsFunc(daemonEnvPrefixes, func(p string) bool { return strings.HasPrefix(key, p) }) ||
-			slices.Contains(daemonEnvNames, key) || slices.Contains(withhold, key) {
+			strings.HasPrefix(key, "SHEEPDOG_") || slices.Contains(withhold, key) {
 			continue
 		}
 		out = append(out, kv)
