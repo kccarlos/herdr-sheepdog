@@ -36,8 +36,10 @@ func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		text := s.awaitUtterance(ctx)
-		if ctx.Err() != nil {
+		text, ok := s.awaitUtterance(ctx, lc)
+		if ctx.Err() != nil || !ok {
+			// Cancelled, or lc retired while waiting: the utterance now
+			// belongs to the session that replaced it.
 			s.doneInflight(id)
 			return
 		}
@@ -57,11 +59,17 @@ func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
 }
 
 // awaitUtterance waits (bounded by SettleMax) for the input transcript to
-// pause, then claims the text no delegation has taken yet.
-func (s *Session) awaitUtterance(ctx context.Context) string {
+// pause, then claims the text no delegation has taken yet. ok is false
+// when lc is no longer the live session (or ctx ended) by then: nothing
+// is claimed, so the session that replaced it keeps its own words.
+func (s *Session) awaitUtterance(ctx context.Context, lc *liveConn) (text string, ok bool) {
 	deadline := s.now().Add(s.cfg.SettleMax)
 	for {
 		s.mu.Lock()
+		if !s.lcActiveLocked(lc) {
+			s.mu.Unlock()
+			return "", false
+		}
 		quiet := !s.inputOpen || s.now().Sub(s.lastInput) >= delegationSettle
 		if quiet || !s.now().Before(deadline) {
 			text := strings.TrimSpace(s.unclaimed)
@@ -70,12 +78,12 @@ func (s *Session) awaitUtterance(ctx context.Context) string {
 			}
 			s.unclaimed, s.settledText = "", ""
 			s.mu.Unlock()
-			return text
+			return text, true
 		}
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return ""
+			return "", false
 		case <-time.After(25 * time.Millisecond):
 		}
 	}

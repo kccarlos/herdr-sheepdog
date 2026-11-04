@@ -158,6 +158,25 @@ func stopRest(text string) string {
 	return rest
 }
 
+// stopSendPoll is how often a stop waiting for a pane's send lock aborts
+// the send holding it again: one that registered itself just after the
+// first abort is caught on the next.
+const stopSendPoll = 25 * time.Millisecond
+
+// abortSend aborts the Prompt in flight on paneID, if any, and reports
+// whether there was one.
+func (s *Supervisor) abortSend(paneID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.sends[paneID]
+	if !ok {
+		return false
+	}
+	f.byStop = true
+	f.cancel()
+	return true
+}
+
 // resolveStop works out the phase from state and carries it out.
 func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	// Phases 1 and 2: the relayed words are in flight. Cancelling the
@@ -194,13 +213,30 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	if has && p.Kind == state.PendingSendInstruction && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
 		paneID := p.PaneID
 		s.mu.Unlock()
-		// Wait behind any in-flight send on this pane so a cancelled Prompt
-		// settles its pending action before we decide whether to interrupt.
+		// Wait behind any in-flight send on this pane so an aborted Prompt
+		// settles before we decide whether to interrupt. The send is
+		// aborted here, not waited out: herdr's own timeout is seconds,
+		// herdrcore's up to 30, and a stop must be quick. The wait itself
+		// ends with ctx.
 		ps := s.paneSend(paneID)
-		ps.Lock()
+		aborted := false
+		locked := false
+		for !locked {
+			if s.abortSend(paneID) {
+				aborted = true
+			}
+			wait, stopWait := context.WithTimeout(ctx, stopSendPoll)
+			locked = ps.LockCtx(wait) == nil
+			stopWait()
+			if !locked && ctx.Err() != nil {
+				break
+			}
+		}
 		s.mu.Lock()
-		p, has = s.store.Pending()
-		if has && p.Kind == state.PendingSendInstruction && p.PaneID == paneID && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
+		if locked {
+			p, has = s.store.Pending()
+		}
+		if locked && has && p.Kind == state.PendingSendInstruction && p.PaneID == paneID && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
 			if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
 				alias := aliasOr(state.Say(row))
 				out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "an interrupt (Ctrl-C) was sent to " + alias}
@@ -239,7 +275,15 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 				return out
 			}
 		}
-		ps.Unlock()
+		if locked {
+			// No interrupt: a send this stop aborted leaves its action
+			// behind with nothing to cancel.
+			if cur, hasCur := s.store.Pending(); aborted && hasCur && cur.Kind == state.PendingSendInstruction && cur.PaneID == paneID {
+				s.clearPending(cur, "stop")
+				has = false
+			}
+			ps.Unlock()
+		}
 	}
 
 	if cancelled {

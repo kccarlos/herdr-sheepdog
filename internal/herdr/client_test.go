@@ -157,6 +157,34 @@ func TestClientRoundTrips(t *testing.T) {
 	}
 }
 
+// A cancelled ctx ends a call that is waiting on herdr's reply at once,
+// not at the call's own timeout: the stop procedure relies on it to
+// abort a Prompt in flight.
+func TestClientCallEndsWhenContextIsCancelled(t *testing.T) {
+	srv := herdrtest.New(t)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	srv.Handle("ping", func(json.RawMessage) (any, error) {
+		<-release
+		return map[string]any{"type": "pong"}, nil
+	})
+	c := herdr.NewClient(srv.Path)
+	c.Timeout = 10 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start := time.Now()
+	_, err := c.Ping(ctx)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("a cancelled call took %v, want about 50ms", d)
+	}
+	if !errors.Is(err, herdr.ErrNoReply) {
+		t.Errorf("err = %v, want ErrNoReply (the request was written)", err)
+	}
+}
+
 func TestClientTimeoutAndDialErrors(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.Handle("ping", func(json.RawMessage) (any, error) {

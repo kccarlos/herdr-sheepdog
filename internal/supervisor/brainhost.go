@@ -216,9 +216,6 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 		h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
 	}
 	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
-	if err == nil {
-		h.s.unsignTask(paneID)
-	}
 	if err != nil {
 		return "", fmt.Errorf("%s (%w)", strings.TrimRight(res.Spoken, "."), err)
 	}

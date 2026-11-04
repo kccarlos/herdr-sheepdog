@@ -695,3 +695,91 @@ func TestBridgeStartTimeoutDoesNotHangOnInheritedPipes(t *testing.T) {
 		t.Fatalf("StartBridge took %v with inherited pipes, want < 1.2s", elapsed)
 	}
 }
+
+// killLeaked ends the grandchild a leak_pipes_ms script started.
+func killLeaked(t *testing.T, f *fake) {
+	t.Cleanup(func() {
+		if raw, err := os.ReadFile(filepath.Join(f.dir, "leaked.pid")); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+				if p, err := os.FindProcess(pid); err == nil {
+					_ = p.Kill()
+				}
+			}
+		}
+	})
+}
+
+// After terminal.closed the bridge finishes at once, whatever still holds
+// the child's stdout: draining to EOF first made OnClose wait for a
+// grandchild that inherited the pipe.
+func TestBridgeClosedFinishesDespiteInheritedStdout(t *testing.T) {
+	f := newFake(t, map[string]string{"script.jsonl": `
+{"emit": {"type": "terminal.frame", "seq": 1, "width": 44, "height": 30, "full": true, "bytes": ""}}
+{"emit": {"type": "terminal.closed", "reason": "pane closed"}}
+{"leak_pipes_ms": 4000}
+{"exit": 0}
+`})
+	killLeaked(t, f)
+	o := f.opts()
+	s := newSink()
+	s.wire(&o)
+	start := time.Now()
+	if _, err := StartBridge(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	s.waitClosed(t)
+	if d := time.Since(start); d > 2500*time.Millisecond {
+		t.Errorf("the bridge took %v to finish, want well under the 4 s the grandchild held stdout", d)
+	}
+}
+
+// Release ends a bridge whose child's stdout a grandchild still holds:
+// the process is killed and our end of the pipe closed, so the reader
+// stops instead of waiting for the grandchild.
+func TestBridgeReleaseDoesNotHangOnInheritedStdout(t *testing.T) {
+	f := newFake(t, map[string]string{"script.jsonl": `
+{"emit": {"type": "terminal.frame", "seq": 1, "width": 100, "height": 20, "full": true, "bytes": ""}}
+{"leak_pipes_ms": 4000}
+{"sleep_ms": 10000}
+`})
+	killLeaked(t, f)
+	o := f.opts()
+	o.Mode, o.Cols, o.Rows = BridgeObserve, 100, 20
+	s := newSink()
+	s.wire(&o)
+	b, err := StartBridge(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // the grandchild is running
+	start := time.Now()
+	b.Release()
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("Release took %v, want it not to wait for the grandchild", d)
+	}
+	if c := s.waitClosed(t); c.Reason != CloseReleased {
+		t.Errorf("closed = %+v, want released", c)
+	}
+}
+
+// What the child wrote to stderr before it died is the reason given,
+// whole: the copy runs inside Wait, so the tail is read after it.
+func TestBridgeExitCarriesTheWholeStderr(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		f := newFake(t, map[string]string{"script.jsonl": `
+{"stderr": "herdr: cannot attach pane\n"}
+{"stderr": "second line of the reason\n"}
+{"exit": 3}
+`})
+		o := f.opts()
+		o.Retry = []time.Duration{}
+		_, err := StartBridge(context.Background(), o)
+		var ae *AttachError
+		if !errors.As(err, &ae) {
+			t.Fatalf("err = %v, want AttachError", err)
+		}
+		if !strings.Contains(ae.Message, "second line of the reason") {
+			t.Fatalf("run %d: message = %q, want the whole stderr", i, ae.Message)
+		}
+	}
+}

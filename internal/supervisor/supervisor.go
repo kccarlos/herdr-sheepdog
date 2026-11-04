@@ -292,7 +292,11 @@ type Supervisor struct {
 	// (Prompt, SendKeys, Interrupt) on that pane without holding s.mu
 	// across socket I/O. Lock order: paneSend(paneID) before s.mu.
 	sendMu    sync.Mutex
-	paneSends map[string]*sync.Mutex
+	paneSends map[string]*paneLock
+
+	// sends is each pane's in-flight Prompt (guarded by s.mu), so the
+	// stop procedure can abort it instead of waiting out its timeout.
+	sends map[string]*inflightSend
 
 	store   *state.Store
 	herdr   Herdr
@@ -565,18 +569,70 @@ func (s *Supervisor) track() bool {
 // paneSend returns the per-pane mutex that serializes herdr write RPCs
 // (Prompt, SendKeys, Interrupt) on paneID. Acquire before s.mu, never while
 // holding s.mu.
-func (s *Supervisor) paneSend(paneID string) *sync.Mutex {
+func (s *Supervisor) paneSend(paneID string) *paneLock {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	if s.paneSends == nil {
-		s.paneSends = map[string]*sync.Mutex{}
+		s.paneSends = map[string]*paneLock{}
 	}
 	m, ok := s.paneSends[paneID]
 	if !ok {
-		m = &sync.Mutex{}
+		m = &paneLock{ch: make(chan struct{}, 1)}
 		s.paneSends[paneID] = m
 	}
 	return m
+}
+
+// paneLock is a mutex whose wait can be abandoned: the stop procedure
+// must not sit behind a send for the send's whole timeout.
+type paneLock struct{ ch chan struct{} }
+
+// Lock waits for the lock.
+func (l *paneLock) Lock() { l.ch <- struct{}{} }
+
+// Unlock releases it.
+func (l *paneLock) Unlock() { <-l.ch }
+
+// LockCtx waits for the lock or for ctx, whichever ends first; the lock
+// is held only when it returns nil.
+func (l *paneLock) LockCtx(ctx context.Context) error {
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// inflightSend is a Prompt on its way to a pane: cancel aborts the RPC,
+// and byStop records that the stop procedure did it (so the send path
+// leaves its pending action for the stop to settle).
+type inflightSend struct {
+	cancel context.CancelFunc
+	byStop bool
+}
+
+// beginSendLocked derives the context a pane's Prompt runs under and
+// registers it so Stop can abort it. Caller holds s.mu and the pane's
+// send lock; endSendLocked deregisters.
+func (s *Supervisor) beginSendLocked(ctx context.Context, paneID string) (context.Context, *inflightSend) {
+	sctx, cancel := context.WithCancel(ctx)
+	f := &inflightSend{cancel: cancel}
+	if s.sends == nil {
+		s.sends = map[string]*inflightSend{}
+	}
+	s.sends[paneID] = f
+	return sctx, f
+}
+
+// endSendLocked deregisters f and reports whether Stop aborted it. Caller
+// holds s.mu.
+func (s *Supervisor) endSendLocked(paneID string, f *inflightSend) (byStop bool) {
+	if s.sends[paneID] == f {
+		delete(s.sends, paneID)
+	}
+	f.cancel()
+	return f.byStop
 }
 
 // SetVoiceConnected records whether a voice session is attached

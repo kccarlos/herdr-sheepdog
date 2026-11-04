@@ -21,12 +21,16 @@ func (s *Session) startOpenLocked(reason string) {
 	}
 	s.opening = true
 	s.wg.Add(1)
-	go func() { defer s.wg.Done(); s.open(reason) }()
+	resets := s.resets
+	go func() { defer s.wg.Done(); s.open(reason, resets) }()
 }
 
 // open dials, sends session.start with the instructions and a recap of
-// the conversation so far, and waits for session.started.
-func (s *Session) open(reason string) {
+// the conversation so far, and waits for session.started. resets is
+// the Reset count when the open began: a Reset since then (the dial was
+// in flight) means this connection carries the conversation the user
+// dropped, so it is closed, not installed.
+func (s *Session) open(reason string, resets int) {
 	started := s.now()
 	lc, err := s.dialStart(reason)
 	s.mu.Lock()
@@ -46,6 +50,11 @@ func (s *Session) open(reason string) {
 	if s.closed {
 		s.mu.Unlock()
 		s.closeLive(lc, "shutdown")
+		return
+	}
+	if s.resets != resets {
+		s.mu.Unlock()
+		s.closeLive(lc, "reset")
 		return
 	}
 	s.live = lc
