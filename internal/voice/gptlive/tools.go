@@ -24,6 +24,10 @@ const settledKeep = 4 * time.Second
 // transcript settles, the unclaimed utterance becomes the tool call.
 func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
 	s.mu.Lock()
+	if !s.lcActiveLocked(lc) {
+		s.mu.Unlock()
+		return
+	}
 	s.lastActivity = s.now()
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.inflight[id] = cancel

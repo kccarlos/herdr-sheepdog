@@ -19,12 +19,13 @@ import (
 // session.started and session.close with session.closed, records every
 // client event, and lets the test inject server events.
 type fakeConn struct {
-	mu     sync.Mutex
-	sent   []map[string]any
-	in     chan []byte
-	closed chan struct{}
-	once   sync.Once
-	usage  float64
+	mu        sync.Mutex
+	sent      []map[string]any
+	in        chan []byte
+	closed    chan struct{}
+	once      sync.Once
+	usage     float64
+	holdClose bool
 }
 
 func newFakeConn() *fakeConn {
@@ -50,7 +51,12 @@ func (c *fakeConn) Send(_ context.Context, ev any) error {
 	case evSessionStart:
 		c.server(map[string]any{"type": evSessionStarted, "client_event_id": m["event_id"], "session": map[string]any{"id": "live_fake", "model": "gpt-live-1"}})
 	case evSessionClose:
-		c.server(map[string]any{"type": evSessionClosed, "reason": "close_requested", "usage": map[string]any{"seconds": c.usage}})
+		c.mu.Lock()
+		hold := c.holdClose
+		c.mu.Unlock()
+		if !hold {
+			c.server(map[string]any{"type": evSessionClosed, "reason": "close_requested", "usage": map[string]any{"seconds": c.usage}})
+		}
 	}
 	return nil
 }
@@ -772,3 +778,95 @@ func TestUpsampler(t *testing.T) {
 		t.Fatalf("total %d want ~%d", total, want)
 	}
 }
+
+func TestRetiringSessionDoesNotCorruptNewSession(t *testing.T) {
+	cfg := testConfig()
+	cfg.CloseTimeout = 2 * time.Second
+	calls := make(chan voice.ToolCall, 4)
+	cfg.Handler = func(_ context.Context, call voice.ToolCall) (voice.ToolResult, error) {
+		calls <- call
+		return voice.ToolResult{Spoken: "Docs is idle.", Scheduling: voice.UrgencyIdle}, nil
+	}
+
+	d := &fakeDialer{}
+	l := &recLog{}
+	s, err := newSession(cfg, l, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	// Open first live session c1, and hold its session.closed ack when retiring.
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "c1 open", s.Live)
+	c1 := d.last()
+	c1.mu.Lock()
+	c1.holdClose = true
+	c1.mu.Unlock()
+
+	if err := s.Reset("new_conversation"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "c1 session.close sent", func() bool { return len(c1.events(evSessionClose)) == 1 })
+	if s.Live() {
+		t.Fatal("session still reported live after Reset")
+	}
+
+	// Trailing frames from retiring c1 arrive before session.closed.
+	c1.server(map[string]any{"type": evInputTranscript, "delta": "stale words from c1 "})
+	c1.server(map[string]any{"type": evOutputTranscript, "delta": "stale assistant reply"})
+
+	// Open second live session c2 while c1 is still waiting for session.closed.
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "c2 open", func() bool { return d.count() == 2 && s.Live() })
+	c2 := d.last()
+
+	// User speaks on c2 and c2 queues two voiced output audio chunks (the second stays in s.out).
+	c2.server(map[string]any{"type": evInputTranscript, "delta": "check docs status"})
+	c2.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 480))})
+	c2.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 480))})
+	waitFor(t, "c2 transcript logged", func() bool {
+		for _, p := range l.find("voice.transcript.in") {
+			if p["text"] == "check docs status" {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Now retiring c1 finally delivers session.closed; its finalize must not wipe c2's state or audio.
+	c1.server(map[string]any{"type": evSessionClosed, "reason": "close_requested", "usage": map[string]any{"seconds": 5}})
+	waitFor(t, "c1 session_close logged", func() bool { return len(l.find("voice.session_close")) == 1 })
+
+	// Drain both of c2's queued audio chunks; c1's finalize must not have flushed s.out.
+	for i := 0; i < 2; i++ {
+		select {
+		case chunk := <-s.Audio():
+			if len(chunk) == 0 {
+				t.Fatalf("chunk %d was empty", i)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("c2 output audio chunk %d was flushed by retiring c1 finalize", i)
+		}
+	}
+	go func() {
+		for range s.Audio() {
+		}
+	}()
+
+	// Delegation on c2 must still find c2's utterance intact (without c1's stale words).
+	c2.server(map[string]any{"type": evDelegationCreated, "offset_ms": 500, "delegation": map[string]any{"id": "del_c2", "target": "client"}})
+	select {
+	case call := <-calls:
+		if call.Args["text"] != "check docs status" {
+			t.Fatalf("delegated text = %q, want %q", call.Args["text"], "check docs status")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("c2 delegation did not reach handler (delegation_empty = %d)", len(l.find("voice.delegation_empty")))
+	}
+}
+

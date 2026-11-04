@@ -73,7 +73,6 @@ func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 // goes to the orchestrator.
 func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	text = strings.TrimSpace(text)
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt {
@@ -82,13 +81,16 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 				// Only questions the user was never told about are open: a
 				// bare yes answers nothing (attention.go).
 				s.log.Log(logSource, "supervisor.fast_path", "", map[string]any{"path": "held_only", "text": text, "input": string(in.kind)})
+				s.mu.Unlock()
 				return voice.ToolResult{Spoken: line}, true
 			}
 		}
+		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
 	keys, label, ok := bareAnswer(p, text)
 	if !ok {
+		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
 	if age := s.cfg.Now().Sub(p.CreatedAt); age > fastAnswerWindow {
@@ -97,6 +99,20 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		// words, with the prompt and how long it has waited in its
 		// roster, and decides (docs/dev/history/bench-2026-10-03.md #8).
 		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "prompt_old", "age_s": int(age.Seconds()), "text": text, "id": p.ID})
+		s.mu.Unlock()
+		return voice.ToolResult{}, false
+	}
+	paneID, pendingID := p.PaneID, p.ID
+	s.mu.Unlock()
+
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	defer ps.Unlock()
+
+	s.mu.Lock()
+	p, has = s.store.Pending()
+	if !has || p.ID != pendingID {
+		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
 	if rin, reason := s.railInputLocked(p, keys); reason != "" || rin != in {
@@ -104,15 +120,18 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 			reason = "the user said something newer than the words being answered"
 		}
 		s.railBlockedLocked(p, keys, "fast_path", reason)
+		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
+	in.used = true
 	alias := s.sayOf(p.PaneID)
 	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID, "input": string(in.kind)})
 	zh := s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, label, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil)
-	if sent {
-		in.used = true
+	if !sent {
+		in.used = false
 	}
+	s.mu.Unlock()
 	if s.brain != nil {
 		// No model saw this, so the transcript would otherwise lose it.
 		s.brain.Daemon(fmt.Sprintf("fast path: the user said %q; %s", text, lowerFirst(res.Spoken)))

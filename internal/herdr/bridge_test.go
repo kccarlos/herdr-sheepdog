@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,9 +21,17 @@ import (
 // re-executed with SHEEPDOG_FAKE_HERDR_DIR set: TestMain then plays a
 // script from that directory (fakeHerdr) instead of running the tests.
 
-const fakeHerdrEnv = "SHEEPDOG_FAKE_HERDR_DIR"
+const (
+	fakeHerdrEnv = "SHEEPDOG_FAKE_HERDR_DIR"
+	holdPipesEnv = "SHEEPDOG_HOLD_PIPES_MS"
+)
 
 func TestMain(m *testing.M) {
+	if ms := os.Getenv(holdPipesEnv); ms != "" {
+		n, _ := strconv.Atoi(ms)
+		time.Sleep(time.Duration(n) * time.Millisecond)
+		os.Exit(0)
+	}
 	if dir := os.Getenv(fakeHerdrEnv); dir != "" {
 		os.Exit(fakeHerdr(dir))
 	}
@@ -129,6 +139,26 @@ func fakeHerdr(dir string) int {
 			var s string
 			_ = json.Unmarshal(d["stderr"], &s)
 			fmt.Fprint(os.Stderr, s)
+		case d["leak_pipes_ms"] != nil:
+			_ = out.Flush()
+			exe, err := os.Executable()
+			if err != nil {
+				return 2
+			}
+			var env []string
+			for _, kv := range os.Environ() {
+				if !strings.HasPrefix(kv, fakeHerdrEnv+"=") {
+					env = append(env, kv)
+				}
+			}
+			sub := exec.Command(exe)
+			sub.Env = append(env, holdPipesEnv+"="+string(d["leak_pipes_ms"]))
+			sub.Stdout = os.Stdout
+			sub.Stderr = os.Stderr
+			if err := sub.Start(); err != nil {
+				return 2
+			}
+			_ = os.WriteFile(filepath.Join(dir, "leaked.pid"), []byte(strconv.Itoa(sub.Process.Pid)), 0o600)
 		case d["sleep_ms"] != nil:
 			_ = out.Flush()
 			n, _ := strconv.Atoi(string(d["sleep_ms"]))
@@ -549,5 +579,119 @@ func TestBridgeScrollIsOneWheelNotchPerLineUpToTheCap(t *testing.T) {
 	enc, _ := json.Marshal(got[0])
 	if want := `{"column":22,"direction":"up","lines":1,"row":15,"type":"terminal.scroll"}`; string(enc) != want {
 		t.Errorf("first notch = %s, want %s (middle of 44x30)", enc, want)
+	}
+}
+
+type strictWriteCloser struct {
+	t      *testing.T
+	inner  io.WriteCloser
+	closed bool
+}
+
+func (w *strictWriteCloser) Write(p []byte) (int, error) {
+	if w.closed {
+		w.t.Errorf("stdin.Write called after stdin.Close")
+		return 0, os.ErrClosed
+	}
+	return w.inner.Write(p)
+}
+
+func (w *strictWriteCloser) Close() error {
+	if w.closed {
+		w.t.Errorf("stdin.Close called more than once")
+		return nil
+	}
+	w.closed = true
+	return w.inner.Close()
+}
+
+func TestBridgeFinishSynchronizesStdinCloseWithSend(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{
+			name: "crash",
+			script: `
+{"emit": {"type": "terminal.frame", "seq": 1, "width": 44, "height": 30, "full": true, "bytes": ""}}
+{"sleep_ms": 60}
+{"exit": 3}
+`,
+		},
+		{
+			name: "closed_then_slow_exit",
+			script: `
+{"emit": {"type": "terminal.frame", "seq": 1, "width": 44, "height": 30, "full": true, "bytes": ""}}
+{"sleep_ms": 40}
+{"emit": {"type": "terminal.closed", "reason": "terminal term_1 exited"}}
+{"sleep_ms": 80}
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t, map[string]string{"script.jsonl": tc.script})
+			o := f.opts()
+			s := newSink()
+			s.wire(&o)
+			b, err := StartBridge(context.Background(), o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.wmu.Lock()
+			b.stdin = &strictWriteCloser{t: t, inner: b.stdin}
+			b.wmu.Unlock()
+
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						select {
+						case <-b.Done():
+							return
+						default:
+						}
+						_ = b.Input([]byte("x"))
+						_ = b.Resize(44, 30)
+					}
+				}()
+			}
+			s.waitClosed(t)
+			<-b.Done()
+			wg.Wait()
+		})
+	}
+}
+
+func TestBridgeStartTimeoutDoesNotHangOnInheritedPipes(t *testing.T) {
+	f := newFake(t, map[string]string{"script.jsonl": `
+{"stderr": "starting daemon\n"}
+{"leak_pipes_ms": 3000}
+{"sleep_ms": 3000}
+`})
+	t.Cleanup(func() {
+		if raw, err := os.ReadFile(filepath.Join(f.dir, "leaked.pid")); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+				if p, err := os.FindProcess(pid); err == nil {
+					_ = p.Kill()
+				}
+			}
+		}
+	})
+	o := f.opts()
+	o.StartTimeout = 60 * time.Millisecond
+	o.Retry = []time.Duration{}
+
+	start := time.Now()
+	_, err := StartBridge(context.Background(), o)
+	elapsed := time.Since(start)
+	var ae *AttachError
+	if !errors.As(err, &ae) || ae.Reason != CloseHerdr {
+		t.Fatalf("err = %v, want AttachError CloseHerdr", err)
+	}
+	if elapsed > 1200*time.Millisecond {
+		t.Fatalf("StartBridge took %v with inherited pipes, want < 1.2s", elapsed)
 	}
 }

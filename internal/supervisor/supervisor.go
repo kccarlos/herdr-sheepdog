@@ -275,9 +275,9 @@ func (c Config) withDefaults() Config {
 
 // Supervisor is safe for concurrent use: tool handlers, HandleTransition,
 // OnVoiceEvent and Run may all run at once. One mutex orders every change
-// to the pending slot and the briefing cache;
-// model calls and pane reads happen outside it, herdr sends inside it so
-// an answer, a stop and an instruction cannot interleave.
+// to the pending slot and the briefing cache; model calls, pane reads and
+// herdr sends happen outside it, with per-pane send locks ordering writes
+// to the same pane so an answer, a stop and an instruction cannot interleave.
 type Supervisor struct {
 	// attMu guards attLast, the attention each pane's last agent.attention
 	// event reported; idxMu guards idx, the folder index the mute check
@@ -287,6 +287,12 @@ type Supervisor struct {
 	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
 	idxMu   sync.Mutex
 	idx     *folderIndex
+
+	// sendMu guards paneSends. Each pane's mutex serializes write RPCs
+	// (Prompt, SendKeys, Interrupt) on that pane without holding s.mu
+	// across socket I/O. Lock order: paneSend(paneID) before s.mu.
+	sendMu    sync.Mutex
+	paneSends map[string]*sync.Mutex
 
 	store   *state.Store
 	herdr   Herdr
@@ -554,6 +560,23 @@ func (s *Supervisor) track() bool {
 	}
 	s.replies.Add(1)
 	return true
+}
+
+// paneSend returns the per-pane mutex that serializes herdr write RPCs
+// (Prompt, SendKeys, Interrupt) on paneID. Acquire before s.mu, never while
+// holding s.mu.
+func (s *Supervisor) paneSend(paneID string) *sync.Mutex {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	if s.paneSends == nil {
+		s.paneSends = map[string]*sync.Mutex{}
+	}
+	m, ok := s.paneSends[paneID]
+	if !ok {
+		m = &sync.Mutex{}
+		s.paneSends[paneID] = m
+	}
+	return m
 }
 
 // SetVoiceConnected records whether a voice session is attached

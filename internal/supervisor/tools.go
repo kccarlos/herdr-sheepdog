@@ -175,16 +175,28 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	if res, err, blocked := s.menuOnScreen(ctx, row); blocked {
 		return res, err
 	}
+	ps := s.paneSend(row.PaneID)
+	ps.Lock()
+	defer ps.Unlock()
+
 	s.mu.Lock()
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
+	s.mu.Unlock()
+
 	_, err := s.herdr.Prompt(ctx, row.PaneID, text)
+
+	s.mu.Lock()
 	if errors.Is(err, herdr.ErrNoReply) {
 		// The text may be typed already; the action's cancel has nothing to interrupt.
-		s.clearPending(p, "send_no_reply")
+		if cur, has := s.store.Pending(); has && cur.ID == p.ID {
+			s.clearPending(p, "send_no_reply")
+		}
 	} else if err != nil {
-		s.clearPending(p, "send_failed")
+		if cur, has := s.store.Pending(); has && cur.ID == p.ID {
+			s.clearPending(p, "send_failed")
+		}
 	} else {
 		now := s.cfg.Now()
 		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = text, &now }); uerr != nil {
@@ -377,10 +389,14 @@ func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voi
 // (pending.confirmed {via}, with extra fields such as a tap's option) and
 // starts the post-answer poll (reprompt.go): herdr may already be showing
 // the next prompt within its own poll window with no state change in
-// between. ok reports whether the keys were sent. Caller holds s.mu.
+// between. ok reports whether the keys were sent. Caller holds
+// s.paneSend(p.PaneID) and s.mu (released across SendKeys and re-taken).
 func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label string, say func(label string) string, via string, extra map[string]any) (voice.ToolResult, bool) {
 	alias := s.sayOf(p.PaneID)
-	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
+	s.mu.Unlock()
+	err := s.herdr.SendKeys(ctx, p.PaneID, keys...)
+	s.mu.Lock()
+	if err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, false
 	}

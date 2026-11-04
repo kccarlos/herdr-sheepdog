@@ -160,7 +160,11 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 		return WindowResult{}, ErrNoSuchAgent
 	}
 	name := aliasOr(state.Say(row))
-	if _, err := s.herdr.Prompt(ctx, paneID, text); err != nil {
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	_, err := s.herdr.Prompt(ctx, paneID, text)
+	ps.Unlock()
+	if err != nil {
 		if errors.Is(err, herdr.ErrAgentBlocked) {
 			return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
 		}
@@ -212,7 +216,11 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 		// Answered or replaced between the look and the tap: the keys
 		// still go to the window as plain keys.
 	}
-	if err := s.herdr.SendKeys(ctx, paneID, keys...); err != nil {
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	err := s.herdr.SendKeys(ctx, paneID, keys...)
+	ps.Unlock()
+	if err != nil {
 		return WindowResult{}, err
 	}
 	name := aliasOr(state.Say(row))

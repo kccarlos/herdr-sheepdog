@@ -348,7 +348,9 @@ func (s *Session) Reset(reason string) error {
 	}
 	s.recap.Reset()
 	s.held = nil
+	s.inputOpen = false
 	s.inText, s.outText = "", ""
+	s.unclaimed, s.settledText = "", ""
 	s.heard.Reset()
 	s.requeue.Reset()
 	lc := s.live

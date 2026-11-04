@@ -118,6 +118,71 @@ func (s *Session) dialStart(reason string) (*liveConn, error) {
 	}
 }
 
+type liveTeardown struct {
+	wasLive     bool
+	wasSpeaking bool
+	closing     bool
+	timing      map[string]any
+	unheard     []voice.UnheardPush
+}
+
+// detachLiveLocked clears s.live and resets active turn, audio and transcript
+// state iff lc is still the live session. Caller holds s.mu.
+func (s *Session) detachLiveLocked(lc *liveConn) liveTeardown {
+	if s.live != lc {
+		return liveTeardown{}
+	}
+	s.live = nil
+	td := liveTeardown{
+		wasLive:     true,
+		wasSpeaking: s.speakingNow,
+		closing:     s.closed,
+		timing:      s.finishAudioTimingLocked(),
+		unheard:     s.heard.Lost(),
+	}
+	s.speakingNow = false
+	if s.inputOpen {
+		if lc.closeWhy != "reset" {
+			s.addRecapLocked("user", s.inText)
+		}
+		s.inputOpen = false
+		s.inText = ""
+	}
+	s.unclaimed, s.settledText, s.turnDoneOwed = "", "", false
+	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
+	s.flushReplyLocked()
+	return td
+}
+
+func (s *Session) finishDetach(td liveTeardown) {
+	if !td.wasLive {
+		return
+	}
+	s.reportUnheard(td.unheard)
+	s.out.Flush()
+	if td.timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", td.timing)
+	}
+	if td.wasSpeaking {
+		s.emit(voice.EventTurnComplete{})
+	}
+	if !td.closing {
+		s.emit(voice.EventStatus{Status: voice.StatusConnected, Reason: ReasonStandby})
+	}
+}
+
+// lcActiveLocked reports whether lc may still drive session audio, transcripts
+// and delegations. Caller holds s.mu.
+func (s *Session) lcActiveLocked(lc *liveConn) bool {
+	if s.closed {
+		return false
+	}
+	if lc == nil {
+		return true
+	}
+	return lc.closeWhy == "" && !lc.finalized && (s.live == nil || s.live == lc)
+}
+
 // closeLive asks the server to close lc (session.close) and releases the
 // connection once session.closed arrived or CloseTimeout passed. lc
 // leaves s.live at once, so new speech opens a fresh session.
@@ -128,10 +193,9 @@ func (s *Session) closeLive(lc *liveConn, why string) {
 		return
 	}
 	lc.closeWhy = why
-	if s.live == lc {
-		s.live = nil
-	}
+	td := s.detachLiveLocked(lc)
 	s.mu.Unlock()
+	s.finishDetach(td)
 	s.log.Log(logSource, "voice.session_closing", "", map[string]any{"reason": why, "session_id": lc.id})
 	_ = s.send(lc, closeEvent{Type: evSessionClose, EventID: fmt.Sprintf("close_%d", lc.seq)})
 	s.wg.Add(1)
@@ -157,10 +221,7 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 		return
 	}
 	lc.finalized = true
-	wasLive := s.live == lc
-	if wasLive {
-		s.live = nil
-	}
+	td := s.detachLiveLocked(lc)
 	secs := lc.usage
 	wall := now.Sub(lc.openedAt).Seconds()
 	if !confirmed && wall > secs {
@@ -176,32 +237,13 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 			why = "connection_lost"
 		}
 	}
-	wasSpeaking := s.speakingNow
-	s.speakingNow = false
-	s.unclaimed, s.settledText, s.turnDoneOwed = "", "", false
-	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
-	s.flushReplyLocked()
-	timing := s.finishAudioTimingLocked()
-	closing := s.closed
-	// A push not heard by now never will be on this session.
-	unheard := s.heard.Lost()
 	s.mu.Unlock()
-	s.reportUnheard(unheard)
-	s.out.Flush()
-	if timing != nil {
-		s.log.Log(logSource, "voice.audio_timing", "", timing)
-	}
+	s.finishDetach(td)
 	s.log.Log(logSource, "voice.session_close", "", map[string]any{
 		"reason": why, "server_reason": serverReason, "session_id": lc.id, "dur_ms": now.Sub(lc.openedAt).Milliseconds(),
 		"billed_s": secs, "confirmed": confirmed, "billed_total_s": total,
 	})
 	s.log.Log(logSource, "voice.billed_seconds", "", map[string]any{"total_s": total, "provider": "openai"})
-	if wasSpeaking {
-		s.emit(voice.EventTurnComplete{})
-	}
-	if wasLive && !closing {
-		s.emit(voice.EventStatus{Status: voice.StatusConnected, Reason: ReasonStandby})
-	}
 }
 
 // readLoop is the single reader of lc.
@@ -237,15 +279,15 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 	case evOutputAudioDelta:
 		chunk, err := base64.StdEncoding.DecodeString(ev.Delta)
 		if err == nil && len(chunk) > 0 {
-			s.onOutputAudio(chunk)
+			s.onOutputAudio(lc, chunk)
 		}
 	case evInputTranscript:
 		if ev.Delta != "" {
-			s.onInputText(ev.Delta)
+			s.onInputText(lc, ev.Delta)
 		}
 	case evOutputTranscript:
 		if ev.Delta != "" {
-			s.onOutputText(ev.Delta)
+			s.onOutputText(lc, ev.Delta)
 		}
 	case evDelegationCreated:
 		if ev.Delegation != nil && ev.Delegation.Target == "client" {
@@ -282,10 +324,14 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 	return false
 }
 
-func (s *Session) onOutputAudio(chunk []byte) {
+func (s *Session) onOutputAudio(lc *liveConn, chunk []byte) {
 	now := s.now()
 	voiced := peak(chunk) >= s.cfg.VoicedPeak
 	s.mu.Lock()
+	if !s.lcActiveLocked(lc) {
+		s.mu.Unlock()
+		return
+	}
 	if s.audioTiming == nil {
 		s.audioTurnSeq++
 		s.audioTiming = audiotiming.New(s.audioTurnSeq, SampleRate)
@@ -307,9 +353,13 @@ func (s *Session) onOutputAudio(chunk []byte) {
 	}
 }
 
-func (s *Session) onInputText(delta string) {
+func (s *Session) onInputText(lc *liveConn, delta string) {
 	now := s.now()
 	s.mu.Lock()
+	if !s.lcActiveLocked(lc) {
+		s.mu.Unlock()
+		return
+	}
 	s.lastInput = now
 	s.inputOpen = true
 	s.lastActivity = now
@@ -321,9 +371,13 @@ func (s *Session) onInputText(delta string) {
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: delta})
 }
 
-func (s *Session) onOutputText(delta string) {
+func (s *Session) onOutputText(lc *liveConn, delta string) {
 	now := s.now()
 	s.mu.Lock()
+	if !s.lcActiveLocked(lc) {
+		s.mu.Unlock()
+		return
+	}
 	s.lastOutText = now
 	s.lastActivity = now
 	s.speakingNow = true
