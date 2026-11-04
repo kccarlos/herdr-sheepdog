@@ -521,6 +521,9 @@ QA:
 
 ### PR 5. `feat(supervisor): status in attention order` (eval-gated)
 
+Dropped on 2026-11-03: neither arm passed the gate, see
+[the report](../eval/status-attention-order-2026-11-03.md).
+
 §9. QA: unit tests for the new order in `composeBriefing` and
 `renderRoster`. The eval report goes in `docs/dev/eval/` with its row in
 the index, and the decision follows the gate in §9.
