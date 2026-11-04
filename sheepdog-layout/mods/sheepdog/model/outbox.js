@@ -37,7 +37,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     snapshot = { ...snapshot, ...patch };
     for (const listener of listeners) listener(snapshot);
   };
-  const forget = (entry) => snapshot.entries.filter((e) => e !== entry);
+  const forget = (entry) => snapshot.entries.filter((e) => e.key !== entry.key);
   const refuse = (entry, notice, again) => {
     retry = again;
     set({ entries: forget(entry), busy: false, notice: { ...notice, at: now() } });
@@ -69,8 +69,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       return { restore: text };
     }
     retry = null;
-    const replied = { ...entry, phase: "replied", reply: typeof res.reply === "string" ? res.reply : "", repliedAt: now() };
-    set({ entries: snapshot.entries.map((e) => (e === entry ? replied : e)), busy: false });
+    set({ entries: snapshot.entries.map((e) => (e.key === entry.key ? { ...e, phase: "replied", reply: typeof res.reply === "string" ? res.reply : "", repliedAt: now() } : e)), busy: false });
     reconcile(items());
     // The conversation has the exchange by now; ask, so it is matched soon.
     await refresh();

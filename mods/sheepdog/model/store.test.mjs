@@ -1,7 +1,7 @@
 // The history merge and the store that drives it: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyNewest, applyOlder, canLoadOlder, emptyHistory, MEMORY_CAPACITY } from "./history.js";
+import { applyNewest, applyOlder, atMemoryLimit, canLoadOlder, emptyHistory, MEMORY_CAPACITY } from "./history.js";
 import { createStore } from "./store.js";
 import { DaemonError } from "../net/http.js";
 
@@ -63,15 +63,27 @@ test("memory is bounded: paging back past it drops the oldest, so the newest sta
   assert.equal(canLoadOlder(h), true);
   h = applyOlder(h, page([1, 2, 3], 1));
   assert.equal(h.items.length, MEMORY_CAPACITY);
-  assert.equal(h.items[0].id, 2, "the oldest went");
+  assert.equal(h.items[0].id, 3, "the two oldest went");
   assert.equal(h.items[h.items.length - 1].id, 1000 + MEMORY_CAPACITY - 2, "the newest stayed");
   assert.equal(canLoadOlder(h), false, "no paging at the limit, so no loop");
+  assert.equal(atMemoryLimit(h), true);
   // A newest page continues from the newest item: nothing in between is missing.
   h = applyNewest(h, page([1000 + MEMORY_CAPACITY - 2, 9001], 9000));
   assert.equal(h.items.length, MEMORY_CAPACITY);
   assert.equal(h.items[h.items.length - 1].id, 9001);
   assert.equal(h.items[h.items.length - 2].id, 1000 + MEMORY_CAPACITY - 2);
   assert.equal(canLoadOlder(h), false);
+  assert.equal(atMemoryLimit(h), true);
+});
+
+test("the limit distinguishes more history from the start of the conversation", () => {
+  const items = Array.from({ length: MEMORY_CAPACITY }, (_, i) => it(i + 1));
+  const complete = applyNewest(emptyHistory(), { items, next_before: null });
+  assert.equal(atMemoryLimit(complete), false);
+  assert.equal(canLoadOlder(complete), false);
+  const incomplete = applyNewest(emptyHistory(), { items, next_before: 1 });
+  assert.equal(atMemoryLimit(incomplete), true);
+  assert.equal(canLoadOlder(incomplete), false);
 });
 
 // A daemon that serves `pages` newest first, and counts the requests.

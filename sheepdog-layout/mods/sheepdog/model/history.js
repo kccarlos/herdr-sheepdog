@@ -77,8 +77,11 @@ export function applyOlder(history, page) {
   let items = normalise([...history.items, ...(page.items ?? [])]);
   // Past the memory the oldest go, so what is kept still reaches the newest
   // item (a gap there would be spliced by the next newest page). Paging stops
-  // here (`canLoadOlder`), so the cursor is dropped with them.
-  if (items.length > MEMORY_CAPACITY) return { items: items.slice(items.length - MEMORY_CAPACITY), nextBefore: null, synced: true };
+  // here (`canLoadOlder`), but retain a cursor to say older items exist.
+  if (items.length > MEMORY_CAPACITY) {
+    items = items.slice(items.length - MEMORY_CAPACITY);
+    return { items, nextBefore: items[0].id, synced: true };
+  }
   return { items, nextBefore: page.next_before ?? null, synced: true };
 }
 
@@ -90,3 +93,4 @@ function trimFront(history) {
 
 export const newestId = (history) => history.items[history.items.length - 1]?.id ?? 0;
 export const canLoadOlder = (history) => history.nextBefore != null && history.items.length < MEMORY_CAPACITY;
+export const atMemoryLimit = (history) => history.nextBefore != null && history.items.length >= MEMORY_CAPACITY;

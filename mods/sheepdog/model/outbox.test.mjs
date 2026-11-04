@@ -176,3 +176,14 @@ test("a reply the stream showed before the turn returned is not shown twice", as
   assert.deepEqual(pendingItems(outbox.getState().entries), []);
   assert.deepEqual(outbox.getState().entries, []);
 });
+
+test("a failed turn removes an entry already matched by the stream", async () => {
+  let outbox;
+  const http = { async turn() {
+    outbox.reconcile([line(outbox.getState().entries[0].at + 1, "hello")]);
+    throw new DaemonError("down", "nothing answered");
+  } };
+  outbox = createOutbox({ http, newKey: () => "k1", now: () => 1_000_000 });
+  assert.deepEqual(await outbox.submit("hello"), { restore: "hello" });
+  assert.deepEqual(outbox.getState().entries, []);
+});

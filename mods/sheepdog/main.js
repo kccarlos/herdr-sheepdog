@@ -21,7 +21,7 @@ import { focusCommand } from "./model/cards.js";
 import { keyMaker, restored, submission } from "./model/composer.js";
 import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
 import { createOutbox, pendingItems } from "./model/outbox.js";
-import { canLoadOlder } from "./model/history.js";
+import { atMemoryLimit, canLoadOlder } from "./model/history.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
@@ -588,7 +588,7 @@ export default class Sheepdog extends View {
       return panelView(t, {
         status,
         entries: status.phase === "down" ? [] : derived.entries,
-        paging: { synced: snapshot.history.synced, canLoadOlder: canLoadOlder(snapshot.history), loadingOlder: snapshot.loadingOlder },
+        paging: { synced: snapshot.history.synced, canLoadOlder: canLoadOlder(snapshot.history), atMemoryLimit: atMemoryLimit(snapshot.history), loadingOlder: snapshot.loadingOlder },
         technical: this.technical,
         retryMs: POLL_MS,
         compose: { state: this.composer, live: derived.live, notice: outbox.notice, busy: outbox.busy, compact: layout.compactBanners || layout.detailsScroll, maxHeight: composerHeight, onSend: (text, cx) => this.send(text, cx, false) },
