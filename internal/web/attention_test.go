@@ -415,6 +415,7 @@ func TestAttentionEndToEndInMockMode(t *testing.T) {
 		vias = append(vias, fmt.Sprintf("%s:%s:unread=%v:pinned=%v", ev.PaneID, p["via"], p["unread"], p["pinned"]))
 	}
 	want := []string{
+		"e2e:work:herdr:unread=true:pinned=false", // the finish: working to done
 		"e2e:work:panel:unread=false:pinned=false",
 		"e2e:work:panel:unread=true:pinned=false",
 		"e2e:work:panel:unread=true:pinned=true",

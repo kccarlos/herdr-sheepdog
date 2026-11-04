@@ -28,3 +28,33 @@ export function agentDetails(agents, name) {
     space: text(agent.workspace_label) || text(agent.workspace),
   };
 }
+
+// ---- counts for the status line --------------------------------------------
+// How many agents are in each attention group, from /api/state's `agents`.
+// The daemon sends `attention.group` (needs_you, working, done, not_running);
+// an older daemon sends none, and the state decides, as the order in
+// docs/dev/design/unread-pinned-mute.md section 5 does for the phone.
+const GROUP_OF_STATE = { blocked: "needs_you", working: "working", idle: "done", done: "done" };
+const KEY_OF_GROUP = { needs_you: "needsYou", working: "working", done: "done", not_running: "notRunning" };
+
+export function attentionCounts(state) {
+  const counts = { needsYou: 0, working: 0, done: 0, notRunning: 0 };
+  for (const agent of Array.isArray(state?.agents) ? state.agents : []) {
+    const given = agent?.attention?.group;
+    const group = Object.hasOwn(KEY_OF_GROUP, given) ? given : (GROUP_OF_STATE[text(agent?.state)] ?? "not_running");
+    counts[KEY_OF_GROUP[group]] += 1;
+  }
+  return counts;
+}
+
+// "1 needs you · 2 working · 1 done": the groups that have agents, in that
+// order; "" when none do. Agents that are not running are left out. `pill` is
+// the count the header pill already shows for needs you: when it is the same
+// number the line leaves that part out, so it is not said twice.
+export function attentionLine(counts, pill = 0) {
+  const parts = [];
+  if (counts?.needsYou > 0 && counts.needsYou !== pill) parts.push(`${counts.needsYou} ${counts.needsYou === 1 ? "needs" : "need"} you`);
+  if (counts?.working > 0) parts.push(`${counts.working} working`);
+  if (counts?.done > 0) parts.push(`${counts.done} done`);
+  return parts.join(" · ");
+}

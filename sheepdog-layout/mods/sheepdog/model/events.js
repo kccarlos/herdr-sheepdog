@@ -6,8 +6,9 @@
 // "now": the conversation and the state may have changed; ask. "settle": the
 // event's words are already shown; ask once things have been quiet for a
 // moment, to let the daemon's own item replace the shown one. "state": only
-// /api/state changed (who holds the voice, mute, speaking). Any other type
-// (audio stats, usage, playback) changes nothing the panel shows.
+// /api/state changed (who holds the voice, mute, speaking, an agent's state or
+// attention, a space mute). Any other type (audio stats, usage, playback)
+// changes nothing the panel shows.
 const NOW = new Set([
   "daemon.start", "conversation.reset", "card.shown",
   "voice.push_held", "voice.push_dropped",
@@ -22,6 +23,9 @@ const STATE = new Set([
   "voice.client", "voice.connect", "voice.connect_error", "voice.disconnected", "voice.muted",
   "voice.stalled", "voice.session_open", "voice.session_close", "voice.session_error",
   "voice.standby", "voice.provider_changed",
+  // An agent's state moved (older daemons say nothing else), its attention or
+  // its group changed, a space was muted: the status line's counts follow.
+  "herdr.transition", "agent.attention", "space.muted",
 ]);
 
 export function eventEffect(type) {

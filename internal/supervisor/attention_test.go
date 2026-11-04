@@ -96,12 +96,14 @@ func newAttentionWorld(t *testing.T) (*harness, *fakeMarker) {
 	t.Helper()
 	fm := newFakeMarker()
 	h := newHarness(t, func(c *Config) { c.Marker = fm })
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateDone)
-	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
-	h.addAgent("w7:p1", "ops", "codex", herdr.StateBlocked)
+	// The marks are there before the agents are: a transition's first sight of
+	// a pane takes them as the baseline for its next change.
 	fm.marks["w5:p1"] = herdr.Marks{Turn: 3, Seen: u64(2), Word: herdr.StateDone, Shared: true}
 	fm.marks["w6:p1"] = herdr.Marks{Turn: 1, Seen: u64(1), Word: herdr.StateWorking, Pinned: true, Shared: true}
 	fm.marks["w7:p1"] = herdr.Marks{Turn: 0, Word: herdr.StateIdle}
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateDone)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.addAgent("w7:p1", "ops", "codex", herdr.StateBlocked)
 	return h, fm
 }
 
@@ -323,15 +325,15 @@ func TestMarkChangeOnAnUnsharedMarkerIsTUIFocus(t *testing.T) {
 		fm.mu.Unlock()
 		h.sup.attentionChanged(context.Background(), "w5:p1")
 	}
-	set(herdr.Marks{Turn: 3, Seen: u64(2), Word: herdr.StateDone}) // first sight: no earlier event
+	set(herdr.Marks{Turn: 3, Seen: u64(2), Word: herdr.StateDone}) // what the transition already took as the baseline: no event
 	set(herdr.Marks{Turn: 3, Seen: u64(3), Word: herdr.StateIdle}) // focused in the TUI
 	set(herdr.Marks{Turn: 4, Seen: u64(3), Word: herdr.StateDone}) // a turn ended
 	var vias []any
 	for _, e := range h.log.ofType("agent.attention") {
 		vias = append(vias, payload(e)["via"])
 	}
-	if len(vias) != 3 || vias[1] != ViaTUI || vias[2] != ViaHerdr {
-		t.Errorf("vias = %v, want [herdr tui_focus herdr]", vias)
+	if len(vias) != 2 || vias[0] != ViaTUI || vias[1] != ViaHerdr {
+		t.Errorf("vias = %v, want [tui_focus herdr]", vias)
 	}
 }
 
@@ -378,5 +380,47 @@ func TestAnnouncedFinishStaysUnread(t *testing.T) {
 	}
 	if a := h.sup.AttentionState(context.Background(), h.store.List()).Agents["w5:p1"]; !a.Unread {
 		t.Errorf("attention after the announcement = %+v, want unread", a)
+	}
+}
+
+// herdr's turn label can arrive before the state transition that ends the
+// turn: the event it caused then says working. The transition must say the
+// attention again, so /events agrees with /api/state (done and unread), and
+// a working transition says it too, for the panel and the phone.
+func TestTransitionsSayTheAttentionAgain(t *testing.T) {
+	fm := newFakeMarker()
+	h := newHarness(t, func(c *Config) { c.Marker = fm })
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	fm.marks["w5:p1"] = herdr.Marks{Turn: 1, Seen: u64(1), Word: herdr.StateWorking, Shared: true}
+	ctx := context.Background()
+	h.sup.attentionChanged(ctx, "w5:p1") // first sight
+
+	// The turn label moves first: the store row still says working.
+	fm.mu.Lock()
+	fm.marks["w5:p1"] = herdr.Marks{Turn: 2, Seen: u64(1), Word: herdr.StateDone, Shared: true}
+	fm.mu.Unlock()
+	h.sup.attentionChanged(ctx, "w5:p1")
+	if p := payload(h.log.ofType("agent.attention")[1]); p["group"] != attention.GroupWorking {
+		t.Fatalf("setup: the label's event = %+v, want the stale working group", p)
+	}
+
+	h.sup.HandleTransition(ctx, herdr.Transition{PaneID: "w5:p1", From: herdr.StateWorking, To: herdr.StateDone, At: h.clock.Now(), Agent: "codex", WorkspaceID: "w5"})
+	evs := h.log.ofType("agent.attention")
+	last := payload(evs[len(evs)-1])
+	if last["group"] != attention.GroupDone || last["unread"] != true || last["via"] != ViaHerdr {
+		t.Errorf("event after the transition = %+v, want done and unread via herdr", last)
+	}
+	got := h.sup.AttentionState(ctx, h.store.List()).Agents["w5:p1"]
+	if got.Group != last["group"] || got.Unread != last["unread"] {
+		t.Errorf("/api/state says %+v but the last event says %+v", got, last)
+	}
+
+	// Working again: the group changes, so the event says so, once.
+	n := len(evs)
+	h.sup.HandleTransition(ctx, herdr.Transition{PaneID: "w5:p1", From: herdr.StateDone, To: herdr.StateWorking, At: h.clock.Now(), Agent: "codex", WorkspaceID: "w5"})
+	h.sup.HandleTransition(ctx, herdr.Transition{PaneID: "w5:p1", From: herdr.StateWorking, To: herdr.StateWorking, At: h.clock.Now(), Agent: "codex", WorkspaceID: "w5"})
+	evs = h.log.ofType("agent.attention")
+	if len(evs) != n+1 || payload(evs[n])["group"] != attention.GroupWorking {
+		t.Errorf("events after working = %d (was %d), want exactly one more, group working", len(evs), n)
 	}
 }
