@@ -102,7 +102,13 @@ a long s, or a Kelvin sign for `k`): `.git`, `.env` and `.env.*` (except
 A root with a sensitive segment anywhere on its path (an agent working in
 `.git` or `~/.ssh`, spelled or reached through a link) is refused as
 `sensitive`. Changes ([ws-contract.md](../ws-contract.md) "Changes") uses the
-same rule.
+same rule, on the agent's folder and on the repository root, both cleaned and
+symlink-resolved. The fold also drops default-ignorable code points (zero
+width, soft hyphen, variation selectors), so `.​env` is `.env`.
+
+Two known limits. Changes follows the repository root, which can be above
+the agent's folder. A sensitive file renamed to an ordinary name is no
+longer hidden.
 
 This is a rail against the likely case, not a promise: the docs say a paired
 phone can read the agents' folders.

@@ -31,12 +31,22 @@ var (
 // equal.
 func fold(s string) string {
 	return strings.Map(func(r rune) rune {
+		if ignorable(r) {
+			return -1
+		}
 		low := r
 		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
 			low = min(low, f)
 		}
 		return low
 	}, norm.NFC.String(s))
+}
+
+// ignorable reports a default-ignorable code point: invisible, so a name
+// with one in it reads the same to a person and to some filesystems.
+func ignorable(r rune) bool {
+	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r) ||
+		unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || r == 0x00AD || r == 0x034F
 }
 
 func foldAll(names ...string) []string {

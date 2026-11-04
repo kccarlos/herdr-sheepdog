@@ -187,6 +187,38 @@ func TestChangesEdges(t *testing.T) {
 	}
 }
 
+// An agent working in a sensitive folder, or a repository whose root is
+// one, gets no list and no diff.
+func TestChangesSensitiveFolder(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	base := t.TempDir()
+	root := filepath.Join(base, ".aws")
+	gitT(t, base, "init", "-q", ".aws")
+	writeT(t, filepath.Join(root, "a.txt"), "x\n")
+	h := newHarness(t, harnessOpts{})
+	trackIn(t, h, "w1:p2", filepath.Join(root, "sub"))
+	writeT(t, filepath.Join(root, "sub", "b.txt"), "y\n")
+	for _, p := range []string{"changes", "changes/a.txt"} {
+		var got map[string]any
+		if code := h.getJSON(windowPath("w1:p2", p), &got); code != http.StatusForbidden || got["reason"] != "sensitive" {
+			t.Errorf("%s = %d %v", p, code, got)
+		}
+	}
+	// A sensitive agent folder under an ordinary repository.
+	dir := t.TempDir()
+	gitT(t, dir, "init", "-q")
+	writeT(t, filepath.Join(dir, ".ssh", "k.txt"), "z\n")
+	trackIn(t, h, "w1:p3", filepath.Join(dir, ".ssh"))
+	var got map[string]any
+	if code := h.getJSON(windowPath("w1:p3", "changes"), &got); code != http.StatusForbidden {
+		t.Errorf(".ssh cwd = %d %v", code, got)
+	}
+}
+
 func TestParseStatusV2(t *testing.T) {
 	out := "# branch.oid abc\x00# branch.head (detached)\x001 .M N... 100644 100644 100644 a a a.go\x002 R. N... 100644 100644 100644 a a R100 new name.txt\x00old name.txt\x00u UU N... 1 1 1 1 a b c both.go\x00? new dir/x\x001 .M N..."
 	files, branch := parseStatusV2([]byte(out), true)

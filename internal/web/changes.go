@@ -146,6 +146,9 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if info, err := os.Stat(row.Cwd); err != nil || !info.IsDir() {
 		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, http.StatusOK
 	}
+	if sensitiveDir(row.Cwd) {
+		return gitRunner{}, nil, http.StatusForbidden
+	}
 	bin := s.deps.GitBin
 	if bin == "" {
 		bin = "git"
@@ -158,7 +161,32 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if err != nil || root == "" {
 		return gitRunner{}, &ChangesResponse{Reason: "not_repo", Files: []ChangedFile{}}, http.StatusOK
 	}
+	if sensitiveDir(root) {
+		return gitRunner{}, nil, http.StatusForbidden
+	}
 	return gitRunner{bin: bin, dir: root}, nil, http.StatusOK
+}
+
+// sensitiveDir reports whether the folder, cleaned and symlink-resolved,
+// has a sensitive segment, as files.Open refuses.
+func sensitiveDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	if files.SensitivePath(filepath.ToSlash(clean)) {
+		return true
+	}
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		return files.SensitivePath(filepath.ToSlash(real))
+	}
+	return false
+}
+
+// refuseChanges answers a non-OK changesRepo status.
+func refuseChanges(w http.ResponseWriter, status int) {
+	if status == http.StatusForbidden {
+		writeJSON(w, status, map[string]string{"error": "hidden for safety", "reason": "sensitive"})
+		return
+	}
+	writeError(w, status, "not a tracked agent")
 }
 
 // listChanges reads status and numstat for the repository. Files the Files
@@ -223,7 +251,7 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 	start := s.deps.Now()
 	g, none, status := s.changesRepo(r.Context(), pane)
 	if status != http.StatusOK {
-		writeError(w, status, "not a tracked agent")
+		refuseChanges(w, status)
 		return
 	}
 	if none != nil {
@@ -246,7 +274,7 @@ func (s *Server) handleChangeDiff(w http.ResponseWriter, r *http.Request) {
 	path := r.PathValue("path")
 	g, none, status := s.changesRepo(r.Context(), pane)
 	if status != http.StatusOK {
-		writeError(w, status, "not a tracked agent")
+		refuseChanges(w, status)
 		return
 	}
 	if none != nil {
