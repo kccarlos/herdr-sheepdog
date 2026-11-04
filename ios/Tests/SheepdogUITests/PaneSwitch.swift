@@ -72,11 +72,11 @@ extension XCTestCase {
         func landed() -> Bool { until.map { $0.waitForExistence(timeout: 3) } ?? true }
         repeat {
             if until?.exists == true { return }
-            if isOnScreen(app, items), tapOnScreen(app, items), landed() { return }
+            if tapTappable(app, items), landed() { return }
             if tapOnScreen(app, app.buttons.matching(identifier: menu)) {
                 if app.buttons[item].waitForExistence(timeout: 3) {
                     scrollMenuToItem(app, items)
-                    if tapOnScreen(app, items), landed() { return }
+                    if (tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
                 }
             }
             usleep(300_000)
@@ -84,27 +84,30 @@ extension XCTestCase {
         XCTFail("no \(item) in \(menu)" + (until.map { ", or it never opened \($0)" } ?? ""), file: file, line: line)
     }
 
-    /// Brings `items` (the open menu's item) onto the screen. A menu that is
-    /// still opening has its items in the tree before they have a place on
-    /// screen, so wait for that first: a drag across the middle of the
-    /// screen closes the menu it was meant to scroll. Only at the
-    /// accessibility sizes, where a menu is taller than the screen and
-    /// scrolls, does the item stay off screen, and then swipes up inside
-    /// the open menu until it shows.
+    /// Brings `items` (the open menu's item) into the menu's tappable area.
+    /// A menu still opening has its items in the tree before UIKit finishes
+    /// placing them, so wait briefly first: a drag across the middle of the
+    /// screen closes a small menu it was meant to scroll. At the
+    /// accessibility sizes a menu is taller than its platter and clips lower
+    /// items even while their unclipped frames sit inside `app.frame`, so
+    /// check hittability (`isTappable`) rather than screen bounds and swipe
+    /// up inside the open menu until the item can be tapped.
     private func scrollMenuToItem(_ app: XCUIApplication, _ items: XCUIElementQuery) {
-        let settled = Date().addingTimeInterval(2)
-        while !isOnScreen(app, items), Date() < settled { usleep(150_000) }
-        for _ in 0 ..< 4 where !isOnScreen(app, items) {
+        let settled = Date().addingTimeInterval(1)
+        while !isAnyTappable(items), Date() < settled { usleep(150_000) }
+        for _ in 0 ..< 4 {
+            if isAnyTappable(items) { break }
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
         }
     }
 
-    /// Whether some match of `query` has a place on screen. `isHittable` on
-    /// the element is no answer: with the same identifier on several
-    /// elements (the demo keeps the real main view under its cover) the
-    /// element is ambiguous and it reports "not tappable" for all of them.
-    private func isOnScreen(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
-        onScreenCenter(app, query) != nil
+    /// Whether some match of `query` is hittable on screen. Indexing each
+    /// match (`element(boundBy:)`) avoids the ambiguity `app.buttons[id]`
+    /// hits when a cover keeps a second copy in the tree, while still asking
+    /// UIKit's hit test so an item clipped below an open menu's scroll view
+    /// is not mistaken for visible.
+    private func isAnyTappable(_ query: XCUIElementQuery) -> Bool {
+        tappableCenter(query) != nil
     }
 
 
@@ -264,6 +267,23 @@ extension XCTestCase {
             guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { continue }
             let center = CGPoint(x: frame.midX, y: frame.midY)
             if screen.contains(center) { return center }
+        }
+        return nil
+    }
+
+    /// Taps the first match that UIKit reports as hittable, by coordinate.
+    private func tapTappable(_ app: XCUIApplication, _ query: XCUIElementQuery) -> Bool {
+        guard let point = tappableCenter(query) else { return false }
+        let screen = app.frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x - screen.minX, dy: point.y - screen.minY)).tap()
+        return true
+    }
+
+    private func tappableCenter(_ query: XCUIElementQuery) -> CGPoint? {
+        for i in 0 ..< query.count {
+            let element = query.element(boundBy: i)
+            guard element.isTappable, let frame = try? element.snapshot().frame else { continue }
+            return CGPoint(x: frame.midX, y: frame.midY)
         }
         return nil
     }

@@ -146,7 +146,6 @@ final class FilesDemoUITests: XCTestCase {
 
         // A day-old file reads in days here as everywhere ("yesterday", or
         // "2 days ago" just after midnight), never as a time of day.
-        tapWhenTappable(app.buttons["files.crumb.root"], "the root crumb")
         open(app, row: "docs")
         let api = app.buttons["files.row.docs/api.md"]
         XCTAssertTrue(api.waitForExistence(timeout: 10))
@@ -354,7 +353,12 @@ final class FilesDemoUITests: XCTestCase {
         scrollToVisible(app, app.buttons["space.changes"])
         sleep(1)
         shot("largest-space")
-        tapWhenTappable(app.buttons["space.files"], "Files")
+        let files = app.buttons["space.files"]
+        if !files.isTappable {
+            scrollToTop(app)
+            scrollToVisible(app, files)
+        }
+        tapWhenTappable(files, "Files")
         XCTAssertTrue(any(app, "files.list").waitForExistence(timeout: 10))
     }
 }
