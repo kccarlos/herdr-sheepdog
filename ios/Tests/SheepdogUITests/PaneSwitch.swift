@@ -10,7 +10,19 @@ extension XCUIElement {
         // between the two fails the test ("no matches found").
         guard let frame = try? snapshot().frame else { return false }
         guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return false }
-        return isHittable
+        // A finite frame can still have no activation point (an element laid
+        // out beside the visible pane, or between two layouts), and
+        // `isHittable` then records "Failed to determine hittability" as a
+        // failure, which stops a test with `continueAfterFailure = false`
+        // at once. Here that means "not tappable yet".
+        var hittable = false
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        options.issueMatcher = { $0.compactDescription.contains("determine hittability") }
+        XCTExpectFailure("an element without an activation point is not tappable", options: options) {
+            hittable = isHittable
+        }
+        return hittable
     }
 }
 
@@ -26,16 +38,24 @@ extension XCTestCase {
         // The pane is up once one of its agent rows can be tapped.
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'flock.agent.'")).firstMatch
         let deadline = Date().addingTimeInterval(20)
-        repeat {
-            if row.isTappable { return }
+        // True once the pane is up. On a Mac whose app is busy one query can
+        // take many seconds, so the deadline can pass during the tap that
+        // opened the pane: look once more before giving up.
+        func isUp() -> Bool {
+            if row.isTappable { return true }
             for i in 0 ..< tabs.count where tabs.element(boundBy: i).isTappable {
                 let tab = tabs.element(boundBy: i)
-                if tab.isSelected { return }
+                if tab.isSelected { return true }
                 tab.tap()
                 break
             }
+            return false
+        }
+        repeat {
+            if isUp() { return }
             usleep(300_000)
         } while Date() < deadline
+        if isUp() { return }
         XCTFail("the Agents pane never opened", file: file, line: line)
     }
 
