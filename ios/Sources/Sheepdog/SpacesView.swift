@@ -274,6 +274,7 @@ struct SpaceDetailView: View {
 
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var worktrees: WorktreeList?
     @State private var worktreeError: String?
     @State private var confirmClose = false
@@ -306,14 +307,24 @@ struct SpaceDetailView: View {
                 }
                 ForEach(space.agents, id: \.paneID) { agent in
                     Button { openWindow(agent.paneID) } label: {
+                        // Name and state stack at the accessibility sizes and the icon goes, so the
+                        // name gets the full width and wraps only between words.
+                        let nameLayout = dynamicTypeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                            : AnyLayout(HStackLayout(spacing: 10))
                         HStack(spacing: 10) {
                             Circle().fill(color(agent.state)).frame(width: 8, height: 8)
-                            Text(agent.name).foregroundStyle(Theme.ink)
-                            Text(agent.state == "blocked" ? "waiting on you" : agent.state)
-                                .font(.footnote)
-                                .foregroundStyle(agent.state == "blocked" ? Theme.blockedText : Theme.muted)
+                            nameLayout {
+                                Text(agent.name).foregroundStyle(Theme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(agent.state == "blocked" ? "waiting on you" : agent.state)
+                                    .font(.footnote)
+                                    .foregroundStyle(agent.state == "blocked" ? Theme.blockedText : Theme.muted)
+                            }
                             Spacer()
-                            Image(systemName: "apple.terminal").foregroundStyle(Theme.muted)
+                            if !dynamicTypeSize.isAccessibilitySize {
+                                Image(systemName: "apple.terminal").foregroundStyle(Theme.muted)
+                            }
                         }
                         .frame(minHeight: 44)
                     }
