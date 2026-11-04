@@ -611,4 +611,3 @@ func TestWatcherReusedShellPaneClearsExitedAgentNameAndSession(t *testing.T) {
 		t.Errorf("fresh agent inherited exited agent's session %+v, want nil", fresh.Session)
 	}
 }
-

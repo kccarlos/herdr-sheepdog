@@ -71,11 +71,11 @@ type Session struct {
 	loudSince time.Time
 	up        upsampler
 
-	live     *liveConn // the open, started session; nil in standby
-	opening  bool
+	live    *liveConn // the open, started session; nil in standby
+	opening bool
 	// resets counts Reset calls, so an open in flight can tell it was
 	// reset (live.go's open).
-	resets int
+	resets   int
 	nextOpen time.Time
 	preroll  [][]byte // the last moments of microphone audio in standby
 	pending  [][]byte // audio held while a session opens

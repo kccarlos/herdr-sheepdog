@@ -869,4 +869,3 @@ func TestRetiringSessionDoesNotCorruptNewSession(t *testing.T) {
 		t.Fatalf("c2 delegation did not reach handler (delegation_empty = %d)", len(l.find("voice.delegation_empty")))
 	}
 }
-

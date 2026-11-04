@@ -123,4 +123,3 @@ func TestRetiredDelegationDoesNotClaimTheNewSessionsWords(t *testing.T) {
 		t.Errorf("unclaimed = %q, want the new session's words left alone", left)
 	}
 }
-

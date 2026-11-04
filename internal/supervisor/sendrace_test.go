@@ -78,7 +78,11 @@ func TestSendInstructionReleasesThePaneBeforeItsFollowUpReads(t *testing.T) {
 		onRead: func(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
 			ps := h.sup.paneSend(paneID)
 			got := make(chan struct{})
-			go func() { ps.Lock(); ps.Unlock(); close(got) }()
+			go func() {
+				ps.Lock()
+				close(got)
+				ps.Unlock()
+			}()
 			select {
 			case <-got:
 			case <-time.After(200 * time.Millisecond):

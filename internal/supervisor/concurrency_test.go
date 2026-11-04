@@ -389,5 +389,3 @@ func TestPollRepromptStopsOnShutdown(t *testing.T) {
 		t.Fatalf("pollReprompt performed %d pane read(s) after shutdown returned, want 0", got)
 	}
 }
-
-
