@@ -58,6 +58,7 @@ you changed `web.port`.
 | The daemon keeps coming back after `kill` | The login service restarts it. Use `sheepdog stop`; it unloads the service. |
 | `sheepdog doctor` says `project folders` needs access, or the phone lists no project folders | macOS has not let sheepdog into a folder such as Documents. Allow sheepdog in System Settings, Privacy & Security, Files and Folders (or Full Disk Access), then retry. Until you answer macOS's prompt the daemon skips that folder instead of waiting. |
 | Browser blocks the microphone | See [faq.md](faq.md) (per origin: `127.0.0.1` and `localhost` are separate). |
+| Quiet microphone on the `/voice` browser page is cut off | The browser page has a room-noise gate (and keyboard shortcuts: `M` to mute or unmute, `Space` or `Esc` to stop, and **New conversation**). Open `/voice?gate=off` to turn the noise gate off, or `/voice?gate_floor=0.008` to lower its floor. |
 
 ## Phone
 
@@ -84,3 +85,8 @@ log lines. Every key and token is replaced by `[REDACTED]` and your home
 directory shows as `~`. Read it, then attach it to a
 [GitHub issue](https://github.com/kccarlos/herdr-sheepdog/issues/new/choose).
 Agent screen text can appear in logs, so look before you post.
+
+In the iPhone app, tap the flag button (**Mark this moment**) at the top right
+right after something goes wrong: it records a 30-second diagnostic snapshot
+(`user.feedback`) in the daemon's event log (`sheepdog dev feedback` lists
+them on your computer).

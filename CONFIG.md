@@ -3,8 +3,11 @@
 Configuration is read from `~/.config/sheepdog/config.toml` when it
 exists (create one with `sheepdog config init`), then overridden by
 `SHEEPDOG_*` environment variables (and, for the keys, `DEEPSEEK_API_KEY`,
-the Gemini pool `GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`
-and the Vertex AI `VERTEX_API_KEY`/`VERTEX_PROJECT`/`VERTEX_LOCATION`).
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, the Gemini pool
+`GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`, the Vertex AI
+`VERTEX_API_KEY`/`VERTEX_PROJECT`/`VERTEX_LOCATION`, and each
+`[[brain.openai_compat]]` entry's `api_key_env` such as
+`OPENROUTER_API_KEY` or `OPENAI_ORCH_API_KEY`).
 The environment always wins over the file. See `internal/config/` for the
 authoritative source; this file is checked against it in
 `internal/config/doc_test.go` — a struct field without a matching entry
@@ -20,23 +23,28 @@ with secrets redacted (as counts); `sheepdog config init` writes a
 commented template of every key below to `~/.config/sheepdog/config.toml`
 (or `--path`), refusing to overwrite an existing file without `--force`.
 
-`sheepdog init` is the guided setup on top of it: it checks the herdr programs
-(and says how to install them), asks for one key — Gemini AI Studio by default, or
-DeepSeek / any OpenAI-compatible orchestrator (`[[brain.openai_compat]]`)
-plus a Gemini key for the voice — validates each with a free model-list
-call, and writes the keys to `~/.config/sheepdog/.env` (or `--env-file`)
-and, only when there is none yet, `config.toml` (both mode 0600). A new
-an existing `config.toml` is never rewritten (init prints the lines to
-add). Keys are read without echo and never printed. `--non-interactive`
-takes the keys from the environment (for scripts and tests).
+`sheepdog init` (or `sheepdog setup --terminal`) is the guided terminal
+setup on top of it, with the same choices as `/setup`: a starting point
+(Recommended, Claude Opus 5.5, Free quick start, or Custom), the voice
+(Gemini Live on AI Studio or Vertex AI, or GPT-Live), and the
+orchestrator preset (Anthropic, Gemini, DeepSeek, Vertex AI, OpenRouter,
+OpenAI, Ollama, LM Studio, or any OpenAI-compatible URL). It checks each
+key with a free live call before anything is written, writes the keys and
+provider choices to `~/.config/sheepdog/.env` (or `--env-file`), and
+writes `config.toml` (creating the commented template when none exists,
+and updating `[gemini.vertex]` or `[[brain.openai_compat]]` in place when
+needed; both files mode 0600). Keys are read without echo and never
+printed. `--non-interactive` takes the keys from the environment (for
+scripts and tests).
 `sheepdog doctor` checks the result and prints one line per check with
-its fix: the selected herdr backend's socket, every configured key (live;
+its fix: the selected herdr backend's socket, the herdr-app panel and
+`Sheepdog.app` on macOS, every configured key (live;
 DeepSeek's balance and
 an OpenRouter key's credit where the API shows them; AI Studio does not
 expose its quota), a one-call tool-calling probe on each OpenAI-compatible
-orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
+and Anthropic orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
 voice providers, the web port (free, this daemon, or another program),
-who can reach the daemon (the bind), push (the relay's health, or the `[push.apns]` key) and the secret files' permissions.
+who can reach the daemon (the bind), the project folders, push (the relay's health, or the `[push.apns]` key) and the config and env files' permissions.
 It exits 1 on any failure.
 `sheepdog pair` asks the running daemon for a new one-time pairing code
 and prints it as a QR code: the app scans it, and so does any phone's
@@ -293,7 +301,7 @@ device (docs/remote-access.md).
 | `web.port` | `SHEEPDOG_WEB_PORT` | `7777` | TCP port. `0` with an empty config picks a free port (used by tests). |
 | `web.dev` | *(flag only: `serve --dev`)* | `false` | Turns on developer-only routes: `/testdata/<name>.wav` serves the audio fixtures so `/voice?src=file` can use one as a fake microphone. |
 | `web.dev_testdata_dir` | *(TOML only)* | `testdata/audio` (relative to the working directory) | Where `/testdata/` serves from when `web.dev` is on and this is empty. |
-| `web.shell` | `SHEEPDOG_WEB_SHELL` | `true` | Lets paired devices open the iPhone app's plain shell and send attachments, on every network. One switch per computer: the setup page's **Shell from your phone** writes it to the env file and applies it at once, with no restart. Off, the shell target of `/term` answers `refused:shell_off`, attachments and wrap-up commands answer `403`; agent windows stay available. See [docs/remote-access.md](docs/remote-access.md#the-phone-shell). |
+| `web.shell` | `SHEEPDOG_WEB_SHELL` | `true` | Lets paired devices open the iPhone app's plain shell and send attachments, on every network. One switch per computer: the setup page's **Shell from your phone** writes it to the env file and applies it at once, with no restart. Off, the shell target of `/term` answers `refused:shell_off`, attachments and wrap-up commands answer `403`; agent windows, git changes and the read-only file browser stay available. See [docs/remote-access.md](docs/remote-access.md#the-phone-shell). |
 | `web.advertise` | `SHEEPDOG_WEB_ADVERTISE` (comma-separated) | `[]` | More `host:port` addresses for the pairing code, listed after the daemon's own Tailscale and LAN addresses: a router's port forward, whose address the daemon cannot see (for example `["100.101.1.1:7777"]`). A host without a port gets `7777`. Subnet routing needs nothing. See [docs/remote-access.md](docs/remote-access.md#through-a-router). |
 | `web.tailscale_https` | `SHEEPDOG_WEB_TAILSCALE_HTTPS` | `false` | Serve a real certificate for this computer's Tailscale name (`<machine>.<tailnet>.ts.net`, from `tailscale cert`) to browsers that open that name, so `/voice` opens in a browser without a certificate warning. **Off by default: turning it on logs the machine name publicly** in the certificate transparency logs. The pairing code's browser link then uses the name; the app keeps using the addresses and the daemon's own pinned key. Needs Tailscale on this computer with HTTPS certificates enabled for the tailnet. Set by the setup page's switch. See [docs/remote-access.md](docs/remote-access.md#a-real-certificate-for-browsers). |
 
@@ -545,16 +553,18 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.config/sheepdog/prompts/` | Your prompt overrides, if you made any (`prompts.dir`). | Until you delete it. |
 | `~/.local/share/sheepdog/events/YYYY-MM-DD.jsonl` | The event log: every event of the daemon, including **transcripts of what you said**, the voice's and the orchestrator's answers, and agent screen excerpts. | `events.retention_days` (14 days). `sheepdog data clear --events` deletes it now. |
 | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
+| `~/.local/share/sheepdog/cards.jsonl` | Cards the orchestrator showed on your screen (`show` tool): markdown notes, agent cards, terminal excerpts and approval prompt snapshots (mode 0600, capped at the newest 500 cards). | `events.retention_days`. Deleted with the event log (`sheepdog data clear --events`). |
 | `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions and your runtime settings (`state.path`). | Overwritten as it changes. |
 | `~/.local/share/sheepdog/agent_marks.json` | With the original herdr, which has no labels: for each terminal, how many turns it finished, the last one you looked at, and whether you pinned it (mode 0600). herdr-core keeps these in terminal labels instead. No text from your sessions. | Each terminal's entry is removed when the terminal closes. |
 | `~/.local/share/sheepdog/space_mutes.json` | Which spaces you muted notifications for, by folder path, when, until when and from where (mode 0600). No text from your sessions. | A mute is removed when it ends, when you turn it off, or at start when its folder no longer exists. |
+| `~/.local/share/sheepdog/wrapups.json` | Wrap-up commands you saved per project folder from the iPhone app: label, shell command and folder path (mode 0600). | Until you delete a command in the app or run `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/attachments/<pane>/` | Photos and files you attached from the iPhone app for an agent (mode 0600). | 7 days. |
 | `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications: device tokens, relay tokens and each phone's notification content key. | Until a phone unregisters. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
-| `~/.local/share/sheepdog/tls/` | This computer's id for the apps (`daemon_id`, 16 random bytes) and its TLS key and self-signed certificate (`key.pem`, `cert.pem`; during a renewal also `next_key.pem`, `next_cert.pem`). Directory 0700, files 0600. No personal data. | Until you delete it; Reset pairing replaces the key and certificate. |
+| `~/.local/share/sheepdog/tls/` | This computer's id for the apps (`daemon_id`, 16 random bytes), its TLS key and self-signed certificate (`key.pem`, `cert.pem`; during a renewal also `next_key.pem`, `next_cert.pem`), and when `web.tailscale_https = true` the cached Tailscale certificate and key (`tsnet.crt`, `tsnet.key`). Directory 0700, files 0600. No personal data. | Until you delete it; Reset pairing replaces the self-signed key and certificate. |
 | `~/.local/share/sheepdog/devices.json` | The paired phones and browsers: a name, a kind, each one's public key, when it paired and was last seen, and whether it was revoked (mode 0600). No secret: the private keys stay on the devices. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
