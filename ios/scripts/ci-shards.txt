@@ -42,7 +42,6 @@ shard-2  SheepdogUITests/PrivacyLinksUITests            # 44
 shard-2  SheepdogUITests/RenderChurnUITests
 shard-2  SheepdogUITests/ActionDedupUITests
 shard-2  SheepdogUITests/AgentAttentionUITests
-shard-2  SheepdogUITests/AgentAttentionLargestTextUITests
 
 # about 501
 shard-3  SheepdogUITests/SpacesDemoUITests             # 213
@@ -59,7 +58,6 @@ shard-4  SheepdogUITests/VoiceRobustnessUITests        # 146
 shard-4  SheepdogUITests/FirstRunUITests               # 104
 shard-4  SheepdogUITests/WalkthroughUITests            # 101
 shard-4  SheepdogUITests/ChangesDemoUITests            # 77
-shard-4  SheepdogUITests/FilesDemoUITests
 shard-4  SheepdogUITests/DemoUITests                   # 46
 shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
@@ -74,3 +72,8 @@ shard-4  SheepdogUITests/ReviewScreenshotsUITests
 shard-4  SheepdogUITests/LaunchRecordingUITests
 shard-4  SheepdogUITests/HeroRecordingUITests
 shard-4  SheepdogUITests/ReadmeRecordingUITests
+
+# The two classes that run at the largest text: slow on the cloud Mac, so
+# they have a job of their own (shards 2 and 4 hit the 50-minute limit).
+shard-5  SheepdogUITests/FilesDemoUITests
+shard-5  SheepdogUITests/AgentAttentionLargestTextUITests

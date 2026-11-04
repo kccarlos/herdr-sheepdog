@@ -70,8 +70,7 @@ class AgentAttentionUITests: XCTestCase {
 
         // Open its window and come back: the daemon marked the turn seen.
         _ = showToggle(app, "claude-auth")
-        tapWhenTappable(scrollToVisible(app, app.buttons["flock.agent.claude-auth.window"].firstMatch), "claude-auth's window button")
-        XCTAssertTrue(element(app, "agentScreen.terminal").waitForExistence(timeout: 15))
+        openAgentWindow(app, alias: "claude-auth")
         sleep(1)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         showAgentsPane(app)

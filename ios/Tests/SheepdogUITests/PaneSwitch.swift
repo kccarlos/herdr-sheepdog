@@ -66,20 +66,28 @@ extension XCTestCase {
     /// lost while something still animated.
     /// With `until`, the tap counts only once that element shows up (the
     /// screen the item opens); otherwise the menu is opened again.
-    func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
+    func tapMenuItem(_ app: XCUIApplication, menu: String, item: String, until: XCUIElement? = nil, timeout: TimeInterval = 40, file: StaticString = #filePath, line: UInt = #line) {
         let deadline = Date().addingTimeInterval(timeout)
         let items = app.buttons.matching(identifier: item)
-        func landed() -> Bool { until.map { $0.waitForExistence(timeout: min(10, deadline.timeIntervalSinceNow)) } ?? true }
+        func landed() -> Bool { until.map { $0.waitForExistence(timeout: max(1, min(10, deadline.timeIntervalSinceNow))) } ?? true }
         repeat {
             if until?.exists == true { return }
-            let menuButtons = app.buttons.matching(identifier: menu)
-            if tapElementTappable(menuButtons) || tapTappable(app, menuButtons) {
-                let itemDeadline = Date().addingTimeInterval(5)
-                while !items.firstMatch.exists && Date() < itemDeadline { usleep(100_000) }
-                if items.firstMatch.exists {
-                    scrollMenuToItem(app, items)
-                    if (tapElementTappable(items) || tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
+            // A menu the caller (or an earlier round) already opened has its
+            // item on screen: tapping the menu button again would close it
+            // while it animates, and the round after would find it half
+            // closed. Open it only when no item can be tapped yet.
+            var open = isAnyTappable(items)
+            if !open {
+                let menuButtons = app.buttons.matching(identifier: menu)
+                if tapElementTappable(menuButtons) || tapTappable(app, menuButtons) {
+                    let itemDeadline = Date().addingTimeInterval(8)
+                    while !items.firstMatch.exists && Date() < itemDeadline { usleep(100_000) }
+                    open = items.firstMatch.exists
                 }
+            }
+            if open {
+                scrollMenuToItem(app, items)
+                if (tapElementTappable(items) || tapTappable(app, items) || tapOnScreen(app, items)), landed() { return }
             }
             usleep(300_000)
         } while Date() < deadline
@@ -122,6 +130,46 @@ extension XCTestCase {
         while !element.isTappable, Date() < deadline { usleep(150_000) }
         XCTAssertTrue(element.isTappable, "\(what) never became tappable", file: file, line: line)
         element.tap()
+    }
+
+    /// Opens an agent's window from the Agents list and waits for its
+    /// terminal. The window button can be below the fold (at the largest
+    /// text only a few rows fit) or under the voice capsule, and a tap
+    /// that lands while the cover or list still settles is lost on a slow
+    /// Mac: so scroll to the button, tap it, and look for the terminal; if
+    /// it did not come up, look for the button again and retry.
+    func openAgentWindow(_ app: XCUIApplication, alias: String, terminalTimeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+        let windows = app.buttons.matching(identifier: "flock.agent.\(alias).window")
+        let capsule = app.scrollViews.matching(identifier: "voice.capsule").firstMatch
+        XCTAssertTrue(windows.firstMatch.waitForExistence(timeout: 15), "\(alias)'s window button", file: file, line: line)
+        let deadline = Date().addingTimeInterval(90)
+        var swipes = 0
+        repeat {
+            if terminal.exists { return }
+            let capsuleTop = capsule.exists ? (try? capsule.snapshot().frame.minY) : nil
+            var tapped = false
+            for i in (0 ..< windows.count).reversed() {
+                let button = windows.element(boundBy: i)
+                guard button.isTappable, let frame = try? button.snapshot().frame else { continue }
+                if let capsuleTop, frame.midY >= capsuleTop { continue }
+                button.tap()
+                tapped = true
+                break
+            }
+            if tapped {
+                if terminal.waitForExistence(timeout: terminalTimeout) { return }
+                continue
+            }
+            if swipes < 6 {
+                app.swipeUp(velocity: .slow)
+                swipes += 1
+            } else {
+                scrollToTop(app)
+                swipes = 0
+            }
+        } while Date() < deadline
+        XCTAssertTrue(terminal.exists, "\(alias)'s window never opened its terminal", file: file, line: line)
     }
 
     /// Types into a text field once it has the keyboard focus, tapping it

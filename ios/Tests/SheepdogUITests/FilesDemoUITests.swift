@@ -38,13 +38,7 @@ final class FilesDemoUITests: XCTestCase {
     private func openBrowser(_ item: String = "files", largest: Bool = false) -> XCUIApplication {
         let app = launch(largest: largest)
         showAgentsPane(app)
-        let window = app.buttons.matching(identifier: "flock.agent.claude-auth.window")
-        XCTAssertTrue(window.firstMatch.waitForExistence(timeout: 10))
-        for i in 0 ..< window.count where window.element(boundBy: i).isTappable {
-            window.element(boundBy: i).tap()
-            break
-        }
-        XCTAssertTrue(any(app, "agentScreen.terminal").waitForExistence(timeout: 30))
+        openAgentWindow(app, alias: "claude-auth")
         let landed = item == "files" ? any(app, "files.list") : app.buttons["changes.file.internal/auth/token.go"]
         tapMenuItem(app, menu: "agentScreen.menu", item: "agentScreen.menu.\(item)", until: landed)
         XCTAssertTrue(landed.waitForExistence(timeout: 10))
