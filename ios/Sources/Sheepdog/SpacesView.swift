@@ -286,6 +286,9 @@ struct SpaceDetailView: View {
     @State private var notice: String?
     @State private var running: String?
     @State private var muting: SpacesView.Space?
+    @State private var browser: BrowserTab?
+    /// What changed in the folder, for the Changes row's second line.
+    @State private var changed: AgentChanges?
 
     var body: some View {
         List {
@@ -299,6 +302,7 @@ struct SpaceDetailView: View {
                 }
                 .accessibilityLabel("Folder: \(placeLine)")
             }
+            if model.filesAvailable { filesSection }
             Section("Agents") {
                 if space.agents.isEmpty {
                     Text("No agents here. Start one with + ▸ New agent.")
@@ -421,6 +425,18 @@ struct SpaceDetailView: View {
             }
         }
         .task { await loadWorktrees() }
+        .task { await loadChanged() }
+        .sheet(item: $browser) { tab in
+            BrowserSheet(
+                target: BrowserTarget(
+                    title: space.name, subtitle: model.showsComputerLabels ? model.currentComputerName : space.branch,
+                    scope: .space(id: space.id), changesPane: changesPane, folder: space.path, filesAvailable: model.filesAvailable
+                ),
+                services: model.browserServices(scope: .space(id: space.id), changesPane: changesPane),
+                start: tab
+            )
+            .presentationSizing(.page)
+        }
         .muteDialog(space: $muting) { space, choice in await setMute(space, choice) }
         .sheet(item: $editor) { mode in
             CommandSheet(mode: mode, spaceName: space.name) { name, command, save in
@@ -475,6 +491,70 @@ struct SpaceDetailView: View {
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button("OK", role: .cancel) {}
         }
+    }
+
+    /// The agent whose changes stand for the space's folder: the changes
+    /// route is an agent's, and every agent here works in this folder.
+    private var changesPane: String? { space.agents.first?.paneID }
+
+    /// Files, and Changes when an agent can say what changed: the read-only
+    /// browser, shown only for a daemon that has it.
+    private var filesSection: some View {
+        Section {
+            Button { browser = .files } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder").foregroundStyle(Theme.muted).frame(width: 26)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Files").foregroundStyle(Theme.ink)
+                        Text("Browse and read").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.chevron)
+                }
+                .frame(minHeight: 44)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Files, browse and read")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("space.files")
+            if changesPane != nil {
+                Button { browser = .changes } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "plusminus").foregroundStyle(Theme.muted).frame(width: 26)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Changes").foregroundStyle(Theme.ink)
+                            Text(changesLine).font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 8)
+                        if let changed, changed.repo, !changed.files.isEmpty {
+                            HStack(spacing: 6) {
+                                Text("+\(changed.added)").foregroundStyle(DiffColors.added)
+                                Text("−\(changed.deleted)").foregroundStyle(DiffColors.removed)
+                            }
+                            .font(.footnote.monospacedDigit().weight(.medium))
+                        }
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.chevron)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Changes, \(changesLine)")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("space.changes")
+            }
+        } header: {
+            Text("Files")
+        }
+    }
+
+    private var changesLine: String {
+        guard let changed, changed.repo else { return "What changed since the last commit" }
+        return changed.files.isEmpty ? "Nothing changed" : changed.summary
+    }
+
+    private func loadChanged() async {
+        guard model.filesAvailable, let pane = changesPane else { return }
+        changed = try? await model.agentChanges(paneID: pane)
     }
 
     /// Mute this space's notifications: for an hour, until tomorrow morning

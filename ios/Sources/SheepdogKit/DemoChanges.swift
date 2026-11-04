@@ -4,17 +4,32 @@ import Foundation
 /// changes for every agent, and uploads that are answered with a made-up
 /// path and never stored.
 extension DemoDaemon {
+    /// The report the demo's files hold, as a new file in the changes.
+    private static let reportLines = DemoFiles.loginLoop.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
     static let demoChanges = AgentChanges(
         repo: true, root: "/Users/demo/code/shop", branch: "fix-login",
         files: [
             ChangedFile(path: "internal/auth/token.go", status: "modified", added: 9, deleted: 3),
             ChangedFile(path: "internal/web/api.go", status: "modified", added: 4, deleted: 1),
             ChangedFile(path: "internal/auth/token_test.go", status: "untracked", added: 18),
+            ChangedFile(path: "docs/reports/login-loop.md", status: "untracked", added: reportLines.count),
+            ChangedFile(path: "docs/images/login-flow.png", status: "untracked", binary: true),
         ],
-        added: 31, deleted: 4
+        added: 31 + reportLines.count, deleted: 4
     )
 
     static let demoDiffs: [String: String] = [
+        "docs/images/login-flow.png": "",
+        "docs/reports/login-loop.md": """
+        diff --git a/docs/reports/login-loop.md b/docs/reports/login-loop.md
+        new file mode 100644
+        --- /dev/null
+        +++ b/docs/reports/login-loop.md
+        @@ -0,0 +1,\(reportLines.count) @@
+        \(reportLines.map { "+" + $0 }.joined(separator: "\n"))
+
+        """,
         "internal/auth/token.go": """
         diff --git a/internal/auth/token.go b/internal/auth/token.go
         --- a/internal/auth/token.go
@@ -79,6 +94,6 @@ extension DemoDaemon {
         guard let file = Self.demoChanges.files.first(where: { $0.path == path }), let diff = Self.demoDiffs[path] else {
             return json(["error": "no changes to that file"], status: 404)
         }
-        return encoded(FileDiff(path: file.path, status: file.status, diff: diff))
+        return encoded(FileDiff(path: file.path, status: file.status, binary: file.binary, diff: diff))
     }
 }

@@ -40,6 +40,9 @@ public enum MarkdownRenderer {
         case list([ListItem])
         case code(String)
         case table(Table)
+        /// A paragraph that is only `![alt](source)`. A view with no way to
+        /// draw it shows the alt text, as the one-`Text` rendering does.
+        case image(alt: String, source: String)
     }
 
     // MARK: - Blocks
@@ -53,7 +56,14 @@ public enum MarkdownRenderer {
         var code: [String]?
 
         func flushParagraph() {
-            if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
+            if !paragraph.isEmpty {
+                let text = paragraph.joined(separator: "\n")
+                if let (alt, source) = loneImage(text) {
+                    blocks.append(.image(alt: alt, source: source))
+                } else {
+                    blocks.append(.paragraph(text))
+                }
+            }
             paragraph = []
         }
         func flushList() {
@@ -127,6 +137,19 @@ public enum MarkdownRenderer {
         if let open = code { blocks.append(.code(open.joined(separator: "\n"))) }
         flushParagraph(); flushList()
         return blocks
+    }
+
+    /// `![alt](source)` and nothing else → (alt, source). A title after the
+    /// source (`"…"`) is left out.
+    static func loneImage(_ text: String) -> (alt: String, source: String)? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("!["), trimmed.hasSuffix(")"), !trimmed.contains("\n"),
+              let close = trimmed.range(of: "](") else { return nil }
+        let alt = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2) ..< close.lowerBound])
+        let inside = String(trimmed[close.upperBound ..< trimmed.index(before: trimmed.endIndex)])
+        guard !alt.contains("]"), !inside.contains(")"), !inside.contains("(") else { return nil }
+        let source = inside.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+        return source.isEmpty ? nil : (alt, source)
     }
 
     /// `| a | b |` → ["a", "b"]; `\|` is a pipe inside a cell.
@@ -250,6 +273,8 @@ public enum MarkdownRenderer {
                 var mono = AttributedString(c)
                 mono.inlinePresentationIntent = .code
                 out += mono
+            case let .image(alt, source):
+                out += inline("![\(alt)](\(source))")
             case let .table(table):
                 // One Text has no grid: the header in bold, then a line
                 // per row. The card sheet draws the real table.

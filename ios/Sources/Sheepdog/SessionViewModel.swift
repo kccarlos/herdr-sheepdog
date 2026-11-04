@@ -1296,6 +1296,36 @@ final class SessionViewModel: ObservableObject {
         return try await current { try await $0.agentDiff(paneID: paneID, path: path) }
     }
 
+    // MARK: - Files and Changes (the read-only browser)
+
+    /// Whether the daemon has the file browser (`files`): the entry points
+    /// show only then. The demo has it.
+    var filesAvailable: Bool {
+        if demo != nil { return true }
+        if case let .ready(_, _, features) = linkModel.handshake { return features.contains(FileBrowser.feature) }
+        return fleet.current?.features?.contains(FileBrowser.feature) ?? false
+    }
+
+    /// The browser's reads, on the current computer. `changesPane` names the
+    /// agent whose changes the Changes tab shows; nil leaves the tab out.
+    func browserServices(scope: FileScope, changesPane: String?) -> BrowserServices {
+        func daemon<T>(_ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
+            guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+            return try await current(body)
+        }
+        return BrowserServices(
+            list: { path, query in try await daemon { try await $0.files(scope, path: path, query: query) } },
+            read: { path in try await daemon { try await $0.file(scope, path: path) } },
+            image: { path in try await daemon { try await $0.fileImage(scope, path: path) } },
+            changes: changesPane.map { pane in { try await self.agentChanges(paneID: pane) } },
+            diff: { path in
+                guard let pane = changesPane else { return nil }
+                return try await self.agentDiff(paneID: pane, path: path)
+            },
+            describe: { self.requestFailure($0) }
+        )
+    }
+
     /// `POST /api/agents/{pane}/attachments`.
     func uploadAttachment(paneID: String, data: Data, fileName: String, mimeType: String) async throws -> AttachmentReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }

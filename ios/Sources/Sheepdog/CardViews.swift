@@ -292,9 +292,13 @@ struct CardSheet: View {
 /// one-`Text` version for rows and bubbles.)
 struct MarkdownBlocksView: View {
     private let blocks: [MarkdownRenderer.Block]
+    /// Draws a picture block (alt text, source). Without one, a picture is
+    /// its alt text, as in a card or a bubble.
+    private let image: ((String, String) -> AnyView)?
 
-    init(_ source: String) {
+    init(_ source: String, image: ((String, String) -> AnyView)? = nil) {
         blocks = MarkdownRenderer.blocks(source)
+        self.image = image
     }
 
     var body: some View {
@@ -336,6 +340,13 @@ struct MarkdownBlocksView: View {
             CodeBlockView(text: text)
         case let .table(table):
             MarkdownTableView(table: table)
+        case let .image(alt, source):
+            if let image {
+                image(alt, source)
+            } else {
+                Text(MarkdownRenderer.inline("![\(alt)](\(source))"))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

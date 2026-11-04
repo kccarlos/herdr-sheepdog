@@ -104,7 +104,7 @@ final class DemoChangesTests: XCTestCase {
         let fetched = try await client.agentChanges(paneID: pane)
         let changes = try XCTUnwrap(fetched)
         XCTAssertTrue(changes.repo)
-        XCTAssertEqual(changes.files.count, 3)
+        XCTAssertEqual(changes.files.count, 5)
         let fetchedDiff = try await client.agentDiff(paneID: pane, path: "internal/auth/token.go")
         let diff = try XCTUnwrap(fetchedDiff)
         XCTAssertFalse(DiffParser.parse(diff.diff).isEmpty)

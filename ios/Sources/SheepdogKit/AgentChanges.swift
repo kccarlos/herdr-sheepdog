@@ -17,6 +17,23 @@ public struct ChangedFile: Codable, Equatable, Hashable, Identifiable, Sendable 
     public var id: String { path }
     public var isBinary: Bool { binary == true }
 
+    /// The status in the words the list uses: "new" for a file git does not
+    /// know yet, "conflict" for a merge in the way.
+    public var statusWord: String {
+        switch status {
+        case "untracked", "added": "new"
+        case "conflicted": "conflict"
+        default: status
+        }
+    }
+
+    /// The line under the name: "auth · modified", "docs/reports · new",
+    /// "from web/signin.tsx" for a rename, just the status at the top level.
+    public var detailLine: String {
+        if let oldPath { return "from \(oldPath)" }
+        return [folder, statusWord].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     /// The last path component.
     public var fileName: String { path.split(separator: "/").last.map(String.init) ?? path }
     /// The folder, "" at the top level.

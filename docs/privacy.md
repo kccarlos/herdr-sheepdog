@@ -208,6 +208,17 @@ them: its event log records only that a window or shell opened and closed
 (which pane, which folder, how long, how many bytes), never what was typed or
 shown.
 
+**Files.** A paired phone can read the files in an agent's or a space's
+folder through your daemon ([iphone-app.md](iphone-app.md)). Those reads go
+only between your phone and your computer, never to an AI service or the push
+relay. Each read is logged in the daemon's event log (`files.read`) by path
+and size (or the reason it was refused) and never logs the file's content;
+listing or searching a folder logs nothing. Nothing you open in Files is
+stored on the phone. Hiding sensitive names (`.env`, `.ssh`, key files and
+the rest) is a safety rail against common accidents, not a guarantee: a
+secret in a file with an ordinary name can still be read, and **Changes**
+follows the git repository root, which can sit above the agent's folder.
+
 **What the app stores on the phone:** the daemon's address, your settings and a
 cache of the conversation. Each paired computer's entry (its id, addresses
 and certificate fingerprint) is in the iOS keychain, not synced to iCloud,

@@ -1,0 +1,700 @@
+@testable import SheepdogKit
+import XCTest
+
+private let utc: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    return calendar
+}()
+
+/// 2026-11-04 12:00 UTC, a Wednesday.
+private let now = Date(timeIntervalSince1970: 1_793_793_600)
+
+private func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+
+final class FileKindTests: XCTestCase {
+    func testKindsByName() {
+        XCTAssertEqual(FileKind.of(name: "README.md"), .markdown)
+        XCTAssertEqual(FileKind.of(name: "notes.MARKDOWN"), .markdown)
+        XCTAssertEqual(FileKind.of(name: "login-flow.PNG"), .image)
+        XCTAssertEqual(FileKind.of(name: "server.go"), .code)
+        XCTAssertEqual(FileKind.of(name: "Makefile"), .code)
+        XCTAssertEqual(FileKind.of(name: "build.log"), .text)
+        XCTAssertEqual(FileKind.of(name: "LICENSE"), .text)
+        XCTAssertEqual(FileKind.of(name: "data.sqlite"), .other)
+        XCTAssertEqual(FileKind.of(name: ".gitignore"), .other, "a dot file has no extension")
+        XCTAssertEqual(FileKind.of(name: "archive"), .other)
+    }
+
+    func testAFolderAndALinkAreNotJudgedByName() {
+        XCTAssertEqual(FileKind(FileEntry(name: "notes.md", kind: .dir)), .folder)
+        XCTAssertEqual(FileKind(FileEntry(name: "latest.md", kind: .link)), .link)
+        XCTAssertEqual(FileKind(FileEntry(name: "a.md")), .markdown)
+    }
+
+    func testEveryKindHasASymbolAndAWord() {
+        for kind in [FileKind.folder, .link, .markdown, .image, .code, .text, .other] {
+            XCTAssertFalse(kind.symbol.isEmpty)
+            XCTAssertFalse(kind.word.isEmpty)
+        }
+    }
+}
+
+final class FileTextTests: XCTestCase {
+    func testSizes() {
+        XCTAssertEqual(FileSizeText.text(0), "0 B")
+        XCTAssertEqual(FileSizeText.text(812), "812 B")
+        XCTAssertEqual(FileSizeText.text(1000), "1 KB")
+        XCTAssertEqual(FileSizeText.text(2400), "2.4 KB")
+        XCTAssertEqual(FileSizeText.text(12_300), "12 KB")
+        XCTAssertEqual(FileSizeText.text(184_000), "184 KB")
+        XCTAssertEqual(FileSizeText.text(999_999), "1 MB")
+        XCTAssertEqual(FileSizeText.text(4_200_000), "4.2 MB")
+        XCTAssertEqual(FileSizeText.text(38_000_000), "38 MB")
+        XCTAssertEqual(FileSizeText.text(16 << 20), "17 MB")
+    }
+
+    func testRelativeTimes() {
+        func text(_ seconds: TimeInterval) -> String { FileTimeText.relative(ago(seconds), now: now, calendar: utc) }
+        XCTAssertEqual(text(20), "just now")
+        XCTAssertEqual(text(-30), "just now")
+        XCTAssertEqual(text(3 * 60), "3 min ago")
+        XCTAssertEqual(text(59 * 60), "59 min ago")
+        XCTAssertEqual(text(3 * 3600), "3 hr ago")
+        // 12:00 now: 13 hours ago is yesterday at 23:00.
+        XCTAssertEqual(text(13 * 3600), "yesterday")
+        XCTAssertEqual(text(3 * 86400), "3 days ago")
+        XCTAssertEqual(text(8 * 86400), "last week")
+        XCTAssertEqual(text(30 * 86400), "Oct 5")
+        XCTAssertEqual(text(400 * 86400), "Sep 30, 2025")
+    }
+
+    func testClock() {
+        let date = Date(timeIntervalSince1970: 1_793_793_600 - 86400 + 4 * 3600 + 12 * 60 - 12 * 3600)
+        let text = FileTimeText.clock(date, calendar: utc).replacingOccurrences(of: "\u{202F}", with: " ")
+        XCTAssertEqual(text, "4:12 AM")
+    }
+
+    func testRowDetail() {
+        let file = FileEntry(name: "install.md", kind: .file, size: 12_300, modified: ago(3 * 60))
+        XCTAssertEqual(FileRowText.detail(file, now: now, calendar: utc), "12 KB · 3 min ago")
+        let folder = FileEntry(name: "reports", kind: .dir, modified: ago(2 * 86400))
+        XCTAssertEqual(FileRowText.detail(folder, now: now, calendar: utc), "2 days ago")
+        let link = FileEntry(name: "latest", kind: .link, modified: ago(60 * 60 * 5))
+        XCTAssertEqual(FileRowText.detail(link, now: now, calendar: utc), "Link · 5 hr ago")
+        let blocked = FileEntry(name: "notes.md", kind: .link, blocked: true)
+        XCTAssertEqual(FileRowText.detail(blocked, now: now, calendar: utc), "Link out of this folder")
+        let bare = FileEntry(name: "a")
+        XCTAssertEqual(FileRowText.detail(bare, now: now, calendar: utc), "0 B")
+    }
+
+    func testYesterdayReadsTheClockInTheRecentOrder() {
+        let date = now.addingTimeInterval(-18 * 3600) // yesterday 18:00
+        let file = FileEntry(name: "api.md", kind: .file, size: 28_000, modified: date)
+        let spoken = FileRowText.detail(file, sort: .recent, now: now, calendar: utc).replacingOccurrences(of: "\u{202F}", with: " ")
+        XCTAssertEqual(spoken, "28 KB · 6:00 PM")
+        XCTAssertEqual(FileRowText.detail(file, sort: .name, now: now, calendar: utc), "28 KB · yesterday")
+    }
+
+    func testSpokenRow() {
+        let entry = FileEntry(name: "install.md", kind: .file, size: 12_300, modified: ago(180))
+        XCTAssertEqual(FileRowText.spoken(entry, detail: "12 KB · 3 min ago", changed: true), "Markdown document install.md, changed, 12 KB · 3 min ago")
+        let blocked = FileEntry(name: "notes.md", kind: .link, blocked: true)
+        XCTAssertEqual(FileRowText.spoken(blocked, detail: "", changed: false), "Link notes.md, outside this folder")
+    }
+
+    func testSearchAndFooterWords() {
+        let one = FileListing(rootName: "shop", entries: [FileEntry(name: "a")])
+        XCTAssertEqual(FileRowText.searchSummary(one, query: "a", scope: "shop"), "1 file named “a” in shop")
+        let mixed = FileListing(rootName: "shop", entries: [FileEntry(name: "a"), FileEntry(name: "ab", kind: .dir)])
+        XCTAssertEqual(FileRowText.searchSummary(mixed, query: "a", scope: "docs"), "2 items named “a” in docs")
+        XCTAssertNil(FileRowText.hiddenNote(0))
+        XCTAssertEqual(FileRowText.hiddenNote(1), "1 file hidden for safety, like .env and keys.")
+        XCTAssertEqual(FileRowText.hiddenNote(2), "2 files hidden for safety, like .env and keys.")
+        XCTAssertEqual(FileRowText.truncatedNote(searching: false, count: 2000), "Showing the first 2,000 items. Search by name to find the rest.")
+        XCTAssertEqual(FileRowText.truncatedNote(searching: true, count: 200), "Showing the first 200 matches. Type more of the name to narrow it down.")
+        XCTAssertEqual(FileRowText.location(FileEntry(name: "a.md", path: "docs/reports/a.md"), rootName: "shop"), "docs/reports")
+        XCTAssertEqual(FileRowText.location(FileEntry(name: "a.md"), rootName: "shop"), "shop")
+    }
+}
+
+final class FileSortTests: XCTestCase {
+    private let entries = [
+        FileEntry(name: "docs", kind: .dir, modified: ago(5 * 86400)),
+        FileEntry(name: "a.md", modified: ago(3 * 60)),
+        FileEntry(name: "b.md", modified: ago(26 * 3600)),
+        FileEntry(name: "c.md", modified: ago(30 * 86400)),
+        FileEntry(name: "d.md", modified: nil),
+        FileEntry(name: "e.md", modified: ago(3 * 60)),
+    ]
+
+    func testNameKeepsTheDaemonsOrder() {
+        XCTAssertEqual(FileSort.name.ordered(entries).map(\.name), entries.map(\.name))
+    }
+
+    func testRecentIsNewestFirstWithTiesInDaemonOrderAndUndatedLast() {
+        XCTAssertEqual(FileSort.recent.ordered(entries).map(\.name), ["a.md", "e.md", "b.md", "docs", "c.md", "d.md"])
+    }
+
+    func testGroupsUnderDayWords() {
+        let groups = FileGroup.groups(FileSort.recent.ordered(entries), now: now, calendar: utc)
+        XCTAssertEqual(groups.map(\.bucket), [.today, .yesterday, .lastWeek, .older])
+        XCTAssertEqual(groups.map(\.bucket.title), ["Today", "Yesterday", "Last 7 days", "Older"])
+        XCTAssertEqual(groups[0].entries.map(\.name), ["a.md", "e.md"])
+        XCTAssertEqual(groups[3].entries.map(\.name), ["c.md", "d.md"])
+    }
+
+    func testBuckets() {
+        func bucket(_ seconds: TimeInterval) -> FileGroup.Bucket { FileGroup.bucket(for: ago(seconds), now: now, calendar: utc) }
+        XCTAssertEqual(bucket(11 * 3600), .today)
+        XCTAssertEqual(bucket(13 * 3600), .yesterday)
+        XCTAssertEqual(bucket(2 * 86400), .lastWeek)
+        XCTAssertEqual(bucket(6 * 86400), .lastWeek)
+        XCTAssertEqual(bucket(7 * 86400), .older)
+        XCTAssertEqual(FileGroup.bucket(for: nil, now: now, calendar: utc), .older)
+    }
+}
+
+final class FilePathTests: XCTestCase {
+    func testParentAndName() {
+        XCTAssertEqual(FilePath.parent(of: "docs/reports/a.md"), "docs/reports")
+        XCTAssertEqual(FilePath.parent(of: "a.md"), "")
+        XCTAssertEqual(FilePath.name(of: "docs/reports/a.md"), "a.md")
+    }
+
+    func testLinksInADocumentResolveFromItsFolder() {
+        let file = "docs/reports/login-loop.md"
+        XCTAssertEqual(FilePath.resolve("../images/login-flow.png", from: file), "docs/images/login-flow.png")
+        XCTAssertEqual(FilePath.resolve("./other.md", from: file), "docs/reports/other.md")
+        XCTAssertEqual(FilePath.resolve("../../internal/auth/token.go", from: file), "internal/auth/token.go")
+        XCTAssertEqual(FilePath.resolve("sub/a%20b.md#top", from: file), "docs/reports/sub/a b.md")
+        XCTAssertEqual(FilePath.resolve("a.md?plain=1", from: "README.md"), "a.md")
+    }
+
+    func testLinksThatAreNotFilesOfTheFolderResolveToNothing() {
+        let file = "docs/a.md"
+        XCTAssertNil(FilePath.resolve("../../outside.md", from: file), "climbs above the folder")
+        XCTAssertNil(FilePath.resolve("/etc/passwd", from: file))
+        XCTAssertNil(FilePath.resolve("https://example.com/a.md", from: file))
+        XCTAssertNil(FilePath.resolve("mailto:me@example.com", from: file))
+        XCTAssertNil(FilePath.resolve("#section", from: file))
+        XCTAssertNil(FilePath.resolve("", from: file))
+        XCTAssertNil(FilePath.resolve("..", from: "a.md"))
+    }
+
+    func testCrumbs() {
+        XCTAssertEqual(FileCrumb.crumbs(rootName: "shop", path: ""), [FileCrumb(name: "shop", path: "")])
+        XCTAssertEqual(FileCrumb.crumbs(rootName: "shop", path: "docs/reports"), [
+            FileCrumb(name: "shop", path: ""), FileCrumb(name: "docs", path: "docs"), FileCrumb(name: "reports", path: "docs/reports"),
+        ])
+    }
+}
+
+final class CodeLinesTests: XCTestCase {
+    func testLinesAreNumberedAndTabsBecomeSpaces() {
+        XCTAssertEqual(CodeLines.split("a\n\tb\n\nc\n"), [
+            CodeLine(number: 1, text: "a"), CodeLine(number: 2, text: "    b"), CodeLine(number: 3, text: ""), CodeLine(number: 4, text: "c"),
+        ])
+    }
+
+    func testEmptyAndLineEndings() {
+        XCTAssertTrue(CodeLines.split("").isEmpty)
+        XCTAssertEqual(CodeLines.split("\n").map(\.text), [""])
+        XCTAssertEqual(CodeLines.split("a\r\nb\rc").map(\.text), ["a", "b", "c"])
+        XCTAssertEqual(CodeLines.split("no newline").count, 1)
+    }
+}
+
+final class ChangeIndexTests: XCTestCase {
+    func testTheLineUnderAChangedFile() {
+        XCTAssertEqual(ChangedFile(path: "internal/auth/token.go", status: "modified").detailLine, "internal/auth · modified")
+        XCTAssertEqual(ChangedFile(path: "login.md", status: "untracked").detailLine, "new")
+        XCTAssertEqual(ChangedFile(path: "web/login.tsx", oldPath: "web/signin.tsx", status: "renamed").detailLine, "from web/signin.tsx")
+        XCTAssertEqual(ChangedFile(path: "a/b.go", status: "conflicted").statusWord, "conflict")
+        XCTAssertEqual(ChangedFile(path: "a/b.go", status: "deleted").statusWord, "deleted")
+    }
+
+    private func changes(root: String?) -> AgentChanges {
+        AgentChanges(repo: true, root: root, branch: "main", files: [
+            ChangedFile(path: "internal/auth/token.go", status: "modified", added: 9, deleted: 3),
+            ChangedFile(path: "docs/a.md", status: "untracked", added: 4),
+        ])
+    }
+
+    func testTheSamePathsWhenTheFolderIsTheRoot() {
+        let index = ChangeIndex(changes(root: "/Users/me/shop"), folder: "/Users/me/shop")
+        XCTAssertEqual(index.change(at: "internal/auth/token.go")?.added, 9)
+        XCTAssertTrue(index.isChanged("docs/a.md"))
+        XCTAssertFalse(index.isChanged("README.md"))
+    }
+
+    func testBelowTheRootTheFoldersPathIsCutFromTheFront() {
+        let index = ChangeIndex(changes(root: "/Users/me/shop/"), folder: "/Users/me/shop/internal")
+        XCTAssertEqual(index.change(at: "auth/token.go")?.path, "internal/auth/token.go", "the daemon's own path comes back, to open the diff")
+        XCTAssertFalse(index.isChanged("docs/a.md"), "that file is not under this folder")
+        XCTAssertFalse(index.isChanged("internal/auth/token.go"))
+    }
+
+    func testWhenTheyCannotBeRelatedTheyAreAssumedToAgree() {
+        XCTAssertTrue(ChangeIndex(changes(root: "/Users/demo/code/shop"), folder: "~/code/shop").isChanged("docs/a.md"))
+        XCTAssertTrue(ChangeIndex(changes(root: nil), folder: nil).isChanged("docs/a.md"))
+    }
+
+    func testNothingWithoutARepository() {
+        XCTAssertFalse(ChangeIndex(AgentChanges(repo: false), folder: nil).isChanged("a"))
+        XCTAssertFalse(ChangeIndex(nil, folder: nil).isChanged("a"))
+    }
+}
+
+final class FileProblemTests: XCTestCase {
+    func testReasonsMapAndAnUnknownOneFails() {
+        XCTAssertEqual(FileProblem(reason: "sensitive"), .sensitive)
+        XCTAssertEqual(FileProblem(reason: "not_file"), .notFile)
+        XCTAssertEqual(FileProblem(reason: "too_large"), .tooLarge)
+        XCTAssertEqual(FileProblem(reason: "something_new"), .failed)
+        XCTAssertEqual(FileProblem(reason: nil), .failed)
+    }
+
+    func testWordsNameTheFolderAndTheSize() {
+        let outside = FileProblem.outside.words(subject: .file, root: "shop")
+        XCTAssertEqual(outside.title, "This file is outside shop")
+        XCTAssertEqual(FileProblem.notFound.words(subject: .folder).title, "That folder is gone")
+        XCTAssertEqual(FileProblem.notFound.words(subject: .file).title, "That file is gone")
+        XCTAssertEqual(FileProblem.sensitive.words().title, "Hidden for safety")
+        let big = FileProblem.tooLarge.words(subject: .file, name: "photo.png", size: 38_000_000)
+        XCTAssertEqual(big.message, "photo.png is 38 MB. The phone shows images up to 16 MB, so open it on your computer.")
+        XCTAssertTrue(FileProblem.denied.words().message.contains("Files and Folders"))
+    }
+
+    func testEveryProblemHasWords() {
+        let all: [FileProblem] = [.noAgent, .noSpace, .noCwd, .notFound, .outside, .sensitive, .notFile, .denied, .tooLarge, .notImage, .badPath, .failed, .olderDaemon]
+        for problem in all {
+            let words = problem.words()
+            XCTAssertFalse(words.title.isEmpty, "\(problem)")
+            XCTAssertFalse(words.message.isEmpty, "\(problem)")
+            XCTAssertFalse(words.symbol.isEmpty, "\(problem)")
+        }
+    }
+
+    func testOnlyWhatMightChangeCanBeRetried() {
+        XCTAssertTrue(FileProblem.denied.canRetry)
+        XCTAssertTrue(FileProblem.failed.canRetry)
+        XCTAssertFalse(FileProblem.sensitive.canRetry)
+        XCTAssertFalse(FileProblem.outside.canRetry)
+    }
+}
+
+final class FilesWireTests: XCTestCase {
+    func testAnUnknownKindIsAFileAndAnUnknownContentKindIsBinary() throws {
+        let entry = try DaemonClient.decoder.decode(FileEntry.self, from: Data(#"{"name":"a","path":"a","kind":"socket","size":1,"modified":"2026-10-21T09:00:00Z"}"#.utf8))
+        XCTAssertEqual(entry.kind, .file)
+        let content = try DaemonClient.decoder.decode(FileContent.self, from: Data(#"{"path":"a","size":1,"kind":"video"}"#.utf8))
+        XCTAssertEqual(content.kind, .binary)
+        XCTAssertFalse(content.truncated)
+    }
+
+    func testAListingWithoutOptionalFieldsDecodes() throws {
+        let listing = try DaemonClient.decoder.decode(FileListing.self, from: Data(#"{"root_name":"shop","entries":[]}"#.utf8))
+        XCTAssertEqual(listing.path, "")
+        XCTAssertEqual(listing.hidden, 0)
+        XCTAssertFalse(listing.truncated)
+    }
+
+    func testPathsAreEscapedPerSegment() {
+        XCTAssertEqual(DaemonClient.escapedFilePath("docs/my report #1.md"), "docs/my%20report%20%231.md")
+        XCTAssertEqual(DaemonClient.escapedFilePath("a%b/c?d"), "a%25b/c%3Fd")
+    }
+
+    func testQueryValuesAreEscapedSoPlusAndAmpersandSurvive() throws {
+        let client = DaemonClient(endpoint: DaemonEndpoint(host: "127.0.0.1", port: 7777))
+        let request = try client.filesRequest(encodedPath: FileScope.agent(paneID: "w1:p2").basePath, query: [("path", "c++ & more"), ("q", "a+b")])
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:7777/api/agents/w1:p2/files?path=c%2B%2B%20%26%20more&q=a%2Bb")
+    }
+
+    func testRoutes() {
+        XCTAssertEqual(FileScope.agent(paneID: "w1:p2").basePath, "/api/agents/w1:p2/files")
+        XCTAssertEqual(FileScope.agent(paneID: "%12").basePath, "/api/agents/%2512/files")
+        XCTAssertEqual(FileScope.space(id: "w1").basePath, "/api/spaces/w1/files")
+    }
+}
+
+/// The client against the offline demo, which answers as the daemon does:
+/// the same routes, shapes and refusals.
+final class FilesClientTests: XCTestCase {
+    private var daemon: DemoDaemon!
+    private var client: DaemonClient!
+    private let agent = FileScope.agent(paneID: DemoWorld.authPane)
+
+    override func setUp() {
+        super.setUp()
+        daemon = DemoDaemon()
+        DemoDaemon.current = daemon
+        client = DaemonClient(endpoint: DemoDaemon.endpoint, session: DemoDaemon.session())
+    }
+
+    override func tearDown() {
+        daemon.stop()
+        super.tearDown()
+    }
+
+    private func unwrapped<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) throws -> T {
+        try XCTUnwrap(value, file: file, line: line)
+    }
+
+    private func refusal<T>(_ body: () async throws -> T) async -> FilesRefusal? {
+        do {
+            _ = try await body()
+            return nil
+        } catch {
+            return error as? FilesRefusal
+        }
+    }
+
+    func testTheRootListsFoldersFirstAndCountsWhatIsHidden() async throws {
+        let listing = try unwrapped(try await client.files(agent))
+        XCTAssertEqual(listing.rootName, "shop")
+        XCTAssertEqual(listing.hidden, 2)
+        let kinds = listing.entries.map(\.kind)
+        XCTAssertEqual(kinds.prefix { $0 == .dir }.count, kinds.filter { $0 == .dir }.count, "folders come first")
+        XCTAssertFalse(listing.entries.contains { $0.name == ".env" }, "a sensitive name is not listed")
+        XCTAssertTrue(listing.entries.contains { $0.name == "notes.md" && $0.isBlocked })
+    }
+
+    func testAFolderOfASpace() async throws {
+        let listing = try unwrapped(try await client.files(.space(id: "w1"), path: "docs"))
+        XCTAssertEqual(listing.path, "docs")
+        XCTAssertEqual(listing.entries.map(\.name).prefix(2), ["images", "reports"])
+        XCTAssertEqual(listing.entries.first { $0.name == "api.md" }?.path, "docs/api.md")
+    }
+
+    func testSearchFindsNamesUnderTheFolderShallowestFirst() async throws {
+        let listing = try unwrapped(try await client.files(agent, query: "LOGIN"))
+        XCTAssertEqual(listing.entries.map(\.path), ["web/login.tsx", "docs/images/login-flow.png", "docs/reports/login-loop.md"])
+        let none = try unwrapped(try await client.files(agent, query: "ledger"))
+        XCTAssertTrue(none.entries.isEmpty)
+        let inFolder = try unwrapped(try await client.files(agent, path: "docs", query: "login"))
+        XCTAssertEqual(inFolder.entries.count, 2)
+    }
+
+    func testSearchNeverMatchesAHiddenNameButCountsIt() async throws {
+        let listing = try unwrapped(try await client.files(agent, query: ".env"))
+        XCTAssertTrue(listing.entries.isEmpty)
+        XCTAssertEqual(listing.hidden, 1)
+    }
+
+    func testReadingTextAndTheKindsOfTheOthers() async throws {
+        let text = try unwrapped(try await client.file(agent, path: "docs/reports/login-loop.md"))
+        XCTAssertEqual(text.kind, .text)
+        XCTAssertTrue(text.text?.hasPrefix("# Login redirect loop") == true)
+        XCTAssertEqual(text.size, text.text?.utf8.count)
+        let log = try unwrapped(try await client.file(agent, path: "build.log"))
+        XCTAssertTrue(log.truncated)
+        let binary = try unwrapped(try await client.file(agent, path: "data.sqlite"))
+        XCTAssertEqual(binary.kind, .binary)
+        XCTAssertNil(binary.text)
+        let image = try unwrapped(try await client.file(agent, path: "docs/images/login-flow.png"))
+        XCTAssertEqual(image.kind, .image)
+    }
+
+    func testAnImageComesAsBytes() async throws {
+        let bytes = try await client.fileImage(agent, path: "docs/images/login-flow.png")
+        XCTAssertEqual(Array(bytes.prefix(4)), [0x89, 0x50, 0x4E, 0x47], "a PNG")
+        let content = try unwrapped(try await client.file(agent, path: "docs/images/login-flow.png"))
+        XCTAssertEqual(content.size, bytes.count)
+    }
+
+    func testALinkInsideIsFollowed() async throws {
+        let content = try unwrapped(try await client.file(agent, path: "latest"))
+        XCTAssertEqual(content.path, "latest")
+        XCTAssertEqual(content.kind, .text)
+    }
+
+    func testRefusalsCarryTheDaemonsReason() async throws {
+        let outside = await refusal { try await client.file(agent, path: "notes.md") }
+        XCTAssertEqual(outside?.problem, .outside)
+        XCTAssertEqual(outside?.status, 403)
+        let hidden = await refusal { try await client.file(agent, path: ".env") }
+        XCTAssertEqual(hidden?.problem, .sensitive)
+        let folder = await refusal { try await client.file(agent, path: "docs") }
+        XCTAssertEqual(folder?.problem, .notFile)
+        let gone = await refusal { try await client.file(agent, path: "nothing.md") }
+        XCTAssertEqual(gone?.problem, .notFound)
+        XCTAssertEqual(gone?.status, 404)
+        let notAFolder = await refusal { try await client.files(agent, path: "README.md") }
+        XCTAssertEqual(notAFolder?.problem, .notFound)
+        let tooBig = await refusal { try await client.fileImage(agent, path: "big-photo.png") }
+        XCTAssertEqual(tooBig?.problem, .tooLarge)
+        XCTAssertEqual(tooBig?.status, 413)
+        let notImage = await refusal { try await client.fileImage(agent, path: "README.md") }
+        XCTAssertEqual(notImage?.problem, .notImage)
+        let noAgent = await refusal { try await client.files(.agent(paneID: "nope")) }
+        XCTAssertEqual(noAgent?.problem, .noAgent)
+        let noSpace = await refusal { try await client.files(.space(id: "nope")) }
+        XCTAssertEqual(noSpace?.problem, .noSpace)
+    }
+
+    func testAnotherFolderIsASmallOne() async throws {
+        let listing = try unwrapped(try await client.files(.space(id: "w2")))
+        XCTAssertEqual(listing.rootName, "shop-fix-login")
+        XCTAssertEqual(listing.entries.map(\.name), ["ideas.txt", "README.md"])
+    }
+}
+
+@MainActor
+final class FileBrowserModelTests: XCTestCase {
+    private func listing(_ path: String = "", _ names: [String] = ["a.md"], root: String = "shop") -> FileListing {
+        FileListing(rootName: root, path: path, entries: names.map { FileEntry(name: $0, path: path.isEmpty ? $0 : path + "/" + $0, modified: now) })
+    }
+
+    private func model(debounce: Duration = .zero, list: @escaping FileBrowserModel.List) -> FileBrowserModel {
+        FileBrowserModel(list: list, describe: { RequestFailure($0, linkUsable: true) }, debounce: debounce, clock: { now })
+    }
+
+    func testStartLoadsTheRoot() async {
+        let model = model { path, query in
+            XCTAssertEqual(path, "")
+            XCTAssertNil(query)
+            return self.listing()
+        }
+        XCTAssertEqual(model.folder, .loading)
+        await model.start()
+        XCTAssertEqual(model.folder.value?.entries.map(\.name), ["a.md"])
+        XCTAssertEqual(model.rootName, "shop")
+        XCTAssertEqual(model.crumbs.map(\.name), ["shop"])
+    }
+
+    func testOpeningAFolderMovesTheCrumbs() async {
+        let model = model { path, _ in self.listing(path, ["x.md"]) }
+        await model.start()
+        await model.open(folder: "docs/reports")
+        XCTAssertEqual(model.path, "docs/reports")
+        XCTAssertEqual(model.crumbs.map(\.path), ["", "docs", "docs/reports"])
+        XCTAssertEqual(model.scopeName, "reports")
+        XCTAssertEqual(model.folder.value?.entries.first?.path, "docs/reports/x.md")
+        await model.open(folder: "")
+        XCTAssertEqual(model.scopeName, "shop")
+    }
+
+    func testAnOlderDaemonAndARefusalAndAnOfflineComputer() async {
+        let older = model { _, _ in nil }
+        await older.start()
+        XCTAssertEqual(older.folder, .failed(.problem(.olderDaemon)))
+        let refused = model { _, _ in throw FilesRefusal(status: 404, problem: .notFound, message: "not found") }
+        await refused.start()
+        XCTAssertEqual(refused.folder, .failed(.problem(.notFound)))
+        let offline = model { _, _ in throw DaemonError.unreachable(endpoint: "x:1", detail: "") }
+        await offline.start()
+        guard case let .failed(failure) = offline.folder else { return XCTFail("\(offline.folder)") }
+        XCTAssertTrue(failure.isOffline)
+        XCTAssertTrue(failure.canRetry)
+    }
+
+    func testACancelledReadIsNotAFailure() async {
+        let model = model { _, _ in throw CancellationError() }
+        await model.start()
+        XCTAssertEqual(model.folder, .loading)
+    }
+
+    func testSearchWaitsThenReplacesTheListAndClearingGoesBack() async throws {
+        var asked: [String?] = []
+        let model = model { path, query in
+            asked.append(query)
+            return query == nil ? self.listing() : self.listing("", ["login.md", "login.png"])
+        }
+        await model.start()
+        model.query = "  login "
+        XCTAssertTrue(model.isSearching)
+        XCTAssertEqual(model.results, .loading)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(model.entries.map(\.name), ["login.md", "login.png"])
+        XCTAssertEqual(asked, [nil, "login"], "the query is trimmed")
+        XCTAssertEqual(model.searchSummary, "2 files named “login” in shop")
+        model.clearSearch()
+        XCTAssertNil(model.results)
+        XCTAssertEqual(model.entries.map(\.name), ["a.md"])
+        XCTAssertNil(model.searchSummary)
+    }
+
+    func testOnlyTheLastKeystrokeAsks() async throws {
+        var asked: [String?] = []
+        let model = model(debounce: .milliseconds(80)) { _, query in
+            asked.append(query)
+            return self.listing()
+        }
+        model.query = "l"
+        model.query = "lo"
+        model.query = "log"
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(asked, ["log"])
+    }
+
+    func testAnOldAnswerDoesNotOverwriteANewerOne() async throws {
+        var calls = 0
+        let model = model { _, query in
+            guard query != nil else { return self.listing() }
+            calls += 1
+            if calls == 1 { try await Task.sleep(for: .milliseconds(200)) }
+            return self.listing("", [calls == 1 ? "old.md" : "new.md"])
+        }
+        model.query = "a"
+        try await Task.sleep(for: .milliseconds(40))
+        model.query = "ab"
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(model.entries.map(\.name), ["new.md"])
+    }
+
+    func testAnOpenFolderIgnoresTheAnswerForTheOneItLeft() async throws {
+        let model = model { path, _ in
+            if path == "slow" { try await Task.sleep(for: .milliseconds(200)) }
+            return self.listing(path, [path.isEmpty ? "root.md" : "\(path).md"])
+        }
+        let slow = Task { await model.open(folder: "slow") }
+        try await Task.sleep(for: .milliseconds(30))
+        await model.open(folder: "")
+        await slow.value
+        XCTAssertEqual(model.path, "")
+        XCTAssertEqual(model.folder.value?.entries.map(\.name), ["root.md"])
+    }
+
+    func testRecentOrderAndGroups() async {
+        let list = FileListing(rootName: "shop", entries: [
+            FileEntry(name: "old.md", modified: ago(20 * 86400)),
+            FileEntry(name: "new.md", modified: ago(60)),
+        ])
+        let model = model { _, _ in list }
+        await model.start()
+        XCTAssertNil(model.groups)
+        XCTAssertEqual(model.entries.map(\.name), ["old.md", "new.md"])
+        model.sort = .recent
+        XCTAssertEqual(model.entries.map(\.name), ["new.md", "old.md"])
+        XCTAssertEqual(model.groups?.map(\.bucket), [.today, .older])
+    }
+
+    func testALinkToAFolderListsAndALinkToAFileDoesNot() async {
+        let model = model { path, _ in
+            if path == "latest" { return self.listing(path) }
+            throw FilesRefusal(status: 404, problem: .notFound, message: "not found")
+        }
+        let folder = await model.resolve(link: FileEntry(name: "latest", kind: .link))
+        XCTAssertEqual(folder, .folder("latest"))
+        let file = await model.resolve(link: FileEntry(name: "other", kind: .link))
+        XCTAssertEqual(file, .file)
+        let blocked = await model.resolve(link: FileEntry(name: "latest", kind: .link, blocked: true))
+        XCTAssertEqual(blocked, .file, "a blocked link is not even asked")
+    }
+
+    func testReloadKeepsWhatIsShownUntilTheAnswer() async {
+        var names = ["a.md"]
+        let model = model { _, _ in self.listing("", names) }
+        await model.start()
+        names = ["a.md", "b.md"]
+        await model.reload()
+        XCTAssertEqual(model.entries.map(\.name), ["a.md", "b.md"])
+    }
+}
+
+@MainActor
+final class FileViewerModelTests: XCTestCase {
+    private func model(_ path: String, content: FileContent?, image: Data = Data(), failure: Error? = nil) -> FileViewerModel {
+        FileViewerModel(
+            path: path,
+            read: { _ in
+                if let failure { throw failure }
+                return content
+            },
+            image: { _ in image },
+            describe: { RequestFailure($0, linkUsable: true) }
+        )
+    }
+
+    func testMarkdownOpensRenderedAndCodeOpensAsSource() async {
+        let md = model("docs/a.md", content: FileContent(path: "docs/a.md", size: 5, kind: .text, text: "# Hi\n"))
+        XCTAssertEqual(md.mode, .rendered)
+        XCTAssertEqual(md.name, "a.md")
+        XCTAssertEqual(md.folder, "docs")
+        await md.load()
+        XCTAssertEqual(md.phase, .text(truncated: false))
+        XCTAssertEqual(md.lines.map(\.text), ["# Hi"])
+        XCTAssertEqual(md.source, "# Hi\n")
+        let code = model("main.go", content: FileContent(path: "main.go", size: 1, kind: .text, text: "x"))
+        XCTAssertEqual(code.mode, .raw)
+    }
+
+    func testAnEmptyTextHasNoLines() async {
+        let empty = model("empty.txt", content: FileContent(path: "empty.txt", kind: .text, text: nil))
+        await empty.load()
+        XCTAssertEqual(empty.phase, .text(truncated: false))
+        XCTAssertTrue(empty.lines.isEmpty)
+    }
+
+    func testATruncatedTextSaysSo() async {
+        let big = model("a.log", content: FileContent(path: "a.log", size: 2 << 20, kind: .text, text: "x", truncated: true))
+        await big.load()
+        XCTAssertEqual(big.phase, .text(truncated: true))
+    }
+
+    func testAnImageFetchesItsBytesAfterTheKindIsKnown() async {
+        let bytes = Data([1, 2, 3])
+        let image = model("a.png", content: FileContent(path: "a.png", size: 3, kind: .image), image: bytes)
+        await image.load()
+        XCTAssertEqual(image.phase, .image(bytes))
+        XCTAssertEqual(image.content?.size, 3)
+    }
+
+    func testATooLargeImageIsNotFetched() async {
+        var fetched = false
+        let viewer = FileViewerModel(
+            path: "big.png",
+            read: { _ in FileContent(path: "big.png", size: FileBrowser.imageLimit + 1, kind: .image) },
+            image: { _ in fetched = true; return Data() },
+            describe: { RequestFailure($0, linkUsable: true) }
+        )
+        await viewer.load()
+        XCTAssertEqual(viewer.phase, .failed(.problem(.tooLarge)))
+        XCTAssertFalse(fetched)
+        XCTAssertEqual(viewer.content?.size, FileBrowser.imageLimit + 1, "the size is there for the words")
+    }
+
+    func testBinaryAndRefusalsAndAnOlderDaemon() async {
+        let binary = model("a.sqlite", content: FileContent(path: "a.sqlite", size: 9, kind: .binary))
+        await binary.load()
+        XCTAssertEqual(binary.phase, .binary)
+        let hidden = model(".env", content: nil, failure: FilesRefusal(status: 403, problem: .sensitive, message: "hidden for safety"))
+        await hidden.load()
+        XCTAssertEqual(hidden.phase, .failed(.problem(.sensitive)))
+        let older = model("a.md", content: nil)
+        await older.load()
+        XCTAssertEqual(older.phase, .failed(.problem(.olderDaemon)))
+        let offline = model("a.md", content: nil, failure: DaemonError.timedOut(endpoint: "x:1"))
+        await offline.load()
+        guard case let .failed(failure) = offline.phase else { return XCTFail("\(offline.phase)") }
+        XCTAssertTrue(failure.canRetry)
+    }
+
+    func testLoadingAgainReplacesWhatWasThere() async {
+        var text = "one"
+        let viewer = FileViewerModel(
+            path: "a.txt",
+            read: { _ in FileContent(path: "a.txt", size: 3, kind: .text, text: text) },
+            image: { _ in Data() },
+            describe: { RequestFailure($0, linkUsable: true) }
+        )
+        await viewer.load()
+        text = "two"
+        await viewer.load()
+        XCTAssertEqual(viewer.source, "two")
+    }
+}
+
+final class MarkdownImageBlockTests: XCTestCase {
+    func testALoneImageIsABlockAndTheRestIsText() {
+        XCTAssertEqual(MarkdownRenderer.blocks("![Login flow](../images/login-flow.png)"), [.image(alt: "Login flow", source: "../images/login-flow.png")])
+        XCTAssertEqual(MarkdownRenderer.blocks("before\n\n![a](b.png \"title\")\n\nafter"), [.paragraph("before"), .image(alt: "a", source: "b.png"), .paragraph("after")])
+        XCTAssertEqual(MarkdownRenderer.blocks("see ![a](b.png) here"), [.paragraph("see ![a](b.png) here")])
+        XCTAssertEqual(MarkdownRenderer.blocks("![a]()"), [.paragraph("![a]()")])
+    }
+
+    func testTheOneTextRenderingKeepsWhatItShowedBefore() {
+        XCTAssertEqual(MarkdownRenderer.plain("![Login flow](a.png)"), "Login flow")
+    }
+}

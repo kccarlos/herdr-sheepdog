@@ -8,7 +8,7 @@ import SwiftUI
 /// left out of `==`), it re-renders only when what it shows changes.
 struct AgentWindowMenu: View, Equatable {
     enum Item {
-        case takeOver, copy, changes, resetTextSize
+        case takeOver, copy, files, changes, resetTextSize
         case shell(cwd: String)
         case action(AgentWindowAction)
         case switchTo(String)
@@ -29,6 +29,8 @@ struct AgentWindowMenu: View, Equatable {
     var shellCwd: String?
     var canResetTextSize: Bool
     var actionsAvailable: Bool
+    /// The daemon lists feature `files`.
+    var filesAvailable: Bool
     var working: Bool
     var others: [Other]
     /// iPad's Open in New Window (fixed for a pane's life).
@@ -38,6 +40,7 @@ struct AgentWindowMenu: View, Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.style == b.style && a.observing == b.observing && a.shellCwd == b.shellCwd
             && a.canResetTextSize == b.canResetTextSize && a.actionsAvailable == b.actionsAvailable
+            && a.filesAvailable == b.filesAvailable
             && a.working == b.working && a.others == b.others && (a.extra == nil) == (b.extra == nil)
     }
 
@@ -75,6 +78,10 @@ struct AgentWindowMenu: View, Equatable {
         }
         Button { perform(.copy) } label: { Label("Copy screen", systemImage: "doc.on.doc") }
             .accessibilityIdentifier("agentScreen.menu.copy")
+        if filesAvailable {
+            Button { perform(.files) } label: { Label("Files", systemImage: "folder") }
+                .accessibilityIdentifier("agentScreen.menu.files")
+        }
         Button { perform(.changes) } label: { Label("Changes", systemImage: "plusminus") }
             .accessibilityIdentifier("agentScreen.menu.changes")
         if let shellCwd {

@@ -228,6 +228,7 @@ public final class DemoDaemon: @unchecked Sendable {
             let started = world.startAgent(kind: object["kind"] as? String ?? "claude", workspace: workspace, text: object["text"] as? String)
             return json(["ok": true, "pane_id": started.paneID, "spoken": started.spoken])
         default:
+            if let reply = filesRoute(method: method, path: path, url: url) { return reply }
             let busy = world.agents.contains { $0.state == .working || $0.state == .blocked }
             if let reply = spaces.handle(method: method, path: path, body: object, busy: busy) {
                 // Like the real daemon, tell the streams a mute changed, so
@@ -284,6 +285,36 @@ public final class DemoDaemon: @unchecked Sendable {
             }
             return json(["error": "not in the demo"], status: 404)
         }
+    }
+
+    /// `GET /api/agents/{pane}/files…` and `/api/spaces/{id}/files…` (the
+    /// file browser): the demo's folder for the scripted agents and the
+    /// "shop" space, a small one for any other. Called with the lock held.
+    private func filesRoute(method: String, path: String, url: URL?) -> Response? {
+        let parts = path.split(separator: "/").map { String($0).removingPercentEncoding ?? String($0) }
+        guard parts.count >= 4, parts[0] == "api", parts[1] == "agents" || parts[1] == "spaces", parts[3] == "files" else { return nil }
+        guard method == "GET" else { return json(["error": "method not allowed"], status: 405) }
+        let id = parts[2]
+        let folder: String
+        if parts[1] == "agents" {
+            guard let agent = world.agents.first(where: { $0.paneID == id }) else {
+                return json(["error": "not a tracked agent", "reason": "no_agent"], status: 404)
+            }
+            folder = agent.workspaceLabel ?? "shop"
+        } else {
+            guard let space = spaces.spaces.first(where: { $0.id == id }) else {
+                return json(["error": "no such space", "reason": "no_space"], status: 404)
+            }
+            folder = (space.path as NSString).lastPathComponent
+        }
+        let items = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems } ?? []
+        func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        let isRead = parts.count > 4
+        return DemoFiles.respond(
+            nodes: folder == "shop" ? DemoFiles.shop : DemoFiles.small, rootName: folder,
+            path: isRead ? parts[4...].joined(separator: "/") : item("path") ?? "", isRead: isRead,
+            query: item("q"), raw: item("raw") == "1", now: clock()
+        )
     }
 
     /// `/events`: what happened after `since`, then held open; later

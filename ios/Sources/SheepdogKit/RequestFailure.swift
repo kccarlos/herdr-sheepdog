@@ -10,6 +10,9 @@ public struct RequestFailure: Equatable, Sendable {
     public var message: String
     /// The computer answers otherwise; this one request ran out of time.
     public var isSlow: Bool
+    /// The computer did not answer at all: unreachable, too slow while the
+    /// link is down, or not the one the phone paired with.
+    public var isUnreachable: Bool
 
     public static let slowTitle = "Taking longer than usual"
 
@@ -21,12 +24,14 @@ public struct RequestFailure: Equatable, Sendable {
         let computer = name ?? "your computer"
         let daemonError = error as? DaemonError
         isSlow = false
+        isUnreachable = false
         switch daemonError {
         case .timedOut? where linkUsable:
             title = Self.slowTitle
             message = "\(DaemonError.slowAnswer) Try again."
             isSlow = true
         case .timedOut?, .unreachable?, .untrusted?:
+            isUnreachable = true
             title = "Couldn't reach \(computer)"
             message = [daemonError?.message, daemonError?.hint].compactMap { $0 }.joined(separator: " ")
         case let known?:
