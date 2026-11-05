@@ -164,6 +164,7 @@ type Tracker struct {
 	byTurn              map[string]*record
 	calls               map[string]pendingCall
 	lastIn              time.Time
+	lastToolCallAt      time.Time
 	lastSilence         *silenceMark
 	lastStreamEnd       time.Time
 	hasSpeechSinceClear bool
@@ -184,6 +185,7 @@ type latencyFields struct {
 	ID                string      `json:"id"`
 	Name              string      `json:"name"`
 	CallID            string      `json:"call_id"`
+	RetryOf           string      `json:"retry_of"`
 	WaitedMS          *int64      `json:"waited_ms"`
 	Turn              json.Number `json:"turn"`
 	Step              int         `json:"step"`
@@ -211,6 +213,17 @@ func (t *Tracker) clearSilence() {
 	t.hasSpeechSinceClear = false
 }
 
+func silenceSpeechEnd(at time.Time, speechEndMS, uplinkLagMS *int64) time.Time {
+	var hold, lag int64
+	if speechEndMS != nil {
+		hold = max(int64(0), *speechEndMS)
+	}
+	if uplinkLagMS != nil {
+		lag = max(int64(0), *uplinkLagMS)
+	}
+	return at.Add(-time.Duration(lag+hold) * time.Millisecond)
+}
+
 // Add feeds one event and returns the breakdowns it completed.
 func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 	var p latencyFields
@@ -222,6 +235,7 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 		out := t.endAll(ev.TS, OutcomeRestart)
 		t.calls = map[string]pendingCall{}
 		t.lastIn = time.Time{}
+		t.lastToolCallAt = time.Time{}
 		t.clearSilence()
 		return out
 	case "web.client.speaking":
@@ -244,6 +258,19 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 			t.clearSilence()
 			break
 		}
+		// When server-side VAD already fired to_supervisor before the client's
+		// gate hangover finished closing, this gate close belongs to that
+		// already-relayed speech and must not arm a mark for a later call.
+		if !t.lastToolCallAt.IsZero() {
+			if p.SpeechEndMS != nil && !silenceSpeechEnd(ev.TS, p.SpeechEndMS, p.UplinkLagMS).After(t.lastToolCallAt) {
+				t.clearSilence()
+				break
+			}
+			if p.SpeechEndMS == nil && !t.hasSpeechSinceClear {
+				t.clearSilence()
+				break
+			}
+		}
 		t.lastSilence = &silenceMark{
 			at:          ev.TS,
 			speechEndMS: p.SpeechEndMS,
@@ -263,47 +290,50 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 			t.lastStreamEnd = time.Time{}
 		}
 	case "voice.stream_end":
-		t.lastStreamEnd = ev.TS
+		if t.lastSilence != nil {
+			t.lastStreamEnd = ev.TS
+		}
 	case "voice.text", "web.utterance":
 		t.clearSilence()
 	case "voice.transcript.in":
 		t.lastIn = ev.TS
 		t.hasSpeechSinceClear = true
 	case "voice.tool_call":
-		if p.Name == "to_supervisor" && p.ID != "" {
-			pc := pendingCall{at: ev.TS, lastIn: t.lastIn}
-			if s := t.lastSilence; s != nil && !s.at.After(ev.TS) && ev.TS.Sub(s.at) <= legacyEndWindow {
-				var daemonTail time.Duration
-				switch {
-				case !t.lastStreamEnd.IsZero() && !t.lastStreamEnd.Before(s.at):
-					endAt := t.lastStreamEnd
-					if endAt.After(ev.TS) {
-						endAt = ev.TS
+		if p.Name == "to_supervisor" {
+			t.lastToolCallAt = ev.TS
+			if p.ID != "" {
+				pc := pendingCall{at: ev.TS, lastIn: t.lastIn}
+				if s := t.lastSilence; s != nil && !s.at.After(ev.TS) && ev.TS.Sub(s.at) <= legacyEndWindow {
+					var daemonTail time.Duration
+					switch {
+					case !t.lastStreamEnd.IsZero() && !t.lastStreamEnd.Before(s.at):
+						endAt := t.lastStreamEnd
+						if endAt.After(ev.TS) {
+							endAt = ev.TS
+						}
+						daemonTail = max(time.Duration(0), endAt.Sub(s.at))
+					case p.GateTailElapsedMS != nil:
+						daemonTail = min(max(time.Duration(0), time.Duration(*p.GateTailElapsedMS)*time.Millisecond), ev.TS.Sub(s.at))
 					}
-					daemonTail = max(time.Duration(0), endAt.Sub(s.at))
-				case p.GateTailElapsedMS != nil:
-					daemonTail = min(max(time.Duration(0), time.Duration(*p.GateTailElapsedMS)*time.Millisecond), ev.TS.Sub(s.at))
+					effStreamEnd := s.at.Add(daemonTail)
+					var clientHold int64
+					if s.speechEndMS != nil {
+						clientHold = max(int64(0), *s.speechEndMS)
+					}
+					if s.uplinkLagMS != nil {
+						u := max(int64(0), *s.uplinkLagMS)
+						pc.uplinkLagMS = &u
+					}
+					gt := clientHold + daemonTail.Milliseconds()
+					pe := max(int64(0), ev.TS.Sub(effStreamEnd).Milliseconds())
+					pc.gateTailMS = &gt
+					pc.providerEOUMS = &pe
+					pc.speechEndAt = silenceSpeechEnd(s.at, s.speechEndMS, s.uplinkLagMS)
+					pc.fromClient = s.speechEndMS != nil
 				}
-				effStreamEnd := s.at.Add(daemonTail)
-				var clientHold int64
-				if s.speechEndMS != nil {
-					clientHold = max(int64(0), *s.speechEndMS)
-				}
-				var uplinkLag int64
-				if s.uplinkLagMS != nil {
-					uplinkLag = max(int64(0), *s.uplinkLagMS)
-					u := uplinkLag
-					pc.uplinkLagMS = &u
-				}
-				gt := clientHold + daemonTail.Milliseconds()
-				pe := max(int64(0), ev.TS.Sub(effStreamEnd).Milliseconds())
-				pc.gateTailMS = &gt
-				pc.providerEOUMS = &pe
-				pc.speechEndAt = s.at.Add(-time.Duration(uplinkLag+clientHold) * time.Millisecond)
-				pc.fromClient = s.speechEndMS != nil
+				t.calls[p.ID] = pc
 			}
 			t.clearSilence()
-			t.calls[p.ID] = pc
 		}
 	case "supervisor.relay", "supervisor.relay_fallback", "supervisor.relay_by_daemon":
 		t.relayed(ev, p)
@@ -417,6 +447,8 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 
 // relayed opens the record for a relay.
 func (t *Tracker) relayed(ev eventlog.Event, p latencyFields) {
+	t.lastSilence = nil
+	t.lastStreamEnd = time.Time{}
 	key := ev.UtteranceID
 	if key == "" && p.CallID != "" {
 		key = "call:" + p.CallID
@@ -434,18 +466,23 @@ func (t *Tracker) relayed(ev eventlog.Event, p latencyFields) {
 	} else if c, ok := t.calls[p.CallID]; ok {
 		delete(t.calls, p.CallID)
 		r.toolCallAt = c.at
-		r.uplinkLagMS = c.uplinkLagMS
-		r.gateTailMS = c.gateTailMS
-		r.providerEOUMS = c.providerEOUMS
 		switch {
 		case p.WaitedMS != nil:
 			r.end = ev.TS.Add(-time.Duration(*p.WaitedMS) * time.Millisecond)
 		case !c.lastIn.IsZero() && c.at.Sub(c.lastIn) <= legacyEndWindow:
 			r.end = c.lastIn
 		}
-		if !c.speechEndAt.IsZero() {
-			if c.fromClient || r.end.IsZero() || r.end.After(c.speechEndAt) {
-				r.end = c.speechEndAt
+		if p.RetryOf == "" {
+			r.uplinkLagMS = c.uplinkLagMS
+			r.gateTailMS = c.gateTailMS
+			r.providerEOUMS = c.providerEOUMS
+			if !c.speechEndAt.IsZero() {
+				if c.fromClient || r.end.IsZero() || r.end.After(c.speechEndAt) {
+					r.end = c.speechEndAt
+				} else if r.gateTailMS != nil {
+					gt := *r.gateTailMS + c.speechEndAt.Sub(r.end).Milliseconds()
+					r.gateTailMS = &gt
+				}
 			}
 		}
 	}

@@ -139,3 +139,33 @@ func TestStateVoiceSpeaking(t *testing.T) {
 		t.Fatalf("voice-off /api/state = %d speaking=%v", code, state.Voice.Speaking)
 	}
 }
+
+func TestMuteLogsClientMuteBeforeSessionStreamEnd(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	h.session.onSetMuted = func(m bool) {
+		if m {
+			h.log.Log("voice", "voice.stream_end", "", map[string]any{"tail_ms": 0})
+			h.log.Log("voice", "voice.muted", "", map[string]any{"muted": true})
+		}
+	}
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	c.send(wsproto.Speaking(true))
+	c.send(wsproto.Mute(true))
+	c.expect(wsproto.TypeStatus)
+
+	types := h.types()
+	muteIdx, streamEndIdx := -1, -1
+	for i, ty := range types {
+		if ty == "web.client.mute" && muteIdx == -1 {
+			muteIdx = i
+		}
+		if ty == "voice.stream_end" && streamEndIdx == -1 {
+			streamEndIdx = i
+		}
+	}
+	if muteIdx == -1 || streamEndIdx == -1 || muteIdx > streamEndIdx {
+		t.Fatalf("event order = %v, want web.client.mute before voice.stream_end", types)
+	}
+}

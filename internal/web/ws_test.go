@@ -334,6 +334,73 @@ func TestWSSilenceUplinkLag(t *testing.T) {
 	}
 }
 
+func TestWSSilenceUplinkLagRequiresPriorAnchor(t *testing.T) {
+	var clockMu sync.Mutex
+	cur := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	advance := func(ms int) {
+		clockMu.Lock()
+		cur = cur.Add(time.Duration(ms) * time.Millisecond)
+		clockMu.Unlock()
+	}
+	nowFn := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return cur
+	}
+	h := newHarness(t, harnessOpts{voice: true, now: nowFn})
+	c := dialWSRaw(t, h)
+
+	// Client omits mono_ms on client-ready (no prior clock anchor yet).
+	c.send(wsproto.ClientReady(wsproto.ProtocolVersion, testClient))
+	c.skipBotReady = true
+	c.expect(wsproto.TypeStatus)
+
+	// Stalled burst: 2s pass, then 30 frames (600ms of PCM) and silence {on: true}
+	// arrive in a single burst at t=2000ms. Without a prior clock anchor, the
+	// daemon cannot know the stall length and must not fabricate uplink_lag_ms.
+	advance(2000)
+	for range 30 {
+		c.sendAudio(make([]byte, 640))
+	}
+	speechEnd, seq, rtt := 300, 30, 24
+	var mono1 int64 = 52000
+	sil1 := wsproto.Silence(true)
+	sil1.SpeechEndMs, sil1.Seq, sil1.MonoMs, sil1.RTTMs = &speechEnd, &seq, &mono1, &rtt
+	c.send(sil1)
+
+	silencePayloads := func() []map[string]any {
+		var out []map[string]any
+		for _, ev := range h.log.Tail(0) {
+			if ev.Type == "web.client.silence" {
+				var p map[string]any
+				_ = json.Unmarshal(ev.Payload, &p)
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	waitFor(t, 2*time.Second, func() bool { return len(silencePayloads()) == 1 }, "first web.client.silence")
+	first := silencePayloads()[0]
+	if _, ok := first["uplink_lag_ms"]; ok {
+		t.Fatalf("first silence without prior anchor fabricated uplink_lag_ms: %v", first)
+	}
+
+	// That first mono_ms=52000 at server t=2000 anchored the socket; a second
+	// gate close at mono_ms=53000 arriving at server t=3150 reports 150 + 12 = 162ms.
+	advance(1150)
+	seq2 := 33
+	var mono2 int64 = 53000
+	sil2 := wsproto.Silence(true)
+	sil2.SpeechEndMs, sil2.Seq, sil2.MonoMs, sil2.RTTMs = &speechEnd, &seq2, &mono2, &rtt
+	c.send(sil2)
+
+	waitFor(t, 2*time.Second, func() bool { return len(silencePayloads()) == 2 }, "second web.client.silence")
+	second := silencePayloads()[1]
+	if second["uplink_lag_ms"] != float64(162) {
+		t.Fatalf("second silence uplink_lag_ms = %v, want 162 (%v)", second["uplink_lag_ms"], second)
+	}
+}
+
 // TestWSPlaybackStatsAndSendWait: the client's ping carries the jitter
 // buffer's underruns/drains/buffer_ms into web.client.stats, and an audio
 // chunk sent to the client shows up as a send_wait sample (WP: audible

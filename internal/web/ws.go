@@ -473,18 +473,11 @@ func (h *hub) afterCancel(res voice.ToolResult) {
 func (h *hub) setMuted(on bool, via string) {
 	h.mu.Lock()
 	h.muted = on
-	c := h.client
 	h.mu.Unlock()
-	if on && c != nil {
-		c.mu.Lock()
-		c.firstRunFrameAt = time.Time{}
-		c.runAudioBytes = 0
-		c.mu.Unlock()
-	}
+	h.s.log.Log(logSource, "web.client.mute", "", map[string]any{"muted": on, "via": via})
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(on)
 	}
-	h.s.log.Log(logSource, "web.client.mute", "", map[string]any{"muted": on, "via": via})
 	h.send(h.statusMsg())
 }
 
@@ -502,15 +495,6 @@ func (h *hub) setSilence(c *client, m wsproto.Message) {
 	gateIsDetector := !c.speakingReports
 	audioFrames := c.audioFramesIn
 	excess, hadPrior := c.noteMonoLocked(now, m.MonoMs)
-	if on && m.MonoMs != nil && !hadPrior && c.runAudioBytes > 0 {
-		// 16 kHz mono PCM16 is 32 bytes/ms; compare wall span against stream duration.
-		burstExcess := now.Sub(c.firstRunFrameAt).Milliseconds() - int64(c.runAudioBytes)/32
-		if burstExcess > excess {
-			excess = burstExcess
-		}
-	}
-	c.firstRunFrameAt = time.Time{}
-	c.runAudioBytes = 0
 	c.mu.Unlock()
 
 	payload := map[string]any{"client_id": c.id, "on": on}
@@ -522,7 +506,7 @@ func (h *hub) setSilence(c *client, m wsproto.Message) {
 			payload["seq"] = *m.Seq
 			payload["audio_frames_in"] = audioFrames
 		}
-		if m.MonoMs != nil {
+		if m.MonoMs != nil && hadPrior {
 			var baseOneWay int64
 			if m.RTTMs != nil {
 				baseOneWay = int64(*m.RTTMs) / 2
@@ -653,10 +637,8 @@ type client struct {
 	mutedDrops            int
 	// skew-free uplink lag tracking (under mu): minMonoOffset is the
 	// smallest observed (server_mono_ms - client_mono_ms) on this socket.
-	hasMonoOffset   bool
-	minMonoOffset   int64
-	firstRunFrameAt time.Time
-	runAudioBytes   int
+	hasMonoOffset bool
+	minMonoOffset int64
 	// silence gate, as reported by the client (silence messages and the
 	// counters carried by its pings)
 	silent             bool
@@ -929,13 +911,8 @@ func (c *client) onAudio(data []byte) {
 		return
 	}
 	h := c.h
-	now := h.s.deps.Now()
 	c.mu.Lock()
 	c.audioFramesIn++
-	if c.firstRunFrameAt.IsZero() {
-		c.firstRunFrameAt = now
-	}
-	c.runAudioBytes += len(data)
 	c.mu.Unlock()
 	h.mu.Lock()
 	muted := h.muted

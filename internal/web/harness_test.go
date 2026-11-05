@@ -51,6 +51,7 @@ type fakeSession struct {
 	pushTags []map[string]any
 	// pushUrgency records the urgency of every PushTagged call.
 	pushUrgency []voice.Urgency
+	onSetMuted  func(bool)
 }
 
 func newFakeSession() *fakeSession {
@@ -97,8 +98,16 @@ func (f *fakeSession) taggedPushes() []map[string]any {
 }
 func (f *fakeSession) Audio() <-chan []byte       { return f.audio }
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
-func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
-func (f *fakeSession) Status() voice.Status       { return f.status }
+func (f *fakeSession) SetMuted(m bool) {
+	f.mu.Lock()
+	f.muted = m
+	cb := f.onSetMuted
+	f.mu.Unlock()
+	if cb != nil {
+		cb(m)
+	}
+}
+func (f *fakeSession) Status() voice.Status { return f.status }
 func (f *fakeSession) Speaking() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()

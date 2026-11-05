@@ -306,3 +306,112 @@ func TestBreakdownVoiceDecompositionEdges(t *testing.T) {
 		t.Fatalf("typed utterance inherited silence mark: %+v", out)
 	}
 }
+
+// A late client gate close arriving after a fast server-VAD to_supervisor must
+// not arm a stale silence mark for a fallback re-relay (retry_of) or a
+// subsequent turn, and retry_of relays never inherit gate decomposition.
+func TestBreakdownStaleSilenceAndRetry(t *testing.T) {
+	tr := NewTracker()
+	// Turn 1: user stops speaking at t=1000; server VAD fires to_supervisor at
+	// t=1350 before the client's 400ms hangover arrives at t=1410; Turn 1 fails
+	// and the voice triggers a retry_of re-relay at t=4500.
+	out := feed(tr,
+		e(1000, "voice.transcript.in", map[string]any{"text": "what is auth doing"}),
+		e(1350, "voice.tool_call", map[string]any{"id": "c1", "name": "to_supervisor"}),
+		e(1355, "supervisor.relay", map[string]any{"call_id": "c1", "utterance_id": "utt-1", "waited_ms": 355}),
+		e(1410, "web.client.silence", map[string]any{"on": true, "speech_end_ms": 400, "seq": 10, "uplink_lag_ms": 10}),
+		e(2410, "voice.stream_end", map[string]any{"tail_ms": 1000}),
+		e(3000, "voice.tool_result", map[string]any{"id": "c1"}),
+		e(4500, "voice.tool_call", map[string]any{"id": "c2", "name": "to_supervisor"}),
+		e(4510, "supervisor.relay", map[string]any{"call_id": "c2", "utterance_id": "utt-2", "retry_of": "utt-1", "waited_ms": 3510}),
+		e(4800, "voice.tool_result", map[string]any{"id": "c2", "spoken": "Auth is idle."}),
+		e(5000, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-2"}),
+	)
+	if len(out) != 2 {
+		t.Fatalf("retry breakdowns = %+v", out)
+	}
+	b2 := out[1]
+	if b2.UplinkLagMS != nil || b2.GateTailMS != nil || b2.ProviderEOUMS != nil || ms(b2.VoiceMS) != 3500 {
+		t.Fatalf("retry inherited Turn 1 silence: uplink=%d gate=%d eou=%d voice=%d", ms(b2.UplinkLagMS), ms(b2.GateTailMS), ms(b2.ProviderEOUMS), ms(b2.VoiceMS))
+	}
+
+	// Turn 3 + Turn 4: late gate close after fast server-VAD to_supervisor,
+	// followed by a second non-retry to_supervisor claiming a trailing
+	// transcript fragment from the same speech (ended at t=6000).
+	out = feed(tr,
+		e(6000, "voice.transcript.in", map[string]any{"text": "check auth"}),
+		e(6350, "voice.tool_call", map[string]any{"id": "c3", "name": "to_supervisor"}),
+		e(6355, "supervisor.relay", map[string]any{"call_id": "c3", "utterance_id": "utt-3", "waited_ms": 355}),
+		e(6380, "voice.transcript.in", map[string]any{"text": "and tests"}),
+		e(6410, "web.client.silence", map[string]any{"on": true, "speech_end_ms": 400, "seq": 20, "uplink_lag_ms": 10}),
+		e(7410, "voice.stream_end", map[string]any{"tail_ms": 1000}),
+		e(7500, "voice.tool_result", map[string]any{"id": "c3", "spoken": "Auth is working."}),
+		e(7600, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-3"}),
+		e(9000, "voice.tool_call", map[string]any{"id": "c4", "name": "to_supervisor"}),
+		e(9010, "supervisor.relay", map[string]any{"call_id": "c4", "utterance_id": "utt-4", "waited_ms": 2630}),
+		e(9200, "voice.tool_result", map[string]any{"id": "c4", "spoken": "Tests passed."}),
+		e(9300, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-4"}),
+	)
+	if len(out) != 2 {
+		t.Fatalf("second-call breakdowns = %+v", out)
+	}
+	b4 := out[1]
+	if b4.UplinkLagMS != nil || b4.GateTailMS != nil || b4.ProviderEOUMS != nil || ms(b4.VoiceMS) != 2620 {
+		t.Fatalf("subsequent call inherited stale silence: uplink=%d gate=%d eou=%d voice=%d", ms(b4.UplinkLagMS), ms(b4.GateTailMS), ms(b4.ProviderEOUMS), ms(b4.VoiceMS))
+	}
+
+	// Turn 5: even if an unvoiced noise bump closes the gate after the last
+	// call, a retry_of relay still omits gate decomposition.
+	out = feed(tr,
+		e(11000, "web.client.silence", map[string]any{"on": true, "speech_end_ms": 300, "seq": 30, "uplink_lag_ms": 10}),
+		e(12000, "voice.stream_end", map[string]any{"tail_ms": 1000}),
+		e(12500, "voice.tool_call", map[string]any{"id": "c5", "name": "to_supervisor"}),
+		e(12510, "supervisor.relay", map[string]any{"call_id": "c5", "utterance_id": "utt-5", "retry_of": "utt-4", "waited_ms": 6130}),
+		e(12600, "voice.tool_result", map[string]any{"id": "c5", "spoken": "Tests passed."}),
+		e(12700, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-5"}),
+	)
+	if len(out) != 1 || out[0].UplinkLagMS != nil || out[0].GateTailMS != nil || out[0].ProviderEOUMS != nil || ms(out[0].VoiceMS) != 6120 {
+		t.Fatalf("retry after bump = %+v", out)
+	}
+}
+
+// When speech_end_ms is absent (mute-after-speech or a legacy client), the gap
+// from the last transcript to the mute/silence event folds into gate_tail_ms
+// so the sub-segments still sum to voice_ms.
+func TestBreakdownPreMuteAndLegacyHoldIncludedInGateTail(t *testing.T) {
+	tr := NewTracker()
+	out := feed(tr,
+		e(3500, "voice.transcript.in", map[string]any{"text": "stop tests"}),
+		e(3800, "web.client.mute", map[string]any{"muted": true}),
+		e(4800, "voice.stream_end", map[string]any{"tail_ms": 1000}),
+		e(5000, "voice.tool_call", map[string]any{"id": "c1", "name": "to_supervisor"}),
+		e(5010, "supervisor.relay", map[string]any{"call_id": "c1", "utterance_id": "utt-1", "waited_ms": 1510}),
+		e(5100, "voice.tool_result", map[string]any{"id": "c1", "spoken": "Stopped."}),
+		e(5200, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-1"}),
+	)
+	if len(out) != 1 {
+		t.Fatalf("mute breakdowns = %+v", out)
+	}
+	b := out[0]
+	if b.UplinkLagMS != nil || ms(b.GateTailMS) != 1300 || ms(b.ProviderEOUMS) != 200 || ms(b.VoiceMS) != 1500 || ms(b.TotalMS) != 1700 {
+		t.Fatalf("mute-after-transcript = gate:%d eou:%d voice:%d total:%d", ms(b.GateTailMS), ms(b.ProviderEOUMS), ms(b.VoiceMS), ms(b.TotalMS))
+	}
+
+	out = feed(tr,
+		e(6000, "web.client.mute", map[string]any{"muted": false}),
+		e(6500, "voice.transcript.in", map[string]any{"text": "status"}),
+		e(6800, "web.client.silence", map[string]any{"on": true}),
+		e(7800, "voice.stream_end", map[string]any{"tail_ms": 1000}),
+		e(8000, "voice.tool_call", map[string]any{"id": "c2", "name": "to_supervisor"}),
+		e(8010, "supervisor.relay", map[string]any{"call_id": "c2", "utterance_id": "utt-2", "waited_ms": 1510}),
+		e(8100, "voice.tool_result", map[string]any{"id": "c2", "spoken": "All idle."}),
+		e(8200, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-2"}),
+	)
+	if len(out) != 1 {
+		t.Fatalf("legacy silence breakdowns = %+v", out)
+	}
+	b2 := out[0]
+	if b2.UplinkLagMS != nil || ms(b2.GateTailMS) != 1300 || ms(b2.ProviderEOUMS) != 200 || ms(b2.VoiceMS) != 1500 {
+		t.Fatalf("legacy silence = gate:%d eou:%d voice:%d", ms(b2.GateTailMS), ms(b2.ProviderEOUMS), ms(b2.VoiceMS))
+	}
+}
