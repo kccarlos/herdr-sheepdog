@@ -1,6 +1,11 @@
 # Lease-Gated Claude Code PermissionRequest Hook
 
-**Decided (KC, 2026-11-05):** install by default, with an opt-out.
+**Decided (KC, 2026-11-05), replacing the holding design below:**
+
+- The hook only reports. It sends Claude's full request to the daemon and exits at once with no output, so Claude always draws its normal menu. There's no holding, no lease, no decision over the hook and no long timeout. It must finish in well under a second and never fail the tool call.
+- The daemon attaches the structured details to the question the screen parser found, and answers with keys as it does today, through the same approval rail. If no report arrives, today's screen reading still works.
+- Install by default with an opt-out. `sheepdog setup` says plainly that it changes `~/.claude/settings.json`, keeps a backup, and `sheepdog doctor` shows the state. Uninstall removes only this entry.
+- Sections below about holding, leases and hook decisions are superseded; failure handling, install, doctor and uninstall still apply.
 
 ## Decision needed
 
