@@ -230,7 +230,7 @@ type EnrollResponse struct {
 // pairing code (public: the code is the credential).
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	remote := s.isRateLimitedCaller(r)
-	src := rateLimitSource(r)
+	src := s.rateLimitSource(r)
 	if remote && s.limits.isBlocked("enroll", src, s.deps.Now()) {
 		writeRateLimited(w)
 		return

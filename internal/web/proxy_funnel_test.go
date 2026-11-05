@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -230,6 +232,251 @@ func TestProxiedLoopbackAuthEndpointsAreRateLimited(t *testing.T) {
 	}
 }
 
+func TestReverseProxyFullSignInAndEnrollFlows(t *testing.T) {
+	for _, proxyMode := range []struct {
+		name      string
+		host      string
+		fwdHost   string
+		fwdPort   string
+		forwarded string
+		origin    string
+	}{
+		{
+			name:    "tailscale serve (Host-rewriting)",
+			host:    "127.0.0.1:7777",
+			fwdHost: "studio.tail1234.ts.net",
+			origin:  "https://studio.tail1234.ts.net",
+		},
+		{
+			name:    "caddy reverse_proxy (Host-preserving)",
+			host:    "studio.tail1234.ts.net",
+			fwdHost: "studio.tail1234.ts.net",
+			origin:  "https://studio.tail1234.ts.net",
+		},
+		{
+			name:    "nginx split X-Forwarded-Host and X-Forwarded-Port",
+			host:    "127.0.0.1:7777",
+			fwdHost: "studio.tail1234.ts.net",
+			fwdPort: "8443",
+			origin:  "https://studio.tail1234.ts.net:8443",
+		},
+		{
+			name:      "RFC 7239 Forwarded header",
+			host:      "127.0.0.1:7777",
+			forwarded: `for=100.64.0.9;proto=https;host="studio.tail1234.ts.net"`,
+			origin:    "https://studio.tail1234.ts.net",
+		},
+	} {
+		t.Run(proxyMode.name, func(t *testing.T) {
+			f := newSetupFixture(t, config.Default())
+			h := f.h
+			applyProxy := func(r *http.Request) {
+				r.RemoteAddr, r.Host = "127.0.0.1:54321", proxyMode.host
+				if proxyMode.forwarded != "" {
+					r.Header.Set("Forwarded", proxyMode.forwarded)
+					return
+				}
+				r.Header.Set("X-Forwarded-For", "100.64.0.9")
+				r.Header.Set("X-Forwarded-Proto", "https")
+				if proxyMode.fwdHost != "" {
+					r.Header.Set("X-Forwarded-Host", proxyMode.fwdHost)
+				}
+				if proxyMode.fwdPort != "" {
+					r.Header.Set("X-Forwarded-Port", proxyMode.fwdPort)
+				}
+			}
+
+			// 1. Public bootstrap routes (/voice, /api/hello) work with no ticket yet.
+			for _, path := range []string{"/voice", "/api/hello"} {
+				r := httptest.NewRequest(http.MethodGet, path, nil)
+				applyProxy(r)
+				w := httptest.NewRecorder()
+				h.srv.handler().ServeHTTP(w, r)
+				if w.Code != http.StatusOK {
+					t.Fatalf("GET %s without ticket = %d %s, want 200", path, w.Code, w.Body.String())
+				}
+			}
+
+			// 2. Unauthenticated or expired-ticket GET /api/state returns 401 (never 403),
+			// which web/voice/app.js and the iOS app rely on to trigger re-signing.
+			for _, hdrTicket := range []string{"", "stale-ticket-after-restart"} {
+				r := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+				applyProxy(r)
+				if hdrTicket != "" {
+					r.Header.Set("Authorization", "Bearer "+ticketPrefix+hdrTicket)
+				}
+				w := httptest.NewRecorder()
+				h.srv.handler().ServeHTTP(w, r)
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("GET /api/state (ticket=%q) = %d %s, want 401", hdrTicket, w.Code, w.Body.String())
+				}
+			}
+
+			// 3. Browser enrolls with Origin header and no prior session cookie.
+			bKey, bPub := newDeviceKey(t)
+			enrollBody := `{"code":"` + h.pairCode() + `","public_key":"` + bPub + `","name":"Mac · Safari","kind":"browser"}`
+			rEnroll := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", strings.NewReader(enrollBody))
+			applyProxy(rEnroll)
+			rEnroll.Header.Set("Content-Type", "application/json")
+			rEnroll.Header.Set("Origin", proxyMode.origin)
+			wEnroll := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wEnroll, rEnroll)
+			if wEnroll.Code != http.StatusOK {
+				t.Fatalf("browser POST /api/devices/enroll = %d %s, want 200", wEnroll.Code, wEnroll.Body.String())
+			}
+			var enrolled EnrollResponse
+			if err := json.Unmarshal(wEnroll.Body.Bytes(), &enrolled); err != nil {
+				t.Fatal(err)
+			}
+
+			// 4. Browser fetches challenge and signs in with Origin header and no prior cookie.
+			rCh := httptest.NewRequest(http.MethodGet, "/api/auth/challenge", nil)
+			applyProxy(rCh)
+			wCh := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wCh, rCh)
+			if wCh.Code != http.StatusOK {
+				t.Fatalf("browser GET /api/auth/challenge = %d %s, want 200", wCh.Code, wCh.Body.String())
+			}
+			var ch ChallengeResponse
+			if err := json.Unmarshal(wCh.Body.Bytes(), &ch); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			sum := sha256.Sum256([]byte(SignedText(h.srv.deps.Computer.ID, "", enrolled.DeviceID, ch.Nonce, now.Unix())))
+			rr, ss, _ := ecdsa.Sign(rand.Reader, bKey, sum[:])
+			sig := make([]byte, 64)
+			rr.FillBytes(sig[:32])
+			ss.FillBytes(sig[32:])
+			sessBody := fmt.Sprintf(`{"device_id":%q,"nonce":%q,"time":%d,"signature":%q,"client":"browser"}`,
+				enrolled.DeviceID, ch.Nonce, now.Unix(), base64.RawURLEncoding.EncodeToString(sig))
+			rSess := httptest.NewRequest(http.MethodPost, "/api/auth/session", strings.NewReader(sessBody))
+			applyProxy(rSess)
+			rSess.Header.Set("Content-Type", "application/json")
+			rSess.Header.Set("Origin", proxyMode.origin)
+			wSess := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wSess, rSess)
+			cookies := wSess.Result().Cookies()
+			if wSess.Code != http.StatusOK || len(cookies) != 1 || !cookies[0].Secure {
+				t.Fatalf("browser POST /api/auth/session = %d %s cookies=%+v, want 200 with Secure cookie", wSess.Code, wSess.Body.String(), cookies)
+			}
+
+			// 5. Paired browser POSTs with Origin + session cookie succeed, while cross-origin POST is refused 403.
+			rUtter := httptest.NewRequest(http.MethodPost, "/api/utterance", strings.NewReader(`{"text":"status"}`))
+			applyProxy(rUtter)
+			rUtter.Header.Set("Content-Type", "application/json")
+			rUtter.Header.Set("Origin", proxyMode.origin)
+			rUtter.AddCookie(cookies[0])
+			wUtter := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wUtter, rUtter)
+			if wUtter.Code != http.StatusOK {
+				t.Fatalf("paired browser POST /api/utterance = %d %s, want 200", wUtter.Code, wUtter.Body.String())
+			}
+
+			for _, badOrigin := range []string{"https://evil.example", "null"} {
+				rCSRF := httptest.NewRequest(http.MethodPost, "/api/utterance", strings.NewReader(`{"text":"evil"}`))
+				applyProxy(rCSRF)
+				rCSRF.Header.Set("Content-Type", "application/json")
+				rCSRF.Header.Set("Origin", badOrigin)
+				rCSRF.AddCookie(cookies[0])
+				wCSRF := httptest.NewRecorder()
+				h.srv.handler().ServeHTTP(wCSRF, rCSRF)
+				if wCSRF.Code != http.StatusForbidden || !strings.Contains(wCSRF.Body.String(), "origin_not_allowed") {
+					t.Fatalf("Origin %q POST through proxy = %d %s, want 403 origin_not_allowed", badOrigin, wCSRF.Code, wCSRF.Body.String())
+				}
+			}
+
+			// 6. Paired iPhone (no Origin) enrolls, signs in, and uses sds_ ticket through the same proxy.
+			pKey, pPub := newDeviceKey(t)
+			pEnroll := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", strings.NewReader(`{"code":"`+h.pairCode()+`","public_key":"`+pPub+`","name":"iPhone","kind":"ios"}`))
+			applyProxy(pEnroll)
+			pEnroll.Header.Set("Content-Type", "application/json")
+			wpEnroll := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wpEnroll, pEnroll)
+			if wpEnroll.Code != http.StatusOK {
+				t.Fatalf("phone POST /api/devices/enroll = %d %s, want 200", wpEnroll.Code, wpEnroll.Body.String())
+			}
+			var pEnrolled EnrollResponse
+			_ = json.Unmarshal(wpEnroll.Body.Bytes(), &pEnrolled)
+
+			pChReq := httptest.NewRequest(http.MethodGet, "/api/auth/challenge", nil)
+			applyProxy(pChReq)
+			wpCh := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wpCh, pChReq)
+			var pCh ChallengeResponse
+			_ = json.Unmarshal(wpCh.Body.Bytes(), &pCh)
+			pSum := sha256.Sum256([]byte(SignedText(h.srv.deps.Computer.ID, h.srv.deps.TLS.Pin(), pEnrolled.DeviceID, pCh.Nonce, now.Unix())))
+			pSig, _ := ecdsa.SignASN1(rand.Reader, pKey, pSum[:])
+			pSessBody := fmt.Sprintf(`{"device_id":%q,"nonce":%q,"time":%d,"signature":%q,"client":"app"}`,
+				pEnrolled.DeviceID, pCh.Nonce, now.Unix(), base64.StdEncoding.EncodeToString(pSig))
+			pSessReq := httptest.NewRequest(http.MethodPost, "/api/auth/session", strings.NewReader(pSessBody))
+			applyProxy(pSessReq)
+			pSessReq.Header.Set("Content-Type", "application/json")
+			wpSess := httptest.NewRecorder()
+			h.srv.handler().ServeHTTP(wpSess, pSessReq)
+			if wpSess.Code != http.StatusOK {
+				t.Fatalf("phone POST /api/auth/session = %d %s, want 200", wpSess.Code, wpSess.Body.String())
+			}
+		})
+	}
+}
+
+func TestProxiedRateLimitResistsHeaderSpoofing(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	_, pub := newDeviceKey(t)
+
+	// Attacker behind tailscale serve / caddy rotates CF-Connecting-IP,
+	// True-Client-IP, X-Real-IP, and a leading X-Forwarded-For header line on
+	// every request while the proxy appends the real client IP (198.51.100.88).
+	var lastCode int
+	for i := 0; i <= badCodesPerMinute+2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", strings.NewReader(`{"code":"guess","public_key":"`+pub+`","name":"attacker","kind":"ios"}`))
+		r.RemoteAddr, r.Host = "127.0.0.1:54321", "127.0.0.1:7777"
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("CF-Connecting-IP", fmt.Sprintf("203.0.113.%d", i+1))
+		r.Header.Set("True-Client-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		r.Header.Set("X-Real-IP", fmt.Sprintf("192.0.2.%d", i+1))
+		r.Header.Add("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", i+1))
+		r.Header.Add("X-Forwarded-For", "198.51.100.88")
+		w := httptest.NewRecorder()
+		h.srv.handler().ServeHTTP(w, r)
+		lastCode = w.Code
+	}
+	if lastCode != http.StatusTooManyRequests {
+		t.Fatalf("spoofed proxy headers bypassed rate limit: status = %d, want 429", lastCode)
+	}
+
+	// Another client IP behind the same proxy is not blocked.
+	goodCode := h.pairCode()
+	rOther := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", strings.NewReader(`{"code":"`+goodCode+`","public_key":"`+pub+`","name":"legit","kind":"ios"}`))
+	rOther.RemoteAddr, rOther.Host = "127.0.0.1:54321", "127.0.0.1:7777"
+	rOther.Header.Set("Content-Type", "application/json")
+	rOther.Header.Set("X-Forwarded-For", "100.64.0.42")
+	wOther := httptest.NewRecorder()
+	h.srv.handler().ServeHTTP(wOther, rOther)
+	if wOther.Code != http.StatusOK {
+		t.Errorf("other tailnet peer after attacker block = %d %s, want 200", wOther.Code, wOther.Body.String())
+	}
+
+	// Under active Tailscale Funnel (e.g. TCPForward Funnel, where Tailscale adds
+	// no HTTP headers), rotating X-Forwarded-For on every request still shares
+	// the "proxy:funnel" bucket and triggers 429.
+	hFunnel := newHarness(t, harnessOpts{})
+	hFunnel.srv.deps.TailscaleFunnel = func(context.Context, int) (bool, error) { return true, nil }
+	lastCode = 0
+	for i := 0; i <= badCodesPerMinute+2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", strings.NewReader(`{"code":"guess","public_key":"`+pub+`","name":"attacker","kind":"ios"}`))
+		r.RemoteAddr, r.Host = "127.0.0.1:54321", "127.0.0.1:7777"
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		w := httptest.NewRecorder()
+		hFunnel.srv.handler().ServeHTTP(w, r)
+		lastCode = w.Code
+	}
+	if lastCode != http.StatusTooManyRequests {
+		t.Fatalf("Funnel X-Forwarded-For rotation bypassed rate limit: status = %d, want 429", lastCode)
+	}
+}
+
 func TestFunnelStatusParsing(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -311,6 +558,28 @@ func TestFunnelStatusParsing(t *testing.T) {
 			name: "unknown schema with AllowFunnel true fails closed",
 			json: `{
 				"AllowFunnel": {"studio.tail1234.ts.net:443": true}
+			}`,
+			port:      7777,
+			wantAny:   true,
+			wantPort:  true,
+			otherPort: true,
+		},
+		{
+			name: "unparseable Proxy target with AllowFunnel true fails closed",
+			json: `{
+				"Web": {"studio.tail1234.ts.net:443": {"Handlers": {"/": {"Proxy": "unix:/tmp/app.sock"}}}},
+				"AllowFunnel": {"studio.tail1234.ts.net:443": true}
+			}`,
+			port:      7777,
+			wantAny:   true,
+			wantPort:  true,
+			otherPort: true,
+		},
+		{
+			name: "unparseable TCPForward target with AllowFunnel true fails closed",
+			json: `{
+				"TCP": {"8443": {"TCPForward": "localhost:notaport"}},
+				"AllowFunnel": {"studio.tail1234.ts.net:8443": true}
 			}`,
 			port:      7777,
 			wantAny:   true,
@@ -433,9 +702,43 @@ exit 1
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	fn := TailscaleCertCLI(t.TempDir())
+	fn := TailscaleCertCLI(t.TempDir(), 7777)
 	_, _, _, err := fn(context.Background())
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "funnel") {
 		t.Fatalf("TailscaleCertCLI with active Funnel = %v, want Funnel refusal", err)
+	}
+}
+
+func TestTailscaleCertCLIAllowsUnrelatedFunnelPort(t *testing.T) {
+	binDir := t.TempDir()
+	fakeTS := filepath.Join(binDir, "tailscale")
+	script := `#!/bin/sh
+if [ "$1" = "status" ]; then
+  echo '{"Self":{"DNSName":"studio.tail1234.ts.net."}}'
+  exit 0
+fi
+if [ "$1" = "serve" ] && [ "$2" = "status" ]; then
+  echo '{"AllowFunnel":{"studio.tail1234.ts.net:443":true},"Web":{"studio.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}'
+  exit 0
+fi
+if [ "$1" = "cert" ]; then
+  echo "CERT" > "$3"
+  echo "KEY" > "$5"
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(fakeTS, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fn := TailscaleCertCLI(t.TempDir(), 7777)
+	name, cert, key, err := fn(context.Background())
+	if err != nil {
+		t.Fatalf("TailscaleCertCLI with Funnel on port 3000 (not 7777) failed: %v", err)
+	}
+	if name != "studio.tail1234.ts.net" || strings.TrimSpace(string(cert)) != "CERT" || strings.TrimSpace(string(key)) != "KEY" {
+		t.Fatalf("unexpected TailscaleCertCLI output: name=%q cert=%q key=%q", name, cert, key)
 	}
 }

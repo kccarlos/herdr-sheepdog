@@ -93,23 +93,69 @@ func forwardedHTTPS(r *http.Request) bool {
 	return false
 }
 
+// forwardedHost returns the client-facing host (or host:port) reported by
+// reverse-proxy headers so same-origin browser checks keep working behind
+// tailscale serve, caddy, or nginx.
+func forwardedHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if xfh := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); xfh != "" {
+		if _, _, err := net.SplitHostPort(xfh); err == nil {
+			return xfh
+		}
+		if xfp := firstForwardedValue(r.Header.Get("X-Forwarded-Port")); xfp != "" {
+			if p, err := strconv.Atoi(xfp); err == nil && p > 0 && p <= 65535 {
+				return net.JoinHostPort(strings.Trim(xfh, "[]"), xfp)
+			}
+		}
+		return xfh
+	}
+	for _, part := range strings.Split(firstForwardedValue(r.Header.Get("Forwarded")), ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(k), "host") {
+			continue
+		}
+		if h := strings.Trim(strings.TrimSpace(v), `"`); h != "" {
+			return h
+		}
+	}
+	return ""
+}
+
+// canonicalProxyHop normalises one X-Forwarded-For entry to an IP or hostname.
+func canonicalProxyHop(hop string) string {
+	hop = strings.TrimSpace(hop)
+	if hop == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(hop); err == nil {
+		hop = h
+	}
+	hop = strings.Trim(hop, "[]")
+	if ip := net.ParseIP(hop); ip != nil {
+		return ip.String()
+	}
+	return strings.ToLower(hop)
+}
+
 // rateLimitSource keys sign-in and pairing rate limits. Direct remote peers
-// are keyed by TCP source IP; proxied loopback requests are keyed in a
-// separate "proxy:" namespace using the proxy-appended client address so a
-// tunnel brute-force attempt gets 429 without blocking genuine local callers.
-func rateLimitSource(r *http.Request) string {
+// are keyed by TCP source IP; active Tailscale Funnel traffic shares one
+// "proxy:funnel" bucket (since TCPForward Funnel adds no HTTP headers); other
+// proxied loopback requests use the last proxy-appended X-Forwarded-For hop so
+// spoofed client headers cannot evade rate limits.
+func (s *Server) rateLimitSource(r *http.Request) string {
 	if !isLoopbackAddr(r.RemoteAddr) {
 		return sourceIP(r.RemoteAddr)
 	}
-	for _, hdr := range []string{"CF-Connecting-IP", "True-Client-IP", "X-Real-IP"} {
-		if v := strings.TrimSpace(r.Header.Get(hdr)); v != "" {
-			return "proxy:" + v
-		}
+	if s.funnelActive(r.Context(), r) {
+		return "proxy:funnel"
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		for i := len(parts) - 1; i >= 0; i-- {
-			if hop := strings.TrimSpace(parts[i]); hop != "" {
+	xffLines := r.Header.Values("X-Forwarded-For")
+	for i := len(xffLines) - 1; i >= 0; i-- {
+		parts := strings.Split(xffLines[i], ",")
+		for j := len(parts) - 1; j >= 0; j-- {
+			if hop := canonicalProxyHop(parts[j]); hop != "" {
 				return "proxy:" + hop
 			}
 		}

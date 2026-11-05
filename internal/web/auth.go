@@ -155,7 +155,7 @@ type ChallengeResponse struct {
 // handleChallenge hands out a one-time nonce (public).
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	if s.isRateLimitedCaller(r) {
-		ip, now := rateLimitSource(r), s.deps.Now()
+		ip, now := s.rateLimitSource(r), s.deps.Now()
 		if s.limits.isBlocked("signature", ip, now) || !s.limits.allow("challenge", ip, challengesPerMinute, now) {
 			writeRateLimited(w)
 			return
@@ -228,7 +228,7 @@ func SignedText(daemonID, pin, deviceID, nonce string, unix int64) string {
 // handleSession checks a signed challenge and issues a ticket.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	limited := s.isRateLimitedCaller(r)
-	src := rateLimitSource(r)
+	src := s.rateLimitSource(r)
 	if limited && s.limits.isBlocked("signature", src, s.deps.Now()) {
 		writeRateLimited(w)
 		return

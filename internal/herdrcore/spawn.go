@@ -116,8 +116,11 @@ func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args [
 // runs with --no-daemon under hc, as herdr-core's own skill says.
 func (b *Backend) agentCommand(kind string, args []string) string {
 	var words []string
-	for _, w := range procprio.ShellPrefixForOS(b.goos(), b.lookPath()) {
-		words = append(words, shellQuote(w))
+	lp := b.lookPath()
+	if _, err := lp(kind); err == nil {
+		for _, w := range procprio.ShellPrefixForOS(b.goos(), lp) {
+			words = append(words, shellQuote(w))
+		}
 	}
 	words = append(words, kind)
 	if kind == "codex" {

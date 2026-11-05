@@ -67,10 +67,10 @@ func TestShellPrefixForOS(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "darwin with nice and taskpolicy on PATH",
+			name: "darwin with nice and taskpolicy on PATH keeps resolved taskpolicy path",
 			goos: "darwin",
 			bins: []string{"nice", "taskpolicy"},
-			want: []string{"nice", "-n", "10", "taskpolicy", "-c", "utility"},
+			want: []string{"nice", "-n", "10", "/usr/bin/taskpolicy", "-c", "utility"},
 		},
 		{
 			name: "darwin with /usr/sbin/taskpolicy fallback",
@@ -127,6 +127,18 @@ func TestUnwrapArgv(t *testing.T) {
 		{
 			in:   []string{"ionice", "-c2", "-n7", "-t", "choom", "-n", "+500", "env", "FOO=1", "-i", "pi"},
 			want: []string{"pi"},
+		},
+		{
+			in:   []string{"/usr/sbin/taskpolicy", "-c", "utility", "-l", "1", "-g", "throttle", "codex", "--no-daemon"},
+			want: []string{"codex", "--no-daemon"},
+		},
+		{
+			in:   []string{"env", "--unset=FOO", "-S", "BAR=1 claude --model sonnet"},
+			want: []string{"claude", "--model", "sonnet"},
+		},
+		{
+			in:   []string{"env", "--split-string=FOO=1 nice -n 10 codex", "--no-daemon"},
+			want: []string{"codex", "--no-daemon"},
 		},
 		{
 			in:   []string{"claude", "--model", "sonnet"},

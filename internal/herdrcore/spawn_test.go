@@ -55,25 +55,33 @@ func TestStartAgentRunsAtUtilityPriority(t *testing.T) {
 		want string
 	}{
 		{
-			name: "darwin with taskpolicy on PATH",
+			name: "darwin with taskpolicy on PATH keeps resolved /usr/sbin/taskpolicy path",
 			goos: "darwin",
-			bins: map[string]string{"nice": "/usr/bin/nice", "taskpolicy": "/usr/sbin/taskpolicy"},
+			bins: map[string]string{"nice": "/usr/bin/nice", "taskpolicy": "/usr/sbin/taskpolicy", "codex": "/opt/homebrew/bin/codex"},
 			kind: "codex",
 			args: []string{"-m", "x"},
-			want: "nice -n 10 taskpolicy -c utility codex --no-daemon -m x",
+			want: "nice -n 10 /usr/sbin/taskpolicy -c utility codex --no-daemon -m x",
 		},
 		{
 			name: "darwin with /usr/sbin/taskpolicy fallback when /usr/sbin is off PATH",
 			goos: "darwin",
-			bins: map[string]string{"nice": "/usr/bin/nice", "/usr/sbin/taskpolicy": "/usr/sbin/taskpolicy"},
+			bins: map[string]string{"nice": "/usr/bin/nice", "/usr/sbin/taskpolicy": "/usr/sbin/taskpolicy", "claude": "/opt/homebrew/bin/claude"},
 			kind: "claude",
 			args: []string{"--model", "y"},
 			want: "nice -n 10 /usr/sbin/taskpolicy -c utility claude --model y",
 		},
 		{
+			name: "aliased or shell-function worker not on daemon PATH omits execvp wrappers",
+			goos: "darwin",
+			bins: map[string]string{"nice": "/usr/bin/nice", "taskpolicy": "/usr/sbin/taskpolicy"},
+			kind: "claude",
+			args: []string{"--model", "y"},
+			want: "claude --model y",
+		},
+		{
 			name: "linux with nice and ionice",
 			goos: "linux",
-			bins: map[string]string{"nice": "/usr/bin/nice", "ionice": "/usr/bin/ionice"},
+			bins: map[string]string{"nice": "/usr/bin/nice", "ionice": "/usr/bin/ionice", "codex": "/usr/local/bin/codex"},
 			kind: "codex",
 			args: nil,
 			want: "nice -n 10 ionice -c 2 -n 7 -t codex --no-daemon",
@@ -81,7 +89,7 @@ func TestStartAgentRunsAtUtilityPriority(t *testing.T) {
 		{
 			name: "linux with nice only",
 			goos: "linux",
-			bins: map[string]string{"nice": "/usr/bin/nice"},
+			bins: map[string]string{"nice": "/usr/bin/nice", "claude": "/usr/local/bin/claude"},
 			kind: "claude",
 			args: nil,
 			want: "nice -n 10 claude",

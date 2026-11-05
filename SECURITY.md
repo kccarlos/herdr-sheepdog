@@ -9,7 +9,7 @@ Do not include real API keys or tokens in a report. `sheepdog doctor --report` r
 ## What sheepdog is, for threat-modelling
 
 - It is a local daemon you run yourself. It listens on `127.0.0.1` by default; off-loopback traffic requires TLS and a paired device key ([docs/remote-access.md](docs/remote-access.md)).
-- Loopback requests carrying reverse-proxy headers (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`) or arriving while Tailscale Funnel targets the daemon's port never get unauthenticated local authority: paired `sds_` session tickets still work on device routes, while `/setup`, `/debug` and pairing routes answer `403`. Never expose the port to the open internet.
+- Loopback requests carrying reverse-proxy headers (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`) or arriving while Tailscale Funnel targets the daemon's port never get unauthenticated local authority: paired devices (`sds_` session tickets and paired browser sessions) still work on public and device routes, while `/setup`, `/debug` and pairing routes answer `403`. Never expose the port to the open internet.
 - Any paired device can read agent screens, open a phone shell (when `web.shell` is on) and answer prompts until it is revoked on the setup page. The one rail in code: an approval is answered only on the user's own words in that turn.
 - API keys live in `~/.config/sheepdog/.env` (mode 0600) and are redacted from logs and reports.
 

@@ -67,10 +67,8 @@ func ShellPrefixForOS(goos string, lookPath func(string) (string, error)) []stri
 	}
 	switch goos {
 	case "darwin":
-		if _, err := lookPath("taskpolicy"); err == nil {
-			prefix = append(prefix, "taskpolicy", "-c", "utility")
-		} else if _, err := lookPath("/usr/sbin/taskpolicy"); err == nil {
-			prefix = append(prefix, "/usr/sbin/taskpolicy", "-c", "utility")
+		if tp, err := resolveTaskpolicy(lookPath); err == nil {
+			prefix = append(prefix, tp, "-c", "utility")
 		}
 	case "linux":
 		// -t ignores ioprio_set failures inside unprivileged containers so the
@@ -95,18 +93,20 @@ func resolveTaskpolicy(lookPath func(string) (string, error)) (string, error) {
 func UnwrapArgv(argv []string) []string {
 	for len(argv) > 0 {
 		base := path.Base(argv[0])
+		if base == "env" {
+			argv = unwrapEnv(argv)
+			continue
+		}
 		var next int
 		switch base {
 		case "nice":
 			next = unwrapNice(argv)
 		case "taskpolicy":
-			next = unwrapFlagsWithArg(argv, "-c", "-t", "-p")
+			next = unwrapFlagsWithArg(argv, "-c", "-d", "-g", "-t", "-l", "-p", "-m", "-j", "-P", "-S")
 		case "ionice":
 			next = unwrapFlagsWithArg(argv, "-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid")
 		case "choom":
 			next = unwrapFlagsWithArg(argv, "-n", "--adjust", "-p", "--pid")
-		case "env":
-			next = unwrapEnv(argv)
 		default:
 			return argv
 		}
@@ -172,28 +172,96 @@ func unwrapFlagsWithArg(argv []string, withArg ...string) int {
 	return i
 }
 
-func unwrapEnv(argv []string) int {
-	i := 1
-	for i < len(argv) {
-		a := argv[i]
+func unwrapEnv(argv []string) []string {
+	rest := argv[1:]
+	for len(rest) > 0 {
+		a := rest[0]
 		if a == "--" {
-			return i + 1
+			if len(rest) == 1 {
+				return nil
+			}
+			return rest[1:]
 		}
-		if a == "-u" || a == "--unset" || a == "-C" || a == "--chdir" || a == "-S" || a == "--split-string" {
-			i += 2
+		if a == "-S" || a == "--split-string" {
+			if len(rest) < 2 {
+				return nil
+			}
+			rest = append(splitEnvString(rest[1]), rest[2:]...)
+			continue
+		}
+		if v, ok := strings.CutPrefix(a, "-S"); ok && v != "" {
+			rest = append(splitEnvString(v), rest[1:]...)
+			continue
+		}
+		if v, ok := strings.CutPrefix(a, "--split-string="); ok {
+			rest = append(splitEnvString(v), rest[1:]...)
+			continue
+		}
+		if a == "-u" || a == "--unset" || a == "-C" || a == "--chdir" {
+			if len(rest) < 2 {
+				return nil
+			}
+			rest = rest[2:]
 			continue
 		}
 		if strings.HasPrefix(a, "-") && a != "-" {
-			i++
+			rest = rest[1:]
 			continue
 		}
 		if strings.Contains(a, "=") {
-			i++
+			rest = rest[1:]
 			continue
 		}
-		break
+		return rest
 	}
-	return i
+	return nil
+}
+
+func splitEnvString(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inToken := false
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == '\\' && quote == '"' && i+1 < len(s) {
+				i++
+				cur.WriteByte(s[i])
+				continue
+			}
+			if c == quote {
+				quote = 0
+				continue
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			if inToken {
+				out = append(out, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+		case '\'', '"':
+			quote = c
+			inToken = true
+		case '\\':
+			inToken = true
+			if i+1 < len(s) {
+				i++
+				cur.WriteByte(s[i])
+			}
+		default:
+			inToken = true
+			cur.WriteByte(c)
+		}
+	}
+	if inToken {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 func writeOOMScoreAdj(procRoot string, pid int, score int) error {

@@ -127,21 +127,26 @@ func serveConfigTargetsPort(cfg tsServeConfig, port int) bool {
 		recognized := false
 		if extPort != "" {
 			if tcp, ok := cfg.TCP[extPort]; ok && tcp.TCPForward != "" {
-				recognized = true
-				if forwardTargetsPort(tcp.TCPForward, port) {
+				matched, valid := forwardTargetsPort(tcp.TCPForward, port)
+				if !valid || matched {
 					return true
 				}
+				recognized = true
 			}
 		}
 		if webCfg, ok := lookupWebConfig(cfg.Web, hostPort); ok && len(webCfg.Handlers) > 0 {
 			for _, h := range webCfg.Handlers {
-				if h.Proxy != "" {
-					recognized = true
-					if proxyTargetsPort(h.Proxy, port) {
+				switch {
+				case h.Proxy != "":
+					matched, valid := proxyTargetsPort(h.Proxy, port)
+					if !valid || matched {
 						return true
 					}
-				} else if h.Path != "" || h.Text != "" {
 					recognized = true
+				case h.Path != "" || h.Text != "":
+					recognized = true
+				default:
+					return true
 				}
 			}
 		}
@@ -165,27 +170,46 @@ func lookupWebConfig(web map[string]tsWebServerConfig, hostPort string) (tsWebSe
 	return tsWebServerConfig{}, false
 }
 
-func proxyTargetsPort(proxy string, port int) bool {
+func proxyTargetsPort(proxy string, port int) (matched, valid bool) {
 	proxy = strings.TrimSpace(proxy)
 	if strings.Contains(proxy, "://") {
 		u, err := url.Parse(proxy)
-		if err != nil {
-			return false
+		if err != nil || u.Host == "" {
+			return false, false
 		}
-		n, err := strconv.Atoi(u.Port())
-		return err == nil && n == port
+		if p := u.Port(); p != "" {
+			n, err := strconv.Atoi(p)
+			if err != nil || n <= 0 || n > 65535 {
+				return false, false
+			}
+			return n == port, true
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			return port == 80, true
+		case "https", "https+insecure":
+			return port == 443, true
+		default:
+			return false, false
+		}
 	}
 	return forwardTargetsPort(proxy, port)
 }
 
-func forwardTargetsPort(addr string, port int) bool {
+func forwardTargetsPort(addr string, port int) (matched, valid bool) {
 	addr = strings.TrimSpace(addr)
 	if _, p, err := net.SplitHostPort(addr); err == nil {
 		n, err := strconv.Atoi(p)
-		return err == nil && n == port
+		if err != nil || n <= 0 || n > 65535 {
+			return false, false
+		}
+		return n == port, true
 	}
 	n, err := strconv.Atoi(addr)
-	return err == nil && n == port
+	if err != nil || n <= 0 || n > 65535 {
+		return false, false
+	}
+	return n == port, true
 }
 
 var funnelCLICache struct {
@@ -424,14 +448,14 @@ const tailscaleCertFix = "Check that Tailscale is running and logged in, and tha
 // TailscaleCertCLI is the daemon's TailscaleCertFunc: `tailscale status
 // --json` for the name, then `tailscale cert` into <dataDir>/tls/
 // (tsnet.crt, tsnet.key, 0600).
-func TailscaleCertCLI(dataDir string) TailscaleCertFunc {
+func TailscaleCertCLI(dataDir string, port int) TailscaleCertFunc {
 	return func(ctx context.Context) (string, []byte, []byte, error) {
 		bin := tailscaleBin()
 		if bin == "" {
 			return "", nil, nil, errors.New("the tailscale command is not installed")
 		}
-		if serveOut, err := exec.CommandContext(ctx, bin, "serve", "status", "--json").Output(); err == nil && AnyFunnelActive(serveOut) { //nolint:gosec // bin is resolved via tailscaleBin()
-			return "", nil, nil, errors.New("Tailscale Funnel is active on this computer (public internet); run `tailscale funnel reset` first")
+		if serveOut, err := exec.CommandContext(ctx, bin, "serve", "status", "--json").Output(); err == nil && FunnelTargetsPort(serveOut, port) { //nolint:gosec // bin is resolved via tailscaleBin()
+			return "", nil, nil, errors.New("Tailscale Funnel is active on this port (public internet); run `tailscale funnel reset` first")
 		}
 		out, err := exec.CommandContext(ctx, bin, "status", "--json").Output()
 		if err != nil {
