@@ -256,6 +256,21 @@ func TestSignOffSkipsSlashCommands(t *testing.T) {
 	}
 }
 
+func TestSignOffPreservesTrailingImagePath(t *testing.T) {
+	if isSlashCommand("/tmp/photo.png") {
+		t.Error("image path is not a slash command")
+	}
+	for _, in := range []string{"look\n/tmp/photo.png", "~/photo.png", "/tmp/photo.png"} {
+		got := withSignOff(in)
+		if got != in+"\n"+SignOff {
+			t.Errorf("got %q", got)
+		}
+		if again := withSignOff(got); again != got {
+			t.Errorf("sign-off duplicated: %q", again)
+		}
+	}
+}
+
 func TestJournalRedactsWorkerSecrets(t *testing.T) {
 	h := newHarness(t, withWorkerLog(t.TempDir()))
 	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)

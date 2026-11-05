@@ -59,11 +59,14 @@ const SignOff = "When you finish, end with three short lines for someone who can
 // that starts with "/" is prose and keeps the trailer.
 func withSignOff(text string) string {
 	text = strings.TrimSpace(text)
-	if isSlashCommand(text) {
-		return trimCommandPunct(text)
-	}
 	if text == "" || strings.HasSuffix(text, SignOff) {
 		return text
+	}
+	if picturePath.MatchString(text) {
+		return text + "\n" + SignOff
+	}
+	if isSlashCommand(text) {
+		return trimCommandPunct(text)
 	}
 	return prose.Terminate(text) + " " + SignOff
 }
@@ -72,7 +75,7 @@ func withSignOff(text string) string {
 // command: after trimming, a single line that starts with "/".
 func isSlashCommand(text string) bool {
 	text = strings.TrimSpace(text)
-	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n")
+	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n") && !picturePath.MatchString(text)
 }
 
 // trimCommandPunct drops sentence punctuation and quotes from the very
