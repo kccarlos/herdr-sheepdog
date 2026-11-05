@@ -99,6 +99,10 @@ final class AgentsModel {
         !collapsedComputers.contains(id)
     }
 
+    func expandComputer(_ id: String) {
+        collapsedComputers.remove(id)
+    }
+
     func toggleComputer(_ id: String) {
         if collapsedComputers.contains(id) {
             collapsedComputers.remove(id)

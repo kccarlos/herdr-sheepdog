@@ -104,6 +104,11 @@ extension SessionViewModel {
             }
         }
         model.onRenewTicket = { endpoints[id]?.credentials?.dropTicket() }
+        model.onOnline = { [weak self] in
+            guard let self, self.demo == nil, PushCoordinator.shared.model === self else { return }
+            let pairedID = self.settings.computers.computer(id) != nil ? id : nil
+            PushCoordinator.shared.computerCameOnline(id: pairedID, endpoint: self.endpoints[id])
+        }
         return model
     }
 

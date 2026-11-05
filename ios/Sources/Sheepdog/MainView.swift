@@ -23,6 +23,13 @@ struct MainView: View {
             : model.navigation.pane == .conversation && model.navigation.path.isEmpty
     }
 
+    /// The Agents / All agents view is in front, nothing over it.
+    private var agentsScreen: Bool {
+        split
+            ? ui.detail == .allAgents && ui.detailPath.isEmpty
+            : model.navigation.pane == .flock && model.navigation.path.isEmpty
+    }
+
     var body: some View {
         Group {
             if split {
@@ -31,7 +38,12 @@ struct MainView: View {
                 PhoneRootView()
             }
         }
-            .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen))
+            .modifier(SessionChrome(ui: ui, voiceScreen: voiceScreen, agentsScreen: agentsScreen))
+            .onChange(of: model.navigation.focusedAgent, initial: true) { _, target in
+                guard target != nil, split, scenes.isPresenter(sceneID) else { return }
+                ui.detailPath = NavigationPath()
+                ui.detail = .allAgents
+            }
             .onChange(of: model.navigation.windowRequest) { _, request in
                 // The window that showed the sheet opens it, once.
                 guard let request, scenes.isPresenter(sceneID) else { return }
@@ -149,7 +161,7 @@ struct PhoneRootView: View {
                             question: { model.questionCard(for: $0) },
                             answer: { model.answer(question: $0, option: $1) },
                             expanded: Bindable(model.agentsModel).expandedAgents,
-                            focusedPaneID: Bindable(model.navigation).focusedAgentPaneID,
+                            focusedAgent: Bindable(model.navigation).focusedAgent,
                             onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
                             voiceQuestionID: model.approval?.pending.id,
                             computers: model.sectionSnapshots,
@@ -158,7 +170,8 @@ struct PhoneRootView: View {
                             talkTo: { model.talk(to: $0) },
                             retry: { model.session($0)?.retry() },
                             collapsedComputers: model.agentsModel.collapsedComputers,
-                            toggleComputer: { model.agentsModel.toggleComputer($0) }
+                            toggleComputer: { model.agentsModel.toggleComputer($0) },
+                            expandComputer: { model.agentsModel.expandComputer($0) }
                         )
                     }
                 }
@@ -575,6 +588,8 @@ struct SessionChrome: ViewModifier {
     let ui: SceneUI
     /// The layout shows the Conversation with nothing over it.
     let voiceScreen: Bool
+    /// The layout shows Agents / All agents with nothing over it.
+    var agentsScreen: Bool = false
 
     @EnvironmentObject private var model: SessionViewModel
     private let scenes = SceneCoordinator.shared
@@ -591,11 +606,14 @@ struct SessionChrome: ViewModifier {
     /// own sheet counts as the voice screen, so the next card can replace
     /// it.
     private var screenReport: ScreenReport {
-        let shown = voiceScreen
-            && !model.showSettings
+        let uncovered = !model.showSettings
             && !model.demoActive
             && model.agentsModel.screenCovers.isEmpty
-        return ScreenReport(visible: appPhase == .active, voiceScreen: shown)
+        return ScreenReport(
+            visible: appPhase == .active,
+            voiceScreen: voiceScreen && uncovered,
+            agentsScreen: agentsScreen && uncovered
+        )
     }
 
     private var presentation: PresentationCoordinator { model.presentation }
@@ -692,7 +710,7 @@ struct SessionChrome: ViewModifier {
             }
             .onChange(of: screenReport, initial: true) { _, report in
                 guard owns else { return }
-                model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen)
+                model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen, agentsScreen: report.agentsScreen)
             }
             .onAppear { model.start() }
             .onChange(of: appPhase) { _, phase in
@@ -764,6 +782,7 @@ struct TopBar: View {
 private struct ScreenReport: Equatable {
     var visible: Bool
     var voiceScreen: Bool
+    var agentsScreen: Bool = false
 }
 
 /// The first-run coach mark: a bubble pointing down at the mic button.

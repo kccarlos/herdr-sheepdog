@@ -136,12 +136,13 @@ public struct PushPayload: Equatable, Sendable {
     public var body: String?
 
     public init(kind: String, paneID: String, agent: String? = nil, pendingID: String? = nil, eventID: String? = nil,
-                options: [PendingOption] = [], category: String? = nil, title: String? = nil, body: String? = nil) {
+                computer: String? = nil, options: [PendingOption] = [], category: String? = nil, title: String? = nil, body: String? = nil) {
         self.kind = kind
         self.paneID = paneID
         self.agent = agent
         self.pendingID = pendingID
         self.eventID = eventID
+        self.computer = computer
         self.options = options
         self.category = category
         self.title = title
@@ -180,6 +181,48 @@ public struct PushPayload: Equatable, Sendable {
 
     /// An approval this phone can answer from the notification.
     public var isAnswerable: Bool { pendingID != nil && !options.isEmpty }
+
+    /// `userInfo` for the replacement follow-up notification posted when a
+    /// background action fails or cannot answer, preserving `computer` so
+    /// tapping it still opens the right computer's card.
+    public func openInsteadUserInfo() -> [String: Any] {
+        var sd: [String: Any] = [
+            "kind": kind,
+            "pane_id": paneID,
+            "agent": agent ?? "",
+        ]
+        if let computer = computer?.trimmed, !computer.isEmpty {
+            sd["computer"] = computer
+        }
+        return ["sheepdog": sd]
+    }
+}
+
+/// Which agent card a notification tap asks the app to reveal: the pane id,
+/// plus the computer id when the payload named one (`sheepdog.computer`).
+public struct AgentFocus: Equatable, Sendable {
+    public var computerID: String?
+    public var paneID: String
+
+    public init(computerID: String? = nil, paneID: String) {
+        let trimmedComputer = computerID?.trimmed
+        self.computerID = (trimmedComputer?.isEmpty == false) ? trimmedComputer : nil
+        self.paneID = paneID.trimmed
+    }
+
+    /// True when this focus targets a secondary computer rather than `currentComputerID`.
+    public func isOtherComputer(currentComputerID: String?) -> Bool {
+        guard let computerID else { return false }
+        return computerID != currentComputerID
+    }
+
+    /// The card expansion and scroll anchor key used in multi-computer Agents views.
+    public func cardKey(currentComputerID: String?) -> String {
+        if let computerID, isOtherComputer(currentComputerID: currentComputerID) {
+            return "\(computerID)|\(paneID)"
+        }
+        return paneID
+    }
 }
 
 /// The notification categories and actions the app registers, and what
@@ -218,6 +261,77 @@ public enum PushActions {
         default: option = nil
         }
         return option.map { (pendingID, $0) }
+    }
+
+    /// Answers a pending prompt from a cold background notification wake:
+    /// when a computer has multiple stored addresses (e.g. LAN + Tailscale),
+    /// stagger-races `GET /api/hello` across them so a blackholed LAN IP
+    /// does not stall for a full request timeout, then sends
+    /// `POST /api/pending/answer` once on the winning endpoint.
+    @discardableResult
+    public static func answerPending(
+        id: String,
+        option: Int,
+        endpoints: [DaemonEndpoint],
+        stagger: TimeInterval = AddressRace.stagger,
+        makeClient: @escaping @Sendable (DaemonEndpoint) -> DaemonClient = { DaemonClient(endpoint: $0) }
+    ) async throws -> DaemonEndpoint {
+        guard let first = endpoints.first else { throw DaemonError.pairing(.notPaired) }
+        if endpoints.count == 1 {
+            let client = makeClient(first)
+            defer { client.invalidate() }
+            _ = try await client.answerPending(id: id, option: option)
+            return first
+        }
+        enum ProbeOutcome: Sendable {
+            case ok(Int)
+            case failed(Int, Error)
+        }
+        var winnerIndex: Int?
+        var preferredError: Error?
+        var fallbackError: Error?
+        await withTaskGroup(of: ProbeOutcome.self) { group in
+            for (index, endpoint) in endpoints.enumerated() {
+                group.addTask {
+                    if index > 0, stagger > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(stagger * Double(index) * 1_000_000_000))
+                        if Task.isCancelled { return .failed(index, CancellationError()) }
+                    }
+                    let client = makeClient(endpoint)
+                    defer { client.invalidate() }
+                    do {
+                        _ = try await client.hello()
+                        return .ok(index)
+                    } catch {
+                        return .failed(index, error)
+                    }
+                }
+            }
+            for await outcome in group {
+                switch outcome {
+                case let .ok(index):
+                    winnerIndex = index
+                    group.cancelAll()
+                case let .failed(index, error):
+                    if !(error is CancellationError) {
+                        if index == 0 {
+                            preferredError = error
+                        } else if fallbackError == nil {
+                            fallbackError = error
+                        }
+                    }
+                }
+                if winnerIndex != nil { break }
+            }
+        }
+        guard let winnerIndex else {
+            throw preferredError ?? fallbackError ?? DaemonError.pairing(.notPaired)
+        }
+        let chosen = endpoints[winnerIndex]
+        let client = makeClient(chosen)
+        defer { client.invalidate() }
+        _ = try await client.answerPending(id: id, option: option)
+        return chosen
     }
 }
 
@@ -346,5 +460,84 @@ public enum PushPolicy {
             lead = "Your daemon sends a notification when an agent needs you, even with the app closed; approvals can be answered from it."
         }
         return lead + " " + always
+    }
+
+    /// Whether a notification arriving while the app is in the foreground
+    /// should suppress its system banner/sound because the screen or voice
+    /// already shows it live.
+    public static func shouldSuppressForegroundBanner(
+        payload: PushPayload?,
+        currentComputerID: String?,
+        currentLinkUsable: Bool,
+        currentEventsOpen: Bool,
+        voiceConnected: Bool,
+        viewingAgents: Bool,
+        otherComputerEventsOpen: Bool
+    ) -> Bool {
+        guard let payload else { return false }
+        let isOther = payload.computer != nil && currentComputerID != nil && payload.computer != currentComputerID
+        if isOther {
+            guard otherComputerEventsOpen else { return false }
+            return payload.isAnswerable || viewingAgents
+        }
+        guard currentLinkUsable && (currentEventsOpen || voiceConnected) else { return false }
+        return payload.isAnswerable || voiceConnected || viewingAgents
+    }
+}
+
+/// Tracks which computers (or bare fixture endpoints) have accepted this
+/// phone's APNs device token, keyed by `computer:<daemonID>` for paired
+/// computers so failing over between addresses or switching computers never
+/// invalidates registration status.
+public struct PushRegistrationState: Equatable, Sendable {
+    public private(set) var registeredTargets: Set<String> = []
+    public private(set) var errors: [String: String] = [:]
+
+    public init(registeredTargets: Set<String> = [], errors: [String: String] = [:]) {
+        self.registeredTargets = registeredTargets
+        self.errors = errors
+    }
+
+    public static func targetKey(computerID: String?, endpointDisplay: String) -> String {
+        if let id = computerID?.trimmed, !id.isEmpty {
+            return "computer:\(id)"
+        }
+        return "endpoint:\(endpointDisplay)"
+    }
+
+    public mutating func recordSuccess(computerID: String?, endpointDisplay: String) {
+        let key = Self.targetKey(computerID: computerID, endpointDisplay: endpointDisplay)
+        registeredTargets.insert(key)
+        errors.removeValue(forKey: key)
+    }
+
+    public mutating func recordNoService(computerID: String?, endpointDisplay: String) {
+        let key = Self.targetKey(computerID: computerID, endpointDisplay: endpointDisplay)
+        registeredTargets.remove(key)
+        errors[key] = "This daemon has no notification service."
+    }
+
+    public mutating func recordError(_ message: String, computerID: String?, endpointDisplay: String) {
+        let key = Self.targetKey(computerID: computerID, endpointDisplay: endpointDisplay)
+        errors[key] = message
+    }
+
+    public mutating func unregister(computerID: String) {
+        let key = Self.targetKey(computerID: computerID, endpointDisplay: "")
+        registeredTargets.remove(key)
+        errors.removeValue(forKey: key)
+    }
+
+    public mutating func reset() {
+        registeredTargets.removeAll()
+        errors.removeAll()
+    }
+
+    public func isRegistered(computerID: String?, endpointDisplay: String) -> Bool {
+        registeredTargets.contains(Self.targetKey(computerID: computerID, endpointDisplay: endpointDisplay))
+    }
+
+    public func error(computerID: String?, endpointDisplay: String) -> String? {
+        errors[Self.targetKey(computerID: computerID, endpointDisplay: endpointDisplay)]
     }
 }

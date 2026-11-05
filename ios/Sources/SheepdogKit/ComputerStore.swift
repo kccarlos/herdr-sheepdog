@@ -113,6 +113,22 @@ public final class ComputerStore: @unchecked Sendable {
         return DaemonEndpoint(text: address(for: id), secure: !computer.isLoopbackFixture, credentials: creds)
     }
 
+    /// Every candidate endpoint for a computer, ordered for racing: the
+    /// remembered winner on `interface` first (when known), then the
+    /// preferred address, then the rest of `computer.addresses` without
+    /// duplicates.
+    public func candidateEndpoints(for id: String, interface: NetworkInterface? = nil) -> [DaemonEndpoint] {
+        guard let computer = computer(id) else { return [] }
+        let creds = credentials(for: id)
+        let preferred = address(for: id)
+        var base: [String] = preferred.isEmpty ? [] : [preferred]
+        for addr in computer.addresses where !base.contains(addr) { base.append(addr) }
+        let winners = LinkWinnerDefaults(defaults: defaults).load(computerID: id)
+        let ordered = AddressRace.order(addresses: base, winners: winners, interface: interface)
+        let secure = !computer.isLoopbackFixture
+        return ordered.compactMap { DaemonEndpoint(text: $0, secure: secure, credentials: creds) }
+    }
+
     // MARK: - Changes
 
     /// Saves a computer from a pairing: a re-pair of a known daemon id

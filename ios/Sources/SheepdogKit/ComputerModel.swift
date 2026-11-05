@@ -93,6 +93,8 @@ public final class ComputerModel {
     @ObservationIgnored public var eventsSince: (() -> UInt64)?
     /// The stream's own life.
     @ObservationIgnored public private(set) var liveUpdates: SocketLife = .idle
+    /// Fires whenever this computer's link transitions into `.online`.
+    @ObservationIgnored public var onOnline: (() -> Void)?
 
     public enum AnswerFeedback: Equatable, Sendable {
         case tapped
@@ -399,10 +401,12 @@ public final class ComputerModel {
     // MARK: - The link
 
     private func linkChanged(_ next: ComputerLink) {
+        let wasOnline: Bool = { if case .online = link.state { return true }; return false }()
         link = next
         set(\.reachability, Reachability(next))
         set(\.canTalkTo, Self.canTalkTo(next))
         onLinkChange?(next)
+        if !wasOnline, case .online = next.state { onOnline?() }
     }
 
     /// Talk to may switch to a computer in this link state.

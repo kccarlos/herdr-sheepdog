@@ -15,7 +15,7 @@ struct FlockView: View {
     /// The cards the user opened (kept for the session).
     @Binding var expanded: Set<String>
     /// A notification tap: scroll to this agent's card, then forget it.
-    @Binding var focusedPaneID: String?
+    @Binding var focusedAgent: AgentFocus?
     /// The empty state's New agent, when the daemon has agent actions.
     var onNewAgent: (() -> Void)?
     /// The voice's own question: its buttons keep the `approval.*` names.
@@ -34,6 +34,7 @@ struct FlockView: View {
     /// Closed computer sections, owned by `AgentsModel`.
     var collapsedComputers: Set<String> = []
     var toggleComputer: (String) -> Void = { _ in }
+    var expandComputer: (String) -> Void = { _ in }
 
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
@@ -62,7 +63,7 @@ struct FlockView: View {
                 .padding(.bottom, 12)
             }
             .onAppear { scrollToFocus(proxy) }
-            .onChange(of: focusedPaneID) { _, _ in scrollToFocus(proxy) }
+            .onChange(of: focusedAgent) { _, _ in scrollToFocus(proxy) }
         }
         .accessibilityIdentifier("flock.list")
     }
@@ -183,6 +184,7 @@ struct FlockView: View {
                         ),
                         answer: answer
                     )
+                    .id("\(computer.id)|\(agent.paneID)")
                 }
             }
         }
@@ -224,12 +226,24 @@ struct FlockView: View {
     }
 
     private func scrollToFocus(_ proxy: ScrollViewProxy) {
-        guard let id = focusedPaneID else { return }
-        if flock.notRunning.contains(where: { $0.paneID == id }) { showNotRunning = true }
-        if question(id) == nil { expanded.insert(id) }
+        guard let target = focusedAgent else { return }
+        let currentID = computers.first(where: \.isCurrent)?.id
+        let isOther = sectioned && target.isOtherComputer(currentComputerID: currentID)
+        let scrollID: String
+        if isOther, let cid = target.computerID {
+            expandComputer(cid)
+            let key = "\(cid)|\(target.paneID)"
+            if remoteCard(cid, target.paneID) == nil { expanded.insert(key) }
+            scrollID = key
+        } else {
+            if let currentID { expandComputer(currentID) }
+            if flock.notRunning.contains(where: { $0.paneID == target.paneID }) { showNotRunning = true }
+            if question(target.paneID) == nil { expanded.insert(target.paneID) }
+            scrollID = target.paneID
+        }
         DispatchQueue.main.async {
-            withAnimation { proxy.scrollTo(id, anchor: .top) }
-            focusedPaneID = nil
+            withAnimation { proxy.scrollTo(scrollID, anchor: .top) }
+            focusedAgent = nil
         }
     }
 }

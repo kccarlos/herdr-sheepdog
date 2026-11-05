@@ -225,6 +225,51 @@ final class SessionViewModel: ObservableObject {
         agentsModel.pendingQuestion(for: agent)
     }
 
+    /// Set by the active window when the Agents / All agents view is on screen.
+    var viewingAgentsScreen = false
+    private var hasReportedScreen = false
+
+    func shouldSuppressForegroundPush(_ payload: PushPayload?) -> Bool {
+        let currentID = settings.computers.currentID
+        let otherOpen: Bool = {
+            guard let cid = payload?.computer, let currentID, cid != currentID,
+                  let other = session(cid) else { return false }
+            return other.link.isUsable && other.liveUpdates == .open
+        }()
+        let viewingAgents = hasReportedScreen
+            ? viewingAgentsScreen
+            : (viewingAgentsScreen || (navigation.pane == .flock && navigation.path.isEmpty && !showSettings))
+        let voiceLive = voice.core.connection.socket == .open && voice.state != .voiceOff
+        return PushPolicy.shouldSuppressForegroundBanner(
+            payload: payload,
+            currentComputerID: currentID,
+            currentLinkUsable: link.isUsable,
+            currentEventsOpen: linkModel.liveUpdates == .open,
+            voiceConnected: voiceLive,
+            viewingAgents: viewingAgents,
+            otherComputerEventsOpen: otherOpen
+        )
+    }
+
+    func focusAgent(_ target: AgentFocus) {
+        guard !target.paneID.isEmpty else { return }
+        let isOther = showsComputerLabels && target.isOtherComputer(currentComputerID: currentComputerID)
+        if isOther, let cid = target.computerID {
+            agentsModel.expandComputer(cid)
+            if remoteCard(computer: cid, paneID: target.paneID) == nil {
+                agentsModel.expandedAgents.insert(target.cardKey(currentComputerID: currentComputerID))
+            }
+        } else {
+            agentsModel.expandComputer(currentComputerID)
+            if questionCard(for: target.paneID) == nil {
+                agentsModel.expandedAgents.insert(target.paneID)
+            }
+        }
+        navigation.path = NavigationPath()
+        navigation.pane = .flock
+        navigation.focusedAgent = target
+    }
+
     // MARK: - Collaborators
 
     let settings: SettingsStore
@@ -1502,9 +1547,11 @@ final class SessionViewModel: ObservableObject {
 
     /// The main screen says what is in front: sent to the daemon as
     /// `visibility` when it changed and the daemon takes it.
-    func setScreen(visible: Bool, voiceScreen: Bool) {
+    func setScreen(visible: Bool, voiceScreen: Bool, agentsScreen: Bool = false) {
+        hasReportedScreen = true
         screenVisible = visible
         voiceScreenInFront = voiceScreen
+        viewingAgentsScreen = visible && agentsScreen
         // The conversation is in front: its rows are the card.
         if voiceScreen || !visible { cardLabel.hide() }
         if demo == nil, let message = cardVisibility.update(visible: visible, voiceScreen: voiceScreen) {

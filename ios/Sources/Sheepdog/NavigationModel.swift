@@ -1,4 +1,5 @@
 import Foundation
+import SheepdogKit
 import SwiftUI
 
 /// Where the main screen is and where it is asked to go: the pane it shows,
@@ -13,7 +14,11 @@ final class NavigationModel {
     /// Which pane the main screen shows; a notification tap switches it.
     var pane: MainPane = .conversation
     /// The agent the Agents pane should scroll to (a notification tap).
-    var focusedAgentPaneID: String?
+    var focusedAgent: AgentFocus?
+    var focusedAgentPaneID: String? {
+        get { focusedAgent?.paneID }
+        set { focusedAgent = newValue.map { AgentFocus(paneID: $0) } }
+    }
     /// The main screen's navigation stack (a card's "Open window" pushes
     /// onto it).
     var path = NavigationPath()
