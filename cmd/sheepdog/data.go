@@ -147,7 +147,7 @@ func checkDataDir(dir string) error {
 			return errors.New("refusing to delete " + abs + ": it holds your home directory")
 		}
 	}
-	for _, mark := range []string{"events", "logs", "brain", "state.json", "sheepdog.pid", "notes.jsonl", "push_devices.json", "cards.jsonl", "wrapups.json"} {
+	for _, mark := range []string{"events", "logs", "brain", "state.json", "sheepdog.pid", "notes.jsonl", "push_devices.json", "vapid_key.json", "web_push_devices.json", "cards.jsonl", "wrapups.json"} {
 		if fileExists(filepath.Join(abs, mark)) {
 			return nil
 		}

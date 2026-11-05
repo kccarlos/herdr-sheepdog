@@ -18,6 +18,13 @@ const NiceDelta = 10
 // sub-agents so the kernel reclaims a runaway child before the daemon.
 const OOMScoreAdj = 500
 
+// linuxOOMScript raises oom_score_adj to OOMScoreAdj (never lowering it) and
+// then execs the target, so the child never runs at the default score. Setting
+// it from the parent after Start races a fast child that reads its own value
+// first. Errors are silenced so the target still starts and its stderr stays
+// clean.
+const linuxOOMScript = `{ c=$(cat /proc/self/oom_score_adj); [ "${c:-0}" -ge 500 ] || echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; exec "$@"`
+
 // WrapArgv wraps argv for exec.Command on the current OS. On macOS it runs the
 // child under QOS_CLASS_UTILITY via taskpolicy -c utility (never background
 // -b, which pins builds to Apple Silicon efficiency cores).
@@ -33,11 +40,20 @@ func WrapArgvForOS(goos string, lookPath func(string) (string, error), argv []st
 	if len(argv) == 0 || lookPath == nil {
 		return argv
 	}
-	if goos != "darwin" {
+	if goos != "darwin" && goos != "linux" {
 		return argv
 	}
 	if _, err := lookPath(argv[0]); err != nil {
 		return argv
+	}
+	if goos == "linux" {
+		sh, err := lookPath("/bin/sh")
+		if err != nil {
+			return argv
+		}
+		out := make([]string, 0, 4+len(argv))
+		out = append(out, sh, "-c", linuxOOMScript, "sh")
+		return append(out, argv...)
 	}
 	tp, err := resolveTaskpolicy(lookPath)
 	if err != nil {
