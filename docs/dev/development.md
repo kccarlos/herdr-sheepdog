@@ -226,6 +226,18 @@ the merge. The relay workflow runs only for `relay/**`. The app's tags are
 The original v1 plan and older run reports are in
 [`history/`](history/).
 
+### README and docs images
+
+Nothing in `assets/readme/` is edited by hand; each file has a script, run locally (never in CI):
+
+| File | Script | What it needs |
+| --- | --- | --- |
+| `setup.gif` (the setup page, first run) | `scripts/readme-media/setup.sh` | Go, ffmpeg, a Chromium. It runs a private daemon with no keys on port 18001; a fake key is "checked" by the tool and the QR is not a real pairing code. |
+| `app/*.png` (iPhone and iPad screenshots in the README and [iphone-app.md](../iphone-app.md#screenshots)) | `ios/scripts/readme-shots.sh` | Xcode, xcodegen, and the iPhone 18 Pro and iPad Air 11-inch (M4) simulators (`SHOTS_PHONE`, `SHOTS_IPAD`). It reuses the screenshot hooks of `LaunchReviewScreenshotsUITests`, `RedesignShotsUITests`, `FilesDemoUITests` and `ChangesDemoUITests`, in the offline demo, status bar 9:41. |
+| the other GIFs and videos | the other scripts in `scripts/readme-media/` | see each script's header |
+
+Look at every image before you commit it: demo names only, no real host, address, key or name. Keep a PNG under 400 KB and a GIF under 3 MB.
+
 ## Known limits
 
 - **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as

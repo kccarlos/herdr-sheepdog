@@ -11,6 +11,12 @@ The iPhone app for [sheepdog](../README.md): the microphone, the speaker
 and the screen. The daemon on your computer owns the models and the
 agents. There is no sheepdog server and no account.
 
+<p align="center">
+  <img src="../assets/readme/app/conversation.png" alt="The app's conversation" width="140">
+  <img src="../assets/readme/app/agents.png" alt="The Agents page: Needs you, Working, Done" width="140">
+  <img src="../assets/readme/app/files.png" alt="The Files browser" width="140">
+</p>
+
 **Using the app** (install, the demo, pairing, notifications,
 troubleshooting) is in [docs/iphone-app.md](../docs/iphone-app.md). Its
 privacy policy is the daemon's [privacy page](../docs/privacy.md). This
