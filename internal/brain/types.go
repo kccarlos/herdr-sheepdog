@@ -146,6 +146,13 @@ type Request struct {
 	// the question as parsed, so the one line covers the result and the
 	// question both.
 	AlsoAsking string
+	// StopError is set on an announce turn when the worker's session
+	// transcript shows its turn ended on an API, quota, rate-limit, auth,
+	// connection or abort condition ("stopped because …"); StopDetail is
+	// the cleaned error message from the transcript (wrapped as worker
+	// output before entering the window).
+	StopError  string
+	StopDetail string
 	// Investigation is the finished job a KindInvestigation turn
 	// delivers: its question, the user's own words, the sub-agent's
 	// answer and what it follows up on.
@@ -497,6 +504,11 @@ type AgentInfo struct {
 type SessionRead struct {
 	LastAssistant string
 	Instruction   string
+	// StopError is non-empty when the worker's last turn ended on an
+	// error or abort ("stopped because …"); StopDetail is the cleaned
+	// error line from its transcript.
+	StopError  string
+	StopDetail string
 	// Files are the base names of the files it edited; Tools counts its
 	// tool calls by name.
 	Files []string
@@ -513,6 +525,8 @@ type JournalEntry struct {
 	LastAssistant string
 	// Instruction is the last instruction it received.
 	Instruction string
+	// Error is non-empty when the turn stopped on an error or abort.
+	Error string
 	// Files are the base names of files it edited; Tools its tool calls
 	// by name.
 	Files []string

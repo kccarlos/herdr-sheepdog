@@ -17,6 +17,7 @@ const NotesFile = "notes.jsonl"
 // note tool, whose result is already in the transcript, so the note is
 // not ingested a second time.
 func (s *Supervisor) appendNote(text string) error {
+	text = s.cfg.Redactor.String(text)
 	n := state.Note{Text: text, At: s.cfg.Now()}
 	if err := s.store.UpdateSession(func(ss *state.Session) { ss.Notes = append(ss.Notes, n) }); err != nil {
 		return err
