@@ -1905,12 +1905,14 @@ final class SessionViewModel: ObservableObject {
 
     /// Pairs with the computer a scanned code names (docs/dev/ws-contract.md
     /// "Pairing"): finds the first address whose key matches the code's pin,
-    /// makes this phone's key, enrolls once (codes are one-time), signs in,
-    /// and only then saves the computer and repoints the app.
-    func pair(_ code: PairingCode) async -> PairOutcome {
+    /// reuses or makes this phone's key, enrolls once (codes are one-time),
+    /// saves the computer and repoints the app, warming a session ticket on
+    /// a best-effort basis.
+    func pair(_ code: PairingCode, protocolClasses: [AnyClass]? = nil) async -> PairOutcome {
         let trust = PinnedTrustDelegate { [code.pin] }
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
+        if let protocolClasses { config.protocolClasses = protocolClasses }
         let session = URLSession(configuration: config, delegate: trust, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let mismatches = MismatchCounter()
@@ -1932,14 +1934,19 @@ final class SessionViewModel: ObservableObject {
             return .failed(title: "None of the code's addresses answered", detail: "Tried \(code.addresses.joined(separator: ", ")). \(SetupHelp.unreachableFix)")
         }
         do {
-            DeviceKey.delete(daemonID: code.daemonID)
+            let hadKey = DeviceKey.load(daemonID: code.daemonID) != nil
             let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
+            var enrolledOK = false
+            defer {
+                if !enrolledOK, !hadKey { DeviceKey.delete(daemonID: code.daemonID) }
+            }
             guard let publicKey = DeviceKey.publicKey(key) else {
                 return .failed(title: "This phone could not make its key", detail: "Try again; restart the phone if it keeps failing.")
             }
             let auth = DeviceAuth(base: base, session: session, trust: trust)
             let kind = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
             let enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
+            enrolledOK = true
             let computer = PairedComputer(
                 daemonID: enrolled.daemonID.isEmpty ? code.daemonID : enrolled.daemonID,
                 name: code.name.isEmpty ? enrolled.name : code.name,
@@ -1953,13 +1960,13 @@ final class SessionViewModel: ObservableObject {
             let repoint = store.currentID == nil || store.currentID == computer.daemonID
             store.save(computer, address: address)
             settings.hasBeenConfigured = true
-            _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
+            if repoint { store.currentID = computer.daemonID }
+            // Best-effort warm-up: the one-time enroll code is already spent,
+            // and the computer's own link signs in if a blip makes this fail.
+            _ = try? await store.credentials(for: computer.daemonID).ticket(base: base)
             notices.setPairingProblem(nil)
             computersChanged()
-            if repoint {
-                store.currentID = computer.daemonID
-                endpointChanged()
-            }
+            if repoint { endpointChanged() }
             return .paired(computer)
         } catch let problem as PairingProblem {
             return .problem(problem)

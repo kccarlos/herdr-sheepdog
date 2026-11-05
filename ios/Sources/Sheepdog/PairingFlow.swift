@@ -47,6 +47,31 @@ enum PairingStage: Equatable {
     }
 }
 
+/// Finishes the `.paired` stage at most once whether the user taps "Done"
+/// or swipes the sheet down: resolves any local rename and fires `onPaired`.
+struct PairingCompletion {
+    var pairedID: String?
+    var typedName: String?
+    private(set) var didFinish = false
+
+    mutating func begin(daemonID: String) {
+        pairedID = daemonID
+        typedName = nil
+        didFinish = false
+    }
+
+    mutating func finish(stage: PairingStage) -> (shouldNotifyPaired: Bool, rename: (id: String, name: String)?) {
+        guard !didFinish, case let .paired(name) = stage else { return (false, nil) }
+        didFinish = true
+        guard let suggestion = ComputerNaming.suggestion(for: name), let pairedID else {
+            return (true, nil)
+        }
+        let chosen = (typedName ?? suggestion).trimmingCharacters(in: .whitespacesAndNewlines)
+        let rename = (!chosen.isEmpty && chosen != name) ? (pairedID, chosen) : nil
+        return (true, rename)
+    }
+}
+
 /// The pairing flow as one sheet: primer, scanner, "Pairing…", and the end
 /// ("Paired with X", "This code has expired", "Please scan again").
 struct PairingFlowView: View {
@@ -55,12 +80,15 @@ struct PairingFlowView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State var stage: PairingStage
-    /// Runs after "Done" on the paired screen.
+    /// Runs after "Done" or swipe-dismissal on the paired screen.
     var onPaired: () -> Void = {}
-    /// The computer just paired, for naming it.
-    @State private var pairedID: String?
-    /// What the user typed over the suggested name; nil: the suggestion.
-    @State private var typedName: String?
+    @State private var completion: PairingCompletion
+
+    init(stage: PairingStage, onPaired: @escaping () -> Void = {}, pairedID: String? = nil, typedName: String? = nil) {
+        _stage = State(initialValue: stage)
+        self.onPaired = onPaired
+        _completion = State(initialValue: PairingCompletion(pairedID: pairedID, typedName: typedName))
+    }
 
     var body: some View {
         NavigationStack {
@@ -85,6 +113,7 @@ struct PairingFlowView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .interactiveDismissDisabled(isWorking)
+        .onDisappear { finishPaired() }
         .accessibilityIdentifier("pairing.\(stage.id)")
     }
 
@@ -276,7 +305,7 @@ struct PairingFlowView: View {
                 .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Name", text: Binding(get: { typedName ?? suggestion }, set: { typedName = $0 }))
+            TextField("Name", text: Binding(get: { completion.typedName ?? suggestion }, set: { completion.typedName = $0 }))
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.words)
@@ -290,11 +319,15 @@ struct PairingFlowView: View {
         .padding(.top, 6)
     }
 
-    /// Saves the name on this phone, if there is one to save.
-    private func applySuggestedName() {
-        guard case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name), let pairedID else { return }
-        let chosen = (typedName ?? suggestion).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !chosen.isEmpty, chosen != name { model.renameComputer(pairedID, to: chosen) }
+    /// Saves the suggested/typed name and notifies `onPaired` at most once.
+    private func finishPaired() {
+        let outcome = completion.finish(stage: stage)
+        if let rename = outcome.rename {
+            model.renameComputer(rename.id, to: rename.name)
+        }
+        if outcome.shouldNotifyPaired {
+            onPaired()
+        }
     }
 
     // MARK: - Actions
@@ -313,9 +346,8 @@ struct PairingFlowView: View {
         case let .confirm(code):
             run(code)
         case .paired:
-            applySuggestedName()
+            finishPaired()
             dismiss()
-            onPaired()
         case .problem, .failed:
             stage = PairingStage.start
         case .scanning, .working:
@@ -337,8 +369,7 @@ struct PairingFlowView: View {
             switch await model.pair(code) {
             case let .paired(computer):
                 Haptics.connected()
-                pairedID = computer.daemonID
-                typedName = nil
+                completion.begin(daemonID: computer.daemonID)
                 stage = .paired(computer.name.isEmpty ? computer.addresses[0] : computer.name)
             case let .problem(problem):
                 stage = .problem(problem)
