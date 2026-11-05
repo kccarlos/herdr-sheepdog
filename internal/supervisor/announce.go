@@ -647,7 +647,7 @@ func (s *Supervisor) duePassed(kept []state.Promise) bool {
 func (s *Supervisor) recordDetail(paneID, detail string) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.LastResult != nil {
-			a.LastResult.Detail = detail
+			a.LastResult.Detail = s.cfg.Redactor.String(detail)
 		}
 	})
 	if err != nil {

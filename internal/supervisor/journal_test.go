@@ -270,3 +270,16 @@ func TestSignOffPreservesTrailingImagePath(t *testing.T) {
 		}
 	}
 }
+
+func TestJournalRedactsWorkerSecrets(t *testing.T) {
+	h := newHarness(t, withWorkerLog(t.TempDir()))
+	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+	secret := "sk-" + "example1234567890abcdef"
+	claudeTurn(t, h, "w5:p1", "result "+secret)
+	row, _ := h.store.Get("w5:p1")
+	h.sup.recordJournal(row, "done", false)
+	row, _ = h.store.Get("w5:p1")
+	if len(row.Journal) != 1 || strings.Contains(row.Journal[0].LastAssistant, secret) || !strings.Contains(row.Journal[0].LastAssistant, "[REDACTED]") {
+		t.Error("journal did not redact the worker secret")
+	}
+}

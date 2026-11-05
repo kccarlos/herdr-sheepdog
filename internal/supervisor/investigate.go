@@ -157,7 +157,7 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	now := s.cfg.Now()
 	inv := state.Investigation{
 		ID: s.nextID("inv"), PaneID: paneID, Alias: row.Alias, Workspace: workspace,
-		Question: plan.question, Asked: strings.TrimSpace(req.Asked), FollowUpOf: req.FollowUpOf,
+		Question: s.cfg.Redactor.String(plan.question), Asked: s.cfg.Redactor.String(strings.TrimSpace(req.Asked)), FollowUpOf: req.FollowUpOf,
 		Source: plan.source, Backend: plan.backend, SessionID: plan.jobSession(), Status: state.InvestigationRunning, Started: now,
 	}
 	if err := s.appendInvestigation(inv); err != nil {
@@ -382,13 +382,13 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		// it came from the repository.
 		fq := q
 		fq.Fork, fq.Session, fq.Backend = false, "", ""
-		fq.Question = forkFallbackQuestion(q.Question, transcript, err)
+		fq.Question = forkFallbackQuestion(q.Question, transcript, errors.New(s.cfg.Redactor.String(err.Error())))
 		s.log.Log(logSource, "investigation.fallback", inv.PaneID, map[string]any{
 			"id": inv.ID, "agent": aliasOr(inv.Alias), "from": state.InvestigationSourceWorker, "to": state.InvestigationSourceCLI,
 			"reason": "budget", "error": err.Error(), "transcript": transcript != "",
 		})
 		q = fq
-		inv.Source, inv.Backend, inv.Question = state.InvestigationSourceCLI, "", fq.Question
+		inv.Source, inv.Backend, inv.Question = state.InvestigationSourceCLI, "", s.cfg.Redactor.String(fq.Question)
 		res, err = s.investigator.Investigate(ctx, fq)
 	}
 	s.mu.Lock()
@@ -407,7 +407,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		cause := investigationCause(err, s.cfg.InvestigateMax)
 		// The record (the orchestrator's Investigations section and recall)
 		// says why in plain words first; the raw error follows, clipped.
-		inv.Status, inv.Err, inv.Finished = state.InvestigationError, cause.fact+" ("+prose.TruncateRunes(oneLineErr(err), 120)+")", &now
+		inv.Status, inv.Err, inv.Finished = state.InvestigationError, s.cfg.Redactor.String(cause.fact)+" ("+prose.TruncateRunes(s.cfg.Redactor.String(oneLineErr(err)), 120)+")", &now
 		s.saveInvestigation(inv)
 		s.log.Log(logSource, "investigation.error", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "dur_ms": dur.Milliseconds(), "error": err.Error(), "cause": cause.name})
 		s.invalidateBriefing()
@@ -431,7 +431,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		return
 	}
 	inv.Status, inv.Finished = state.InvestigationDone, &now
-	inv.Result, inv.Backend = strings.TrimSpace(res.Answer), res.Backend
+	inv.Result, inv.Backend = strings.TrimSpace(s.cfg.Redactor.String(res.Answer)), res.Backend
 	inv.Summary = investigationSummary(inv.Result)
 	if res.SessionID != "" || q.Fork {
 		// A fork's session is only ever the one it reported: the

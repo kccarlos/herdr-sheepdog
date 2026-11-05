@@ -21,6 +21,7 @@ import (
 // createPromise records an open promise for paneID and logs
 // promise.created. turn is the orchestrator turn that made it (0 outside one).
 func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (state.Promise, error) {
+	req.Text = s.cfg.Redactor.String(req.Text)
 	row, ok := s.store.Get(paneID)
 	if !ok {
 		return state.Promise{}, errors.New("that agent is gone")

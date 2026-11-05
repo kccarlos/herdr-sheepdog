@@ -342,7 +342,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = err
 			return out
 		}
-		text = prose.TailBytes(text, maxResultBytes)
+		text = prose.TailBytes(b.cfg.Redactor.String(text), maxResultBytes)
 		out.result = wrapWorker(row.Alias, "screen", text)
 		out.summary = fmt.Sprintf("screen of %s, %d lines", row.Alias, strings.Count(text, "\n")+1)
 	case ToolRunCLI:
@@ -356,7 +356,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = err
 			return out
 		}
-		text = prose.TailBytes(text, maxResultBytes)
+		text = prose.TailBytes(b.cfg.Redactor.String(text), maxResultBytes)
 		out.result = wrapWorker(row.Alias, "cli", text)
 		out.summary = fmt.Sprintf("cli output for %s, %d bytes", row.Alias, len(text))
 	case ToolInvestigate:
@@ -468,6 +468,8 @@ func (b *Brain) readSession(ctx context.Context, row AgentInfo, out toolOutcome)
 		out.err = fmt.Errorf("%w; read_screen with source screen still shows what it is doing now", err)
 		return out
 	}
+	read.Instruction = b.cfg.Redactor.String(read.Instruction)
+	read.LastAssistant = b.cfg.Redactor.String(read.LastAssistant)
 	text := sessionText(read)
 	out.result = wrapWorker(row.Alias, SourceSession, text)
 	out.summary = fmt.Sprintf("session of %s, last message %d chars", aliasOr(row.Alias), utf8.RuneCountInString(read.LastAssistant))

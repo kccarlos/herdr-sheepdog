@@ -1,7 +1,9 @@
 package brain
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
@@ -62,6 +65,9 @@ const (
 
 // Config tunes a Brain; zero values take the defaults.
 type Config struct {
+	// Redactor masks secrets before context is saved or sent to a model.
+	Redactor *redact.Redactor
+
 	// Provider is the id the Model given to New is registered under and
 	// the provider of the first turn (default ProviderGemini); SetModel
 	// changes it at runtime (Brain.Provider reports the current one).
@@ -295,7 +301,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 	}
 	b.engine = cfg.Engine
 	if b.engine == nil {
-		b.engine = NewDefaultEngine(cfg.PruneAfterTurns, b.summarize, func(m Message) Message { return b.transcript.Append(m) })
+		b.engine = NewDefaultEngine(cfg.PruneAfterTurns, b.summarize, func(m Message) Message { return b.transcript.Append(b.redactMessage(m)) })
 	}
 	return b, nil
 }
@@ -542,8 +548,57 @@ func (b *Brain) ingest(m Message, turn int) {
 		m.TS = b.cfg.Now()
 	}
 	m.Turn = turn
+	m = b.redactMessage(m)
 	m = b.transcript.Append(m)
 	b.engine.Ingest(m, turn)
+}
+
+func (b *Brain) redactMessage(m Message) Message {
+	m.Content = b.cfg.Redactor.String(m.Content)
+	m.Words = b.cfg.Redactor.String(m.Words)
+	if m.ToolResult != nil {
+		r := *m.ToolResult
+		r.Error = b.cfg.Redactor.String(r.Error)
+		r.Summary = b.cfg.Redactor.String(r.Summary)
+		m.ToolResult = &r
+	}
+	if m.ToolCall != nil {
+		c := *m.ToolCall
+		c.Args, _ = b.redactValue(c.Args).(map[string]any)
+		m.ToolCall = &c
+	}
+	if len(m.Raw) > 0 {
+		var value any
+		dec := json.NewDecoder(bytes.NewReader(m.Raw))
+		dec.UseNumber()
+		if json.Valid(m.Raw) && dec.Decode(&value) == nil {
+			m.Raw, _ = json.Marshal(b.redactValue(value))
+		} else {
+			m.Raw = nil
+		}
+	}
+	return m
+}
+
+func (b *Brain) redactValue(v any) any {
+	switch v := v.(type) {
+	case string:
+		return b.cfg.Redactor.String(v)
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, x := range v {
+			out[k] = b.redactValue(x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, x := range v {
+			out[i] = b.redactValue(x)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // Heard ingests a fragment of the user's speech (voice.transcript.in);
