@@ -226,7 +226,7 @@ func (c *termConn) openShell(m termproto.Message) {
 func (s *Server) handleShellClose(w http.ResponseWriter, r *http.Request) {
 	t := s.term
 	pane := r.PathValue("pane_id")
-	kind := s.kindOf(r.RemoteAddr)
+	kind := s.requestKind(r)
 	if !t.shellAllowed() {
 		writeError(w, http.StatusForbidden, "the shell is off on this computer (the setup page switches it)")
 		return

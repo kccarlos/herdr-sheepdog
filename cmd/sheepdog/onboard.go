@@ -19,11 +19,15 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
+	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
 // onboardEndpoints are the API roots init and doctor validate keys
 // against (tests point them at an httptest server).
-var onboardEndpoints = onboard.DefaultEndpoints
+var (
+	onboardEndpoints       = onboard.DefaultEndpoints
+	onboardTailscaleFunnel = web.TailscaleFunnelCLI
+)
 
 func printDoctorUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog doctor [flags]")
@@ -105,7 +109,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	svcInstalled, svcPATH := installedServicePATH()
 	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{
 		Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath,
-		Environment: &environment, Home: probe.Home,
+		Environment: &environment, Home: probe.Home, TailscaleFunnel: onboardTailscaleFunnel(),
 		HerdrAppHomeEnv: os.Getenv("HERDR_APP_HOME"), HCSessionEnv: os.Getenv("HC_SESSION"),
 		ServiceInstalled: svcInstalled, ServicePATH: svcPATH,
 	})

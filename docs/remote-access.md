@@ -124,9 +124,14 @@ agent windows, git changes and the read-only file browser still work
 (with `.env`, `.ssh`, private keys and other sensitive filenames hidden in
 code).
 
-A tunnel or reverse proxy on the computer itself (one that reaches sheepdog
-on `127.0.0.1`) looks like this computer to sheepdog. `tailscale serve` is
-fine; never put a public tunnel in front of sheepdog (see above).
+A reverse proxy on the computer itself (such as `tailscale serve` or `caddy`
+forwarding to `127.0.0.1`) still requires a paired device: loopback requests
+carrying `X-Forwarded-*` or `Forwarded` headers do not get automatic local
+access, and `/setup`, `/debug` and pairing codes stay reachable only directly
+at `http://127.0.0.1:7777` on the computer. Paired devices (`sds_` session
+tickets and paired browsers) keep working through private proxies. Public
+tunnels such as Tailscale Funnel are refused (`tailscale funnel reset`); never
+put a public tunnel in front of sheepdog (see above).
 
 ## Troubleshooting
 

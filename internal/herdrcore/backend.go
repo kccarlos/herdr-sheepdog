@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -29,6 +30,9 @@ type Backend struct {
 	// LookPath finds an executable on PATH (exec.LookPath by default); it is
 	// a field so tests need no real agents installed.
 	LookPath func(file string) (string, error)
+	// GOOS names the target operating system (runtime.GOOS by default) when
+	// choosing OS priority wrappers for spawned shells.
+	GOOS string
 
 	client *hc.Client
 	log    herdr.Logger
@@ -56,6 +60,7 @@ func New(client *hc.Client, log herdr.Logger) *Backend {
 	}
 	return &Backend{
 		LookPath: exec.LookPath,
+		GOOS:     runtime.GOOS,
 		client:   client,
 		log:      log,
 		resync:   make(chan struct{}, 1),
