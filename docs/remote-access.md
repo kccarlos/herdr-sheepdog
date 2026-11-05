@@ -83,6 +83,9 @@ that name.
   this computer's name and your tailnet's name.
 - It needs HTTPS certificates turned on for your tailnet (Tailscale admin
   console, DNS page). If they are off, the switch says so and stays off.
+- Turning it on also lets `/voice` on Android, Linux and desktop browsers
+  enable **browser notifications** (Web Push), which browsers block over a
+  self-signed certificate.
 - The iPhone app does not need it and does not use it: it keeps checking
   sheepdog's own certificate by its fingerprint.
 

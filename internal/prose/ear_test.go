@@ -71,7 +71,7 @@ func TestEar(t *testing.T) {
 		{"semicolon", "Auth is done; tests pass.", "Auth is done. Tests pass.", ""},
 		{"pr numbers", "Auth merged #49, then PR 12 landed.", "Auth merged, then landed.", ""},
 		{"hash", "Commit 1398579abc is on main.", "Commit is on main.", ""},
-		{"path", "Auth wrote /Users/kc/repo/auth/test.go.", "Auth wrote a file.", ""},
+		{"path", "Auth wrote /Users/you/repo/auth/test.go.", "Auth wrote a file.", ""},
 		{"long second sentence kept", "Auth is done. " + forty + ".", "Auth is done. " + forty + ".", ""},
 		{"one long sentence kept", "The lag fix you asked for is in, and it " + also + " works.", "The lag fix you asked for is in, and it " + also + " works.", ""},
 		{"thirty words kept", thirty, thirty + ".", ""},

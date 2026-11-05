@@ -30,7 +30,13 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 	if !blocked && len(kept) == 0 {
 		return
 	}
-	n := push.Notification{EventID: a.eventID, PaneID: a.row.PaneID, Agent: a.row.Alias, Text: text, NeedsYou: blocked}
+	n := push.Notification{
+		EventID:  a.eventID,
+		PaneID:   a.row.PaneID,
+		Agent:    s.cfg.Redactor.String(a.row.Alias),
+		Text:     s.cfg.Redactor.String(text),
+		NeedsYou: blocked,
+	}
 	switch {
 	case a.pending != "":
 		n.Kind = push.KindApproval
@@ -40,7 +46,7 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 				if o.Meta {
 					continue
 				}
-				n.Options = append(n.Options, push.Option{Index: i + 1, Label: o.Label})
+				n.Options = append(n.Options, push.Option{Index: i + 1, Label: s.cfg.Redactor.String(o.Label)})
 			}
 		}
 	case a.event == brain.PromiseEventBlocked:

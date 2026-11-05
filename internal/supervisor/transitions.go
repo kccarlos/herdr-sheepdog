@@ -339,9 +339,10 @@ const kindAgy = "agy"
 // level.
 func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool, stopErr *workerlog.TurnError) {
 	alias := aliasOr(state.Say(row))
-	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
+	phrase := s.cfg.Redactor.String(prompt.Phrase())
+	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": phrase})
 	s.touch(row.PaneID)
-	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
+	s.recordBlock(row.PaneID, phrase, false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
@@ -354,12 +355,12 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 		stopReason = verb
 		stopDetail = stopErr.Message
 	}
-	sentence := alias + " " + verb + ", and it's asking " + prompt.Phrase() + "."
-	if prompt.Phrase() == "" {
+	sentence := alias + " " + verb + ", and it's asking " + phrase + "."
+	if phrase == "" {
 		sentence = alias + " " + verb + ", and it's waiting at a prompt."
 	}
 	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventDone, alsoIdle: alsoIdle, alsoBlocked: true, owed: instructed,
-		sentence: sentence, asking: prompt.Phrase(), screen: screen, pending: p.ID, stopReason: stopReason, stopDetail: stopDetail})
+		sentence: sentence, asking: phrase, screen: screen, pending: p.ID, stopReason: stopReason, stopDetail: stopDetail})
 }
 
 // runningShepherdTask reports whether row's current task is an

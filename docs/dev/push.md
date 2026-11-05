@@ -1,12 +1,15 @@
-# Phone notifications (APNs)
+# Phone and browser notifications (APNs and Web Push)
 
-The daemon sends a system notification to the iOS companion app when an
-agent needs the user, even when the app is closed. This is the
-contract between the daemon, the push relay and the app; the code is
-`internal/push` (sender, device registry, relay client, end-to-end
-sealing), the hook is `internal/supervisor/notify.go`, the HTTP routes
-are `internal/web/push.go`, and the relay is `relay/` (a Cloudflare
-Worker, [`../../relay/README.md`](../../relay/README.md)).
+The daemon sends a system notification when an agent needs the user, even
+when the client is closed: to the iOS companion app over APNs, and to
+paired Android, Linux and desktop browsers on `/voice` over Web Push.
+This is the contract between the daemon, the push relay, the iOS app and
+`/voice`; the code is `internal/push` (APNs sender, Web Push VAPID +
+`aes128gcm` sender, device registries, relay client, end-to-end sealing),
+the hook is `internal/supervisor/notify.go`, the HTTP routes are
+`internal/web/push.go`, the browser Service Worker is `web/voice/sw.js`,
+and the relay is `relay/` (a Cloudflare Worker,
+[`../../relay/README.md`](../../relay/README.md)).
 
 ## Architecture
 
@@ -82,7 +85,9 @@ ticket, [`ws-contract.md`](ws-contract.md) "Auth").
 | `DELETE /api/push/register` | `{"token":"..."}` or `{"relay_token":"..."}` | `200 {"ok":true}`, also for an unknown token. |
 | `POST /api/push/activity` | `{"token":"<hex activity push token>","environment":"production"\|"sandbox"}` | `200 {"ok":true}`. The voice session's Live Activity push token, for the paired device whose ticket sent it (one per device; a new one replaces it; revoking the device drops it). Kept in `push_activities.json` under the data directory (mode 0600) so a restart keeps updating the banner, at most 8 hours. `400` from loopback (no paired device) or for a bad token or environment. See "Live Activity updates". |
 | `DELETE /api/push/activity` | — | `200 {"ok":true}`: the activity ended. |
-| `GET /api/push/status` | — | `{"enabled":bool,"reason":"<why not, when disabled>","devices":N,"mode":"relay"\|"apns"\|"off"}` |
+| `POST /api/push/web` | `{"endpoint":"https://…","keys":{"p256dh":"<base64url, 65B P-256>","auth":"<base64url, 16B>"},"device":"<optional name>"}` | `200 {"ok":true}`. Registers or updates a browser Web Push subscription (`web_push_devices.json`, mode 0600). Bound to the paired device's id when called over a device session (revoking the device drops it). `400` for a non-HTTPS URL, an IP literal or private/loopback host, an invalid uncompressed P-256 key, or an auth secret shorter than 16 bytes; `503` when the daemon has no push service. |
+| `DELETE /api/push/web` | `{"endpoint":"https://…"}` | `200 {"ok":true}`, also for an unknown endpoint. |
+| `GET /api/push/status` | — | `{"enabled":bool,"reason":"<why not, when disabled>","devices":N,"mode":"relay"\|"apns"\|"off","web_push_enabled":bool,"vapid_public_key":"<base64url, 65B>","web_devices":M}` |
 
 The app need not talk to the relay itself: in relay mode the daemon
 trades a registered device token for a relay token (`POST /v1/register`
@@ -276,3 +281,50 @@ locked, or closed).
 The content state is the app's `LiveActivityContent`
 (`ios/Sources/SheepdogKit/LiveActivityContent.swift`); `ActivityState` in
 `internal/push/activity.go` mirrors it.
+
+## Browser notifications (Web Push)
+
+On Android, Linux and desktop browsers (iPhone and iPad browsers are
+skipped because the Sheepdog app handles notifications there), `/voice`
+offers **Enable notifications** (`web/voice/push.js` + `web/voice/sw.js`).
+Browser notifications need no Apple key and no relay: they are enabled
+whenever `push.mode` is not `"off"`, even when APNs itself is disabled.
+
+- **Keys and storage.** At first start `internal/push/webpush.go`
+  generates one P-256 VAPID keypair in `<data_dir>/vapid_key.json` (mode
+  0600) and exposes the uncompressed public key as `vapid_public_key` on
+  `GET /api/push/status`. Browser subscriptions persist in
+  `<data_dir>/web_push_devices.json` (mode 0600).
+- **Wire format.** Each push is encrypted end-to-end for the browser's
+  `p256dh` public key and `auth` secret using RFC 8291 `aes128gcm`
+  (`WebPush: info\x00` IKM HKDF + `Content-Encoding: aes128gcm\x00` CEK and
+  nonce HKDF, single final record `0x02`) and authenticated with an
+  RFC 8292 VAPID ES256 JWT (`Authorization: vapid t=<jwt>, k=<pub>`,
+  `Urgency: high` for needs-you events and `normal` otherwise, `TTL: 86400`,
+  plus an RFC 8030 `Topic` header sanitized to at most 32 URL-safe base64
+  characters from `pending_id` or `event_id`). The JSON plaintext carries
+  `{title, body, tag, kind, pane_id, agent, needs_you, …}` with the same
+  fields as APNs' `sheepdog` dictionary.
+- **Endpoint safety.** Both registration and the outbound dialer reject
+  non-HTTPS URLs, IP literals, `localhost` / `.local`, and any DNS result
+  that resolves to a loopback, private, link-local, multicast or
+  unspecified address, so a crafted subscription cannot probe local
+  services. Push service `404` and `410` responses remove the subscription
+  automatically. Logs (`push.registered`, `push.unregistered`, `push.sent`
+  and `push.failed`, with `mode: "webpush"`) carry only `endpoint_host` and
+  `token_tail`, never keys or full URLs.
+- **Service Worker (`/voice/sw.js`).** Served with
+  `Service-Worker-Allowed: /voice` and registered with `{scope: '/voice'}`.
+  While any `/voice` window client is visible, `sw.js` forwards the event
+  over `postMessage` and skips the OS banner; otherwise it shows the
+  notification (for `kind: approval`, `requireInteraction: true` and up to
+  two inline option action buttons). Tapping an option button sends
+  `POST /api/pending/answer` with an `Idempotency-Key`, renewing an
+  expired post-restart session cookie directly from the paired P-256 key
+  in IndexedDB when needed; `/voice` also posts open question ids to
+  `sw.js` so alerts answered on another device are retracted.
+- **Certificate requirement.** Browsers only register Service Workers in a
+  secure context with a trusted certificate: `http://127.0.0.1` /
+  `localhost` on the computer itself, or Tailscale HTTPS
+  (`web.tailscale_https = true`, [`../remote-access.md`](../remote-access.md#a-real-certificate-for-browsers))
+  from another device.

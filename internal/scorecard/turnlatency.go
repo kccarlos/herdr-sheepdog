@@ -24,7 +24,7 @@ type TurnLatencyReport struct {
 
 // TurnLatencySegments lists the segments in timeline order, as the
 // report prints them.
-var TurnLatencySegments = []string{"total_ms", "voice_ms", "relay_ms", "queue_ms", "brain_ms", "step_ms", "model_ms", "tool_ms", "delivery_ms", "push_queue_ms", "first_audio_ms"}
+var TurnLatencySegments = []string{"total_ms", "voice_ms", "uplink_lag_ms", "gate_tail_ms", "provider_eou_ms", "relay_ms", "queue_ms", "brain_ms", "step_ms", "model_ms", "tool_ms", "delivery_ms", "push_queue_ms", "first_audio_ms"}
 
 // TurnLatencies returns the slice's breakdowns: its turn.latency events
 // when it has any, else a replay of its raw events.
@@ -53,6 +53,9 @@ func computeTurnLatency(events []eventlog.Event) TurnLatencyReport {
 		r.Outcomes[b.Outcome]++
 		add("total_ms", b.TotalMS)
 		add("voice_ms", b.VoiceMS)
+		add("uplink_lag_ms", b.UplinkLagMS)
+		add("gate_tail_ms", b.GateTailMS)
+		add("provider_eou_ms", b.ProviderEOUMS)
 		add("relay_ms", b.RelayMS)
 		add("queue_ms", b.QueueMS)
 		add("brain_ms", b.BrainMS)

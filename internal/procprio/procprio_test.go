@@ -51,11 +51,15 @@ func TestWrapArgvForOS(t *testing.T) {
 		t.Errorf("missing binary wrapped = %v, want %v", got, orig)
 	}
 
-	// Linux does not wrap exec.Command argv (ApplyProcessGroup adjusts nice,
-	// ioprio and oom_score_adj after Start without polluting child stderr).
-	got = WrapArgvForOS("linux", fakeLookPath("nice", "ionice", "codex"), []string{"codex", "exec"})
-	if !slices.Equal(got, []string{"codex", "exec"}) {
-		t.Errorf("linux WrapArgvForOS = %v, want unchanged", got)
+	// Linux raises oom_score_adj before the target program runs: setting it
+	// after Start races a fast child that reads its own value first.
+	got = WrapArgvForOS("linux", fakeLookPath("/bin/sh", "codex"), []string{"codex", "exec"})
+	if len(got) < 4 || got[0] != "/bin/sh" || got[1] != "-c" || !strings.Contains(got[2], "oom_score_adj") ||
+		!slices.Equal(got[len(got)-2:], []string{"codex", "exec"}) {
+		t.Errorf("linux WrapArgvForOS = %v, want an sh wrapper that sets oom_score_adj then execs codex exec", got)
+	}
+	if got = WrapArgvForOS("linux", fakeLookPath("/bin/sh"), []string{"codex", "exec"}); !slices.Equal(got, []string{"codex", "exec"}) {
+		t.Errorf("linux missing binary wrapped = %v, want unchanged", got)
 	}
 }
 

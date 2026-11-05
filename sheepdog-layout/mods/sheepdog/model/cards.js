@@ -16,6 +16,7 @@ export const agentName = (card) => trimmed(card.spoken) || trimmed(card.agent) |
 // What kind of card it is, in a word or two.
 export function kindWord(card) {
   switch (card.kind) {
+    case "card": return "Card";
     case "agent": return "Agent window";
     case "excerpt": return "Screen";
     case "approval": return "Question";
@@ -29,6 +30,7 @@ export function displayTitle(card) {
   if (title) return title;
   const who = agentName(card);
   switch (card.kind) {
+    case "card": return "Card";
     case "agent": return who ? `${who}'s window` : "Agent window";
     case "excerpt": return who ? `${who}'s screen` : "Agent screen";
     case "approval": return who ? `${who} is asking` : "An agent is asking";

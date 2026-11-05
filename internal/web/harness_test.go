@@ -59,6 +59,7 @@ type fakeSession struct {
 	pushTags []map[string]any
 	// pushUrgency records the urgency of every PushTagged call.
 	pushUrgency []voice.Urgency
+	onSetMuted  func(bool)
 
 	trackPlayback bool
 	play          voice.PlaybackTracker
@@ -285,8 +286,16 @@ func (f *fakeSession) BumpAudioEpoch() {
 	f.mu.Unlock()
 }
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
-func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
-func (f *fakeSession) Status() voice.Status       { return f.status }
+func (f *fakeSession) SetMuted(m bool) {
+	f.mu.Lock()
+	f.muted = m
+	cb := f.onSetMuted
+	f.mu.Unlock()
+	if cb != nil {
+		cb(m)
+	}
+}
+func (f *fakeSession) Status() voice.Status { return f.status }
 func (f *fakeSession) Speaking() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -461,6 +470,7 @@ type harnessOpts struct {
 	marks bool
 	mutes *attention.Mutes
 	wrap  func(*supervisor.Supervisor) Supervisor
+	now   func() time.Time
 	// trackPlayback wires PlaybackTracker and Recap into fakeSession so
 	// end-to-end /ws tests exercise real flush acknowledgement slots,
 	// underruns, cuts, and stop pushes.
@@ -542,7 +552,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	deps := Deps{Log: log, Store: store, Supervisor: serverSup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, Files: !o.filesOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
-		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir}
+		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir, Now: o.now}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {

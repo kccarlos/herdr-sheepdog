@@ -180,6 +180,7 @@ public struct VoiceActivityDetector: Sendable {
         if quietFrames < counts.hangover {
             return Output(send: [frame], transition: nil)
         }
+        let speechEndMs = voicedFramesThisOpen > 0 ? quietFrames * tuning.frameMilliseconds : nil
         isGated = true
         quietFrames = 0
         recent = []
@@ -187,7 +188,7 @@ public struct VoiceActivityDetector: Sendable {
         countingThisOpen = false
         voicedFramesThisOpen = 0
         withhold(frame)
-        return Output(send: [], transition: .closed)
+        return Output(send: [], transition: .closed, speechEndMs: speechEndMs)
     }
 
     /// Forgets the pre-roll and reopens without a transition, as a

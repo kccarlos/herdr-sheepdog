@@ -103,7 +103,9 @@ type Session struct {
 	stalledNow   bool
 	// tailGen is bumped by every gate close and every client frame, so a
 	// comfort-noise tail stops when the gate reopens (AudioStreamEnd).
-	tailGen int
+	// tailStartedAt is when the active stream-end tail began (zero: none).
+	tailGen       int
+	tailStartedAt time.Time
 	// audioTiming follows the open model turn's output-audio arrivals
 	// (voice.audio_timing, WP: audible gaps investigation); nil between
 	// turns. audioTurnSeq numbers turns across the session's lifetime.
@@ -443,6 +445,12 @@ func (s *Session) endStream(held [][]byte) {
 	}
 	s.tailGen++
 	gen := s.tailGen
+	startedAt := s.now()
+	if conn != nil && live {
+		s.tailStartedAt = startedAt
+	} else {
+		s.tailStartedAt = time.Time{}
+	}
 	s.mu.Unlock()
 	if conn == nil || !live {
 		return
@@ -454,7 +462,7 @@ func (s *Session) endStream(held [][]byte) {
 	}
 	tail := comfortNoise(s.cfg.GateTail)
 	if len(tail) == 0 {
-		s.audioStreamEnd(conn)
+		s.audioStreamEnd(conn, startedAt)
 		return
 	}
 	s.wg.Add(1)
@@ -477,7 +485,7 @@ func (s *Session) endStream(held [][]byte) {
 			}
 		}
 		if s.tailCurrent(gen) {
-			s.audioStreamEnd(conn)
+			s.audioStreamEnd(conn, startedAt)
 		}
 	}()
 }
@@ -509,13 +517,22 @@ func comfortNoise(d time.Duration) []byte {
 	return b
 }
 
-func (s *Session) audioStreamEnd(conn Conn) {
+func (s *Session) audioStreamEnd(conn Conn, startedAt time.Time) {
 	if conn == nil {
 		return
 	}
 	s.sendMu.Lock()
 	_ = conn.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true})
 	s.sendMu.Unlock()
+	now := s.now()
+	s.mu.Lock()
+	if s.tailStartedAt.Equal(startedAt) {
+		s.tailStartedAt = time.Time{}
+	}
+	s.mu.Unlock()
+	s.log.Log(logSource, "voice.stream_end", "", map[string]any{
+		"tail_ms": max(int64(0), now.Sub(startedAt).Milliseconds()),
+	})
 }
 
 // Muted reports the current mute state.
@@ -571,6 +588,7 @@ func (s *Session) forwardAudio(pcm16 []byte) error {
 		return nil
 	}
 	s.tailGen++ // the gate reopened: no comfort tail, no stream end
+	s.tailStartedAt = time.Time{}
 	conn := s.conn
 	if conn == nil {
 		s.bufferLocked(pcm16)

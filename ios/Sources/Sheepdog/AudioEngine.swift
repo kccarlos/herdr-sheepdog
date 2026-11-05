@@ -48,8 +48,8 @@ final class AudioEngine {
 
     /// A 40 ms frame ready for the socket, with the peak that decided the gate.
     var onFrame: ((Data) -> Void)?
-    /// The silence gate flipped: `true` when it closed.
-    var onGate: ((Bool) -> Void)?
+    /// The silence gate flipped: `true` when it closed, with speech-end offset (ms).
+    var onGate: ((Bool, Int?) -> Void)?
     /// Input level, 0…1, for the orb's ring.
     var onLevel: ((Float) -> Void)?
     /// Playback started or stopped (the voice speaking, for the orb).
@@ -286,7 +286,7 @@ final class AudioEngine {
             converter?.reset()
             if isGateClosed {
                 isGateClosed = false
-                onGate?(false)
+                onGate?(false, nil)
             }
             onLevel?(0)
         } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: interrupted || needsResume, gateClosed: gate.manual == false) {
@@ -439,7 +439,7 @@ final class AudioEngine {
             if let transition = out.transition {
                 let closed = transition == .closed
                 isGateClosed = closed
-                onGate?(closed)
+                onGate?(closed, out.speechEndMs)
             }
             for send in out.send {
                 onFrame?(send.pcm16LEData)
