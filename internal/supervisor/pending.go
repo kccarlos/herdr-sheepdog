@@ -253,11 +253,10 @@ func (s *Supervisor) ExpirePending() {
 // of its question. The rail then checks those words as for any prompt.
 // Caller holds s.mu; ok is false when the pane is gone or working, its
 // screen does not parse as a prompt, or — not blocked — the user's
-// words are not about the menu (why says so). muted is the space mute,
-// read by the caller outside s.mu (paneMuted): a muted space's prompt is
-// revived held. screen is the pane read the caller took outside s.mu;
+// words are not about the menu (why says so). screen is the pane read
+// the caller took outside s.mu;
 // a missing read cannot safely revive the prompt.
-func (s *Supervisor) revivePrompt(paneID, source string, muted bool, screen *paneScreen) (p state.PendingAction, ok bool, why string) {
+func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p state.PendingAction, ok bool, why string) {
 	row, found := s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
 		return state.PendingAction{}, false, ""
@@ -274,7 +273,6 @@ func (s *Supervisor) revivePrompt(paneID, source string, muted bool, screen *pan
 		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
-	s.setPendingMuted(p, muted)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
 	return p, true, ""
 }

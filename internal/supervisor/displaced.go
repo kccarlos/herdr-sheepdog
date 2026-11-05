@@ -362,23 +362,17 @@ func (s *Supervisor) PushShown(text string, tags map[string]any) {
 
 // toldInReply records an orchestrator reply delivered to the user now (a
 // tool result the voice speaks, or a typed turn's text): the open
-// questions it states were told. A held question (muted space) it states
-// is told, and promoted, only when the user's newest words named its
-// agent or the reply reads its question out (its whole spoken summary): a
-// status reply that mentions it in passing leaves it held. A
+// questions it states were told. A held question is promoted only when
+// the reply reads its whole spoken summary. A
 // question it states that is not open (its pane still at the prompt) is
 // told if it is installed again within the window (installedLocked).
 func (s *Supervisor) toldInReply(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncToldLocked()
-	var asked string
-	if in := s.lastInputLocked(); in != nil {
-		asked = in.text
-	}
 	for _, q := range s.statedInLocked(text) {
 		if q.Held || s.heldQuestion(q.ID) {
-			if !s.namedInLocked(asked, q.PaneID) && !readsOut(text, q) {
+			if !readsOut(text, q) {
 				continue
 			}
 			q = s.promoteHeldLocked(q)
@@ -420,7 +414,7 @@ var promptStockWords = map[string]bool{
 	"asks": true, "ask": true, "asking": true, "wants": true, "permission": true, "approve": true, "approval": true,
 	"allow": true, "run": true, "running": true, "following": true, "command": true, "proceed": true, "should": true,
 	"could": true, "may": true, "let": true, "waiting": true, "question": true, "prompt": true, "yes": true, "don't": true,
-	"again": true, "commands": true, "start": true, "who": true, "how": true, "will": true, "not": true, "are": true, "have": true,
+	"file": true, "link": true, "again": true, "commands": true, "start": true, "who": true, "how": true, "will": true, "not": true, "are": true, "have": true,
 }
 
 // statedInLocked are the open questions text states: it names the
@@ -428,7 +422,7 @@ var promptStockWords = map[string]bool{
 // agent's name or a stock word) with its prompt. A reply that names an
 // agent without saying what it asks tells nothing. Caller holds s.mu.
 func (s *Supervisor) statedInLocked(text string) []state.PendingAction {
-	words := wordSet(menuWords(text))
+	words := wordSet(nameTokens(text))
 	var out []state.PendingAction
 	for _, q := range s.openKeysLocked() {
 		if s.statesLocked(words, q) {
@@ -443,7 +437,7 @@ func (s *Supervisor) statedInLocked(text string) []state.PendingAction {
 // pane is still not working (at its prompt as far as herdr says). Caller
 // holds s.mu.
 func (s *Supervisor) statedNotOpenLocked(text string) []state.PendingAction {
-	words := wordSet(menuWords(text))
+	words := wordSet(nameTokens(text))
 	openPanes := map[string]bool{}
 	for k := range s.openKeysLocked() {
 		openPanes[k.pane] = true
@@ -475,18 +469,21 @@ func (s *Supervisor) statesLocked(words map[string]bool, q state.PendingAction) 
 	names := map[string]bool{}
 	named := false
 	for _, n := range []string{row.Alias, state.Say(row), s.sayOf(q.PaneID)} {
-		nw := menuWords(n)
+		nw := nameTokens(n)
 		for _, w := range nw {
 			names[w] = true
 		}
-		if len(nw) > 0 && containsWords(words, nw) {
+		if len(nw) > 0 && len([]rune(nw[0])) >= 2 && !shortNameStopWords[nw[0]] && containsWords(words, nw) {
 			named = true
 		}
 	}
 	if !named {
 		return false
 	}
-	for _, w := range menuWords(q.Command + " " + q.Question + " " + q.SpokenSummary) {
+	for _, w := range nameTokens(prose.Spoken(q.Command, 0) + " " + q.Question + " " + q.SpokenSummary) {
+		if len([]rune(w)) < 2 || len([]rune(w)) == 2 && shortNameStopWords[w] {
+			continue
+		}
 		if words[w] && !names[w] && !promptStockWords[w] && !menuStopWords[w] {
 			return true
 		}
@@ -505,15 +502,36 @@ func wordSet(ws []string) map[string]bool {
 // nameTokens are the lower-case runs of letters and digits of text, of
 // any length: "fix-claude's" is fix, claude, s.
 func nameTokens(text string) []string {
-	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
+	var out []string
+	var token []rune
+	var han bool
+	flush := func() {
+		if len(token) > 0 {
+			out = append(out, string(token))
+			token = nil
+		}
+	}
+	for _, r := range strings.ToLower(text) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			continue
+		}
+		h := unicode.Is(unicode.Han, r)
+		if len(token) > 0 && h != han {
+			flush()
+		}
+		han = h
+		token = append(token, r)
+	}
+	flush()
+	return out
 }
 
+var shortNameStopWords = map[string]bool{"go": true, "on": true, "to": true, "in": true, "it": true, "is": true, "no": true, "me": true, "my": true, "we": true, "do": true, "or": true, "an": true, "as": true, "at": true, "be": true, "by": true, "of": true, "ok": true, "so": true, "up": true, "us": true}
+
 // namedInLocked reports whether text (the user's words) names pane's
-// agent: every token of its alias or spoken name is in it. A name with no
-// token of three letters or more ("go", "ui") never counts, so everyday
-// words are not taken for it. Caller holds s.mu.
+// agent: every token of its alias or spoken name is in it. Common short
+// words do not count as names. Caller holds s.mu.
 func (s *Supervisor) namedInLocked(text, pane string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
@@ -524,10 +542,14 @@ func (s *Supervisor) namedInLocked(text, pane string) bool {
 	}
 	words := wordSet(nameTokens(text))
 	for _, n := range []string{row.Alias, state.Say(row), s.sayOf(pane)} {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if len([]rune(n)) >= 2 && strings.IndexFunc(n, func(r rune) bool { return !unicode.Is(unicode.Han, r) }) == -1 && strings.Contains(strings.ToLower(text), n) {
+			return true
+		}
 		toks := nameTokens(n)
 		long := false
 		for _, w := range toks {
-			long = long || len([]rune(w)) >= 3
+			long = long || len([]rune(w)) >= 2 && !shortNameStopWords[w]
 		}
 		if long && containsWords(words, toks) {
 			return true
@@ -577,6 +599,9 @@ func (s *Supervisor) displacedByLocked(p state.PendingAction, in *shepherdInput)
 	}
 	s.syncToldLocked()
 	k := keyOf(p)
+	if e, ok := s.told.stated[k]; ok && in.began > e.seq {
+		return promptKey{}, false
+	}
 	if e := s.told.told[k]; e != nil && e.closedAt.IsZero() && in.began > e.seq {
 		return promptKey{}, false
 	}

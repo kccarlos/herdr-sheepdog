@@ -213,6 +213,10 @@ func noFindingSentence(a announcement) string {
 // applyResult turns the orchestrator's answer (or failure) into the event's one
 // push and its logs.
 func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Chattiness, r turnResult) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	if r.err != nil {
 		s.codePath(a, kept, level, fallbackReason(r.err))
 		return
@@ -336,6 +340,10 @@ func promiseIDs(ps []state.Promise) []string {
 //     the line relates the finish to a request of theirs (relates_to),
 //     which the code could not know.
 func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	dur := s.cfg.Now().Sub(start).Milliseconds()
 	audible := len(kept) > 0 || a.owed || level.allows(a.kind)
 	if r.err != nil {
@@ -432,6 +440,10 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // newer turn about the same agent is about to speak; nor after a model
 // error, which is no matter of time).
 func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chattiness, reason string) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	s.recordFinish(a, doneResult)
 	if s.brain != nil && reason != "promise" {
 		applied := brain.UrgencySkip

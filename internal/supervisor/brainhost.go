@@ -251,22 +251,37 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// herdr must not stall voice events and transitions on s.mu. The
 	// revival re-checks the pane under s.mu.
 	var screen *paneScreen
-	if p, has := s.store.Pending(); !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		if row, ok := s.store.Get(paneID); ok && row.State != herdr.StateWorking {
-			screen = s.readScreen(ctx, paneID)
+	defer s.pushReask()
+	s.mu.Lock()
+	for {
+		p, has := s.store.Pending()
+		if has && p.Kind == state.PendingAnswerPrompt && p.PaneID == paneID || screen != nil {
+			break
+		}
+		row, ok := s.store.Get(paneID)
+		if !ok || row.State == herdr.StateWorking {
+			break
+		}
+		sig := s.lastPrompt[paneID]
+		s.mu.Unlock()
+		screen = s.readScreen(ctx, paneID)
+		s.mu.Lock()
+		current, ok := s.store.Get(paneID)
+		if !ok || current.State != row.State || current.StateSince != row.StateSince || s.lastPrompt[paneID] != sig {
+			s.mu.Unlock()
+			return "", fmt.Errorf("%w: the question changed while reading it; please ask again", brain.ErrNotPermitted)
 		}
 	}
-	defer s.pushReask() // displaced.go: after s.mu is released
-	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
+	reviving := false
 	for _, q := range s.store.Questions() {
 		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
 			return "", fmt.Errorf("%w: %s's question is held in a muted space; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		revived, ok, why := s.revivePrompt(paneID, "send_keys", muted, screen)
+		revived, ok, why := s.revivePrompt(paneID, "send_keys", screen)
 		if !ok {
 			if why != "" {
 				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)
@@ -274,6 +289,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 		p = revived
+		reviving = true
 		if s.heldQuestion(p.ID) {
 			return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
@@ -310,6 +326,9 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 			}
 		}
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
+	}
+	if reviving {
+		s.setPendingMuted(p, muted)
 	}
 	// A tool result: a fact for the orchestrator, which phrases the reply.
 	// In the user's language, like the fast path and taps: when the
