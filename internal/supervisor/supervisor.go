@@ -628,10 +628,12 @@ func (l *paneLock) LockCtx(ctx context.Context) error {
 }
 
 // inflightSend is a Prompt on its way to a pane: cancel aborts the RPC,
-// and byStop records that the stop procedure did it (so the send path
-// leaves its pending action for the stop to settle).
+// utt is the utterance turn that owns it (nil when unowned), and byStop
+// records that the stop procedure aborted it (so the send path leaves its
+// pending action for the stop to settle).
 type inflightSend struct {
 	cancel context.CancelFunc
+	utt    *inflightUtterance
 	byStop bool
 }
 
@@ -640,7 +642,7 @@ type inflightSend struct {
 // send lock; endSendLocked deregisters.
 func (s *Supervisor) beginSendLocked(ctx context.Context, paneID string) (context.Context, *inflightSend) {
 	sctx, cancel := context.WithCancel(ctx)
-	f := &inflightSend{cancel: cancel}
+	f := &inflightSend{cancel: cancel, utt: utteranceOf(ctx)}
 	if s.sends == nil {
 		s.sends = map[string]*inflightSend{}
 	}

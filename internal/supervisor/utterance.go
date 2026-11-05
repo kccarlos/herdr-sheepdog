@@ -126,6 +126,14 @@ func withCallID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, callIDKey{}, id)
 }
 
+type utteranceKey struct{}
+
+// utteranceOf returns the in-flight utterance ctx belongs to (nil when none).
+func utteranceOf(ctx context.Context) *inflightUtterance {
+	u, _ := ctx.Value(utteranceKey{}).(*inflightUtterance)
+	return u
+}
+
 // UtteranceOf is the words an utterance runs on (docs/dev/roles.md "One
 // decision-maker"): what the daemon recorded the user saying, typing
 // or tapping (heard), and the voice model's to_supervisor argument
@@ -355,6 +363,7 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 func (s *Supervisor) beginUtterance(parent context.Context, text, callID, id string) (context.Context, *inflightUtterance) {
 	turnCtx, cancel := context.WithCancel(parent)
 	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID, merged: 1, id: id}
+	turnCtx = context.WithValue(turnCtx, utteranceKey{}, u)
 	s.mu.Lock()
 	if u.id == "" {
 		u.id = s.nextID("utt")

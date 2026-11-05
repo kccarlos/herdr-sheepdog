@@ -8,13 +8,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 )
 
-// PushService is the device registry and status of the phone and browser
+// PushService is the device registry and status of the phone
 // notification sender (*push.Sender).
 type PushService interface {
 	RegisterDevice(push.Registration) (push.Device, error)
 	Unregister(token string) error
-	RegisterWebPush(push.WebSubscription) error
-	UnregisterWebPush(endpoint string) error
 	Status() push.Status
 	ForgetDevices(ids []string) error
 	Notify(push.Notification)
@@ -98,61 +96,8 @@ func (s *Server) handlePushStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.deps.Push.Status())
 }
 
-// webPushRegisterRequest is the body of POST and DELETE /api/push/web.
-type webPushRegisterRequest struct {
-	Endpoint string           `json:"endpoint"`
-	Keys     push.WebPushKeys `json:"keys"`
-	Device   string           `json:"device"`
-}
-
-// handleWebPushRegister stores a paired browser's RFC 8291 Web Push
-// subscription (idempotent; tied to the authenticated device).
-func (s *Server) handleWebPushRegister(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Push == nil {
-		writeError(w, http.StatusServiceUnavailable, "push not available")
-		return
-	}
-	var req webPushRegisterRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
-		return
-	}
-	deviceID := deviceOf(r)
-	if deviceID == localDevice {
-		deviceID = ""
-	}
-	if err := s.deps.Push.RegisterWebPush(push.WebSubscription{
-		Endpoint: req.Endpoint,
-		Keys:     req.Keys,
-		Name:     req.Device,
-		DeviceID: deviceID,
-	}); err != nil {
-		writePushError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// handleWebPushUnregister removes a browser Web Push subscription by endpoint.
-func (s *Server) handleWebPushUnregister(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Push == nil {
-		writeError(w, http.StatusServiceUnavailable, "push not available")
-		return
-	}
-	var req webPushRegisterRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
-		return
-	}
-	if err := s.deps.Push.UnregisterWebPush(req.Endpoint); err != nil {
-		writePushError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 func writePushError(w http.ResponseWriter, err error) {
-	if errors.Is(err, push.ErrBadToken) || errors.Is(err, push.ErrBadRelayToken) || errors.Is(err, push.ErrBadEnvironment) || errors.Is(err, push.ErrBadSubscription) || errors.Is(err, push.ErrPrivateEndpoint) {
+	if errors.Is(err, push.ErrBadToken) || errors.Is(err, push.ErrBadRelayToken) || errors.Is(err, push.ErrBadEnvironment) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

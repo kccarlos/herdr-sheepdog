@@ -114,7 +114,6 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/devices.json` | Your paired phones and browsers: their names, kinds, public keys and when each was last seen. No secret. | Until you delete it or revoke a device on the setup page. |
 | `~/.local/share/sheepdog/tls/` | This computer's id, its own TLS certificate and key, and when `web.tailscale_https = true` the cached Tailscale certificate and key (`tsnet.crt`, `tsnet.key`). | Until you delete it. |
 | `~/.local/share/sheepdog/push_devices.json` | Your phones' notification tokens and each phone's notification encryption key. | Until a phone unregisters. |
-| `~/.local/share/sheepdog/vapid_key.json`, `web_push_devices.json` | This computer's VAPID P-256 keypair and the paired browsers registered for Web Push notifications on `/voice` (mode 0600). | Until a browser unregisters or is revoked. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log, with secrets redacted. | Rotated at 10 MB, 3 old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log; normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |

@@ -8,14 +8,24 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // Program describes a program run in an existing shell.
@@ -159,6 +169,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "foreground process tree identifies each pane's live session",
 			Run:  foregroundProcessTreeIdentifiesLiveSessions,
+		},
+		{
+			Name: "unsent desktop input blocks prompts",
+			Run:  unsentDesktopInputBlocksPrompts,
 		},
 	}, markScenarios()...)
 }
@@ -733,4 +747,114 @@ func spoken(agent herdr.AgentInfo) string {
 		Name:           agent.Name,
 	}})
 	return names[agent.PaneID]
+}
+
+func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
+	cases := []struct {
+		kind        string
+		placeholder string
+		empty       string
+		typed       string
+	}{
+		{
+			kind:        "claude",
+			placeholder: "────────\n\x1b[0m❯\u00a0\x1b[2mTry \"create a util logging.py that...\"\x1b[0m\n────────\n  ⏵⏵ auto mode on",
+			empty:       "────────\n\x1b[0m❯\u00a0\n────────\n  ⏵⏵ auto mode on",
+			typed:       "────────\n\x1b[0m❯\u00a0halftyped\n────────\n  ⏵⏵ auto mode on",
+		},
+		{
+			kind:        "codex",
+			placeholder: "\x1b[0m› \x1b[2mAsk Codex to do anything\x1b[0m\n\n  gpt-5.6-luna max · ~/repo",
+			empty:       "\x1b[0m› \n\n  gpt-5.6-luna max · ~/repo",
+			typed:       "\x1b[0m› halftyped\n\n  gpt-5.6-luna max · ~/repo",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			d := newDriver(t)
+			ctx := testContext(t)
+			store := watchState(t, ctx, d.Backend())
+			pane, err := d.NewAgent(ctx, t.TempDir(), tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := waitAgentRows(t, store, 1)
+			say := state.SpokenNames(rows)[pane.PaneID]
+
+			log := &recordingLogger{}
+			ih := inject.NewHerdr(d.Backend(), log)
+			model := braintest.NewModel(
+				braintest.Step{Calls: []*genai.FunctionCall{
+					braintest.FC(brain.ToolPrompt, map[string]any{"agent": say, "text": "VOICE-TEXT"}),
+				}},
+				braintest.Step{Text: braintest.Reply("Not sent: desktop input is being typed.", "")},
+			)
+			logRoot := t.TempDir()
+			b, err := brain.New(brain.Config{DataDir: logRoot, RunID: "conformance"}, model, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = b.Close() })
+			sup, err := supervisor.New(store, ih, nil, nil, log, supervisor.Config{
+				Brain:     b,
+				DataDir:   logRoot,
+				ReplyWait: -1,
+				WorkerLog: workerlog.New(workerlog.Options{
+					ClaudeProjects: filepath.Join(logRoot, "claude"),
+					CodexSessions:  filepath.Join(logRoot, "codex"),
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Half-typed desktop text must block both window input and voice prompt.
+			if err := d.SetScreen(ctx, pane.PaneID, tc.typed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sup.WindowPrompt(ctx, pane.PaneID, "VOICE-TEXT"); !errors.Is(err, supervisor.ErrTerminalTyping) {
+				t.Fatalf("WindowPrompt with unsent text: err = %v, want ErrTerminalTyping", err)
+			}
+			words := "tell " + say + " to run VOICE-TEXT"
+			sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: words, Final: true})
+			if _, err := sup.ToSupervisor(ctx, words); err != nil {
+				t.Fatalf("ToSupervisor: %v", err)
+			}
+			calls := model.Calls()
+			if len(calls) < 2 {
+				t.Fatalf("model calls = %d, want >= 2", len(calls))
+			}
+			if got := calls[1].Text(); !strings.Contains(got, "being typed") {
+				t.Fatalf("tool result = %q, want typing refusal", got)
+			}
+
+			// Placeholder and empty input boxes must allow prompts through.
+			for _, screen := range []string{tc.placeholder, tc.empty} {
+				if err := d.SetScreen(ctx, pane.PaneID, screen); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := sup.WindowPrompt(ctx, pane.PaneID, "VOICE-TEXT"); err != nil {
+					t.Fatalf("WindowPrompt on %q: %v", screen, err)
+				}
+			}
+
+			// An unclear screen fails open and logs that the check was unavailable.
+			log.reset()
+			if err := d.SetScreen(ctx, pane.PaneID, "output without prompt"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sup.WindowPrompt(ctx, pane.PaneID, "VOICE-TEXT"); err != nil {
+				t.Fatalf("WindowPrompt on unclear screen: %v", err)
+			}
+			logged := false
+			for _, entry := range log.snapshot() {
+				if strings.HasPrefix(entry, "supervisor.typing_check_unavailable ") {
+					logged = true
+				}
+			}
+			if !logged {
+				t.Fatalf("unclear screen did not log supervisor.typing_check_unavailable: %v", log.snapshot())
+			}
+		})
+	}
 }
