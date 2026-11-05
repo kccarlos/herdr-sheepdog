@@ -21,10 +21,14 @@ public struct CaptureGate: Sendable {
         /// Frames to send now, oldest first (possibly including pre-roll).
         public var send: [[Int16]]
         public var transition: Transition?
+        /// On `.closed`, milliseconds since speech ended in this open segment,
+        /// or `nil` when closing an unvoiced initial room segment.
+        public var speechEndMs: Int?
 
-        public init(send: [[Int16]], transition: Transition?) {
+        public init(send: [[Int16]], transition: Transition?, speechEndMs: Int? = nil) {
             self.send = send
             self.transition = transition
+            self.speechEndMs = speechEndMs
         }
     }
 
@@ -77,9 +81,12 @@ public struct CaptureGate: Sendable {
     private var vad: VoiceActivityDetector
     private var manualPreroll: [[Int16]] = []
     private let manualPrerollFrames: Int
+    private let frameMilliseconds: Int
+    private var sentWhileOpen = false
 
     public init(tuning: VADTuning = VADTuning()) {
         vad = VoiceActivityDetector(tuning: tuning)
+        frameMilliseconds = max(1, tuning.frameMilliseconds)
         manualPrerollFrames = max(0, Int((Double(tuning.prerollMilliseconds) / Double(max(1, tuning.frameMilliseconds))).rounded()))
     }
 
@@ -91,24 +98,32 @@ public struct CaptureGate: Sendable {
         let vadOut = vad.push(frame)
 
         var send: [[Int16]]
+        var speechEndMs: Int?
         if let manual {
             if manual {
                 send = wasGated ? manualPreroll + [frame] : [frame]
                 manualPreroll = []
                 isGated = false
+                if !send.isEmpty { sentWhileOpen = true }
             } else {
                 send = []
                 isGated = true
                 manualPreroll.append(frame)
                 if manualPreroll.count > manualPrerollFrames { manualPreroll.removeFirst(manualPreroll.count - manualPrerollFrames) }
+                if !wasGated {
+                    speechEndMs = sentWhileOpen ? frameMilliseconds : nil
+                    sentWhileOpen = false
+                }
             }
         } else {
             send = vadOut.send
             isGated = vad.isGated
+            speechEndMs = vadOut.speechEndMs
         }
         if isGated, send.isEmpty { gatedFrames += 1 }
         let transition: Transition? = wasGated == isGated ? nil : (isGated ? .closed : .opened)
-        return Output(send: send, transition: transition)
+        if transition == nil || transition == .opened { speechEndMs = nil }
+        return Output(send: send, transition: transition, speechEndMs: speechEndMs)
     }
 
     /// Mute or a fresh connection: open without a transition (the daemon
@@ -117,6 +132,7 @@ public struct CaptureGate: Sendable {
     public mutating func reset() {
         vad.reset(keepFloor: true)
         manualPreroll = []
+        sentWhileOpen = false
         isGated = manual == false
     }
 
@@ -140,6 +156,7 @@ public struct CaptureGate: Sendable {
     /// state, so the next push only transitions on a real change.
     private mutating func resync() {
         manualPreroll = []
+        sentWhileOpen = false
         if manual == nil {
             // Start the detector open; if it was visibly gated, the next
             // push reports `.opened` and it closes again on its own.

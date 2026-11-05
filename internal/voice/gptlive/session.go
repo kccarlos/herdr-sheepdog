@@ -316,7 +316,11 @@ func (s *Session) SetMuted(muted bool) {
 func (s *Session) AudioStreamEnd() {
 	s.mu.Lock()
 	s.armed = true
+	live := s.live != nil && !s.muted && !s.closed
 	s.mu.Unlock()
+	if live {
+		s.log.Log(logSource, "voice.stream_end", "", map[string]any{"tail_ms": int64(0)})
+	}
 }
 
 // ClientAttached is called by the /ws hub when a client connects (true)

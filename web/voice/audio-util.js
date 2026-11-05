@@ -893,6 +893,7 @@ export class SilenceGate {
     this.prerollFrames = Math.max(0, Math.round((o.prerollMs == null ? 100 : o.prerollMs) / this.frameMs));
     this.gated = false; // true while frames are being withheld
     this.quietMs = 0; // consecutive silent time seen so far
+    this.voiced = false; // true once any frame in the open segment reached floor
     this.preroll = []; // withheld frames, oldest first, at most prerollFrames
     this.gatedFrames = 0; // frames withheld in total
     this.peak = 0; // peak of the last frame, in LSB
@@ -900,7 +901,7 @@ export class SilenceGate {
 
   /**
    * @param {Int16Array} frame
-   * @returns {{send: Int16Array[], transition: ('on'|'off'|null)}} frames to
+   * @returns {{send: Int16Array[], transition: ('on'|'off'|null), speechEndMs?: (number|null)}} frames to
    *   send now (possibly including pre-roll) and whether the gate switched
    *   on (silence started) or off (speech resumed) on this frame.
    */
@@ -909,6 +910,7 @@ export class SilenceGate {
     this.peak = peak;
     if (peak >= this.floor) {
       this.quietMs = 0;
+      this.voiced = true;
       if (this.gated) {
         this.gated = false;
         const send = this.preroll;
@@ -922,8 +924,10 @@ export class SilenceGate {
     if (!this.gated) {
       if (this.quietMs < this.holdMs) return { send: [frame], transition: null };
       this.gated = true;
+      const speechEndMs = this.voiced ? this.quietMs : null;
+      this.voiced = false;
       this.withhold(frame);
-      return { send: [], transition: 'on' };
+      return { send: [], transition: 'on', speechEndMs };
     }
     this.withhold(frame);
     return { send: [], transition: null };

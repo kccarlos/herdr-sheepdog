@@ -473,7 +473,14 @@ func (h *hub) afterCancel(res voice.ToolResult) {
 func (h *hub) setMuted(on bool, via string) {
 	h.mu.Lock()
 	h.muted = on
+	c := h.client
 	h.mu.Unlock()
+	if on && c != nil {
+		c.mu.Lock()
+		c.firstRunFrameAt = time.Time{}
+		c.runAudioBytes = 0
+		c.mu.Unlock()
+	}
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(on)
 	}
@@ -486,13 +493,44 @@ func (h *hub) setMuted(on bool, via string) {
 // client that never sent a speaking message the gate is also its speech
 // detector: open means speaking (docs/dev/ws-contract.md "Client speech
 // detector").
-func (h *hub) setSilence(c *client, on bool) {
+func (h *hub) setSilence(c *client, m wsproto.Message) {
+	on := *m.On
+	now := h.s.deps.Now()
 	c.mu.Lock()
 	c.silent = on
 	c.silenceTransitions++
 	gateIsDetector := !c.speakingReports
+	audioFrames := c.audioFramesIn
+	excess, hadPrior := c.noteMonoLocked(now, m.MonoMs)
+	if on && m.MonoMs != nil && !hadPrior && c.runAudioBytes > 0 {
+		// 16 kHz mono PCM16 is 32 bytes/ms; compare wall span against stream duration.
+		burstExcess := now.Sub(c.firstRunFrameAt).Milliseconds() - int64(c.runAudioBytes)/32
+		if burstExcess > excess {
+			excess = burstExcess
+		}
+	}
+	c.firstRunFrameAt = time.Time{}
+	c.runAudioBytes = 0
 	c.mu.Unlock()
-	h.s.log.Log(logSource, "web.client.silence", "", map[string]any{"client_id": c.id, "on": on})
+
+	payload := map[string]any{"client_id": c.id, "on": on}
+	if on {
+		if m.SpeechEndMs != nil {
+			payload["speech_end_ms"] = *m.SpeechEndMs
+		}
+		if m.Seq != nil {
+			payload["seq"] = *m.Seq
+			payload["audio_frames_in"] = audioFrames
+		}
+		if m.MonoMs != nil {
+			var baseOneWay int64
+			if m.RTTMs != nil {
+				baseOneWay = int64(*m.RTTMs) / 2
+			}
+			payload["uplink_lag_ms"] = excess + baseOneWay
+		}
+	}
+	h.s.log.Log(logSource, "web.client.silence", "", payload)
 	if on {
 		if v, ok := h.s.deps.Voice.(audioEnder); ok {
 			v.AudioStreamEnd()
@@ -609,9 +647,16 @@ type client struct {
 
 	// counters (under mu)
 	framesIn, framesOut   int
+	audioFramesIn         int
 	bytesIn, bytesOut     int
 	droppedAudio, dropped int // dropped = total drops, for throttling
 	mutedDrops            int
+	// skew-free uplink lag tracking (under mu): minMonoOffset is the
+	// smallest observed (server_mono_ms - client_mono_ms) on this socket.
+	hasMonoOffset   bool
+	minMonoOffset   int64
+	firstRunFrameAt time.Time
+	runAudioBytes   int
 	// silence gate, as reported by the client (silence messages and the
 	// counters carried by its pings)
 	silent             bool
@@ -703,6 +748,26 @@ func (c *client) sendWaitStats() (maxMS, p95MS float64) {
 
 func newClient(h *hub, conn *websocket.Conn, remote string, maxQueue int) *client {
 	return &client{h: h, conn: conn, remote: remote, max: maxQueue, start: h.s.deps.Now(), notify: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+// noteMonoLocked updates the minimum observed (server_mono_ms - client_mono_ms)
+// offset on this connection and returns the excess delay above that baseline.
+// Comparing elapsed ms since c.start against client mono_ms keeps uplink_lag_ms
+// completely immune to wall-clock skew and NTP jumps. Caller holds c.mu.
+func (c *client) noteMonoLocked(now time.Time, monoMs *int64) (excessMS int64, hadPrior bool) {
+	if monoMs == nil {
+		return 0, false
+	}
+	offset := now.Sub(c.start).Milliseconds() - *monoMs
+	if !c.hasMonoOffset {
+		c.hasMonoOffset = true
+		c.minMonoOffset = offset
+		return 0, false
+	}
+	if offset < c.minMonoOffset {
+		c.minMonoOffset = offset
+	}
+	return max(int64(0), offset-c.minMonoOffset), true
 }
 
 // enqueue adds f to the outbound queue, dropping the oldest audio frame
@@ -864,6 +929,14 @@ func (c *client) onAudio(data []byte) {
 		return
 	}
 	h := c.h
+	now := h.s.deps.Now()
+	c.mu.Lock()
+	c.audioFramesIn++
+	if c.firstRunFrameAt.IsZero() {
+		c.firstRunFrameAt = now
+	}
+	c.runAudioBytes += len(data)
+	c.mu.Unlock()
 	h.mu.Lock()
 	muted := h.muted
 	h.mu.Unlock()
@@ -926,12 +999,13 @@ func (c *client) onControl(data []byte) {
 		if wsproto.ValidAEC(m.AEC) {
 			c.aec = m.AEC
 		}
+		_, _ = c.noteMonoLocked(c.h.s.deps.Now(), m.MonoMs)
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
 		h.setMuted(*m.On, "ws")
 	case wsproto.TypeSilence:
-		h.setSilence(c, *m.On)
+		h.setSilence(c, m)
 	case wsproto.TypeSpeaking:
 		h.setSpeaking(c, *m.On)
 	case wsproto.TypePlayback:

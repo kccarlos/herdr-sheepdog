@@ -94,6 +94,8 @@ public final class VoiceSocket: LinkChannelClient {
 
     /// Who the app says it is on `client-ready`.
     public var client = WSMessage.ClientInfo.app()
+    /// Monotonic uptime in milliseconds, stamped on `client-ready`, `ping` and `silence`.
+    public var monoMs: () -> Int64 = { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
     /// The handshake of the current (or last) connection.
     public private(set) var handshake = ProtocolHandshake()
 
@@ -105,6 +107,9 @@ public final class VoiceSocket: LinkChannelClient {
     private var handshakeTimer: Task<Void, Never>?
     private var userClosed = true
     private var pingSentAt: Date?
+    private var pingSentMonoMs: Int64?
+    private var lastRttMs: Int?
+    private var uplinkSeq = 0
     private var generation = 0
 
     /// The pins of the endpoint's computer, followed across `update`.
@@ -220,6 +225,9 @@ public final class VoiceSocket: LinkChannelClient {
         receiveLoop?.cancel()
         receiveLoop = nil
         pingSentAt = nil
+        pingSentMonoMs = nil
+        lastRttMs = nil
+        uplinkSeq = 0
         task?.cancel(with: code, reason: Data(reason.utf8))
         task = nil
     }
@@ -254,6 +262,9 @@ public final class VoiceSocket: LinkChannelClient {
 
     private func didOpen() {
         life = .open
+        uplinkSeq = 0
+        pingSentMonoMs = nil
+        lastRttMs = nil
         openReporter?.opened()
         // The handshake first, before anything else on the connection.
         // An older daemon answers it with an "unknown type" error, which
@@ -274,7 +285,12 @@ public final class VoiceSocket: LinkChannelClient {
     private func handle(text: String) {
         guard let message = try? WSMessage.decode(Data(text.utf8)) else { return }
         if message.type == .pong {
+            if let sentMono = pingSentMonoMs {
+                let rtt = monoMs() - sentMono
+                if rtt >= 0 { lastRttMs = Int(rtt) }
+            }
             pingSentAt = nil
+            pingSentMonoMs = nil
         }
         let before = handshake.state
         let action = handshake.receive(message)
@@ -340,7 +356,27 @@ public final class VoiceSocket: LinkChannelClient {
 
     @discardableResult
     public func send(_ message: WSMessage) -> Bool {
-        guard let task, life == .open, let data = try? message.encode() else { return false }
+        guard let task, life == .open else { return false }
+        var message = message
+        switch message.type {
+        case .clientReady:
+            if message.monoMs == nil { message.monoMs = monoMs() }
+        case .ping:
+            let m = message.monoMs ?? monoMs()
+            message.monoMs = m
+            if message.rttMs == nil { message.rttMs = lastRttMs }
+            pingSentMonoMs = m
+        case .silence where message.on == true:
+            if message.seq == nil { message.seq = uplinkSeq }
+            if message.monoMs == nil { message.monoMs = monoMs() }
+            if message.rttMs == nil { message.rttMs = lastRttMs }
+        default:
+            break
+        }
+        guard let data = try? message.encode() else {
+            if message.type == .ping { pingSentMonoMs = nil }
+            return false
+        }
         task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
         return true
     }
@@ -349,6 +385,7 @@ public final class VoiceSocket: LinkChannelClient {
     @discardableResult
     public func send(frame: Data) -> Bool {
         guard let task, life == .open else { return false }
+        uplinkSeq += 1
         task.send(.data(frame)) { _ in }
         return true
     }

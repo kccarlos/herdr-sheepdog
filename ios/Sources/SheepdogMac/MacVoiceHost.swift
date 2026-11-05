@@ -138,8 +138,8 @@ final class MacVoiceHost: VoiceControlling {
         audio.onFrame = { [weak self] frame in
             self?.channel.send(frame: frame)
         }
-        audio.onGate = { [weak self] closed in
-            self?.send(.gateChanged(closed: closed))
+        audio.onGate = { [weak self] closed, speechEndMs in
+            self?.send(.gateChanged(closed: closed, speechEndMs: speechEndMs))
         }
         audio.onSpeakingChanged = { [weak self] speaking in
             self?.send(.playbackChanged(speaking: speaking))
@@ -212,7 +212,7 @@ final class MacVoiceHost: VoiceControlling {
         case .flush:
             send(.flush)
         case .error:
-            if let text = message.message { send(.daemonError(text)) }
+            if let text = message.displayErrorMessage { send(.daemonError(text)) }
         case .voiceCommand:
             receive(command: message)
         // The conversation, the agent windows and the cards are the panel's.

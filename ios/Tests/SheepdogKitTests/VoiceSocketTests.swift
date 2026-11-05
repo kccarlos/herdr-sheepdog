@@ -44,7 +44,8 @@ final class VoiceSocketTests: XCTestCase {
 
     func testEveryOpenStartsWithClientReady() async throws {
         let first = try await openingMessages(muted: false)[0]
-        XCTAssertEqual(first, .clientReady(client: Self.client), "the handshake goes before anything else")
+        XCTAssertNotNil(first.monoMs)
+        XCTAssertEqual(first, .clientReady(client: Self.client, monoMs: first.monoMs), "the handshake goes before anything else")
     }
 
     func testEveryOpenSaysNotMutedToo() async throws {
@@ -72,7 +73,50 @@ final class VoiceSocketTests: XCTestCase {
         defer { socket.disconnect() }
         let texts = try await server.texts(count: 3, timeout: 10)
         let messages = try texts.map { try WSMessage.decode(Data($0.utf8)) }
-        XCTAssertEqual(messages, [.clientReady(client: Self.client), .mute(false), .speaking(false)], "speaking is authoritative from the first open")
+        XCTAssertNotNil(messages[0].monoMs)
+        XCTAssertEqual(messages, [.clientReady(client: Self.client, monoMs: messages[0].monoMs), .mute(false), .speaking(false)], "speaking is authoritative from the first open")
+    }
+
+    func testSilenceAndPingCarryMonotonicTimestampsSeqAndRTT() async throws {
+        let server = try LocalWebSocketServer()
+        defer { server.stop() }
+        let port = try await server.start()
+        let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
+        var mono: Int64 = 10_000
+        socket.monoMs = { mono }
+        socket.client = Self.client
+        socket.connect()
+        defer { socket.disconnect() }
+        let openTexts = try await server.texts(count: 3, timeout: 10)
+        XCTAssertEqual(try WSMessage.decode(Data(openTexts[0].utf8)).monoMs, 10_000)
+
+        mono = 11_000
+        socket.pingTick(now: Date(timeIntervalSinceReferenceDate: 11))
+        let pingTexts = try await server.texts(count: 4, timeout: 5)
+        let ping1 = try WSMessage.decode(Data(pingTexts[3].utf8))
+        XCTAssertEqual(ping1.monoMs, 11_000)
+        XCTAssertNil(ping1.rttMs)
+
+        mono = 11_028
+        server.send(#"{"type":"pong"}"#)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(socket.send(frame: Data(repeating: 0, count: 1_280)))
+        XCTAssertTrue(socket.send(frame: Data(repeating: 0, count: 1_280)))
+        XCTAssertTrue(socket.send(frame: Data(repeating: 0, count: 1_280)))
+        mono = 12_500
+        XCTAssertTrue(socket.send(.silence(true, speechEndMs: 400)))
+        XCTAssertTrue(socket.send(.silence(false)))
+        let allTexts = try await server.texts(count: 6, timeout: 5)
+        let gateClose = try WSMessage.decode(Data(allTexts[4].utf8))
+        XCTAssertEqual(gateClose.on, true)
+        XCTAssertEqual(gateClose.speechEndMs, 400)
+        XCTAssertEqual(gateClose.seq, 3)
+        XCTAssertEqual(gateClose.monoMs, 12_500)
+        XCTAssertEqual(gateClose.rttMs, 28)
+
+        let gateOpen = try WSMessage.decode(Data(allTexts[5].utf8))
+        XCTAssertEqual(gateOpen, .silence(false), "reopening carries only on:false")
     }
 
     func testAPingWaitsForItsPongThenTimesTheSocketOut() async throws {

@@ -252,6 +252,7 @@ type harnessOpts struct {
 	marks bool
 	mutes *attention.Mutes
 	wrap  func(*supervisor.Supervisor) Supervisor
+	now   func() time.Time
 }
 
 // testFleet is the fleet a test's marks follow: the injector's panes.
@@ -328,7 +329,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	deps := Deps{Log: log, Store: store, Supervisor: serverSup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, Files: !o.filesOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
-		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir}
+		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir, Now: o.now}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {

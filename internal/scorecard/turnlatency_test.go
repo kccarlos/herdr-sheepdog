@@ -16,14 +16,18 @@ func TestTurnLatencyPrefersLoggedBreakdowns(t *testing.T) {
 	if r.Source != "replay" || r.N != 1 || r.Outcomes["played"] != 1 || r.Segments["first_audio_ms"].Median != 500 {
 		t.Fatalf("replayed = %+v", r)
 	}
-	logged := ev(1600, "observe", "turn.latency", "utt-1", map[string]any{"utterance_id": "utt-1", "relay": "voice", "outcome": "played", "total_ms": 4000, "steps_ms": []int{100, 200}})
+	logged := ev(1600, "observe", "turn.latency", "utt-1", map[string]any{
+		"utterance_id": "utt-1", "relay": "voice", "outcome": "played",
+		"total_ms": 4000, "voice_ms": 1590, "uplink_lag_ms": 40, "gate_tail_ms": 1300, "provider_eou_ms": 250,
+		"steps_ms": []int{100, 200},
+	})
 	r = computeTurnLatency(eventsOf(raw, result, play, logged))
-	if r.Source != "events" || r.N != 1 || r.Segments["total_ms"].Median != 4000 || r.Segments["step_ms"].N != 2 {
+	if r.Source != "events" || r.N != 1 || r.Segments["total_ms"].Median != 4000 || r.Segments["uplink_lag_ms"].Median != 40 || r.Segments["gate_tail_ms"].Median != 1300 || r.Segments["provider_eou_ms"].Median != 250 || r.Segments["step_ms"].N != 2 {
 		t.Fatalf("logged = %+v", r)
 	}
 	var b strings.Builder
 	writeTurnLatency(&b, r)
-	if !strings.Contains(b.String(), "| total_ms | 1 | 4000 | 4000 | 4000 |") {
+	if !strings.Contains(b.String(), "| total_ms | 1 | 4000 | 4000 | 4000 |") || !strings.Contains(b.String(), "| gate_tail_ms | 1 | 1300 | 1300 | 1300 |") {
 		t.Errorf("markdown = %s", b.String())
 	}
 }

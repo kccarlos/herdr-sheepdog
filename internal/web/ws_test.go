@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,6 +271,66 @@ func TestWSSilenceGate(t *testing.T) {
 	}
 	if stats["gated_frames"] != float64(42) || stats["peak"] != float64(5) || stats["silent"] != false || stats["silence_transitions"] != float64(2) {
 		t.Fatalf("stats = %v", stats)
+	}
+}
+
+func TestWSSilenceUplinkLag(t *testing.T) {
+	var clockMu sync.Mutex
+	cur := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	advance := func(ms int) {
+		clockMu.Lock()
+		cur = cur.Add(time.Duration(ms) * time.Millisecond)
+		clockMu.Unlock()
+	}
+	nowFn := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return cur
+	}
+	h := newHarness(t, harnessOpts{voice: true, now: nowFn})
+	c := dialWSRaw(t, h)
+
+	// Handshake at server t=0, client mono_ms=50000 (arbitrary epoch skew!).
+	var mono0 int64 = 50000
+	ready := wsproto.ClientReady(wsproto.ProtocolVersion, testClient)
+	ready.MonoMs = &mono0
+	c.send(ready)
+	c.skipBotReady = true
+	c.expect(wsproto.TypeStatus)
+
+	// Ping at client mono_ms=51000 arrives at server t=1000 (baseline offset),
+	// carrying rtt_ms=24 (12ms baseline one-way).
+	advance(1000)
+	var mono1 int64 = 51000
+	rtt := 24
+	c.send(wsproto.Message{Type: wsproto.TypePing, MonoMs: &mono1, RTTMs: &rtt})
+	c.expect(wsproto.TypePong)
+
+	// Send 3 binary PCM frames, then silence {on: true} stamped at client
+	// mono_ms=52000 that arrives at server t=2180 (180ms burst queueing over
+	// baseline + 12ms RTT/2 = 192ms skew-free uplink_lag_ms).
+	c.sendAudio(make([]byte, 640))
+	c.sendAudio(make([]byte, 640))
+	c.sendAudio(make([]byte, 640))
+	advance(1180)
+	speechEnd, seq := 300, 3
+	var mono2 int64 = 52000
+	sil := wsproto.Silence(true)
+	sil.SpeechEndMs, sil.Seq, sil.MonoMs, sil.RTTMs = &speechEnd, &seq, &mono2, &rtt
+	c.send(sil)
+
+	var got map[string]any
+	waitFor(t, 2*time.Second, func() bool {
+		for _, ev := range h.log.Tail(0) {
+			if ev.Type == "web.client.silence" {
+				_ = json.Unmarshal(ev.Payload, &got)
+				return true
+			}
+		}
+		return false
+	}, "web.client.silence")
+	if got["speech_end_ms"] != float64(300) || got["seq"] != float64(3) || got["audio_frames_in"] != float64(3) || got["uplink_lag_ms"] != float64(192) {
+		t.Fatalf("web.client.silence = %v", got)
 	}
 }
 

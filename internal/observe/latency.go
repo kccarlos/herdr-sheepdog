@@ -14,7 +14,9 @@ import (
 // the user's last word to the first audio of the answer is cut into
 // consecutive segments, each measured from the events that bound it:
 //
-//	voice_ms        last words → the voice's to_supervisor call (voice.tool_call)
+//	voice_ms        last words → the voice's to_supervisor call (voice.tool_call);
+//	                when a silence gate or mute closed the stream first, decomposed
+//	                into uplink_lag_ms, gate_tail_ms and provider_eou_ms
 //	relay_ms        tool call → supervisor.relay (the daemon's own relay: the
 //	                unanswered wait, relay_by_daemon waited_ms)
 //	queue_ms        relay → brain.turn_started (fast paths, the turn lock)
@@ -78,17 +80,20 @@ type Breakdown struct {
 	// Stale: the user had moved on when the reply landed.
 	Stale bool `json:"stale,omitempty"`
 
-	TotalMS      *int64  `json:"total_ms,omitempty"`
-	VoiceMS      *int64  `json:"voice_ms,omitempty"`
-	RelayMS      *int64  `json:"relay_ms,omitempty"`
-	QueueMS      *int64  `json:"queue_ms,omitempty"`
-	BrainMS      *int64  `json:"brain_ms,omitempty"`
-	StepsMS      []int64 `json:"steps_ms,omitempty"`
-	ModelMS      *int64  `json:"model_ms,omitempty"`
-	ToolMS       *int64  `json:"tool_ms,omitempty"`
-	DeliveryMS   *int64  `json:"delivery_ms,omitempty"`
-	PushQueueMS  *int64  `json:"push_queue_ms,omitempty"`
-	FirstAudioMS *int64  `json:"first_audio_ms,omitempty"`
+	TotalMS       *int64  `json:"total_ms,omitempty"`
+	VoiceMS       *int64  `json:"voice_ms,omitempty"`
+	UplinkLagMS   *int64  `json:"uplink_lag_ms,omitempty"`
+	GateTailMS    *int64  `json:"gate_tail_ms,omitempty"`
+	ProviderEOUMS *int64  `json:"provider_eou_ms,omitempty"`
+	RelayMS       *int64  `json:"relay_ms,omitempty"`
+	QueueMS       *int64  `json:"queue_ms,omitempty"`
+	BrainMS       *int64  `json:"brain_ms,omitempty"`
+	StepsMS       []int64 `json:"steps_ms,omitempty"`
+	ModelMS       *int64  `json:"model_ms,omitempty"`
+	ToolMS        *int64  `json:"tool_ms,omitempty"`
+	DeliveryMS    *int64  `json:"delivery_ms,omitempty"`
+	PushQueueMS   *int64  `json:"push_queue_ms,omitempty"`
+	FirstAudioMS  *int64  `json:"first_audio_ms,omitempty"`
 
 	// At is when the record ended (the playback start, or the event or
 	// tick that ended it).
@@ -111,10 +116,13 @@ type record struct {
 	turnKey       string
 	turnID        string
 
-	end        time.Time // the user's last words (zero: unknown)
-	toolCallAt time.Time
-	relayAt    time.Time
-	relayWait  time.Duration // the daemon's own relay: its unanswered wait
+	end           time.Time // the user's last words (zero: unknown)
+	uplinkLagMS   *int64
+	gateTailMS    *int64
+	providerEOUMS *int64
+	toolCallAt    time.Time
+	relayAt       time.Time
+	relayWait     time.Duration // the daemon's own relay: its unanswered wait
 
 	turnStart time.Time
 	steps     []int64
@@ -130,19 +138,35 @@ type record struct {
 
 // pendingCall is a voice to_supervisor call not yet relayed.
 type pendingCall struct {
-	at     time.Time
-	lastIn time.Time
+	at            time.Time
+	lastIn        time.Time
+	speechEndAt   time.Time
+	fromClient    bool
+	uplinkLagMS   *int64
+	gateTailMS    *int64
+	providerEOUMS *int64
+}
+
+// silenceMark records a client gate close (or mute-after-speech) awaiting a
+// voice tool call.
+type silenceMark struct {
+	at          time.Time
+	speechEndMS *int64
+	uplinkLagMS *int64
 }
 
 // Tracker builds Breakdowns from events in log order. It is not safe for
 // concurrent use. The live daemon feeds it from the observer
 // (LatencyObserver); the scorecard feeds it a recorded log (Replay).
 type Tracker struct {
-	open   map[string]*record // by utterance id (and legacy aliases)
-	byCall map[string]*record
-	byTurn map[string]*record
-	calls  map[string]pendingCall
-	lastIn time.Time
+	open                map[string]*record // by utterance id (and legacy aliases)
+	byCall              map[string]*record
+	byTurn              map[string]*record
+	calls               map[string]pendingCall
+	lastIn              time.Time
+	lastSilence         *silenceMark
+	lastStreamEnd       time.Time
+	hasSpeechSinceClear bool
 	// TaggedPlayback: the voice tags each reply's playback start with
 	// its utterance_id (this daemon's sessions do), so an untagged start
 	// is never a reply. False for an older log: an untagged start goes
@@ -157,21 +181,34 @@ func NewTracker() *Tracker {
 
 // payload fields the tracker reads; every decode is best-effort.
 type latencyFields struct {
-	ID               string      `json:"id"`
-	Name             string      `json:"name"`
-	CallID           string      `json:"call_id"`
-	WaitedMS         *int64      `json:"waited_ms"`
-	Turn             json.Number `json:"turn"`
-	Step             int         `json:"step"`
-	Template         string      `json:"template"`
-	Pending          bool        `json:"pending"`
-	Cancelled        bool        `json:"cancelled"`
-	Spoken           string      `json:"spoken"`
-	AnswersUtterance string      `json:"answers_utterance"`
-	Skipped          bool        `json:"skipped"`
-	SchedulingSent   string      `json:"scheduling_sent"`
-	Replaces         string      `json:"replaces"`
-	State            string      `json:"state"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	CallID            string      `json:"call_id"`
+	WaitedMS          *int64      `json:"waited_ms"`
+	Turn              json.Number `json:"turn"`
+	Step              int         `json:"step"`
+	Template          string      `json:"template"`
+	Pending           bool        `json:"pending"`
+	Cancelled         bool        `json:"cancelled"`
+	Spoken            string      `json:"spoken"`
+	AnswersUtterance  string      `json:"answers_utterance"`
+	Skipped           bool        `json:"skipped"`
+	SchedulingSent    string      `json:"scheduling_sent"`
+	Replaces          string      `json:"replaces"`
+	State             string      `json:"state"`
+	On                *bool       `json:"on"`
+	Muted             *bool       `json:"muted"`
+	SpeechEndMS       *int64      `json:"speech_end_ms"`
+	Seq               *int64      `json:"seq"`
+	UplinkLagMS       *int64      `json:"uplink_lag_ms"`
+	TailMS            *int64      `json:"tail_ms"`
+	GateTailElapsedMS *int64      `json:"gate_tail_elapsed_ms"`
+}
+
+func (t *Tracker) clearSilence() {
+	t.lastSilence = nil
+	t.lastStreamEnd = time.Time{}
+	t.hasSpeechSinceClear = false
 }
 
 // Add feeds one event and returns the breakdowns it completed.
@@ -185,12 +222,88 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 		out := t.endAll(ev.TS, OutcomeRestart)
 		t.calls = map[string]pendingCall{}
 		t.lastIn = time.Time{}
+		t.clearSilence()
 		return out
+	case "web.client.speaking":
+		if p.On != nil && *p.On {
+			t.hasSpeechSinceClear = true
+		}
+	case "web.client.silence":
+		if p.On == nil {
+			break
+		}
+		if !*p.On {
+			t.clearSilence()
+			t.hasSpeechSinceClear = true
+			break
+		}
+		// A protocol-aware client includes seq on every gate close and omits
+		// speech_end_ms when 0 voiced frames occurred in the open segment
+		// (e.g. a silent room right after connect or unmute).
+		if p.Seq != nil && p.SpeechEndMS == nil {
+			t.clearSilence()
+			break
+		}
+		t.lastSilence = &silenceMark{
+			at:          ev.TS,
+			speechEndMS: p.SpeechEndMS,
+			uplinkLagMS: p.UplinkLagMS,
+		}
+		t.lastStreamEnd = time.Time{}
+	case "web.client.mute":
+		if p.Muted == nil {
+			break
+		}
+		if !*p.Muted {
+			t.clearSilence()
+			break
+		}
+		if t.lastSilence == nil && t.hasSpeechSinceClear {
+			t.lastSilence = &silenceMark{at: ev.TS}
+			t.lastStreamEnd = time.Time{}
+		}
+	case "voice.stream_end":
+		t.lastStreamEnd = ev.TS
+	case "voice.text", "web.utterance":
+		t.clearSilence()
 	case "voice.transcript.in":
 		t.lastIn = ev.TS
+		t.hasSpeechSinceClear = true
 	case "voice.tool_call":
 		if p.Name == "to_supervisor" && p.ID != "" {
-			t.calls[p.ID] = pendingCall{at: ev.TS, lastIn: t.lastIn}
+			pc := pendingCall{at: ev.TS, lastIn: t.lastIn}
+			if s := t.lastSilence; s != nil && !s.at.After(ev.TS) && ev.TS.Sub(s.at) <= legacyEndWindow {
+				var daemonTail time.Duration
+				switch {
+				case !t.lastStreamEnd.IsZero() && !t.lastStreamEnd.Before(s.at):
+					endAt := t.lastStreamEnd
+					if endAt.After(ev.TS) {
+						endAt = ev.TS
+					}
+					daemonTail = max(time.Duration(0), endAt.Sub(s.at))
+				case p.GateTailElapsedMS != nil:
+					daemonTail = min(max(time.Duration(0), time.Duration(*p.GateTailElapsedMS)*time.Millisecond), ev.TS.Sub(s.at))
+				}
+				effStreamEnd := s.at.Add(daemonTail)
+				var clientHold int64
+				if s.speechEndMS != nil {
+					clientHold = max(int64(0), *s.speechEndMS)
+				}
+				var uplinkLag int64
+				if s.uplinkLagMS != nil {
+					uplinkLag = max(int64(0), *s.uplinkLagMS)
+					u := uplinkLag
+					pc.uplinkLagMS = &u
+				}
+				gt := clientHold + daemonTail.Milliseconds()
+				pe := max(int64(0), ev.TS.Sub(effStreamEnd).Milliseconds())
+				pc.gateTailMS = &gt
+				pc.providerEOUMS = &pe
+				pc.speechEndAt = s.at.Add(-time.Duration(uplinkLag+clientHold) * time.Millisecond)
+				pc.fromClient = s.speechEndMS != nil
+			}
+			t.clearSilence()
+			t.calls[p.ID] = pc
 		}
 	case "supervisor.relay", "supervisor.relay_fallback", "supervisor.relay_by_daemon":
 		t.relayed(ev, p)
@@ -321,11 +434,19 @@ func (t *Tracker) relayed(ev eventlog.Event, p latencyFields) {
 	} else if c, ok := t.calls[p.CallID]; ok {
 		delete(t.calls, p.CallID)
 		r.toolCallAt = c.at
+		r.uplinkLagMS = c.uplinkLagMS
+		r.gateTailMS = c.gateTailMS
+		r.providerEOUMS = c.providerEOUMS
 		switch {
 		case p.WaitedMS != nil:
 			r.end = ev.TS.Add(-time.Duration(*p.WaitedMS) * time.Millisecond)
 		case !c.lastIn.IsZero() && c.at.Sub(c.lastIn) <= legacyEndWindow:
 			r.end = c.lastIn
+		}
+		if !c.speechEndAt.IsZero() {
+			if c.fromClient || r.end.IsZero() || r.end.After(c.speechEndAt) {
+				r.end = c.speechEndAt
+			}
 		}
 	}
 	t.open[key] = r
@@ -464,6 +585,9 @@ func (r *record) breakdown(at time.Time, outcome string) Breakdown {
 		}
 	} else {
 		b.VoiceMS = span(r.end, r.toolCallAt)
+		b.UplinkLagMS = r.uplinkLagMS
+		b.GateTailMS = r.gateTailMS
+		b.ProviderEOUMS = r.providerEOUMS
 		b.RelayMS = span(r.toolCallAt, r.relayAt)
 	}
 	b.QueueMS = span(r.relayAt, r.turnStart)

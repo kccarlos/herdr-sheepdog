@@ -24,8 +24,10 @@ const STATE = new Set([
   "voice.stalled", "voice.session_open", "voice.session_close", "voice.session_error",
   "voice.standby", "voice.provider_changed",
   // An agent's state moved (older daemons say nothing else), its attention or
-  // its group changed, a space was muted: the status line's counts follow.
+  // its group changed, a space was muted, or a provider hit an account problem:
+  // the status line's counts and notice follow.
   "herdr.transition", "agent.attention", "space.muted",
+  "brain.account_problem", "web.account_problem",
 ]);
 
 export function eventEffect(type) {

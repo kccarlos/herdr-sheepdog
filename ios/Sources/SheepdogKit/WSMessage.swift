@@ -105,6 +105,20 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case outgoing = "out"
     }
 
+    /// Account problems carried on `error` (`docs/dev/ws-contract.md` "Account problems").
+    /// Mirrors `brain.AccountProblem`.
+    public enum AccountProblem: String, Codable, Sendable {
+        case invalidKey = "invalid_key"
+        case quota
+        case balance
+        case unknown
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = AccountProblem(rawValue: raw) ?? .unknown
+        }
+    }
+
     public var type: Kind
     /// `client-ready` / `bot-ready`: the protocol the client speaks, or
     /// the one the daemon will speak on this connection; `bot-ready` adds
@@ -116,6 +130,14 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var features: [String]?
     /// `mute` / `silence` / `speaking`, and `voice-command` `ptt`.
     public var on: Bool?
+    /// `silence {on: true}`: ms elapsed since speech ended on the client, and
+    /// total binary PCM frames sent on this `/ws` connection before the gate closed.
+    public var speechEndMs: Int?
+    public var seq: Int?
+    /// `client-ready` / `ping` / `silence`: client monotonic clock (ms) and
+    /// latest measured `/ws` ping/pong RTT (ms).
+    public var monoMs: Int64?
+    public var rttMs: Int?
     /// `playback`: what the player did, and the milliseconds of the run
     /// actually played, in stream time (24 kHz audio consumed, not wall
     /// clock). Required for `drained` and `flushed`.
@@ -160,8 +182,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// `transcript`.
     public var dir: Direction?
     public var final: Bool?
-    /// `error` and `screen-error`.
+    /// `error` and `screen-error` (with optional account-problem fields on `error`).
     public var message: String?
+    public var problem: AccountProblem?
+    public var role: String?
+    public var fix: String?
     /// `screen-subscribe` (`pane_id`, `lines`), `screen` (the window, the
     /// body of `GET /api/agents/{pane}/screen`) and `screen-error`
     /// (`pane_id`; `ended` when the subscription is over).
@@ -182,8 +207,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
+        case problem, role, fix, seq
         case `protocol`, client, daemon, features
         case minProtocol = "min_protocol"
+        case speechEndMs = "speech_end_ms"
+        case monoMs = "mono_ms"
+        case rttMs = "rtt_ms"
         case playedMs = "played_ms"
         case at
         case receivedMs = "received_ms"
@@ -205,6 +234,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
         daemon: DaemonInfo? = nil,
         features: [String]? = nil,
         on: Bool? = nil,
+        speechEndMs: Int? = nil,
+        seq: Int? = nil,
+        monoMs: Int64? = nil,
+        rttMs: Int? = nil,
         state: PlaybackState? = nil,
         playedMs: Int? = nil,
         at: String? = nil,
@@ -226,6 +259,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
         dir: Direction? = nil,
         final: Bool? = nil,
         message: String? = nil,
+        problem: AccountProblem? = nil,
+        role: String? = nil,
+        fix: String? = nil,
         paneID: String? = nil,
         lines: Int? = nil,
         ansi: Bool? = nil,
@@ -243,6 +279,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.daemon = daemon
         self.features = features
         self.on = on
+        self.speechEndMs = speechEndMs
+        self.seq = seq
+        self.monoMs = monoMs
+        self.rttMs = rttMs
         self.state = state
         self.playedMs = playedMs
         self.at = at
@@ -264,6 +304,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.dir = dir
         self.final = final
         self.message = message
+        self.problem = problem
+        self.role = role
+        self.fix = fix
         self.paneID = paneID
         self.lines = lines
         self.ansi = ansi
@@ -275,16 +318,31 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.action = action
     }
 
+    /// `error`: `message` together with `fix` when an account problem supplies one.
+    public var displayErrorMessage: String? {
+        Self.combineError(message: message, fix: fix)
+    }
+
+    public static func combineError(message: String?, fix: String?) -> String? {
+        guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty else { return nil }
+        guard let fix = fix?.trimmingCharacters(in: .whitespacesAndNewlines), !fix.isEmpty else { return message }
+        let sentence = fix.prefix(1).uppercased() + fix.dropFirst()
+        let ended = sentence.hasSuffix(".") || sentence.hasSuffix("!") || sentence.hasSuffix("?") ? sentence : sentence + "."
+        return "\(message) \(ended)"
+    }
+
     // MARK: - Client → server constructors
 
     /// The handshake's first frame (docs/ws-contract.md "Protocol version
     /// and handshake").
-    public static func clientReady(protocol p: Int = ProtocolHandshake.protocolVersion, client: ClientInfo) -> WSMessage {
-        WSMessage(type: .clientReady, protocol: p, client: client)
+    public static func clientReady(protocol p: Int = ProtocolHandshake.protocolVersion, client: ClientInfo, monoMs: Int64? = nil) -> WSMessage {
+        WSMessage(type: .clientReady, protocol: p, client: client, monoMs: monoMs)
     }
 
     public static func mute(_ on: Bool) -> WSMessage { WSMessage(type: .mute, on: on) }
-    public static func silence(_ on: Bool) -> WSMessage { WSMessage(type: .silence, on: on) }
+    public static func silence(_ on: Bool, speechEndMs: Int? = nil) -> WSMessage {
+        WSMessage(type: .silence, on: on, speechEndMs: on ? speechEndMs : nil)
+    }
     /// The app's own speech detector opened (`true`) or closed.
     public static func speaking(_ on: Bool) -> WSMessage { WSMessage(type: .speaking, on: on) }
     /// A playback report; `playedMs` is stream time, never negative.
@@ -395,6 +453,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     /// Mirrors `wsproto.Message.Validate`: the fields the type requires.
     public func validate() throws {
+        if let speechEndMs, speechEndMs < 0 { throw WSMessageError.badValue(type.rawValue, "speech_end_ms") }
+        if let seq, seq < 0 { throw WSMessageError.badValue(type.rawValue, "seq") }
+        if let monoMs, monoMs < 0 { throw WSMessageError.badValue(type.rawValue, "mono_ms") }
+        if let rttMs, rttMs < 0 { throw WSMessageError.badValue(type.rawValue, "rtt_ms") }
         switch type {
         case .clientReady:
             if `protocol` == nil { throw WSMessageError.missingField("client-ready", "protocol") }

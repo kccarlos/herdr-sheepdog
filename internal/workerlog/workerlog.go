@@ -301,7 +301,7 @@ func (r *Reader) Locate(sess Session) (string, error) {
 
 // ClaudeSlug is the directory name Claude Code keeps a working
 // directory's sessions under: every "/" and "." becomes "-"
-// ("/Users/kc/x/.claude/wt" -> "-Users-kc-x--claude-wt").
+// ("/Users/you/x/.claude/wt" -> "-Users-you-x--claude-wt").
 func ClaudeSlug(cwd string) string {
 	return strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
 }

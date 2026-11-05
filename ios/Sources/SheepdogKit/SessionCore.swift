@@ -353,14 +353,14 @@ public struct SessionCore: Equatable, Sendable {
                 effects.append(.setManualGate(nil))
             }
 
-        case let .gateChanged(closed):
+        case let .gateChanged(closed, speechEndMs):
             mic.gateClosed = closed
             // A muted client sends no silence transitions (the contract's
             // "mute and silence are independent"): muting resets the gate,
             // and the unmute tells the daemon where it stands.
             guard !mic.muted else { break }
             connection.socketGateClosed = closed
-            effects.append(.send(.silence(closed)))
+            effects.append(.send(.silence(closed, speechEndMs: speechEndMs)))
             // The gate is the app's speech detector: open on speech (or a
             // hold), closed after the hangover. Muting reports the gate
             // open without any speech, hence the mute check.
@@ -707,7 +707,7 @@ public enum SessionEvent: Equatable, Sendable {
 
     // The audio engine
     /// The silence gate flipped (`onGate`).
-    case gateChanged(closed: Bool)
+    case gateChanged(closed: Bool, speechEndMs: Int? = nil)
     /// `-sheepdogFakeVoice` drives the gate itself, without a microphone
     /// and without telling the daemon.
     case simulatedGate(closed: Bool)
