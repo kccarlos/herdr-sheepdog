@@ -125,11 +125,283 @@ func TestModifiedLayoutIsKeptButPanelStillUpdates(t *testing.T) {
 	home, _ := installOld(t)
 	put(t, filepath.Join(home, "layouts", "sheepdog.json"), `{"mine":true}`)
 	res, err := Sync(home, newer())
-	if err != nil || res.LayoutUpdated || !res.Updated {
+	if err != nil || res.LayoutUpdated || !res.LayoutSidecar || !res.Updated {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json")); got != `{"mine":true}` {
 		t.Fatalf("layout = %q", got)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json.new")); got != `{"v":2}` {
+		t.Fatalf("layout sidecar = %q", got)
+	}
+	// If the user deletes sheepdog.json.new after reviewing it, subsequent daemon starts of the same release must not recreate it.
+	if err := os.Remove(filepath.Join(home, "layouts", "sheepdog.json.new")); err != nil {
+		t.Fatal(err)
+	}
+	res2, err := Sync(home, newer())
+	if err != nil || res2.LayoutSidecar {
+		t.Fatalf("second sync recreated deleted sidecar: %+v %v", res2, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "layouts", "sheepdog.json.new")); !os.IsNotExist(err) {
+		t.Fatalf("deleted sidecar came back: %v", err)
+	}
+	// A later release with a newer layout writes the sidecar once for that new version.
+	v3 := Source{Panel: panelFS("new main", ""), Layout: []byte(`{"v":3}`), Version: "v1.2.0"}
+	res3, err := Sync(home, v3)
+	if err != nil || !res3.LayoutSidecar {
+		t.Fatalf("v3 sync did not write sidecar: %+v %v", res3, err)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json.new")); got != `{"v":3}` {
+		t.Fatalf("v3 sidecar = %q", got)
+	}
+}
+
+func TestResizedOrToggledLayoutStillUpdatesCleanly(t *testing.T) {
+	home := t.TempDir()
+	v1Layout := `{"id":"root","type":"row","children":[{"id":"sidebar","type":"block","size":{"px":240},"hidden":false,"content":{"mod":"workspace-chrome"}},{"id":"sheepdog","type":"block","size":{"px":340},"min":44,"max":720,"content":{"mod":"sheepdog"}}]}`
+	old := Source{Panel: panelFS("old main", ""), Layout: []byte(v1Layout), Version: "v1.0.0"}
+	if err := InstallPanel(home, old.Panel); err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(home, "layouts", "sheepdog.json"), v1Layout)
+	if err := Record(home, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate herdr-app mutating runtime fields (pane size, hidden, active) and formatting.
+	resized := "{\n  \"id\": \"root\",\n  \"type\": \"row\",\n  \"active\": \"sheepdog\",\n  \"children\": [\n    {\"id\": \"sidebar\", \"type\": \"block\", \"size\": {\"px\": 300}, \"hidden\": true, \"content\": {\"mod\": \"workspace-chrome\"}},\n    {\"id\": \"sheepdog\", \"type\": \"block\", \"size\": {\"px\": 480}, \"min\": 44, \"max\": 720, \"content\": {\"mod\": \"sheepdog\"}}\n  ]\n}\n"
+	put(t, filepath.Join(home, "layouts", "sheepdog.json"), resized)
+
+	// When the shipped layout's structure has NOT changed, Sync keeps the user's resized file as-is.
+	sameStruct := Source{Panel: panelFS("new main", ""), Layout: []byte(v1Layout), Version: "v1.0.1"}
+	res, err := Sync(home, sameStruct)
+	if err != nil || !res.Updated || res.LayoutUpdated || res.LayoutSidecar {
+		t.Fatalf("same-structure sync: %+v, %v", res, err)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json")); got != resized {
+		t.Fatalf("resized layout was clobbered when structure did not change: %q", got)
+	}
+
+	// When a later release changes layout structure (e.g. min: 48), Sync recognizes the resized layout as unmodified and updates it.
+	v2Layout := `{"id":"root","type":"row","children":[{"id":"sidebar","type":"block","size":{"px":240},"hidden":false,"content":{"mod":"workspace-chrome"}},{"id":"sheepdog","type":"block","size":{"px":340},"min":48,"max":720,"content":{"mod":"sheepdog"}}]}`
+	put(t, filepath.Join(home, "layouts", "sheepdog.json.new"), "stale")
+	nextStruct := Source{Panel: panelFS("v2 main", ""), Layout: []byte(v2Layout), Version: "v1.1.0"}
+	res, err = Sync(home, nextStruct)
+	if err != nil || !res.Updated || !res.LayoutUpdated || res.LayoutSidecar {
+		t.Fatalf("new-structure sync: %+v, %v", res, err)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json")); got != v2Layout {
+		t.Fatalf("updated layout = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, "layouts", "sheepdog.json.new")); !os.IsNotExist(err) {
+		t.Fatalf("stale .new sidecar stayed: %v", err)
+	}
+}
+
+func TestAtomicSwapAndFallbackKeepPanelPresent(t *testing.T) {
+	home, _ := installOld(t)
+	dir := filepath.Join(home, "mods", "sheepdog")
+
+	// 1. Native atomic swap (darwin RENAME_SWAP / linux RENAME_EXCHANGE).
+	stop := make(chan struct{})
+	missing := make(chan string, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if _, err := os.Stat(filepath.Join(dir, "main.js")); err != nil {
+					select {
+					case missing <- err.Error():
+					default:
+					}
+					return
+				}
+			}
+		}
+	}()
+	if res, err := Sync(home, newer()); err != nil || !res.Updated {
+		close(stop)
+		t.Fatalf("atomic sync: %+v, %v", res, err)
+	}
+	close(stop)
+	select {
+	case msg := <-missing:
+		t.Fatalf("panel disappeared during atomic swap: %s", msg)
+	default:
+	}
+
+	// 2. Fallback when atomic swap returns ENOSYS.
+	origSwap := swapDirsFn
+	swapDirsFn = func(string, string) error { return os.ErrInvalid }
+	t.Cleanup(func() { swapDirsFn = origSwap })
+	v3 := Source{Panel: panelFS("v3 main", ""), Layout: []byte(`{"v":2}`), Version: "v1.2.0"}
+	if res, err := Sync(home, v3); err != nil || !res.Updated {
+		t.Fatalf("fallback sync: %+v, %v", res, err)
+	}
+	if got := read(t, filepath.Join(dir, "main.js")); got != "v3 main" {
+		t.Fatalf("after fallback: %q", got)
+	}
+}
+
+func TestInstallPanelDropsOldMarkerFilesAndRefusesSymlink(t *testing.T) {
+	home, _ := installOld(t)
+	dir := filepath.Join(home, "mods", "sheepdog")
+	if err := InstallPanel(home, panelFS("installed v2", "")); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "main.js")); got != "installed v2" {
+		t.Fatalf("main.js = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "model", "gone.js")); !os.IsNotExist(err) {
+		t.Fatalf("dropped file survived InstallPanel: %v", err)
+	}
+	if got := read(t, filepath.Join(dir, "gpui-kit.d.ts")); got != "herdr-app's" {
+		t.Fatalf("extra file lost: %q", got)
+	}
+
+	// Refuses symlinked mods/sheepdog.
+	symHome := t.TempDir()
+	target := t.TempDir()
+	put(t, filepath.Join(target, "main.js"), "dev checkout")
+	if err := os.MkdirAll(filepath.Join(symHome, "mods"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(symHome, "mods", "sheepdog")); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallPanel(symHome, panelFS("clobber", "")); err == nil {
+		t.Fatal("expected error installing over symlinked mods/sheepdog")
+	}
+	if got := read(t, filepath.Join(target, "main.js")); got != "dev checkout" {
+		t.Fatalf("symlink target modified: %q", got)
+	}
+}
+
+func TestKeybindingAndCleanUninstall(t *testing.T) {
+	home, src := installOld(t)
+	put(t, filepath.Join(home, "shared.json"), `{"layout":"sheepdog","sheepdog.url":"http://127.0.0.1:7777"}`)
+	if err := RecordPreviousLayout(home, "work"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Existing keys.json with another binding on a different key and a conflicting binding test.
+	put(t, filepath.Join(home, "keys.json"), "{\n  \"global\": {\n    \"cmd-t\": \"tab.new\",\n    \"cmd-shift-s\": \"app.palette\"\n  },\n  \"terminal\": {\n    \"cmd-c\": \"terminal.copy\"\n  }\n}\n")
+	ks, err := InspectKeybinding(home, "cmd-shift-s")
+	if err != nil || !ks.FileExists || !ks.Bound || ks.Current != "app.palette" {
+		t.Fatalf("inspect conflict: %+v, %v", ks, err)
+	}
+	if err := InstallKeybinding(home, "cmd-shift-s"); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(home, "keys.json.bak")); !strings.Contains(got, "app.palette") {
+		t.Fatalf("backup missing previous binding: %q", got)
+	}
+	ks, err = InspectKeybinding(home, "cmd-shift-s")
+	if err != nil || !ks.AlreadyOurs {
+		t.Fatalf("inspect after install: %+v, %v", ks, err)
+	}
+
+	// Marker metadata survives Sync!
+	next := newer()
+	if res, err := Sync(home, next); err != nil || !res.Updated {
+		t.Fatalf("sync after keybinding: %+v, %v", res, err)
+	}
+	put(t, filepath.Join(home, "layouts", "sheepdog.json.new"), "leftover")
+
+	// Dry run touches nothing.
+	plan, err := Uninstall(home, next, true)
+	if err != nil || len(plan.Actions) == 0 {
+		t.Fatalf("dry-run uninstall: %+v, %v", plan, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "mods", "sheepdog", "main.js")); err != nil {
+		t.Fatalf("dry-run deleted panel: %v", err)
+	}
+
+	// Real uninstall removes panel, layout, .new, restores keys.json to app.palette, and switches shared.json back to work.
+	plan, err = Uninstall(home, next, false)
+	if err != nil || plan.RestoredLayout != "work" {
+		t.Fatalf("uninstall: %+v, %v", plan, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "mods", "sheepdog")); !os.IsNotExist(err) {
+		t.Fatalf("mods/sheepdog still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "layouts", "sheepdog.json")); !os.IsNotExist(err) {
+		t.Fatalf("layouts/sheepdog.json still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "layouts", "sheepdog.json.new")); !os.IsNotExist(err) {
+		t.Fatalf("layouts/sheepdog.json.new still exists: %v", err)
+	}
+	keysAfter := read(t, filepath.Join(home, "keys.json"))
+	if !strings.Contains(keysAfter, `"app.palette"`) || !strings.Contains(keysAfter, `"terminal.copy"`) || strings.Contains(keysAfter, "sheepdog.focus") {
+		t.Fatalf("keys.json not restored cleanly:\n%s", keysAfter)
+	}
+	if _, err := os.Stat(filepath.Join(home, "keys.json.bak")); !os.IsNotExist(err) {
+		t.Fatalf("keys.json.bak left behind after restoring binding: %v", err)
+	}
+	sharedAfter := read(t, filepath.Join(home, "shared.json"))
+	if !strings.Contains(sharedAfter, `"layout":"work"`) && !strings.Contains(sharedAfter, `"layout": "work"`) {
+		t.Fatalf("shared.json layout not restored:\n%s", sharedAfter)
+	}
+
+	// Also verify keys.json.bak is removed when no prior binding on that key existed in a pre-existing keys.json.
+	home2, _ := installOld(t)
+	put(t, filepath.Join(home2, "keys.json"), `{"global":{"cmd-t":"tab.new"}}`)
+	if err := InstallKeybinding(home2, "cmd-shift-s"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home2, "keys.json.bak")); err != nil {
+		t.Fatalf("expected keys.json.bak before uninstall: %v", err)
+	}
+	if _, err := Uninstall(home2, src, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home2, "keys.json.bak")); !os.IsNotExist(err) {
+		t.Fatalf("keys.json.bak left behind after removing added binding: %v", err)
+	}
+
+	// InstallKeybinding refuses to mutate keys.json without an install marker.
+	noMarkerHome := t.TempDir()
+	put(t, filepath.Join(noMarkerHome, "keys.json"), `{"global":{"cmd-t":"tab.new"}}`)
+	if err := InstallKeybinding(noMarkerHome, "cmd-shift-s"); err == nil {
+		t.Fatal("expected error from InstallKeybinding without an install marker")
+	}
+	if got := read(t, filepath.Join(noMarkerHome, "keys.json")); strings.Contains(got, "sheepdog.focus") {
+		t.Fatalf("InstallKeybinding mutated keys.json without marker: %s", got)
+	}
+	_ = src
+}
+
+func TestUninstallPreservesUserEditsAndOtherShownLayout(t *testing.T) {
+	home, src := installOld(t)
+	put(t, filepath.Join(home, "mods", "sheepdog", "main.js"), "user custom panel")
+	put(t, filepath.Join(home, "layouts", "sheepdog.json"), `{"custom_structure":true}`)
+	put(t, filepath.Join(home, "shared.json"), `{"layout":"terminals"}`)
+	if err := InstallKeybinding(home, "cmd-shift-s"); err != nil {
+		t.Fatal(err)
+	}
+	// User later rebounds cmd-shift-s to something else.
+	put(t, filepath.Join(home, "keys.json"), `{"global":{"cmd-shift-s":"space.new"}}`)
+
+	plan, err := Uninstall(home, src, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RestoredLayout != "" {
+		t.Fatalf("switched away from terminals layout: %+v", plan)
+	}
+	if got := read(t, filepath.Join(home, "mods", "sheepdog", "main.js")); got != "user custom panel" {
+		t.Fatalf("modified panel lost: %q", got)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json")); got != `{"custom_structure":true}` {
+		t.Fatalf("modified layout lost: %q", got)
+	}
+	if got := read(t, filepath.Join(home, "keys.json")); !strings.Contains(got, `"space.new"`) {
+		t.Fatalf("user's rebound key overwritten: %q", got)
+	}
+	if got := read(t, filepath.Join(home, "shared.json")); !strings.Contains(got, `"terminals"`) {
+		t.Fatalf("shared.json changed when not on sheepdog: %q", got)
 	}
 }
 

@@ -407,3 +407,58 @@ func TestUnitsRestartOnCrashAndUseStdioPath(t *testing.T) {
 		}
 	}
 }
+
+func TestAugmentPATHPreservesShimsAndAppendsFallbacks(t *testing.T) {
+	home := "/Users/dev"
+	shim := "/Users/dev/.local/share/mise/shims"
+	nvm := "/Users/dev/.nvm/versions/node/v22/bin"
+	cur := shim + ":" + nvm + ":/usr/bin:/bin"
+	look := func(name string) (string, error) {
+		switch name {
+		case "hc":
+			return "/Users/dev/custom-hc/bin/hc", nil
+		case "tailscale":
+			return "/Applications/Tailscale.app/Contents/MacOS/Tailscale", nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	got := AugmentPATH(cur, home, "darwin", []string{"/opt/sheepdog/bin/sheepdog"}, look)
+	parts := strings.Split(got, ":")
+	if len(parts) < 6 || parts[0] != shim || parts[1] != nvm {
+		t.Fatalf("version-manager shims did not stay first: %v", parts)
+	}
+	for _, want := range []string{
+		"/opt/sheepdog/bin",
+		"/Users/dev/custom-hc/bin",
+		"/Applications/Tailscale.app/Contents/MacOS",
+		"/Users/dev/.local/bin",
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	} {
+		if !PATHContains(got, want) {
+			t.Errorf("augmented PATH %q missing %q", got, want)
+		}
+	}
+}
+
+func TestInstalledPATHReadsDarwinAndLinuxUnits(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		s := spec(t, goos)
+		s.PATH = "/Users/dev/my shims:/usr/local/bin:/usr/bin:/bin"
+		data, err := s.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(s.UnitPath()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(s.UnitPath(), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := (Manager{Spec: s}).InstalledPATH()
+		if !ok || got != s.PATH {
+			t.Errorf("%s InstalledPATH() = %q, %v; want %q", goos, got, ok, s.PATH)
+		}
+	}
+}

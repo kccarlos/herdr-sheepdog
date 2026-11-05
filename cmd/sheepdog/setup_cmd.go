@@ -355,12 +355,21 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		}
 	}
 	if env.HerdrApp && installedPanel {
-		setupSheepdogLayout(ctx, env, o)
+		prevShown := env.ShownLayout
+		switched := setupSheepdogLayout(ctx, env, o)
 		// Say what was installed, so the daemon can keep it current after an
 		// upgrade (docs/dev/update.md).
 		src := panelsync.Source{Panel: o.Panel, Layout: o.Layout, Version: version}
 		if err := panelsync.Record(env.HerdrAppHome, src); err != nil {
 			fprintf(o.Out, "Warning: could not record the panel install: %v\n", err)
+		}
+		if _, err := panelsync.ReadMarker(filepath.Join(env.HerdrAppHome, "mods", "sheepdog")); err == nil {
+			if switched && prevShown != "" && prevShown != "sheepdog" {
+				if err := panelsync.RecordPreviousLayout(env.HerdrAppHome, prevShown); err != nil {
+					fprintf(o.Out, "Warning: could not record the previous layout: %v\n", err)
+				}
+			}
+			setupSheepdogShortcut(env, o)
 		}
 	}
 	if env.OS == "darwin" && env.HerdrApp && !env.SheepdogApp {
@@ -371,10 +380,10 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	return wroteBackend, nil
 }
 
-func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEnvironmentOptions) {
+func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEnvironmentOptions) bool {
 	if env.PanelDocked {
 		fprintf(o.Out, "The Sheepdog panel is docked in herdr-app's %s layout.\n", env.ShownLayout)
-		return
+		return false
 	}
 
 	switchNow := false
@@ -390,7 +399,7 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 	}
 	if declined {
 		fprintln(o.Out, "Skipped the Sheepdog layout. To dock the panel later, run sheepdog setup again, or open the panel and choose Copy my layout.")
-		return
+		return false
 	}
 	if !switchNow {
 		switch env.Layout {
@@ -409,14 +418,14 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 		} else {
 			fprintln(o.Out, "Open herdr-app's layout picker and choose Sheepdog, or press Ctrl+Shift+L to cycle to it.")
 		}
-		return
+		return false
 	}
 
 	switch env.Layout {
 	case onboard.LayoutMissing:
 		if err := onboard.InstallLayout(env.HerdrAppHome, o.Layout); err != nil {
 			fprintf(o.Out, "Warning: could not install the Sheepdog layout: %v\n", err)
-			return
+			return false
 		}
 		fprintln(o.Out, "Installed the Sheepdog layout for herdr-app.")
 	case onboard.LayoutDifferent:
@@ -424,11 +433,11 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 	}
 	if !probeHasCommand(o.Probe, "herdr-app") {
 		fprintln(o.Out, "Open herdr-app's layout picker and choose Sheepdog, or press Ctrl+Shift+L to cycle to it.")
-		return
+		return false
 	}
 	if o.LayoutSwitch == nil {
 		printLayoutSwitchManual(o.Out, nil)
-		return
+		return false
 	}
 	out, err := o.LayoutSwitch(ctx)
 	if err == nil {
@@ -436,14 +445,14 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 	}
 	if err != nil {
 		printLayoutSwitchManual(o.Out, err)
-		return
+		return false
 	}
 	// herdr-app answers ok even for a layout it does not have, so the
 	// switch counts only once its shared state says so.
 	for i := 0; ; i++ {
 		if onboard.ShownLayout(env.HerdrAppHome, o.Probe) == "sheepdog" {
 			fprintln(o.Out, "Switched herdr-app to the Sheepdog layout.")
-			return
+			return true
 		}
 		if i >= layoutConfirmTries {
 			break
@@ -451,6 +460,38 @@ func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEn
 		time.Sleep(layoutConfirmDelay)
 	}
 	printLayoutSwitchManual(o.Out, errors.New("herdr-app did not show it"))
+	return false
+}
+
+func setupSheepdogShortcut(env onboard.Environment, o setupEnvironmentOptions) {
+	if !o.Interactive || o.Prompt == nil || env.HerdrAppHome == "" {
+		return
+	}
+	key := panelsync.DefaultFocusKey(env.OS)
+	ks, err := panelsync.InspectKeybinding(env.HerdrAppHome, key)
+	if err != nil {
+		fprintf(o.Out, "Warning: could not inspect %s/keys.json: %v\n", env.HerdrAppHome, err)
+		return
+	}
+	if ks.AlreadyOurs {
+		return
+	}
+	yes, err := o.Prompt.yesNo(fmt.Sprintf("Add a keyboard shortcut (%s) in herdr-app to focus the Sheepdog panel?", key), false)
+	if err != nil || !yes {
+		return
+	}
+	if ks.Bound {
+		overwrite, err := o.Prompt.yesNo(fmt.Sprintf("%s is already bound to %q in keys.json. Replace it (sheepdog uninstall restores it)?", key, ks.Current), false)
+		if err != nil || !overwrite {
+			fprintf(o.Out, "Kept %s -> %s in keys.json.\n", key, ks.Current)
+			return
+		}
+	}
+	if err := panelsync.InstallKeybinding(env.HerdrAppHome, key); err != nil {
+		fprintf(o.Out, "Warning: could not update keys.json: %v\n", err)
+		return
+	}
+	fprintf(o.Out, "Added %s -> %s in %s/keys.json.\n", key, panelsync.FocusCommand, env.HerdrAppHome)
 }
 
 // How long setup waits for herdr-app to show the Sheepdog layout after
