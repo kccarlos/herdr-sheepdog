@@ -119,7 +119,7 @@ export function foldQuestions(app, event) {
       if (p.kind !== "answer_prompt" || !p.id) return app;
       const options = Array.isArray(p.options) ? p.options : [];
       const q = { id: p.id, kind: p.kind, summary: text(p.summary), spoken_summary: text(p.summary), question: text(p.question), options, ...present({ agent: p.agent, command: p.command }) };
-      return { ...app, pending_action: q, questions: [...dropped(questions), q] };
+      return { ...app, pending_action: p.held ? app.pending_action : q, questions: [...dropped(questions), q] };
     }
     case "pending.confirmed":
     case "pending.cancelled":
@@ -128,6 +128,16 @@ export function foldQuestions(app, event) {
       const pendingGone = app.pending_action?.id === p.id;
       if (!had && !pendingGone) return app;
       return { ...app, ...(pendingGone ? { pending_action: null } : {}), ...(had ? { questions: dropped(questions) } : {}) };
+    }
+    case "pending.promoted": {
+      // A held question was announced: it is the voice's question now. One
+      // not listed yet waits for the state the event also asks for.
+      const q = questions.find((x) => x.id === p.id);
+      if (!q || app.pending_action?.id === p.id) return app;
+      const open = { ...q };
+      delete open.held;
+      delete open.muted;
+      return { ...app, pending_action: open };
     }
     default:
       return app;

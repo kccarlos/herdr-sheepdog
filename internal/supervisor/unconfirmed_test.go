@@ -15,9 +15,11 @@ import (
 func TestPromptNoReplyChecksTheScreen(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "w5", "codex", herdr.StateIdle)
+	hold := make(chan struct{})
+	defer close(hold)
 	h.client.Timeout = 100 * time.Millisecond
 	h.srv.Handle("agent.prompt", func(json.RawMessage) (any, error) {
-		time.Sleep(400 * time.Millisecond)
+		<-hold
 		return map[string]any{}, nil
 	})
 

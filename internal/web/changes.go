@@ -135,19 +135,19 @@ func (c *capWriter) Write(p []byte) (int, error) {
 
 // changesRepo finds the agent's repository: its runner rooted at the top
 // level, or a ChangesResponse saying why there is none.
-func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *ChangesResponse, int) {
+func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *ChangesResponse, error) {
 	row, ok := s.deps.Store.Get(pane)
 	if !ok {
-		return gitRunner{}, nil, http.StatusNotFound
+		return gitRunner{}, nil, errNoAgent
 	}
 	if row.Cwd == "" {
-		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, http.StatusOK
+		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, nil
 	}
 	if info, err := os.Stat(row.Cwd); err != nil || !info.IsDir() {
-		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, http.StatusOK
+		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, nil
 	}
-	if sensitiveDir(row.Cwd) || s.privateRoot(row.Cwd) {
-		return gitRunner{}, nil, http.StatusForbidden
+	if err := files.CheckRoot(row.Cwd, s.deps.DataDir); err != nil {
+		return gitRunner{}, nil, err
 	}
 	bin := s.deps.GitBin
 	if bin == "" {
@@ -155,38 +155,25 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	}
 	out, _, err := gitRunner{bin: bin, dir: row.Cwd}.run(ctx, 64<<10, false, "rev-parse", "--show-toplevel")
 	if errors.Is(err, errNoGit) {
-		return gitRunner{}, &ChangesResponse{Reason: "no_git", Files: []ChangedFile{}}, http.StatusOK
+		return gitRunner{}, &ChangesResponse{Reason: "no_git", Files: []ChangedFile{}}, nil
 	}
 	root := strings.TrimSpace(string(out))
 	if err != nil || root == "" {
-		return gitRunner{}, &ChangesResponse{Reason: "not_repo", Files: []ChangedFile{}}, http.StatusOK
+		return gitRunner{}, &ChangesResponse{Reason: "not_repo", Files: []ChangedFile{}}, nil
 	}
-	if sensitiveDir(root) || s.privateRoot(root) {
-		return gitRunner{}, nil, http.StatusForbidden
+	if err := files.CheckRoot(root, s.deps.DataDir); err != nil {
+		return gitRunner{}, nil, err
 	}
-	return gitRunner{bin: bin, dir: root}, nil, http.StatusOK
+	return gitRunner{bin: bin, dir: root}, nil, nil
 }
 
-// sensitiveDir reports whether the folder, cleaned and symlink-resolved,
-// has a sensitive segment, as files.Open refuses.
-func sensitiveDir(dir string) bool {
-	clean := filepath.Clean(dir)
-	if files.SensitivePath(filepath.ToSlash(clean)) {
-		return true
-	}
-	if real, err := filepath.EvalSymlinks(clean); err == nil {
-		return files.SensitivePath(filepath.ToSlash(real))
-	}
-	return false
-}
-
-// refuseChanges answers a non-OK changesRepo status.
-func refuseChanges(w http.ResponseWriter, status int) {
-	if status == http.StatusForbidden {
-		writeJSON(w, status, map[string]string{"error": "hidden for safety", "reason": "sensitive"})
+// refuseChanges answers a non-nil changesRepo error.
+func refuseChanges(w http.ResponseWriter, err error) {
+	if errors.Is(err, errNoAgent) {
+		writeError(w, http.StatusNotFound, "not a tracked agent")
 		return
 	}
-	writeError(w, status, "not a tracked agent")
+	filesError(w, err)
 }
 
 // listChanges reads status and numstat for the repository. Files the Files
@@ -249,9 +236,9 @@ func sensitiveChange(f ChangedFile) bool {
 func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 	pane := r.PathValue("pane_id")
 	start := s.deps.Now()
-	g, none, status := s.changesRepo(r.Context(), pane)
-	if status != http.StatusOK {
-		refuseChanges(w, status)
+	g, none, err := s.changesRepo(r.Context(), pane)
+	if err != nil {
+		refuseChanges(w, err)
 		return
 	}
 	if none != nil {
@@ -272,9 +259,9 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChangeDiff(w http.ResponseWriter, r *http.Request) {
 	pane := r.PathValue("pane_id")
 	path := r.PathValue("path")
-	g, none, status := s.changesRepo(r.Context(), pane)
-	if status != http.StatusOK {
-		refuseChanges(w, status)
+	g, none, err := s.changesRepo(r.Context(), pane)
+	if err != nil {
+		refuseChanges(w, err)
 		return
 	}
 	if none != nil {

@@ -754,4 +754,13 @@ final class SessionCoreTests: XCTestCase {
         var core = connected()
         XCTAssertEqual(core.apply(.micSignal(ok: false), now: t0), [.haptic(.micLost)])
     }
+
+    func testGateCloseForwardsSpeechEndMilliseconds() {
+        var core = connected()
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: t0), [.send(.silence(false)), .send(.speaking(true))])
+        XCTAssertEqual(
+            core.apply(.gateChanged(closed: true, speechEndMs: 400), now: at(1)),
+            [.send(.silence(true, speechEndMs: 400)), .send(.speaking(false))]
+        )
+    }
 }

@@ -147,7 +147,7 @@ scheduling each frame at "now".
 | Message                              | Meaning                                                                                                   |
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
-| `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
+| `{"type":"silence","on":true\|false,"speech_end_ms":N?,"seq":N?,"mono_ms":N?,"rtt_ms":N?}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). Optional timing stamps on `on:true` decompose end-of-speech latency; see *Silence gate*. |
 | `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the user) or closed. Optional; see *Client speech detector*. |
 | `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
 | `{"type":"drain","at":"…","buffer_ms":N,"played_ms":N,"received_ms":N?,"reason":"dry\|early"?}` | The client's player ran dry, for diagnosis only. Requires the `feedback` feature. See *Feedback and drains*. |
@@ -167,6 +167,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 ```json
 {"type":"mute","on":true}
 {"type":"silence","on":false}
+{"type":"silence","on":true,"speech_end_ms":300,"seq":48,"mono_ms":12400,"rtt_ms":22}
 {"type":"speaking","on":true}
 {"type":"cancel"}
 {"type":"text","text":"what is auth doing"}
@@ -329,7 +330,14 @@ that. The client therefore gates its capture:
   `{"type":"silence","on":false}`, then the last **100 ms** of withheld
   frames (pre-roll, so the first syllable is not clipped), then the live
   frames.
-- The daemon logs each transition as `web.client.silence {on}`; on
+- The daemon logs each transition as `web.client.silence {on}`; when the
+  client includes optional timing stamps on `on:true` (`speech_end_ms`,
+  ms elapsed on the client since the last voiced frame in the open
+  segment, omitted when 0 voiced frames occurred; `seq`, cumulative
+  binary frames sent on this socket; `mono_ms`, client monotonic ms, also
+  sent on `client-ready` and `ping`; `rtt_ms`, latest `/ws` `ping`→`pong`
+  round-trip ms), the daemon logs `speech_end_ms`, `seq`,
+  `audio_frames_in` and skew-free `uplink_lag_ms` alongside `on`. On
   `on:true` it tells the model the audio stream paused (Gemini: 1 s of a
   ±8 LSB comfort-noise floor at real-time pace, then `audioStreamEnd`,
   the same signal `mute` sends) so the server VAD closes the user's turn
@@ -1577,8 +1585,11 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
   is no repository the answer is still `200`, with `{"repo": false,
   "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`. An untracked
   `pane_id` is `404 {"error":"not a tracked agent"}`; when the agent's
-  `cwd` itself has a sensitive segment it is
-  `403 {"error":"hidden for safety","reason":"sensitive"}`.
+  `cwd` (or the repository root) has a sensitive segment it is
+  `403 {"error":"hidden for safety","reason":"sensitive"}`, and when it is
+  the home folder, an ancestor of it, or the daemon's data folder (or an
+  ancestor or child of it) it is `403` with `reason` `home_root` or
+  `private_root`.
 - **`GET /api/agents/{pane_id}/changes/{path}`** — one file's unified
   diff: the file's fields plus `"diff": "…"` (empty for a binary file)
   and `truncated` past 512 KB. `path` is the file's `path` from the list,
@@ -1663,6 +1674,9 @@ JSON unless `?raw=1`:
 | 404 | `not_found` | Gone, the folder was removed, or a list of something that is not a folder. |
 | 403 | `outside` | The path leaves the folder through a link. |
 | 403 | `sensitive` | Hidden for safety. |
+| 403 | `home_root` | The folder is the user's home folder or above it. |
+| 403 | `private_root` | The folder is the daemon's data folder, above it, or inside it. |
+| 403 | `files_off` | File browsing is disabled (`web.files = false`). |
 | 403 | `not_file` | A read of a folder, FIFO, socket or device. |
 | 403 | `denied` | The system refused. |
 | 413 | `too_large` | `?raw=1` on an image over 16 MiB. |
@@ -1814,10 +1828,11 @@ way to answer (the user answers through the existing approval card,
 ## Phone notifications
 
 Not part of `/ws`: the iOS app registers its APNs device token over
-`POST /api/push/register` and the daemon sends system notifications for
-events that need the user, whether or not a `/ws` client is attached.
-The contract (routes, payload, when an alert is sent) is in
-[`push.md`](push.md).
+`POST /api/push/register` and `/voice` on Android, Linux and desktop
+browsers registers a Web Push subscription over `POST /api/push/web`, so
+the daemon sends system notifications for events that need the user
+whether or not a `/ws` client is attached. The contract (routes, payload,
+when an alert is sent) is in [`push.md`](push.md).
 
 ### Desktop notifications
 

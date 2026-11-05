@@ -189,4 +189,38 @@ final class PushTests: XCTestCase {
         noPending.pendingID = nil
         XCTAssertNil(PushActions.answer(actionIdentifier: PushActions.approve, payload: noPending))
     }
+
+    func testAgentFocusIsTargetPresentChecksComputerRegardlessOfSectioned() throws {
+        let agentB = try DaemonClient.decoder.decode(
+            Agent.self,
+            from: Data(#"{"pane_id":"%1","alias":"billing","state":"working"}"#.utf8)
+        )
+        let focusRemovedA = AgentFocus(computerID: "computer-a", paneID: "%1")
+
+        XCTAssertFalse(
+            focusRemovedA.isTargetPresent(
+                currentComputerID: "computer-b",
+                sectioned: false,
+                currentAgents: [agentB],
+                otherComputerAgents: { _ in nil }
+            ),
+            "another computer's focus must never match the current computer's %1 when sectioned is false"
+        )
+        XCTAssertTrue(
+            AgentFocus(computerID: "computer-b", paneID: "%1").isTargetPresent(
+                currentComputerID: "computer-b",
+                sectioned: false,
+                currentAgents: [agentB],
+                otherComputerAgents: { _ in nil }
+            )
+        )
+        XCTAssertTrue(
+            AgentFocus(paneID: "%1").isTargetPresent(
+                currentComputerID: "computer-b",
+                sectioned: false,
+                currentAgents: [agentB],
+                otherComputerAgents: { _ in nil }
+            )
+        )
+    }
 }

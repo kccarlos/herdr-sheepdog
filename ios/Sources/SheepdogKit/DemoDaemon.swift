@@ -348,7 +348,7 @@ public final class DemoDaemon: @unchecked Sendable {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .custom { date, encoder in
             var c = encoder.singleValueContainer()
-            try c.encode(ISO8601DateFormatter.sheepdog.string(from: date))
+            try c.encode(RFC3339Date.string(from: date))
         }
         return e
     }()
@@ -360,7 +360,7 @@ public final class DemoDaemon: @unchecked Sendable {
             "type": .string(event.type),
             "payload": .object(event.payload),
         ]
-        if let ts = event.ts { object["ts"] = .string(ISO8601DateFormatter.sheepdog.string(from: ts)) }
+        if let ts = event.ts { object["ts"] = .string(RFC3339Date.string(from: ts)) }
         if let pane = event.paneID { object["pane_id"] = .string(pane) }
         let data = (try? encoder.encode(object)) ?? Data("{}".utf8)
         return String(decoding: data, as: UTF8.self)

@@ -25,7 +25,8 @@ The Sheepdog block in herdr-app's sidebar contains:
   returns to it from the box).
 - **Questions with one button per answer.** Tap an option to answer the agent,
   or press 1-9 when the panel has focus. Suggested replies take 1-9 as well.
-  Long questions shrink to an **Answer** bar that opens the options.
+  Long questions (or questions in a short window) shrink to an **Answer** bar
+  that opens the options (click it, or press `a` when the panel has focus).
 - **Voice controls:** **Talk**, **Mute**, **Stop** and **Hold to talk**. The
   buttons control whichever device holds the voice, including your phone.
 - **Settings** for models, languages, reply style, paired devices and the

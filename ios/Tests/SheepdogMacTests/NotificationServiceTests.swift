@@ -86,6 +86,14 @@ final class NotificationServiceTests: XCTestCase {
             type: "voice.closed",
             payload: ["reason": .string("replaced")]
         )))
+
+        let account = try XCTUnwrap(NotificationNotice(event: DaemonEvent(
+            seq: 11,
+            source: "web",
+            type: "web.account_problem",
+            payload: ["message": .string("Gemini refused the key."), "fix": .string("check GEMINI_API_KEY")]
+        )))
+        XCTAssertEqual(account.body, "Gemini refused the key. Check GEMINI_API_KEY.")
     }
 
     func testSuppressionNeedsTheVoiceHereAndTheUserTalking() {

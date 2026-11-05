@@ -147,9 +147,9 @@ func TestClassifyJob(t *testing.T) {
 }
 
 func TestScrub(t *testing.T) {
-	in := `mail kc@example.org, key sk-abcdefghijklmnop1234, token: abcdefghijklmnopqrstu, ghp_abcdefghijklmnopqrstuvwxyz12, /Users/kc/Documents`
+	in := `mail alice@example.org, key sk-abcdefghijklmnop1234, token: abcdefghijklmnopqrstu, ghp_abcdefghijklmnopqrstuvwxyz12, /Users/alice/Documents`
 	out := scrub(in)
-	for _, leak := range []string{"kc@example.org", "sk-abcdef", "abcdefghijklmnopqrstu", "ghp_", "/Users/kc"} {
+	for _, leak := range []string{"alice@example.org", "sk-abcdef", "abcdefghijklmnopqrstu", "ghp_", "/Users/alice"} {
 		if strings.Contains(out, leak) {
 			t.Errorf("scrub left %q in %q", leak, out)
 		}

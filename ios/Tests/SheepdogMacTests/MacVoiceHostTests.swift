@@ -81,7 +81,7 @@ final class MacVoiceHostTests: XCTestCase {
         await connect(rig)
         rig.host.handle(route: .mute(true))
         XCTAssertTrue(rig.channel.muted)
-        rig.audio.onGate?(true)
+        rig.audio.onGate?(true, 400)
         XCTAssertFalse(rig.channel.gateClosed, "a muted client sends no gate changes")
     }
 
@@ -167,11 +167,11 @@ final class MacVoiceHostTests: XCTestCase {
     func testTheGateTellsTheDaemonSilenceAndSpeech() async {
         let rig = Rig()
         await connect(rig)
-        rig.audio.onGate?(false)
+        rig.audio.onGate?(false, nil)
         XCTAssertTrue(rig.host.state.userTalking)
-        rig.audio.onGate?(true)
+        rig.audio.onGate?(true, 400)
         XCTAssertFalse(rig.host.state.userTalking)
-        XCTAssertEqual(rig.channel.sent, [.silence(false), .speaking(true), .silence(true), .speaking(false)])
+        XCTAssertEqual(rig.channel.sent, [.silence(false), .speaking(true), .silence(true, speechEndMs: 400), .speaking(false)])
     }
 
     func testTheProviderSetsThePlaybackProfile() async {
@@ -423,6 +423,12 @@ final class MacVoiceHostTests: XCTestCase {
         await connect(rig)
         rig.channel.emit(.control(.error("rate limited")))
         XCTAssertEqual(rig.host.state.problem, "The daemon said: rate limited")
+
+        var accountErr = WSMessage.error("DeepSeek says the balance is used up.")
+        accountErr.problem = .balance
+        accountErr.fix = "top up the account"
+        rig.channel.emit(.control(accountErr))
+        XCTAssertEqual(rig.host.state.problem, "The daemon said: DeepSeek says the balance is used up. Top up the account.")
     }
 
     func testTheTickerCopiesTheCountersToThePing() async {

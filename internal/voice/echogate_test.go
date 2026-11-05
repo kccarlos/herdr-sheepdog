@@ -511,6 +511,39 @@ func TestEchoText(t *testing.T) {
 	if !EchoText("贝奇克劳德正在跑测试", "好的，贝奇克劳德正在跑测试，跑完告诉你。") {
 		t.Error("Chinese echo not recognised")
 	}
+	for _, c := range []struct {
+		name, heard, said string
+		want              bool
+	}{
+		{
+			name:  "digits and camelCase vs spoken words",
+			heard: "there are twenty three errors in auth service",
+			said:  "There are 23 errors in authService right now.",
+			want:  true,
+		},
+		{
+			name:  "filename joiners spoken out",
+			heard: "check ws underscore proto dot go in cmd slash server",
+			said:  "Please check ws_proto.go in cmd/server.",
+			want:  true,
+		},
+		{
+			name:  "ordinals and Chinese numerals",
+			heard: "the sixth test",
+			said:  "The 6th test failed on the 3rd retry.",
+			want:  true,
+		},
+		{
+			name:  "Chinese numerals vs digits",
+			heard: "结果是二十五不是三十",
+			said:  "现在结果是25不是30。",
+			want:  true,
+		},
+	} {
+		if got := EchoText(c.heard, c.said); got != c.want {
+			t.Errorf("%s: EchoText(%q, %q) = %v, want %v", c.name, c.heard, c.said, got, c.want)
+		}
+	}
 }
 
 func TestEchoGateArmsOnHeardEcho(t *testing.T) {
@@ -585,5 +618,26 @@ func TestEchoGateUnarmedNeverResends(t *testing.T) {
 	sent += len(out)
 	if sent != 40 {
 		t.Fatalf("%d frames sent for 40", sent)
+	}
+}
+
+func TestEchoTextIdentifierAloneDoesNotHideCommand(t *testing.T) {
+	if EchoText("Stop parseHTTPResponse", "I am checking parseHTTPResponse now") {
+		t.Fatal("2-word command with identifier matched as echo")
+	}
+	if EchoText("Please stop parseHTTPResponse", "I am checking parseHTTPResponse right now") {
+		t.Fatal("3-word command with identifier matched as echo")
+	}
+	if EchoText("parseHTTPResponse", "Checking parseHTTPResponse") {
+		t.Fatal("single identifier answer matched as echo")
+	}
+	if !EchoText("Checking ws_proto.go", "I am checking ws_proto.go right now") {
+		t.Fatal("two-word phrase with identifier missed as echo")
+	}
+	if !EchoText("ws underscore proto dot go", "Checking ws_proto.go") {
+		t.Fatal("spoken-joiner identifier missed as echo")
+	}
+	if !EchoText("正在检查测试", "我现在正在检查测试结果") {
+		t.Fatal("CJK echo missed")
 	}
 }

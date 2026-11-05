@@ -48,10 +48,10 @@ func lifecycleFlags(fs *flag.FlagSet) (configPath, envFile *string) {
 
 // loadLifecycle loads the env file and config the daemon would use.
 func loadLifecycle(ctx context.Context, name, configPath, envFile string, stdout, stderr io.Writer) (*lifecycle, int, bool) {
-	// start and restart read the env file the last daemon loaded (an
-	// explicit --env-file wins), not whatever ./.env this working
+	// start, restart and redact-logs read the env file the last daemon loaded
+	// (an explicit --env-file wins), not whatever ./.env this working
 	// directory offers.
-	if envFile == "" && (name == "start" || name == "restart") {
+	if envFile == "" && (name == "start" || name == "restart" || name == "redact-logs") {
 		if p := recordedEnvFile(configPath); p != "" {
 			envFile = p
 			fprintf(stdout, "using the env file the last run loaded: %s\n", p)

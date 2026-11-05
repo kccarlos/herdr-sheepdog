@@ -26,12 +26,18 @@ type Program struct {
 	// Args are the program arguments. Resume is represented here just as
 	// the agent's own command line reports it.
 	Args []string
+	// Wrapper prefixes the command line in backends that inspect process
+	// argv (such as nice / taskpolicy / ionice utility wrappers).
+	Wrapper []string
 	// Reported says the program reports OSC 7501 status (hc); the old
 	// backend's screen detection does not depend on this field.
 	Reported bool
 	// State is the state while the program runs. For an hc program that
 	// does not report, the screen decides blocked versus unknown.
 	State herdr.State
+	// PID is the program's foreground PID; zero lets the driver assign a
+	// unique PID per program launch.
+	PID int
 }
 
 // Driver performs the machine actions a scenario needs. Its implementations
@@ -119,6 +125,10 @@ func Scenarios() []Scenario {
 			Run:  agentsAreDetectedFreshAndResumed,
 		},
 		{
+			Name: "utility priority wrapped agent is detected and survives daemon restart",
+			Run:  wrappedAgentDetectedAcrossRestart,
+		},
+		{
 			Name: "an exited agent leaves the terminal at a plain shell",
 			Run:  exitedAgentIsNoLongerListed,
 		},
@@ -145,6 +155,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "a periodic snapshot with no change logs nothing and emits no transition",
 			Run:  unchangedSnapshotIsSilent,
+		},
+		{
+			Name: "foreground process tree identifies each pane's live session",
+			Run:  foregroundProcessTreeIdentifiesLiveSessions,
 		},
 	}, markScenarios()...)
 }
@@ -247,6 +261,36 @@ func agentsAreDetectedFreshAndResumed(t *testing.T, newDriver NewDriver) {
 				t.Fatalf("spoken name = %q, want %q", got, tc.say)
 			}
 		})
+	}
+}
+
+func wrappedAgentDetectedAcrossRestart(t *testing.T, newDriver NewDriver) {
+	d := newDriver(t)
+	ctx := testContext(t)
+	shells := NewShellBook()
+	pane, _, err := shells.Open(ctx, d.ShellHost(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetScreen(ctx, pane.PaneID, blockedScreen); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Run(ctx, pane.PaneID, Program{
+		Kind:    "codex",
+		Wrapper: []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility"},
+		Args:    []string{"--no-daemon"},
+		State:   herdr.StateBlocked,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := oneAgent(t, ctx, d.Backend())
+	if agent.PaneID != pane.PaneID || agent.Agent != "codex" || agent.Status != herdr.StateBlocked || spoken(agent) != "Codex" {
+		t.Fatalf("wrapped agent before restart = %+v", agent)
+	}
+	restarted := d.RestartDaemon(t)
+	after := oneAgent(t, ctx, restarted.Backend())
+	if after.PaneID != pane.PaneID || after.Agent != "codex" || after.Status != herdr.StateBlocked {
+		t.Fatalf("wrapped agent after restart = %+v", after)
 	}
 }
 
@@ -525,15 +569,31 @@ func unchangedSnapshotIsSilent(t *testing.T, newDriver NewDriver) {
 		t.Fatal("timed out waiting for the initial snapshot")
 	}
 
-	// Let the initial refresh and any immediately queued socket work settle
-	// before using LastBeat to count the periodic snapshots.
-	time.Sleep(2 * snapshotEvery)
-	before := w.LastBeat()
-	log.reset()
+	// Wait on LastBeat for the initial refresh and one periodic snapshot to
+	// complete so any startup socket work has settled before resetting the log.
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
+	var settleBeat time.Time
+	for settled := 0; settled < 2; {
+		select {
+		case tr, ok := <-transitions:
+			if !ok {
+				t.Fatal("transitions channel closed")
+			}
+			t.Fatalf("unchanged periodic snapshot emitted transition %+v", tr)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for initial snapshots to settle")
+		case <-tick.C:
+			if now := w.LastBeat(); !now.IsZero() && now.After(settleBeat) {
+				settleBeat = now
+				settled++
+			}
+		}
+	}
+	before := settleBeat
+	log.reset()
 	lastBeat := before
 	for beats := 0; beats < 2; {
 		select {

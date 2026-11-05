@@ -470,6 +470,8 @@ func (b *Brain) readSession(ctx context.Context, row AgentInfo, out toolOutcome)
 	}
 	read.Instruction = b.cfg.Redactor.String(read.Instruction)
 	read.LastAssistant = b.cfg.Redactor.String(read.LastAssistant)
+	read.StopError = b.cfg.Redactor.String(read.StopError)
+	read.StopDetail = b.cfg.Redactor.String(read.StopDetail)
 	text := sessionText(read)
 	out.result = wrapWorker(row.Alias, SourceSession, text)
 	out.summary = fmt.Sprintf("session of %s, last message %d chars", aliasOr(row.Alias), utf8.RuneCountInString(read.LastAssistant))

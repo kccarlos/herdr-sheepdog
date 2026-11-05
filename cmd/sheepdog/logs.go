@@ -23,8 +23,12 @@ func printLogsUsage(w io.Writer) {
 	fprintln(w, "  -f     keep printing new lines until Ctrl-C")
 }
 
-// followPoll is how often logs -f checks the file.
-var followPoll = 250 * time.Millisecond
+// followPoll is how often logs -f checks the file; followReady is a test hook
+// called after followFile records its starting offset.
+var (
+	followPoll  = 250 * time.Millisecond
+	followReady func()
+)
 
 // runLogs implements `sheepdog logs`.
 func runLogs(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -124,6 +128,9 @@ func followFile(ctx context.Context, path string, w io.Writer) {
 	var cur os.FileInfo
 	if st, err := os.Stat(path); err == nil {
 		off, cur = st.Size(), st
+	}
+	if followReady != nil {
+		followReady()
 	}
 	buf := make([]byte, 64<<10)
 	for {

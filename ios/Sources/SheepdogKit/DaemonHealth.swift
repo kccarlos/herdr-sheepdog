@@ -43,8 +43,9 @@ public struct DaemonHealth: Equatable, Sendable {
 
     /// The event types the pane lists.
     public static let problemTypes: Set<String> = [
+        "brain.account_problem", "web.account_problem",
         "brain.fallback", "brain.rate_limited", "voice.connect_error", "voice.push_held", "voice.push_dropped",
-        "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing",
+        "supervisor.echo_dropped", "supervisor.echo_possible", "web.audio_unheard", "voice.playback", "worker.session_missing",
     ]
 
     /// Folds one event; returns true when anything changed. Idempotent.
@@ -144,6 +145,10 @@ public struct DaemonHealth: Equatable, Sendable {
         let title: String
         var detail: String?
         switch event.type {
+        case "brain.account_problem", "web.account_problem":
+            severity = .error
+            title = firstLine(text("message")) ?? "Provider account problem"
+            detail = firstLine(text("fix"))
         case "brain.fallback":
             severity = .error
             title = "Orchestrator fell back: \(text("reason") ?? "unknown reason")"
@@ -171,6 +176,10 @@ public struct DaemonHealth: Equatable, Sendable {
             severity = .info
             title = "Echo dropped — the voice heard itself"
             detail = text("heard").map { "heard “\($0)”" }
+        case "supervisor.echo_possible":
+            severity = .info
+            title = "Echo possible — words overlapped playback"
+            detail = text("text").map { "heard “\($0)”" }
         case "web.audio_unheard":
             severity = .warning
             let bytes = event.int("bytes") ?? 0

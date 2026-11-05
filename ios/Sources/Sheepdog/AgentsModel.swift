@@ -62,6 +62,14 @@ final class AgentsModel {
     func seenFailed(_ write: SeenTracker.Write) { seenTracker.failed(write) }
     func forgetSeen(_ paneID: String) { seenTracker.forget(paneID) }
 
+    /// Clears per-computer optimistic attention state, seen turn marks, and
+    /// expanded card keys when switching to a different computer.
+    func resetForComputerSwitch() {
+        overlay = AttentionOverlay()
+        seenTracker = SeenTracker()
+        expandedAgents.removeAll()
+    }
+
     /// The voice's own open question (`/api/state` `pending_action`); it goes
     /// through the approval card.
     var pendingAction: PendingAction? { current?.pendingAction }
@@ -97,6 +105,16 @@ final class AgentsModel {
 
     func isComputerExpanded(_ id: String) -> Bool {
         !collapsedComputers.contains(id)
+    }
+
+    func expandComputer(_ id: String) {
+        collapsedComputers.remove(id)
+    }
+
+    func forgetComputer(_ id: String) {
+        collapsedComputers.remove(id)
+        let prefix = "\(id)|"
+        expandedAgents = expandedAgents.filter { !$0.hasPrefix(prefix) }
     }
 
     func toggleComputer(_ id: String) {

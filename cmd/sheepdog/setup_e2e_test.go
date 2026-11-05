@@ -180,6 +180,7 @@ func TestSetupPageFlowEndToEnd(t *testing.T) {
 // TestSetupNoDisplayUsesTheTerminal: over SSH, setup asks in the
 // terminal (init's questions) and says where the page is.
 func TestSetupNoDisplayUsesTheTerminal(t *testing.T) {
+	unsetEnv(t, "GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY")
 	fakeKeyAPI(t)
 	orig := hasDisplay
 	hasDisplay = func() bool { return false }

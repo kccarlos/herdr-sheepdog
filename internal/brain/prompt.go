@@ -424,7 +424,7 @@ func (b *Brain) redactAgents(in []AgentInfo) []AgentInfo {
 	r := b.cfg.Redactor.String
 	for i := range out {
 		a := &out[i]
-		a.Task, a.LastTask, a.LastResult, a.LastBlock = r(a.Task), r(a.LastTask), r(a.LastResult), r(a.LastBlock)
+		a.Task, a.LastTask, a.LastResult, a.LastDetail, a.LastBlock = r(a.Task), r(a.LastTask), r(a.LastResult), r(a.LastDetail), r(a.LastBlock)
 		if a.Pending != nil {
 			p := *a.Pending
 			p.Question = r(p.Question)
@@ -438,6 +438,7 @@ func (b *Brain) redactAgents(in []AgentInfo) []AgentInfo {
 		for j := range a.Journal {
 			a.Journal[j].LastAssistant = r(a.Journal[j].LastAssistant)
 			a.Journal[j].Instruction = r(a.Journal[j].Instruction)
+			a.Journal[j].Error = r(a.Journal[j].Error)
 		}
 	}
 	return out

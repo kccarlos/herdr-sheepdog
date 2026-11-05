@@ -70,6 +70,9 @@ type shepherdInput struct {
 	kind InputKind
 	text string
 	at   time.Time
+	// began is the seq of its first fragment (seq moves with each one):
+	// what the user had been told when they started (displaced.go).
+	began uint64
 	// open is a voice input still collecting transcript fragments.
 	open bool
 	// claimed is set once a to_supervisor call was accepted on it: a
@@ -298,6 +301,7 @@ func (s *Supervisor) closeVoiceLocked() {
 func (s *Supervisor) addInputLocked(in *shepherdInput) {
 	s.inputSeq++
 	in.seq, in.at = s.inputSeq, s.cfg.Now()
+	in.began = in.seq
 	s.inputs = append(s.inputs, in)
 	s.promptCEOSpokeLocked() // buried.go
 	if len(s.inputs) > maxInputs {
@@ -327,12 +331,15 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 // the gate, the voice relayed the words at 19.414 — refused at 20.9 as
 // its own initiative — and the push only went to the model at 21.9.
 // The instruction was lost (docs/dev/history/bench-2026-10-03.md #10).
-func (s *Supervisor) markPushed(text string) {
+// pendingID is the question the push states, when the voice layer
+// carries its tag (voice.EventPush.PendingID).
+func (s *Supervisor) markPushed(text, pendingID string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq
 	s.lastPush = text
 	s.recordSentLocked(text)
-	s.promptPushedLocked(text) // buried.go
+	s.promptPushedLocked(text)          // buried.go
+	s.linePushedLocked(text, pendingID) // displaced.go
 	s.mu.Unlock()
 }
 
@@ -353,24 +360,40 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 			s.mu.Unlock()
 			return c, true
 		}
-		wake := s.inputWake
-		s.mu.Unlock()
 		if s.cfg.inputGrace <= 0 {
+			s.mu.Unlock()
 			return claim{}, false
 		}
+		s.graceWaiters++
+		wake := s.inputWake
+		s.mu.Unlock()
 		if deadline == nil {
 			t := time.NewTimer(s.cfg.inputGrace)
 			defer t.Stop()
 			deadline = t.C
 		}
+		var done bool
 		select {
 		case <-wake:
 		case <-deadline:
-			return claim{}, false
+			done = true
 		case <-ctx.Done():
+			done = true
+		}
+		s.mu.Lock()
+		s.graceWaiters--
+		s.mu.Unlock()
+		if done {
 			return claim{}, false
 		}
 	}
+}
+
+// inGraceWait reports whether a to_supervisor call is currently waiting in inputGrace.
+func (s *Supervisor) inGraceWait() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.graceWaiters > 0
 }
 
 // freshRunLocked is the run of unclaimed inputs newer than floor, oldest
@@ -427,9 +450,11 @@ func (s *Supervisor) promptSinceLocked(p state.PendingAction) time.Time {
 
 // railInputLocked is the one rail's reading of the user for keys
 // that answer p: the newest input, which must have arrived after the
-// prompt appeared and within Config.AuthoriseWindow, not already have
-// answered a prompt, be non-empty, and — when the keys approve — not be
-// a "no". It returns the input, or the refusal reason. Caller holds s.mu.
+// prompt appeared and within Config.AuthoriseWindow, not have begun
+// before a prompt that displaced another one was told (displaced.go), not
+// already have answered a prompt, be non-empty, and — when the keys
+// approve — not be a "no". It returns the input, or the refusal reason.
+// Caller holds s.mu.
 func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*shepherdInput, string) {
 	alias := s.aliasOf(p.PaneID)
 	in := s.lastInputLocked()
@@ -439,10 +464,15 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, fmt.Sprintf("the user has said nothing that could answer %s's prompt", alias)
 	case in.at.Before(s.promptSinceLocked(p)):
 		return nil, fmt.Sprintf("the user has said nothing since %s's prompt appeared", alias)
+	case in.used:
+		// Before the displacement rule: a second send on words whose
+		// answer was delivered is refused without asking the user again
+		// (displaced.go).
+		return nil, "the user's last words already answered a prompt"
+	case s.displacedLocked(p, in) != "": // displaced.go
+		return nil, s.displacedLocked(p, in)
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return nil, fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
-	case in.used:
-		return nil, "the user's last words already answered a prompt"
 	case strings.TrimSpace(in.text) == "":
 		return nil, "the user's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
@@ -541,11 +571,15 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // passes the same rail as a spoken answer; the keys go through the same
 // executor (the post-answer poll included), and the voice gets a silent
 // line saying what was tapped. id must name the open question, which
-// lives as long as its pane is blocked at that prompt (pending.go,
+// lives as long as its pane is at that prompt (pending.go,
 // ExpirePending): anything else is ErrPendingGone. It may be the
 // question the voice is on or any other open question (/api/state
-// questions); for the latter the screen is read again first, so the
-// keys never go into a question the tap was not about.
+// questions). The screen is read again first, without s.mu (a slow herdr
+// must not stall voice events and transitions), so the keys never go into
+// a question the tap was not about: a working pane or a screen without
+// that prompt ends the question (ErrPendingGone); a failed read sends
+// nothing and keeps it (ErrNotSent). A pane herdr reports done or idle at
+// its prompt (agy, a finish that asks, a menu) answers as any other.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
 	p, _, has := s.questionByID(id)
@@ -560,26 +594,40 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 
 	s.mu.Lock()
 	p, slot, has := s.questionByID(id)
+	_, exists := s.store.Get(p.PaneID)
+	s.mu.Unlock()
 	if !has {
+		return voice.ToolResult{}, ErrPendingGone
+	}
+	// The voice's own question on a pane the table no longer lists is
+	// answered as it is (the keys report any failure); every other is
+	// checked against the screen.
+	asking, known := true, true
+	if !slot || exists {
+		asking, known = s.stillAsking(ctx, p)
+	}
+	s.mu.Lock()
+	cur, slot, has := s.questionByID(id)
+	if !has || cur.PaneID != p.PaneID || pendingSignature(cur) != pendingSignature(p) {
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	if !slot {
+	p = cur
+	if !known {
 		s.mu.Unlock()
-		still := s.stillAsking(ctx, p)
-		s.mu.Lock()
-		p, slot, has = s.questionByID(id)
-		if !has {
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
-		}
-		if !slot && !still {
+		return voice.ToolResult{}, fmt.Errorf("%w: the screen could not be read to check the question", ErrNotSent)
+	}
+	if !asking {
+		if slot {
+			s.clearPending(p, "prompt_gone")
+		} else {
 			s.dropQuestionLocked(p)
 			s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
 		}
+		s.mu.Unlock()
+		return voice.ToolResult{}, ErrPendingGone
 	}
+
 	if option < 1 || option > len(p.Options) || p.Options[option-1].Meta {
 		s.mu.Unlock()
 		return voice.ToolResult{}, fmt.Errorf("%w: %d (the question has %d)", ErrNoSuchOption, option, len(p.Options))

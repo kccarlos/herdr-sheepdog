@@ -4,6 +4,8 @@
 // window overlay is the same panel (it is also what opens when the mod is not
 // docked). Pure, so node tests it. No herdr imports.
 
+import { decide, natural } from "./presentation.js";
+
 // A block narrower than this draws the compact rail, like the shipped
 // sidebars' compact column.
 export const COMPACT_BELOW = 160;
@@ -57,4 +59,35 @@ export function panelBudget({
     questionArea: Math.max(0, detailsLimit - shownBanners.reduce((sum, value) => sum + value, 0) - px(voice)),
     timelineMinHeight,
   };
+}
+
+// Composes `panelBudget` and `decide` without applying the 55% share twice:
+// `panelBudget` already reserves `minTimelineShare` for the timeline plus the
+// header, banners, voice bar and composer, so `questionArea` is the full inline
+// question budget (`budgetShare: 1`, keeping `RETURN_SHARE` hysteresis).
+export function resolvePanelLayout(
+  {
+    height,
+    header = 0,
+    banners = [],
+    voice = 0,
+    composer = 0,
+    questionHeights = [],
+    held = false,
+    minTimelineShare = MIN_TIMELINE_SHARE,
+  } = {},
+  currentPresentation = null,
+) {
+  const stackHeight = natural(questionHeights);
+  const base = { height, header, banners, voice, composer, minTimelineShare };
+  const questionBudget = panelBudget({ ...base, question: stackHeight });
+  const presentation = decide(
+    { heights: questionHeights, area: questionBudget.questionArea, budgetShare: 1, held },
+    currentPresentation,
+  );
+  const layout = panelBudget({
+    ...base,
+    question: presentation === "compact" ? COMPACT_QUESTION_HEIGHT : stackHeight,
+  });
+  return { layout, presentation };
 }

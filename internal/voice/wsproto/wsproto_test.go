@@ -97,3 +97,32 @@ func TestPingAEC(t *testing.T) {
 		}
 	}
 }
+
+func TestSilenceAndPingTimingStamps(t *testing.T) {
+	speechEnd, seq, rtt := 312, 48, 26
+	var mono int64 = 123456
+	m := Silence(true)
+	m.SpeechEndMs, m.Seq, m.MonoMs, m.RTTMs = &speechEnd, &seq, &mono, &rtt
+	b, err := m.Encode()
+	if err != nil {
+		t.Fatalf("encode silence with stamps: %v", err)
+	}
+	back, err := Parse(b)
+	if err != nil {
+		t.Fatalf("parse silence with stamps: %v", err)
+	}
+	if back.SpeechEndMs == nil || *back.SpeechEndMs != 312 || back.Seq == nil || *back.Seq != 48 || back.MonoMs == nil || *back.MonoMs != 123456 || back.RTTMs == nil || *back.RTTMs != 26 {
+		t.Fatalf("round-trip silence stamps = %+v", back)
+	}
+	for _, bad := range []string{
+		`{"type":"silence","on":true,"speech_end_ms":-1}`,
+		`{"type":"silence","on":true,"seq":-1}`,
+		`{"type":"silence","on":true,"mono_ms":-5}`,
+		`{"type":"ping","rtt_ms":-2}`,
+		`{"type":"client-ready","protocol":1,"mono_ms":-1}`,
+	} {
+		if _, err := Parse([]byte(bad)); err == nil {
+			t.Errorf("Parse(%s) accepted negative timing stamp", bad)
+		}
+	}
+}

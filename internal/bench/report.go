@@ -92,7 +92,7 @@ type VoiceSummary struct {
 }
 
 // latencySegments are the turn.latency fields, in pipeline order.
-var latencySegments = []string{"voice_ms", "relay_ms", "queue_ms", "brain_ms", "model_ms", "tool_ms", "delivery_ms", "push_queue_ms", "first_audio_ms", "total_ms"}
+var latencySegments = []string{"voice_ms", "uplink_lag_ms", "gate_tail_ms", "provider_eou_ms", "relay_ms", "queue_ms", "brain_ms", "model_ms", "tool_ms", "delivery_ms", "push_queue_ms", "first_audio_ms", "total_ms"}
 
 // NewReport builds the report.
 func NewReport(started time.Time, setup map[string]string, repeat int, runs []Run, spend Spend, scs []Scenario) Report {

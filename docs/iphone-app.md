@@ -302,10 +302,11 @@ With one computer, none of this shows: no names and no Talk to.
     - **Hidden for safety.** Because a phone can be lost, a safety rail in the
       daemon hides common secret and key names, such as `.env`, `.ssh`,
       `.git` and key files: they aren't listed, searched or read, and the
-      screen says how many are hidden. Only regular files inside the folder
-      can be read; symlinks
-      that leave the folder are marked blocked, and folders with a hidden
-      name on their own path are refused.
+      screen says how many are hidden. Only regular files inside a project
+      folder can be read; symlinks that leave the folder are marked blocked,
+      folders with a hidden name on their own path say "Hidden for safety",
+      and your home folder and sheepdog's data folder say they cannot be
+      opened.
     - **Limits.** A folder shows up to 2,000 entries (reading at most 20,000
       names), search returns up to 200 matches (across 20,000 entries or 2
       seconds), text files show the first 1 MiB before marking the rest

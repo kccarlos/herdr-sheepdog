@@ -24,11 +24,11 @@ export function bannerModel(u) {
   return null;
 }
 
-function dismissed(key) {
-  try { return localStorage.getItem('sheepdog.update.dismissed') === key; } catch { return false; }
+function dismissed(key, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+  try { return Boolean(storage && storage.getItem('sheepdog.update.dismissed') === key); } catch { return false; }
 }
-function dismiss(key) {
-  try { localStorage.setItem('sheepdog.update.dismissed', key); } catch { /* private window: it just comes back */ }
+function dismiss(key, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+  try { if (storage) storage.setItem('sheepdog.update.dismissed', key); } catch { /* private window: it just comes back */ }
 }
 
 /** Builds the banner element for a model. */
@@ -36,6 +36,7 @@ export function buildBanner(doc, m, onDismiss) {
   const el = doc.createElement('div');
   el.id = 'update-banner';
   el.className = 'update-banner';
+  el.dataset.key = m.key;
   el.setAttribute('role', 'status');
   const p = doc.createElement('span');
   p.append(m.text);
@@ -62,22 +63,32 @@ export function buildBanner(doc, m, onDismiss) {
   return el;
 }
 
-async function init() {
+/** Applies /api/state's `update` object immediately, replacing or clearing an older banner. */
+export function applyUpdateBanner(doc, u, storage) {
+  const m = bannerModel(u);
+  const old = doc.getElementById('update-banner');
+  if (!m || dismissed(m.key, storage)) {
+    if (old) old.remove();
+    return;
+  }
+  if (old && old.dataset && old.dataset.key === m.key) return;
+  if (old) old.remove();
+  const el = buildBanner(doc, m, () => { dismiss(m.key, storage); el.remove(); });
+  doc.querySelector('header')?.after(el);
+}
+
+export async function refreshUpdateBanner() {
+  if (typeof document === 'undefined') return;
   let u;
   try {
     const res = await fetch('/api/state', { cache: 'no-store' });
     if (!res.ok) return;
     u = (await res.json()).update;
   } catch { return; }
-  const m = bannerModel(u);
-  const old = document.getElementById('update-banner');
-  if (!m || dismissed(m.key)) { if (old) old.remove(); return; }
-  if (old) return;
-  const el = buildBanner(document, m, () => { dismiss(m.key); el.remove(); });
-  document.querySelector('header')?.after(el);
+  applyUpdateBanner(document, u);
 }
 
 if (typeof document !== 'undefined') {
-  init();
-  setInterval(init, 5 * 60 * 1000);
+  refreshUpdateBanner();
+  setInterval(refreshUpdateBanner, 5 * 60 * 1000);
 }

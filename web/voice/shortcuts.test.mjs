@@ -26,3 +26,28 @@ test('Space stops, M toggles mute, modifiers and open cards leave keys alone', (
   assert.equal(voiceKeyAction({ key: '?', ctrlKey: true }, {}), null);
   assert.equal(voiceKeyAction({ key: '?' }, { cardOpen: true }), null);
 });
+
+test('1-9 answers the primary open question unless hidden by shortcuts, card, auth gate, or a field', () => {
+  const q = {
+    id: 'ap-1',
+    kind: 'answer_prompt',
+    options: [
+      { index: 1, label: 'Yes' },
+      { index: 2, label: 'No' },
+    ],
+  };
+  const cards = [{ pending: q, phase: 'open' }];
+
+  assert.deepEqual(voiceKeyAction({ key: '2' }, { cards }), {
+    type: 'answer-approval',
+    question: q,
+    option: q.options[1],
+    preventDefault: true,
+  });
+  assert.equal(voiceKeyAction({ key: '2' }, { cards, shortcutsOpen: true }), null);
+  assert.equal(voiceKeyAction({ key: '2' }, { cards, cardOpen: true }), null);
+  assert.equal(voiceKeyAction({ key: '2' }, { cards, authOpen: true }), null);
+  assert.equal(voiceKeyAction({ key: '2' }, { cards, inField: true }), null);
+  assert.equal(voiceKeyAction({ key: '2', ctrlKey: true }, { cards }), null);
+  assert.equal(voiceKeyAction({ key: '9' }, { cards }), null);
+});

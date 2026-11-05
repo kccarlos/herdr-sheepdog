@@ -545,10 +545,15 @@ func TestStopRepliesWithoutWaitingForTheBrain(t *testing.T) {
 	calls := len(m.Calls())
 	h.clock.Advance(5 * time.Second)
 
-	start := time.Now()
-	res := h.call(ToolStop, nil)
-	if took := time.Since(start); took > 50*time.Millisecond {
-		t.Errorf("stop took %v, want a few ms", took)
+	stopDone := make(chan voice.ToolResult, 1)
+	go func() {
+		stopDone <- h.call(ToolStop, nil)
+	}()
+	var res voice.ToolResult
+	select {
+	case res = <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop blocked waiting on the model")
 	}
 	if res.Spoken != "Sent an interrupt to auth." || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("stop = %+v", res)

@@ -60,9 +60,10 @@ func TestDocFacts(t *testing.T) {
 		"Files",
 	)
 
-	// Finding #3/F1: docs/remote-access.md mentions the read-only file browser when web.shell is off.
+	// Finding #3/F1: docs/remote-access.md mentions the read-only file browser when web.shell is off,
+	// and documents proxy/Funnel loopback rules.
 	remDoc := read("docs/remote-access.md")
-	mustContain("docs/remote-access.md", remDoc, "file browser")
+	mustContain("docs/remote-access.md", remDoc, "file browser", "tailscale funnel reset")
 
 	// Finding #4, #6, #7: docs/quick-start.md and docs/models.md.
 	qsDoc := read("docs/quick-start.md")
@@ -72,10 +73,26 @@ func TestDocFacts(t *testing.T) {
 	modDoc := read("docs/models.md")
 	mustContain("docs/models.md", modDoc, "Free quick start")
 
-	// Finding #5: docs/safety.md network bullet.
+	// Finding #5: docs/safety.md network bullet and SECURITY.md threat model.
 	safeDoc := read("docs/safety.md")
 	mustContain("docs/safety.md", safeDoc, "TLS and paired devices")
 	mustNotContain("docs/safety.md", safeDoc, "a token for anything else, no TLS")
+
+	secDoc := read("SECURITY.md")
+	mustContain("SECURITY.md", secDoc,
+		"TLS",
+		"P-256",
+		"X-Forwarded-*",
+		"Tailscale Funnel",
+		"PinnedTrustDelegate",
+		"NSAllowsArbitraryLoads",
+		"kccarlos.opensource@gmail.com",
+	)
+	mustNotContain("SECURITY.md", secDoc,
+		"It has **no TLS**",
+		"without TLS**, because the daemon offers none",
+		"The daemon's token is the only credential",
+	)
 
 	// Finding #8: docs/commands.md doctor entry.
 	cmdDoc := read("docs/commands.md")

@@ -47,20 +47,50 @@ enum PairingStage: Equatable {
     }
 }
 
+/// Finishes the `.paired` stage at most once whether the user taps "Done"
+/// or swipes the sheet down: resolves any local rename and fires `onPaired`.
+struct PairingCompletion {
+    var pairedID: String?
+    var typedName: String?
+    private(set) var didFinish = false
+
+    mutating func begin(daemonID: String) {
+        pairedID = daemonID
+        typedName = nil
+        didFinish = false
+    }
+
+    mutating func finish(stage: PairingStage) -> (shouldNotifyPaired: Bool, rename: (id: String, name: String)?) {
+        guard !didFinish, case let .paired(name) = stage else { return (false, nil) }
+        didFinish = true
+        guard let suggestion = ComputerNaming.suggestion(for: name), let pairedID else {
+            return (true, nil)
+        }
+        let chosen = (typedName ?? suggestion).trimmingCharacters(in: .whitespacesAndNewlines)
+        let rename = (!chosen.isEmpty && chosen != name) ? (pairedID, chosen) : nil
+        return (true, rename)
+    }
+}
+
 /// The pairing flow as one sheet: primer, scanner, "Pairing…", and the end
 /// ("Paired with X", "This code has expired", "Please scan again").
 struct PairingFlowView: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State var stage: PairingStage
-    /// Runs after "Done" on the paired screen.
+    /// Runs after "Done" or swipe-dismissal on the paired screen.
     var onPaired: () -> Void = {}
-    /// The computer just paired, for naming it.
-    @State private var pairedID: String?
-    /// What the user typed over the suggested name; nil: the suggestion.
-    @State private var typedName: String?
+    @State private var completion: PairingCompletion
+    @State private var pairingTask: Task<Void, Never>?
+
+    init(stage: PairingStage, onPaired: @escaping () -> Void = {}, pairedID: String? = nil, typedName: String? = nil) {
+        _stage = State(initialValue: stage)
+        self.onPaired = onPaired
+        _completion = State(initialValue: PairingCompletion(pairedID: pairedID, typedName: typedName))
+    }
 
     var body: some View {
         NavigationStack {
@@ -85,6 +115,13 @@ struct PairingFlowView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .interactiveDismissDisabled(isWorking)
+        .onDisappear {
+            if isWorking {
+                pairingTask?.cancel()
+                pairingTask = nil
+            }
+            finishPaired()
+        }
         .accessibilityIdentifier("pairing.\(stage.id)")
     }
 
@@ -228,43 +265,61 @@ struct PairingFlowView: View {
                 if case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name) {
                     nameSuggestion(for: name, suggestion: suggestion)
                 }
+                if dynamicTypeSize.isAccessibilitySize {
+                    actionButtons(copy)
+                        .padding(.top, 12)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
             .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity, minHeight: geo.size.height * 0.8)
+            .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? nil : geo.size.height * 0.8)
           }
           .scrollBounceBehavior(.basedOnSize)
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 4) {
-                Button { primary() } label: {
-                    Text(copy.primary)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.onAccent)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.accentColor))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("pairing.primary")
-                if let secondary = copy.secondary {
-                    Button(secondary) { dismiss() }
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("pairing.secondary")
-                }
+            if !dynamicTypeSize.isAccessibilitySize {
+                actionButtons(copy)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: 520)
+                    .background(Theme.surface)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-            .frame(maxWidth: 520)
-            .background(Theme.surface)
         }
         .background(Theme.surface.ignoresSafeArea())
+    }
+
+    private func actionButtons(_ copy: Copy) -> some View {
+        VStack(spacing: 4) {
+            Button { primary() } label: {
+                Text(copy.primary)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.onAccent)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("pairing.primary")
+            if let secondary = copy.secondary {
+                Button { dismiss() } label: {
+                    Text(secondary)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("pairing.secondary")
+            }
+        }
     }
 
     /// A computer named like a machine ID ("M944QD4VY") gets a plain
@@ -276,7 +331,7 @@ struct PairingFlowView: View {
                 .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Name", text: Binding(get: { typedName ?? suggestion }, set: { typedName = $0 }))
+            TextField("Name", text: Binding(get: { completion.typedName ?? suggestion }, set: { completion.typedName = $0 }))
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.words)
@@ -290,11 +345,15 @@ struct PairingFlowView: View {
         .padding(.top, 6)
     }
 
-    /// Saves the name on this phone, if there is one to save.
-    private func applySuggestedName() {
-        guard case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name), let pairedID else { return }
-        let chosen = (typedName ?? suggestion).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !chosen.isEmpty, chosen != name { model.renameComputer(pairedID, to: chosen) }
+    /// Saves the suggested/typed name and notifies `onPaired` at most once.
+    private func finishPaired() {
+        let outcome = completion.finish(stage: stage)
+        if let rename = outcome.rename {
+            model.renameComputer(rename.id, to: rename.name)
+        }
+        if outcome.shouldNotifyPaired {
+            onPaired()
+        }
     }
 
     // MARK: - Actions
@@ -313,9 +372,8 @@ struct PairingFlowView: View {
         case let .confirm(code):
             run(code)
         case .paired:
-            applySuggestedName()
+            finishPaired()
             dismiss()
-            onPaired()
         case .problem, .failed:
             stage = PairingStage.start
         case .scanning, .working:
@@ -332,13 +390,15 @@ struct PairingFlowView: View {
     }
 
     private func run(_ code: PairingCode) {
+        pairingTask?.cancel()
         stage = .working(code.name)
-        Task {
-            switch await model.pair(code) {
+        pairingTask = Task {
+            let outcome = await model.pair(code)
+            guard !Task.isCancelled else { return }
+            switch outcome {
             case let .paired(computer):
                 Haptics.connected()
-                pairedID = computer.daemonID
-                typedName = nil
+                completion.begin(daemonID: computer.daemonID)
                 stage = .paired(computer.name.isEmpty ? computer.addresses[0] : computer.name)
             case let .problem(problem):
                 stage = .problem(problem)

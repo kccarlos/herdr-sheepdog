@@ -142,8 +142,7 @@ func TestResetDisarmsTheDaemonRelay(t *testing.T) {
 	if _, _, err := h.sup.ResetConversation(context.Background(), "app"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	h.sup.replies.Wait()
+	h.waitRelay()
 	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
 		t.Errorf("relay_by_daemon = %d after a reset, want 0", n)
 	}

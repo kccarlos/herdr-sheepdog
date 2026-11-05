@@ -35,6 +35,7 @@ const (
 	ModelsDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/models.md"
 	RemoteDocURL   = "https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/remote-access.md"
 	setupNotLocal  = "The setup page only opens on the computer sheepdog runs on. Open http://127.0.0.1:%s/setup there, or run `sheepdog setup` in its terminal."
+	setupFunnelMsg = "Tailscale Funnel is active on this computer (public internet). Run `tailscale funnel reset` in a terminal, then reload http://127.0.0.1:%s/setup."
 	phoneSeenFresh = 10 * time.Minute
 )
 
@@ -112,8 +113,15 @@ func (p *phoneTracker) note(r *http.Request, now time.Time) {
 	if err != nil {
 		return
 	}
-	if ip := net.ParseIP(host); ip == nil || ip.IsLoopback() {
+	ip := net.ParseIP(host)
+	if ip == nil {
 		return
+	}
+	if ip.IsLoopback() {
+		if !isProxiedRequest(r) {
+			return
+		}
+		host = "proxy"
 	}
 	p.mu.Lock()
 	p.at, p.remote = now, host
@@ -133,10 +141,21 @@ func (p *phoneTracker) last() (time.Time, string) {
 // the same browser cannot post to it.
 func (s *Server) localOnly(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if msg := localProblem(r); msg != "" {
+		msg := localProblem(r)
+		tmpl := setupNotLocal
+		if msg == "" && s.funnelActive(r.Context(), r) {
+			msg = "tailscale funnel"
+			tmpl = setupFunnelMsg
+		}
+		if msg != "" {
 			s.log.Log(logSource, "web.setup_refused", "", map[string]any{"path": r.URL.Path, "remote": r.RemoteAddr, "why": msg})
 			_, port, _ := net.SplitHostPort(s.Addr())
-			text := fmt.Sprintf(setupNotLocal, port)
+			if port == "" {
+				if n := s.targetPort(r); n > 0 {
+					port = fmt.Sprint(n)
+				}
+			}
+			text := fmt.Sprintf(tmpl, port)
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				writeError(w, http.StatusForbidden, text)
 				return
@@ -163,6 +182,9 @@ func localProblem(r *http.Request) string {
 	h = strings.Trim(h, "[]")
 	if ip := net.ParseIP(h); h != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return "not a loopback host name"
+	}
+	if isProxiedRequest(r) {
+		return "reverse proxy headers"
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return ""
@@ -750,7 +772,10 @@ func (s *Server) restartSoon(reason string) {
 
 func (s *Server) handleSetupChecks(w http.ResponseWriter, r *http.Request) {
 	sd := s.deps.Setup
-	results := onboard.Doctor(r.Context(), sd.Config, onboard.DoctorOptions{Endpoints: sd.Endpoints, ConfigPath: sd.ConfigPath, EnvPath: sd.EnvPath})
+	results := onboard.Doctor(r.Context(), sd.Config, onboard.DoctorOptions{
+		Endpoints: sd.Endpoints, ConfigPath: sd.ConfigPath, EnvPath: sd.EnvPath,
+		TailscaleFunnel: s.deps.TailscaleFunnel,
+	})
 	out := make([]SetupCheck, 0, len(results))
 	for _, res := range results {
 		out = append(out, checkOf(res))

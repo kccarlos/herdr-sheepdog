@@ -93,6 +93,8 @@ public final class ComputerModel {
     @ObservationIgnored public var eventsSince: (() -> UInt64)?
     /// The stream's own life.
     @ObservationIgnored public private(set) var liveUpdates: SocketLife = .idle
+    /// Fires whenever this computer's link transitions into `.online`.
+    @ObservationIgnored public var onOnline: (() -> Void)?
 
     public enum AnswerFeedback: Equatable, Sendable {
         case tapped
@@ -149,15 +151,20 @@ public final class ComputerModel {
             let epoch = self.epoch
             let connection = self.connection
             let moved = self.lastAddress != nil && self.lastAddress != address
+            let wasOpen = self.link.channels
             self.lastAddress = address
             // The session's `/ws` and `/term` move first, so the reopen
             // below (and any open the channel set allows next) goes there.
             for entry in self.clients.values { entry.client.linkUses(address: address) }
             Task { [weak self] in
                 await connection.use(address: address, epoch: epoch)
-                // Open channels follow the link to its new address.
+                // Channels already open before the move reopen on the new
+                // address; channels that opened synchronously in the same
+                // transition (`onChannels`) are already targeting `address`.
                 guard moved, let self, epoch == self.epoch else { return }
-                for channel in LinkChannel.allCases where self.link.channels.contains(channel) { self.reopen(channel) }
+                for channel in LinkChannel.allCases where wasOpen.contains(channel) && self.link.channels.contains(channel) {
+                    self.reopen(channel)
+                }
             }
         }
         runtime.onRenewTicket = { [weak self] in self?.onRenewTicket?() }
@@ -399,10 +406,12 @@ public final class ComputerModel {
     // MARK: - The link
 
     private func linkChanged(_ next: ComputerLink) {
+        let wasOnline: Bool = { if case .online = link.state { return true }; return false }()
         link = next
         set(\.reachability, Reachability(next))
         set(\.canTalkTo, Self.canTalkTo(next))
         onLinkChange?(next)
+        if !wasOnline, case .online = next.state { onOnline?() }
     }
 
     /// Talk to may switch to a computer in this link state.

@@ -29,7 +29,7 @@ scenarios (docs/dev/iteration-2.md, "Rules for every change").
 | dedup | same (pane, state) from another channel within `DedupWindow` 2 s | `herdr.dedup` |
 | `blocked` debounce | `blocked` must persist `Debounce` 3 s (`debounce_ms`); any other state cancels it; others emit at once | `herdr.debounce_cancelled` |
 | synthetic `blocked → blocked` | post-answer poll every 1 s for `reprompt_poll_s`, and the reconciler every 30 s + at startup (`supervisor/reprompt.go`) | `supervisor.reprompt`, `supervisor.reprompt_poll` |
-| `agent_session` | carried on the Transition from the snapshot; the transcript since the last read is read at each block/finish (`internal/workerlog`) | `worker.session_missing` |
+| worker session | resolved live from the pane's foreground process tree (`pane.process_info` / `terminal.get` → `~/.claude/sessions/<pid>.json` or open Codex `rollout-*.jsonl` descriptor, cached per `(pane, roots)`), falling back to `agent_session` carried on the Transition from the snapshot; the transcript since the last read is read at each block/finish (`internal/workerlog`) and synced back onto the state row | `worker.session_missing` |
 | dispatch | one goroutine per Transition, **serialised per pane** (`internal/app/run.go` `paneLocks`); `HandleTransition` blocks for the pane read and the whole announce turn | — |
 
 ### 1.2 Supervisor — `internal/supervisor`

@@ -1,11 +1,14 @@
 package supervisor
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
@@ -126,9 +129,112 @@ func (j *journalState) clearMissing(paneID string) {
 	j.mu.Unlock()
 }
 
-// workerSession is the row's session for workerlog.
-func workerSession(row state.Agent) workerlog.Session {
-	return workerlog.Session{Agent: row.Kind, Source: row.SessionSource, Kind: row.SessionKind, Value: row.SessionValue, Cwd: row.Cwd}
+// processInfoTimeout bounds one pane.process_info call so a slow socket
+// never stalls a transition or session read.
+const processInfoTimeout = 500 * time.Millisecond
+
+// ProcessInspector is the optional herdr capability that reports a pane's
+// foreground process tree (pane.process_info on herdr, terminal.get on
+// herdr-core).
+type ProcessInspector interface {
+	ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error)
+}
+
+func isUnsupportedMethod(err error) bool {
+	var he *herdr.Error
+	return errors.As(err, &he) && he.Code == "invalid_request" && strings.Contains(he.Message, "unknown variant")
+}
+
+func rootsFromProcessInfo(info herdr.ProcessInfo) workerlog.ProcessRoots {
+	if info.ShellForeground() {
+		return workerlog.ProcessRoots{}
+	}
+	var fg int
+	for _, p := range info.ForegroundProcesses {
+		if p.PID > 0 && p.PID != info.ShellPID {
+			fg = int(p.PID)
+			break
+		}
+	}
+	if fg == 0 && len(info.ForegroundProcesses) > 0 && info.ForegroundProcesses[0].PID > 0 {
+		fg = int(info.ForegroundProcesses[0].PID)
+	}
+	return workerlog.ProcessRoots{
+		PID:      fg,
+		Pgrp:     int(info.ForegroundProcessGroup),
+		ShellPID: int(info.ShellPID),
+	}
+}
+
+func (s *Supervisor) paneRoots(ctx context.Context, row state.Agent) workerlog.ProcessRoots {
+	if row.PaneID == "" || s.noProcessInfo.Load() {
+		return workerlog.ProcessRoots{}
+	}
+	if row.Kind != "" && !workerlog.SupportsKind(row.Kind) {
+		return workerlog.ProcessRoots{}
+	}
+	pi, ok := s.herdr.(ProcessInspector)
+	if !ok {
+		return workerlog.ProcessRoots{}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pctx, cancel := context.WithTimeout(ctx, processInfoTimeout)
+	info, err := pi.ProcessInfo(pctx, row.PaneID)
+	cancel()
+	if err != nil {
+		if isUnsupportedMethod(err) {
+			s.noProcessInfo.Store(true)
+		}
+		return workerlog.ProcessRoots{}
+	}
+	return rootsFromProcessInfo(info)
+}
+
+// workerSessionWithRoots is the row's session for workerlog, carrying the
+// pane's live foreground process roots when known.
+func workerSessionWithRoots(row state.Agent, roots workerlog.ProcessRoots) workerlog.Session {
+	return workerlog.Session{
+		Pane:   row.PaneID,
+		Roots:  roots,
+		Agent:  row.Kind,
+		Source: row.SessionSource,
+		Kind:   row.SessionKind,
+		Value:  row.SessionValue,
+		Cwd:    row.Cwd,
+	}
+}
+
+// syncDiscoveredSession persists a PID-discovered session id onto the state
+// row so later restarts and diagnostics see the active session without
+// waiting for a 30s snapshot.
+func (s *Supervisor) syncDiscoveredSession(paneID string) {
+	if paneID == "" || s.cfg.WorkerLog == nil {
+		return
+	}
+	disc, ok := s.cfg.WorkerLog.Discovered(paneID)
+	if !ok || disc.ID == "" {
+		return
+	}
+	row, exists := s.store.Get(paneID)
+	if !exists {
+		return
+	}
+	if row.SessionKind == herdr.SessionKindID && row.SessionValue == disc.ID && row.SessionSource == disc.Source {
+		return
+	}
+	_, _ = s.store.Update(paneID, func(a *state.Agent) {
+		if a.SessionKind == herdr.SessionKindID && a.SessionValue == disc.ID && a.SessionSource == disc.Source {
+			return
+		}
+		if !strings.HasPrefix(a.SessionSource, "pid:") && a.SessionValue != "" && a.ReportedSession == "" {
+			a.ReportedSession = a.SessionValue
+		}
+		a.SessionSource = disc.Source
+		a.SessionKind = herdr.SessionKindID
+		a.SessionValue = disc.ID
+	})
 }
 
 // recordJournal reads what is new in the worker's transcript and appends
@@ -140,14 +246,36 @@ func workerSession(row state.Agent) workerlog.Session {
 // transcript has no new message for it yet, the read is retried once
 // after journalRetry. A transcript that cannot be read still leaves an
 // entry when the row knows the instruction.
-func (s *Supervisor) recordJournal(row state.Agent, event string, finish bool) *workerlog.TurnError {
+func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots workerlog.ProcessRoots, event string, finish bool) *workerlog.TurnError {
 	alias := aliasOr(row.Alias)
-	d, err := s.cfg.WorkerLog.Read(row.PaneID, workerSession(row))
+	sess := workerSessionWithRoots(row, roots)
+	prevDisc, _ := s.cfg.WorkerLog.Discovered(row.PaneID)
+	d, err := s.cfg.WorkerLog.Read(row.PaneID, sess)
+	if err == nil && d.Bytes == 0 && roots.HasPID() {
+		// A same-PID session rotation (/new in Codex) leaves 0 new bytes
+		// on the previous rollout file: drop the cached FD probe and re-read
+		// once so both blocked and finished turns find a rotated rollout.
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+		sess.Roots = s.paneRoots(ctx, row)
+		d, err = s.cfg.WorkerLog.Read(row.PaneID, sess)
+		if disc, ok := s.cfg.WorkerLog.Discovered(row.PaneID); ok && disc.ID != prevDisc.ID {
+			s.refreshTitle(row, sess.Roots)
+		}
+	}
+	s.syncDiscoveredSession(row.PaneID)
 	if err == nil && !d.Fresh && d.Error == nil && finish && journalRetry > 0 {
 		time.Sleep(journalRetry)
-		if next, nerr := s.cfg.WorkerLog.Read(row.PaneID, workerSession(row)); nerr == nil {
+		if d.Bytes == 0 && roots.HasPID() {
+			s.cfg.WorkerLog.Invalidate(row.PaneID)
+			sess.Roots = s.paneRoots(ctx, row)
+		}
+		if next, nerr := s.cfg.WorkerLog.Read(row.PaneID, sess); nerr == nil {
 			d.Merge(next)
 		}
+		if disc, ok := s.cfg.WorkerLog.Discovered(row.PaneID); ok && disc.ID != prevDisc.ID {
+			s.refreshTitle(row, sess.Roots)
+		}
+		s.syncDiscoveredSession(row.PaneID)
 	}
 	if err != nil {
 		reason := workerlog.Reason(err)

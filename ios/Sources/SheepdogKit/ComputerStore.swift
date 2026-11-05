@@ -99,6 +99,16 @@ public final class ComputerStore: @unchecked Sendable {
         defaults.set(address, forKey: Key.address(id))
     }
 
+    /// Records the address that won a background race on `interface` without
+    /// overwriting the user's preferred address (`Key.address`).
+    public func recordRaceWinner(_ address: String, for id: String, interface: NetworkInterface?) {
+        guard let interface, !address.isEmpty, computer(id) != nil else { return }
+        let store = LinkWinnerDefaults(defaults: defaults)
+        var winners = store.load(computerID: id)
+        winners[interface] = address
+        store.save(winners, computerID: id)
+    }
+
     /// The address with no paired computer behind it (a loopback fixture).
     public var looseAddress: String {
         get { defaults.string(forKey: Key.looseAddress) ?? "" }
@@ -111,6 +121,22 @@ public final class ComputerStore: @unchecked Sendable {
         guard let computer = computer(id) else { return nil }
         let creds = credentials(for: id)
         return DaemonEndpoint(text: address(for: id), secure: !computer.isLoopbackFixture, credentials: creds)
+    }
+
+    /// Every candidate endpoint for a computer, ordered for racing: the
+    /// remembered winner on `interface` first (when known), then the
+    /// preferred address, then the rest of `computer.addresses` without
+    /// duplicates.
+    public func candidateEndpoints(for id: String, interface: NetworkInterface? = nil) -> [DaemonEndpoint] {
+        guard let computer = computer(id) else { return [] }
+        let creds = credentials(for: id)
+        let preferred = address(for: id)
+        var base: [String] = preferred.isEmpty ? [] : [preferred]
+        for addr in computer.addresses where !base.contains(addr) { base.append(addr) }
+        let winners = LinkWinnerDefaults(defaults: defaults).load(computerID: id)
+        let ordered = AddressRace.order(addresses: base, winners: winners, interface: interface)
+        let secure = !computer.isLoopbackFixture
+        return ordered.compactMap { DaemonEndpoint(text: $0, secure: secure, credentials: creds) }
     }
 
     // MARK: - Changes

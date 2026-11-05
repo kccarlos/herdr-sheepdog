@@ -251,7 +251,7 @@ func TestRelayWaitsForATrailingTranscript(t *testing.T) {
 	blockedAuth(t, h)
 	h.clock.Advance(time.Second)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		waitFor(t, func() bool { return h.sup.inGraceWait() }, "relay to enter inputGrace")
 		h.hear("yes")
 	}()
 	res := h.relay("yes")
@@ -289,6 +289,22 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 	// The same id again: the question is gone.
 	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
 		t.Errorf("second tap err = %v, want ErrPendingGone", err)
+	}
+}
+
+func TestTapRejectsStalePendingScreen(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	p, _ := h.pending()
+	h.srv.SetScreen(p.PaneID, "No question here")
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+		t.Fatalf("tap error = %v, want ErrPendingGone", err)
+	}
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Fatalf("sent stale keys: %v", got)
+	}
+	if _, ok := h.store.Pending(); ok {
+		t.Fatal("stale pending was retained")
 	}
 }
 

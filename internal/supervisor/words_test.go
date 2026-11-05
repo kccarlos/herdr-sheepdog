@@ -193,8 +193,7 @@ func TestDaemonRelayWatch(t *testing.T) {
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "hello"})
 			tc.after(h)
-			time.Sleep(150 * time.Millisecond)
-			h.sup.replies.Wait()
+			h.waitRelay()
 			if got := h.log.count("supervisor.relay_by_daemon") == 1; got != tc.relay {
 				t.Errorf("relay_by_daemon = %d, want relayed=%v", h.log.count("supervisor.relay_by_daemon"), tc.relay)
 			}
@@ -322,8 +321,7 @@ func TestBargeInEndsThePushWindow(t *testing.T) {
 	h.sup.OnVoiceEvent(voice.EventInterrupted{})
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "thanks"})
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "You're welcome."})
-	time.Sleep(150 * time.Millisecond)
-	h.sup.replies.Wait()
+	h.waitRelay()
 	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
 		t.Errorf("relay_by_daemon = %d, want 0: the voice answered", n)
 	}

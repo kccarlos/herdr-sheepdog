@@ -77,6 +77,9 @@ One file: JSON unless `?raw=1`.
 | 404 | `not_found` | Gone, or the folder was removed. |
 | 403 | `outside` | Left the root. |
 | 403 | `sensitive` | Hidden for safety. |
+| 403 | `home_root` | The user's home folder or above it. |
+| 403 | `private_root` | The daemon's data folder, above it, or inside it. |
+| 403 | `files_off` | File browsing is disabled (`web.files = false`). |
 | 403 | `not_file` | A read of a folder, FIFO, socket or device. |
 | 403 | `denied` | The system refused, or a link loops. |
 | 413 | `too_large` | Over the image limit. |
@@ -99,7 +102,7 @@ a long s, or a Kelvin sign for `k`): `.git`, `.env` and `.env.*` (except
 `credentials`, `credentials.json`, `secrets.json`, `secrets.yaml`,
 `secrets.yml`, `.codex`, `.claude`, `Library`, `.credentials.json`, `auth.json`, `.gcloud`, and shell and REPL history names. `node_modules` is skipped by a search under the same fold. Repository `.config`, `.local` and `.cache` folders remain visible.
 
-The home folder and the daemon's data folder, their parents, and folders inside the data folder are refused as `sensitive`, including when reached through a symlink. Choose a project folder instead.
+The home folder and folders above it are refused as `home_root`, and the daemon's data folder, its parents, and folders inside it are refused as `private_root`, including when reached through a symlink. Choose a project folder instead.
 
 A root with a sensitive segment anywhere on its path (an agent working in
 `.git` or `~/.ssh`, spelled or reached through a link) is refused as

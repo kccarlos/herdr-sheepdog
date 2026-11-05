@@ -247,8 +247,9 @@ type Deps struct {
 	// TailscaleHTTPS is config web.tailscale_https: serve the *.ts.net
 	// certificate TailscaleCert fetches to browsers asking for that name
 	// (tsnet.go). The setup page switches it.
-	TailscaleHTTPS bool
-	TailscaleCert  TailscaleCertFunc
+	TailscaleHTTPS  bool
+	TailscaleCert   TailscaleCertFunc
+	TailscaleFunnel TailscaleFunnelFunc
 
 	// DataDir is the daemon's data directory; attachments are kept in its
 	// attachments/ folder. Empty answers the attachments route with 503.
@@ -308,6 +309,7 @@ type Server struct {
 	// phones remembers the last authorized request from another machine
 	// (the setup page's "Connected").
 	phones phoneTracker
+	funnel funnelCache
 	// idem keeps the replies to POSTs sent with an Idempotency-Key.
 	idem *idemStore
 
@@ -449,12 +451,22 @@ func (s *Server) wrap(a access, h http.HandlerFunc) http.HandlerFunc {
 	return h
 }
 
-// loopbackOnly refuses any caller but this computer with 403
-// {"error":"loopback_only"} (the guard has already checked the Host).
+// loopbackOnly refuses any caller other than a direct local loopback client
+// (never proxied headers or active Tailscale Funnel) with 403
+// {"error":"loopback_only"}.
 func (s *Server) loopbackOnly(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.kindOf(r.RemoteAddr) != "loopback" {
-			s.log.Log(logSource, "web.loopback_only", "", map[string]any{"path": r.URL.Path, "remote": r.RemoteAddr})
+		var why string
+		switch {
+		case s.kindOf(r.RemoteAddr) != "loopback":
+			why = "not_loopback"
+		case !isLoopbackHost(r.Host):
+			why = "host"
+		default:
+			why = s.isUntrustedLoopback(r)
+		}
+		if why != "" {
+			s.log.Log(logSource, "web.loopback_only", "", map[string]any{"path": r.URL.Path, "remote": r.RemoteAddr, "why": why})
 			writeError(w, http.StatusForbidden, "loopback_only")
 			return
 		}
@@ -546,6 +558,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
 		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
 		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
+		route{"POST /api/push/web", accessDevice, s.handleWebPushRegister},
+		route{"DELETE /api/push/web", accessDevice, s.handleWebPushUnregister},
 		route{"POST /api/push/activity", accessDevice, s.handlePushActivity},
 		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
@@ -618,6 +632,11 @@ func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 	files := http.FileServerFS(sub)
 	serve := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
+		if name == "voice" && r.URL.Path == "/sw.js" {
+			// Let /voice/sw.js control /voice (without a trailing slash), the
+			// canonical URL GET / redirects to.
+			w.Header().Set("Service-Worker-Allowed", "/voice")
+		}
 		files.ServeHTTP(w, r)
 	}
 	return []route{
@@ -634,12 +653,33 @@ func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 // for every event; the supervisor gets the same events separately.
 func (s *Server) OnVoiceEvent(ev voice.Event) { s.hub.onVoiceEvent(ev) }
 
+// audioChunker is implemented by voice sessions that stamp outbound
+// audio chunks with an interrupt epoch so an in-flight chunk cannot
+// overtake a flush.
+type audioChunker interface {
+	AudioChunks() <-chan voice.AudioChunk
+}
+
 // Run pumps model audio to the browser until ctx ends or the session's
 // Audio channel closes. It returns immediately when there is no voice
 // session.
 func (s *Server) Run(ctx context.Context) {
 	if s.deps.Voice == nil {
 		return
+	}
+	if ac, ok := s.deps.Voice.(audioChunker); ok {
+		chunks := ac.AudioChunks()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok := <-chunks:
+				if !ok {
+					return
+				}
+				s.hub.sendAudioChunk(chunk)
+			}
+		}
 	}
 	audio := s.deps.Voice.Audio()
 	for {

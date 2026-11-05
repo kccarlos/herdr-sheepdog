@@ -42,6 +42,20 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertEqual(p?.title, "Echo dropped — the voice heard itself")
         XCTAssertEqual(p?.detail, "heard “No change since I last checked”")
 
+        p = line("supervisor.echo_possible", ["text": .string("yes go ahead"), "utterance_id": .number(4)])
+        XCTAssertEqual(p?.title, "Echo possible — words overlapped playback")
+        XCTAssertEqual(p?.detail, "heard “yes go ahead”")
+
+        p = line("brain.account_problem", ["provider": .string("deepseek"), "problem": .string("balance"), "message": .string("DeepSeek says the balance is used up."), "fix": .string("top up the account")])
+        XCTAssertEqual(p?.title, "DeepSeek says the balance is used up.")
+        XCTAssertEqual(p?.detail, "top up the account")
+        XCTAssertEqual(p?.severity, .error)
+
+        p = line("web.account_problem", ["role": .string("voice"), "provider": .string("gemini"), "problem": .string("invalid_key"), "message": .string("Gemini refused the voice API key."), "fix": .string("check GEMINI_API_KEY")])
+        XCTAssertEqual(p?.title, "Gemini refused the voice API key.")
+        XCTAssertEqual(p?.detail, "check GEMINI_API_KEY")
+        XCTAssertEqual(p?.severity, .error)
+
         p = line("web.audio_unheard", ["bytes": .number(96_000), "provider": .string("gemini")])
         XCTAssertEqual(p?.title, "Audio played to nobody (2.0 s)")
         XCTAssertEqual(p?.detail, "gemini, no client attached")

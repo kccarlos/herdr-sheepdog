@@ -103,7 +103,7 @@ var (
 	reWWW  = regexp.MustCompile(`(?i)\bwww\.\S+`)
 	reHash = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
 	// rePath matches file paths for scrubbing: an absolute/home/dotted
-	// path ("/Users/kc/x.go", "~/repo/x.go", "./a/b.go") or a bare
+	// path ("/Users/you/x.go", "~/repo/x.go", "./a/b.go") or a bare
 	// relative path with a leading word ("internal/x/calc_test.go"). It
 	// requires at least two "/segment" groups so a lone identifier like
 	// "TestTotal" or a bare filename like "calc_test.go" is never

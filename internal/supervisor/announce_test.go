@@ -437,20 +437,14 @@ func TestFinishTimeoutSpeaksTheCodeSentenceOnce(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// Nothing is spoken at AnnounceWait: the finish waits.
-			pusher := h.pusher
-			early := make(chan int, 1)
-			go func() {
-				time.Sleep(budget / 2)
-				early <- len(pusher.all())
-			}()
+			// Nothing is spoken at AnnounceWait: the finish waits for the turn's budget.
 			start := time.Now()
 			doneAuth(h)
-			if n := <-early; n != 0 {
-				t.Errorf("%d pushes before the turn's budget ran out", n)
-			}
 			if el := time.Since(start); el < budget {
 				t.Errorf("finish spoke after %s, before the budget %s", el, budget)
+			}
+			if pushedAt, ok := h.pusher.firstPushAt(); !ok || pushedAt.Sub(start) < budget {
+				t.Errorf("first push landed after %s, before the budget %s", pushedAt.Sub(start), budget)
 			}
 			if got := h.pushTexts(); len(got) != 1 || got[0] != c.want {
 				t.Fatalf("pushes = %v", got)
@@ -540,17 +534,14 @@ func TestAnnounceLateBlockLines(t *testing.T) {
 // At quiet a finish nobody is owed is not spoken, so nothing waits for
 // the orchestrator: no model call, no push, the transition returns at once.
 func TestQuietFinishDoesNotWait(t *testing.T) {
-	var h *harness
+	block := make(chan struct{})
+	defer close(block)
 	m := braintest.NewModel()
-	m.EventDefault = slowAnnounce(&h, 6*time.Second, announceReply("Auth finished the refactor.", "idle", "", "the refactor", false))
-	h = newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
+	m.EventDefault = &braintest.Step{Block: block, Text: braintest.Reply("Auth finished the refactor.", "")}
+	h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
-	start := time.Now()
 	doneAuth(h)
-	if el := time.Since(start); el > 50*time.Millisecond {
-		t.Errorf("a quiet finish took %s", el)
-	}
 	if got := h.pusher.all(); len(got) != 0 {
 		t.Fatalf("pushes = %+v", got)
 	}

@@ -61,7 +61,7 @@ struct DemoSpaces {
                 ]
                 if let branch = space.branch { object["branch"] = branch }
                 object["muted"] = space.muted
-                if space.muted, let until = space.until { object["until"] = ISO8601DateFormatter.sheepdog.string(from: until) }
+                if space.muted, let until = space.until { object["until"] = RFC3339Date.string(from: until) }
                 return object
             },
             "folders": folders.map { ["name": $0.name, "path": $0.path, "git": $0.git] },
@@ -98,14 +98,14 @@ struct DemoSpaces {
             var until: Date?
             if let text = body["until"] as? String {
                 guard muted else { return (400, ["error": "until goes with muted: true"]) }
-                guard let date = ISO8601DateFormatter().date(from: text) else { return (400, ["error": "until must be RFC 3339"]) }
+                guard let date = RFC3339Date.date(from: text) else { return (400, ["error": "until must be RFC 3339"]) }
                 guard date > Date() else { return (400, ["error": "until is in the past"]) }
                 until = date
             }
             spaces[index].muted = muted
             spaces[index].until = muted ? until : nil
             var space: [String: Any] = ["id": spaces[index].id, "path": spaces[index].path, "muted": muted]
-            if let until = spaces[index].until { space["until"] = ISO8601DateFormatter.sheepdog.string(from: until) }
+            if let until = spaces[index].until { space["until"] = RFC3339Date.string(from: until) }
             return (200, ["ok": true, "space": space])
         case ("POST", ["close"]):
             if spaces[index].hasAgents, busy { return (409, ["error": "an agent there is still working or waiting"]) }

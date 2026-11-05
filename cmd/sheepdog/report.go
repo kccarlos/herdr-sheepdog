@@ -110,7 +110,7 @@ func buildReport(ctx context.Context, o reportOptions) string {
 		svcInstalled, svcPATH := installedServicePATH()
 		results := onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
 			Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath,
-			Environment: &environment, Home: probe.Home,
+			Environment: &environment, Home: probe.Home, TailscaleFunnel: onboardTailscaleFunnel(),
 			HerdrAppHomeEnv: os.Getenv("HERDR_APP_HOME"), HCSessionEnv: os.Getenv("HC_SESSION"),
 			ServiceInstalled: svcInstalled, ServicePATH: svcPATH,
 		})

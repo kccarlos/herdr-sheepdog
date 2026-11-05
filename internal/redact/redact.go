@@ -10,6 +10,7 @@ package redact
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -58,20 +59,64 @@ type Redactor struct {
 }
 
 // New returns a Redactor for the given exact values (empty and short
-// ones are ignored) plus the built-in shapes.
+// ones are ignored) plus the built-in shapes. Configured values that JSON
+// escaping alters (quotes, backslashes, newlines, HTML characters) also
+// include their single- and double-escaped JSON string interiors so raw
+// text containing serialized JSON masks them cleanly without breaking
+// surrounding escapes.
 func New(values ...string) *Redactor {
 	seen := map[string]bool{}
 	r := &Redactor{}
+	add := func(s string) {
+		if len(s) < minSecretLen || seen[s] {
+			return
+		}
+		seen[s] = true
+		r.values = append(r.values, s)
+	}
 	for _, v := range values {
 		v = strings.TrimSpace(v)
-		if len(v) < minSecretLen || seen[v] {
+		if len(v) < minSecretLen {
 			continue
 		}
-		seen[v] = true
-		r.values = append(r.values, v)
+		add(v)
+		e1False := jsonEscapeString(v, false)
+		e1True := jsonEscapeString(v, true)
+		add(e1False)
+		add(e1True)
+		for _, e1 := range []string{e1False, e1True} {
+			add(jsonEscapeString(e1, false))
+			add(jsonEscapeString(e1, true))
+		}
 	}
-	sort.Slice(r.values, func(i, j int) bool { return len(r.values[i]) > len(r.values[j]) })
+	sort.Slice(r.values, func(i, j int) bool {
+		if len(r.values[i]) != len(r.values[j]) {
+			return len(r.values[i]) > len(r.values[j])
+		}
+		return r.values[i] < r.values[j]
+	})
 	return r
+}
+
+func jsonEscapeString(s string, escapeHTML bool) string {
+	if escapeHTML {
+		b, err := json.Marshal(s)
+		if err != nil || len(b) < 2 {
+			return s
+		}
+		return string(b[1 : len(b)-1])
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return s
+	}
+	b := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	if len(b) < 2 {
+		return s
+	}
+	return string(b[1 : len(b)-1])
 }
 
 // ConfigSecrets are every secret value in cfg: the Gemini key pool, the

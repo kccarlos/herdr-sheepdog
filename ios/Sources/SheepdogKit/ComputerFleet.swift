@@ -76,8 +76,13 @@ public final class ComputerFleet {
     /// the caller applies nothing.
     public func onCurrent<Client, T>(as type: Client.Type, _ body: @escaping @Sendable (Client) async throws -> T) async throws -> T {
         guard let model = current else { throw Moved() }
-        let value = try await model.request(as: type, body)
-        guard current === model else { throw Moved() }
-        return value
+        do {
+            let value = try await model.request(as: type, body)
+            guard current === model else { throw Moved() }
+            return value
+        } catch {
+            guard current === model else { throw Moved() }
+            throw error
+        }
     }
 }

@@ -3,6 +3,7 @@ package observe
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -40,8 +41,19 @@ func (l *lineLog) take() []string {
 	return out
 }
 
+func waitPing(t *testing.T, pinged <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-pinged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for herdr ping")
+	}
+}
+
 // Each component: a miss is logged once per incident, its recovery once.
 func TestWatchdogIncidents(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(prevProcs)
 	now := time.Date(2026, 10, 3, 1, 0, 0, 0, time.UTC)
 	var (
 		turnStart   time.Time
@@ -61,11 +73,12 @@ func TestWatchdogIncidents(t *testing.T) {
 		Listener:    func() bool { return listener },
 		HerdrBeat:   func() (time.Time, bool) { return beat, watcherUp },
 		HerdrPing: func(context.Context) error {
-			defer func() { pinged <- struct{}{} }()
+			runtime.Gosched()
 			return pingErr
 		},
 		HerdrStale: 100 * time.Second,
 	})
+	w.pingDone = func() { pinged <- struct{}{} }
 	var clockMu sync.Mutex // the ping goroutine reads the clock
 	w.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
 	frozen := false // the herdr beat stops
@@ -129,14 +142,14 @@ func TestWatchdogIncidents(t *testing.T) {
 	if got := tick(101 * time.Second); len(got) != 1 || got[0] != "daemon.heartbeat_missed herdr no snapshot or event for 101s; socket not checked yet" {
 		t.Fatalf("herdr miss = %v", got)
 	}
-	<-pinged
+	waitPing(t, pinged)
 	frozen = false
 	if got := tick(time.Second); len(got) != 1 || got[0] != "daemon.heartbeat_ok herdr" {
 		t.Fatalf("herdr recovery = %v", got)
 	}
 	watcherUp = false
 	got := tick(time.Second)
-	<-pinged
+	waitPing(t, pinged)
 	if len(got) != 1 || !strings.Contains(got[0], "no watcher running") || !strings.Contains(got[0], "socket unresponsive: connection refused") {
 		t.Fatalf("herdr down = %v", got)
 	}

@@ -48,7 +48,7 @@ func newBrainHarness(t *testing.T, m *braintest.Model, opts ...func(*Config)) *h
 func TestBrainAnswersAskWithTools(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "auth"})}},
-		braintest.Step{Text: braintest.Reply("Auth is asking whether it can create hello.txt; see /Users/kc/x/y.go.", "It ran `go test` in /Users/kc/repo/auth and stopped at the approval prompt.")},
+		braintest.Step{Text: braintest.Reply("Auth is asking whether it can create hello.txt; see /Users/you/x/y.go.", "It ran `go test` in /Users/you/repo/auth and stopped at the approval prompt.")},
 	)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -254,7 +254,7 @@ func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 		t.Errorf("keys = %v", got)
 	}
 	if h.log.count("brain.rail_blocked") != 0 {
-		t.Errorf("rail_blocked = %d, want 0 (an authorised, revived answer)", h.log.count("brain.rail_blocked"))
+		t.Errorf("rail_blocked = %v, want 0 (an authorised, revived answer)", h.log.ofType("brain.rail_blocked"))
 	}
 	revived := h.log.ofType("pending.revived")
 	if len(revived) != 1 {

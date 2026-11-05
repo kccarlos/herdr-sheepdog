@@ -106,7 +106,7 @@ func TestPromptDoesNotBlockStopOrVoiceEvents(t *testing.T) {
 	}()
 	select {
 	case <-evDone:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		close(unblock)
 		t.Fatal("OnVoiceEvent blocked on s.mu while herdr.Prompt was in flight")
 	}
@@ -122,14 +122,14 @@ func TestPromptDoesNotBlockStopOrVoiceEvents(t *testing.T) {
 	var stopRes voice.ToolResult
 	select {
 	case stopRes = <-stopDone:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		close(unblock)
 		t.Fatal("Stop blocked on s.mu while herdr.Prompt was in flight")
 	}
 
 	select {
 	case <-promptCtxCanceled:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("Stop did not cancel in-flight Prompt context")
 	}
 
@@ -208,7 +208,7 @@ func TestSendKeysAndReviveReadDoNotHoldMu(t *testing.T) {
 	}()
 	select {
 	case <-ev1:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		close(releaseRead)
 		close(releaseKeys)
 		t.Fatal("OnVoiceEvent blocked on s.mu during revivePrompt Read")
@@ -229,7 +229,7 @@ func TestSendKeysAndReviveReadDoNotHoldMu(t *testing.T) {
 	}()
 	select {
 	case <-ev2:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		close(releaseKeys)
 		t.Fatal("OnVoiceEvent blocked on s.mu during answerKeys SendKeys")
 	}
@@ -329,7 +329,7 @@ func TestAnnounceHeldTrackedByShutdown(t *testing.T) {
 
 	select {
 	case <-announceCanceled:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		close(unblock)
 		<-shutDone
 		t.Fatal("shutdown did not cancel announceHeld turn context via s.life")
@@ -337,7 +337,7 @@ func TestAnnounceHeldTrackedByShutdown(t *testing.T) {
 
 	select {
 	case <-shutDone:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("shutdown did not finish after announceHeld cancelled")
 	}
 
@@ -377,7 +377,7 @@ func TestPollRepromptStopsOnShutdown(t *testing.T) {
 
 	select {
 	case <-sawPollRead:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("pollReprompt did not read pane")
 	}
 

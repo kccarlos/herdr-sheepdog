@@ -1,6 +1,42 @@
 import SheepdogKit
 import SwiftUI
 
+private struct FlockInputs: Equatable {
+    var flock: Flock = Flock([])
+    var computers: [ComputerSnapshot] = []
+    var currentName = ""
+    var voiceQuestionID: String?
+    var collapsedComputers: Set<String> = []
+    var question: (String) -> ApprovalFlow.Card? = { _ in nil }
+    var answer: (String, Int) -> Void = { _, _ in }
+    var onNewAgent: (() -> Void)?
+    var remoteCard: (String, String) -> ApprovalFlow.Card? = { _, _ in nil }
+    var talkTo: (String) -> Void = { _ in }
+    var retry: (String) -> Void = { _ in }
+    var toggleComputer: (String) -> Void = { _ in }
+    var expandComputer: (String) -> Void = { _ in }
+
+    static func == (lhs: FlockInputs, rhs: FlockInputs) -> Bool {
+        lhs.flock == rhs.flock
+            && lhs.computers == rhs.computers
+            && lhs.currentName == rhs.currentName
+            && lhs.voiceQuestionID == rhs.voiceQuestionID
+            && lhs.collapsedComputers == rhs.collapsedComputers
+            && (lhs.onNewAgent != nil) == (rhs.onNewAgent != nil)
+    }
+}
+
+private struct FlockInputsKey: EnvironmentKey {
+    static let defaultValue = FlockInputs()
+}
+
+private extension EnvironmentValues {
+    var flockInputs: FlockInputs {
+        get { self[FlockInputsKey.self] }
+        set { self[FlockInputsKey.self] = newValue }
+    }
+}
+
 /// The Agents page: one compact card per running agent, blocked first,
 /// then "Not running (N)" folded at the bottom. A waiting agent's card
 /// carries its question and answer buttons and never folds; the others
@@ -15,7 +51,7 @@ struct FlockView: View {
     /// The cards the user opened (kept for the session).
     @Binding var expanded: Set<String>
     /// A notification tap: scroll to this agent's card, then forget it.
-    @Binding var focusedPaneID: String?
+    @Binding var focusedAgent: AgentFocus?
     /// The empty state's New agent, when the daemon has agent actions.
     var onNewAgent: (() -> Void)?
     /// The voice's own question: its buttons keep the `approval.*` names.
@@ -34,37 +70,89 @@ struct FlockView: View {
     /// Closed computer sections, owned by `AgentsModel`.
     var collapsedComputers: Set<String> = []
     var toggleComputer: (String) -> Void = { _ in }
+    var expandComputer: (String) -> Void = { _ in }
 
     /// Closed by default: the running agents are what matters.
     @State private var showNotRunning = false
 
-    private var sectioned: Bool { computers.count > 1 }
+    private var inputs: FlockInputs {
+        FlockInputs(
+            flock: flock,
+            computers: computers,
+            currentName: currentName,
+            voiceQuestionID: voiceQuestionID,
+            collapsedComputers: collapsedComputers,
+            question: question,
+            answer: answer,
+            onNewAgent: onNewAgent,
+            remoteCard: remoteCard,
+            talkTo: talkTo,
+            retry: retry,
+            toggleComputer: toggleComputer,
+            expandComputer: expandComputer
+        )
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    if sectioned {
-                        // The store's order: Talk to never moves a section.
-                        ForEach(computers) { computer in
-                            if computer.isCurrent {
-                                currentSection
-                            } else {
-                                otherSection(computer)
-                            }
-                        }
-                    } else {
-                        currentSection
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 12)
-            }
-            .onAppear { scrollToFocus(proxy) }
-            .onChange(of: focusedPaneID) { _, _ in scrollToFocus(proxy) }
+            FlockScrollContent(
+                proxy: proxy,
+                expanded: $expanded,
+                focusedAgent: $focusedAgent,
+                showNotRunning: $showNotRunning
+            )
         }
+        .environment(\.flockInputs, inputs)
         .accessibilityIdentifier("flock.list")
+    }
+}
+
+private struct FlockScrollContent: View {
+    let proxy: ScrollViewProxy
+    @Binding var expanded: Set<String>
+    @Binding var focusedAgent: AgentFocus?
+    @Binding var showNotRunning: Bool
+    @Environment(\.flockInputs) private var inputs
+
+    private var flock: Flock { inputs.flock }
+    private var computers: [ComputerSnapshot] { inputs.computers }
+    private var currentName: String { inputs.currentName }
+    private var voiceQuestionID: String? { inputs.voiceQuestionID }
+    private var collapsedComputers: Set<String> { inputs.collapsedComputers }
+    private var question: (String) -> ApprovalFlow.Card? { inputs.question }
+    private var answer: (String, Int) -> Void { inputs.answer }
+    private var onNewAgent: (() -> Void)? { inputs.onNewAgent }
+    private var remoteCard: (String, String) -> ApprovalFlow.Card? { inputs.remoteCard }
+    private var talkTo: (String) -> Void { inputs.talkTo }
+    private var retry: (String) -> Void { inputs.retry }
+    private var toggleComputer: (String) -> Void { inputs.toggleComputer }
+    private var expandComputer: (String) -> Void { inputs.expandComputer }
+
+    private var sectioned: Bool { computers.count > 1 }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if sectioned {
+                    // The store's order: Talk to never moves a section.
+                    ForEach(computers) { computer in
+                        if computer.isCurrent {
+                            currentSection
+                        } else {
+                            otherSection(computer)
+                        }
+                    }
+                } else {
+                    currentSection
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+        }
+        .onAppear { scrollToFocus(proxy) }
+        .onChange(of: focusedAgent) { _, _ in scrollToFocus(proxy) }
+        .onChange(of: renderedFocusToken) { _, _ in scrollToFocus(proxy) }
     }
 
     /// The current computer: its header (several computers only), then its
@@ -183,6 +271,7 @@ struct FlockView: View {
                         ),
                         answer: answer
                     )
+                    .id("\(computer.id)|\(agent.paneID)")
                 }
             }
         }
@@ -223,13 +312,49 @@ struct FlockView: View {
         .accessibilityIdentifier("flock.notRunning")
     }
 
+    private var renderedFocusToken: [String] {
+        var ids = flock.all.map(\.paneID)
+        for computer in computers where !computer.isCurrent {
+            if case .offline = computer.reachability { continue }
+            ids.append(contentsOf: Flock(computer.agents).running.map { "\(computer.id)|\($0.paneID)" })
+        }
+        return ids
+    }
+
     private func scrollToFocus(_ proxy: ScrollViewProxy) {
-        guard let id = focusedPaneID else { return }
-        if flock.notRunning.contains(where: { $0.paneID == id }) { showNotRunning = true }
-        if question(id) == nil { expanded.insert(id) }
+        guard let target = focusedAgent else { return }
+        let currentID = computers.first(where: \.isCurrent)?.id
+        let isOther = target.isOtherComputer(currentComputerID: currentID)
+        if isOther, let cid = target.computerID {
+            guard sectioned else { return }
+            expandComputer(cid)
+        } else if let currentID {
+            expandComputer(currentID)
+        }
+        guard target.isTargetPresent(
+            currentComputerID: currentID,
+            sectioned: sectioned,
+            currentAgents: flock.all,
+            otherComputerAgents: { cid in
+                guard let comp = computers.first(where: { $0.id == cid }) else { return nil }
+                if case .offline = comp.reachability { return nil }
+                return comp.agents
+            }
+        ) else { return }
+        let scrollID: String
+        if isOther, let cid = target.computerID {
+            let key = "\(cid)|\(target.paneID)"
+            if remoteCard(cid, target.paneID) == nil { expanded.insert(key) }
+            scrollID = key
+        } else {
+            if flock.notRunning.contains(where: { $0.paneID == target.paneID }) { showNotRunning = true }
+            if question(target.paneID) == nil { expanded.insert(target.paneID) }
+            scrollID = target.paneID
+        }
         DispatchQueue.main.async {
-            withAnimation { proxy.scrollTo(id, anchor: .top) }
-            focusedPaneID = nil
+            guard focusedAgent == target else { return }
+            withAnimation { proxy.scrollTo(scrollID, anchor: .top) }
+            focusedAgent = nil
         }
     }
 }

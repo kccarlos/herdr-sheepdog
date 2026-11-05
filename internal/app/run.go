@@ -66,6 +66,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	defer cancel()
 	var wg sync.WaitGroup
 
+	a.sup.WarmFolders(inner)
 	wg.Add(1)
 	go func() { defer wg.Done(); a.observer.Run(inner) }()
 

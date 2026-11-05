@@ -2,6 +2,7 @@ package redact
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -87,5 +88,66 @@ func TestWriterRedactsSecretSplitAcrossWrites(t *testing.T) {
 	w.Flush()
 	if strings.Contains(buf.String(), "SPLITSECRET") || !strings.Contains(buf.String(), "value [REDACTED] end\npartial") {
 		t.Errorf("got %q", buf.String())
+	}
+}
+
+func TestConfiguredSecretsRedactedWhenJSONEscaped(t *testing.T) {
+	s1 := "my\"quoted\\secret&key<123>\nline2"
+	s2 := `"leading-quote-secret`
+	s3 := `trailing-slash-secret\`
+	r := New(s1, s2, s3)
+
+	marshalNoHTML := func(v any) string {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(v); err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSuffix(buf.String(), "\n")
+	}
+
+	payload := map[string]string{"a": s1, "b": s2, "c": s3}
+	htmlJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJSON := marshalNoHTML(payload)
+	doubleJSON, err := json.Marshal(map[string]string{"arguments": rawJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, in := range map[string]string{
+		"json.Marshal":         string(htmlJSON),
+		"SetEscapeHTML(false)": rawJSON,
+		"double-encoded":       string(doubleJSON),
+	} {
+		out := r.String(in)
+		for _, leak := range []string{"quoted", "leading-quote-secret", "trailing-slash-secret", "line2"} {
+			if strings.Contains(out, leak) {
+				t.Errorf("%s leaked %q:\n%s", name, leak, out)
+			}
+		}
+		if !json.Valid([]byte(out)) {
+			t.Errorf("%s became invalid JSON after redaction:\n%s", name, out)
+		}
+		if name == "double-encoded" {
+			var outer map[string]string
+			if err := json.Unmarshal([]byte(out), &outer); err != nil {
+				t.Fatalf("unmarshal outer double-encoded JSON: %v", err)
+			}
+			if !json.Valid([]byte(outer["arguments"])) {
+				t.Errorf("inner double-encoded JSON became invalid: %s", outer["arguments"])
+			}
+		}
+	}
+
+	section := "### assistant\n→ send_keys(" + rawJSON + ")\n\n"
+	redSection := r.String(section)
+	for _, leak := range []string{"quoted", "leading-quote-secret", "trailing-slash-secret", "line2"} {
+		if strings.Contains(redSection, leak) {
+			t.Errorf("section leaked %q:\n%s", leak, redSection)
+		}
 	}
 }

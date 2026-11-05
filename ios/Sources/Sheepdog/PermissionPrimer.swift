@@ -14,28 +14,62 @@ struct PermissionPrimerView: View {
     let primer: PermissionPrimer
     let answer: (Bool) -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(spacing: 14) {
-            Spacer(minLength: 20)
-            MascotCard(name: primer == .microphone ? "MascotListening" : "MascotAlert", width: 150)
-                .frame(maxHeight: 170)
-            Text(title)
-                .font(.title.weight(.bold))
-                .fontDesign(.rounded)
-                .foregroundStyle(Theme.ink)
-                .multilineTextAlignment(.center)
-                .padding(.top, 6)
-            Text(message)
-                .font(.body)
-                .foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            if primer == .notifications { sample }
-            Spacer(minLength: 20)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 14) {
+                    Spacer(minLength: 20)
+                    MascotCard(name: primer == .microphone ? "MascotListening" : "MascotAlert", width: 150)
+                        .frame(maxHeight: 170)
+                    Text(title)
+                        .font(.title.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(Theme.ink)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(message)
+                        .font(.body)
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if primer == .notifications { sample }
+                    Spacer(minLength: 20)
+                    if dynamicTypeSize.isAccessibilitySize {
+                        buttons.padding(.top, 8)
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, 12)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            if !dynamicTypeSize.isAccessibilitySize {
+                buttons
+                    .padding(.horizontal, 28)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.surface.ignoresSafeArea())
+        .interactiveDismissDisabled()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("primer.\(primer.rawValue)")
+    }
+
+    private var buttons: some View {
+        VStack(spacing: 8) {
             Button { answer(true) } label: {
                 Text(primary)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.onAccent)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .background(Capsule().fill(Color.accentColor))
             }
@@ -45,18 +79,15 @@ struct PermissionPrimerView: View {
                 Text(secondary)
                     .font(.body.weight(.medium))
                     .foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("primer.notNow")
         }
-        .padding(.horizontal, 28)
-        .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.surface.ignoresSafeArea())
-        .interactiveDismissDisabled()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("primer.\(primer.rawValue)")
     }
 
     private var title: String {
