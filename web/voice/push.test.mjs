@@ -222,7 +222,7 @@ function loadServiceWorkerEnv(overrides = {}) {
       openWindow: async (url) => { openedWindows.push(url); return { url }; },
     },
     registration: {
-      scope: 'https://example-host.example-tailnet.ts.net:7777/voice',
+      scope: 'https://mac-mini.tailnet.ts.net:7777/voice',
       showNotification: async (title, options) => {
         const closed = { done: false };
         shown.push({ title, options, data: options.data, tag: options.tag, closed, close() { closed.done = true; } });
