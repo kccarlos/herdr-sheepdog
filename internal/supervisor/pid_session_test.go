@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdrcore"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
@@ -397,5 +401,93 @@ func TestOlderHerdrWithoutProcessInfoFallsBackCleanly(t *testing.T) {
 	}
 	if got := len(h.srv.RequestsFor("pane.process_info")); got != 1 {
 		t.Fatalf("pane.process_info calls = %d, want 1 (cached unsupported after first invalid_request)", got)
+	}
+}
+
+func TestWrappedUtilityWorkersDiscoverSessionsEndToEnd(t *testing.T) {
+	proc := newFakeProcFS(t)
+	sharedCwd := "/work/wrapped-repo"
+	claudeID := "aaaaaaaa-5555-4666-8777-888888888888"
+	codexID := "01a0c000-5555-7666-8777-888888888888"
+
+	inv := &fakeInvestigator{answer: "Forked from wrapped claude.", session: forkSession, backend: "claude"}
+	h := newInvestigationHarness(t, inv, proc.option())
+
+	hcSrv := hctest.New(t)
+	hcBackend := herdrcore.New(hc.NewClient(hcSrv.Path), h.log)
+	h.sup.herdr = hcBackend
+
+	sh1, sh2 := 100, 101
+	claudeArgv := []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility", "claude"}
+	codexArgv := []string{"/usr/sbin/taskpolicy", "-c", "utility", "codex", "--no-daemon"}
+	promptScreen := "Do you want to proceed?\n\n› 1. Yes\n  2. No\n\nEnter to confirm · Esc to cancel\n"
+	hcSrv.Add(hc.Terminal{
+		Address:    "t1",
+		State:      "live",
+		Cwd:        sharedCwd,
+		PID:        &sh1,
+		Argv:       claudeArgv,
+		Foreground: &hc.Foreground{PID: 410, Name: "nice", Argv: claudeArgv, Cwd: sharedCwd},
+	})
+	hcSrv.SetScreen("t1", promptScreen)
+	hcSrv.Add(hc.Terminal{
+		Address:    "t2",
+		State:      "live",
+		Cwd:        sharedCwd,
+		PID:        &sh2,
+		Argv:       codexArgv,
+		Foreground: &hc.Foreground{PID: 510, Name: "taskpolicy", Argv: codexArgv, Cwd: sharedCwd},
+	})
+	hcSrv.SetScreen("t2", promptScreen)
+
+	proc.setTree(410, 412)
+	proc.setClaudePID(t, 412, claudeID)
+	proc.write(t, filepath.Join("claude", "projects", workerlog.ClaudeSlug(sharedCwd), claudeID+".jsonl"), strings.Join([]string{
+		`{"type":"ai-title","aiTitle":"Wrapped auth"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Wrapped Claude ready."}]}}`,
+	}, "\n")+"\n")
+
+	proc.setTree(510, 512)
+	rollout := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T12-00-00-"+codexID+".jsonl"),
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"Wrapped Codex ready."}}`+"\n")
+	proc.write(t, filepath.Join("codex", "session_index.jsonl"), fmt.Sprintf(`{"id":%q,"thread_name":"Wrapped codex"}`+"\n", codexID))
+	proc.setOpen(512, rollout)
+
+	ctx := context.Background()
+	snap, err := hcBackend.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if len(snap.Agents) != 2 {
+		t.Fatalf("Snapshot.Agents = %+v, want 2 wrapped agents", snap.Agents)
+	}
+	for _, a := range snap.Agents {
+		h.sup.HandleTransition(ctx, herdr.Transition{PaneID: a.PaneID, To: herdr.StateWorking, At: h.clock.Now(), Agent: a.Agent, Cwd: a.Cwd})
+		h.sup.HandleTransition(ctx, herdr.Transition{PaneID: a.PaneID, From: herdr.StateWorking, To: a.Status, At: h.clock.Now(), Agent: a.Agent, Cwd: a.Cwd})
+	}
+
+	r1, _ := h.store.Get("t1")
+	if r1.Kind != "claude" || r1.Title != "Wrapped auth" || r1.SessionValue != claudeID || len(r1.Journal) != 1 || r1.Journal[0].LastAssistant != "Wrapped Claude ready." {
+		t.Fatalf("wrapped claude row = kind %q title %q session %q journal %+v", r1.Kind, r1.Title, r1.SessionValue, r1.Journal)
+	}
+	r2, _ := h.store.Get("t2")
+	if r2.Kind != "codex" || r2.Title != "Wrapped codex" || r2.SessionValue != codexID || len(r2.Journal) != 1 || r2.Journal[0].LastAssistant != "Wrapped Codex ready." {
+		t.Fatalf("wrapped codex row = kind %q title %q session %q journal %+v", r2.Kind, r2.Title, r2.SessionValue, r2.Journal)
+	}
+
+	host := brainHost{h.sup}
+	if sr1, err := host.ReadSession(ctx, "t1"); err != nil || sr1.LastAssistant != "Wrapped Claude ready." {
+		t.Fatalf("ReadSession(t1) = %+v, %v", sr1, err)
+	}
+	if sr2, err := host.ReadSession(ctx, "t2"); err != nil || sr2.LastAssistant != "Wrapped Codex ready." {
+		t.Fatalf("ReadSession(t2) = %+v, %v", sr2, err)
+	}
+
+	if _, err := h.sup.startInvestigation(ctx, "t1", brain.InvestigationRequest{Question: "why?", Source: "worker", Turn: 1}); err != nil {
+		t.Fatalf("startInvestigation(t1, source=worker): %v", err)
+	}
+	waitFor(t, func() bool { return len(inv.all()) == 1 }, "wrapped worker fork query")
+	if q := inv.all()[0]; !q.Fork || q.Session != claudeID || q.Backend != "claude" {
+		t.Fatalf("fork query = %+v, want claude fork of %s", q, claudeID)
 	}
 }

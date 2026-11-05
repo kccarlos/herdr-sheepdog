@@ -173,11 +173,17 @@ func (d *oldDriver) Run(ctx context.Context, paneID string, p conformance.Progra
 	} else {
 		fg = d.procs.alloc()
 	}
+	argv := append(append([]string(nil), p.Wrapper...), p.Kind)
+	argv = append(argv, p.Args...)
+	name := p.Kind
+	if len(p.Wrapper) > 0 {
+		name = filepath.Base(p.Wrapper[0])
+	}
 	d.srv.SetProcessInfo(herdr.ProcessInfo{
 		PaneID:                 pane.PaneID,
 		ShellPID:               sh,
 		ForegroundProcessGroup: fg,
-		ForegroundProcesses:    []herdr.ProcessItem{{PID: fg, Name: p.Kind, Argv: append([]string{p.Kind}, p.Args...)}},
+		ForegroundProcesses:    []herdr.ProcessItem{{PID: fg, Name: name, Argv: argv}},
 	})
 	agent := herdr.AgentInfo{
 		PaneID:      pane.PaneID,

@@ -1,14 +1,19 @@
 package workerlog
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
 )
 
 func writeJSONFile(t *testing.T, path, content string) {
@@ -353,6 +358,87 @@ func TestDiscoverLiveOSProcess(t *testing.T) {
 	cres, err := r.Resolve(claudeSess)
 	if err != nil || cres.ID != claudeUUID || cres.Path != claudeTranscript {
 		t.Fatalf("live Claude Resolve = %+v, %v", cres, err)
+	}
+}
+
+func TestDiscoverLiveWrappedWorkerProcess(t *testing.T) {
+	prefix := procprio.ShellPrefix(exec.LookPath)
+	if len(prefix) == 0 {
+		t.Skip("no OS priority wrapper available on this machine")
+	}
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found on PATH")
+	}
+
+	dir := t.TempDir()
+	codexUUID := "01a0c000-0000-7000-8000-000000000777"
+	rollout := filepath.Join(dir, "codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T20-00-00-"+codexUUID+".jsonl")
+	writeJSONFile(t, rollout, `{"type":"event_msg","payload":{"type":"agent_message","message":"Wrapped child FD."}}`+"\n")
+
+	// Run an outer shell under procprio's nice/taskpolicy prefix, spawning a
+	// child process that holds rollout open on fd 3 and reports its own PID.
+	argv := append(append([]string(nil), prefix...), shPath, "-c", `sh -c 'exec 3<"$1"; echo $$; read _' sh "$1"`, "sh", rollout)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start wrapped worker (%v): %v", argv, err)
+	}
+	var childPID int
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		if childPID > 0 {
+			if p, err := os.FindProcess(childPID); err == nil {
+				_ = p.Kill()
+			}
+		}
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	})
+
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read child PID: %v", err)
+	}
+	childPID, err = strconv.Atoi(strings.TrimSpace(line))
+	if err != nil || childPID <= 0 {
+		t.Fatalf("invalid child PID %q: %v", line, err)
+	}
+
+	claudeUUID := "44444444-5555-4666-8777-999999999999"
+	cwd := "/work/wrapped-live"
+	claudeTranscript := filepath.Join(dir, "claude", "projects", ClaudeSlug(cwd), claudeUUID+".jsonl")
+	writeJSONFile(t, claudeTranscript, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Wrapped child pid json."}]}}`+"\n")
+	writeJSONFile(t, filepath.Join(dir, "claude", "sessions", fmt.Sprintf("%d.json", childPID)), fmt.Sprintf(`{"sessionId":%q}`, claudeUUID))
+
+	roots := ProcessRoots{PID: cmd.Process.Pid, Pgrp: cmd.Process.Pid, ShellPID: os.Getpid()}
+	r := New(Options{
+		ClaudeProjects: filepath.Join(dir, "claude", "projects"),
+		CodexSessions:  filepath.Join(dir, "codex", "sessions"),
+	})
+
+	codexRes, err := r.Resolve(Session{Pane: "wrapped:codex", Roots: roots, Agent: "codex"})
+	if err != nil {
+		t.Fatalf("wrapped Codex Resolve: %v", err)
+	}
+	wantReal, _ := filepath.EvalSymlinks(rollout)
+	gotReal, _ := filepath.EvalSymlinks(codexRes.Path)
+	if codexRes.ID != codexUUID || gotReal != wantReal {
+		t.Fatalf("wrapped Codex Resolve = %+v, want id %s path %s", codexRes, codexUUID, wantReal)
+	}
+
+	claudeRes, err := r.Resolve(Session{Pane: "wrapped:claude", Roots: roots, Agent: "claude", Cwd: cwd})
+	if err != nil || claudeRes.ID != claudeUUID || claudeRes.Path != claudeTranscript {
+		t.Fatalf("wrapped Claude Resolve = %+v, %v", claudeRes, err)
 	}
 }
 

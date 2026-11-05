@@ -171,7 +171,8 @@ func foregroundProcessTreeIdentifiesLiveSessions(t *testing.T, newDriver NewDriv
 		t.Fatalf("after RestartDaemon roots = %+v, want PID %d", r3AfterRestart, r3.PID)
 	}
 
-	// Exiting pane 1 returns it to its plain shell, and launching Codex in that same shell exposes a new PID.
+	// Exiting pane 1 returns it to its plain shell, and launching Codex wrapped in
+	// nice + taskpolicy in that same shell unwraps its kind and exposes a new PID.
 	if err := restarted.Exit(ctx, p1.PaneID); err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +180,29 @@ func foregroundProcessTreeIdentifiesLiveSessions(t *testing.T, newDriver NewDriv
 	if afterExit := rootsOf(restarted.Backend(), p1.PaneID); afterExit.PID != 0 {
 		t.Fatalf("plain shell after Exit should have no foreground agent PID, got %+v", afterExit)
 	}
-	if err := restarted.Run(ctx, p1.PaneID, Program{Kind: "codex", App: "codex", Reported: true, State: herdr.StateIdle}); err != nil {
+	if err := restarted.SetScreen(ctx, p1.PaneID, blockedScreen); err != nil {
 		t.Fatal(err)
+	}
+	if err := restarted.Run(ctx, p1.PaneID, Program{
+		Kind:    "codex",
+		Wrapper: []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility"},
+		Args:    []string{"--no-daemon"},
+		State:   herdr.StateBlocked,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := restarted.Backend().ListAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrappedKind string
+	for _, a := range agents {
+		if a.PaneID == p1.PaneID {
+			wrappedKind = a.Agent
+		}
+	}
+	if wrappedKind != "codex" {
+		t.Fatalf("wrapped agent kind = %q, want codex; agents = %+v", wrappedKind, agents)
 	}
 	r1New := rootsOf(restarted.Backend(), p1.PaneID)
 	if r1New.PID <= 0 || r1New.PID == r1.PID {
@@ -193,7 +215,7 @@ func foregroundProcessTreeIdentifiesLiveSessions(t *testing.T, newDriver NewDriv
 	mu.Lock()
 	openByPID[r1New.PID] = []string{rollout2}
 	mu.Unlock()
-	digNew, err := reader.Read(p1.PaneID, workerlog.Session{Pane: p1.PaneID, Roots: r1New, Agent: "codex", Cwd: sharedDir})
+	digNew, err := reader.Read(p1.PaneID, workerlog.Session{Pane: p1.PaneID, Roots: r1New, Agent: wrappedKind, Cwd: sharedDir})
 	if err != nil || digNew.LastAssistant != "Codex took over pane one." {
 		t.Fatalf("new agent in same shell Read = %+v, %v", digNew, err)
 	}
