@@ -12,6 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
@@ -185,6 +186,8 @@ type Config struct {
 	// WorkerLog reads the workers' own session transcripts for the work
 	// journal (journal.go); default the real ~/.claude and ~/.codex.
 	WorkerLog *workerlog.Reader
+	// Redactor masks worker excerpts before they enter the persisted journal.
+	Redactor *redact.Redactor
 
 	chattiness Chattiness // parsed Chattiness
 

@@ -66,7 +66,7 @@ func (s *Supervisor) refreshTitle(row state.Agent, roots workerlog.ProcessRoots)
 	}
 	// Worker text spoken aloud: D9 applies (no PR numbers, hashes, paths).
 	title = prose.Spoken(title, 0)
-	if changed, err := s.store.SetTitle(row.PaneID, title); err == nil && changed {
+	if changed, err := s.store.SetTitle(row.PaneID, s.cfg.Redactor.String(title)); err == nil && changed {
 		s.log.Log(logSource, "worker.title", row.PaneID, map[string]any{"agent": aliasOr(row.Alias), "title": state.CleanTitle(title)})
 	}
 }

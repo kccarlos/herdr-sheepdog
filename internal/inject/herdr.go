@@ -205,6 +205,7 @@ func (h *Herdr) ReadANSI(ctx context.Context, paneID string, source herdr.ReadSo
 		}); ok {
 			return r.ReadANSI(ctx, paneID, source, lines)
 		}
+		return herdr.ReadResult{}, supervisor.ErrANSIUnavailable
 	}
 	return h.Read(ctx, paneID, source, lines)
 }

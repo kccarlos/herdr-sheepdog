@@ -178,6 +178,10 @@ type Digest struct {
 	// last instruction in this read: what the worker did for it.
 	Tools map[string]int
 	Files []string
+	// Error is non-nil when the worker's last turn stopped on an API,
+	// quota, rate-limit, auth, connection or abort condition rather than
+	// finishing cleanly.
+	Error *TurnError
 }
 
 // Instruction is the last instruction of the read, or "".
@@ -197,7 +201,13 @@ func (d *Digest) Merge(next Digest) {
 	if next.Path != "" {
 		d.Path = next.Path
 	}
-	if next.Fresh || d.LastAssistant == "" {
+	if len(next.Instructions) > 0 {
+		d.Fresh = false
+		if next.Error != nil {
+			d.LastAssistant = ""
+		}
+	}
+	if next.Fresh || d.LastAssistant == "" || (next.Error != nil && !d.Fresh) {
 		d.LastAssistant = next.LastAssistant
 	}
 	d.Fresh = d.Fresh || next.Fresh
@@ -225,6 +235,11 @@ func (d *Digest) Merge(next Digest) {
 		if !seen {
 			d.Files = append(d.Files, f)
 		}
+	}
+	if next.Error != nil {
+		d.Error = next.Error
+	} else if len(next.Instructions) > 0 || next.Fresh || len(next.Tools) > 0 {
+		d.Error = nil
 	}
 }
 
@@ -400,15 +415,16 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 	}
 	d.Bytes = consumed
 	acc.fill(&d)
-	d.Fresh = d.LastAssistant != ""
-	if d.LastAssistant == "" {
+	if d.LastAssistant == "" && d.Error == nil {
 		d.LastAssistant = lastAssistant
 	}
 
 	r.mu.Lock()
 	if r.cursors[pane] == cur {
 		cur.offset = start + consumed
-		cur.lastAssistant = d.LastAssistant
+		if d.LastAssistant != "" {
+			cur.lastAssistant = d.LastAssistant
+		}
 	}
 	r.mu.Unlock()
 	return d, nil
@@ -450,7 +466,9 @@ func (r *Reader) Tail(sess Session) (Digest, error) {
 	}
 	d.Bytes = consumed
 	acc.fill(&d)
-	d.Fresh = d.LastAssistant != ""
+	if !d.Fresh && d.Error == nil {
+		d.Fresh = d.LastAssistant != ""
+	}
 	return d, nil
 }
 

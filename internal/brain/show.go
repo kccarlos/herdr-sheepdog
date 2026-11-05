@@ -128,9 +128,9 @@ func (b *Brain) show(ctx context.Context, t *turn, arg func(string) string, args
 	var out toolOutcome
 	switch kind {
 	case ShowCard:
-		req.Title = clipRunes(strings.Join(strings.Fields(arg("title")), " "), ShowTitleRunes)
+		req.Title = clipRunes(strings.Join(strings.Fields(b.cfg.Redactor.String(arg("title"))), " "), ShowTitleRunes)
 		md, _ := args["markdown"].(string)
-		req.Markdown = clipMarkdown(strings.TrimSpace(md), ShowMarkdownBytes)
+		req.Markdown = clipMarkdown(strings.TrimSpace(b.cfg.Redactor.String(md)), ShowMarkdownBytes)
 		if req.Markdown == "" {
 			return toolOutcome{err: errors.New("show card needs markdown")}
 		}

@@ -62,11 +62,14 @@ const SignOff = "When you finish, end with three short lines for someone who can
 // that starts with "/" is prose and keeps the trailer.
 func withSignOff(text string) string {
 	text = strings.TrimSpace(text)
-	if isSlashCommand(text) {
-		return trimCommandPunct(text)
-	}
 	if text == "" || strings.HasSuffix(text, SignOff) {
 		return text
+	}
+	if picturePath.MatchString(text) {
+		return text + "\n" + SignOff
+	}
+	if isSlashCommand(text) {
+		return trimCommandPunct(text)
 	}
 	return prose.Terminate(text) + " " + SignOff
 }
@@ -75,7 +78,7 @@ func withSignOff(text string) string {
 // command: after trimming, a single line that starts with "/".
 func isSlashCommand(text string) bool {
 	text = strings.TrimSpace(text)
-	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n")
+	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n") && !picturePath.MatchString(text)
 }
 
 // trimCommandPunct drops sentence punctuation and quotes from the very
@@ -240,12 +243,12 @@ func (s *Supervisor) syncDiscoveredSession(paneID string) {
 // transcript has no new message for it yet, the read is retried once
 // after journalRetry. A transcript that cannot be read still leaves an
 // entry when the row knows the instruction.
-func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots workerlog.ProcessRoots, event string, finish bool) {
+func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots workerlog.ProcessRoots, event string, finish bool) *workerlog.TurnError {
 	alias := aliasOr(row.Alias)
 	sess := workerSessionWithRoots(row, roots)
 	d, err := s.cfg.WorkerLog.Read(row.PaneID, sess)
 	s.syncDiscoveredSession(row.PaneID)
-	if err == nil && !d.Fresh && finish && journalRetry > 0 {
+	if err == nil && !d.Fresh && d.Error == nil && finish && journalRetry > 0 {
 		if d.Bytes == 0 {
 			// A same-PID session rotation (/new in Codex) leaves 0 new bytes
 			// on the previous rollout file: drop the cached FD probe before
@@ -269,28 +272,36 @@ func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots w
 		if d.Bytes == 0 {
 			// Nothing new since the last entry (a re-prompt, a block
 			// right after a finish): no entry repeats the one before.
-			return
+			return nil
 		}
 	}
 
 	e := state.JournalEntry{At: s.cfg.Now(), Event: event, Tools: d.Tools}
 	if d.Fresh {
-		e.LastAssistant = workerlog.Clip(scrubLines(d.LastAssistant), journalAssistantRunes)
+		e.LastAssistant = workerlog.Clip(scrubLines(s.cfg.Redactor.String(d.LastAssistant)), journalAssistantRunes)
 	}
-	instruction := withoutSignOff(d.Instruction())
+	if d.Error != nil {
+		e.Error = d.Error.Summary()
+	}
+	instruction := withoutSignOff(s.cfg.Redactor.String(d.Instruction()))
 	if instruction == "" {
-		instruction = withoutSignOff(row.CurrentTask)
+		instruction = withoutSignOff(s.cfg.Redactor.String(row.CurrentTask))
 	}
 	e.Instruction = workerlog.Clip(prose.Spoken(instruction, 0), journalInstructionRunes)
 	e.FilesTouched = d.Files
-	if e.LastAssistant == "" && e.Instruction == "" && len(e.Tools) == 0 && len(e.FilesTouched) == 0 {
-		return
+	if e.LastAssistant == "" && e.Instruction == "" && len(e.Tools) == 0 && len(e.FilesTouched) == 0 && e.Error == "" {
+		return d.Error
 	}
 	if err := s.store.AppendJournal(row.PaneID, e); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": err.Error()})
-		return
+		return d.Error
 	}
-	s.log.Log(logSource, "worker.journal", row.PaneID, map[string]any{"agent": alias, "event": event, "bytes": d.Bytes, "files": d.Files})
+	logPayload := map[string]any{"agent": alias, "event": event, "bytes": d.Bytes, "files": d.Files}
+	if d.Error != nil {
+		logPayload["stop_kind"] = string(d.Error.Kind)
+	}
+	s.log.Log(logSource, "worker.journal", row.PaneID, logPayload)
+	return d.Error
 }
 
 // scrubLines applies D9 (prose.Spoken) line by line, keeping the line
@@ -313,7 +324,7 @@ func journalInfo(journal []state.JournalEntry) []brain.JournalEntry {
 	}
 	out := make([]brain.JournalEntry, 0, len(journal))
 	for _, e := range journal {
-		out = append(out, brain.JournalEntry{At: e.At, Event: e.Event, LastAssistant: e.LastAssistant, Instruction: e.Instruction, Files: e.FilesTouched, Tools: e.Tools})
+		out = append(out, brain.JournalEntry{At: e.At, Event: e.Event, LastAssistant: e.LastAssistant, Instruction: e.Instruction, Error: e.Error, Files: e.FilesTouched, Tools: e.Tools})
 	}
 	return out
 }
