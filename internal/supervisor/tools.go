@@ -186,6 +186,14 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	// marks before its own: a transition the send causes can be handled
 	// before Prompt returns, and must find the task it finishes.
 	s.mu.Lock()
+	if u := utteranceOf(ctx); (u != nil && u.dropped) || ctx.Err() != nil {
+		s.mu.Unlock()
+		ps.Unlock()
+		if err := ctx.Err(); err != nil {
+			return voice.ToolResult{}, err
+		}
+		return voice.ToolResult{}, context.Canceled
+	}
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
@@ -208,10 +216,11 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	}
 
 	s.mu.Lock()
-	// A turn cancelled by the stop (ctx done) aborted its Prompt before
-	// anything was sent: the pending action is dropped as before. Only a
-	// send aborted by abortSend alone leaves it to the stop procedure.
-	byStop := s.endSendLocked(row.PaneID, flight) && ctx.Err() == nil
+	// A dropped utterance's Prompt that failed before writing on the wire
+	// sent nothing and clears its pending action; if the request had already
+	// been written (ErrNoReply), or if Stop aborted a send whose utterance
+	// was not dropped, keep the pending action for resolveStop to settle.
+	byStop := s.endSendLocked(row.PaneID, flight) && (flight.utt == nil || !flight.utt.dropped || errors.Is(err, herdr.ErrNoReply))
 	if err != nil {
 		if hadRow {
 			// Undo the mark unless a transition has moved the row on.

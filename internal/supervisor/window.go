@@ -321,20 +321,39 @@ func clipNote(text string) string {
 var ErrTerminalTyping = errors.New("terminal has unsent input")
 
 func (s *Supervisor) checkTypedInput(ctx context.Context, paneID string) error {
-	r, ok := s.herdr.(ANSIReader)
-	if !ok {
-		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "ansi_unavailable"})
+	var (
+		read  herdr.ReadResult
+		err   error
+		plain bool
+	)
+	if r, ok := s.herdr.(ANSIReader); ok {
+		read, err = r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
+		if errors.Is(err, ErrANSIUnavailable) {
+			plain = true
+		} else if err != nil {
+			s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
+			return nil
+		}
+	} else {
+		plain = true
+	}
+	if plain {
+		read, err = s.herdr.Read(ctx, paneID, herdr.SourceVisible, 0)
+		if err != nil {
+			s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
+			return nil
+		}
+	}
+	clean := reANSI.ReplaceAllString(read.Text, "")
+	if _, menu := herdr.ParsePrompt(clean); menu {
 		return nil
 	}
-	read, err := r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
-	if err != nil {
-		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
-		return nil
+	var typed, known bool
+	if plain {
+		typed, known = herdr.TypedInputPlain(clean)
+	} else {
+		typed, known = herdr.TypedInput(read.Text)
 	}
-	if _, menu := herdr.ParsePrompt(reANSI.ReplaceAllString(read.Text, "")); menu {
-		return nil
-	}
-	typed, known := herdr.TypedInput(read.Text)
 	if !known || read.Truncated {
 		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "unclear_screen"})
 		return nil

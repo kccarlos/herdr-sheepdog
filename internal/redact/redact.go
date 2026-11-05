@@ -3,9 +3,10 @@
 //
 // A Redactor knows two kinds of secret: exact values (every key and token
 // in the loaded config, and every environment variable whose name says it
-// is a secret) and shapes (Google API keys, sk- keys, bearer tokens,
-// token= / key= query parameters, PEM private keys), so a secret the
-// config does not know about is still caught when it looks like one.
+// is a secret) and shapes (Google API keys, sk- keys, GitHub, Slack and
+// AWS tokens, bearer tokens, token= / key= query parameters, PEM private
+// keys), so a secret the config does not know about is still caught when
+// it looks like one.
 package redact
 
 import (
@@ -29,23 +30,74 @@ const Mask = "[REDACTED]"
 // values ("1", "on") would mangle ordinary text and are not secrets.
 const minSecretLen = 6
 
+type shapeRule struct {
+	re       *regexp.Regexp
+	mayMatch func(s, lower string) bool
+}
+
 // shapes are the secret patterns redacted wherever they appear. Each
 // keeps its first group (the label) and masks the rest.
-var shapes = []*regexp.Regexp{
-	// Google API keys (AI Studio, Vertex express).
-	regexp.MustCompile(`()AIza[0-9A-Za-z_\-]{20,}`),
-	// A key a provider echoed back half-masked (sk-abcd****1234).
-	regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]*\*{3,}[0-9A-Za-z_\-]*`),
-	// OpenAI / DeepSeek / OpenRouter / Anthropic style keys.
-	regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]{12,}`),
-	// Authorization headers.
-	regexp.MustCompile(`(?i)(bearer\s+)[0-9A-Za-z._~+/=\-]{8,}`),
-	// token=, key=, api_key=, secret=, password= in URLs, env lines and
-	// key: value text.
-	regexp.MustCompile(`(?i)((?:^|[^0-9A-Za-z])(?:api[_-]?key|(?:access|auth|refresh|id|bearer)[_-]?token|client[_-]?secret|password)["']?\s*[=:]\s*["']?)[^\s"'&,;}]{6,}`),
-	regexp.MustCompile(`(?i)([?&](?:key|token)=)[^\s"'&,;}]{6,}`),
-	// PEM private keys (an APNs .p8 pasted into an issue).
-	regexp.MustCompile(`(?s)(-----BEGIN [A-Z ]*PRIVATE KEY-----).*?-----END [A-Z ]*PRIVATE KEY-----`),
+var shapes = []shapeRule{
+	{
+		// Google API keys (AI Studio, Vertex express).
+		re:       regexp.MustCompile(`()AIza[0-9A-Za-z_\-]{20,}`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "AIza") },
+	},
+	{
+		// A key a provider echoed back half-masked (sk-abcd****1234).
+		re:       regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]*\*{3,}[0-9A-Za-z_\-]*`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "sk-") },
+	},
+	{
+		// OpenAI / DeepSeek / OpenRouter / Anthropic style keys.
+		re:       regexp.MustCompile(`()\bsk-[0-9A-Za-z_\-]{12,}`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "sk-") },
+	},
+	{
+		// GitHub classic personal, OAuth, user, server and refresh tokens (ghp_, gho_, ghu_, ghs_, ghr_).
+		re:       regexp.MustCompile(`()\bgh[pousr]_[0-9A-Za-z]{20,}`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "gh") && strings.IndexByte(s, '_') >= 0 },
+	},
+	{
+		// GitHub fine-grained personal access tokens (github_pat_).
+		re:       regexp.MustCompile(`()\bgithub_pat_[0-9A-Za-z_]{20,}`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "github_pat_") },
+	},
+	{
+		// Slack bot, user, app, refresh and session tokens (xoxb-, xoxp-, ...).
+		re:       regexp.MustCompile(`()\bxox[baprs]-[0-9A-Za-z\-]{10,}`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "xox") && strings.IndexByte(s, '-') >= 0 },
+	},
+	{
+		// AWS long-term access key IDs (AKIA).
+		re:       regexp.MustCompile(`()\bAKIA[0-9A-Z]{16}\b`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "AKIA") },
+	},
+	{
+		// Authorization headers.
+		re:       regexp.MustCompile(`(?i)(bearer\s+)[0-9A-Za-z._~+/=\-]{8,}`),
+		mayMatch: func(_, lower string) bool { return strings.Contains(lower, "bearer") },
+	},
+	{
+		// token=, key=, api_key=, secret=, password= in URLs, env lines and
+		// key: value text.
+		re: regexp.MustCompile(`(?i)((?:^|[^0-9A-Za-z])(?:api[_-]?key|(?:access|auth|refresh|id|bearer)[_-]?token|client[_-]?secret|password)["']?\s*[=:]\s*["']?)[^\s"'&,;}]{6,}`),
+		mayMatch: func(s, lower string) bool {
+			return strings.ContainsAny(s, "=:") &&
+				(strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "password"))
+		},
+	},
+	{
+		re: regexp.MustCompile(`(?i)([?&](?:key|token)=)[^\s"'&,;}]{6,}`),
+		mayMatch: func(s, lower string) bool {
+			return strings.ContainsAny(s, "?&") && (strings.Contains(lower, "key") || strings.Contains(lower, "token"))
+		},
+	},
+	{
+		// PEM private keys (an APNs .p8 pasted into an issue).
+		re:       regexp.MustCompile(`(?s)(-----BEGIN [A-Z ]*PRIVATE KEY-----).*?-----END [A-Z ]*PRIVATE KEY-----`),
+		mayMatch: func(s, _ string) bool { return strings.Contains(s, "-----BEGIN ") },
+	},
 }
 
 // secretEnvName matches environment variables that hold a secret.
@@ -161,18 +213,9 @@ func (r *Redactor) String(s string) string {
 	// Most context contains no credential syntax. Avoid running every
 	// regular expression over ordinary prompt text on every model step.
 	lower := strings.ToLower(s)
-	candidates := [...]bool{
-		strings.Contains(s, "AIza"),
-		strings.Contains(s, "sk-"),
-		strings.Contains(s, "sk-"),
-		strings.Contains(lower, "bearer"),
-		strings.ContainsAny(s, "=:") && (strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "password")),
-		strings.ContainsAny(s, "?&") && (strings.Contains(lower, "key") || strings.Contains(lower, "token")),
-		strings.Contains(s, "-----BEGIN "),
-	}
-	for i, re := range shapes {
-		if candidates[i] {
-			s = re.ReplaceAllString(s, "${1}"+Mask)
+	for _, sh := range shapes {
+		if sh.mayMatch(s, lower) {
+			s = sh.re.ReplaceAllString(s, "${1}"+Mask)
 		}
 	}
 	return s

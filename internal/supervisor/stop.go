@@ -182,6 +182,7 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	// Phases 1 and 2: the relayed words are in flight. Cancelling the
 	// turn's context stops its write tools before they execute.
 	var withdrawn stopOutcome
+	var abortedByTurn map[string]bool
 	s.mu.Lock()
 	if u := s.utterance; u != nil {
 		u.dropped = true
@@ -191,6 +192,15 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 			phase, when = stopPhaseCancelTurn, "before it acted"
 		}
 		withdrawn = stopOutcome{phase: phase, what: fmt.Sprintf("your request %q was withdrawn %s", u.text, when)}
+		for paneID, f := range s.sends {
+			if f.utt == u {
+				f.byStop = true
+				if abortedByTurn == nil {
+					abortedByTurn = map[string]bool{}
+				}
+				abortedByTurn[paneID] = true
+			}
+		}
 		cancel := u.cancel
 		s.mu.Unlock()
 		cancel()
@@ -219,7 +229,7 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 		// herdrcore's up to 30, and a stop must be quick. The wait itself
 		// ends with ctx.
 		ps := s.paneSend(paneID)
-		aborted := false
+		aborted := abortedByTurn[paneID]
 		locked := false
 		for !locked {
 			if s.abortSend(paneID) {

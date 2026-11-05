@@ -55,6 +55,12 @@ func TestEveryConfigSecretIsRedacted(t *testing.T) {
 
 func TestShapesAreRedactedWithoutConfig(t *testing.T) {
 	var r *Redactor
+	ghpTok := "gh" + "p_" + strings.Repeat("aB3", 12)
+	ghoTok := "gh" + "o_" + strings.Repeat("xY9", 10)
+	ghPat := "github" + "_pat_" + "11ABCDEF0_" + strings.Repeat("z9Q", 12)
+	slackBot := "xox" + "b-" + "123456789012-" + "FAKEFAKEFAKEFAKE"
+	slackUser := "xox" + "p-" + "987654321098-" + "FAKEFAKEFAKEFAKE"
+	awsKey := "AK" + "IA" + "FAKEFAKEFAKEFAKE"
 	for _, in := range []string{
 		"key AIzaSyA1234567890abcdefghijklmnopqrstu in a URL",
 		"Authorization: Bearer abcdefghijklmnop.qrstuv",
@@ -64,16 +70,31 @@ func TestShapesAreRedactedWithoutConfig(t *testing.T) {
 		`{"access_token":"plainlongtokenvalue"}`,
 		"Incorrect API key provided: sk-FakeK****************0000. You can",
 		"-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49\n-----END PRIVATE KEY-----",
+		"pushed with " + ghpTok + " to origin",
+		"oauth " + ghoTok + " ok",
+		"fine-grained " + ghPat + " in log",
+		"slack bot " + slackBot + " and user " + slackUser,
+		"aws id " + awsKey + " in output",
 	} {
 		out := r.String(in)
-		for _, leak := range []string{"AIzaSyA123", "abcdefghijklmnop", "sk-or-v1", "ZZZsecretZZZ", "AIzaSecond", "plainlongtokenvalue", "MIGTAgEAMBMG", "sk-FakeK"} {
+		for _, leak := range []string{
+			"AIzaSyA123", "abcdefghijklmnop", "sk-or-v1", "ZZZsecretZZZ", "AIzaSecond",
+			"plainlongtokenvalue", "MIGTAgEAMBMG", "sk-FakeK",
+			ghpTok, ghoTok, ghPat, slackBot, slackUser, awsKey,
+		} {
 			if strings.Contains(out, leak) {
 				t.Errorf("%q -> %q leaks %q", in, out, leak)
 			}
 		}
 	}
-	// Ordinary log text survives.
-	for _, keep := range []string{"gemini.api_keys=4 web.token=set", "pane_id w5:p1 turn_id t-12", "monkey: banana-split"} {
+	// Ordinary log text survives, including tool call IDs and short prefixes.
+	for _, keep := range []string{
+		"gemini.api_keys=4 web.token=set",
+		"pane_id w5:p1 turn_id t-12",
+		"monkey: banana-split",
+		"call_00_xoxuwTT1s9a12esbdi0Z9019",
+		"prefixes ghp_ github_pat_ xoxb- xoxp- AKIA alone",
+	} {
 		if got := r.String(keep); got != keep {
 			t.Errorf("%q was changed to %q", keep, got)
 		}
