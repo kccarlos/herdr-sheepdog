@@ -99,6 +99,7 @@ export function shortcutsSheet(t, { platform, onClose }) {
               section(t, "When the panel has focus", [
                 shortcutRow(t, "Enter", "Write a message in the composer"),
                 shortcutRow(t, "1–9", "Pick an open question option or suggested reply"),
+                shortcutRow(t, "a", "Open a compact question's Answer bar"),
                 shortcutRow(t, "?", "Show or hide keyboard shortcuts"),
                 shortcutRow(t, "Esc", "Close open sheet/window, or return to your pane"),
               ]),

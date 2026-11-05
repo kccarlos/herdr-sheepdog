@@ -50,15 +50,16 @@ export function estimateHeight(question, { width }) {
 export const natural = (heights, spacing = SPACING) => heights.reduce((a, b) => a + b, 0) + spacing * Math.max(0, heights.length - 1);
 
 // The presentation for `heights` (each card's estimate) in `area` (the window's
-// height), given the one on screen (null before the first decision). `held`:
-// the user is in the middle of it (the sheet is open, an answer is in flight):
-// nothing changes under them. Not measured yet (no area): what is on screen,
-// inline at first.
-export function decide({ heights, spacing = SPACING, area, held = false }, current) {
+// height when `budgetShare` is BUDGET_SHARE, or an already-budgeted question
+// area when `budgetShare` is 1), given the one on screen (null before the first
+// decision). `held`: the user is in the middle of it (the sheet is open, an
+// answer is in flight): nothing changes under them. Not measured yet (no area):
+// what is on screen, inline at first.
+export function decide({ heights, spacing = SPACING, area, budgetShare = BUDGET_SHARE, held = false }, current) {
   if (heights.length === 0) return current ?? "inline";
   if (held && current) return current;
   if (!(area > 0) || heights.some((h) => !(h > 0))) return current ?? "inline";
-  let limit = area * BUDGET_SHARE;
+  let limit = area * budgetShare;
   if (current === "compact") limit *= RETURN_SHARE;
   return natural(heights, spacing) <= limit ? "inline" : "compact";
 }

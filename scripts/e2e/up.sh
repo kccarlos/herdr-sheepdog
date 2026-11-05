@@ -140,19 +140,27 @@ if [ "$WITH_APP" = 1 ]; then
   cp "$PANEL_LAYOUT" "$APP_HOME/layouts/sheepdog.json"
   # No welcome dialog (no command closes it): write the key it sets when
   # finished, and the layout, before the first start.
-  # Likewise the what's-new dialog an update opens once by itself.
-  AV=$(herdr-app --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  # Likewise the what's-new dialog an update opens once by itself. Copy
+  # Herdr.app into $DIR, strip any update a login Herdr staged inside it, and
+  # aim HERDR_RELEASES_URL at a closed loopback port so the private window
+  # never self-updates into a new PID or opens frame-whatsnew mid-run.
+  SRC_APP="$HOME/Applications/Herdr.app"
+  [ -d "$SRC_APP" ] || e2e_die "$SRC_APP not found"
+  APP="$DIR/Herdr.app"
+  cp -cR "$SRC_APP" "$APP" 2>/dev/null || cp -R "$SRC_APP" "$APP"
+  find "$APP" \( -name '*.updated' -o -name '*.new.json' -o -name '.new.json' -o -name '*.download' -o -name '.download' \) -delete 2>/dev/null || true
+  AV=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  [ -n "$AV" ] || AV=$(herdr-app --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
   [ -n "$AV" ] && printf '{"last_run":"%s","presented":["%s"]}\n' "$AV" "$AV" >"$APP_HOME/update-notes.json"
   printf '{"frame.welcomed":"skipped","layout":"sheepdog","sheepdog.url":"%s"}\n' "$E2E_URL" >"$APP_HOME/shared.json"
 
-  APP="$HOME/Applications/Herdr.app"
-  [ -d "$APP" ] || e2e_die "$APP not found"
   # open(1), not the herdr-app CLI symlink: a launch through the CLI is
   # hidden from computer-use screenshots.
   open -n -a "$APP" --env "HERDR_APP_HOME=$APP_HOME" --env "HC_SESSION=$HC_SESSION" \
     --env "HC_SOCKET=$HC_SOCKET" --env "XDG_CONFIG_HOME=$DIR/xdg/config" \
     --env "XDG_DATA_HOME=$DIR/xdg/data" --env "XDG_STATE_HOME=$DIR/xdg/state" \
-    --env "XDG_CACHE_HOME=$DIR/xdg/cache" --env "DISABLE_AUTOUPDATER=1"
+    --env "XDG_CACHE_HOME=$DIR/xdg/cache" --env "HERDR_RELEASES_URL=http://127.0.0.1:1" \
+    --env "DISABLE_AUTOUPDATER=1"
 
   # Find the private Herdr: the Herdr process whose environment has our
   # HERDR_APP_HOME (ps -E prints it).
@@ -170,10 +178,15 @@ if [ "$WITH_APP" = 1 ]; then
   [ -n "$APP_PID" ] || e2e_die "private Herdr did not start"
   echo "$APP_PID" >"$DIR/app.pid"
   e2e_wait 30 e2e_app status || e2e_die "private Herdr window never answered 'herdr-app status'"
+  # If a background Herdr updated Herdr.app between writing update-notes.json
+  # and open(1), dismiss the one-time frame-whatsnew dialog it opened.
+  if e2e_app status 2>/dev/null | jq -e '.overlays | index("frame-whatsnew") != null' >/dev/null 2>&1; then
+    e2e_app "do" overlay.close --id frame-whatsnew >/dev/null 2>&1 || e2e_app "do" overlay.close >/dev/null 2>&1 || true
+  fi
 
-  e2e_app do layout.switch --name sheepdog >/dev/null || echo "warning: layout.switch failed" >&2
-  e2e_app do space.new --name e2e --folder "$DIR/home" >/dev/null || echo "warning: space.new failed" >&2
-  e2e_app do window.maximize >/dev/null 2>&1 || true
+  e2e_app "do" layout.switch --name sheepdog >/dev/null || echo "warning: layout.switch failed" >&2
+  e2e_wait 10 e2e_app "do" space.new --name e2e --folder "$DIR/home" || echo "warning: space.new failed" >&2
+  e2e_app "do" window.maximize >/dev/null 2>&1 || true
   sleep 1
   echo "private Herdr up (pid $APP_PID)"
 fi
