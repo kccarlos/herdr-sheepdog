@@ -407,7 +407,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		cause := investigationCause(err, s.cfg.InvestigateMax)
 		// The record (the orchestrator's Investigations section and recall)
 		// says why in plain words first; the raw error follows, clipped.
-		inv.Status, inv.Err, inv.Finished = state.InvestigationError, cause.fact+" ("+prose.TruncateRunes(oneLineErr(err), 120)+")", &now
+		inv.Status, inv.Err, inv.Finished = state.InvestigationError, s.cfg.Redactor.String(cause.fact)+" ("+prose.TruncateRunes(s.cfg.Redactor.String(oneLineErr(err)), 120)+")", &now
 		s.saveInvestigation(inv)
 		s.log.Log(logSource, "investigation.error", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "dur_ms": dur.Milliseconds(), "error": err.Error(), "cause": cause.name})
 		s.invalidateBriefing()
@@ -431,7 +431,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		return
 	}
 	inv.Status, inv.Finished = state.InvestigationDone, &now
-	inv.Result, inv.Backend = strings.TrimSpace(res.Answer), res.Backend
+	inv.Result, inv.Backend = strings.TrimSpace(s.cfg.Redactor.String(res.Answer)), res.Backend
 	inv.Summary = investigationSummary(inv.Result)
 	if res.SessionID != "" || q.Fork {
 		// A fork's session is only ever the one it reported: the

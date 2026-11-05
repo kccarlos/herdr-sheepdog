@@ -29,9 +29,9 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		Kind:   state.PendingAnswerPrompt,
 		// The prompt's own words reach the ear, so D9 applies to them
 		// like any other text from a pane: no paths, hashes or URLs.
-		SpokenSummary: prose.Spoken(prompt.SummaryIn(alias, s.ceoChineseLocked()), 0),
-		Question:      prompt.Phrase(),
-		Command:       prompt.Command,
+		SpokenSummary: s.cfg.Redactor.String(prose.Spoken(prompt.SummaryIn(alias, s.ceoChineseLocked()), 0)),
+		Question:      s.cfg.Redactor.String(prompt.Phrase()),
+		Command:       s.cfg.Redactor.String(prompt.Command),
 		YesKeys:       append([]string(nil), prompt.YesKeys...),
 		NoKeys:        append([]string(nil), prompt.NoKeys...),
 		// No ExpiresAt: an answer_prompt lives while the pane is
@@ -39,8 +39,8 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		CreatedAt: now,
 	}
 	for i, o := range prompt.Options {
-		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta,
-			Description: o.Description, Recommended: o.Recommended, Title: o.Title})
+		p.Options = append(p.Options, state.Option{Label: s.cfg.Redactor.String(o.Label), Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta,
+			Description: s.cfg.Redactor.String(o.Description), Recommended: o.Recommended, Title: s.cfg.Redactor.String(o.Title)})
 	}
 	// Remembered so the post-answer poll and the reconciler can tell a
 	// new prompt from this one (docs/dev/roles.md "blocked -> blocked is a

@@ -263,7 +263,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		if step > 1 {
 			state = b.stateNow()
 		}
-		msgs := withState(asm.Messages, b.cfg.Redactor.String(state), t.n)
+		msgs := withState(asm.Messages, state, t.n)
 
 		t0 := b.cfg.Now()
 		resp, raw, err := b.generateStep(ctx, t, step, msgs, &config)
@@ -695,7 +695,9 @@ func withState(msgs []Message, state string, turn int) []Message {
 
 // sections assembles the system prompt's sections from the current
 // prompt files, roster and ledger (no host yet: an empty roster).
-func (b *Brain) sections() []PromptSection {
+func (b *Brain) sections() []PromptSection { return b.promptSections(true) }
+
+func (b *Brain) promptSections(includeStable bool) []PromptSection {
 	b.mu.Lock()
 	host := b.host
 	userVars := b.userVars
@@ -721,7 +723,10 @@ func (b *Brain) sections() []PromptSection {
 			screen = screenLine(dh.ScreenVisible())
 		}
 	}
-	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	var secs []PromptSection
+	if includeStable {
+		secs = append(append(secs, stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	}
 	now := b.cfg.Now()
 	record := recordLine(started, compaction, now)
 	if screen != "" {
@@ -740,7 +745,7 @@ func (b *Brain) sections() []PromptSection {
 // request it costs the prefix cache nothing.
 func (b *Brain) stateNow() string {
 	var dynamic []PromptSection
-	for _, s := range b.sections() {
+	for _, s := range b.promptSections(false) {
 		if s.Source == SourceDynamic {
 			dynamic = append(dynamic, s)
 		}
