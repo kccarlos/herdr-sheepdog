@@ -34,11 +34,12 @@ test('links: only http(s)', () => {
   assert.ok(!inline('[x](javascript:alert(1))').includes('<a'));
 });
 
-test('approval card is read-only: no buttons', () => {
+test('approval card is read-only: no buttons, points at the question card', () => {
   const html = cardBodyHTML({ kind: 'approval', question: 'run the migration?', command: 'make migrate', options: [{ index: 1, label: 'Yes' }, { index: 2, label: 'No' }] });
   assert.ok(!html.includes('<button'));
   assert.match(html, /Yes · No/);
   assert.match(html, /make migrate/);
+  assert.match(html, /question card on this page/);
 });
 
 test('excerpt is monospace and escaped', () => {

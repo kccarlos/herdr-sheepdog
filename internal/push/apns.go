@@ -84,21 +84,29 @@ type Status struct {
 	Devices int    `json:"devices"`
 	// Mode is how notifications are sent: relay, apns or off.
 	Mode string `json:"mode,omitempty"`
+	// WebPushEnabled, VAPIDPublicKey and WebDevices report RFC 8291/8292
+	// browser Web Push support (/voice on Android, Linux and desktop).
+	WebPushEnabled bool   `json:"web_push_enabled"`
+	VAPIDPublicKey string `json:"vapid_public_key,omitempty"`
+	WebDevices     int    `json:"web_devices,omitempty"`
 }
 
 // Sender sends notifications to the registered devices. All methods are
 // safe for concurrent use; a nil *Sender is disabled and does nothing.
 type Sender struct {
-	cfg     Config
-	log     logging.Logger
-	on      bool              // sending enabled
-	key     *ecdsa.PrivateKey // mode apns
-	relay   relayClient       // mode relay
-	reason  string            // why disabled
-	devs    *devices
-	acts    activities
-	client  *http.Client
-	baseURL map[string]string
+	cfg       Config
+	log       logging.Logger
+	on        bool              // sending enabled (APNs / relay)
+	key       *ecdsa.PrivateKey // mode apns
+	relay     relayClient       // mode relay
+	reason    string            // why APNs sending is disabled
+	devs      *devices
+	webDevs   *webDevices
+	vapid     *vapidKey
+	acts      activities
+	client    *http.Client
+	webClient *http.Client
+	baseURL   map[string]string
 
 	mu       sync.Mutex
 	jwt      string
@@ -132,22 +140,41 @@ func New(cfg Config, log logging.Logger) (*Sender, error) {
 		cfg.SandboxURL = SandboxURL
 	}
 	client := cfg.Client
+	webClient := cfg.Client
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
+	if webClient == nil {
+		webClient = newSafeWebPushClient(10 * time.Second)
+	}
 	path := ""
+	webPath := ""
+	vapidPath := ""
 	if cfg.DataDir != "" {
 		path = filepath.Join(cfg.DataDir, DevicesFile)
+		webPath = filepath.Join(cfg.DataDir, WebDevicesFile)
+		vapidPath = filepath.Join(cfg.DataDir, VAPIDFile)
 	}
 	devs, err := loadDevices(path)
 	if err != nil {
 		return nil, err
 	}
+	webDevs, err := loadWebDevices(webPath)
+	if err != nil {
+		return nil, err
+	}
+	var vapid *vapidKey
+	if cfg.Mode != ModeOff {
+		vapid, err = loadOrCreateVAPID(vapidPath)
+		if err != nil {
+			return nil, err
+		}
+	}
 	actsPath := ""
 	if cfg.DataDir != "" {
 		actsPath = filepath.Join(cfg.DataDir, ActivitiesFile)
 	}
-	s := &Sender{cfg: cfg, log: log, devs: devs, client: client, seen: map[string]bool{},
+	s := &Sender{cfg: cfg, log: log, devs: devs, webDevs: webDevs, vapid: vapid, client: client, webClient: webClient, seen: map[string]bool{},
 		baseURL: map[string]string{EnvProduction: cfg.ProductionURL, EnvSandbox: cfg.SandboxURL}}
 	s.acts.load(actsPath, cfg.Now())
 	switch cfg.Mode {
@@ -249,7 +276,19 @@ func (s *Sender) Status() Status {
 	if s == nil {
 		return Status{Reason: "push not available"}
 	}
-	return Status{Enabled: s.on, Reason: s.reason, Devices: s.devs.count(), Mode: s.cfg.Mode}
+	webCount := 0
+	if s.webDevs != nil {
+		webCount = s.webDevs.count()
+	}
+	return Status{
+		Enabled:        s.on,
+		Reason:         s.reason,
+		Devices:        s.devs.count(),
+		Mode:           s.cfg.Mode,
+		WebPushEnabled: s.WebPushEnabled(),
+		VAPIDPublicKey: s.VAPIDPublicKey(),
+		WebDevices:     webCount,
+	}
 }
 
 // Registration is what POST /api/push/register carries: a device token,
@@ -349,6 +388,15 @@ func (s *Sender) ForgetDevices(ids []string) error {
 	if n > 0 {
 		s.log.Log(logSource, "push.unregistered", "", map[string]any{"reason": "device_revoked", "removed": n, "devices": s.devs.count()})
 	}
+	if s.webDevs != nil {
+		wn, werr := s.webDevs.removeDevices(ids)
+		if werr != nil {
+			return werr
+		}
+		if wn > 0 {
+			s.log.Log(logSource, "push.unregistered", "", map[string]any{"mode": "webpush", "reason": "device_revoked", "removed": wn, "web_devices": s.webDevs.count()})
+		}
+	}
 	return nil
 }
 
@@ -362,9 +410,9 @@ func (s *Sender) Devices() []Device {
 
 // Notify sends n to every registered device in the background, once per
 // dedupe key (Notification.Key): a second Notify about the same event is
-// dropped. It never blocks on APNs.
+// dropped. It never blocks on APNs or Web Push.
 func (s *Sender) Notify(n Notification) {
-	if !s.Enabled() {
+	if s == nil || (!s.Enabled() && !s.WebPushEnabled()) {
 		return
 	}
 	if key := n.Key(); key != "" {
@@ -384,17 +432,33 @@ func (s *Sender) Notify(n Notification) {
 	if n.Computer == "" {
 		n.Computer = s.cfg.ComputerID
 	}
-	devs := s.devs.list()
-	if n.ExceptDevice != "" {
-		kept := devs[:0]
-		for _, d := range devs {
-			if d.DeviceID != n.ExceptDevice {
-				kept = append(kept, d)
+	var devs []Device
+	if s.Enabled() {
+		devs = s.devs.list()
+		if n.ExceptDevice != "" {
+			kept := devs[:0]
+			for _, d := range devs {
+				if d.DeviceID != n.ExceptDevice {
+					kept = append(kept, d)
+				}
 			}
+			devs = kept
 		}
-		devs = kept
 	}
-	if len(devs) == 0 {
+	var webSubs []WebSubscription
+	if s.WebPushEnabled() && s.webDevs != nil {
+		webSubs = s.webDevs.list()
+		if n.ExceptDevice != "" {
+			kept := webSubs[:0]
+			for _, sub := range webSubs {
+				if sub.DeviceID != n.ExceptDevice {
+					kept = append(kept, sub)
+				}
+			}
+			webSubs = kept
+		}
+	}
+	if len(devs) == 0 && len(webSubs) == 0 {
 		return
 	}
 	s.wg.Add(1)
@@ -402,11 +466,16 @@ func (s *Sender) Notify(n Notification) {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
 		defer cancel()
-		if s.cfg.Mode == ModeRelay {
-			s.sendRelay(ctx, n, devs)
-			return
+		if len(devs) > 0 {
+			if s.cfg.Mode == ModeRelay {
+				s.sendRelay(ctx, n, devs)
+			} else {
+				s.send(ctx, n, devs)
+			}
 		}
-		s.send(ctx, n, devs)
+		if len(webSubs) > 0 {
+			s.sendWebPush(ctx, n, webSubs)
+		}
 	}()
 }
 

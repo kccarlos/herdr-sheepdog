@@ -24,6 +24,11 @@
   </span>
 </header>
 
+<div id="reload-banner" class="update-banner hidden" role="status">
+  <span id="reload-text">sheepdog restarted onto a newer build; this page will reload when you disconnect.</span>
+  <button type="button" id="btn-reload-now">Reload now</button>
+</div>
+
 <section class="card hidden" id="auth-gate" aria-live="polite">
   <h2 id="auth-title">Pair this browser</h2>
   <p id="auth-text" class="muted small"></p>
@@ -34,6 +39,8 @@
 </section>
 
 <main id="app-main">
+  <section id="approvals" class="approvals hidden" aria-label="Open questions" aria-live="polite"></section>
+
   <section class="card controls">
     <div class="row buttons">
       <button id="btn-connect" class="primary">Connect</button>
@@ -45,6 +52,10 @@
     <div class="row">
       <button id="btn-new-conversation" class="danger" title="reset the orchestrator's transcript and the voice session's memory; the agents, promises, notes and pending prompts are kept">New conversation</button>
       <span id="new-conversation-result" class="muted small"></span>
+    </div>
+    <div class="row hidden" id="push-row">
+      <button type="button" id="btn-push">Enable notifications</button>
+      <span id="push-status" class="muted small"></span>
     </div>
     <div class="row">
       <label class="meter-label">mic
@@ -102,7 +113,7 @@
     </dl>
   </section>
 
-  <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop · <kbd>?</kbd> shortcuts. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
+  <p class="muted small">Keys: <kbd>1</kbd>–<kbd>9</kbd> answer question · <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop · <kbd>?</kbd> shortcuts. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
 </main>
 
 <dialog id="card-dialog" class="card-dialog" aria-labelledby="card-title">
@@ -126,6 +137,7 @@
   </form>
   <div class="card-body">
     <dl class="shortcuts-list">
+      <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Pick an open question option</dd>
       <dt><kbd>M</kbd></dt><dd>Mute or unmute microphone</dd>
       <dt><kbd>Space</kbd> / <kbd>Esc</kbd></dt><dd>Stop voice playback and cancel current turn</dd>
       <dt><kbd>Enter</kbd></dt><dd>Send typed utterance (when focused in text box)</dd>

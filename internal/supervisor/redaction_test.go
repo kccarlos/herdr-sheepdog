@@ -11,13 +11,26 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
+type captureNotifier struct {
+	got []push.Notification
+}
+
+func (c *captureNotifier) Notify(n push.Notification) {
+	c.got = append(c.got, n)
+}
+
 func TestRedactionPersistenceBoundaries(t *testing.T) {
 	secret := "custom-secret-123456789"
-	opt := func(c *Config) { c.Redactor = redact.New(secret) }
+	notifs := &captureNotifier{}
+	opt := func(c *Config) {
+		c.Redactor = redact.New(secret)
+		c.Notifier = notifs
+	}
 	h := newHarness(t, opt)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	h.srv.SetScreen("w5:p1", "output "+secret)
@@ -52,6 +65,16 @@ func TestRedactionPersistenceBoundaries(t *testing.T) {
 	p, ok := h.store.Pending()
 	if !ok || !strings.Contains(p.Command, "printf") || !strings.Contains(p.Command, "[REDACTED]") {
 		t.Errorf("approval lost context: %+v", p)
+	}
+	h.sup.notify(announcement{row: row, event: brain.PromiseEventBlocked, eventID: "evt-red-1", pending: p.ID}, nil, "auth asks to run "+secret)
+	if len(notifs.got) == 0 {
+		t.Fatal("expected push notification")
+	}
+	for _, n := range notifs.got {
+		b, _ := json.Marshal(n)
+		if strings.Contains(string(b), secret) {
+			t.Errorf("push notification leaked secret: %s", b)
+		}
 	}
 }
 
