@@ -190,20 +190,26 @@ struct PaneDivider: View {
 struct AgentWindowScene: View {
     let route: AgentWindowRoute?
     @EnvironmentObject private var app: SessionViewModel
+    @State private var id = UUID()
     private let scenes = SceneCoordinator.shared
 
     var body: some View {
-        AgentWindowContent(route: route)
+        AgentWindowContent(route: route, agentSceneID: id)
             .environmentObject(scenes.demoModel ?? app)
+            .onAppear { scenes.registerAgent(id) }
+            .onDisappear { scenes.unregisterAgent(id) }
             .debugAnimationsOff()
     }
 }
 
 private struct AgentWindowContent: View {
     let route: AgentWindowRoute?
+    let agentSceneID: UUID
     @EnvironmentObject private var model: SessionViewModel
     @State private var ui = SceneUI()
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.appPhase) private var appPhase
+    private let scenes = SceneCoordinator.shared
 
     var body: some View {
         Group {
@@ -243,6 +249,14 @@ private struct AgentWindowContent: View {
             #endif
             // A window restored on its own, before any main window.
             model.start()
+        }
+        .onChange(of: appPhase) { _, phase in
+            guard scenes.isAgentLifecycleOwner(agentSceneID) else { return }
+            switch phase {
+            case .active: model.becameActive()
+            case .background: model.enteredBackground()
+            default: break
+            }
         }
     }
 }

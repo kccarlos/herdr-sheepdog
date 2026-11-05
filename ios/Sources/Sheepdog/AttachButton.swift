@@ -99,14 +99,17 @@ struct AttachButton: View {
     }
 
     private func sendFile(_ url: URL) {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
-            failure = "Could not read that file."
-            return
+        uploading = true
+        Task {
+            let loaded = await Attachments.loadFile(at: url)
+            uploading = false
+            switch loaded {
+            case let .success(file):
+                start(file.data, file.name, file.mimeType)
+            case let .failure(problem):
+                failure = problem.message
+            }
         }
-        let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        start(data, url.lastPathComponent, type)
     }
 
     private func pasteImage() {

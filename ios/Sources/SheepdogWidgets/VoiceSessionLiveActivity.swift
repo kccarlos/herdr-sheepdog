@@ -18,27 +18,30 @@ struct VoiceSessionLiveActivity: Widget {
                 .activitySystemActionForegroundColor(ActivityPalette.ink)
         } dynamicIsland: { context in
             let state = context.state
-            let look = PhaseLook(state)
+            let isStale = context.isStale
+            let look = PhaseLook(state, isStale: isStale)
+            let waitingCount = state.islandWaitingCount(isStale: isStale)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: look.symbol)
                         .font(.title2)
                         .foregroundStyle(look.tint)
+                        .opacity(isStale ? 0.65 : 1)
                         .accessibilityHidden(true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if state.waiting > 0 {
-                        Label("\(state.waiting)", systemImage: "person.fill.questionmark")
+                    if waitingCount > 0 {
+                        Label("\(waitingCount)", systemImage: "person.fill.questionmark")
                             .font(.headline.monospacedDigit())
                             .foregroundStyle(ActivityPalette.waiting)
                             .accessibilityHidden(true)
                     }
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(state.title)
+                    Text(state.islandCenterTitle(isStale: isStale))
                         .font(.headline)
                         .lineLimit(1)
-                        .accessibilityLabel(context.isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: context.attributes.voiceName))
+                        .accessibilityLabel(isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: context.attributes.voiceName))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     SessionButtons(state: state)
@@ -46,16 +49,18 @@ struct VoiceSessionLiveActivity: Widget {
             } compactLeading: {
                 Image(systemName: look.symbol)
                     .foregroundStyle(look.tint)
-                    .accessibilityLabel(state.compactAccessibilityLabel)
+                    .opacity(isStale ? 0.65 : 1)
+                    .accessibilityLabel(state.compactAccessibilityLabel(isStale: isStale))
             } compactTrailing: {
-                Text(state.waiting > 0 ? "\(state.waiting)" : "")
+                Text(waitingCount > 0 ? "\(waitingCount)" : "")
                     .font(.caption.weight(.bold).monospacedDigit())
                     .foregroundStyle(ActivityPalette.waiting)
                     .accessibilityHidden(true)
             } minimal: {
-                Image(systemName: state.waiting > 0 ? "person.fill.questionmark" : look.symbol)
-                    .foregroundStyle(state.waiting > 0 ? ActivityPalette.waiting : look.tint)
-                    .accessibilityLabel(state.compactAccessibilityLabel)
+                Image(systemName: waitingCount > 0 ? "person.fill.questionmark" : look.symbol)
+                    .foregroundStyle(waitingCount > 0 ? ActivityPalette.waiting : look.tint)
+                    .opacity(isStale ? 0.65 : 1)
+                    .accessibilityLabel(state.compactAccessibilityLabel(isStale: isStale))
             }
             .keylineTint(look.tint)
         }
@@ -264,7 +269,13 @@ struct PhaseLook {
     let tint: Color
     let glyph: Color
 
-    init(_ state: LiveActivityContent) {
+    init(_ state: LiveActivityContent, isStale: Bool = false) {
+        if isStale {
+            symbol = "questionmark.circle"
+            tint = ActivityPalette.idle
+            glyph = .white
+            return
+        }
         switch state.phase {
         case .listening:
             symbol = "waveform"; tint = ActivityPalette.accent; glyph = ActivityPalette.onAccent

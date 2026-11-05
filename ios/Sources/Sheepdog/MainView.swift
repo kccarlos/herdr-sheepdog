@@ -610,6 +610,7 @@ struct SessionChrome: ViewModifier {
             && !model.demoActive
             && model.agentsModel.screenCovers.isEmpty
         return ScreenReport(
+            owns: owns,
             visible: appPhase == .active,
             voiceScreen: voiceScreen && uncovered,
             agentsScreen: agentsScreen && uncovered
@@ -709,10 +710,15 @@ struct SessionChrome: ViewModifier {
                     .onAppear { presentation.appeared(item) }
             }
             .onChange(of: screenReport, initial: true) { _, report in
-                guard owns else { return }
+                guard report.owns else { return }
                 model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen, agentsScreen: report.agentsScreen)
             }
             .onAppear { model.start() }
+            .onDisappear {
+                if scenes.scenes.filter({ $0 != sceneID }).isEmpty {
+                    model.setScreen(visible: appPhase == .active, voiceScreen: false, agentsScreen: false)
+                }
+            }
             .onChange(of: appPhase) { _, phase in
                 guard owns else { return }
                 switch phase {
@@ -780,6 +786,7 @@ struct TopBar: View {
 
 /// The screen as `visibility` reports it.
 private struct ScreenReport: Equatable {
+    var owns: Bool
     var visible: Bool
     var voiceScreen: Bool
     var agentsScreen: Bool = false
