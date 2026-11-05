@@ -296,6 +296,15 @@ type Note struct {
 	At   time.Time `json:"at"`
 }
 
+// ToldPrompt is one prompt the user was told about (pane, prompt
+// signature, and when it closed if no longer open), kept in the session
+// so the displacement rail survives a daemon restart.
+type ToldPrompt struct {
+	PaneID   string    `json:"pane_id"`
+	Sig      string    `json:"sig"`
+	ClosedAt time.Time `json:"closed_at,omitzero"`
+}
+
 // Session is the voice-session bookkeeping.
 type Session struct {
 	VoiceConnected bool `json:"voice_connected"`
@@ -326,6 +335,9 @@ type Session struct {
 	// Investigations are the background jobs, newest last, capped at
 	// MaxInvestigations.
 	Investigations []Investigation `json:"investigations,omitempty"`
+	// ToldPrompts are the prompts told to the user, oldest first, open or
+	// recently closed, so the displacement rail survives a restart.
+	ToldPrompts []ToldPrompt `json:"told_prompts,omitempty"`
 }
 
 // MaxInvestigations is how many investigation records the session keeps
@@ -419,6 +431,7 @@ func (t Table) clone() Table {
 	if len(out.Session.Investigations) == 0 {
 		out.Session.Investigations = nil
 	}
+	out.Session.ToldPrompts = append([]ToldPrompt(nil), t.Session.ToldPrompts...)
 	return out
 }
 

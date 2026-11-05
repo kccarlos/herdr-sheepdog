@@ -320,7 +320,14 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 			// displaced.go: the user hears why and is asked again, in
 			// code; the orchestrator must not answer for them.
 			if line := s.reaskLocked(p, last); line != "" {
-				s.queueReaskLocked(p, line)
+				if reviving {
+					s.registerRevivedQuestionLocked(p)
+				}
+				if tr := typedReasksOf(ctx); tr != nil {
+					tr.add(keyOf(p), p.PaneID, line)
+				} else {
+					s.queueReaskLocked(p, line)
+				}
 				reason += "; the daemon has told the user why and asked them again, so do not ask again yourself"
 			} else {
 				reason += "; the daemon has already told the user why and asked them again"

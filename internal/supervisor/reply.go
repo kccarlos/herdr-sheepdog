@@ -118,7 +118,11 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		s.answered(u, out) // unanswered.go
 		// The reply reaches the user now: the questions it states were
 		// told (displaced.go).
-		s.toldInReply(replyText(out.res))
+		uttID := u.id
+		if u.typed {
+			uttID = ""
+		}
+		s.toldInReplyFor(replyText(out.res), uttID)
 		return out.res
 	}
 	s.fellBack(u, out) // unanswered.go
@@ -212,7 +216,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 		// The questions the reply states are told when it goes out
 		// (displaced.go).
 		s.mu.Lock()
-		s.replyLineLocked(line)
+		s.replyLineForLocked(line, u.id)
 		s.mu.Unlock()
 	}
 	s.pushTagged(paneID, line, urgency, tags)

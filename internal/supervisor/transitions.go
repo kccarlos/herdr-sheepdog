@@ -441,6 +441,7 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 	// that reads the same later appeared then, not now (inputs.go).
 	delete(s.promptSeenAt, paneID)
 	delete(s.told.asked, paneID)
+	s.closedLocked() // displaced.go
 }
 
 // aliasOf returns the alias of a pane, or "another agent" when unknown

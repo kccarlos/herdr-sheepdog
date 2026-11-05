@@ -69,7 +69,7 @@ func TestReview4ShortNameAndScrubbedCommandInReply(t *testing.T) {
 	p.Question = ""
 	p.SpokenSummary = ""
 	h.sup.mu.Lock()
-	got := h.sup.statesLocked(wordSet(nameTokens("db asks to run rm a file")), p)
+	got := h.sup.statesLocked("db asks to run rm a file", p)
 	h.sup.mu.Unlock()
 	if !got {
 		t.Fatal("reply did not match short name and command")
@@ -97,7 +97,7 @@ func TestReview4ScrubPlaceholderDoesNotIdentifyQuestion(t *testing.T) {
 	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
 	p := state.PendingAction{PaneID: docsPane, Command: "rm /tmp/example"}
 	h.sup.mu.Lock()
-	got := h.sup.statesLocked(wordSet(nameTokens("docs is working on a file")), p)
+	got := h.sup.statesLocked("docs is working on a file", p)
 	h.sup.mu.Unlock()
 	if got {
 		t.Fatal("generic scrub placeholder identified an unheard question")
@@ -118,7 +118,7 @@ func TestReview2StatesNamesAndChinese(t *testing.T) {
 			}
 			p := state.PendingAction{PaneID: docsPane, Question: tc.question}
 			h.sup.mu.Lock()
-			got := h.sup.statesLocked(wordSet(nameTokens(tc.reply)), p)
+			got := h.sup.statesLocked(tc.reply, p)
 			h.sup.mu.Unlock()
 			if !got {
 				t.Fatalf("%q did not identify %q's question", tc.reply, tc.name)

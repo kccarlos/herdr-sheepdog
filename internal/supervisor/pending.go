@@ -274,6 +274,11 @@ func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p 
 	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == promptSignature(prompt) {
 		return cur, true, ""
 	}
+	for _, q := range s.store.Questions() {
+		if q.Kind == state.PendingAnswerPrompt && q.PaneID == paneID && pendingSignature(q) == promptSignature(prompt) {
+			return q, true, ""
+		}
+	}
 	row, found = s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
 		return state.PendingAction{}, false, ""
@@ -285,6 +290,47 @@ func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p 
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
 	return p, true, ""
+}
+
+// registerRevivedQuestionLocked lists a revived answer_prompt in the open
+// questions without moving the voice's pending slot, so a re-ask of it
+// carries a live pending_id and a follow-up answer or phone tap resolves.
+// Caller holds s.mu.
+func (s *Supervisor) registerRevivedQuestionLocked(p state.PendingAction) {
+	if p.Kind != state.PendingAnswerPrompt {
+		return
+	}
+	if _, ok := s.openByIDLocked(p.ID); ok {
+		return
+	}
+	var old *state.PendingAction
+	for _, q := range s.store.Questions() {
+		if q.PaneID == p.PaneID {
+			cp := q
+			old = &cp
+			s.attMu.Lock()
+			delete(s.held, q.ID)
+			s.attMu.Unlock()
+		}
+	}
+	s.installedLocked(p) // displaced.go
+	if err := s.store.SetQuestion(p); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
+		if a.LastBlock == nil {
+			a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
+		}
+		a.LastBlock.Question = p.Question
+		a.LastBlock.Answered = false
+	}); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+	s.invalidateBriefingLocked()
+	if old != nil {
+		s.log.Log(logSource, "pending.cancelled", old.PaneID, map[string]any{"id": old.ID, "kind": old.Kind, "reason": "superseded"})
+	}
+	s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
 }
 
 // paneScreen is one read of a pane's screen.
