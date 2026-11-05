@@ -47,6 +47,12 @@ struct NotificationNotice: Equatable {
             paneID = nil
             title = "Sheepdog"
             body = LocalNotice.voiceClosed(reason: reason).text
+        case "web.account_problem", "brain.account_problem":
+            guard let text = WSMessage.combineError(message: event.string("message"), fix: event.string("fix")) else { return nil }
+            eventID = event.seq
+            paneID = nil
+            title = "Sheepdog"
+            body = text
         case "voice.connect_error", "voice.session_error", "daemon.voice_error", "daemon.voice_provider_error":
             let reason = event.string("message")?.nilIfEmpty
                 ?? event.string("error")?.nilIfEmpty

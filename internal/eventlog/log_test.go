@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,5 +392,87 @@ func TestTurnAndUtteranceIDsLifted(t *testing.T) {
 	}
 	if old.TurnID != "" || old.UtteranceID != "" {
 		t.Errorf("old line = %+v", old)
+	}
+}
+
+type stalledFile struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	buf     bytes.Buffer
+}
+
+func (s *stalledFile) Write(p []byte) (int, error) {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *stalledFile) Close() error { return nil }
+
+func TestLogNeverBlocksOnStalledDiskWrite(t *testing.T) {
+	dir := t.TempDir()
+	sf := &stalledFile{entered: make(chan struct{}), release: make(chan struct{})}
+	c := &clock{now: time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)}
+	l, err := Open(dir, Options{
+		Now:           c.Now,
+		FlushInterval: 10 * time.Millisecond,
+		openDay:       func(string) (io.WriteCloser, error) { return sf, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const count = 80
+	pad := strings.Repeat("x", 1024)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < count; i++ {
+			l.Log("voice", "voice.audio", "", map[string]any{"i": i, "pad": pad})
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		close(sf.release)
+		<-done
+		_ = l.Close()
+		t.Fatal("Log blocked caller goroutine on stalled disk write")
+	}
+	// Wait until the background flusher hits the stalled OS write, then verify
+	// subsequent Log and Tail calls still do not block on the flusher's lock.
+	select {
+	case <-sf.entered:
+	case <-time.After(time.Second):
+		close(sf.release)
+		_ = l.Close()
+		t.Fatal("background flusher never started writing")
+	}
+	extraDone := make(chan struct{})
+	go func() {
+		defer close(extraDone)
+		l.Log("voice", "voice.audio", "", map[string]any{"i": count})
+		_ = l.Tail(5)
+	}()
+	select {
+	case <-extraDone:
+	case <-time.After(200 * time.Millisecond):
+		close(sf.release)
+		<-extraDone
+		_ = l.Close()
+		t.Fatal("Log/Tail blocked while background flush was stalled on disk")
+	}
+	close(sf.release)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sf.mu.Lock()
+	lines := bytes.Split(bytes.TrimSpace(sf.buf.Bytes()), []byte("\n"))
+	sf.mu.Unlock()
+	if len(lines) != count+1 {
+		t.Fatalf("persisted %d lines, want %d", len(lines), count+1)
 	}
 }

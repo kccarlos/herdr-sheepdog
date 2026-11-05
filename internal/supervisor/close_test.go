@@ -17,7 +17,7 @@ import (
 // in the daemon's own directory (w1:p1), and a herdr that closes panes.
 func closeWorld(t *testing.T, m *braintest.Model) *harness {
 	t.Helper()
-	h := newBrainHarness(t, m, func(c *Config) { c.ProtectedDirs = []string{"/Users/kc/Documents/herdr-sheepdog"} })
+	h := newBrainHarness(t, m, func(c *Config) { c.ProtectedDirs = []string{"/Users/you/Documents/herdr-sheepdog"} })
 	h.srv.Handle("pane.close", func(p json.RawMessage) (any, error) {
 		var params struct {
 			PaneID string `json:"pane_id"`
@@ -27,8 +27,8 @@ func closeWorld(t *testing.T, m *braintest.Model) *harness {
 		return map[string]any{"type": "ok"}, nil
 	})
 	for _, a := range []struct{ pane, ws, cwd string }{
-		{"w1:p1", "herdr-sheepdog", "/Users/kc/Documents/herdr-sheepdog"},
-		{"w2:p1", "kvoice", "/Users/kc/Documents/kvoice"},
+		{"w1:p1", "herdr-sheepdog", "/Users/you/Documents/herdr-sheepdog"},
+		{"w2:p1", "kvoice", "/Users/you/Documents/kvoice"},
 	} {
 		h.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: strings.Split(a.pane, ":")[0], Label: a.ws})
 		h.srv.SetAgent(herdr.AgentInfo{PaneID: a.pane, WorkspaceID: strings.Split(a.pane, ":")[0], Agent: "claude", Status: herdr.StateIdle, Cwd: a.cwd})

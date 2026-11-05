@@ -121,6 +121,7 @@ func (l *Log) Days() ([]string, error) {
 	if l.dir == "" {
 		return nil, nil
 	}
+	_ = l.Flush()
 	return listDays(l.dir)
 }
 

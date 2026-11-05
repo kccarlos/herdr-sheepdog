@@ -77,7 +77,7 @@ func itoa(i int) string {
 
 func TestSpokenEnforcesD9(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"Auth wrote /Users/kc/repo/auth/test.go and pushed.", "Auth wrote a file and pushed."},
+		{"Auth wrote /Users/you/repo/auth/test.go and pushed.", "Auth wrote a file and pushed."},
 		{"See https://github.com/openai/codex/releases/latest for notes.", "See a link for notes."},
 		{"Commit 1398579abc is on main.", "Commit is on main."},
 		{"Pane w5:p1 is idle.", "Pane is idle."},
@@ -86,7 +86,7 @@ func TestSpokenEnforcesD9(t *testing.T) {
 		{"line one\nline two", "line one line two"},
 		{"The word defaced is fine and 1234567 too.", "The word defaced is fine and 1234567 too."},
 		{"  spaced   out  ", "spaced out"},
-		{"Ran C:\\Users\\kc\\thing.exe now.", "Ran a file now."},
+		{"Ran C:\\Users\\you\\thing.exe now.", "Ran a file now."},
 		{"TestTotal in internal/x/calc_test.go:12 failed.", "TestTotal in a file:12 failed."},
 		{"Total() is wrong per calc_test.go.", "Total() is wrong per calc_test.go."},
 	}
@@ -108,7 +108,7 @@ func TestSpokenKeepsSpaceBeforeDotToken(t *testing.T) {
 	cases := map[string]string{
 		"bench-codex asks to run go test -race ./...": "bench-codex asks to run go test -race ./...",
 		"run go vet ./... then go test .":             "run go vet ./... then go test.",
-		"It edited /Users/kc/bench/calc/calc.go .":    "It edited a file.",
+		"It edited /Users/you/bench/calc/calc.go .":   "It edited a file.",
 		"Done , and the tests pass .":                 "Done, and the tests pass.",
 		"Is it ready ?":                               "Is it ready?",
 	}

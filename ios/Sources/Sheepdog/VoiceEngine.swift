@@ -277,8 +277,8 @@ final class VoiceEngine {
         audio.onFrame = { [weak self] frame in
             self?.socket.send(frame: frame)
         }
-        audio.onGate = { [weak self] closed in
-            self?.send(.gateChanged(closed: closed))
+        audio.onGate = { [weak self] closed, speechEndMs in
+            self?.send(.gateChanged(closed: closed, speechEndMs: speechEndMs))
         }
         audio.onLevel = { [weak self] level in
             self?.meter.setLevel(level)
@@ -378,7 +378,7 @@ final class VoiceEngine {
         case .flush:
             send(.flush)
         case .error:
-            if let text = message.message { send(.daemonError(text)) }
+            if let text = message.displayErrorMessage { send(.daemonError(text)) }
         case .transcript, .screen, .screenError, .card:
             host?.voiceEngine(self, control: message)
         case .voiceCommand:

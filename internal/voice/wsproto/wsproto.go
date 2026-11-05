@@ -256,6 +256,17 @@ type Message struct {
 
 	// mute, silence and speaking; voice-command with action ptt
 	On *bool `json:"on,omitempty"`
+	// silence (on: true) and ping / client-ready timing stamps (optional,
+	// docs/dev/ws-contract.md "Silence gate"): SpeechEndMs is client
+	// monotonic ms elapsed since the last voiced frame in the open segment
+	// (omitted when 0 voiced frames occurred); Seq is cumulative binary
+	// PCM frames sent on this socket so far; MonoMs is the client's
+	// monotonic clock in ms when sent; RTTMs is the latest /ws ping→pong
+	// round-trip ms.
+	SpeechEndMs *int   `json:"speech_end_ms,omitempty"`
+	Seq         *int   `json:"seq,omitempty"`
+	MonoMs      *int64 `json:"mono_ms,omitempty"`
+	RTTMs       *int   `json:"rtt_ms,omitempty"`
 
 	// playback: the client's player started, drained or flushed, and
 	// how much of the current spoken run it played (ms of the 24 kHz
@@ -489,6 +500,12 @@ func Parse(data []byte) (Message, error) {
 
 // Validate checks that the fields required by m.Type are present.
 func (m Message) Validate() error {
+	if (m.SpeechEndMs != nil && *m.SpeechEndMs < 0) ||
+		(m.Seq != nil && *m.Seq < 0) ||
+		(m.MonoMs != nil && *m.MonoMs < 0) ||
+		(m.RTTMs != nil && *m.RTTMs < 0) {
+		return fmt.Errorf("wsproto: %s: negative timing stamp", m.Type)
+	}
 	switch m.Type {
 	case TypeClientReady:
 		if m.Protocol == nil {
