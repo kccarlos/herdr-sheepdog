@@ -40,9 +40,10 @@ type Session struct {
 	// rec records the voice context (capture.go); nil records nothing.
 	rec *ctxcap.VoiceSession
 
-	audio  chan []byte
-	events chan voice.Event
-	out    *outQueue
+	audio       chan []byte
+	audioChunks chan voice.AudioChunk
+	events      chan voice.Event
+	out         *outQueue
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -132,6 +133,8 @@ type Session struct {
 	// turnDoneAt is when the model's speech last ended (voice.RequeueHold).
 	turnDoneAt time.Time
 	openCheck  voice.OpenCheck
+	flushBy    string
+	flushAt    time.Time
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -147,10 +150,12 @@ type liveConn struct {
 	pace     inputPacer    // input audio sent vs the wall clock (pace.go)
 
 	// under Session.mu
-	usage       float64
-	closeWhy    string // our reason, when we asked to close
-	finalized   bool
-	startedOnce sync.Once
+	usage          float64
+	closeWhy       string // our reason, when we asked to close
+	finalized      bool
+	startedOnce    sync.Once
+	suppressOutput bool
+	suppressedAt   time.Time
 }
 
 // pushItem is one queued Push.
@@ -163,6 +168,10 @@ type pushItem struct {
 	// heldAt is when the push was first held for want of a listener
 	// (zero: never held); see pumpPushes.
 	heldAt time.Time
+	// flushedConn is the speaking liveConn already flushed and retired for an
+	// UrgencyInterrupt push, so delivering it on the replacement connection
+	// does not emit a duplicate flush.
+	flushedConn *liveConn
 }
 
 // New builds a Session; it does not connect (see Start).
@@ -180,12 +189,13 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 	}
 	s := &Session{
 		cfg: cfg, dial: dial, log: log, now: time.Now, rec: cfg.Context.Session("openai", cfg.Model),
-		audio:    make(chan []byte),
-		events:   make(chan voice.Event, cfg.EventBuffer),
-		out:      newOutQueue(),
-		inflight: map[string]context.CancelFunc{},
-		armed:    true,
-		recap:    voice.Recap{Max: cfg.RecapTurns},
+		audio:       make(chan []byte),
+		audioChunks: make(chan voice.AudioChunk),
+		events:      make(chan voice.Event, cfg.EventBuffer),
+		out:         newOutQueue(),
+		inflight:    map[string]context.CancelFunc{},
+		armed:       true,
+		recap:       voice.Recap{Max: cfg.RecapTurns},
 	}
 	s.heard.Coverage = s.keyTermCoverage
 	return s, nil
@@ -205,7 +215,7 @@ func (s *Session) Start(ctx context.Context) error {
 	s.emit(voice.EventStatus{Status: voice.StatusConnected, Reason: ReasonStandby})
 	s.log.Log(logSource, "voice.standby", "", map[string]any{"provider": "openai", "model": s.cfg.Model, "idle_close_s": s.cfg.IdleClose.Seconds()})
 	s.wg.Add(2)
-	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio) }()
+	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio, s.audioChunks) }()
 	go func() { defer s.wg.Done(); s.tickLoop(s.ctx) }()
 	return nil
 }
@@ -250,6 +260,70 @@ func (s *Session) Close() error {
 
 // Audio implements voice.Session.
 func (s *Session) Audio() <-chan []byte { return s.audio }
+
+// AudioChunks yields outbound audio frames paired with their flush epoch.
+func (s *Session) AudioChunks() <-chan voice.AudioChunk { return s.audioChunks }
+
+// FlushAudio purges queued outbound audio for a daemon-initiated client flush
+// (afterCancel) and returns the flushed epoch.
+func (s *Session) FlushAudio() uint64 {
+	s.mu.Lock()
+	now := s.now()
+	s.flushBy, s.flushAt = "stop", now
+	seq := s.flushReplyLocked()
+	s.suppressOutputLocked(now)
+	timing := s.finishAudioTimingLocked()
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	if s.client {
+		s.play.FlushMeta(now, voice.FlushMeta{
+			RecapSeq:    seq,
+			UtteranceID: uttID,
+			ByPush:      false,
+		})
+	} else {
+		s.play.Detach()
+	}
+	_, epoch := s.out.FlushEpoch()
+	unheard := s.heard.Interrupted(now, "stop", s.client)
+	s.mu.Unlock()
+	if timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", timing)
+	}
+	s.reportUnheard(unheard)
+	return epoch
+}
+
+// PurgeAudio drops queued outbound audio on a retiring session without
+// recording a client flush acknowledgement slot.
+func (s *Session) PurgeAudio() uint64 {
+	s.mu.Lock()
+	s.suppressOutputLocked(s.now())
+	_, epoch := s.out.Purge()
+	s.mu.Unlock()
+	return epoch
+}
+
+// ExpectFlush records a daemon flush barrier emitted outside the session
+// (e.g. a provider switch) whose client acknowledgement will arrive here.
+func (s *Session) ExpectFlush() {
+	s.mu.Lock()
+	var unheard []voice.UnheardPush
+	if s.client {
+		now := s.now()
+		s.play.Flush(now)
+		unheard = s.heard.Interrupted(now, "switch", true)
+	}
+	s.mu.Unlock()
+	s.reportUnheard(unheard)
+}
+
+// BumpAudioEpoch advances the outbound audio queue's epoch across a switch.
+func (s *Session) BumpAudioEpoch() {
+	s.mu.Lock()
+	s.out.BumpEpoch()
+	s.mu.Unlock()
+}
 
 // Events implements voice.Session.
 func (s *Session) Events() <-chan voice.Event { return s.events }
@@ -333,8 +407,10 @@ func (s *Session) ClientAttached(attached bool) {
 		s.armed = true
 	}
 	s.play.Detach()
+	unheard := s.heard.Detach()
 	s.vad.Reset()
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	if changed {
 		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
 	}
@@ -394,19 +470,38 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 
 // ClientPlayback applies a /ws client playback report
 // (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback and,
-// when a flushed run was cut short, emits the heard part as a cut
-// transcript for the orchestrator. The push pump reads the new state on its
-// next tick.
+// when a flushed run was cut short, trims the recap and emits the heard part
+// as a cut transcript for the orchestrator.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	now := s.now()
 	rep := s.play.Report(now, state, playedMs)
 	utt := s.playUtt.Started(state)
 	var unheard []voice.UnheardPush
+	var timing map[string]any
 	if state == voice.PlaybackFlushed {
-		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
+		if !rep.Awaited {
+			s.suppressOutputLocked(now)
+			timing = s.finishAudioTimingLocked()
+			s.out.Purge()
+		}
+		unheard = s.heard.FlushedReport(now, rep)
+		if rep.Cut != nil {
+			if !rep.Awaited {
+				rep.Cut.UtteranceID = s.playUtt.Flushed(true)
+				rep.Cut.ByPush = s.flushBy == "push" && now.Sub(s.flushAt) < 10*time.Second
+				if rep.RecapSeq == 0 {
+					rep.RecapSeq = s.addRecapLocked(voice.RecapAssistant, s.outText)
+					s.outText = ""
+				}
+			}
+			s.recap.CutSeq(rep.RecapSeq, rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+		}
 	}
 	s.mu.Unlock()
+	if timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", timing)
+	}
 	s.reportUnheard(unheard)
 	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
@@ -627,17 +722,58 @@ func (s *Session) finishAudioTimingLocked() map[string]any {
 	return t.Finish()
 }
 
+// suppressOutputLocked gates incoming server output deltas from a locally
+// interrupted speech run until the stream goes quiet for SpeechHold.
+//
+// Protocol limit: GPT-Live's output_audio.delta and output_transcript.delta
+// carry no turn or item IDs, and session.*.appended only acknowledges that an
+// append entered the timeline without guaranteeing the model stopped speaking
+// its earlier run. On a user or client barge-in we keep the connection open to
+// avoid reconnect latency and avoid splitting an utterance in progress: old
+// output is dropped until SpeechHold of output silence, while the server's own
+// history retains the untrimmed assistant turn until idle close reopens with
+// the trimmed recap. When an interrupting push must cut active or still-draining
+// speech and speak immediately, pumpPushes retires the connection and reopens
+// with the corrected recap instead of treating session.instructions.appended as
+// a cancellation boundary. Caller holds s.mu.
+func (s *Session) suppressOutputLocked(now time.Time) {
+	wasSpeaking := s.speakingNow || s.speakingLocked(now) || s.outText != ""
+	s.speakingNow = false
+	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
+	if lc := s.live; lc != nil && s.lcActiveLocked(lc) && (wasSpeaking || s.outputSuppressedLocked(lc, now)) {
+		lc.suppressOutput = true
+		lc.suppressedAt = now
+	}
+}
+
 // interrupt drops queued model audio and tells the client to flush.
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	now := s.now()
-	awaited := s.play.Flush(now)
-	unheard := s.heard.Interrupted(now, by, awaited)
+	s.flushBy, s.flushAt = by, now
+	seq := s.flushReplyLocked()
+	s.suppressOutputLocked(now)
+	timing := s.finishAudioTimingLocked()
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	if s.client {
+		s.play.FlushMeta(now, voice.FlushMeta{
+			RecapSeq:    seq,
+			UtteranceID: uttID,
+			ByPush:      by == "push",
+		})
+	} else {
+		s.play.Detach()
+	}
+	dropped, epoch := s.out.FlushEpoch()
+	unheard := s.heard.Interrupted(now, by, s.client)
 	s.mu.Unlock()
+	if timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", timing)
+	}
 	s.reportUnheard(unheard)
-	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
-	s.emit(voice.EventInterrupted{})
+	s.emit(voice.EventInterrupted{Epoch: epoch})
 }
 
 // classify maps an utterance to its tool call.

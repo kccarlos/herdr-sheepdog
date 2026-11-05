@@ -19,13 +19,14 @@ import (
 // session.started and session.close with session.closed, records every
 // client event, and lets the test inject server events.
 type fakeConn struct {
-	mu        sync.Mutex
-	sent      []map[string]any
-	in        chan []byte
-	closed    chan struct{}
-	once      sync.Once
-	usage     float64
-	holdClose bool
+	mu            sync.Mutex
+	sent          []map[string]any
+	in            chan []byte
+	closed        chan struct{}
+	once          sync.Once
+	usage         float64
+	holdClose     bool
+	holdAppendAck bool
 }
 
 func newFakeConn() *fakeConn {
@@ -45,19 +46,32 @@ func (c *fakeConn) Send(_ context.Context, ev any) error {
 	default:
 	}
 	c.mu.Lock()
-	c.sent = append(c.sent, m)
+	holdClose := c.holdClose
+	holdAck := c.holdAppendAck
 	c.mu.Unlock()
 	switch m["type"] {
 	case evSessionStart:
 		c.server(map[string]any{"type": evSessionStarted, "client_event_id": m["event_id"], "session": map[string]any{"id": "live_fake", "model": "gpt-live-1"}})
+	case evInstructionsAppend:
+		if !holdAck {
+			c.server(map[string]any{"type": evInstructionsApplied, "client_event_id": m["event_id"]})
+		}
+	case evThinkingAppend:
+		if !holdAck {
+			c.server(map[string]any{"type": evThinkingApplied, "client_event_id": m["event_id"]})
+		}
+	case evCommentaryAppend:
+		if !holdAck {
+			c.server(map[string]any{"type": evCommentaryApplied, "client_event_id": m["event_id"]})
+		}
 	case evSessionClose:
-		c.mu.Lock()
-		hold := c.holdClose
-		c.mu.Unlock()
-		if !hold {
+		if !holdClose {
 			c.server(map[string]any{"type": evSessionClosed, "reason": "close_requested", "usage": map[string]any{"seconds": c.usage}})
 		}
 	}
+	c.mu.Lock()
+	c.sent = append(c.sent, m)
+	c.mu.Unlock()
 	return nil
 }
 
