@@ -73,8 +73,20 @@ test("shortcuts and card sheets block blind answers and composer focus; ? closes
   assert.equal(keyAction("enter", { onPanel: true, sheet: "questions" }), null);
 });
 
-test("a compact question bar whose options are hidden never allows blind digit answers", () => {
+test("a compact question bar blocks blind digit answers, opens on a, and answers once open", () => {
   assert.equal(keyAction("1", { onPanel: true, question, questionVisible: false, suggestions }), null);
+  assert.deepEqual(keyAction("a", { onPanel: true, question, questionVisible: false, suggestions }), { type: "questions" });
+  assert.deepEqual(keyAction("A", { onPanel: true, question, questionVisible: false }), { type: "questions" });
+  assert.equal(keyAction("a", { onPanel: true, question, questionVisible: true }), null, "inline options are already on screen");
+  assert.equal(keyAction("a", { onPanel: false, question, questionVisible: false }), null, "typing a in the composer stays text");
+  assert.equal(keyAction("a", { onPanel: true, question, questionVisible: false, modified: true }), null);
+  assert.equal(keyAction("a", { onPanel: true, question, questionVisible: false, active: false }), null);
+  assert.equal(keyAction("a", { onPanel: true, question, questionVisible: false, sheet: "questions" }), null);
+  assert.deepEqual(
+    keyAction("1", { onPanel: true, question, questionVisible: false, sheet: "questions" }),
+    { type: "answer", question: question.pending, option: question.pending.options[0] },
+  );
+  assert.equal(keyAction("1", { onPanel: true, question, sheet: "questions", busy: true }), null);
 });
 
 test("leaving focuses the pane that had the keys, whether the panel was entered by pane.go or a click", () => {

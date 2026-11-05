@@ -18,6 +18,7 @@
 // Returns what to do, or null when the key means nothing here:
 //   { type: "shortcuts" }                ?: open or close keyboard shortcuts
 //   { type: "composer" }                 Enter: write a message
+//   { type: "questions" }                a: open a compact question's Answer bar
 //   { type: "answer", question, option } 1-9: tap that option of the question
 //   { type: "send", text }               1-9: send that suggested reply
 //   { type: "panel" }                    Esc in the composer: back to the panel
@@ -51,17 +52,20 @@ export function keyAction(
   if (key === "?" && onPanel) return { type: "shortcuts" };
   if (!onPanel || !active) return null;
   if (sheetType) {
-    if (sheetType === "questions" && /^[1-9]$/.test(key) && question?.phase === "open") {
+    if (sheetType === "questions" && !busy && /^[1-9]$/.test(key) && question?.phase === "open") {
       const option = question.pending?.options?.[Number(key) - 1];
       return option ? { type: "answer", question: question.pending, option } : null;
     }
     return null;
   }
   if (key === "enter") return { type: "composer" };
+  if ((key === "a" || key === "A") && question?.phase === "open" && !questionVisible) {
+    return { type: "questions" };
+  }
   if (!/^[1-9]$/.test(key)) return null;
   const at = Number(key) - 1;
   if (question?.phase === "open") {
-    if (!questionVisible) return null;
+    if (!questionVisible || busy) return null;
     const option = question.pending?.options?.[at];
     return option ? { type: "answer", question: question.pending, option } : null;
   }

@@ -53,7 +53,9 @@ by hand.
 
 ## Keys: Enter and Esc
 
-1. With a question open (`approval`), click "Answer", then press `1`:
+1. With a question open (`approval`) in a short window where it compacts to
+   "Answer", pressing `1` alone does nothing; click "Answer" (or press `a` on
+   the panel), then press `1`:
    "Yes, proceed" is sent (the card shows no key hints); `/api/state`
    `questions` empties and the conversation shows "You approved".
 2. Esc in the composer goes to the panel, Esc on the panel returns the keys

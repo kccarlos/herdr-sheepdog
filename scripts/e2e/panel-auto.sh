@@ -87,7 +87,9 @@ key 36 1
 check "keys: Esc, Esc returns the keys to the terminal (typed command ran)" e2e_wait 10 bash -c "HC_SESSION='$E2E_HC_SESSION' HC_SOCKET='$E2E_HC_SOCKET' hc read '$T' | grep -qx 'esc-ok-42'"
 shot esc-terminal
 
-# Approvals show at once; `1` on the panel answers.
+# Approvals show at once; inline cards answer on `1`, while in a short window
+# (such as the VM's 662 px display) the compact "Answer" bar blocks blind `1`,
+# opens on `a`, and answers on `1`.
 "$HERE/scenario.sh" "$DIR" approval >/dev/null || bad "approval scenario"
 check "approval: the question is open within 2 s" e2e_wait 2 bash -c "curl -fs '$E2E_URL/api/state' | jq -e '[.questions[] | select(.kind==\"answer_prompt\")] | length == 1'"
 sleep 1
@@ -96,6 +98,15 @@ raise
 e2e_app "do" pane.go --direction right >/dev/null
 sleep 0.5
 typed 1
+WIN_H=$(jq -r '.bounds[3] // empty | floor' "$E2E_APP_HOME/window.json" 2>/dev/null)
+[ -n "$WIN_H" ] || WIN_H=$(osascript -e "tell application \"System Events\" to item 2 of (get size of front window of (first process whose unix id is $PID))" 2>/dev/null || echo 0)
+if [ "${WIN_H:-0}" -gt 0 ] && [ "$WIN_H" -lt 1074 ]; then
+  sleep 0.5
+  check "keys: 1 on a compact question bar does not blindly answer" bash -c "curl -fs '$E2E_URL/api/state' | jq -e '[.questions[] | select(.kind==\"answer_prompt\")] | length == 1'"
+  typed a
+  sleep 0.5
+  typed 1
+fi
 sleep 1.5
 check "keys: 1 on the panel answers the question (questions empty)" e2e_wait 10 bash -c "curl -fs '$E2E_URL/api/state' | jq -e '(.questions | length == 0) and ([.agents[] | select(.alias==\"auth\") | .last_block.answered] | first == true)'"
 shot approved
