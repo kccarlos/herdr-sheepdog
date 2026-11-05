@@ -417,7 +417,7 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 		s.log.Log(logSource, "voice.push_dropped", "", d)
 		return
 	}
-	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
+	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency, PendingID: voice.PushPendingID(item.tags)})
 }
 
 // clip bounds an append's content (the API limit is 500 tokens; ~4
