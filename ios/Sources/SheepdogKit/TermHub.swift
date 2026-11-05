@@ -46,11 +46,20 @@ public final class TermHub: LinkChannelClient {
     public var openChannels: [Int] { socket.openChannels }
 
     public func update(endpoint: DaemonEndpoint) {
-        let wasOpen = !handlers.isEmpty
-        socket.disconnect()
+        let sameComputer = ConversationCache.key(for: socket.currentEndpoint) == ConversationCache.key(for: endpoint)
+        if sameComputer, !handlers.isEmpty {
+            socket.move(to: endpoint)
+            return
+        }
+        lingerTask?.cancel()
+        lingerTask = nil
+        let closing = handlers
         handlers.removeAll()
+        socket.disconnect()
         socket.update(endpoint: endpoint)
-        if wasOpen { socket.connect() }
+        for (ch, handler) in closing.sorted(by: { $0.key < $1.key }) {
+            handler(.closed(ch: ch, reason: .gone, canTakeOver: false))
+        }
     }
 
     /// Opens a channel for one window; `handler` gets that channel's events

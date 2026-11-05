@@ -218,7 +218,10 @@ final class SessionViewModel: ObservableObject {
     /// The computer answers: notifications stay quiet in the foreground,
     /// the screen already shows what they would say.
     var sessionIsLive: Bool { link.isUsable }
-    var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
+    var endpointDisplay: String {
+        _ = linkModel.presentation
+        return settings.endpoint.map { channelEndpoint($0).display } ?? "not set"
+    }
     var isConfigured: Bool { settings.endpoint != nil }
 
     func pendingQuestion(for agent: Agent) -> String? {
@@ -554,6 +557,7 @@ final class SessionViewModel: ObservableObject {
                 saveCache(now: true, model: previous)
             }
             cardInbox.clear()
+            agentsModel.resetForComputerSwitch()
             healthModel.clear()
             settingsModel.clear()
             notices.clearForSwitch()

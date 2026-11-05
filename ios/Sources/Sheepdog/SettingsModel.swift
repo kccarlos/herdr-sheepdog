@@ -35,7 +35,15 @@ final class SettingsModel {
     /// The computer changed: what was loaded was the old one's.
     func clear() {
         brainModels = nil
+        brainError = nil
         daemonSettings = nil
+        settingsError = nil
+        voiceProviders = nil
+        providerError = nil
+    }
+
+    static func isSuperseded(_ error: Error) -> Bool {
+        error is ComputerFleet.Moved || error is ComputerModel.Stale || error is CancellationError
     }
 
     // MARK: Voice provider (GET/PUT /api/voice/provider[s])
@@ -52,6 +60,8 @@ final class SettingsModel {
             }
             #endif
             voiceProviders = list
+        } catch where Self.isSuperseded(error) {
+            return
         } catch {
             // Hidden rather than an error: the picker is a convenience, and
             // the connection itself reports what is wrong.
@@ -72,6 +82,8 @@ final class SettingsModel {
                 self.voiceProviders = list
                 session.voiceProviderSelected(list.provider)
                 Haptics.tap()
+            } catch where Self.isSuperseded(error) {
+                return
             } catch let error as DaemonError {
                 #if DEBUG
                 if DebugLaunch.fakeProviders {
@@ -110,6 +122,8 @@ final class SettingsModel {
         do {
             brainModels = try await session.current { try await $0.brainModels(provider: provider) }
             brainError = nil
+        } catch where Self.isSuperseded(error) {
+            return
         } catch let error as DaemonError {
             brainError = error.message
         } catch {
@@ -128,6 +142,8 @@ final class SettingsModel {
             do {
                 self.brainModels = try await session.current { try await $0.setBrainModel(provider: provider, model: model) }
                 Haptics.tap()
+            } catch where Self.isSuperseded(error) {
+                return
             } catch let error as DaemonError {
                 self.brainError = error.message
             } catch {
@@ -144,6 +160,8 @@ final class SettingsModel {
         do {
             daemonSettings = try await session.current { try await $0.settings() }
             settingsError = nil
+        } catch where Self.isSuperseded(error) {
+            return
         } catch let error as DaemonError {
             // No orchestrator is a 503: hide the control, say why.
             daemonSettings = nil
@@ -161,6 +179,8 @@ final class SettingsModel {
                 self.daemonSettings = try await session.current { try await $0.setChattiness(level) }
                 self.settingsError = nil
                 Haptics.tap()
+            } catch where Self.isSuperseded(error) {
+                return
             } catch let error as DaemonError {
                 self.settingsError = error.message
             } catch {
@@ -184,6 +204,8 @@ final class SettingsModel {
                 self.daemonSettings = try await session.current { try await $0.setLanguages(codes) }
                 self.settingsError = nil
                 Haptics.tap()
+            } catch where Self.isSuperseded(error) {
+                return
             } catch {
                 // Back to what the daemon has, then say why it refused.
                 await self.loadDaemonSettings()

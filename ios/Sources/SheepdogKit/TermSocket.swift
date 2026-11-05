@@ -147,9 +147,23 @@ public final class TermSocket {
         return components.url
     }
 
+    public var currentEndpoint: DaemonEndpoint { endpoint }
+
     public func update(endpoint: DaemonEndpoint) {
         self.endpoint = endpoint
         trust.follow(endpoint.credentials)
+    }
+
+    /// Re-targets the socket to another endpoint of the same computer,
+    /// keeping open channels so they reopen on the new connection.
+    public func move(to endpoint: DaemonEndpoint) {
+        let changed = self.endpoint != endpoint
+        self.endpoint = endpoint
+        trust.follow(endpoint.credentials)
+        guard wanted, changed else { return }
+        teardown()
+        state = .reconnecting
+        if allowed { start() }
     }
 
     /// The same computer at the address its link uses now (same pin).
