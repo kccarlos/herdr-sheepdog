@@ -100,7 +100,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
-	if p.Held || s.heldQuestion(p.ID) || ((mutedPane == p.PaneID || s.paneMutedCached(p.PaneID)) && !s.toldOpenLocked(p)) {
+	if p.Held || s.heldQuestion(p.ID) || ((mutedPane == p.PaneID || s.paneMutedCached(p.PaneID)) && (!p.Promoted || !s.toldOpenLocked(p))) {
 		// A muted space's question the user was not told about (recorded
 		// unheld while the folder index was cold, or its space muted
 		// since): a bare word does not answer it, as send_keys would not

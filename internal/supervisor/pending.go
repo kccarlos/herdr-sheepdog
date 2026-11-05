@@ -254,42 +254,43 @@ func (s *Supervisor) ExpirePending() {
 // it) is revived too, but only when the user's newest words are
 // about it (wordsAboutMenuLocked): they name one of its options or words
 // of its question. The rail then checks those words as for any prompt.
-// Caller holds s.mu; ok is false when the pane is gone or working, its
-// screen does not parse as a prompt, or — not blocked — the user's
-// words are not about the menu (why says so). screen is the pane read
-// the caller took outside s.mu;
-// a missing read cannot safely revive the prompt.
-func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p state.PendingAction, ok bool, why string) {
+// Caller holds s.mu; revived reports whether a new action was minted from the
+// screen rather than reusing an open question; ok is false when the pane is
+// gone or working, its screen does not parse as a prompt, or — not blocked —
+// the user's words are not about the menu (why says so). screen is the pane
+// read the caller took outside s.mu; a missing read cannot safely revive the
+// prompt.
+func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p state.PendingAction, revived, ok bool, why string) {
 	row, found := s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
 	if screen == nil || screen.err != nil {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
 	prompt, parsed := herdr.ParsePrompt(screen.text)
 	if !parsed {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
 	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == s.promptSignature(prompt) {
-		return cur, true, ""
+		return cur, false, true, ""
 	}
 	for _, q := range s.store.Questions() {
 		if q.Kind == state.PendingAnswerPrompt && q.PaneID == paneID && pendingSignature(q) == s.promptSignature(prompt) {
-			return q, true, ""
+			return q, false, true, ""
 		}
 	}
 	row, found = s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
 	blocked := row.State == herdr.StateBlocked
 	if !blocked && !s.wordsAboutMenuLocked(prompt, row) {
-		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
+		return state.PendingAction{}, false, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
-	return p, true, ""
+	return p, true, true, ""
 }
 
 // registerRevivedQuestionLocked lists a revived answer_prompt in the open

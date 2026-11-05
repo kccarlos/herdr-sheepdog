@@ -269,9 +269,10 @@ type PendingAction struct {
 	// Options are the choices on screen for an answer_prompt action.
 	Options []Option `json:"options,omitempty"`
 	// YesKeys / NoKeys are the keystrokes for a plain yes / no.
-	YesKeys []string `json:"yes_keys,omitempty"`
-	NoKeys  []string `json:"no_keys,omitempty"`
-	Held    bool     `json:"held,omitempty"`
+	YesKeys  []string `json:"yes_keys,omitempty"`
+	NoKeys   []string `json:"no_keys,omitempty"`
+	Held     bool     `json:"held,omitempty"`
+	Promoted bool     `json:"promoted,omitempty"`
 }
 
 // Option is one selectable choice of an answer_prompt action.

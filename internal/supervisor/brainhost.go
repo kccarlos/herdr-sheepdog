@@ -286,22 +286,24 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		}
 	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		revived, ok, why := s.revivePrompt(paneID, "send_keys", screen)
+		found, revived, ok, why := s.revivePrompt(paneID, "send_keys", screen)
 		if !ok {
 			if why != "" {
 				return "", fmt.Errorf("%w: %s; ask the user to clarify; nothing was sent", brain.ErrNotPermitted, why)
 			}
 			return "", fmt.Errorf("%w: %s has no pending approval prompt now; check the agent window and ask again", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
-		p = revived
-		reviving = true
-		if s.heldQuestion(p.ID) {
+		p = found
+		reviving = revived
+		if p.Held || s.heldQuestion(p.ID) {
 			return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
+	} else if p.Held || s.heldQuestion(p.ID) {
+		return "", fmt.Errorf("%w: %s's question is held in a muted space; answer it on the phone or unmute the space to hear it; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 	}
-	if muted && (reviving || !s.toldOpenLocked(p)) {
-		// Recorded unheld while the folder index was cold: still a muted
-		// space's question the user was never told.
+	if muted && (reviving || !p.Promoted || !s.toldOpenLocked(p)) {
+		// Recorded unheld while the folder index was cold, or muted since
+		// without being promoted: still a muted space's question.
 		return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 	}
 	allowed := allowedKeys(p)

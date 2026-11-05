@@ -117,12 +117,13 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		s.noteFocus(out.focus, u.text)
 		s.answered(u, out) // unanswered.go
 		// The reply reaches the user now: the questions it states were
-		// told (displaced.go).
-		uttID := u.id
+		// told (displaced.go). A typed reply shows only Spoken, never
+		// Options.
 		if u.typed {
-			uttID = ""
+			s.toldInReply(out.res.Spoken)
+		} else {
+			s.toldInReplyFor(replyText(out.res), u.id)
 		}
-		s.toldInReplyFor(replyText(out.res), uttID)
 		return out.res
 	}
 	s.fellBack(u, out) // unanswered.go

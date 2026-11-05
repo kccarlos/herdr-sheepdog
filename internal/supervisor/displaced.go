@@ -712,6 +712,8 @@ func (s *Supervisor) toldInReplyFor(text, uttID string) {
 				continue
 			}
 			q = s.promoteHeldLocked(q)
+		} else if readsOut(text, q) && s.paneMutedCached(q.PaneID) {
+			q = s.promoteHeldLocked(q)
 		}
 		s.toldKeyForLocked(keyOf(q), "", uttID)
 	}

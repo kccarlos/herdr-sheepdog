@@ -475,6 +475,7 @@ func (s *Supervisor) holdSpaceQuestions(idx *folderIndex, path string) {
 			}
 		}
 		q.Held = true
+		q.Promoted = false
 		if err := s.store.SetQuestion(q); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
 		}
@@ -750,6 +751,7 @@ func (s *Supervisor) promoteHeld(a announcement) {
 // reply that says it). It returns q as promoted. Caller holds s.mu.
 func (s *Supervisor) promoteHeldLocked(q state.PendingAction) state.PendingAction {
 	q.Held = false
+	q.Promoted = true
 	if err := s.store.SetQuestion(q); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
 		return q
