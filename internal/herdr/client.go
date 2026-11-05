@@ -106,6 +106,10 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
+	// A cancelled ctx ends the call now, not at the deadline: closing
+	// the connection fails the blocked read or write.
+	stopWatch := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopWatch()
 
 	id := c.nextID(method)
 	if params == nil {

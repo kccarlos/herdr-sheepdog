@@ -21,9 +21,17 @@ import (
 // sheepdog serve` still overrides an .env entry. Values are never
 // logged, by any caller of this function or of config.Load.
 func LoadEnvFile(path string) error {
+	_, err := LoadEnvFileNames(path)
+	return err
+}
+
+// LoadEnvFileNames loads the file and returns the names it actually set.
+// On error it also returns names set before the error.
+func LoadEnvFileNames(path string) ([]string, error) {
+	var names []string
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("config: env-file %s: %w", path, err)
+		return names, fmt.Errorf("config: env-file %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -37,23 +45,24 @@ func LoadEnvFile(path string) error {
 		}
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {
-			return fmt.Errorf("config: env-file %s:%d: not KEY=VALUE", path, lineNo)
+			return names, fmt.Errorf("config: env-file %s:%d: not KEY=VALUE", path, lineNo)
 		}
 		key = strings.TrimSpace(key)
 		if key == "" {
-			return fmt.Errorf("config: env-file %s:%d: empty key", path, lineNo)
+			return names, fmt.Errorf("config: env-file %s:%d: empty key", path, lineNo)
 		}
 		if _, set := os.LookupEnv(key); set {
 			continue // the real environment always wins
 		}
 		if err := os.Setenv(key, unquoteEnvValue(strings.TrimSpace(val))); err != nil {
-			return fmt.Errorf("config: env-file %s:%d: setenv %s: %w", path, lineNo, key, err)
+			return names, fmt.Errorf("config: env-file %s:%d: setenv %s: %w", path, lineNo, key, err)
 		}
+		names = append(names, key)
 	}
 	if err := sc.Err(); err != nil {
-		return fmt.Errorf("config: env-file %s: %w", path, err)
+		return names, fmt.Errorf("config: env-file %s: %w", path, err)
 	}
-	return nil
+	return names, nil
 }
 
 // unquoteEnvValue strips one layer of surrounding matching quotes

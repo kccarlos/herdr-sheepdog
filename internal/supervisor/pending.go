@@ -251,7 +251,7 @@ func (s *Supervisor) ExpirePending() {
 // it) is revived too, but only when the user's newest words are
 // about it (wordsAboutMenuLocked): they name one of its options or words
 // of its question. The rail then checks those words as for any prompt.
-// Caller holds s.mu; ok is false when the pane is gone or working, its
+// Caller must not hold s.mu; ok is false when the pane is gone or working, its
 // screen does not parse as a prompt, or — not blocked — the user's
 // words are not about the menu (why says so). screen is the pane read
 // the caller took outside s.mu;
@@ -261,7 +261,6 @@ func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p 
 	if !found || row.State == herdr.StateWorking {
 		return state.PendingAction{}, false, ""
 	}
-	blocked := row.State == herdr.StateBlocked
 	if screen == nil || screen.err != nil {
 		return state.PendingAction{}, false, ""
 	}
@@ -269,6 +268,14 @@ func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p 
 	if !parsed {
 		return state.PendingAction{}, false, ""
 	}
+	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == promptSignature(prompt) {
+		return cur, true, ""
+	}
+	row, found = s.store.Get(paneID)
+	if !found || row.State == herdr.StateWorking {
+		return state.PendingAction{}, false, ""
+	}
+	blocked := row.State == herdr.StateBlocked
 	if !blocked && !s.wordsAboutMenuLocked(prompt, row) {
 		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}

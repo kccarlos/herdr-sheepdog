@@ -454,6 +454,7 @@ final class FileProblemTests: XCTestCase {
         XCTAssertEqual(FileProblem.notFound.words(subject: .folder).title, "That folder is gone")
         XCTAssertEqual(FileProblem.notFound.words(subject: .file).title, "That file is gone")
         XCTAssertEqual(FileProblem.sensitive.words().title, "Hidden for safety")
+        XCTAssertTrue(FileProblem.sensitive.words().message.contains("home folder"))
         let big = FileProblem.tooLarge.words(subject: .file, name: "photo.png", size: 38_000_000)
         XCTAssertEqual(big.message, "photo.png is 38 MB. The phone shows images up to 16 MB, so open it on your computer.")
         XCTAssertTrue(FileProblem.denied.words().message.contains("Files and Folders"))
@@ -791,6 +792,26 @@ final class FileBrowserModelTests: XCTestCase {
         XCTAssertEqual(file, .file)
         let blocked = await model.resolve(link: FileEntry(name: "latest", kind: .link, blocked: true))
         XCTAssertEqual(blocked, .file, "a blocked link is not even asked")
+    }
+
+    func testFailedLinkProbesLeaveTheLoadedListAlone() async {
+        let failures: [Error] = [
+            FilesRefusal(status: 403, problem: .sensitive, message: "hidden"),
+            FilesRefusal(status: 403, problem: .outside, message: "outside"),
+            DaemonError.unreachable(endpoint: "x:1", detail: ""),
+        ]
+        for failure in failures {
+            let model = model { path, _ in
+                if path.isEmpty { return self.listing() }
+                throw failure
+            }
+            await model.start()
+            let original = model.folder
+            let target = await model.resolve(link: FileEntry(name: "link", kind: .link))
+            XCTAssertEqual(target, .file)
+            XCTAssertEqual(model.folder, original, "probe failed: \(failure)")
+            XCTAssertEqual(model.path, "")
+        }
     }
 
     func testReloadKeepsWhatIsShownUntilTheAnswer() async {

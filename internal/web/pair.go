@@ -142,15 +142,32 @@ func (s *Server) pairing(fresh bool) PairResponse {
 	return resp
 }
 
+// freshCodeAsked reports whether r asks for a new pairing code (?new=1).
+// Retiring the code the user is about to scan is a change made by a GET,
+// which the cross-origin guard lets through, so a request the browser says
+// another site or port made (Sec-Fetch-Site neither same-origin nor none)
+// gets the current code instead. A client that sends no such header (the
+// CLI, the panel, curl) is not a browser page and may ask.
+func freshCodeAsked(r *http.Request) bool {
+	if r.URL.Query().Get("new") != "1" {
+		return false
+	}
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+		return true
+	}
+	return false
+}
+
 // handlePair answers the current pairing code (?new=1 makes a new one).
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.pairing(r.URL.Query().Get("new") == "1"))
+	writeJSON(w, http.StatusOK, s.pairing(freshCodeAsked(r)))
 }
 
 // pairQRLink returns the current pairing link for a QR renderer, or
 // writes the same conflict /api/pair would answer when there is none.
 func (s *Server) pairQRLink(w http.ResponseWriter, r *http.Request) (string, bool) {
-	p := s.pairing(r.URL.Query().Get("new") == "1")
+	p := s.pairing(freshCodeAsked(r))
 	if p.Link == "" {
 		writeError(w, http.StatusConflict, p.Error)
 		return "", false

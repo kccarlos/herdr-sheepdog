@@ -239,6 +239,8 @@ type Deps struct {
 	// Shell is config web.shell: paired devices may open the phone shell
 	// and send attachments (on by default; the setup page switches it).
 	Shell bool
+	// Files is config web.files: paired devices may browse files.
+	Files bool
 	// Advertise is config web.advertise: more host:port addresses the
 	// pairing code lists after the daemon's own (a router's port forward).
 	Advertise []string
@@ -262,11 +264,12 @@ type Deps struct {
 
 // Server is the HTTP server. Create with New, then Listen + Serve.
 type Server struct {
-	deps Deps
-	log  logging.Logger
-	mux  *http.ServeMux
-	hub  *hub
-	term *termServer
+	attachmentMu sync.Mutex
+	deps         Deps
+	log          logging.Logger
+	mux          *http.ServeMux
+	hub          *hub
+	term         *termServer
 	// noAccessLogged are the folders web.spaces.no_access already named
 	// (path -> true), so a phone polling /api/spaces logs each once.
 	noAccessLogged sync.Map

@@ -48,7 +48,7 @@ const defaultRepromptPollInterval = time.Second
 // it, so a reprompt it raises never runs an orchestrator turn against a
 // closing orchestrator.
 func (s *Supervisor) startReprompt(paneID string) {
-	if s.cfg.RepromptPoll <= 0 {
+	if s.cfg.RepromptPoll <= 0 || s.shut {
 		return
 	}
 	if !s.track() {
@@ -104,6 +104,9 @@ func (s *Supervisor) pollReprompt(paneID string) {
 		}
 		read, err := s.herdr.Read(s.life, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 		if err != nil {
+			if s.life.Err() != nil {
+				return
+			}
 			continue
 		}
 		prompt, ok := herdr.ParsePrompt(read.Text)
@@ -118,6 +121,9 @@ func (s *Supervisor) pollReprompt(paneID string) {
 		}
 		if !s.raiseReprompt(s.life, row, prompt, "reprompt", time.Since(start)) {
 			s.releasePromptClaim(paneID, sig, prev)
+			if s.life.Err() != nil {
+				return
+			}
 			continue
 		}
 		outcome = "raised"

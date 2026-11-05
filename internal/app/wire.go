@@ -19,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -288,7 +289,7 @@ func (a *App) wire() error {
 		deps.Watcher = a.wref
 	}
 	deps.Term = a.term
-	deps.Shell, deps.Advertise = cfg.Web.Shell, cfg.Web.Advertise
+	deps.Shell, deps.Files, deps.Advertise = cfg.Web.Shell, cfg.Web.Files, cfg.Web.Advertise
 	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {
@@ -338,6 +339,7 @@ func (a *App) buildQuerier() (*cli.Runner, error) {
 		Timeout:         time.Duration(a.cfg.CLI.TimeoutS) * time.Second,
 		MaxOutputBytes:  a.cfg.CLI.MaxOutputKB << 10,
 		Log:             a.log,
+		WithholdEnv:     cliWithheldEnv(a.cfg, a.opts.EnvFileNames),
 	}
 	det := cli.Detect(cfg, a.log)
 	if !det.Codex && !det.Claude {
@@ -428,4 +430,20 @@ func herdrTerm(cfg config.Config, client *herdr.Client) *web.TermDeps {
 		},
 		Shells: shellHost(client), ProjectRoots: cfg.Supervisor.ProjectRoots,
 	}
+}
+
+// cliWithheldEnv keeps dotenv secrets and configured provider keys out of children.
+func cliWithheldEnv(cfg config.Config, names []string) []string {
+	var out []string
+	for _, n := range names {
+		if redact.IsSecretEnvName(n) {
+			out = append(out, n)
+		}
+	}
+	for _, provider := range cfg.Brain.OpenAICompat {
+		if provider.APIKeyEnv != "" {
+			out = append(out, provider.APIKeyEnv)
+		}
+	}
+	return out
 }

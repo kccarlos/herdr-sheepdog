@@ -227,9 +227,6 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 		h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
 	}
 	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
-	if err == nil {
-		h.s.unsignTask(paneID)
-	}
 	if err != nil {
 		return "", fmt.Errorf("%s (%w)", strings.TrimRight(res.Spoken, "."), err)
 	}
@@ -244,6 +241,9 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // approved") — then the answer send path (answerKeys).
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	defer ps.Unlock()
 	// The space mute is read fresh, outside s.mu (it may read herdr): the
 	// folder index a lock-held check reads can be cold or stale.
 	muted := s.paneMuted(ctx, paneID)
@@ -312,7 +312,8 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
 	}
 	// The one rail reads the user's own recorded words, never what the
-	// model says they were (inputs.go).
+	// model says they were (inputs.go). Claim the input before answerKeys
+	// releases s.mu so a concurrent call cannot spend the same approval.
 	in, reason := s.railInputLocked(p, keys)
 	if reason != "" {
 		if last := s.lastInputLocked(); reason == s.displacedLocked(p, last) {
@@ -330,14 +331,15 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if reviving {
 		s.setPendingMuted(p, muted)
 	}
+	in.used = true
 	// A tool result: a fact for the orchestrator, which phrases the reply.
 	// In the user's language, like the fast path and taps: when the
 	// turn times out after sending, this result is what they hear
 	// (docs/dev/eval/eval-campaign-2026-10-03.md run C, H4).
 	alias, zh := s.sayOf(paneID), s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, zh) }, "brain", nil)
-	if sent {
-		in.used = true
+	if !sent {
+		in.used = false
 	}
 	if res.Clarify {
 		return "", errors.New(res.Spoken)
@@ -456,20 +458,39 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	return "Sent Ctrl-C to " + alias + " twice, and it is still working: it has not stopped.", nil
 }
 
-// sendInterrupt sends one Ctrl-C under the supervisor's lock and marks the
-// pane interrupted before the lock is released, so the working -> idle
-// transition it causes (another goroutine) is not announced as a finish.
+// sendInterrupt marks the pane interrupted before releasing s.mu for the
+// socket RPC, so the working -> idle transition it causes on another
+// goroutine is not announced as a finish, and rolls back on send failure.
 // first also drops the pane's pending action and makes it the subject.
 func (h brainHost) sendInterrupt(ctx context.Context, paneID string, first bool) (string, error) {
 	s := h.s
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	defer ps.Unlock()
+
+	s.mu.Lock()
+	alias := s.sayOf(paneID)
+	prevAt, hadPrev := s.interrupted[paneID]
+	sentAt := s.cfg.Now()
+	s.interrupted[paneID] = sentAt
+	s.mu.Unlock()
+
+	err := s.herdr.Interrupt(ctx, paneID)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	alias := s.sayOf(paneID)
-	if err := s.herdr.Interrupt(ctx, paneID); err != nil {
+	if err != nil {
+		if hadPrev {
+			s.interrupted[paneID] = prevAt
+		} else if cur, ok := s.interrupted[paneID]; ok && cur.Equal(sentAt) {
+			delete(s.interrupted, paneID)
+		}
 		s.log.Log(logSource, "supervisor.cancel_error", paneID, map[string]any{"error": err.Error(), "via": "brain"})
 		return alias, fmt.Errorf("could not interrupt %s: %w", alias, err)
 	}
-	s.interrupted[paneID] = s.cfg.Now()
+	if cur, ok := s.interrupted[paneID]; ok && cur.Equal(sentAt) {
+		s.interrupted[paneID] = s.cfg.Now()
+	}
 	if first {
 		s.dropPendingFor(paneID, "brain_interrupt")
 		s.lastSubject = paneID

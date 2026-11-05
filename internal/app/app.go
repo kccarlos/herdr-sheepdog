@@ -25,6 +25,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
@@ -89,6 +90,8 @@ type Options struct {
 	// Dev turns on the developer-only web routes (config web.dev; the
 	// `serve --dev` flag). See config.Web.
 	Dev bool
+	// EnvFileNames are the environment names loaded from the daemon env file.
+	EnvFileNames []string
 	// Version is reported in daemon.start and /api/state.
 	Version string
 	// Update, when set, is the update notice /api/state reports.
@@ -348,6 +351,9 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The event files and /events are readable by paired devices: mask the
+	// daemon's keys in them as in daemon.log (serve.go).
+	elog.SetRedactor(redact.ForConfig(cfg).String)
 	var log logging.Logger = elog
 	if opts.Echo != nil {
 		log = teeLogger{elog, opts.Echo}

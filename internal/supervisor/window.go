@@ -160,20 +160,41 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 		return WindowResult{}, ErrNoSuchAgent
 	}
 	name := aliasOr(state.Say(row))
-	if _, err := s.herdr.Prompt(ctx, paneID, text); err != nil {
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	// The row records the prompt before the RPC (see sendInstruction): a
+	// quick turn's transitions can land before Prompt returns.
+	note := clipNote(text)
+	s.mu.Lock()
+	now := s.cfg.Now()
+	prev, _ := s.store.Get(paneID)
+	if _, err := s.store.Update(paneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = note, &now }); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
+	}
+	s.invalidateBriefingLocked()
+	sctx, flight := s.beginSendLocked(ctx, paneID)
+	s.mu.Unlock()
+
+	_, err := s.herdr.Prompt(sctx, paneID, text)
+
+	s.mu.Lock()
+	s.endSendLocked(paneID, flight)
+	if err != nil {
+		_, _ = s.store.Update(paneID, func(a *state.Agent) {
+			if a.CurrentTask == note && a.LastInteraction != nil && a.LastInteraction.Equal(now) {
+				a.CurrentTask, a.LastInteraction = prev.CurrentTask, prev.LastInteraction
+			}
+		})
+		s.invalidateBriefingLocked()
+	}
+	s.mu.Unlock()
+	ps.Unlock()
+	if err != nil {
 		if errors.Is(err, herdr.ErrAgentBlocked) {
 			return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
 		}
 		return WindowResult{}, err
 	}
-	s.mu.Lock()
-	now := s.cfg.Now()
-	note := clipNote(text)
-	if _, err := s.store.Update(paneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = note, &now }); err != nil {
-		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
-	}
-	s.invalidateBriefingLocked()
-	s.mu.Unlock()
 	if s.brain != nil {
 		s.brain.Daemon(fmt.Sprintf("the user typed a prompt in %s's window: %q", name, note))
 	}
@@ -212,7 +233,11 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 			return WindowResult{Kind: "answer"}, fmt.Errorf("%w: %v", ErrWindowRefused, err)
 		}
 	}
-	if err := s.herdr.SendKeys(ctx, paneID, keys...); err != nil {
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	err := s.herdr.SendKeys(ctx, paneID, keys...)
+	ps.Unlock()
+	if err != nil {
 		return WindowResult{}, err
 	}
 	if row.State == herdr.StateBlocked {

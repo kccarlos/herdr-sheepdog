@@ -215,7 +215,8 @@ an agent's or space's working directory and git diffs; secret filenames
 hidden in code (`403 hidden for safety`), and the event log records only the
 path, size and line count read (`files.read`), never file contents.
 
-**Files.** A paired phone can read the files in an agent's or a space's
+**Files.** Set `web.files = false` to disable the Files browser; Changes remains available.
+A paired phone can read the files in an agent's or a space's
 folder through your daemon ([iphone-app.md](iphone-app.md)). Those reads go
 only between your phone and your computer, never to an AI service or the push
 relay. Each read is logged in the daemon's event log (`files.read`) by path

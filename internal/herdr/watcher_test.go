@@ -3,6 +3,8 @@ package herdr_test
 import (
 	"context"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -459,4 +461,153 @@ func TestWatcherSnapshotReportsRename(t *testing.T) {
 		t.Fatalf("state change with rename = %+v", tr)
 	}
 	expectNoTransition(t, ch, 300*time.Millisecond)
+}
+
+type scriptedEventSource struct {
+	mu       sync.Mutex
+	snapshot func(ctx context.Context) (herdr.Snapshot, error)
+	paneCh   chan herdr.StatusEvent
+	fleetCh  chan herdr.FleetEvent
+	resyncCh chan struct{}
+	subs     atomic.Int32
+}
+
+func (s *scriptedEventSource) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
+	s.mu.Lock()
+	fn := s.snapshot
+	s.mu.Unlock()
+	return fn(ctx)
+}
+
+func (s *scriptedEventSource) Subscribe(ctx context.Context, _ string) <-chan herdr.StatusEvent {
+	s.subs.Add(1)
+	out := make(chan herdr.StatusEvent)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-s.paneCh:
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
+}
+
+func (s *scriptedEventSource) SubscribeFleet(context.Context) <-chan herdr.FleetEvent {
+	return s.fleetCh
+}
+
+func (s *scriptedEventSource) Resync() <-chan struct{} {
+	return s.resyncCh
+}
+
+func TestWatcherBufferedStatusAfterCloseDoesNotResurrectPane(t *testing.T) {
+	paneCh := make(chan herdr.StatusEvent)
+	src := &scriptedEventSource{
+		paneCh:   paneCh,
+		fleetCh:  make(chan herdr.FleetEvent),
+		resyncCh: make(chan struct{}, 1),
+		snapshot: func(context.Context) (herdr.Snapshot, error) {
+			return herdr.Snapshot{
+				Workspaces: []herdr.WorkspaceInfo{{WorkspaceID: "w5", Label: "auth"}},
+				Panes:      []herdr.PaneInfo{{PaneID: "w5:p1", WorkspaceID: "w5"}},
+				Agents:     []herdr.AgentInfo{{PaneID: "w5:p1", WorkspaceID: "w5", Agent: "codex", Status: herdr.StateIdle}},
+			}, nil
+		},
+	}
+
+	w := herdr.NewWatcher(src, herdr.WatcherConfig{Debounce: debounce, SnapshotInterval: time.Hour, DedupWindow: dedupWin}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	ch := w.Transitions()
+	expectTransition(t, ch, "", herdr.StateIdle)
+	if got := src.subs.Load(); got != 1 {
+		t.Fatalf("initial pane subscriptions = %d, want 1", got)
+	}
+
+	// On resync, while Run is paused inside Snapshot, buffer a status event from
+	// the existing per-pane subscription into w.status before removePane runs.
+	src.mu.Lock()
+	src.snapshot = func(context.Context) (herdr.Snapshot, error) {
+		paneCh <- herdr.StatusEvent{PaneID: "w5:p1", WorkspaceID: "w5", Agent: "codex", State: herdr.StateWorking, Source: "socket"}
+		paneCh <- herdr.StatusEvent{PaneID: "w5:p1", WorkspaceID: "w5", Agent: "codex", State: herdr.StateDone, Source: "socket"}
+		paneCh <- herdr.StatusEvent{PaneID: "w5:p1", WorkspaceID: "w5", Agent: "codex", State: herdr.StateIdle, Source: "socket"}
+		return herdr.Snapshot{}, nil
+	}
+	src.mu.Unlock()
+	src.resyncCh <- struct{}{}
+
+	tr := expectTransition(t, ch, herdr.StateIdle, herdr.StateUnknown)
+	if !tr.Closed {
+		t.Fatalf("expected closed transition, got %+v", tr)
+	}
+
+	// Buffered status events from the removed pane must be dropped, never resurrecting it.
+	expectNoTransition(t, ch, 150*time.Millisecond)
+	if got := src.subs.Load(); got != 1 {
+		t.Fatalf("pane subscriptions after close = %d, want 1 (closed pane was re-subscribed)", got)
+	}
+}
+
+func TestWatcherReusedShellPaneClearsExitedAgentNameAndSession(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "w5", Label: "shell"})
+	srv.SetPane(herdr.PaneInfo{PaneID: "w5:p1", WorkspaceID: "w5"})
+	srv.SetAgent(herdr.AgentInfo{
+		PaneID:      "w5:p1",
+		WorkspaceID: "w5",
+		Status:      herdr.StateIdle,
+		Agent:       "claude",
+		Name:        "old-claude",
+		Session:     &herdr.AgentSession{Kind: "claude", Value: "/tmp/old-claude.jsonl"},
+	})
+	w, _, _ := startWatcher(t, srv, time.Hour, 1)
+	ch := w.Transitions()
+
+	first := expectTransition(t, ch, "", herdr.StateIdle)
+	if first.Name != "old-claude" || first.Session == nil || first.Session.Value != "/tmp/old-claude.jsonl" {
+		t.Fatalf("initial transition = %+v, session=%+v", first, first.Session)
+	}
+
+	// Agent exits to shell (pane stays alive).
+	srv.EmitAgentDetected("w5:p1", "w5", "claude", true, herdr.StateDone)
+	srv.RemoveAgent("w5:p1")
+	var rel herdr.Transition
+	for !rel.Released {
+		rel = recvTransition(t, ch)
+	}
+
+	// A new unnamed, sessionless agent starts in the same shell pane.
+	srv.SetAgent(herdr.AgentInfo{
+		PaneID:      "w5:p1",
+		WorkspaceID: "w5",
+		Status:      herdr.StateIdle,
+		Agent:       "codex",
+	})
+	srv.EmitAgentDetected("w5:p1", "w5", "codex", false, "")
+
+	fresh := expectTransition(t, ch, "", herdr.StateIdle)
+	if fresh.Agent != "codex" {
+		t.Fatalf("fresh agent = %q, want codex", fresh.Agent)
+	}
+	if fresh.Name != "" {
+		t.Errorf("fresh agent inherited exited agent's name %q, want empty", fresh.Name)
+	}
+	if fresh.Session != nil {
+		t.Errorf("fresh agent inherited exited agent's session %+v, want nil", fresh.Session)
+	}
 }

@@ -566,6 +566,17 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // its prompt (agy, a finish that asks, a menu) answers as any other.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
+	p, _, has := s.questionByID(id)
+	s.mu.Unlock()
+	if !has {
+		return voice.ToolResult{}, ErrPendingGone
+	}
+
+	ps := s.paneSend(p.PaneID)
+	ps.Lock()
+	defer ps.Unlock()
+
+	s.mu.Lock()
 	p, slot, has := s.questionByID(id)
 	_, exists := s.store.Get(p.PaneID)
 	s.mu.Unlock()
@@ -600,6 +611,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
+
 	if option < 1 || option > len(p.Options) || p.Options[option-1].Meta {
 		s.mu.Unlock()
 		return voice.ToolResult{}, fmt.Errorf("%w: %d (the question has %d)", ErrNoSuchOption, option, len(p.Options))
@@ -619,10 +631,11 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, errors.New(reason)
 	}
+	in.used = true
 	alias := s.sayOf(p.PaneID)
 	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
-	if sent {
-		in.used = true
+	if !sent {
+		in.used = false
 	}
 	s.mu.Unlock()
 	if !sent {

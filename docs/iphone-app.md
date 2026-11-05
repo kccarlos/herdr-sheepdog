@@ -25,6 +25,27 @@ type one, or ask it aloud (the demo starts with the microphone off and
 asks for the microphone and speech recognition when you first tap it). No daemon, no key, no network. **Leave** returns to
 setup.
 
+## Screenshots
+
+All from the [offline demo](#try-it-without-a-computer-the-demo), on an iPhone 18 Pro. Redo them with `ios/scripts/readme-shots.sh` ([how](dev/development.md#readme-and-docs-images)).
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="../assets/readme/app/conversation.png" alt="The conversation: the voice answers what failed and suggests what to ask next" width="240"><br><sub>The conversation</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/agents.png" alt="Agents grouped as Needs you, Working and Done" width="240"><br><sub>Agents: Needs you, Working, Done</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/approval.png" alt="An approval card with the agent's question and its options" width="240"><br><sub>An approval</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/agent-window.png" alt="An agent's window: its terminal and the keys to answer it" width="240"><br><sub>An agent's window</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="../assets/readme/app/files.png" alt="The Files browser for an agent's folder" width="240"><br><sub>Files</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/markdown.png" alt="A Markdown file shown as a formatted page" width="240"><br><sub>A Markdown file</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/changes.png" alt="Changes: an agent's diff, with added and removed lines" width="240"><br><sub>Changes: a diff</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/dark-approval.png" alt="The same approval in dark mode" width="240"><br><sub>Dark mode</sub></td>
+  </tr>
+</table>
+
+<p align="center"><img src="../assets/readme/app/ipad.png" alt="On iPad the agents sit in a sidebar beside the detail" width="720"></p>
+
 ## Pair
 
 1. On the computer: open the setup page (`sheepdog setup`), or run
@@ -269,6 +290,7 @@ With one computer, none of this shows: no names and no Talk to.
     lines added and removed; tap one for its diff. It only shows changes
     and never edits anything. "No repository" means the agent's folder is
     not a git repository.
+  - Set `web.files = false` on the computer to hide Files; Changes stays available.
   - **⋯ ▸ Files** (and **Files** on a space's page) opens a read-only browser
     for the agent's or space's folder; it never changes a file. Folders come
     first, then files by name or modified date, with a path bar to step back

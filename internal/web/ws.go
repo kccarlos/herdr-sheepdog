@@ -153,7 +153,28 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(wsReadLimit)
 	c := newClient(h, conn, r.RemoteAddr, h.s.deps.OutQueue)
-	defer h.s.track(r, func() { c.closeAfterFlush(closeDeviceRevoked, "device_revoked") })()
+	initialReason := make(chan string, 1)
+	untrack, tracked := h.s.track(r, func(reason string) {
+		select {
+		case initialReason <- reason:
+		default:
+		}
+		code := websocket.StatusCode(4004)
+		if reason == reasonDeviceRevoked {
+			code = closeDeviceRevoked
+		}
+		c.closeAfterFlush(code, reason)
+	})
+	if !tracked {
+		reason := <-initialReason
+		code := websocket.StatusCode(4004)
+		if reason == reasonDeviceRevoked {
+			code = closeDeviceRevoked
+		}
+		_ = conn.Close(code, reason)
+		return
+	}
+	defer untrack()
 
 	h.mu.Lock()
 	h.seq++
