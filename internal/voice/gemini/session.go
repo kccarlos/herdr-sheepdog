@@ -30,9 +30,10 @@ type Session struct {
 	// rec records the voice context (capture.go); nil records nothing.
 	rec *ctxcap.VoiceSession
 
-	audio  chan []byte
-	events chan voice.Event
-	out    *outQueue
+	audio       chan []byte
+	audioChunks chan voice.AudioChunk
+	events      chan voice.Event
+	out         *outQueue
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -199,6 +200,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		now:         time.Now,
 		rec:         cfg.Context.Session("gemini", cfg.Model),
 		audio:       make(chan []byte),
+		audioChunks: make(chan voice.AudioChunk),
 		events:      make(chan voice.Event, cfg.EventBuffer),
 		out:         newOutQueue(),
 		status:      voice.StatusConnecting,
@@ -239,7 +241,7 @@ func (s *Session) Start(ctx context.Context) error {
 	s.install(conn, resumed, false)
 
 	s.wg.Add(4)
-	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio) }()
+	go func() { defer s.wg.Done(); s.out.pumpBoth(s.ctx, s.audio, s.audioChunks) }()
 	go func() { defer s.wg.Done(); s.pushLoop(s.ctx) }()
 	go func() { defer s.wg.Done(); s.run(s.ctx) }()
 	go func() { defer s.wg.Done(); s.refreshLoop(s.ctx) }()
@@ -292,6 +294,59 @@ func (s *Session) finish(reason string) {
 
 // Audio implements voice.Session.
 func (s *Session) Audio() <-chan []byte { return s.audio }
+
+// AudioChunks yields outbound audio frames paired with their flush epoch.
+func (s *Session) AudioChunks() <-chan voice.AudioChunk { return s.audioChunks }
+
+// FlushAudio purges queued outbound audio for a daemon-initiated client flush
+// (afterCancel) and returns the flushed epoch.
+func (s *Session) FlushAudio() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.speaking = false
+	seq := s.recap.AddSeq(voice.RecapAssistant, s.outText)
+	s.outText = ""
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	if !s.noClient {
+		s.play.FlushMeta(now, voice.FlushMeta{
+			RecapSeq:    seq,
+			UtteranceID: uttID,
+			ByPush:      false,
+		})
+	} else {
+		s.play.Detach()
+	}
+	_, epoch := s.out.FlushEpoch()
+	return epoch
+}
+
+// PurgeAudio drops queued outbound audio on a retiring session without
+// recording a client flush acknowledgement slot.
+func (s *Session) PurgeAudio() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, epoch := s.out.Purge()
+	return epoch
+}
+
+// ExpectFlush records a daemon flush barrier emitted outside the session
+// (e.g. a provider switch) whose client acknowledgement will arrive here.
+func (s *Session) ExpectFlush() {
+	s.mu.Lock()
+	if !s.noClient {
+		s.play.Flush(s.now())
+	}
+	s.mu.Unlock()
+}
+
+// BumpAudioEpoch advances the outbound audio queue's epoch across a switch.
+func (s *Session) BumpAudioEpoch() {
+	s.mu.Lock()
+	s.out.BumpEpoch()
+	s.mu.Unlock()
+}
 
 // Events implements voice.Session.
 func (s *Session) Events() <-chan voice.Event { return s.events }
@@ -592,6 +647,7 @@ func (s *Session) SendText(text string) error {
 	s.mu.Lock()
 	s.openTurnLocked()
 	s.flushRecapLocked()
+	s.play.TurnComplete()
 	s.recap.Add(voice.RecapUser, text)
 	s.mu.Unlock()
 	s.logTurn(s.noteInput(s.now()))
@@ -792,23 +848,30 @@ func (s *Session) speakingLocked(now time.Time) bool {
 }
 
 // ClientPlayback applies a /ws client playback report
-// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback,
-// wakes the push queue (a drained reply may release a push), and when a
-// flushed run was cut short emits the heard part as a cut transcript
-// for the orchestrator.
+// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback, wakes
+// the push queue (a drained reply may release a push), and when a flushed run
+// was cut short emits the heard part as a cut transcript for the orchestrator.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	now := s.now()
 	rep := s.play.Report(now, state, playedMs)
 	s.echo.Playback(now, state)
 	utt := s.playUtt.Started(state)
+	if state == voice.PlaybackFlushed && !rep.Awaited {
+		s.out.Purge()
+	}
 	if rep.Cut != nil {
 		// Which reply the cut run played, and who cut it: the supervisor
 		// records an answer the user talked over as unanswered.
-		rep.Cut.UtteranceID = s.playUtt.Run()
-		rep.Cut.ByPush = s.cutByPushLocked(now)
-		s.flushRecapLocked()
-		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+		if !rep.Awaited {
+			rep.Cut.UtteranceID = s.playUtt.Flushed(true)
+			rep.Cut.ByPush = s.cutByPushLocked(now)
+			if rep.RecapSeq == 0 {
+				rep.RecapSeq = s.recap.AddSeq(voice.RecapAssistant, s.outText)
+				s.outText = ""
+			}
+		}
+		s.recap.CutSeq(rep.RecapSeq, rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
 	}
 	var cutFact string
 	if state == voice.PlaybackFlushed && s.useBriefings() {

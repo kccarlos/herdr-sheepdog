@@ -50,6 +50,10 @@ type playbackReporter interface {
 // message, or its silence gate read the same way) for push timing.
 type speechReporter interface{ ClientSpeaking(on bool) }
 
+// audioFlusher purges queued session audio and returns the epoch fenced
+// off by the flush.
+type audioFlusher interface{ FlushAudio() uint64 }
+
 // tagPusher is a session that carries tags onto a push
 // (supervisor.TagPusher).
 type tagPusher interface {
@@ -66,10 +70,13 @@ type hub struct {
 	// clientInfo is the accepted client-ready identity of client.
 	clientInfo *VoiceClientInfo
 	seq        int
-	status     voice.Status
-	reason     string
-	stalled    bool
-	muted      bool
+	// flushedEpoch is the highest voice audio epoch already flushed;
+	// any late-arriving chunk at or below it is dropped.
+	flushedEpoch uint64
+	status       voice.Status
+	reason       string
+	stalled      bool
+	muted        bool
 	// unheard: model audio is being dropped for want of a client in the
 	// current run (web.audio_unheard is logged once per run; a client
 	// attaching or the model's turn completing starts a new run).
@@ -179,6 +186,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.seq++
 	c.id = h.seq
+	c.flushedEpoch = h.flushedEpoch
 	busy := h.client != nil
 	h.mu.Unlock()
 
@@ -302,21 +310,49 @@ func (h *hub) current() *client {
 // reason; what remains here is the model's own answer to audio it
 // heard before the page went away.
 func (h *hub) sendAudio(chunk []byte) {
-	seq := h.s.audio.Arrived(h.s.deps.Now(), len(chunk))
+	h.sendAudioChunk(voice.AudioChunk{Data: chunk})
+}
+
+func (h *hub) sendAudioChunk(chunk voice.AudioChunk) {
+	if n := len(chunk.FlushedEpochs); n > 0 {
+		h.mu.Lock()
+		latest := h.flushedEpoch
+		c := h.client
+		h.mu.Unlock()
+		if c != nil {
+			c.mu.Lock()
+			if c.flushedEpoch < latest {
+				latest = c.flushedEpoch
+			}
+			c.mu.Unlock()
+		}
+		if chunk.FlushedEpochs[n-1] > latest {
+			for _, ep := range chunk.FlushedEpochs {
+				if ep > latest {
+					h.flush(ep)
+				}
+			}
+		}
+	}
 	h.mu.Lock()
+	if chunk.Epoch != 0 && chunk.Epoch <= h.flushedEpoch {
+		h.mu.Unlock()
+		return
+	}
 	c := h.client
 	first := c == nil && !h.unheard
 	if c == nil {
 		h.unheard = true
 	}
 	h.mu.Unlock()
+	seq := h.s.audio.Arrived(h.s.deps.Now(), len(chunk.Data))
 	if first {
-		h.s.log.Log(logSource, "web.audio_unheard", "", map[string]any{"bytes": len(chunk), "provider": h.s.voiceProvider()})
+		h.s.log.Log(logSource, "web.audio_unheard", "", map[string]any{"bytes": len(chunk.Data), "provider": h.s.voiceProvider()})
 	}
 	if c == nil {
 		return
 	}
-	c.enqueue(frame{binary: true, data: chunk, audioSeq: seq})
+	c.enqueue(frame{binary: true, data: chunk.Data, audioSeq: seq, epoch: chunk.Epoch})
 }
 
 // send delivers a control message to the client, if any.
@@ -341,7 +377,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.mu.Lock()
 		h.endTurnLocked() // cut on purpose: what was not heard is not owed
 		h.mu.Unlock()
-		h.flush()
+		h.flush(e.Epoch)
 	case voice.EventTurnComplete:
 		h.s.audio.EndRun()
 		h.mu.Lock()
@@ -424,16 +460,27 @@ func (h *hub) push(text string, u voice.Urgency, tags map[string]any) error {
 	return h.s.deps.Voice.Push(text, u)
 }
 
-// flush drops queued audio and tells the client to drop its buffer.
-func (h *hub) flush() {
-	h.s.audio.EndRun()
-	c := h.current()
+// flush drops queued pre-flush audio, fences off epoch, and tells the client
+// to drop its buffer. Epoch-tagged flushes are idempotent so a flush barrier
+// delivered ahead of newer-epoch audio is not sent a second time when the
+// matching EventInterrupted arrives.
+func (h *hub) flush(epoch uint64) {
+	h.mu.Lock()
+	alreadyFlushed := epoch != 0 && epoch <= h.flushedEpoch
+	if !alreadyFlushed {
+		if epoch > h.flushedEpoch {
+			h.flushedEpoch = epoch
+		}
+		h.s.audio.EndRun()
+	}
+	c := h.client
+	h.mu.Unlock()
 	if c == nil {
 		return
 	}
-	dropped := c.dropAudio()
-	c.enqueue(controlFrame(wsproto.Flush()))
-	h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
+	if dropped, sent := c.flush(epoch, controlFrame(wsproto.Flush())); sent {
+		h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
+	}
 }
 
 // cancel runs the stop tool and applies its effect to the audio pipe
@@ -456,7 +503,11 @@ func (h *hub) cancel(via string) error {
 // was saying). Without a voice session the result is shown as a
 // transcript so the page has something to display.
 func (h *hub) afterCancel(res voice.ToolResult) {
-	h.flush()
+	var ep uint64
+	if fa, ok := h.s.deps.Voice.(audioFlusher); ok {
+		ep = fa.FlushAudio()
+	}
+	h.flush(ep)
 	if h.s.deps.Voice != nil {
 		// Tagged stop: the one reply that stays INTERRUPT even while the
 		// model (or the client's playback) counts as speaking.
@@ -492,6 +543,9 @@ func (h *hub) setSilence(c *client, on bool) {
 	c.silenceTransitions++
 	gateIsDetector := !c.speakingReports
 	c.mu.Unlock()
+	if h.current() != c {
+		return
+	}
 	h.s.log.Log(logSource, "web.client.silence", "", map[string]any{"client_id": c.id, "on": on})
 	if on {
 		if v, ok := h.s.deps.Voice.(audioEnder); ok {
@@ -511,6 +565,9 @@ func (h *hub) setSpeaking(c *client, on bool) {
 	c.mu.Lock()
 	c.speakingReports = true
 	c.mu.Unlock()
+	if h.current() != c {
+		return
+	}
 	h.s.log.Log(logSource, "web.client.speaking", "", map[string]any{"client_id": c.id, "on": on})
 	if v, ok := h.s.deps.Voice.(speechReporter); ok {
 		v.ClientSpeaking(on)
@@ -523,14 +580,16 @@ func (h *hub) setPlayback(c *client, state string, playedMs int) {
 	c.mu.Lock()
 	c.playbackReports++
 	c.mu.Unlock()
-	if state == voice.PlaybackDrained {
+	h.mu.Lock()
+	active := h.client == c
+	if active && state == voice.PlaybackDrained {
 		// The client played everything it was sent: the turn's text so
 		// far was heard (the handoff's acknowledged position).
-		h.mu.Lock()
-		if h.client == c {
-			h.turnHeard = len(h.turnOut)
-		}
-		h.mu.Unlock()
+		h.turnHeard = len(h.turnOut)
+	}
+	h.mu.Unlock()
+	if !active {
+		return
 	}
 	if v, ok := h.s.deps.Voice.(playbackReporter); ok {
 		v.ClientPlayback(state, playedMs)
@@ -580,6 +639,8 @@ type frame struct {
 	// audioSeq is an audio frame's number in the server's AudioLog
 	// (0: not recorded), so writeLoop can note when it went out.
 	audioSeq uint64
+	// epoch is the voice interrupt epoch of a binary audio frame.
+	epoch uint64
 }
 
 func controlFrame(m wsproto.Message) frame {
@@ -600,12 +661,13 @@ type client struct {
 	max    int
 	start  time.Time
 
-	mu      sync.Mutex
-	queue   []frame
-	closing bool
-	notify  chan struct{}
-	done    chan struct{}
-	once    sync.Once
+	mu           sync.Mutex
+	queue        []frame
+	flushedEpoch uint64
+	closing      bool
+	notify       chan struct{}
+	done         chan struct{}
+	once         sync.Once
 
 	// counters (under mu)
 	framesIn, framesOut   int
@@ -712,9 +774,29 @@ func (c *client) enqueue(f frame) {
 		f.at = c.h.s.deps.Now()
 	}
 	c.mu.Lock()
-	if c.closing && !f.close {
-		c.mu.Unlock()
+	bp, ok := c.enqueueLocked(f)
+	c.mu.Unlock()
+	if bp > 0 {
+		c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": bp, "queue": c.max})
+	}
+	if !ok {
 		return
+	}
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
+}
+
+// enqueueLocked appends f to c.queue while holding c.mu. If backpressure
+// drops a frame that should be logged, bpDropped > 0 is returned so the
+// caller can log after releasing c.mu.
+func (c *client) enqueueLocked(f frame) (bpDropped int, enqueued bool) {
+	if c.closing && !f.close {
+		return 0, false
+	}
+	if f.binary && f.epoch != 0 && f.epoch <= c.flushedEpoch {
+		return 0, false
 	}
 	if len(c.queue) >= c.max {
 		idx := 0
@@ -730,35 +812,82 @@ func (c *client) enqueue(f frame) {
 		c.dropped++
 		c.queue = append(c.queue[:idx], c.queue[idx+1:]...)
 		if c.dropped == 1 || c.dropped%backpressureEvery == 0 {
-			n := c.dropped
-			c.mu.Unlock()
-			c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": n, "queue": c.max})
-			c.mu.Lock()
+			bpDropped = c.dropped
 		}
 	}
 	c.queue = append(c.queue, f)
-	c.mu.Unlock()
-	select {
-	case c.notify <- struct{}{}:
-	default:
-	}
+	return bpDropped, true
 }
 
-// dropAudio removes every queued audio frame and returns how many.
-func (c *client) dropAudio() int {
+// flush atomically advances the client's flushed audio epoch, drops queued
+// pre-flush audio frames while preserving newer-epoch frames behind the
+// barrier, and enqueues ctrl ahead of any newer-epoch audio.
+func (c *client) flush(epoch uint64, ctrl frame) (int, bool) {
+	if ctrl.at.IsZero() {
+		ctrl.at = c.h.s.deps.Now()
+	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	kept := c.queue[:0]
+	if epoch != 0 && epoch <= c.flushedEpoch {
+		c.mu.Unlock()
+		return 0, false
+	}
+	if epoch > c.flushedEpoch {
+		c.flushedEpoch = epoch
+	}
+	kept := make([]frame, 0, len(c.queue)+1)
 	n := 0
+	inserted := false
+	canSendCtrl := !c.closing || ctrl.close
 	for _, f := range c.queue {
 		if f.binary {
-			n++
-			continue
+			if epoch == 0 || f.epoch == 0 || f.epoch <= epoch {
+				n++
+				continue
+			}
+			if !inserted && canSendCtrl {
+				kept = append(kept, ctrl)
+				inserted = true
+			}
 		}
 		kept = append(kept, f)
 	}
-	c.queue = kept
-	return n
+	var bp int
+	ok := false
+	if inserted {
+		c.queue = kept
+		if len(c.queue) > c.max {
+			idx := 0
+			for i, q := range c.queue {
+				if q.binary {
+					idx = i
+					break
+				}
+			}
+			if c.queue[idx].binary {
+				c.droppedAudio++
+			}
+			c.dropped++
+			c.queue = append(c.queue[:idx], c.queue[idx+1:]...)
+			if c.dropped == 1 || c.dropped%backpressureEvery == 0 {
+				bp = c.dropped
+			}
+		}
+		ok = true
+	} else {
+		c.queue = kept
+		bp, ok = c.enqueueLocked(ctrl)
+	}
+	c.mu.Unlock()
+	if bp > 0 {
+		c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": bp, "queue": c.max})
+	}
+	if ok {
+		select {
+		case c.notify <- struct{}{}:
+		default:
+		}
+	}
+	return n, ok
 }
 
 // closeAfterFlush lets queued frames go out, then closes.
@@ -865,8 +994,12 @@ func (c *client) onAudio(data []byte) {
 	}
 	h := c.h
 	h.mu.Lock()
+	active := h.client == c
 	muted := h.muted
 	h.mu.Unlock()
+	if !active {
+		return
+	}
 	if muted || h.s.deps.Voice == nil {
 		c.mu.Lock()
 		c.mutedDrops++
@@ -929,7 +1062,9 @@ func (c *client) onControl(data []byte) {
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
-		h.setMuted(*m.On, "ws")
+		if h.current() == c {
+			h.setMuted(*m.On, "ws")
+		}
 	case wsproto.TypeSilence:
 		h.setSilence(c, *m.On)
 	case wsproto.TypeSpeaking:

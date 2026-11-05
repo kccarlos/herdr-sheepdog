@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -252,5 +253,245 @@ func TestPlaybackStartTaggedWithReplyUtterance(t *testing.T) {
 	ps := h.log.payloads("voice.playback")
 	if len(ps) != 3 || ps[0]["utterance_id"] != "utt-7" || ps[1]["utterance_id"] != nil || ps[2]["utterance_id"] != nil {
 		t.Fatalf("voice.playback = %v", ps)
+	}
+}
+
+func TestGeminiLateFlushedAndUnsolicitedFlushRaces(t *testing.T) {
+	t.Run("late_flushed_preserves_new_turn_and_utterance", func(t *testing.T) {
+		c := newFakeConn("c1")
+		h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+		// Run 1 answers utt-1 and is interrupted by the user (model barge-in).
+		h.s.mu.Lock()
+		h.s.playUtt.Handed("utt-1")
+		h.s.mu.Unlock()
+		speakReply(h, c, strings.Fields("Checking the auth failure right now"), 200)
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+		c.serve(interruptedMsg())
+		h.waitEvent("flush 1", isFlushEvent)
+
+		// Before Run 1's PlaybackFlushed arrives, Run 2 (an urgent push answering
+		// utt-2) goes out, speaks a substring reply ("Checking failure"), and starts playing.
+		if err := h.s.PushTagged("Checking failure", voice.UrgencyInterrupt, map[string]any{"utterance_id": "utt-2", "needs_user": true}); err != nil {
+			t.Fatal(err)
+		}
+		h.waitEvent("push 2 sent", func(voice.Event) bool { return h.log.has("voice.push") })
+		speakReply(h, c, []string{"Checking", "failure"}, 200)
+		c.serve(turnCompleteMsg())
+		h.waitEvent("turn 2 complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+
+		// Now Run 1's late PlaybackFlushed arrives.
+		h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+		ev := h.waitEvent("cut transcript for run 1", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Cut != nil
+		})
+		tr := ev.(voice.EventTranscript)
+		if tr.Cut.UtteranceID != "utt-1" {
+			t.Fatalf("cut UtteranceID = %q, want %q", tr.Cut.UtteranceID, "utt-1")
+		}
+		if tr.Cut.ByPush {
+			t.Fatalf("cut ByPush = true, want false (run 1 was cut by user)")
+		}
+		entries := h.s.RecapEntries()
+		last := entries[len(entries)-1]
+		if last.Text != "Checking failure" || last.Cut {
+			t.Fatalf("newer reply corrupted by late cut: entries=%+v", entries)
+		}
+	})
+
+	t.Run("unsolicited_flushed_does_not_split_user_input_in_progress", func(t *testing.T) {
+		c := newFakeConn("c1")
+		h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+		speakReply(h, c, strings.Fields("Auth is running the migration suite"), 300)
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+
+		// User starts speaking (partial input transcript) while client flushes playback
+		// ahead of the server's interrupted signal.
+		c.serve(inputTranscriptMsg("check the ", false))
+		h.waitEvent("partial in", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Dir == voice.DirIn && strings.Contains(tr.Text, "check")
+		})
+		h.s.ClientPlayback(voice.PlaybackFlushed, 600)
+		c.serve(inputTranscriptMsg("build logs", true))
+		h.waitEvent("final in", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Dir == voice.DirIn && tr.Final
+		})
+
+		var userTexts []string
+		for _, e := range h.s.RecapEntries() {
+			if e.Role == voice.RecapUser {
+				userTexts = append(userTexts, e.Text)
+			}
+		}
+		if len(userTexts) != 1 || userTexts[0] != "check the build logs" {
+			t.Fatalf("user recap entries = %q, want single [\"check the build logs\"]", userTexts)
+		}
+	})
+}
+
+func TestGeminiStopSequenceEmptyFlushAcksDoNotCutNewReply(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	// Run 1 is playing when the user taps Stop on iOS/web: client locally
+	// flushes first, then sends cancel (afterCancel -> FlushAudio + stop push).
+	speakReply(h, c, strings.Fields("Auth is running the long test suite"), 200)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+	h.waitEvent("cut 1", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+
+	_ = h.s.FlushAudio()
+	if err := h.s.PushTagged("Stopped auth.", voice.UrgencyInterrupt, map[string]any{"stop": true}); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("stop push flush", isFlushEvent)
+	c.waitSent(t, "stop push", isContent("Stopped auth."))
+
+	// Model begins speaking the stop confirmation before the client's two
+	// empty flush acknowledgements (for FlushAudio and interrupt("push")) arrive.
+	speakReply(h, c, []string{"Stopped", "auth."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("stop reply complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+
+	isCut := func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	}
+	cutsBefore := h.countEvents(isCut)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	time.Sleep(30 * time.Millisecond)
+
+	if n := h.countEvents(isCut) - cutsBefore; n != 0 {
+		t.Fatalf("empty flush acks emitted %d spurious cut transcripts on new reply", n)
+	}
+	entries := h.s.RecapEntries()
+	if len(entries) == 0 {
+		t.Fatal("recap is empty; new reply was deleted by empty flush ack")
+	}
+	last := entries[len(entries)-1]
+	if last.Text != "Stopped auth." || last.Cut {
+		t.Fatalf("last recap entry = %+v, want intact 'Stopped auth.'", last)
+	}
+}
+
+func TestGeminiCutAfterUnderrunKeepsHeardFirstSentence(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	// First sentence plays and drains mid-turn (underrun before TurnComplete).
+	speakReply(h, c, []string{"Auth", "passed", "tests."}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackDrained, 900)
+
+	// Same turn resumes with a second sentence, then is cut at 0 ms of the second run.
+	speakReply(h, c, []string{"Now", "deploying", "staging."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("turn complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+
+	ev := h.waitEvent("cut transcript", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+	tr := ev.(voice.EventTranscript)
+	if tr.Text != "Auth passed tests." || tr.Cut.HeardMs != 900 {
+		t.Fatalf("cut transcript = %+v (cut=%+v), want Text='Auth passed tests.' HeardMs=900", tr, tr.Cut)
+	}
+	wantFull := "Auth passed tests. Now deploying staging."
+	if tr.Cut.Full != wantFull {
+		t.Fatalf("cut Full = %q, want %q", tr.Cut.Full, wantFull)
+	}
+	entries := h.s.RecapEntries()
+	if len(entries) != 1 || entries[0].Text != "Auth passed tests." || !entries[0].Cut || entries[0].CutAfterMs != 900 {
+		t.Fatalf("recap entries = %+v, want single cut entry 'Auth passed tests.' at 900ms", entries)
+	}
+}
+
+func TestGeminiClientFlushDoesNotCreateUntrackedDaemonFlush(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	var (
+		flushedEpoch  uint64
+		daemonFlushes int
+		mu            sync.Mutex
+	)
+	noteBarrier := func(ep uint64) {
+		mu.Lock()
+		if ep > flushedEpoch {
+			flushedEpoch = ep
+			daemonFlushes++
+		}
+		mu.Unlock()
+	}
+	go func() {
+		for ch := range h.s.AudioChunks() {
+			for _, ep := range ch.FlushedEpochs {
+				noteBarrier(ep)
+			}
+		}
+	}()
+
+	speakReply(h, c, strings.Fields("Auth is running the long test suite"), 200)
+
+	// Client flushes locally on Stop, and Gemini streams one more chunk while
+	// the stop tool waits for herdr before afterCancel runs.
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+	h.waitEvent("cut 1", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+	c.serve(audioMsg(outAudio(200)))
+	c.serve(outputTranscriptMsg("still "))
+	time.Sleep(40 * time.Millisecond)
+
+	noteBarrier(h.s.FlushAudio())
+	if err := h.s.PushTagged("Stopped auth.", voice.UrgencyInterrupt, map[string]any{"stop": true}); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("stop push flush", isFlushEvent)
+	c.waitSent(t, "stop push", isContent("Stopped auth."))
+
+	speakReply(h, c, []string{"Stopped", "auth."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("stop reply complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+	time.Sleep(20 * time.Millisecond)
+
+	h.evMu.Lock()
+	evs := append([]voice.Event(nil), h.events...)
+	h.evMu.Unlock()
+	for _, ev := range evs {
+		if intr, ok := ev.(voice.EventInterrupted); ok {
+			noteBarrier(intr.Epoch)
+		}
+	}
+
+	mu.Lock()
+	acks := daemonFlushes
+	mu.Unlock()
+	if acks != 2 {
+		t.Fatalf("daemon flush barriers emitted = %d, want 2 (client flush created an untracked barrier)", acks)
+	}
+	for i := 0; i < acks; i++ {
+		h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	}
+	entries := h.s.RecapEntries()
+	last := entries[len(entries)-1]
+	if last.Text != "Stopped auth." || last.Cut {
+		t.Fatalf("last recap entry = %+v, want intact 'Stopped auth.'", last)
 	}
 }
