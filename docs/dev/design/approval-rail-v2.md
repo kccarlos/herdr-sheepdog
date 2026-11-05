@@ -14,10 +14,10 @@ The rest of this document assumes **Option A** and **Yes** to automatic canonica
 
 ## Decisions (KC, 2026-11-05)
 
-- Option A: the daemon speaks a question's exact text with its own TTS clip.
-- The answer path doesn't change: speech becomes text in the voice model, the orchestrator reads it, and the daemon maps the answer to keys from the options on screen. TTS only speaks; it never interprets an answer or produces a command.
-- Context comes with the clip. The clip's exact text, its question ID and the agent are added to the voice model's and the orchestrator's context as soon as it's scheduled, marked heard or cut from the playback report, so "yes", "why?" and "what does that change?" all work. The transcript and the app show it too.
-- Users are told. docs/privacy.md, docs/voice setup and the setup page say prompts are sent to a TTS provider as well as the live voice model, after redaction. If TTS fails, the question isn't counted as told and the user is asked to answer on the phone.
+- **Option B, not A.** The voice model asks. No separate TTS, so no new provider, no context sync and no second voice. Wherever this document assumes Option A, Option B applies instead.
+- A question counts as told when the model's output transcript carries the question's key content and the phone reports that audio played. If the model paraphrases too far, it isn't told: the user is asked again, names the agent, or taps. That failure is safe.
+- The answer path doesn't change: speech becomes text in the voice model, the orchestrator reads it, and the daemon maps the answer to keys from the options on screen.
+- Order: the PermissionRequest hook first, then this.
 
 ## Why v1 is being replaced
 
