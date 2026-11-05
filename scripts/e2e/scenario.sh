@@ -248,7 +248,10 @@ scenario_files() {
     ([.[] | select(.pane_id=="e2e:files" and .payload.path=="huge.png" and .payload.raw==true and .payload.reason=="too_large")] | length >= 1)
   ' >/dev/null || e2e_die "files: /api/events?type=files.read missing expected metadata records: $out"
 
-  jlog 'select(.type=="files.read" and .pane_id=="e2e:files")' | jq -s -e 'length >= 6' >/dev/null \
+  # The event log flushes buffered writes to disk every 500 ms.
+  local want_on_disk
+  want_on_disk=$(echo "$out" | jq '[.[] | select(.pane_id=="e2e:files")] | length')
+  e2e_wait 5 bash -c "cat '$E2E_DIR'/data/events/*.jsonl 2>/dev/null | jq -c 'select(.type==\"files.read\" and .pane_id==\"e2e:files\")' 2>/dev/null | jq -s -e 'length >= 6 and length >= $want_on_disk'" \
     || e2e_die "files: on-disk event log has no files.read lines for e2e:files"
   if jlog 'select(.type=="files.read")' | grep -Eq 'hello files|Files Scenario|SECRET_ENV_VALUE|PRIVATE_KEY_MATERIAL|OUTSIDE_SECRET_MARKER|LONGS_KEY_MATERIAL|ZWSP_ENV_MATERIAL'; then
     e2e_die "files: files.read event log leaked file contents"

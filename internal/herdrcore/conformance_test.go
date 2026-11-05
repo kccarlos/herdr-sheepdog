@@ -3,6 +3,7 @@ package herdrcore_test
 import (
 	"context"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"testing"
@@ -256,8 +257,11 @@ func (d *coreDriver) Exit(ctx context.Context, paneID string) error {
 	return nil
 }
 
+var reStripANSI = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])`)
+
 func (d *coreDriver) SetScreen(_ context.Context, paneID, screen string) error {
-	d.srv.SetScreen(paneID, screen)
+	// hc terminal.read always returns rendered plain text without ANSI escapes.
+	d.srv.SetScreen(paneID, reStripANSI.ReplaceAllString(screen, ""))
 	return nil
 }
 

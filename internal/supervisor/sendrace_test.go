@@ -3,11 +3,17 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"google.golang.org/genai"
 )
 
 // A send that no utterance owns (a spawn's first instruction, a turn the
@@ -228,5 +234,67 @@ func TestFailedAnswerKeysLeaveTheBlockOpen(t *testing.T) {
 	row, _ := h.store.Get("w5:p1")
 	if row.LastBlock == nil || row.LastBlock.Answered || row.LastBlock.Answer != "" {
 		t.Errorf("block = %+v after a failed send, want it open", row.LastBlock)
+	}
+}
+
+// When Stop cancels an utterance after Prompt already wrote agent.prompt on
+// the wire and is only waiting to read herdr's reply, Client.Call closes the
+// socket and returns ErrNoReply. Because the instruction already reached herdr,
+// a working agent must still receive Ctrl-C (not "withdrawn before it acted"),
+// and an idle agent must still clear the pending action cleanly.
+func TestStopWhileUtterancePromptAwaitsReplyInterrupts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		state     herdr.State
+		wantPhase string
+		wantCtrlC int
+	}{
+		{"working agent is interrupted", herdr.StateWorking, stopPhaseInterrupt, 1},
+		{"idle agent clears pending without interrupt", herdr.StateIdle, stopPhaseCancelTurn, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := braintest.NewModel(
+				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})}},
+				braintest.Step{Text: braintest.Reply("Telling auth to add a readme. Sent.", "")},
+			)
+			h := newBrainHarness(t, m)
+			h.addAgent("w5:p1", "auth", "codex", tc.state)
+
+			wrotePrompt := make(chan struct{})
+			base := h.sup.herdr
+			h.sup.herdr = &interceptHerdr{
+				Herdr: base,
+				onPrompt: func(ctx context.Context, paneID, text string) (herdr.AgentInfo, error) {
+					close(wrotePrompt)
+					<-ctx.Done()
+					return herdr.AgentInfo{}, fmt.Errorf("herdr: agent.prompt: read: %w (%w)", herdr.ErrNoReply, ctx.Err())
+				},
+			}
+
+			done := make(chan voice.ToolResult, 1)
+			go func() { done <- h.say("tell auth to add a readme") }()
+			select {
+			case <-wrotePrompt:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Prompt was not called")
+			}
+
+			h.call(ToolStop, nil)
+			<-done
+
+			assertStopped(t, h, tc.wantPhase, StopTriggerTool)
+			ctrlC := 0
+			for _, r := range h.sendKeysRequests() {
+				if strings.Contains(r[1], "ctrl+c") {
+					ctrlC++
+				}
+			}
+			if ctrlC != tc.wantCtrlC {
+				t.Errorf("%d ctrl+c sends, want %d: %v", ctrlC, tc.wantCtrlC, h.sendKeysRequests())
+			}
+			if p, ok := h.pending(); ok {
+				t.Errorf("pending action left behind: %+v", p)
+			}
+		})
 	}
 }

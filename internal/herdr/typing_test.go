@@ -55,3 +55,39 @@ func TestTypedInputLiveRegion(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedInputPlain(t *testing.T) {
+	for _, tc := range []struct {
+		name, screen string
+		typed, known bool
+	}{
+		{"claude empty", "────────\n❯\n────────\n  status", false, true},
+		{"claude empty nbsp", "────────\n❯\u00a0\n────────\n  status", false, true},
+		{"claude placeholder", "────────\n❯\u00a0Try \"create a util logging.py that...\"\n────────\n  status", false, true},
+		{"claude wrapped placeholder", "────────\n❯\u00a0Try \"create a util\n  logging.py that...\"\n────────\n  status", false, true},
+		{"claude truncated placeholder", "────────\n❯\u00a0Try \"create a util…\n────────\n  status", false, true},
+		{"claude queue hint", "────────\n❯\u00a0Press up to edit queued messages\n────────\n  status", false, true},
+		{"claude queue edit hint", "────────\n❯\u00a0Press Enter to edit the selected message, or up again for history\n────────\n  status", false, true},
+		{"claude subagent hint", "────────\n❯\u00a0Message @researcher…\n────────\n  status", false, true},
+		{"claude typed", "────────\n❯\u00a0halftyped\n────────\n  status", true, true},
+		{"claude boxed paragraphs", "────────\n❯ \n\n  paragraph\n────────\n  status", true, true},
+		{"single rule typed", "❯ unfinished words\n────────", true, true},
+		{"codex placeholder", "› Ask Codex to do anything\n\n  gpt-5.6-luna max · ~/repo", false, true},
+		{"codex followup placeholder", "› Ask a follow-up question\n\n  gpt-5.6-luna max · ~/repo", false, true},
+		{"codex typed", "› halftyped\n\n  gpt-5.6-luna max · ~/repo", true, true},
+		{"codex wrapped typed", "› line 1\n  line 2\n\n  gpt-5.6-luna max · ~/repo", true, true},
+		{"bare empty prompt", "❯ ", false, true},
+		{"bare unboxed text unclear", "❯ claude", false, false},
+		{"history", "❯ old command\nworking\n\nstatus", false, false},
+		{"history separated", "› old command\n\nworking\n  status", false, false},
+		{"single rule history", "❯ old command\nworking on it\n────────\nstatus", false, false},
+		{"no prompt", "no prompt here", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typed, known := TypedInputPlain(tc.screen)
+			if typed != tc.typed || known != tc.known {
+				t.Errorf("got (%v, %v), want (%v, %v)", typed, known, tc.typed, tc.known)
+			}
+		})
+	}
+}
