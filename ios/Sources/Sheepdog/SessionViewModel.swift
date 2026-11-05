@@ -1213,6 +1213,8 @@ final class SessionViewModel: ObservableObject {
 
     /// Settings ▸ Clear conversation on this phone.
     func clearConversation() {
+        saveTask?.cancel()
+        saveTask = nil
         if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
         history.clear()
         reducer.clear()
@@ -1516,22 +1518,24 @@ final class SessionViewModel: ObservableObject {
         let target = model ?? fleet.current
         guard let endpoint = target.flatMap({ endpoints[$0.id] }) ?? settings.endpoint else { return }
         let saved = target?.conversation ?? spareConversation
-        if model == nil { saveTask?.cancel() }
+        saveTask?.cancel()
+        saveTask = nil
         let snapshot = ConversationSnapshot(endpoint: endpoint, history: saved.history, lastEventID: saved.lastSeq > 0 ? Int64(clamping: saved.lastSeq) : nil)
         let cache = self.cache
-        let write = {
-            do { try cache.save(snapshot, for: endpoint) } catch {
+        if now {
+            cache.enqueueSave(snapshot, for: endpoint) { error in
                 SheepdogLog.socket.error("cache: \(String(describing: error), privacy: .public)")
             }
-        }
-        if now {
-            write()
             return
         }
         saveTask = Task.detached(priority: .utility) {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
-            write()
+            do {
+                try cache.save(snapshot, for: endpoint)
+            } catch {
+                SheepdogLog.socket.error("cache: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -2034,6 +2038,8 @@ final class SessionViewModel: ObservableObject {
     func removeComputer() async {
         guard let id = settings.computers.currentID else {
             // A bare loopback address (the tests): forget it.
+            saveTask?.cancel()
+            saveTask = nil
             if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
             settings.address = ""
             settings.hasBeenConfigured = false
@@ -2050,6 +2056,10 @@ final class SessionViewModel: ObservableObject {
     func removeComputer(_ id: String) async {
         let store = settings.computers
         let wasCurrent = store.currentID == id
+        if wasCurrent {
+            saveTask?.cancel()
+            saveTask = nil
+        }
         await PushCoordinator.shared.unregister(computer: id)
         // Before the store forgets it, which stops its model: on the
         // address its link uses now, not the stored one.
@@ -2058,7 +2068,13 @@ final class SessionViewModel: ObservableObject {
         } else if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
                   let credentials = endpoint.credentials,
                   let ticket = try? await credentials.ticket(base: base) {
-            await DeviceAuth(base: base, session: credentials.session(timeout: 4)).unpair(ticket: ticket)
+            let session = credentials.session(timeout: 4)
+            defer { session.finishTasksAndInvalidate() }
+            await DeviceAuth(base: base, session: session).unpair(ticket: ticket)
+        }
+        if wasCurrent {
+            saveTask?.cancel()
+            saveTask = nil
         }
         if let endpoint = store.endpoint(for: id) { cache.clear(for: endpoint) }
         store.remove(id)
@@ -2133,6 +2149,7 @@ final class SessionViewModel: ObservableObject {
         }
         let endpoint = channelEndpoint(preferred)
         let probeClient = DaemonClient(endpoint: endpoint)
+        defer { probeClient.invalidate() }
         do {
             let hello = try await probeClient.hello()
             _ = try await probeClient.state()
@@ -2371,8 +2388,10 @@ extension SessionViewModel {
     /// pinned session: the pin is the check, never the address).
     private func checkAddress(_ address: String) async -> String? {
         guard let endpoint = DaemonEndpoint(text: address, secure: true, credentials: settings.credentials) else { return ComputerAddress.Problem.unreadable.message }
+        let client = DaemonClient(endpoint: endpoint)
+        defer { client.invalidate() }
         do {
-            _ = try await DaemonClient(endpoint: endpoint).hello()
+            _ = try await client.hello()
             return nil
         } catch DaemonError.untrusted {
             return "Something answered at \(address), but not with this computer's key, so the app did not use it."

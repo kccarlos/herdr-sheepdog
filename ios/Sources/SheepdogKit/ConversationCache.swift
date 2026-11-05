@@ -54,6 +54,8 @@ public struct ConversationSnapshot: Codable, Equatable, Sendable {
 
 /// One small JSON file per daemon endpoint in Application Support.
 public struct ConversationCache: Sendable {
+    private static let ioQueue = DispatchQueue(label: "sheepdog.conversation-cache.io")
+
     public let directory: URL
 
     public init(directory: URL) {
@@ -83,14 +85,40 @@ public struct ConversationCache: Sendable {
     }
 
     public func load(for endpoint: DaemonEndpoint) -> ConversationSnapshot? {
-        guard let data = try? Data(contentsOf: fileURL(for: endpoint)),
-              let snapshot = try? ConversationCache.decoder.decode(ConversationSnapshot.self, from: data),
-              snapshot.version == ConversationSnapshot.currentVersion
-        else { return nil }
-        return snapshot
+        Self.ioQueue.sync {
+            guard let data = try? Data(contentsOf: fileURL(for: endpoint)),
+                  let snapshot = try? ConversationCache.decoder.decode(ConversationSnapshot.self, from: data),
+                  snapshot.version == ConversationSnapshot.currentVersion
+            else { return nil }
+            return snapshot
+        }
     }
 
     public func save(_ snapshot: ConversationSnapshot, for endpoint: DaemonEndpoint) throws {
+        try Self.ioQueue.sync {
+            try writeUnlocked(snapshot, for: endpoint)
+        }
+    }
+
+    /// Enqueues a serialized background write so foreground/background
+    /// lifecycle hooks do not block `@MainActor` on disk I/O while keeping
+    /// strict FIFO ordering with `load` and `clear`.
+    public func enqueueSave(
+        _ snapshot: ConversationSnapshot,
+        for endpoint: DaemonEndpoint,
+        onError: (@Sendable (Error) -> Void)? = nil
+    ) {
+        let cache = self
+        Self.ioQueue.async {
+            do {
+                try cache.writeUnlocked(snapshot, for: endpoint)
+            } catch {
+                onError?(error)
+            }
+        }
+    }
+
+    private func writeUnlocked(_ snapshot: ConversationSnapshot, for endpoint: DaemonEndpoint) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var url = fileURL(for: endpoint)
         let data = try ConversationCache.encoder.encode(snapshot)
@@ -102,14 +130,16 @@ public struct ConversationCache: Sendable {
     }
 
     public func clear(for endpoint: DaemonEndpoint) {
-        try? FileManager.default.removeItem(at: fileURL(for: endpoint))
+        Self.ioQueue.sync {
+            try? FileManager.default.removeItem(at: fileURL(for: endpoint))
+        }
     }
 
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .custom { date, encoder in
             var c = encoder.singleValueContainer()
-            try c.encode(ISO8601DateFormatter.sheepdog.string(from: date))
+            try c.encode(RFC3339Date.string(from: date))
         }
         e.outputFormatting = [.sortedKeys]
         return e
