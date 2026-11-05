@@ -214,7 +214,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	if t.req.Screen != "" {
 		// The supervisor's own read for this event: in the window like a
 		// read_screen result (wrapped, pruned to a stub later).
-		text := prose.TailBytes(t.req.Screen, maxResultBytes)
+		text := prose.TailBytes(b.cfg.Redactor.String(t.req.Screen), maxResultBytes)
 		b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "screen", text), Agent: t.req.Agent,
 			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
 	}
@@ -263,7 +263,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		if step > 1 {
 			state = b.stateNow()
 		}
-		msgs := withState(asm.Messages, state, t.n)
+		msgs := withState(asm.Messages, b.cfg.Redactor.String(state), t.n)
 
 		t0 := b.cfg.Now()
 		resp, raw, err := b.generateStep(ctx, t, step, msgs, &config)
@@ -727,7 +727,11 @@ func (b *Brain) sections() []PromptSection {
 	if screen != "" {
 		record = strings.TrimSpace(record + "\n" + screen)
 	}
-	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
+	secs = append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
+	for i := range secs {
+		secs[i].Text = b.cfg.Redactor.String(secs[i].Text)
+	}
+	return secs
 }
 
 // stateNow renders the state block from the Host as it is now: the loop

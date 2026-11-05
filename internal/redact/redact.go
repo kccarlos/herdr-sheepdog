@@ -113,8 +113,22 @@ func (r *Redactor) String(s string) string {
 			s = strings.ReplaceAll(s, v, Mask)
 		}
 	}
-	for _, re := range shapes {
-		s = re.ReplaceAllString(s, "${1}"+Mask)
+	// Most context contains no credential syntax. Avoid running every
+	// regular expression over ordinary prompt text on every model step.
+	lower := strings.ToLower(s)
+	candidates := [...]bool{
+		strings.Contains(s, "AIza"),
+		strings.Contains(s, "sk-"),
+		strings.Contains(s, "sk-"),
+		strings.Contains(lower, "bearer"),
+		strings.ContainsAny(s, "=:") && (strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "password")),
+		strings.ContainsAny(s, "?&") && (strings.Contains(lower, "key") || strings.Contains(lower, "token")),
+		strings.Contains(s, "-----BEGIN "),
+	}
+	for i, re := range shapes {
+		if candidates[i] {
+			s = re.ReplaceAllString(s, "${1}"+Mask)
+		}
 	}
 	return s
 }

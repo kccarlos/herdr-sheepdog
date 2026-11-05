@@ -16,6 +16,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
@@ -62,6 +63,9 @@ const (
 
 // Config tunes a Brain; zero values take the defaults.
 type Config struct {
+	// Redactor masks secrets before context is saved or sent to a model.
+	Redactor *redact.Redactor
+
 	// Provider is the id the Model given to New is registered under and
 	// the provider of the first turn (default ProviderGemini); SetModel
 	// changes it at runtime (Brain.Provider reports the current one).
@@ -542,6 +546,14 @@ func (b *Brain) ingest(m Message, turn int) {
 		m.TS = b.cfg.Now()
 	}
 	m.Turn = turn
+	m.Content = b.cfg.Redactor.String(m.Content)
+	m.Words = b.cfg.Redactor.String(m.Words)
+	if m.ToolResult != nil {
+		r := *m.ToolResult
+		r.Error = b.cfg.Redactor.String(r.Error)
+		r.Summary = b.cfg.Redactor.String(r.Summary)
+		m.ToolResult = &r
+	}
 	m = b.transcript.Append(m)
 	b.engine.Ingest(m, turn)
 }
