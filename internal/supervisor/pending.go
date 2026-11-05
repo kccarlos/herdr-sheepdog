@@ -169,6 +169,9 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 // dropQuestionLocked removes p from the open questions when it is
 // still its pane's question. Caller holds s.mu.
 func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
+	s.attMu.Lock()
+	delete(s.held, p.ID)
+	s.attMu.Unlock()
 	if q, ok := s.store.Question(p.ID); !ok || q.PaneID != p.PaneID {
 		return
 	}

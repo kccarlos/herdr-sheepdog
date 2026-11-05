@@ -20,12 +20,26 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 	}
 	prev, _ := s.store.Get(t.PaneID)
+	var previousQuestion string
+	for _, q := range s.store.Questions() {
+		if q.PaneID == t.PaneID {
+			previousQuestion = q.ID
+			break
+		}
+	}
 	row, _, err := s.store.Apply(t)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
 	// Apply drops the pane's question when it leaves blocked or closes.
 	s.mu.Lock()
+	if previousQuestion != "" {
+		if _, ok := s.store.Question(previousQuestion); !ok {
+			s.attMu.Lock()
+			delete(s.held, previousQuestion)
+			s.attMu.Unlock()
+		}
+	}
 	s.syncToldLocked() // displaced.go
 	s.mu.Unlock()
 	if !t.Closed && !t.Released {
@@ -426,6 +440,7 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 	// The pane left its prompt (answered in the terminal, say): a prompt
 	// that reads the same later appeared then, not now (inputs.go).
 	delete(s.promptSeenAt, paneID)
+	delete(s.told.asked, paneID)
 }
 
 // aliasOf returns the alias of a pane, or "another agent" when unknown

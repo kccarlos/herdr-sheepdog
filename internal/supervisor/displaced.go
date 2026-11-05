@@ -473,8 +473,19 @@ func (s *Supervisor) statesLocked(words map[string]bool, q state.PendingAction) 
 		for _, w := range nw {
 			names[w] = true
 		}
-		if len(nw) > 0 && len([]rune(nw[0])) >= 2 && !shortNameStopWords[nw[0]] && containsWords(words, nw) {
+		long := false
+		for _, w := range nw {
+			long = long || len([]rune(w)) >= 2 && !shortNameStopWords[w]
+		}
+		if long && containsWords(words, nw) {
 			named = true
+		}
+		if len(nw) == 1 && len([]rune(nw[0])) >= 2 && isHan(nw[0]) {
+			for w := range words {
+				if strings.Contains(w, nw[0]) {
+					named = true
+				}
+			}
 		}
 	}
 	if !named {
@@ -484,11 +495,23 @@ func (s *Supervisor) statesLocked(words map[string]bool, q state.PendingAction) 
 		if len([]rune(w)) < 2 || len([]rune(w)) == 2 && shortNameStopWords[w] {
 			continue
 		}
-		if words[w] && !names[w] && !promptStockWords[w] && !menuStopWords[w] {
+		match := words[w]
+		if isHan(w) && len([]rune(w)) >= 2 {
+			for reply := range words {
+				if strings.Contains(reply, w) {
+					match = true
+				}
+			}
+		}
+		if match && !names[w] && !promptStockWords[w] && !menuStopWords[w] {
 			return true
 		}
 	}
 	return false
+}
+
+func isHan(w string) bool {
+	return w != "" && strings.IndexFunc(w, func(r rune) bool { return !unicode.Is(unicode.Han, r) }) == -1
 }
 
 func wordSet(ws []string) map[string]bool {

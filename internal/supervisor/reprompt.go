@@ -48,7 +48,7 @@ const defaultRepromptPollInterval = time.Second
 // it, so a reprompt it raises never runs an orchestrator turn against a
 // closing orchestrator.
 func (s *Supervisor) startReprompt(paneID string) {
-	if s.cfg.RepromptPoll <= 0 || s.shut {
+	if s.cfg.RepromptPoll <= 0 {
 		return
 	}
 	if !s.track() {

@@ -103,3 +103,66 @@ func TestReview4ScrubPlaceholderDoesNotIdentifyQuestion(t *testing.T) {
 		t.Fatal("generic scrub placeholder identified an unheard question")
 	}
 }
+
+func TestReview2StatesNamesAndChinese(t *testing.T) {
+	for _, tc := range []struct{ name, question, reply string }{
+		{"go-api", "run pytest", "go api asks to run pytest"},
+		{"数据库", "删除临时文件", "数据库请求删除临时文件吗"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.addAgent(docsPane, tc.name, "codex", herdr.StateWorking)
+			_, err := h.store.Update(docsPane, func(a *state.Agent) { a.Alias = tc.name; a.Spoken = tc.name })
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := state.PendingAction{PaneID: docsPane, Question: tc.question}
+			h.sup.mu.Lock()
+			got := h.sup.statesLocked(wordSet(nameTokens(tc.reply)), p)
+			h.sup.mu.Unlock()
+			if !got {
+				t.Fatalf("%q did not identify %q's question", tc.reply, tc.name)
+			}
+		})
+	}
+}
+
+func TestReview2DropHeldQuestionClearsBookkeeping(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block(authPane, "codex-approval-prompt.screen.txt")
+	q, ok := w.store.Question(firstQuestionOf(w.harness, authPane))
+	if !ok {
+		t.Fatal("missing question")
+	}
+	w.sup.mu.Lock()
+	w.sup.dropQuestionLocked(q)
+	w.sup.mu.Unlock()
+	if w.sup.heldQuestion(q.ID) {
+		t.Fatal("dropped question remains held")
+	}
+}
+
+func TestReview2MutedRevivalNeverSends(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.block(authPane, "codex-approval-prompt.screen.txt")
+	p, ok := w.pending()
+	if !ok {
+		t.Fatal("missing pending question")
+	}
+	w.sup.mu.Lock()
+	w.sup.toldKeyLocked(keyOf(p), "")
+	w.sup.mu.Unlock()
+	if err := w.store.ClearPending(); err != nil {
+		t.Fatal(err)
+	}
+	w.mute(t)
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes approve auth")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), authPane, p.YesKeys); err == nil {
+		t.Fatal("muted revival was answered")
+	}
+	if n := w.keysTo(authPane); n != 0 {
+		t.Fatalf("sent %d keys", n)
+	}
+}

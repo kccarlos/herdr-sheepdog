@@ -277,39 +277,39 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	reviving := false
 	for _, q := range s.store.Questions() {
 		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
-			return "", fmt.Errorf("%w: %s's question is held in a muted space; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+			return "", fmt.Errorf("%w: %s's question is held in a muted space; answer it on the phone or unmute the space to hear it; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
 		revived, ok, why := s.revivePrompt(paneID, "send_keys", screen)
 		if !ok {
 			if why != "" {
-				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)
+				return "", fmt.Errorf("%w: %s; ask the user to clarify; nothing was sent", brain.ErrNotPermitted, why)
 			}
-			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
+			return "", fmt.Errorf("%w: %s has no pending approval prompt now; check the agent window and ask again", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 		p = revived
 		reviving = true
 		if s.heldQuestion(p.ID) {
-			return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+			return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 	}
-	if muted && !s.toldOpenLocked(p) {
+	if muted && (reviving || !s.toldOpenLocked(p)) {
 		// Recorded unheld while the folder index was cold: still a muted
 		// space's question the user was never told.
-		return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+		return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 	}
 	allowed := allowedKeys(p)
 	for _, k := range keys {
 		if !allowed[k] {
-			return "", fmt.Errorf("%w: key %q is not in the prompt's option set", brain.ErrNotPermitted, k)
+			return "", fmt.Errorf("%w: key %q is not in the prompt's option set; ask the user to choose an available option", brain.ErrNotPermitted, k)
 		}
 	}
 	if len(keys) == 0 {
-		return "", fmt.Errorf("%w: no keys", brain.ErrNotPermitted)
+		return "", fmt.Errorf("%w: no keys; ask the user to choose an available option", brain.ErrNotPermitted)
 	}
 	if !selectedBy(p, keys) {
-		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
+		return "", fmt.Errorf("%w: keys %v mix more than one option; ask the user to choose one option", brain.ErrNotPermitted, keys)
 	}
 	// The one rail reads the user's own recorded words, never what the
 	// model says they were (inputs.go). Claim the input before answerKeys
@@ -325,11 +325,13 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 			} else {
 				reason += "; the daemon has already told the user why and asked them again"
 			}
+		} else {
+			reason += "; ask the user to repeat their choice"
 		}
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
 	if reviving {
-		s.setPendingMuted(p, muted)
+		s.setPendingMuted(p, false)
 	}
 	in.used = true
 	// A tool result: a fact for the orchestrator, which phrases the reply.

@@ -114,6 +114,13 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	// already used, so only a genuinely new one (a higher seq) passes.
 	s.relayedSeq = s.inputSeq
 	s.pushSeq = s.inputSeq
+	s.syncToldLocked()
+	for k, e := range s.told.told {
+		if !e.closedAt.IsZero() {
+			delete(s.told.told, k)
+		}
+	}
+	clear(s.told.stated)
 	s.mu.Unlock()
 	s.forgetFocus()
 	s.forgetUnanswered()
