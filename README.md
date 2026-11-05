@@ -29,6 +29,14 @@
 
 https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 
+<p align="center">
+  <img src="assets/readme/app/conversation.png" alt="The iPhone app's conversation: the voice tells you what each agent did and suggests what to ask next" width="190">
+  <img src="assets/readme/app/agents.png" alt="The Agents page groups your agents as Needs you, Working and Done" width="190">
+  <img src="assets/readme/app/approval.png" alt="An approval card: an agent asks to run a command and you answer with a tap or a word" width="190">
+  <img src="assets/readme/app/files.png" alt="The Files browser: the agent's folder, with its changed files marked" width="190">
+</p>
+<p align="center"><sub>The iPhone app in its offline demo: the conversation, who needs you, an approval, the agent's files. <a href="docs/iphone-app.md#screenshots">More screenshots →</a></sub></p>
+
 - **a voice-first agent harness** — a realtime voice model and a stateful orchestrator that reads your agents, wired together with rails in code (approvals only on your words) and tuned by evals, not prompt tricks. [how it works →](docs/dev/design-overview.md)
 - **hands-free voice** — talk to your agents on your phone and earbuds, no screen needed. Real-time voice by the latest Gemini 3.8 Live or GPT-Live. [quick start →](docs/quick-start.md)
 - **who's stuck, first** — "what's going on?" covers the whole fleet and names who needs you before anyone else. [commands →](docs/commands.md)
@@ -63,7 +71,7 @@ sheepdog setup
 
 This needs herdr-tui 0.9.4 or newer. [Quick start →](docs/quick-start.md#herdr-tui)
 
-<p align="center"><img src="assets/readme/herdr-tui.gif" alt="Installing the sheepdog plugin in herdr-tui and opening Pair your phone" width="800"></p>
+<p align="center"><img src="assets/readme/setup.gif" alt="The setup page that sheepdog setup opens: pick a starting point, paste a key and see it checked, then scan the pairing QR code with the phone" width="560"></p>
 
 ### On herdr-app (herdr-core)
 
