@@ -360,24 +360,40 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 			s.mu.Unlock()
 			return c, true
 		}
-		wake := s.inputWake
-		s.mu.Unlock()
 		if s.cfg.inputGrace <= 0 {
+			s.mu.Unlock()
 			return claim{}, false
 		}
+		s.graceWaiters++
+		wake := s.inputWake
+		s.mu.Unlock()
 		if deadline == nil {
 			t := time.NewTimer(s.cfg.inputGrace)
 			defer t.Stop()
 			deadline = t.C
 		}
+		var done bool
 		select {
 		case <-wake:
 		case <-deadline:
-			return claim{}, false
+			done = true
 		case <-ctx.Done():
+			done = true
+		}
+		s.mu.Lock()
+		s.graceWaiters--
+		s.mu.Unlock()
+		if done {
 			return claim{}, false
 		}
 	}
+}
+
+// inGraceWait reports whether a to_supervisor call is currently waiting in inputGrace.
+func (s *Supervisor) inGraceWait() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.graceWaiters > 0
 }
 
 // freshRunLocked is the run of unclaimed inputs newer than floor, oldest

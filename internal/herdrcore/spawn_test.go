@@ -352,15 +352,15 @@ func TestStartAgentLaunchIsPendingUntilTheProgramShows(t *testing.T) {
 	if _, err := b.GetAgent(ctx, "t1"); !errors.Is(err, herdr.ErrAgentNotFound) {
 		t.Fatalf("GetAgent on a plain shell = %v, want ErrAgentNotFound", err)
 	}
-	if err := b.StartAgent(ctx, "t1", "x", "codex", nil, 150*time.Millisecond); err != nil {
+	if err := b.StartAgent(ctx, "t1", "x", "codex", nil, 500*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	info, err := b.GetAgent(ctx, "t1")
 	if err != nil || !info.LaunchPending || info.Agent != "codex" {
 		t.Fatalf("GetAgent during the launch = %+v, %v; want pending codex", info, err)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := b.GetAgent(ctx, "t1"); !errors.Is(err, herdr.ErrAgentNotFound) {
-		t.Fatalf("GetAgent after the launch wait = %v, want ErrAgentNotFound", err)
-	}
+	waitFor(t, "the pending launch to expire", func() bool {
+		_, err := b.GetAgent(ctx, "t1")
+		return errors.Is(err, herdr.ErrAgentNotFound)
+	})
 }

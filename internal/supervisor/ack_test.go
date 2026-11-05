@@ -21,8 +21,7 @@ func TestVoiceAnswerIsNotSecondGuessed(t *testing.T) {
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes, make the edit."})
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "On it."})
 	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
-	time.Sleep(120 * time.Millisecond)
-	h.sup.replies.Wait()
+	h.waitRelay()
 	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
 		t.Errorf("relay_by_daemon = %d, want 0", n)
 	}
@@ -62,8 +61,7 @@ func TestAnswerOrRelayAfterAcknowledgementHoldsTheWatch(t *testing.T) {
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: tc.heard})
 			tc.after(h)
-			time.Sleep(120 * time.Millisecond)
-			h.sup.replies.Wait()
+			h.waitRelay()
 			if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
 				t.Errorf("relay_by_daemon = %d, want 0", n)
 			}

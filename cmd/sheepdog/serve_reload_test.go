@@ -21,6 +21,7 @@ import (
 // the copy the first load put in the environment.
 func TestServeSetupModeAndReload(t *testing.T) {
 	noKeys(t)
+	unsetEnv(t, "SHEEPDOG_COMPUTER_NAME")
 	dir := t.TempDir()
 	port := freePort(t)
 	cfgPath := filepath.Join(dir, "config.toml")

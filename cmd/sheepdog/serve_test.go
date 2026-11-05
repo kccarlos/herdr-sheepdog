@@ -20,6 +20,32 @@ func noKeys(t *testing.T) {
 	}
 }
 
+// unsetEnv clears keys for the test (so LoadDotEnv can populate them) and
+// restores their prior values when the test finishes.
+func unsetEnv(t *testing.T, keys ...string) {
+	t.Helper()
+	type saved struct {
+		val string
+		had bool
+	}
+	prev := make(map[string]saved, len(keys))
+	for _, k := range keys {
+		v, ok := os.LookupEnv(k)
+		prev[k] = saved{val: v, had: ok}
+		_ = os.Unsetenv(k)
+	}
+	t.Cleanup(func() {
+		for _, k := range keys {
+			s := prev[k]
+			if s.had {
+				_ = os.Setenv(k, s.val)
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		}
+	})
+}
+
 func TestServeFlagsAndValidation(t *testing.T) {
 	noKeys(t)
 	var stderr bytes.Buffer

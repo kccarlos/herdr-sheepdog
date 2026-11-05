@@ -43,10 +43,12 @@ var _ Renamer = (*herdr.Client)(nil)
 
 // namesState is the names line bookkeeping.
 type namesState struct {
-	mu    sync.Mutex
-	sent  string      // the names line last pushed
-	want  string      // the line waiting for the debounce
-	timer *time.Timer // the pending debounce, nil when none
+	mu     sync.Mutex
+	sent   string      // the names line last pushed
+	want   string      // the line waiting for the debounce
+	timer  *time.Timer // the pending debounce, nil when none
+	closed bool
+	wg     sync.WaitGroup
 	// said holds the spoken names (lower-cased) that went out in a
 	// line meant for the user's ear (noteNamesSaid).
 	said map[string]bool
@@ -102,29 +104,35 @@ func (s *Supervisor) syncNames() {
 	line := namesLine(s.SpokenNames())
 	n := &s.names
 	n.mu.Lock()
-	if line == n.sent && n.timer == nil {
+	if n.closed || (line == n.sent && n.timer == nil) {
 		n.mu.Unlock()
 		return
 	}
 	n.want = line
 	if namesDebounce <= 0 {
 		n.mu.Unlock()
-		s.flushNames()
+		s.flushNames(false)
 		return
 	}
 	if n.timer == nil {
-		n.timer = time.AfterFunc(namesDebounce, s.flushNames)
+		n.wg.Add(1)
+		n.timer = time.AfterFunc(namesDebounce, func() { s.flushNames(true) })
 	}
 	n.mu.Unlock()
 }
 
 // flushNames pushes the waiting names line unless it was already sent.
-func (s *Supervisor) flushNames() {
+func (s *Supervisor) flushNames(fromTimer bool) {
 	n := &s.names
+	if fromTimer {
+		defer n.wg.Done()
+	}
 	n.mu.Lock()
-	n.timer = nil
+	if fromTimer {
+		n.timer = nil
+	}
 	line := n.want
-	if line == "" || line == n.sent {
+	if n.closed || line == "" || line == n.sent {
 		n.mu.Unlock()
 		return
 	}
@@ -138,11 +146,15 @@ func (s *Supervisor) flushNames() {
 func (s *Supervisor) stopNames() {
 	n := &s.names
 	n.mu.Lock()
+	n.closed = true
 	if n.timer != nil {
-		n.timer.Stop()
+		if n.timer.Stop() {
+			n.wg.Done()
+		}
 		n.timer = nil
 	}
 	n.mu.Unlock()
+	n.wg.Wait()
 }
 
 // rename gives the agent the name the user chose: the state table keeps

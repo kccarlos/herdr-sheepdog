@@ -30,15 +30,17 @@ import (
 // The errors every call returns; the web layer maps each to a status and
 // a reason (docs/dev/ws-contract.md "Files").
 var (
-	ErrBadPath   = errors.New("not a clean relative path")
-	ErrOutside   = errors.New("that leaves the folder")
-	ErrSensitive = errors.New("hidden for safety")
-	ErrNotFound  = errors.New("not found")
-	ErrNotFile   = errors.New("not a regular file")
-	ErrDenied    = errors.New("the system refused")
-	ErrTooLarge  = errors.New("too large to show")
-	ErrNotImage  = errors.New("not an image")
-	ErrFailed    = errors.New("could not be read")
+	ErrBadPath     = errors.New("not a clean relative path")
+	ErrOutside     = errors.New("that leaves the folder")
+	ErrSensitive   = errors.New("hidden for safety")
+	ErrHomeRoot    = errors.New("home folder cannot be browsed")
+	ErrPrivateRoot = errors.New("private folder cannot be browsed")
+	ErrNotFound    = errors.New("not found")
+	ErrNotFile     = errors.New("not a regular file")
+	ErrDenied      = errors.New("the system refused")
+	ErrTooLarge    = errors.New("too large to show")
+	ErrNotImage    = errors.New("not an image")
+	ErrFailed      = errors.New("could not be read")
 )
 
 // maxLinks bounds the symlinks one path may pass through.
@@ -50,16 +52,76 @@ type Root struct {
 	name string
 }
 
-// Open opens dir as a root. A missing folder, or a path that is not a
-// folder, is ErrNotFound; a folder with a sensitive name anywhere on its
-// path (an agent working in .git or ~/.ssh), spelled or linked, is
-// ErrSensitive.
-func Open(dir string) (*Root, error) {
-	if SensitivePath(filepath.ToSlash(filepath.Clean(dir))) {
-		return nil, ErrSensitive
+// CheckRoot refuses roots that should never be browsed as a whole:
+//   - the user's home folder or any folder above it (ErrHomeRoot);
+//   - any folder in privateDirs, its parents, or anything inside it
+//     (ErrPrivateRoot), e.g. the daemon's data directory;
+//   - a folder with a sensitive segment anywhere on its cleaned or
+//     symlink-resolved path (ErrSensitive).
+func CheckRoot(dir string, privateDirs ...string) error {
+	root := resolvePath(dir)
+	if home, err := os.UserHomeDir(); err == nil && pathContains(root, resolvePath(home)) {
+		return ErrHomeRoot
 	}
-	if real, err := filepath.EvalSymlinks(dir); err == nil && SensitivePath(filepath.ToSlash(real)) {
-		return nil, ErrSensitive
+	for _, p := range privateDirs {
+		rp := resolvePath(p)
+		if pathContains(root, rp) || pathContains(rp, root) {
+			return ErrPrivateRoot
+		}
+	}
+	if SensitivePath(filepath.ToSlash(filepath.Clean(dir))) || SensitivePath(filepath.ToSlash(root)) {
+		return ErrSensitive
+	}
+	return nil
+}
+
+// resolvePath makes p absolute and resolves symlinks on p (or on its deepest
+// existing prefix when p does not exist yet, e.g. /var -> /private/var).
+func resolvePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	p = filepath.Clean(p)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	var tail []string
+	cur := p
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				real = filepath.Join(real, tail[i])
+			}
+			return real
+		}
+	}
+}
+
+// pathContains reports whether child is parent or inside parent.
+func pathContains(parent, child string) bool {
+	if parent == "" || child == "" {
+		return false
+	}
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Open opens dir as a root. A missing folder, or a path that is not a
+// folder, is ErrNotFound; the home folder (or an ancestor) is ErrHomeRoot;
+// a folder with a sensitive name anywhere on its path (an agent working in
+// .git or ~/.ssh), spelled or linked, is ErrSensitive.
+func Open(dir string) (*Root, error) {
+	if err := CheckRoot(dir); err != nil {
+		return nil, err
 	}
 	// Stat first: os.OpenRoot's own open would wait on a FIFO.
 	info, err := os.Stat(dir)

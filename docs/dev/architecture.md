@@ -129,8 +129,9 @@ stay in memory; every step is also appended to
 `<data_dir>/brain/<run>.requests.jsonl` (one file per daemon run, a
 `segment` field naming the transcript segment, which a "New
 conversation" changes), and a restart loads the tail of the newest file,
-numbering on from it. Nothing is redacted: the bodies hold no key (a test
-asserts it).
+numbering on from it. Secrets are masked with `internal/redact` before
+writing (and `sheepdog redact-logs` masks older files in place); the
+bodies hold no provider key (a test asserts it).
 
 **Voice.** Both live models keep their context server-side and it cannot
 be read back, so the right pane is reconstructed from what the daemon

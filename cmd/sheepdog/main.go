@@ -75,6 +75,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runUninstall(ctx, args[1:], stdout, stderr)
 	case "data":
 		return runData(ctx, args[1:], stdout, stderr)
+	case "redact-logs":
+		return runRedactLogs(ctx, args[1:], stdout, stderr)
 	case "service":
 		return runService(ctx, args[1:], stdout, stderr)
 	case "config":
@@ -182,13 +184,14 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  serve       run the daemon in this terminal (Ctrl-C stops it)")
 	fprintln(w, "")
 	fprintln(w, "Manage:")
-	fprintln(w, "  update      check for a new release and print how to upgrade")
-	fprintln(w, "  uninstall   stop, remove the login service, ask before deleting config and data")
-	fprintln(w, "  service     install|uninstall|start|status|logs: run at login (launchd / systemd)")
-	fprintln(w, "  data        clear [--events|--all]: delete the event log (your transcripts) or all data")
-	fprintln(w, "  config      show|init: inspect or scaffold config.toml")
-	fprintln(w, "  version     print version, commit and build date")
-	fprintln(w, "  help        show this help")
+	fprintln(w, "  update        check for a new release and print how to upgrade")
+	fprintln(w, "  uninstall     stop, remove the login service, ask before deleting config and data")
+	fprintln(w, "  service       install|uninstall|start|status|logs: run at login (launchd / systemd)")
+	fprintln(w, "  data          clear [--events|--all]: delete the event log (your transcripts) or all data")
+	fprintln(w, "  redact-logs   mask secrets in existing orchestrator transcripts and request logs")
+	fprintln(w, "  config        show|init: inspect or scaffold config.toml")
+	fprintln(w, "  version       print version, commit and build date")
+	fprintln(w, "  help          show this help")
 	fprintln(w, "")
 	fprintln(w, "Developer commands (voice-test, brain-test, eval, scorecard, audio-e2e, bench,")
 	fprintln(w, "herdr watch (herdr-tui), prompts, feedback): sheepdog dev --help")

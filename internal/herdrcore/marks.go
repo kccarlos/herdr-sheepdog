@@ -61,8 +61,8 @@ type echo struct {
 }
 
 // maxEchoes bounds the queue of a terminal whose echoes never come (a write
-// that changed nothing sends no event).
-const maxEchoes = 8
+// that changed nothing sends no event) while still holding a burst of writes.
+const maxEchoes = 64
 
 // RunMarks keeps the marks of every local terminal current from one
 // unfiltered subscription, until ctx ends. It re-reads everything after a
@@ -85,6 +85,14 @@ func (b *Backend) RunMarks(ctx context.Context) {
 			}
 		}
 	})
+}
+
+// MarksLive reports whether the marks subscription has loaded its snapshot
+// and is keeping the cache live.
+func (b *Backend) MarksLive() bool {
+	b.cache.mu.Lock()
+	defer b.cache.mu.Unlock()
+	return b.cache.live
 }
 
 // setMarksLive says whether the subscription behind the cache is up. The
@@ -179,15 +187,19 @@ func (b *Backend) applyLabels(address string, seen *uint64, pinned bool) {
 	}
 	next := old
 	next.Seen, next.Pinned = seen, pinned
-	if queue := b.cache.echoes[address]; len(queue) > 0 && queue[0].matches(seen, pinned) {
-		if len(queue) == 1 {
-			delete(b.cache.echoes, address)
-			b.cache.marks[address] = next // the last of our writes: the labels as they are
-		} else {
-			b.cache.echoes[address] = queue[1:]
+	if queue := b.cache.echoes[address]; len(queue) > 0 {
+		for i := range queue {
+			if queue[i].matches(seen, pinned) {
+				if i == len(queue)-1 {
+					delete(b.cache.echoes, address)
+					b.cache.marks[address] = next // the last of our writes: the labels as they are
+				} else {
+					b.cache.echoes[address] = queue[i+1:]
+				}
+				b.cache.mu.Unlock()
+				return
+			}
 		}
-		b.cache.mu.Unlock()
-		return
 	}
 	b.cache.marks[address] = next
 	b.cache.mu.Unlock()

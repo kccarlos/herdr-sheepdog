@@ -1577,8 +1577,11 @@ index lock the agent's own git needs), `core.fsmonitor=false`,
   is no repository the answer is still `200`, with `{"repo": false,
   "reason": "not_repo"|"no_cwd"|"no_git", "files": []}`. An untracked
   `pane_id` is `404 {"error":"not a tracked agent"}`; when the agent's
-  `cwd` itself has a sensitive segment it is
-  `403 {"error":"hidden for safety","reason":"sensitive"}`.
+  `cwd` (or the repository root) has a sensitive segment it is
+  `403 {"error":"hidden for safety","reason":"sensitive"}`, and when it is
+  the home folder, an ancestor of it, or the daemon's data folder (or an
+  ancestor or child of it) it is `403` with `reason` `home_root` or
+  `private_root`.
 - **`GET /api/agents/{pane_id}/changes/{path}`** — one file's unified
   diff: the file's fields plus `"diff": "…"` (empty for a binary file)
   and `truncated` past 512 KB. `path` is the file's `path` from the list,
@@ -1663,6 +1666,9 @@ JSON unless `?raw=1`:
 | 404 | `not_found` | Gone, the folder was removed, or a list of something that is not a folder. |
 | 403 | `outside` | The path leaves the folder through a link. |
 | 403 | `sensitive` | Hidden for safety. |
+| 403 | `home_root` | The folder is the user's home folder or above it. |
+| 403 | `private_root` | The folder is the daemon's data folder, above it, or inside it. |
+| 403 | `files_off` | File browsing is disabled (`web.files = false`). |
 | 403 | `not_file` | A read of a folder, FIFO, socket or device. |
 | 403 | `denied` | The system refused. |
 | 413 | `too_large` | `?raw=1` on an image over 16 MiB. |

@@ -442,6 +442,9 @@ final class MarkdownPathTests: XCTestCase {
 final class FileProblemTests: XCTestCase {
     func testReasonsMapAndAnUnknownOneFails() {
         XCTAssertEqual(FileProblem(reason: "sensitive"), .sensitive)
+        XCTAssertEqual(FileProblem(reason: "home_root"), .homeRoot)
+        XCTAssertEqual(FileProblem(reason: "private_root"), .privateRoot)
+        XCTAssertEqual(FileProblem(reason: "files_off"), .filesOff)
         XCTAssertEqual(FileProblem(reason: "not_file"), .notFile)
         XCTAssertEqual(FileProblem(reason: "too_large"), .tooLarge)
         XCTAssertEqual(FileProblem(reason: "something_new"), .failed)
@@ -453,8 +456,24 @@ final class FileProblemTests: XCTestCase {
         XCTAssertEqual(outside.title, "This file is outside shop")
         XCTAssertEqual(FileProblem.notFound.words(subject: .folder).title, "That folder is gone")
         XCTAssertEqual(FileProblem.notFound.words(subject: .file).title, "That file is gone")
-        XCTAssertEqual(FileProblem.sensitive.words().title, "Hidden for safety")
-        XCTAssertTrue(FileProblem.sensitive.words().message.contains("home folder"))
+        let sensitiveFile = FileProblem.sensitive.words(subject: .file)
+        XCTAssertEqual(sensitiveFile.title, "Hidden for safety")
+        XCTAssertTrue(sensitiveFile.message.contains(".env"))
+        XCTAssertFalse(sensitiveFile.message.contains("home folder"))
+        XCTAssertFalse(sensitiveFile.message.contains("data folder"))
+        let sensitiveFolder = FileProblem.sensitive.words(subject: .folder)
+        XCTAssertEqual(sensitiveFolder.title, "Hidden for safety")
+        XCTAssertTrue(sensitiveFolder.message.contains(".git"))
+        XCTAssertFalse(sensitiveFolder.message.contains("home folder"))
+        let home = FileProblem.homeRoot.words()
+        XCTAssertEqual(home.title, "Can't open your home folder")
+        XCTAssertTrue(home.message.contains("project folder"))
+        let privateRoot = FileProblem.privateRoot.words()
+        XCTAssertEqual(privateRoot.title, "Can't open sheepdog's data folder")
+        XCTAssertTrue(privateRoot.message.contains("project folder"))
+        let filesOff = FileProblem.filesOff.words()
+        XCTAssertEqual(filesOff.title, "File browsing is off")
+        XCTAssertTrue(filesOff.message.contains("web.files = false"))
         let big = FileProblem.tooLarge.words(subject: .file, name: "photo.png", size: 38_000_000)
         XCTAssertEqual(big.message, "photo.png is 38 MB. The phone shows images up to 16 MB, so open it on your computer.")
         XCTAssertTrue(FileProblem.denied.words().message.contains("Files and Folders"))
@@ -469,7 +488,10 @@ final class FileProblemTests: XCTestCase {
     }
 
     func testEveryProblemHasWords() {
-        let all: [FileProblem] = [.noAgent, .noSpace, .noCwd, .notFound, .outside, .sensitive, .notFile, .denied, .tooLarge, .notImage, .badPath, .failed, .olderDaemon]
+        let all: [FileProblem] = [
+            .noAgent, .noSpace, .noCwd, .notFound, .outside, .sensitive, .homeRoot, .privateRoot,
+            .filesOff, .notFile, .denied, .tooLarge, .notImage, .badPath, .failed, .olderDaemon,
+        ]
         for problem in all {
             let words = problem.words()
             XCTAssertFalse(words.title.isEmpty, "\(problem)")
@@ -482,6 +504,9 @@ final class FileProblemTests: XCTestCase {
         XCTAssertTrue(FileProblem.denied.canRetry)
         XCTAssertTrue(FileProblem.failed.canRetry)
         XCTAssertFalse(FileProblem.sensitive.canRetry)
+        XCTAssertFalse(FileProblem.homeRoot.canRetry)
+        XCTAssertFalse(FileProblem.privateRoot.canRetry)
+        XCTAssertFalse(FileProblem.filesOff.canRetry)
         XCTAssertFalse(FileProblem.outside.canRetry)
     }
 }

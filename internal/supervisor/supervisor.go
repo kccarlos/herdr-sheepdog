@@ -430,8 +430,9 @@ type Supervisor struct {
 	life    context.Context
 	endLife context.CancelFunc
 	// inputWake is closed and replaced whenever an input arrives, for a
-	// call waiting out inputGrace.
-	inputWake chan struct{}
+	// call waiting out inputGrace; graceWaiters counts active waits.
+	inputWake    chan struct{}
+	graceWaiters int
 	// relay is the unanswered-utterance watch (relay.go).
 	relay relayWatch
 	// echo is what the voice is saying or just said, for the echo guard

@@ -135,19 +135,26 @@ func TestLogsFollowSeesAppendsAndRotation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	origPoll := followPoll
 	followPoll = 10 * time.Millisecond
+	ready := make(chan struct{})
+	followReady = func() { close(ready) }
+	t.Cleanup(func() {
+		followPoll = origPoll
+		followReady = nil
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &syncBuffer{}
 	done := make(chan struct{})
 	go func() { followFile(ctx, path, out); close(done) }()
-	time.Sleep(50 * time.Millisecond)
+	<-ready
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	_, _ = f.WriteString("new 1\n")
 	_ = f.Close()
-	time.Sleep(50 * time.Millisecond)
+	waitFor(t, func() bool { return out.String() == "new 1\n" })
 	_ = os.Rename(path, path+".1")
 	_ = os.WriteFile(path, []byte("after rotate\n"), 0o600)
-	time.Sleep(80 * time.Millisecond)
+	waitFor(t, func() bool { return out.String() == "new 1\nafter rotate\n" })
 	cancel()
 	<-done
 	if got := out.String(); got != "new 1\nafter rotate\n" {
