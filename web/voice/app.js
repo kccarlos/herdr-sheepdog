@@ -7,8 +7,8 @@
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
-import { parsePairing, isAppleMobile, appLink, enroll, signIn, keyStore, MSG } from './pairing.js';
-import { createWakeController } from './wake.js';
+import { parsePairing, isAppleMobile, appLink, enroll, signIn, renewSession, classifyWsClose, keyStore, MSG } from './pairing.js';
+import { createWakeController, createPingTracker } from './wake.js';
 import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle, approvalDigitOption } from './approvals.js';
 import { createBuildReloader, takeReloadDraft } from './reload.js';
 import { pushSupport, enableWebPush, disableWebPush, syncExistingWebPush } from './push.js';
@@ -389,11 +389,31 @@ function openWS() {
     wakeController.reset();
     clearTimeout(state.handshakeTimer);
     console.log(`[voice] ws closed code=${e.code} reason=${JSON.stringify(e.reason)}`);
-    if (state.handshake && (state.handshake.state === 'rejected' || state.handshake.state === 'daemon_old')) {
+    const next = classifyWsClose({
+      code: e.code,
+      reason: e.reason,
+      opened,
+      handshakeState: state.handshake && state.handshake.state,
+      userDisconnected: state.userDisconnected,
+    });
+    if (next.action === 'stop') {
       // A protocol mismatch does not fix itself: no reconnect loop.
       return;
     }
-    if (e.reason === 'replaced') {
+    if (next.action === 'revoked') {
+      (async () => {
+        let id = state.daemonId;
+        if (!id) {
+          const h = await fetch('/api/hello', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({}));
+          id = (h.computer && h.computer.id) || '';
+        }
+        if (id) await authDeps().forget(id);
+      })().catch(() => {});
+      lockOutToAuthGate(next.gate);
+      render();
+      return;
+    }
+    if (next.action === 'replaced') {
       // Another client (a second tab, the phone) took the session over.
       // Reconnecting would take it back, and that client would do the
       // same, in a loop (docs/dev/timelines.md C14): stop, as the iOS app
@@ -402,16 +422,16 @@ function openWS() {
       showError('Another client took over the voice session. Press Connect to take it back.');
       return;
     }
-    if (!state.userDisconnected) {
-      if (!opened) {
-        // An upgrade refused before onopen may be a 401 after a daemon restart
-        // invalidated in-memory session cookies: renew once before backing off.
-        reSignIn().finally(() => {
-          if (!state.userDisconnected && !state.ws && !state.reconnectTimer) scheduleReconnect();
-        });
-        render();
-        return;
-      }
+    if (next.action === 'resign_reconnect') {
+      // An upgrade refused before onopen (401 after restart) or a 4004 close
+      // (session_expired) renews the session cookie before backing off.
+      reSignIn().finally(() => {
+        if (!state.userDisconnected && !state.ws && !state.reconnectTimer) scheduleReconnect();
+      });
+      render();
+      return;
+    }
+    if (next.action === 'reconnect') {
       scheduleReconnect();
     }
     render();
@@ -461,11 +481,12 @@ function send(m) {
   return true;
 }
 
+const pingTracker = createPingTracker();
+
 function sendPingPacket() {
-  state.pingSentAt = performance.now();
   // The ping carries the gate counters and the jitter buffer's playback
   // stats so web.client.stats can report them (docs/dev/ws-contract.md).
-  state.pingOutstanding = send({
+  const ok = send({
     type: 'ping',
     gated_frames: state.level.gatedFrames || 0,
     peak: Math.round((state.level.peak || 0) * 0x7fff),
@@ -479,16 +500,21 @@ function sendPingPacket() {
     audio_state: state.ctx ? state.ctx.state : undefined,
     aec: state.aec,
   });
+  if (ok) {
+    pingTracker.sent();
+    state.pingSentAt = performance.now();
+    state.pingOutstanding = true;
+  }
+  return ok;
 }
 
 function startPing() {
   stopPing();
-  state.pingOutstanding = false;
   state.pingTimer = setInterval(() => {
-    if (state.pingOutstanding) {
+    if (pingTracker.outstanding()) {
       // Wait for the pong rather than send another ping (which would
       // restart the clock): the ping runs more often than the timeout.
-      if (performance.now() - state.pingSentAt >= PONG_TIMEOUT_MS) {
+      if (pingTracker.oldestAge() >= PONG_TIMEOUT_MS) {
         console.log('[voice] pong timeout; closing socket');
         if (state.ws) state.ws.close(4000, 'pong timeout');
       }
@@ -501,6 +527,7 @@ function startPing() {
 function stopPing() {
   clearInterval(state.pingTimer);
   state.pingTimer = 0;
+  pingTracker.reset();
   state.pingOutstanding = false;
 }
 
@@ -575,11 +602,13 @@ function onControl(m) {
       if (m.problem) showAccountProblem(m);
       else showError(m.message || 'error');
       break;
-    case 'pong':
-      state.pongMs = performance.now() - state.pingSentAt;
-      state.pingOutstanding = false;
-      wakeController.onPong();
+    case 'pong': {
+      const pong = pingTracker.onPong();
+      if (pong.rttMs !== null) state.pongMs = pong.rttMs;
+      state.pingOutstanding = pingTracker.outstanding();
+      if (pong.drained) wakeController.onPong();
       break;
+    }
     default:
       break;
   }
@@ -897,6 +926,17 @@ function showAuthGate(title, text) {
   return false;
 }
 
+function lockOutToAuthGate(gate) {
+  disconnect();
+  clearTimeout(state.eventsRetryTimer);
+  state.eventsRetryTimer = 0;
+  if (state.eventsSource) {
+    state.eventsSource.close();
+    state.eventsSource = null;
+  }
+  showAuthGate(gate.title, gate.text);
+}
+
 let signInPromise = null;
 
 // reSignIn renews an expired or post-restart sheepdog_session cookie using the
@@ -905,24 +945,10 @@ function reSignIn() {
   if (signInPromise) return signInPromise;
   signInPromise = (async () => {
     try {
-      let id = state.daemonId;
-      if (!id) {
-        const hello = await fetch('/api/hello', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({}));
-        id = (hello.computer && hello.computer.id) || '';
-        if (id) state.daemonId = id;
-      }
-      if (!id) return false;
-      const s = await signIn(id, authDeps()).catch(() => ({ ok: false }));
-      if (s.ok) return true;
-      if (s.reason === 'device_revoked' || s.reason === 'unknown_device') {
-        disconnect();
-        if (state.eventsSource) {
-          state.eventsSource.close();
-          state.eventsSource = null;
-        }
-        showAuthGate('Scan the pairing code again', MSG.revoked);
-      }
-      return false;
+      const r = await renewSession(state.daemonId, authDeps());
+      if (r.daemonId) state.daemonId = r.daemonId;
+      if (r.gate) lockOutToAuthGate(r.gate);
+      return r.ok;
     } finally {
       signInPromise = null;
     }
@@ -1164,21 +1190,25 @@ async function initWebPush() {
     }
   });
 
+  let pushStatus = null;
   try {
     const stRes = await authedFetch('/api/push/status', { cache: 'no-store' });
     const st = await stRes.json().catch(() => ({}));
-    if (stRes.ok && st.web_push_enabled === false) {
-      row.classList.remove('hidden');
-      $('btn-push').disabled = true;
-      $('push-status').textContent = 'Notifications are off on the computer (push.mode = off).';
-      return;
+    if (stRes.ok) {
+      pushStatus = st;
+      if (st.web_push_enabled === false) {
+        row.classList.remove('hidden');
+        $('btn-push').disabled = true;
+        $('push-status').textContent = 'Notifications are off on the computer (push.mode = off).';
+        return;
+      }
     }
   } catch (_) {
     /* keep button available for retry */
   }
 
   row.classList.remove('hidden');
-  const existing = await syncExistingWebPush(pushDeps());
+  const existing = await syncExistingWebPush({ ...pushDeps(), pushStatus });
   state.pushEnabled = Boolean(existing && existing.active);
   renderPushRow();
 }

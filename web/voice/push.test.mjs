@@ -8,6 +8,7 @@ import {
   explainPushError,
   enableWebPush,
   disableWebPush,
+  syncExistingWebPush,
 } from './push.js';
 import { b64url, signedText } from './pairing.js';
 
@@ -88,6 +89,123 @@ test('enableWebPush and disableWebPush register /voice/sw.js with scope /voice a
   assert.equal(unsubscribed, 1);
   assert.equal(posted[1].method, 'DELETE');
   assert.equal(posted[1].body.endpoint, 'https://fcm.googleapis.com/fcm/send/sub-1');
+});
+
+test('rotated VAPID key unsubscribes stale PushSubscription and re-subscribes in enableWebPush and syncExistingWebPush', async () => {
+  const staleVAPID = b64url(Uint8Array.from({ length: 65 }, (_, i) => (i === 0 ? 4 : (i + 9) & 0xff)));
+  const currentVAPID = sampleVAPID;
+  let unsubscribed = 0;
+  let subscribedKeys = [];
+  const calls = [];
+
+  const makeStaleSub = () => ({
+    endpoint: 'https://fcm.googleapis.com/fcm/send/stale-sub',
+    options: { userVisibleOnly: true, applicationServerKey: vapidKeyBytes(staleVAPID).buffer },
+    toJSON: () => ({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/stale-sub',
+      keys: { p256dh: sampleVAPID, auth: 'MDEyMzQ1Njc4OWFiY2RlZg' },
+    }),
+    unsubscribe: async () => { unsubscribed++; return true; },
+  });
+  const freshSub = {
+    endpoint: 'https://fcm.googleapis.com/fcm/send/fresh-sub',
+    options: { userVisibleOnly: true, applicationServerKey: vapidKeyBytes(currentVAPID).buffer },
+    toJSON: () => ({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/fresh-sub',
+      keys: { p256dh: sampleVAPID, auth: 'MDEyMzQ1Njc4OWFiY2RlZg' },
+    }),
+    unsubscribe: async () => true,
+  };
+
+  let currentSub = makeStaleSub();
+  const fakeReg = {
+    pushManager: {
+      getSubscription: async () => currentSub,
+      subscribe: async (opts) => {
+        subscribedKeys.push(b64url(opts.applicationServerKey));
+        currentSub = freshSub;
+        return freshSub;
+      },
+    },
+  };
+  const deps = {
+    ua: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0',
+    touchPoints: 0,
+    Notification: { permission: 'granted', requestPermission: async () => 'granted' },
+    swContainer: {
+      register: async () => fakeReg,
+      getRegistration: async () => fakeReg,
+    },
+    fetch: async (url, init = {}) => {
+      if (url === '/api/push/status') {
+        return { ok: true, status: 200, json: async () => ({ web_push_enabled: true, vapid_public_key: currentVAPID }) };
+      }
+      calls.push({ url, method: init.method || 'GET', body: JSON.parse(init.body) });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    },
+  };
+
+  // syncExistingWebPush detects the rotated VAPID key, unsubscribes stale-sub, and registers fresh-sub.
+  const synced = await syncExistingWebPush(deps);
+  assert.deepEqual(synced, { active: true, endpoint: 'https://fcm.googleapis.com/fcm/send/fresh-sub' });
+  assert.equal(unsubscribed, 1);
+  assert.deepEqual(subscribedKeys, [currentVAPID]);
+  const postAfterSync = calls.filter((c) => c.method === 'POST');
+  assert.equal(postAfterSync.length, 1);
+  assert.equal(postAfterSync[0].body.endpoint, 'https://fcm.googleapis.com/fcm/send/fresh-sub');
+
+  // enableWebPush does the same when getSubscription() returns a stale key.
+  currentSub = makeStaleSub();
+  const enabled = await enableWebPush(deps);
+  assert.deepEqual(enabled, { ok: true, endpoint: 'https://fcm.googleapis.com/fcm/send/fresh-sub' });
+  assert.equal(unsubscribed, 2);
+  assert.deepEqual(subscribedKeys, [currentVAPID, currentVAPID]);
+});
+
+test('syncExistingWebPush and disableWebPush check Notification permission and HTTP errors', async () => {
+  const validSub = {
+    endpoint: 'https://fcm.googleapis.com/fcm/send/sub-ok',
+    options: { userVisibleOnly: true, applicationServerKey: vapidKeyBytes(sampleVAPID).buffer },
+    toJSON: () => ({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/sub-ok',
+      keys: { p256dh: sampleVAPID, auth: 'MDEyMzQ1Njc4OWFiY2RlZg' },
+    }),
+    unsubscribe: async () => true,
+  };
+  const fakeReg = { pushManager: { getSubscription: async () => validSub } };
+
+  // Denied permission -> active: false without claiming notifications are on.
+  const denied = await syncExistingWebPush({
+    ua: '',
+    touchPoints: 0,
+    Notification: { permission: 'denied' },
+    swContainer: { getRegistration: async () => fakeReg },
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ web_push_enabled: true, vapid_public_key: sampleVAPID }) }),
+  });
+  assert.deepEqual(denied, { active: false });
+
+  // POST /api/push/web HTTP 503 -> active: false.
+  const serverErr = await syncExistingWebPush({
+    ua: '',
+    touchPoints: 0,
+    Notification: { permission: 'granted' },
+    swContainer: { getRegistration: async () => fakeReg },
+    fetch: async (url) => {
+      if (url === '/api/push/status') {
+        return { ok: true, status: 200, json: async () => ({ web_push_enabled: true, vapid_public_key: sampleVAPID }) };
+      }
+      return { ok: false, status: 503, json: async () => ({ error: 'push unavailable' }) };
+    },
+  });
+  assert.deepEqual(serverErr, { active: false });
+
+  // disableWebPush surfaces DELETE /api/push/web failure instead of pretending ok: true.
+  const disableErr = await disableWebPush({
+    swContainer: { getRegistration: async () => fakeReg },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({ error: 'disk full' }) }),
+  });
+  assert.equal(disableErr.ok, false);
+  assert.match(disableErr.message, /disk full/);
 });
 
 function loadServiceWorkerEnv(overrides = {}) {
@@ -174,15 +292,21 @@ test('sw.js shows approval push with inline actions, skips visible /voice tab, a
   assert.equal(env.shown.length, 0);
   assert.equal(tabMessages.length, 1);
 
-  // Hidden / closed tab shows notification with Notification.maxActions (2) inline buttons.
+  // Hidden / closed tab shows notification with Notification.maxActions (2) inline buttons and requireInteraction.
   env.setClients([]);
   await env.dispatch('push', { data: { json: () => payload } });
   assert.equal(env.shown.length, 1);
   assert.equal(env.shown[0].title, 'auth');
+  assert.equal(env.shown[0].options.requireInteraction, true);
   assert.deepEqual(
     Array.from(env.shown[0].options.actions, (a) => ({ action: a.action, title: a.title })),
     [{ action: 'option:1', title: 'Yes' }, { action: 'option:2', title: 'No' }],
   );
+
+  // Non-approval push does not set requireInteraction.
+  await env.dispatch('push', { data: { json: () => ({ title: 'auth', body: 'auth finished.', kind: 'done', tag: 'evt-9' }) } });
+  assert.equal(env.shown.length, 2);
+  assert.equal(env.shown[1].options.requireInteraction, false);
 
   // Page message sync-open-questions closes notifications whose pending_id is no longer open.
   await env.dispatch('message', { data: { type: 'sync-open-questions', openIds: ['ap-other'] } });

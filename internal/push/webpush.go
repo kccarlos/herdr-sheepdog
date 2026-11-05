@@ -200,36 +200,135 @@ func isDisallowedPushHost(host string) bool {
 	return false
 }
 
+type ipLookupFunc func(ctx context.Context, host string) ([]netip.Addr, error)
+type proxyURLFunc func(req *http.Request) (*url.URL, error)
+type rawDialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+type proxyTargetKey struct{}
+
+type safeWebPushRoundTripper struct {
+	tr          *http.Transport
+	proxyOf     proxyURLFunc
+	checkTarget func(ctx context.Context, hostPort string) ([]netip.Addr, error)
+}
+
+func (rt *safeWebPushRoundTripper) transport() *http.Transport { return rt.tr }
+
+func (rt *safeWebPushRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL == nil || isDisallowedPushHost(req.URL.Host) {
+		return nil, ErrPrivateEndpoint
+	}
+	if rt.proxyOf != nil {
+		proxyURL, err := rt.proxyOf(req)
+		if err != nil {
+			return nil, err
+		}
+		if proxyURL != nil {
+			if _, err := rt.checkTarget(req.Context(), req.URL.Host); err != nil {
+				return nil, err
+			}
+			if proxyAddr := proxyDialAddr(proxyURL); proxyAddr != "" {
+				req = req.WithContext(context.WithValue(req.Context(), proxyTargetKey{}, proxyAddr))
+			}
+		}
+	}
+	return rt.tr.RoundTrip(req)
+}
+
+func proxyDialAddr(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		default:
+			return ""
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
+
 // newSafeWebPushClient builds an HTTP client whose dialer refuses private,
 // loopback and link-local addresses so a paired browser cannot turn Web Push
 // into an SSRF probe against the daemon's LAN or localhost.
 func newSafeWebPushClient(timeout time.Duration) *http.Client {
-	dialer := &net.Dialer{Timeout: 8 * time.Second}
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, err
-			}
-			if len(ips) == 0 {
+	dialer := &net.Dialer{Timeout: 4 * time.Second}
+	return buildSafeWebPushClient(
+		timeout,
+		func(ctx context.Context, host string) ([]netip.Addr, error) {
+			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		},
+		http.ProxyFromEnvironment,
+		dialer.DialContext,
+	)
+}
+
+func buildSafeWebPushClient(timeout time.Duration, lookup ipLookupFunc, proxyOf proxyURLFunc, rawDial rawDialFunc) *http.Client {
+	checkTarget := func(ctx context.Context, hostPort string) ([]netip.Addr, error) {
+		if isDisallowedPushHost(hostPort) {
+			return nil, ErrPrivateEndpoint
+		}
+		host := hostPort
+		if h, _, err := net.SplitHostPort(hostPort); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		ips, err := lookup(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, ErrPrivateEndpoint
+		}
+		for _, ip := range ips {
+			if isDisallowedPushAddr(ip) {
 				return nil, ErrPrivateEndpoint
 			}
+		}
+		return ips, nil
+	}
+
+	tr := &http.Transport{
+		Proxy: proxyOf,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if allowedProxy, _ := ctx.Value(proxyTargetKey{}).(string); allowedProxy != "" && strings.EqualFold(addr, allowedProxy) {
+				return rawDial(ctx, network, addr)
+			}
+			_, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := checkTarget(ctx, addr)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
 			for _, ip := range ips {
-				if isDisallowedPushAddr(ip) {
-					return nil, ErrPrivateEndpoint
+				conn, err := rawDial(ctx, network, net.JoinHostPort(ip.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+				if ctx.Err() != nil {
+					break
 				}
 			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			return nil, lastErr
 		},
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: tr,
+		Transport: &safeWebPushRoundTripper{tr: tr, proxyOf: proxyOf, checkTarget: checkTarget},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

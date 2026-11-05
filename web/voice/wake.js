@@ -11,6 +11,34 @@ export const FRESH_CONNECT_MS = 1000;
 /** Minimum gap between wake side-effects (state / banner refresh) on burst events. */
 export const WAKE_DEBOUNCE_MS = 500;
 
+/**
+ * Tracks in-flight client→server pings in FIFO order so an interval ping
+ * already on the wire when wake() sends its probe cannot skew RTT or
+ * prematurely satisfy the wake deadline.
+ */
+export function createPingTracker({ now = () => performance.now() } = {}) {
+  const sentAt = [];
+  return {
+    sent() {
+      sentAt.push(now());
+    },
+    onPong() {
+      if (sentAt.length === 0) return { rttMs: null, drained: true };
+      const t0 = sentAt.shift();
+      return { rttMs: Math.max(0, now() - t0), drained: sentAt.length === 0 };
+    },
+    outstanding() {
+      return sentAt.length > 0;
+    },
+    oldestAge() {
+      return sentAt.length > 0 ? now() - sentAt[0] : 0;
+    },
+    reset() {
+      sentAt.length = 0;
+    },
+  };
+}
+
 export function createWakeController({
   now = () => performance.now(),
   setTimer = (fn, ms) => setTimeout(fn, ms),

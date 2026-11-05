@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WAKE_PONG_TIMEOUT_MS, createWakeController } from './wake.js';
+import { WAKE_PONG_TIMEOUT_MS, createWakeController, createPingTracker } from './wake.js';
 
 function fakeClock(start = 10_000) {
   let t = start;
@@ -166,4 +166,44 @@ test('wake does nothing while hidden, and never opens /ws when userDisconnected'
   assert.equal(wakes, 1);
   assert.equal(pings, 0);
   assert.equal(reconnected, 0);
+});
+
+test('createPingTracker matches in-flight interval ping separately from a wake probe', () => {
+  const clock = fakeClock(10_000);
+  const tracker = createPingTracker({ now: clock.now });
+  const sock = { id: 'ws-inflight' };
+  const dropped = [];
+  const st = { hidden: false, userDisconnected: false, wsState: 'open', ws: sock, connectStartedAt: 1000, hasReconnectTimer: false };
+
+  const ctrl = createWakeController({
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+    getState: () => st,
+    sendPing: () => { tracker.sent(); return true; },
+    dropAndReconnect: (s) => dropped.push(s),
+    reconnectNow: () => {},
+  });
+
+  // Interval ping goes out at t=10000; wake fires 200 ms later while it is still outstanding.
+  tracker.sent();
+  clock.advance(200);
+  ctrl.wake();
+  assert.equal(tracker.outstanding(), true);
+  assert.equal(tracker.oldestAge(), 200);
+
+  // Earlier interval pong arrives at t=10250: RTT is 250 ms (not 50 ms), and wake probe is still pending!
+  clock.advance(50);
+  const first = tracker.onPong();
+  assert.deepEqual(first, { rttMs: 250, drained: false });
+  if (first.drained) ctrl.onPong();
+
+  // Wake probe pong arrives at t=10260: RTT is 60 ms, queue is drained, and wake drop is cancelled.
+  clock.advance(10);
+  const second = tracker.onPong();
+  assert.deepEqual(second, { rttMs: 60, drained: true });
+  if (second.drained) ctrl.onPong();
+
+  clock.advance(2000);
+  assert.equal(dropped.length, 0);
 });

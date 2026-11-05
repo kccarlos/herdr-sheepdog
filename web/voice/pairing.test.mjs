@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { parsePairing, isAppleMobile, deviceName, appLink, signedText, enroll, signIn, MSG } from './pairing.js';
+import { parsePairing, isAppleMobile, deviceName, appLink, signedText, enroll, signIn, renewSession, classifyWsClose, MSG } from './pairing.js';
 
 const hash = '#pair=1&d=DAEMONID&e=c0de&k=PIN&n=Studio+Mac+%26+co&u=100.101.102.103%3A7777&u=192.168.1.20%3A7777';
 
@@ -88,4 +88,57 @@ test('without a saved key there is nothing to sign', async () => {
   const r = await signIn('DAEMONID', { fetch: d.fetch, subtle: webcrypto.subtle, now: Date.now, ...memStore() });
   assert.deepEqual(r, { ok: false, reason: 'no_key' });
   assert.deepEqual(d.calls, []);
+});
+
+test('renewSession refreshes rotated daemon id, gates remote 401 on no_key, and leaves loopback 200 open', async () => {
+  const store = memStore();
+  // Save a key for OLD_DAEMON only, simulating `sheepdog data clear --all` rotating computer.id to NEW_DAEMON.
+  await store.save('OLD_DAEMON', { deviceId: 'dev-old', key: {} });
+
+  let stateStatus = 401;
+  const calls = [];
+  const deps = {
+    subtle: webcrypto.subtle,
+    now: Date.now,
+    ...store,
+    fetch: async (path) => {
+      calls.push(path);
+      if (path === '/api/hello') return { ok: true, status: 200, json: async () => ({ computer: { id: 'NEW_DAEMON' } }) };
+      if (path === '/api/state') return { ok: stateStatus === 200, status: stateStatus, json: async () => ({}) };
+      return { ok: false, status: 404, json: async () => ({}) };
+    },
+  };
+
+  // Remote browser gets 401 on /api/state and has no key for NEW_DAEMON -> shows Pair gate instead of looping.
+  const remote = await renewSession('OLD_DAEMON', deps);
+  assert.deepEqual(remote, {
+    ok: false,
+    daemonId: 'NEW_DAEMON',
+    gate: { title: 'Pair this browser', text: MSG.pair },
+  });
+  assert.ok(calls.includes('/api/hello'), 'always refreshes /api/hello even when cachedDaemonId was set');
+
+  // Loopback browser has no key in IndexedDB either, but /api/state returns 200 -> no auth gate!
+  stateStatus = 200;
+  const local = await renewSession('', deps);
+  assert.deepEqual(local, { ok: false, daemonId: 'NEW_DAEMON', gate: null });
+});
+
+test('classifyWsClose stops on 4003 device_revoked and re-signs on 4004 session_expired even after onopen', () => {
+  assert.deepEqual(
+    classifyWsClose({ code: 4003, reason: 'device_revoked', opened: true, handshakeState: 'ready', userDisconnected: false }),
+    { action: 'revoked', gate: { title: 'Scan the pairing code again', text: MSG.revoked } },
+  );
+  assert.deepEqual(
+    classifyWsClose({ code: 4004, reason: 'session_expired', opened: true, handshakeState: 'ready', userDisconnected: false }),
+    { action: 'resign_reconnect' },
+  );
+  assert.deepEqual(
+    classifyWsClose({ code: 1006, reason: '', opened: false, handshakeState: null, userDisconnected: false }),
+    { action: 'resign_reconnect' },
+  );
+  assert.deepEqual(
+    classifyWsClose({ code: 1006, reason: '', opened: true, handshakeState: 'ready', userDisconnected: false }),
+    { action: 'reconnect' },
+  );
 });

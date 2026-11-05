@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -8,18 +9,24 @@ import (
 	"crypto/elliptic"
 	"crypto/hkdf"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -417,5 +424,163 @@ func TestWebPushDeviceRevocationAndValidation(t *testing.T) {
 	}
 	if len(sProd.WebDevices()) != 0 {
 		t.Errorf("WebDevices after ForgetDevices = %+v, want empty", sProd.WebDevices())
+	}
+}
+
+func TestSafeWebPushClientFallbackAndProxy(t *testing.T) {
+	pushSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(pushSrv.Close)
+
+	// Trust pushSrv's test CA on any *http.Transport inside c.
+	pool := x509.NewCertPool()
+	pool.AddCert(pushSrv.Certificate())
+
+	srvAddr := pushSrv.Listener.Addr().String()
+	deadV6 := netip.MustParseAddr("2001:db8::dead")
+	goodV4 := netip.MustParseAddr("203.0.113.10")
+
+	t.Run("falls back past unreachable first IP and blocks mixed private DNS", func(t *testing.T) {
+		var dialed []string
+		var mu sync.Mutex
+		c := buildSafeWebPushClient(
+			3*time.Second,
+			func(_ context.Context, host string) ([]netip.Addr, error) {
+				switch host {
+				case "dualstack.example.com":
+					return []netip.Addr{deadV6, goodV4}, nil
+				case "rebind.example.com":
+					return []netip.Addr{goodV4, netip.MustParseAddr("127.0.0.1")}, nil
+				default:
+					return nil, errors.New("nxdomain")
+				}
+			},
+			nil,
+			func(ctx context.Context, network, addr string) (net.Conn, error) {
+				mu.Lock()
+				dialed = append(dialed, addr)
+				mu.Unlock()
+				host, _, _ := net.SplitHostPort(addr)
+				if host == deadV6.String() {
+					return nil, errors.New("network is unreachable")
+				}
+				if host == goodV4.String() {
+					return (&net.Dialer{}).DialContext(ctx, network, srvAddr)
+				}
+				return nil, errors.New("unexpected addr " + addr)
+			},
+		)
+		setWebPushTestRootCAs(c, pool)
+
+		resp, err := c.Post("https://dualstack.example.com/send/1", "application/octet-stream", strings.NewReader("x"))
+		if err != nil {
+			t.Fatalf("dualstack push failed: %v (dialed=%v)", err, dialed)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("status = %d, want 201", resp.StatusCode)
+		}
+
+		// Mixed public + private DNS RRset must still be rejected without dialing.
+		mu.Lock()
+		dialed = nil
+		mu.Unlock()
+		if _, err := c.Post("https://rebind.example.com/send/1", "application/octet-stream", strings.NewReader("x")); !errors.Is(err, ErrPrivateEndpoint) {
+			t.Fatalf("rebind error = %v, want ErrPrivateEndpoint", err)
+		}
+		mu.Lock()
+		gotDialed := append([]string(nil), dialed...)
+		mu.Unlock()
+		if len(gotDialed) != 0 {
+			t.Fatalf("rebind dialed %v, want none", gotDialed)
+		}
+	})
+
+	t.Run("allows localhost HTTPS_PROXY for public push host while blocking SSRF target", func(t *testing.T) {
+		var connectCount atomic.Int32
+		proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodConnect {
+				http.Error(w, "want CONNECT", http.StatusMethodNotAllowed)
+				return
+			}
+			connectCount.Add(1)
+			up, err := net.DialTimeout("tcp", srvAddr, 2*time.Second)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				_ = up.Close()
+				http.Error(w, "no hijack", http.StatusInternalServerError)
+				return
+			}
+			down, buf, err := hj.Hijack()
+			if err != nil {
+				_ = up.Close()
+				return
+			}
+			_, _ = down.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+			if n := buf.Reader.Buffered(); n > 0 {
+				b, _ := buf.Peek(n)
+				_, _ = up.Write(b)
+			}
+			go func() {
+				_, _ = io.Copy(up, down)
+				_ = up.Close()
+			}()
+			_, _ = io.Copy(down, up)
+			_ = down.Close()
+		}))
+		t.Cleanup(proxySrv.Close)
+		proxyURL, err := url.Parse(proxySrv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c := buildSafeWebPushClient(
+			3*time.Second,
+			func(_ context.Context, host string) ([]netip.Addr, error) {
+				switch host {
+				case "public.example.com":
+					return []netip.Addr{goodV4}, nil
+				case "lan-rebind.example.com":
+					return []netip.Addr{netip.MustParseAddr("192.168.1.1")}, nil
+				default:
+					return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+				}
+			},
+			func(*http.Request) (*url.URL, error) { return proxyURL, nil },
+			(&net.Dialer{}).DialContext,
+		)
+		setWebPushTestRootCAs(c, pool)
+
+		resp, err := c.Post("https://public.example.com/send/ok", "application/octet-stream", strings.NewReader("x"))
+		if err != nil {
+			t.Fatalf("proxied public push failed: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated || connectCount.Load() != 1 {
+			t.Fatalf("status=%d connectCount=%d, want 201 and 1", resp.StatusCode, connectCount.Load())
+		}
+
+		// SSRF target resolving to RFC1918 must be blocked BEFORE dialing the proxy!
+		connectCount.Store(0)
+		if _, err := c.Post("https://lan-rebind.example.com/admin", "application/octet-stream", strings.NewReader("x")); !errors.Is(err, ErrPrivateEndpoint) {
+			t.Fatalf("proxied SSRF error = %v, want ErrPrivateEndpoint", err)
+		}
+		if got := connectCount.Load(); got != 0 {
+			t.Fatalf("proxy CONNECT count on SSRF target = %d, want 0", got)
+		}
+	})
+}
+
+func setWebPushTestRootCAs(c *http.Client, pool *x509.CertPool) {
+	switch tr := c.Transport.(type) {
+	case *http.Transport:
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
+	case interface{ transport() *http.Transport }:
+		tr.transport().TLSClientConfig = &tls.Config{RootCAs: pool}
 	}
 }

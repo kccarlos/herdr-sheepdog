@@ -140,6 +140,7 @@ self.addEventListener('push', (e) => {
         body: d.body || '',
         tag: d.tag || 'sheepdog',
         renotify: Boolean(d.needs_you),
+        requireInteraction: d.kind === 'approval',
         icon: '/static/apple-touch-icon.png',
         badge: '/static/favicon-32.png',
         data: {

@@ -14,6 +14,24 @@ export function vapidKeyBytes(b64u) {
   return out;
 }
 
+function toBytes(raw) {
+  if (!raw) return null;
+  if (raw instanceof Uint8Array) return raw;
+  if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+  if (Object.prototype.toString.call(raw) === '[object ArrayBuffer]') return new Uint8Array(raw);
+  return null;
+}
+
+function vapidKeyMatches(sub, expectedBytes) {
+  if (!sub || !sub.options) return true;
+  const actual = toBytes(sub.options.applicationServerKey);
+  if (!actual || actual.length !== expectedBytes.length) return false;
+  for (let i = 0; i < actual.length; i++) {
+    if (actual[i] !== expectedBytes[i]) return false;
+  }
+  return true;
+}
+
 /** Reports whether this browser can use Web Push on /voice. */
 export function pushSupport({ isSecureContext, hasSW, hasPushManager, hasNotification, ua, touchPoints }) {
   if (isAppleMobile(ua, touchPoints)) {
@@ -73,15 +91,28 @@ export async function enableWebPush(deps) {
     return { ok: false, message: explainPushError({ name: 'NotAllowedError' }) };
   }
 
+  const serverKey = vapidKeyBytes(st.vapid_public_key);
   let reg;
   let sub;
   try {
     reg = await deps.swContainer.register('/voice/sw.js', { scope: '/voice' });
     sub = await reg.pushManager.getSubscription();
+    if (sub && !vapidKeyMatches(sub, serverKey)) {
+      const staleEndpoint = sub.endpoint || (sub.toJSON && sub.toJSON().endpoint) || '';
+      await sub.unsubscribe();
+      if (staleEndpoint) {
+        await deps.fetch('/api/push/web', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: staleEndpoint }),
+        }).catch(() => {});
+      }
+      sub = null;
+    }
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: vapidKeyBytes(st.vapid_public_key),
+        applicationServerKey: serverKey,
       });
     }
   } catch (err) {
@@ -115,13 +146,20 @@ export async function disableWebPush(deps) {
     const sub = reg && (await reg.pushManager.getSubscription());
     if (!sub) return { ok: true };
     const endpoint = sub.endpoint || (sub.toJSON && sub.toJSON().endpoint) || '';
-    await sub.unsubscribe().catch(() => {});
     if (endpoint) {
-      await deps.fetch('/api/push/web', {
+      const res = await deps.fetch('/api/push/web', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
-      }).catch(() => {});
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, message: body.error || `Could not disable browser notifications (${res.status}).` };
+      }
+    }
+    const unsub = await sub.unsubscribe();
+    if (unsub === false) {
+      return { ok: false, message: 'Could not unsubscribe browser notifications.' };
     }
     return { ok: true };
   } catch (err) {
@@ -131,26 +169,56 @@ export async function disableWebPush(deps) {
 
 /**
  * Checks whether this browser already has an active Web Push subscription
- * and re-syncs it idempotently with the daemon on startup.
+ * matching the daemon's current VAPID key and re-syncs it on startup.
  */
 export async function syncExistingWebPush(deps) {
   try {
+    if (!deps.Notification || deps.Notification.permission !== 'granted') return { active: false };
     const reg = await deps.swContainer.getRegistration('/voice');
     if (!reg) return { active: false };
-    const sub = await reg.pushManager.getSubscription();
+    let sub = await reg.pushManager.getSubscription();
     if (!sub) return { active: false };
-    const json = sub.toJSON ? sub.toJSON() : sub;
-    if (json && json.endpoint && json.keys && json.keys.p256dh && json.keys.auth) {
-      await deps.fetch('/api/push/web', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: json.endpoint,
-          keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
-          device: deviceName(deps.ua, deps.touchPoints),
-        }),
-      }).catch(() => {});
+
+    let st = deps.pushStatus;
+    if (!st) {
+      const stRes = await deps.fetch('/api/push/status', { cache: 'no-store' });
+      if (!stRes || !stRes.ok) return { active: false };
+      st = await stRes.json().catch(() => ({}));
     }
+    if (!st.web_push_enabled || !st.vapid_public_key) return { active: false };
+
+    const serverKey = vapidKeyBytes(st.vapid_public_key);
+    if (!vapidKeyMatches(sub, serverKey)) {
+      const staleEndpoint = sub.endpoint || (sub.toJSON && sub.toJSON().endpoint) || '';
+      const unsub = await sub.unsubscribe();
+      if (unsub === false) return { active: false };
+      if (staleEndpoint) {
+        await deps.fetch('/api/push/web', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: staleEndpoint }),
+        }).catch(() => {});
+      }
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: serverKey,
+      });
+    }
+
+    const json = sub && (sub.toJSON ? sub.toJSON() : sub);
+    if (!json || !json.endpoint || !json.keys || !json.keys.p256dh || !json.keys.auth) {
+      return { active: false };
+    }
+    const res = await deps.fetch('/api/push/web', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+        device: deviceName(deps.ua, deps.touchPoints),
+      }),
+    });
+    if (!res || !res.ok) return { active: false };
     return { active: true, endpoint: json.endpoint };
   } catch (_) {
     return { active: false };

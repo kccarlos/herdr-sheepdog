@@ -105,6 +105,52 @@ export async function signIn(daemonId, deps) {
   return { ok: false, reason: body.reason || String(r.status) };
 }
 
+// renewSession refreshes computer.id from /api/hello and re-signs the session
+// cookie with IndexedDB's key. When no key is stored for this daemon and
+// /api/state answers 401 (a remote browser, or a rotated daemon id after
+// `sheepdog data clear --all`), it returns the pairing gate so the page stops
+// retrying; on loopback (/api/state 200) or while offline, gate is null.
+export async function renewSession(cachedDaemonId, deps) {
+  const hello = await deps.fetch('/api/hello', { cache: 'no-store' })
+    .then((r) => (r && r.ok ? r.json() : {}))
+    .catch(() => ({}));
+  const id = (hello && hello.computer && hello.computer.id) || cachedDaemonId || '';
+  if (!id) return { ok: false, daemonId: '', gate: null };
+  const s = await signIn(id, deps).catch(() => ({ ok: false }));
+  if (s.ok) return { ok: true, daemonId: id, gate: null };
+  if (s.reason === 'device_revoked' || s.reason === 'unknown_device') {
+    return { ok: false, daemonId: id, gate: { title: 'Scan the pairing code again', text: MSG.revoked } };
+  }
+  if (s.reason === 'no_key') {
+    const check = await deps.fetch('/api/state', { cache: 'no-store' }).catch(() => null);
+    if (check && check.status === 401) {
+      return { ok: false, daemonId: id, gate: { title: 'Pair this browser', text: MSG.pair } };
+    }
+  }
+  return { ok: false, daemonId: id, gate: null };
+}
+
+// classifyWsClose maps a /ws CloseEvent onto the page's next step (4003 =
+// device_revoked, 4004 = session_expired; internal/web/auth.go & ws.go).
+export function classifyWsClose({ code, reason, opened, handshakeState, userDisconnected }) {
+  if (handshakeState === 'rejected' || handshakeState === 'daemon_old') {
+    return { action: 'stop' };
+  }
+  if (code === 4003 || reason === 'device_revoked') {
+    return { action: 'revoked', gate: { title: 'Scan the pairing code again', text: MSG.revoked } };
+  }
+  if (reason === 'replaced') {
+    return { action: 'replaced' };
+  }
+  if (userDisconnected) {
+    return { action: 'none' };
+  }
+  if (!opened || code === 4004 || reason === 'session_expired') {
+    return { action: 'resign_reconnect' };
+  }
+  return { action: 'reconnect' };
+}
+
 // keyStore is IndexedDB, keyed by daemon id (a CryptoKey is stored as
 // itself; it stays non-extractable).
 export function keyStore(idb) {
