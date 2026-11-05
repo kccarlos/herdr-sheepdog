@@ -97,3 +97,51 @@ func TestRecapFocusSlot(t *testing.T) {
 		t.Errorf("after reset: focus = %q, entries = %d", r.Focus(), r.Len())
 	}
 }
+
+func TestRecapCutZeroHeardDropsAndJoinsAround(t *testing.T) {
+	t.Run("next_user_added_after_cut", func(t *testing.T) {
+		var r Recap
+		r.Add(RecapUser, "check auth")
+		r.Add(RecapAssistant, "Auth is running the migration suite.")
+		if !r.Cut("Auth is running the migration suite.", "", 0) {
+			t.Fatal("expected Cut to match")
+		}
+		if len(r.Entries()) != 1 {
+			t.Fatalf("entries after 0-heard cut = %+v, want 0-heard assistant removed", r.Entries())
+		}
+		r.Add(RecapUser, "and check docs")
+		got := r.Entries()
+		if len(got) != 1 || got[0].Role != RecapUser || got[0].Text != "check auth and check docs" {
+			t.Fatalf("entries after join_around = %+v, want merged user utterance", got)
+		}
+	})
+
+	t.Run("next_user_already_present_before_cut", func(t *testing.T) {
+		var r Recap
+		r.Add(RecapUser, "check auth")
+		r.Add(RecapAssistant, "Auth is running the migration suite.")
+		r.Add(RecapUser, "and check docs")
+		if !r.Cut("Auth is running the migration suite.", "", 0) {
+			t.Fatal("expected Cut to match")
+		}
+		got := r.Entries()
+		if len(got) != 1 || got[0].Role != RecapUser || got[0].Text != "check auth and check docs" {
+			t.Fatalf("entries after join_around = %+v, want merged user utterance", got)
+		}
+	})
+}
+
+func TestRecapCutEllipsisAndNote(t *testing.T) {
+	var r Recap
+	r.Add(RecapAssistant, "Auth is running the tests and then it deploys.")
+	r.Cut("Auth is running the tests and then it deploys.", "Auth is running.", 1500)
+	entries := r.Recent(200)
+	lines := RecapLines(entries)
+	want := "You (cut off after 2 s): Auth is running…"
+	if lines != want {
+		t.Fatalf("RecapLines = %q, want %q", lines, want)
+	}
+	if CutEllipsis("already…") != "already…" {
+		t.Fatalf("CutEllipsis doubled ellipsis: %q", CutEllipsis("already…"))
+	}
+}

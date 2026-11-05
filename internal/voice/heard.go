@@ -3,7 +3,6 @@ package voice
 import (
 	"strings"
 	"time"
-	"unicode"
 )
 
 // Heard detection (docs/dev/history/bench-2026-10-03.md #17, #18, #19). A push that
@@ -92,7 +91,8 @@ type HeardTracker struct {
 	// and judges by key terms (KeyTermCoverage).
 	Coverage func(text string, tags map[string]any, said string) float64
 
-	cur *pushWatch
+	cur      *pushWatch
+	curRunID uint32
 	// cut are watches whose speech the daemon flushed, waiting for the
 	// client's flushed report to say how much was played (oldest first,
 	// like PlaybackTracker's awaiting runs).
@@ -102,8 +102,25 @@ type HeardTracker struct {
 // cutRun is one flushed run waiting for the client's report: the watch
 // it cut (nil for a run no push was watched in) and when.
 type cutRun struct {
+	id uint32
 	w  *pushWatch
 	at time.Time
+}
+
+// SetRunID tags the active watched speech with a monotonic run_id so
+// FlushedRun matches its exact flushed run.
+func (h *HeardTracker) SetRunID(id uint32) {
+	if id != 0 {
+		h.curRunID = id
+	}
+}
+
+// TagLastCutRun stamps the newest untagged cutRun when a flush raced
+// ahead of outbound audio delivery.
+func (h *HeardTracker) TagLastCutRun(id uint32) {
+	if id != 0 && len(h.cut) > 0 && h.cut[len(h.cut)-1].id == 0 {
+		h.cut[len(h.cut)-1].id = id
+	}
 }
 
 // Pushed starts watching a spoken push; a push still watched is judged
@@ -118,6 +135,7 @@ func (h *HeardTracker) Pushed(now time.Time, text string, tags map[string]any, r
 		out = h.judge(out, w, w.said.String(), reason)
 	}
 	h.cur = &pushWatch{text: text, tags: tags, requeued: requeued, sentAt: now}
+	h.curRunID = 0
 	return out
 }
 
@@ -152,16 +170,26 @@ func (h *HeardTracker) TurnComplete() {
 // interruption an interrupting push itself causes — so it stays
 // watched.
 func (h *HeardTracker) Interrupted(now time.Time, by string, awaited bool) []UnheardPush {
+	return h.InterruptedRun(now, by, awaited, h.curRunID)
+}
+
+// InterruptedRun is Interrupted tagged with runID (0 when untagged).
+func (h *HeardTracker) InterruptedRun(now time.Time, by string, awaited bool, runID uint32) []UnheardPush {
+	if runID == 0 {
+		runID = h.curRunID
+	}
 	w := h.cur
 	if w == nil || !w.voiced {
 		w = nil
 	} else {
 		h.cur = nil
+		h.curRunID = 0
 		w.cutBy = by
 	}
 	switch {
 	case awaited:
-		h.cut = append(h.cut, cutRun{w: w, at: now})
+		h.curRunID = 0
+		h.cut = append(h.cut, cutRun{id: runID, w: w, at: now})
 		if len(h.cut) > maxAwaiting {
 			out := h.judgeRuns(h.cut[:len(h.cut)-maxAwaiting])
 			h.cut = h.cut[len(h.cut)-maxAwaiting:]
@@ -173,24 +201,56 @@ func (h *HeardTracker) Interrupted(now time.Time, by string, awaited bool) []Unh
 	return nil
 }
 
-// Flushed applies the client's flushed report: cut (nil when the run
-// was heard whole) and heard (the played part). It judges the oldest
-// watch the daemon flushed, or, with none, a voiced watch the client
-// flushed on its own (the stop button).
+// Flushed applies an untagged client flushed report: cut (nil when the run
+// was heard whole) and heard (the played part).
 func (h *HeardTracker) Flushed(now time.Time, cut *TranscriptCut, heard string) []UnheardPush {
+	return h.FlushedRun(now, cut, heard, 0)
+}
+
+// FlushedRun applies a client flushed report optionally tagged with runID
+// (0 falls back to FIFO matching). When runID != 0, duplicate or late
+// reports for already-settled runs are ignored without touching a newer
+// watched push.
+func (h *HeardTracker) FlushedRun(now time.Time, cut *TranscriptCut, heard string, runID uint32) []UnheardPush {
 	out := h.expire(now)
 	var w *pushWatch
-	switch {
-	case len(h.cut) > 0:
-		w, h.cut = h.cut[0].w, h.cut[1:]
-		if w == nil {
-			return out // a run no push was watched in
+	if runID != 0 {
+		idx := -1
+		for i := range h.cut {
+			if h.cut[i].id == runID {
+				idx = i
+				break
+			}
 		}
-	case h.cur != nil && h.cur.voiced && cut != nil:
-		w, h.cur = h.cur, nil
-		w.cutBy = "client"
-	default:
-		return out
+		switch {
+		case idx >= 0:
+			if idx > 0 {
+				out = append(out, h.judgeRuns(h.cut[:idx])...)
+			}
+			w = h.cut[idx].w
+			h.cut = h.cut[idx+1:]
+			if w == nil {
+				return out
+			}
+		case h.cur != nil && h.cur.voiced && cut != nil && (h.curRunID == 0 || h.curRunID == runID):
+			w, h.cur, h.curRunID = h.cur, nil, 0
+			w.cutBy = "client"
+		default:
+			return out
+		}
+	} else {
+		switch {
+		case len(h.cut) > 0:
+			w, h.cut = h.cut[0].w, h.cut[1:]
+			if w == nil {
+				return out // a run no push was watched in
+			}
+		case h.cur != nil && h.cur.voiced && cut != nil:
+			w, h.cur, h.curRunID = h.cur, nil, 0
+			w.cutBy = "client"
+		default:
+			return out
+		}
 	}
 	said := w.said.String()
 	if cut != nil {
@@ -205,7 +265,7 @@ func (h *HeardTracker) Flushed(now time.Time, cut *TranscriptCut, heard string) 
 func (h *HeardTracker) Settle(now time.Time, playing bool) []UnheardPush {
 	out := h.expire(now)
 	if w := h.cur; w != nil && w.turnDone && !playing {
-		h.cur = nil
+		h.cur, h.curRunID = nil, 0
 		reason := UnheardBodySkipped
 		if w.userTurn {
 			reason = UnheardUserTurn
@@ -220,7 +280,7 @@ func (h *HeardTracker) Lost() []UnheardPush {
 	out := h.judgeRuns(h.cut)
 	h.cut = nil
 	if w := h.cur; w != nil {
-		h.cur = nil
+		h.cur, h.curRunID = nil, 0
 		out = h.judge(out, w, w.said.String(), UnheardConnectionLost)
 	}
 	return out
@@ -274,7 +334,7 @@ func (h *HeardTracker) expire(now time.Time) []UnheardPush {
 	out := h.judgeRuns(h.cut[:n])
 	h.cut = h.cut[n:]
 	if w := h.cur; w != nil && now.Sub(w.sentAt) > heardTimeout {
-		h.cur = nil
+		h.cur, h.curRunID = nil, 0
 		reason := UnheardNotVoiced
 		if w.userTurn {
 			reason = UnheardUserTurn
@@ -358,14 +418,8 @@ func PushCoverage(push, said string) float64 {
 		}
 		return 0
 	}
-	have := map[[2]string]bool{}
-	for i := 1; i < len(st); i++ {
-		have[[2]string{st[i-1], st[i]}] = true
-	}
-	want := map[[2]string]bool{}
-	for i := 1; i < len(pt); i++ {
-		want[[2]string{pt[i-1], pt[i]}] = true
-	}
+	have := tokenBigrams(st, true)
+	want := tokenBigrams(pt, false)
 	n := 0
 	for k := range want {
 		if have[k] {
@@ -375,30 +429,10 @@ func PushCoverage(push, said string) float64 {
 	return float64(n) / float64(len(want))
 }
 
-// coverageTokens splits text into lower-case words and single CJK
-// characters, dropping everything else.
+// coverageTokens splits text into normalised lower-case tokens (numbers,
+// sub-words across code joiners and camelCase, and single CJK characters).
 func coverageTokens(text string) []string {
-	var out []string
-	var word strings.Builder
-	flush := func() {
-		if word.Len() > 0 {
-			out = append(out, word.String())
-			word.Reset()
-		}
-	}
-	for _, c := range strings.ToLower(text) {
-		switch {
-		case unicode.Is(unicode.Han, c) || unicode.Is(unicode.Hiragana, c) || unicode.Is(unicode.Katakana, c) || unicode.Is(unicode.Hangul, c):
-			flush()
-			out = append(out, string(c))
-		case unicode.IsLetter(c) || unicode.IsDigit(c):
-			word.WriteRune(c)
-		default:
-			flush()
-		}
-	}
-	flush()
-	return out
+	return normTokens(text)
 }
 
 // Re-queue timing (docs/dev/bench/tier2-2026-10-03.md #5). In

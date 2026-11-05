@@ -36,8 +36,9 @@ import (
 func KeyTermCoverage(push string, names []string, said string) float64 {
 	body, options := splitOptions(push)
 	saidLower := strings.ToLower(said)
+	saidSeq := coverageTokens(said)
 	saidTokens := map[string]bool{}
-	for _, t := range coverageTokens(said) {
+	for _, t := range saidSeq {
 		saidTokens[t] = true
 	}
 	saidNumbers := map[string]bool{}
@@ -48,7 +49,7 @@ func KeyTermCoverage(push string, names []string, said string) float64 {
 	total, covered := 0, 0
 	for _, n := range pushNames(push, names) {
 		total++
-		if strings.Contains(saidLower, n) {
+		if strings.Contains(saidLower, n) || containsTokenSeq(saidSeq, coverageTokens(n)) {
 			covered++
 		}
 	}
@@ -179,15 +180,6 @@ func digitRuns(text string) []string {
 	return out
 }
 
-// englishNumbers are the number words a voice says for small numbers.
-var englishNumbers = map[string]int{
-	"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
-	"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
-	"seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
-	"sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100,
-	"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-}
-
 // chineseDigits are the Chinese numeral characters and their values;
 // chineseUnits the multipliers.
 var (
@@ -196,31 +188,20 @@ var (
 )
 
 // spokenNumbers are the numbers text says, as digit strings: digit
-// runs, English number words, and runs of Chinese numerals.
+// runs, English number words (including compounds and ordinals), and
+// runs of Chinese numerals.
 func spokenNumbers(text string) []string {
 	out := digitRuns(text)
-	for _, w := range coverageTokens(text) {
-		if n, ok := englishNumbers[w]; ok {
-			out = append(out, strconv.Itoa(n))
+	seen := map[string]bool{}
+	for _, n := range out {
+		seen[n] = true
+	}
+	for _, t := range normTokens(text) {
+		if isDigitsToken(t) && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
 		}
 	}
-	var run []rune
-	flush := func() {
-		if len(run) > 0 {
-			out = append(out, chineseNumber(run))
-			run = run[:0]
-		}
-	}
-	for _, c := range text {
-		_, d := chineseDigits[c]
-		_, u := chineseUnits[c]
-		if d || u {
-			run = append(run, c)
-		} else {
-			flush()
-		}
-	}
-	flush()
 	return out
 }
 
@@ -286,7 +267,7 @@ func contentTokens(text string) []string {
 		cjk := len(r) == 1 && unicode.Is(unicode.Han, r[0])
 		switch {
 		case cjk && cjkParticles[t]:
-		case !cjk && (len(r) < 3 || stopWords[t]):
+		case !cjk && (len(r) < 3 || stopWords[t] || spokenJoiners[t]):
 		case seen[t]:
 		default:
 			seen[t] = true

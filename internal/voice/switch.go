@@ -587,12 +587,37 @@ func (sw *Switcher) HasListener() bool {
 	return sw.client
 }
 
-// ClientPlayback forwards a /ws client playback report to the current
-// session (docs/dev/ws-contract.md "Playback reports"). A new provider's
-// session starts with no run, so a report about the old one's audio
-// (the flush a switch sends) is logged and otherwise ignored there.
+// NoteAudioRun forwards a monotonic audio run id to the current session.
+func (sw *Switcher) NoteAudioRun(runID uint32) {
+	if p, ok := sw.cur().(interface{ NoteAudioRun(uint32) }); ok {
+		p.NoteAudioRun(runID)
+	}
+}
+
+// AssignFlushedRun forwards untagged awaiting-run assignment to the
+// current session.
+func (sw *Switcher) AssignFlushedRun(next func() uint32) uint32 {
+	if p, ok := sw.cur().(interface{ AssignFlushedRun(func() uint32) uint32 }); ok {
+		return p.AssignFlushedRun(next)
+	}
+	return 0
+}
+
+// ClientPlayback forwards an untagged /ws client playback report to the
+// current session (docs/dev/ws-contract.md "Playback reports").
 func (sw *Switcher) ClientPlayback(state string, playedMs int) {
-	if p, ok := sw.cur().(interface{ ClientPlayback(string, int) }); ok {
+	sw.ClientPlaybackRun(state, playedMs, 0)
+}
+
+// ClientPlaybackRun forwards a /ws client playback report (optionally
+// tagged with runID) to the current session.
+func (sw *Switcher) ClientPlaybackRun(state string, playedMs int, runID uint32) {
+	cur := sw.cur()
+	if p, ok := cur.(interface{ ClientPlaybackRun(string, int, uint32) }); ok {
+		p.ClientPlaybackRun(state, playedMs, runID)
+		return
+	}
+	if p, ok := cur.(interface{ ClientPlayback(string, int) }); ok {
 		p.ClientPlayback(state, playedMs)
 	}
 }

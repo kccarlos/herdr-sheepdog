@@ -791,15 +791,36 @@ func (s *Session) speakingLocked(now time.Time) bool {
 	return playing
 }
 
-// ClientPlayback applies a /ws client playback report
-// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback,
-// wakes the push queue (a drained reply may release a push), and when a
-// flushed run was cut short emits the heard part as a cut transcript
-// for the orchestrator.
+// NoteAudioRun tags the current playback run with runID when the /ws hub
+// starts delivering a new spoken run.
+func (s *Session) NoteAudioRun(runID uint32) {
+	s.mu.Lock()
+	s.play.SetRunID(runID)
+	s.mu.Unlock()
+}
+
+// AssignFlushedRun tags an untagged awaiting run when a flush arrived at
+// the /ws hub before any audio chunk of that run left the session.
+func (s *Session) AssignFlushedRun(next func() uint32) uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.play.AssignAwaitingRunID(next)
+}
+
+// ClientPlayback applies an untagged /ws client playback report.
 func (s *Session) ClientPlayback(state string, playedMs int) {
+	s.ClientPlaybackRun(state, playedMs, 0)
+}
+
+// ClientPlaybackRun applies a /ws client playback report optionally tagged
+// with runID (docs/dev/ws-contract.md "Playback reports"): it logs
+// voice.playback, wakes the push queue (a drained reply may release a push),
+// and when a flushed run was cut short emits the heard part as a cut
+// transcript for the orchestrator.
+func (s *Session) ClientPlaybackRun(state string, playedMs int, runID uint32) {
 	s.mu.Lock()
 	now := s.now()
-	rep := s.play.Report(now, state, playedMs)
+	rep := s.play.ReportRun(now, state, playedMs, runID)
 	s.echo.Playback(now, state)
 	utt := s.playUtt.Started(state)
 	if rep.Cut != nil {

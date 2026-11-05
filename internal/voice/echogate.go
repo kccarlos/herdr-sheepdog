@@ -3,9 +3,7 @@ package voice
 import (
 	"math"
 	"sort"
-	"strings"
 	"time"
-	"unicode"
 )
 
 // EchoGate keeps the voice's own speech, leaking from the phone's speaker
@@ -641,43 +639,30 @@ func EchoText(heard, said string) bool {
 	if len(h) < 3 || len(sd) < 2 {
 		return false
 	}
-	in := map[string]bool{}
-	for i := 1; i < len(sd); i++ {
-		in[sd[i-1]+" "+sd[i]] = true
+	in := tokenBigrams(sd, true)
+	compact := make([]string, 0, len(h))
+	for i, tok := range h {
+		if i > 0 && i+1 < len(h) && spokenJoiners[tok] && in[[2]string{h[i-1], h[i+1]}] {
+			continue
+		}
+		compact = append(compact, tok)
+	}
+	if len(compact) < 3 {
+		return false
 	}
 	n := 0
-	for i := 1; i < len(h); i++ {
-		if in[h[i-1]+" "+h[i]] {
+	for i := 1; i < len(compact); i++ {
+		if in[[2]string{compact[i-1], compact[i]}] {
 			n++
 		}
 	}
-	return n >= 2 && n*2 >= len(h)-1
+	return n >= 2 && n*2 >= len(compact)-1
 }
 
-// echoTokens splits text into lower-case words of letters and digits;
-// each Han character is a word of its own.
+// echoTokens splits text into normalised lower-case tokens (canonical
+// numbers, sub-words across code joiners and camelCase, and CJK characters).
 func echoTokens(s string) []string {
-	var out []string
-	var cur []rune
-	flush := func() {
-		if len(cur) > 0 {
-			out = append(out, string(cur))
-		}
-		cur = cur[:0]
-	}
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case unicode.Is(unicode.Han, r):
-			flush()
-			out = append(out, string(r))
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			cur = append(cur, r)
-		default:
-			flush()
-		}
-	}
-	flush()
-	return out
+	return normTokens(s)
 }
 
 // firstSteady: before the gate is armed, an echo match must hold its

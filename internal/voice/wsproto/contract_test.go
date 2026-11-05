@@ -128,3 +128,49 @@ func TestContractCheckerCatchesDrift(t *testing.T) {
 		t.Errorf("good bot-ready: %q %v", typ, err)
 	}
 }
+
+func TestAudioRunFramingAndMessages(t *testing.T) {
+	pcm := []byte{0x10, 0x20, 0x30, 0x40}
+	packed := PackAudioRun(0x01020304, pcm)
+	if len(packed) != AudioRunHeaderBytes+len(pcm) {
+		t.Fatalf("len(packed) = %d, want %d", len(packed), AudioRunHeaderBytes+len(pcm))
+	}
+	if packed[0] != 0x04 || packed[1] != 0x03 || packed[2] != 0x02 || packed[3] != 0x01 {
+		t.Fatalf("header = %x, want little-endian 04030201", packed[:4])
+	}
+	runID, gotPCM, ok := UnpackAudioRun(packed)
+	if !ok || runID != 0x01020304 || !bytes.Equal(gotPCM, pcm) {
+		t.Fatalf("UnpackAudioRun = (%d, %x, %v)", runID, gotPCM, ok)
+	}
+	if _, _, ok := UnpackAudioRun([]byte{1, 2, 3}); ok {
+		t.Fatal("UnpackAudioRun accepted < 4 byte frame")
+	}
+
+	fl := FlushRun(7)
+	b, err := fl.Encode()
+	if err != nil || string(b) != `{"type":"flush","run_id":7}` {
+		t.Fatalf("FlushRun(7) = %s, %v", b, err)
+	}
+	if b0, err := FlushRun(0).Encode(); err != nil || string(b0) != `{"type":"flush"}` {
+		t.Fatalf("FlushRun(0) = %s, %v", b0, err)
+	}
+	pb := PlaybackRun(PlaybackFlushed, 420, 7)
+	parsed, err := Parse(mustEncode(t, pb))
+	if err != nil || parsed.RunID == nil || *parsed.RunID != 7 || *parsed.PlayedMs != 420 {
+		t.Fatalf("PlaybackRun round trip = %+v, %v", parsed, err)
+	}
+	cr := ClientReadyFeatures(ProtocolVersion, ClientInfo{Name: "x", Version: "1", Platform: "web"}, FeatureRunID)
+	parsedCR, err := Parse(mustEncode(t, cr))
+	if err != nil || len(parsedCR.Features) != 1 || parsedCR.Features[0] != FeatureRunID {
+		t.Fatalf("ClientReadyFeatures round trip = %+v, %v", parsedCR, err)
+	}
+}
+
+func mustEncode(t *testing.T, m Message) []byte {
+	t.Helper()
+	b, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

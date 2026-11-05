@@ -19,6 +19,23 @@ type Recap struct {
 	// focus is the supervisor's latest current-focus line (a silent push
 	// tagged TagFocus): a fresh session gets it after the recap.
 	focus string
+	// joinNextUser merges the next RecapUser utterance onto the trailing
+	// RecapUser entry when an intervening 0-heard assistant turn was cut.
+	joinNextUser bool
+}
+
+// CutEllipsis formats the heard prefix of a cut assistant reply with a
+// trailing ellipsis ("…") without doubling existing punctuation.
+func CutEllipsis(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	trimmed := strings.TrimRight(text, ".,;:!?…，。；：！？、 ")
+	if trimmed == "" {
+		return text + "…"
+	}
+	return trimmed + "…"
 }
 
 // TagFocus marks the supervisor's silent current-focus line (the agent
@@ -74,6 +91,13 @@ func (r *Recap) Add(role, text string) {
 	}
 	if role == RecapUser && r.repeatsRecent(text) {
 		return
+	}
+	if r.joinNextUser {
+		r.joinNextUser = false
+		if role == RecapUser && len(r.entries) > 0 && r.entries[len(r.entries)-1].Role == RecapUser {
+			r.entries[len(r.entries)-1].Text = strings.TrimSpace(r.entries[len(r.entries)-1].Text) + " " + text
+			return
+		}
 	}
 	r.entries = append(r.entries, RecapEntry{Role: role, Text: text})
 	max := r.Max
@@ -142,9 +166,12 @@ func recapNorm(text string) string {
 // Cut replaces the newest assistant entry that full (everything the cut
 // run said) contains with heard, the part the client played: the recap
 // then says what the user actually heard, as the orchestrator's "Assistant
-// said (cut off after N s)" does. It reports whether an entry matched.
+// said (cut off after N s)" does. A 0-heard reply is removed completely
+// and surrounding user turns are joined (join_around). It reports whether
+// an entry matched.
 func (r *Recap) Cut(full, heard string, heardMs int) bool {
 	full = strings.TrimSpace(full)
+	heard = strings.TrimSpace(heard)
 	for i := len(r.entries) - 1; i >= 0; i-- {
 		e := &r.entries[i]
 		if e.Role != RecapAssistant || e.Cut {
@@ -153,7 +180,19 @@ func (r *Recap) Cut(full, heard string, heardMs int) bool {
 		if full == "" || !strings.Contains(full, e.Text) {
 			return false
 		}
-		e.Text, e.Cut, e.CutAfterMs = strings.TrimSpace(heard), true, heardMs
+		if heard == "" {
+			r.entries = append(r.entries[:i], r.entries[i+1:]...)
+			if i > 0 && i < len(r.entries) && r.entries[i-1].Role == RecapUser && r.entries[i].Role == RecapUser {
+				r.entries[i-1].Text = strings.TrimSpace(r.entries[i-1].Text) + " " + strings.TrimSpace(r.entries[i].Text)
+				r.entries = append(r.entries[:i], r.entries[i+1:]...)
+				r.joinNextUser = false
+			} else if i == len(r.entries) && i > 0 && r.entries[i-1].Role == RecapUser {
+				r.joinNextUser = true
+			}
+			return true
+		}
+		e.Text, e.Cut, e.CutAfterMs = heard, true, heardMs
+		r.joinNextUser = false
 		return true
 	}
 	return false
@@ -168,7 +207,14 @@ func (r *Recap) Entries() []RecapEntry {
 // Seed puts entries (another session's, already filtered) before the
 // ones kept, within Max.
 func (r *Recap) Seed(entries []RecapEntry) {
-	r.entries = append(append([]RecapEntry(nil), entries...), r.entries...)
+	var clean []RecapEntry
+	for _, e := range entries {
+		if e.Cut && strings.TrimSpace(e.Text) == "" {
+			continue
+		}
+		clean = append(clean, e)
+	}
+	r.entries = append(clean, r.entries...)
 	max := r.Max
 	if max <= 0 {
 		max = DefaultRecapTurns
@@ -179,7 +225,7 @@ func (r *Recap) Seed(entries []RecapEntry) {
 }
 
 // Reset forgets everything ("New conversation"), the focus included.
-func (r *Recap) Reset() { r.entries, r.focus = nil, "" }
+func (r *Recap) Reset() { r.entries, r.focus, r.joinNextUser = nil, "", false }
 
 // Len is the number of entries kept.
 func (r *Recap) Len() int { return len(r.entries) }
@@ -217,10 +263,10 @@ func RecapLines(entries []RecapEntry) string {
 			b.WriteString("User: ")
 		case RecapAssistant:
 			if e.Cut {
-				fmt.Fprintf(&b, "You (cut off after %.0f s): ", float64(e.CutAfterMs)/1000)
-			} else {
-				b.WriteString("You: ")
+				fmt.Fprintf(&b, "You (cut off after %.0f s): %s\n", float64(e.CutAfterMs)/1000, CutEllipsis(e.Text))
+				continue
 			}
+			b.WriteString("You: ")
 		default:
 			b.WriteString("Supervisor update: ")
 		}

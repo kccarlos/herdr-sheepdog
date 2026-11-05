@@ -34,6 +34,49 @@ func TestPushCoverageOnRun2Lines(t *testing.T) {
 	}
 }
 
+func TestPushCoverageNormalisesNumbersAndCodeJoiners(t *testing.T) {
+	cases := []struct {
+		name, push, said string
+		minCov           float64
+	}{
+		{
+			name:   "cardinal digits vs spoken words and snake_case dot filename",
+			push:   "3 failures in ws_proto.go",
+			said:   "three failures in ws underscore proto dot go",
+			minCov: 0.99,
+		},
+		{
+			name:   "compound number 23 and kebab-case slash path",
+			push:   "23 warnings in cmd/auth-handler/main.go",
+			said:   "twenty-three warnings in cmd slash auth dash handler slash main dot go",
+			minCov: 0.99,
+		},
+		{
+			name:   "camelCase and acronym splitting",
+			push:   "parseHTTPResponse failed in authService",
+			said:   "parse HTTP response failed in auth service",
+			minCov: 0.99,
+		},
+		{
+			name:   "ordinals 1st..21st vs spoken ordinals",
+			push:   "failed on the 1st and 21st retry",
+			said:   "failed on the first and twenty first retry",
+			minCov: 0.99,
+		},
+		{
+			name:   "Chinese numerals vs Arabic digits",
+			push:   "测试还是失败，结果是25，应该是30。",
+			said:   "测试还是失败，结果是二十五，应该是三十。",
+			minCov: 0.99,
+		},
+	}
+	for _, tc := range cases {
+		if got := PushCoverage(tc.push, tc.said); got < tc.minCov {
+			t.Errorf("%s: PushCoverage(%q, %q) = %.2f, want >= %.2f", tc.name, tc.push, tc.said, got, tc.minCov)
+		}
+	}
+}
+
 // TestHeardTrackerIgnoresTheInterruptionItsOwnPushCauses: Gemini reports
 // "interrupted" right after an interrupting push and sends a stray
 // turnComplete (run 2, 00:48:12.310 and .417) before it voices the push;
@@ -114,5 +157,41 @@ func TestRequeueHoldCollisionTimeline(t *testing.T) {
 	g := RequeueFacts{LastInput: at(50), ReplyDoneAt: at(40)}
 	if got := RequeueHold(at(61), g); got != "" {
 		t.Errorf("61: %q, want free", got)
+	}
+}
+
+func TestHeardTrackerRunIDMatchesAndIgnoresStaleFlushed(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	var h HeardTracker
+
+	// Run 1: push 1 cut by barge-in.
+	h.Pushed(t0, "first push body needs full coverage here", nil, false)
+	h.SetRunID(1)
+	h.Said("first push body needs full coverage here")
+	h.InterruptedRun(t0.Add(100*time.Millisecond), "model", true, 1)
+
+	// Run 2: push 2 starts speaking before flushed(1) arrives.
+	h.Pushed(t0.Add(200*time.Millisecond), "second push body stays heard completely", nil, false)
+	h.SetRunID(2)
+	h.Said("second push body stays heard completely")
+	h.TurnComplete()
+
+	// Late flushed(1) judges push 1 as unheard, leaving push 2 watched.
+	cut1 := &TranscriptCut{HeardMs: 300, RunMs: 2000, Full: "first push body needs full coverage here"}
+	unheard := h.FlushedRun(t0.Add(250*time.Millisecond), cut1, "first", 1)
+	if len(unheard) != 1 || unheard[0].Text != "first push body needs full coverage here" {
+		t.Fatalf("FlushedRun(1) = %+v, want push 1 unheard", unheard)
+	}
+	if !h.Watching() {
+		t.Fatal("push 2 should still be watched after flushed(1)")
+	}
+
+	// Duplicate flushed(1) must NOT cut push 2.
+	dupCut := &TranscriptCut{HeardMs: 0, RunMs: 2000, Full: "second push body stays heard completely"}
+	if dup := h.FlushedRun(t0.Add(260*time.Millisecond), dupCut, "", 1); len(dup) != 0 {
+		t.Fatalf("duplicate FlushedRun(1) falsely cut push 2: %+v", dup)
+	}
+	if settled := h.Settle(t0.Add(500*time.Millisecond), false); len(settled) != 0 {
+		t.Fatalf("Settle push 2 = %+v, want heard", settled)
 	}
 }

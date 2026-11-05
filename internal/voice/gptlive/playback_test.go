@@ -129,3 +129,159 @@ func TestGPTLivePlaybackStartTaggedWithReplyUtterance(t *testing.T) {
 		t.Fatalf("voice.playback = %v", p)
 	}
 }
+
+func TestGPTLiveTruncateOnBargeInAndClamp(t *testing.T) {
+	t.Run("truncate_at_played_ms", func(t *testing.T) {
+		s, d, _ := startSession(t, testConfig())
+		s.ClientAttached(true)
+		_ = s.SendAudio(tone(3000, 640))
+		waitFor(t, "open", s.Live)
+		c := d.last()
+		words := strings.Fields("one two three four five six seven eight nine ten")
+		for _, w := range words {
+			c.server(map[string]any{
+				"type":          evOutputAudioDelta,
+				"item_id":       "item_abc",
+				"content_index": 0,
+				"delta":         b64(tone(4000, 100*24)),
+			})
+			c.server(map[string]any{
+				"type":          evOutputTranscript,
+				"item_id":       "item_abc",
+				"content_index": 0,
+				"delta":         w + " ",
+			})
+		}
+		waitFor(t, "reply received", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return strings.Contains(s.outText, "ten")
+		})
+		s.ClientPlayback(voice.PlaybackStarted, 0)
+		s.ClientPlayback(voice.PlaybackFlushed, 400)
+		waitFor(t, "truncate sent", func() bool {
+			return len(c.events("conversation.item.truncate")) == 1
+		})
+		tr := c.events("conversation.item.truncate")[0]
+		if tr["item_id"] != "item_abc" || tr["content_index"] != float64(0) || tr["audio_end_ms"] != float64(400) {
+			t.Fatalf("truncate event = %v", tr)
+		}
+	})
+
+	t.Run("clamp_to_server_audio_ms", func(t *testing.T) {
+		s, d, _ := startSession(t, testConfig())
+		s.ClientAttached(true)
+		_ = s.SendAudio(tone(3000, 640))
+		waitFor(t, "open", s.Live)
+		c := d.last()
+		// Server sends 600 ms for item_short; client reports 950 ms played.
+		for _, w := range []string{"alpha", "beta", "gamma"} {
+			c.server(map[string]any{
+				"type":          evOutputAudioDelta,
+				"item_id":       "item_short",
+				"content_index": 1,
+				"delta":         b64(tone(4000, 200*24)),
+			})
+			c.server(map[string]any{
+				"type":          evOutputTranscript,
+				"item_id":       "item_short",
+				"content_index": 1,
+				"delta":         w + " ",
+			})
+		}
+		waitFor(t, "reply received", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return strings.Contains(s.outText, "gamma")
+		})
+		s.ClientPlayback(voice.PlaybackStarted, 0)
+		s.ClientPlayback(voice.PlaybackFlushed, 950)
+		waitFor(t, "truncate sent", func() bool {
+			return len(c.events("conversation.item.truncate")) == 1
+		})
+		tr := c.events("conversation.item.truncate")[0]
+		if tr["item_id"] != "item_short" || tr["content_index"] != float64(1) || tr["audio_end_ms"] != float64(600) {
+			t.Fatalf("clamped truncate event = %v, want audio_end_ms=600", tr)
+		}
+	})
+}
+
+func TestGPTLiveCutRecapJoinAroundAndNote(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 120 * time.Millisecond
+	s, d, _ := startSession(t, cfg)
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open 1", s.Live)
+	c1 := d.last()
+
+	// User speaks first half -> settles.
+	c1.server(map[string]any{"type": evInputTranscript, "delta": "check auth"})
+	time.Sleep(cfg.SettleWait + 30*time.Millisecond)
+
+	// Assistant starts replying, immediately cut at 0 ms (0-heard).
+	for _, w := range []string{"Let", "me", "check", "auth", "now"} {
+		c1.server(map[string]any{"type": evOutputAudioDelta, "item_id": "it_1", "delta": b64(tone(4000, 120*24))})
+		c1.server(map[string]any{"type": evOutputTranscript, "item_id": "it_1", "delta": w + " "})
+	}
+	waitFor(t, "first reply", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return strings.Contains(s.outText, "now")
+	})
+	s.ClientPlayback(voice.PlaybackStarted, 0)
+	s.ClientPlayback(voice.PlaybackFlushed, 0)
+
+	// User finishes sentence -> settles and joins around dropped 0-heard reply.
+	c1.server(map[string]any{"type": evInputTranscript, "delta": "and docs"})
+	time.Sleep(cfg.SettleWait + 30*time.Millisecond)
+
+	// Assistant replies, cut 40% in ("Checking auth").
+	for _, w := range []string{"Checking", "auth", "and", "docs", "now"} {
+		c1.server(map[string]any{"type": evOutputAudioDelta, "item_id": "it_2", "delta": b64(tone(4000, 200*24))})
+		c1.server(map[string]any{"type": evOutputTranscript, "item_id": "it_2", "delta": w + " "})
+	}
+	waitFor(t, "second reply", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return strings.Contains(s.outText, "now")
+	})
+	s.ClientPlayback(voice.PlaybackStarted, 0)
+	s.ClientPlayback(voice.PlaybackFlushed, 400)
+
+	// Wait for idle close, then reopen and inspect session.start input items.
+	waitFor(t, "idle close", func() bool { return !s.Live() })
+	s.SetMuted(true)
+	s.SetMuted(false)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open 2", func() bool { return d.count() == 2 && s.Live() })
+	c2 := d.last()
+	starts := c2.events(evSessionStart)
+	if len(starts) != 1 {
+		t.Fatalf("session.start events = %d", len(starts))
+	}
+	sess, _ := starts[0]["session"].(map[string]any)
+	rawInput, _ := sess["input"].([]any)
+	var roles, texts []string
+	for _, it := range rawInput {
+		m, _ := it.(map[string]any)
+		role, _ := m["role"].(string)
+		content, _ := m["content"].([]any)
+		var txt string
+		if len(content) > 0 {
+			p, _ := content[0].(map[string]any)
+			txt, _ = p["text"].(string)
+		}
+		roles = append(roles, role)
+		texts = append(texts, txt)
+	}
+	if len(texts) != 3 {
+		t.Fatalf("recap items = %d (%v / %v), want [user, assistant, developer]", len(texts), roles, texts)
+	}
+	if roles[0] != "user" || texts[0] != "check auth and docs" {
+		t.Errorf("item[0] = %s:%q, want user:%q", roles[0], texts[0], "check auth and docs")
+	}
+	if roles[1] != "assistant" || texts[1] != "Checking auth…" {
+		t.Errorf("item[1] = %s:%q, want assistant:%q", roles[1], texts[1], "Checking auth…")
+	}
+}

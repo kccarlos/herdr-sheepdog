@@ -132,6 +132,18 @@ type Session struct {
 	// turnDoneAt is when the model's speech last ended (voice.RequeueHold).
 	turnDoneAt time.Time
 	openCheck  voice.OpenCheck
+	flushBy    string
+	flushAt    time.Time
+}
+
+// outItemSpan tracks the active assistant output item's server-generated
+// audio so conversation.item.truncate never exceeds server_audio_ms.
+type outItemSpan struct {
+	runID        uint32
+	itemID       string
+	contentIndex int
+	serverBytes  int
+	startedAt    time.Time
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -147,10 +159,14 @@ type liveConn struct {
 	pace     inputPacer    // input audio sent vs the wall clock (pace.go)
 
 	// under Session.mu
-	usage       float64
-	closeWhy    string // our reason, when we asked to close
-	finalized   bool
-	startedOnce sync.Once
+	usage         float64
+	closeWhy      string // our reason, when we asked to close
+	finalized     bool
+	startedOnce   sync.Once
+	outItem       *outItemSpan
+	awaitingItems []outItemSpan
+	truncatedID   string
+	truncSeq      int
 }
 
 // pushItem is one queued Push.
@@ -388,21 +404,128 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 	return playing
 }
 
-// ClientPlayback applies a /ws client playback report
-// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback and,
-// when a flushed run was cut short, emits the heard part as a cut
-// transcript for the orchestrator. The push pump reads the new state on its
-// next tick.
-func (s *Session) ClientPlayback(state string, playedMs int) {
+func buildTruncateLocked(lc *liveConn, span outItemSpan, playedMs int) *truncateEvent {
+	if lc == nil || span.itemID == "" || span.serverBytes <= 0 || span.itemID == lc.truncatedID {
+		return nil
+	}
+	serverAudioMs := span.serverBytes / (SampleRate * 2 / 1000)
+	endMs := playedMs
+	if endMs < 0 {
+		endMs = 0
+	}
+	if endMs > serverAudioMs {
+		endMs = serverAudioMs
+	}
+	lc.truncatedID = span.itemID
+	lc.truncSeq++
+	return &truncateEvent{
+		Type:         evItemTruncate,
+		EventID:      fmt.Sprintf("trunc_%d_%d", lc.seq, lc.truncSeq),
+		ItemID:       span.itemID,
+		ContentIndex: span.contentIndex,
+		AudioEndMS:   endMs,
+	}
+}
+
+// NoteAudioRun tags the current playback and push-watch run with runID
+// when the /ws hub starts delivering a new spoken run.
+func (s *Session) NoteAudioRun(runID uint32) {
 	s.mu.Lock()
-	now := s.now()
-	rep := s.play.Report(now, state, playedMs)
-	utt := s.playUtt.Started(state)
-	var unheard []voice.UnheardPush
-	if state == voice.PlaybackFlushed {
-		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
+	s.play.SetRunID(runID)
+	s.heard.SetRunID(runID)
+	if s.live != nil && s.live.outItem != nil && s.live.outItem.runID == 0 {
+		s.live.outItem.runID = runID
 	}
 	s.mu.Unlock()
+}
+
+// AssignFlushedRun tags an untagged awaiting run when a flush arrived at
+// the /ws hub before any audio chunk of that run left the session.
+func (s *Session) AssignFlushedRun(next func() uint32) uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.play.AssignAwaitingRunID(next)
+	if id != 0 {
+		s.heard.TagLastCutRun(id)
+		if s.live != nil {
+			if n := len(s.live.awaitingItems); n > 0 && s.live.awaitingItems[n-1].runID == 0 {
+				s.live.awaitingItems[n-1].runID = id
+			} else if s.live.outItem != nil && s.live.outItem.runID == 0 {
+				s.live.outItem.runID = id
+			}
+		}
+	}
+	return id
+}
+
+// ClientPlayback applies an untagged /ws client playback report.
+func (s *Session) ClientPlayback(state string, playedMs int) {
+	s.ClientPlaybackRun(state, playedMs, 0)
+}
+
+// ClientPlaybackRun applies a /ws client playback report optionally tagged
+// with runID (docs/dev/ws-contract.md "Playback reports"): it logs
+// voice.playback and, when a flushed run was cut short, truncates the live
+// server item, trims the recap, and emits the heard part as a cut
+// transcript for the orchestrator.
+func (s *Session) ClientPlaybackRun(state string, playedMs int, runID uint32) {
+	s.mu.Lock()
+	now := s.now()
+	rep := s.play.ReportRun(now, state, playedMs, runID)
+	utt := s.playUtt.Started(state)
+	var unheard []voice.UnheardPush
+	var trunc *truncateEvent
+	var truncConn *liveConn
+	switch state {
+	case voice.PlaybackDrained:
+		if s.live != nil && (runID == 0 || s.live.outItem == nil || s.live.outItem.runID == 0 || s.live.outItem.runID == runID) {
+			s.live.outItem = nil
+		}
+	case voice.PlaybackFlushed:
+		if lc := s.live; lc != nil && s.lcActiveLocked(lc) {
+			if runID != 0 {
+				matched := false
+				for i := range lc.awaitingItems {
+					if lc.awaitingItems[i].runID == runID {
+						span := lc.awaitingItems[i]
+						lc.awaitingItems = lc.awaitingItems[i+1:]
+						trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
+						matched = true
+						break
+					}
+				}
+				if !matched && lc.outItem != nil && (lc.outItem.runID == 0 || lc.outItem.runID == runID) && rep.RunMs > 0 {
+					span := *lc.outItem
+					lc.outItem = nil
+					trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
+				}
+			} else if len(lc.awaitingItems) > 0 {
+				var span outItemSpan
+				span, lc.awaitingItems = lc.awaitingItems[0], lc.awaitingItems[1:]
+				trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
+			} else if lc.outItem != nil {
+				span := *lc.outItem
+				lc.outItem = nil
+				trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
+			}
+		}
+		unheard = s.heard.FlushedRun(now, rep.Cut, rep.Heard, runID)
+		if rep.Cut != nil {
+			rep.Cut.UtteranceID = s.playUtt.Run()
+			rep.Cut.ByPush = s.flushBy == "push" && now.Sub(s.flushAt) < 10*time.Second
+			s.flushReplyLocked()
+			s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+		}
+	}
+	s.mu.Unlock()
+	if trunc != nil && truncConn != nil {
+		if err := s.send(truncConn, *trunc); err == nil {
+			s.log.Log(logSource, "voice.item_truncated", "", map[string]any{
+				"item_id": trunc.ItemID, "content_index": trunc.ContentIndex,
+				"audio_end_ms": trunc.AudioEndMS, "session_id": truncConn.id,
+			})
+		}
+	}
 	s.reportUnheard(unheard)
 	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
@@ -627,9 +750,37 @@ func (s *Session) finishAudioTimingLocked() map[string]any {
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	now := s.now()
-	awaited := s.play.Flush(now)
-	unheard := s.heard.Interrupted(now, by, awaited)
+	s.flushBy, s.flushAt = by, now
+	s.flushReplyLocked()
+	runID, awaited := s.play.FlushRun(now)
+	var trunc *truncateEvent
+	var truncConn *liveConn
+	if lc := s.live; lc != nil && s.lcActiveLocked(lc) && lc.outItem != nil {
+		span := *lc.outItem
+		if span.runID == 0 {
+			span.runID = runID
+		}
+		lc.outItem = nil
+		if s.play.Reports() && awaited {
+			lc.awaitingItems = append(lc.awaitingItems, span)
+			if len(lc.awaitingItems) > 4 {
+				lc.awaitingItems = lc.awaitingItems[len(lc.awaitingItems)-4:]
+			}
+		} else {
+			estMs := int(now.Sub(span.startedAt).Milliseconds())
+			trunc, truncConn = buildTruncateLocked(lc, span, estMs), lc
+		}
+	}
+	unheard := s.heard.InterruptedRun(now, by, awaited, runID)
 	s.mu.Unlock()
+	if trunc != nil && truncConn != nil {
+		if err := s.send(truncConn, *trunc); err == nil {
+			s.log.Log(logSource, "voice.item_truncated", "", map[string]any{
+				"item_id": trunc.ItemID, "content_index": trunc.ContentIndex,
+				"audio_end_ms": trunc.AudioEndMS, "session_id": truncConn.id,
+			})
+		}
+	}
 	s.reportUnheard(unheard)
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})

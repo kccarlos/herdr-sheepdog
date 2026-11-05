@@ -45,8 +45,10 @@ type fakeSession struct {
 	// resets records every Reset(reason) call.
 	resets []string
 	// playback and speaking record ClientPlayback / ClientSpeaking.
-	playback []string
-	speaking []bool
+	playback     []string
+	playbackRuns []string
+	audioRuns    []uint32
+	speaking     []bool
 	// pushTags records the tags of every PushTagged call.
 	pushTags []map[string]any
 	// pushUrgency records the urgency of every PushTagged call.
@@ -128,8 +130,17 @@ func (f *fakeSession) ClientAttached(a bool) {
 	f.mu.Unlock()
 }
 func (f *fakeSession) ClientPlayback(state string, playedMs int) {
+	f.ClientPlaybackRun(state, playedMs, 0)
+}
+func (f *fakeSession) ClientPlaybackRun(state string, playedMs int, runID uint32) {
 	f.mu.Lock()
 	f.playback = append(f.playback, fmt.Sprintf("%s:%d", state, playedMs))
+	f.playbackRuns = append(f.playbackRuns, fmt.Sprintf("%s:%d:%d", state, playedMs, runID))
+	f.mu.Unlock()
+}
+func (f *fakeSession) NoteAudioRun(runID uint32) {
+	f.mu.Lock()
+	f.audioRuns = append(f.audioRuns, runID)
 	f.mu.Unlock()
 }
 func (f *fakeSession) ClientSpeaking(on bool) {
@@ -141,6 +152,11 @@ func (f *fakeSession) playbackReports() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.playback...)
+}
+func (f *fakeSession) playbackRunReports() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.playbackRuns...)
 }
 func (f *fakeSession) speakingReports() []bool {
 	f.mu.Lock()

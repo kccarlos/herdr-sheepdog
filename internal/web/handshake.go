@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/coder/websocket"
@@ -31,7 +32,7 @@ type handshake struct {
 // features lists the optional parts of the contract this daemon serves
 // right now (bot-ready "features").
 func (s *Server) features() []string {
-	f := []string{wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence}
+	f := []string{wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence, wsproto.FeatureRunID}
 	if s.deps.VoiceSwitch != nil {
 		f = append(f, wsproto.FeatureProvider)
 	}
@@ -123,6 +124,7 @@ func (c *client) onClientReady(m wsproto.Message) {
 		return
 	}
 	c.hs.resolved, c.hs.protocol = true, *m.Protocol
+	c.binaryRunID = slices.Contains(m.Features, wsproto.FeatureRunID)
 	if c.hs.timer != nil {
 		c.hs.timer.Stop()
 	}
@@ -139,8 +141,26 @@ func (c *client) onClientReady(m wsproto.Message) {
 	c.attachIfPending()
 	c.h.setClientInfo(c, m.Client)
 	// The daemon speaks its own protocol; a newer client steps down to
-	// it (or closes, if it cannot).
+	// it (or closes, if it cannot). Any audio that arrived before
+	// client-ready goes out right after bot-ready, framed according to the
+	// negotiated features.
 	c.enqueue(controlFrame(wsproto.BotReady(wsproto.ProtocolVersion, c.h.s.deps.MinProtocol, c.h.s.deps.Version, c.h.s.features())))
+	c.mu.Lock()
+	for _, f := range c.preHandshake {
+		if len(c.queue) >= c.max {
+			c.droppedAudio++
+			c.dropped++
+			continue
+		}
+		c.queue = append(c.queue, f)
+	}
+	c.preHandshake = nil
+	c.audioReady = true
+	c.mu.Unlock()
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
 }
 
 // attachIfPending attaches a client that connected while another was

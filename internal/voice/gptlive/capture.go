@@ -57,6 +57,8 @@ func (c *recConn) Send(ctx context.Context, ev any) error {
 		c.rec.Audio(base64.StdEncoding.DecodedLen(len(e.Audio)), SampleRate)
 	case appendEvent:
 		c.appended(e)
+	case truncateEvent:
+		c.rec.Marker("output truncated", fmt.Sprintf("conversation.item.truncate: item %s cut at %d ms.", e.ItemID, e.AudioEndMS), ctxcap.Raw(e))
 	case closeEvent:
 		c.rec.Marker("session close sent", "session.close: the daemon asked the server to end this session.", ctxcap.Raw(e))
 	}

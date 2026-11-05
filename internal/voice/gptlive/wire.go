@@ -11,12 +11,14 @@ const (
 	evInstructionsAppend = "session.instructions.append"
 	evThinkingAppend     = "session.thinking.append"
 	evCommentaryAppend   = "session.commentary.append"
+	evItemTruncate       = "conversation.item.truncate"
 	evSessionClose       = "session.close"
 )
 
 // Server event types.
 const (
 	evSessionStarted      = "session.started"
+	evOutputItemAdded     = "response.output_item.added"
 	evOutputAudioDelta    = "session.output_audio.delta"
 	evInputTranscript     = "session.input_transcript.delta"
 	evOutputTranscript    = "session.output_transcript.delta"
@@ -93,6 +95,16 @@ type closeEvent struct {
 	EventID string `json:"event_id,omitempty"`
 }
 
+// truncateEvent trims an assistant audio item on barge-in so server
+// history matches what the client actually played.
+type truncateEvent struct {
+	Type         string `json:"type"`
+	EventID      string `json:"event_id,omitempty"`
+	ItemID       string `json:"item_id"`
+	ContentIndex int    `json:"content_index"`
+	AudioEndMS   int    `json:"audio_end_ms"`
+}
+
 // serverEvent is the union of the server events the session reads.
 type serverEvent struct {
 	Type          string `json:"type"`
@@ -108,7 +120,13 @@ type serverEvent struct {
 	// session.closed
 	Reason string `json:"reason"`
 
-	// output audio and transcripts
+	// output audio, transcripts and items
+	ItemID       string `json:"item_id"`
+	ContentIndex int    `json:"content_index"`
+	Item         *struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	} `json:"item"`
 	Delta   string `json:"delta"`
 	StartMS int64  `json:"start_ms"`
 	EndMS   int64  `json:"end_ms"`

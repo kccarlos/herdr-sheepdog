@@ -112,7 +112,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 					s.audioTiming = audiotiming.New(s.audioTurnSeq, wsproto.ServerSampleRate)
 				}
 				s.audioTiming.Chunk(now, len(p.InlineData.Data))
-				s.play.Sent(now, len(p.InlineData.Data))
+				s.play.SentPCM(now, p.InlineData.Data)
 				s.echo.Out(p.InlineData.Data)
 				s.mu.Unlock()
 				s.clearStalled()

@@ -285,10 +285,18 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		}
 		s.mu.Unlock()
 		lc.startedOnce.Do(func() { close(lc.started) })
+	case evOutputItemAdded:
+		if ev.Item != nil && ev.Item.Role == "assistant" && ev.Item.ID != "" {
+			s.mu.Lock()
+			if s.lcActiveLocked(lc) && ev.Item.ID != lc.truncatedID {
+				lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: ev.Item.ID, startedAt: s.now()}
+			}
+			s.mu.Unlock()
+		}
 	case evOutputAudioDelta:
 		chunk, err := base64.StdEncoding.DecodeString(ev.Delta)
 		if err == nil && len(chunk) > 0 {
-			s.onOutputAudio(lc, chunk)
+			s.onOutputAudio(lc, chunk, ev.ItemID, ev.ContentIndex)
 		}
 	case evInputTranscript:
 		if ev.Delta != "" {
@@ -296,7 +304,7 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		}
 	case evOutputTranscript:
 		if ev.Delta != "" {
-			s.onOutputText(lc, ev.Delta)
+			s.onOutputText(lc, ev.Delta, ev.ItemID, ev.ContentIndex)
 		}
 	case evDelegationCreated:
 		if ev.Delegation != nil && ev.Delegation.Target == "client" {
@@ -333,13 +341,25 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 	return false
 }
 
-func (s *Session) onOutputAudio(lc *liveConn, chunk []byte) {
+func (s *Session) onOutputAudio(lc *liveConn, chunk []byte, itemID string, contentIndex int) {
 	now := s.now()
 	voiced := peak(chunk) >= s.cfg.VoicedPeak
 	s.mu.Lock()
 	if !s.lcActiveLocked(lc) {
 		s.mu.Unlock()
 		return
+	}
+	if lc != nil && itemID != "" {
+		if itemID == lc.truncatedID {
+			s.mu.Unlock()
+			return
+		}
+		if lc.outItem == nil || lc.outItem.itemID != itemID {
+			lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: itemID, contentIndex: contentIndex, startedAt: now}
+		} else if lc.outItem.runID == 0 {
+			lc.outItem.runID = s.play.RunID()
+		}
+		lc.outItem.serverBytes += len(chunk)
 	}
 	if s.audioTiming == nil {
 		s.audioTurnSeq++
@@ -354,7 +374,7 @@ func (s *Session) onOutputAudio(lc *liveConn, chunk []byte) {
 	forward := voiced || (!s.lastVoiced.IsZero() && now.Sub(s.lastVoiced) < s.cfg.PauseHold)
 	if forward {
 		s.outBytes += int64(len(chunk))
-		s.play.Sent(now, len(chunk))
+		s.play.SentPCM(now, chunk)
 	}
 	s.mu.Unlock()
 	if forward {
@@ -380,12 +400,23 @@ func (s *Session) onInputText(lc *liveConn, delta string) {
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: delta})
 }
 
-func (s *Session) onOutputText(lc *liveConn, delta string) {
+func (s *Session) onOutputText(lc *liveConn, delta string, itemID string, contentIndex int) {
 	now := s.now()
 	s.mu.Lock()
 	if !s.lcActiveLocked(lc) {
 		s.mu.Unlock()
 		return
+	}
+	if lc != nil && itemID != "" {
+		if itemID == lc.truncatedID {
+			s.mu.Unlock()
+			return
+		}
+		if lc.outItem == nil || lc.outItem.itemID != itemID {
+			lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: itemID, contentIndex: contentIndex, startedAt: now}
+		} else if lc.outItem.runID == 0 {
+			lc.outItem.runID = s.play.RunID()
+		}
 	}
 	s.lastOutText = now
 	s.lastActivity = now
@@ -415,12 +446,16 @@ func (s *Session) flushReplyLocked() {
 // any silent context received in standby as session.input messages.
 func (s *Session) recapItemsLocked() []initialItem {
 	var items []initialItem
-	for _, e := range s.recap.Recent(s.cfg.RecapChars) {
+	entries := s.recap.Recent(s.cfg.RecapChars)
+	for _, e := range entries {
 		part := contentPart{Type: "input_text", Text: e.Text}
 		role := e.Role
 		switch e.Role {
 		case voice.RecapAssistant:
 			part.Type = "output_text"
+			if e.Cut {
+				part.Text = voice.CutEllipsis(e.Text)
+			}
 		case voice.RecapSupervisor:
 			// A spoken push carried over from Gemini (a provider switch).
 			role, part.Text = "developer", "Supervisor update, already spoken to the user: "+e.Text
