@@ -291,7 +291,8 @@ func (a *App) wire() error {
 	}
 	deps.Term = a.term
 	deps.Shell, deps.Files, deps.Advertise = cfg.Web.Shell, cfg.Web.Files, cfg.Web.Advertise
-	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir)
+	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir, cfg.Web.Port)
+	deps.TailscaleFunnel = web.TailscaleFunnelCLI()
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {
 		return err

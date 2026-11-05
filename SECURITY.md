@@ -8,16 +8,16 @@ Do not include real API keys or tokens in a report. `sheepdog doctor --report` r
 
 ## What sheepdog is, for threat-modelling
 
-- It is a local daemon you run yourself. It listens on `127.0.0.1` by default and refuses a non-loopback address without a token.
-- It has **no TLS**. Use your LAN or Tailscale; never expose the port to the open internet ([docs/remote-access.md](docs/remote-access.md)).
-- Any paired device can read agent screens and answer their prompts until it is revoked on the setup page. The one rail in code: an approval is answered only on the user's own words in that turn.
+- It is a local daemon you run yourself. It listens on `127.0.0.1` by default; off-loopback traffic requires TLS and a paired device key ([docs/remote-access.md](docs/remote-access.md)).
+- Loopback requests carrying reverse-proxy headers (`X-Forwarded-*`, `Forwarded`, `X-Real-IP`) or arriving while Tailscale Funnel targets the daemon's port never get unauthenticated local authority: paired devices (`sds_` session tickets and paired browser sessions) still work on public and device routes, while `/setup`, `/debug` and pairing routes answer `403`. Never expose the port to the open internet.
+- Any paired device can read agent screens, open a phone shell (when `web.shell` is on) and answer prompts until it is revoked on the setup page. The one rail in code: an approval is answered only on the user's own words in that turn.
 - API keys live in `~/.config/sheepdog/.env` (mode 0600) and are redacted from logs and reports.
 
 ### The iPhone app
 
 - The app talks only to the sheepdog daemon at the address you give it (typed, or from the daemon's pairing code), and, for notifications, to Apple directly or through the push relay, which forwards end-to-end encrypted payloads it cannot read. It has no server of its own.
-- The daemon's token is the only credential. The app keeps it in the keychain (available only when the phone is unlocked). Answering an approval from a notification needs the passcode.
-- The connection is **plain HTTP and WebSocket without TLS**, because the daemon offers none. Use it on a trusted LAN or Tailscale only. This is why the app sets `NSAllowsArbitraryLoads`.
+- Each paired device generates its own P-256 signing key (kept in the Secure Enclave on iPhone when available) and pins the daemon's TLS certificate fingerprint from the one-time pairing code. Answering an approval from a notification needs the passcode.
+- Connections off the computer use HTTPS and WSS verified against the pinned certificate fingerprint. Use it on a trusted LAN or Tailscale only.
 - A `sheepdog://pair` link changes nothing until you confirm "Pair with <host>?".
 
 In scope: the daemon, the CLI, the herdr plugin scripts, the web pages, the push relay and the iPhone app in this repository.

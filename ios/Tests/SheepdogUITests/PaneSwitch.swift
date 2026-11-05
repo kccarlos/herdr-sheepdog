@@ -133,13 +133,14 @@ extension XCTestCase {
     }
 
     /// Opens an agent's window from the Agents list and waits for its
-    /// terminal. The window button can be below the fold (at the largest
-    /// text only a few rows fit) or under the voice capsule, and a tap
+    /// terminal (or `until`, for a window without one). The window button
+    /// can be below the fold (at the largest text only a few rows fit) or
+    /// under the voice capsule, and a tap
     /// that lands while the cover or list still settles is lost on a slow
     /// Mac: so scroll to the button, tap it, and look for the terminal; if
     /// it did not come up, look for the button again and retry.
-    func openAgentWindow(_ app: XCUIApplication, alias: String, terminalTimeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
-        let terminal = app.descendants(matching: .any)["agentScreen.terminal"]
+    func openAgentWindow(_ app: XCUIApplication, alias: String, terminalTimeout: TimeInterval = 30, until: XCUIElement? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        let terminal = until ?? app.descendants(matching: .any)["agentScreen.terminal"]
         let windows = app.buttons.matching(identifier: "flock.agent.\(alias).window")
         let capsule = app.scrollViews.matching(identifier: "voice.capsule").firstMatch
         XCTAssertTrue(windows.firstMatch.waitForExistence(timeout: 15), "\(alias)'s window button", file: file, line: line)
@@ -169,7 +170,7 @@ extension XCTestCase {
                 swipes = 0
             }
         } while Date() < deadline
-        XCTAssertTrue(terminal.exists, "\(alias)'s window never opened its terminal", file: file, line: line)
+        XCTAssertTrue(terminal.exists, "\(alias)'s window never reached its expected state", file: file, line: line)
     }
 
     /// Types into a text field once it has the keyboard focus, tapping it

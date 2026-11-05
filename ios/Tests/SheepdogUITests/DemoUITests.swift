@@ -156,6 +156,15 @@ final class DemoUITests: XCTestCase {
 
         setSwitch()
         XCTAssertTrue(waitForGone(reconnect, timeout: 10), "off again: the reconnect is hidden")
+
+        // A clean launch must not inherit this preference from an earlier test.
+        setSwitch()
+        XCTAssertTrue(app.descendants(matching: .any)["conversation.technicalTag"].waitForExistence(timeout: 10))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        XCTAssertTrue(restart.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.descendants(matching: .any)["conversation.technicalTag"].exists, "reset clears technical events")
     }
 
     private func waitForGone(_ element: XCUIElement, timeout: TimeInterval) -> Bool {

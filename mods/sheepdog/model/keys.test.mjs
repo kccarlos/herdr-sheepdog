@@ -47,6 +47,36 @@ test("in the composer digits and Enter are text, and 0 or letters mean nothing",
   assert.equal(keyAction("a", { onPanel: true, suggestions }), null);
 });
 
+test("? on the panel opens or closes keyboard shortcuts, but stays text in the composer", () => {
+  assert.deepEqual(keyAction("?", { onPanel: true }), { type: "shortcuts" });
+  assert.deepEqual(keyAction("?", { onPanel: true, active: false }), { type: "shortcuts" });
+  assert.deepEqual(keyAction("?", { onPanel: true, sheet: true }), { type: "shortcuts" });
+  assert.equal(keyAction("?", { onPanel: false }), null, "typing ? in the composer types ?");
+  assert.equal(keyAction("?", { onPanel: false, sheet: "questions" }), null, "typing ? in composer with questions sheet open still types ?");
+  assert.equal(keyAction("?", { onPanel: true, modified: true }), null);
+});
+
+test("shortcuts and card sheets block blind answers and composer focus; ? closes shortcuts even without panel focus", () => {
+  assert.equal(keyAction("1", { onPanel: true, question, suggestions, sheet: "shortcuts" }), null);
+  assert.equal(keyAction("enter", { onPanel: true, sheet: "shortcuts" }), null);
+  assert.deepEqual(keyAction("?", { onPanel: false, sheet: "shortcuts" }), { type: "shortcuts" });
+  assert.deepEqual(keyAction("escape", { onPanel: false, sheet: "shortcuts" }), { type: "sheet" });
+
+  assert.equal(keyAction("1", { onPanel: true, question, suggestions, sheet: "card" }), null);
+  assert.equal(keyAction("enter", { onPanel: true, sheet: "card" }), null);
+
+  assert.deepEqual(
+    keyAction("1", { onPanel: true, question, suggestions, sheet: "questions" }),
+    { type: "answer", question: question.pending, option: question.pending.options[0] },
+  );
+  assert.equal(keyAction("1", { onPanel: true, suggestions, sheet: "questions" }), null, "questions sheet does not send hidden suggested replies");
+  assert.equal(keyAction("enter", { onPanel: true, sheet: "questions" }), null);
+});
+
+test("a compact question bar whose options are hidden never allows blind digit answers", () => {
+  assert.equal(keyAction("1", { onPanel: true, question, questionVisible: false, suggestions }), null);
+});
+
 test("leaving focuses the pane that had the keys, whether the panel was entered by pane.go or a click", () => {
   assert.deepEqual(leaveCommand({ pane: "p1", terminal: "t1" }), { name: "pane.focus", args: { pane: "p1" } });
   assert.deepEqual(leaveCommand({ pane: null, terminal: "t1" }), { name: "pane.focus", args: { terminal: "t1" } });

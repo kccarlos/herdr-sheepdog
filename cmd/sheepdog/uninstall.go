@@ -9,18 +9,21 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
 
 func printUninstallUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog uninstall [--yes | --keep-data] [--config PATH]")
+	fprintln(w, "usage: sheepdog uninstall [--yes | --keep-data] [--dry-run] [--config PATH]")
 	fprintln(w, "")
-	fprintln(w, "Stops the daemon, removes the login service and the ~/.local/bin/sheepdog")
-	fprintln(w, "link when it points to this sheepdog, then asks before deleting your config and")
-	fprintln(w, "keys (~/.config/sheepdog) and data (~/.local/share/sheepdog: transcripts, logs).")
+	fprintln(w, "Stops the daemon, removes the login service, the ~/.local/bin/sheepdog link")
+	fprintln(w, "when it points to this sheepdog, and unchanged herdr-app panel/layout files")
+	fprintln(w, "(plus any opt-in keys.json shortcut setup added), then asks before deleting")
+	fprintln(w, "your config and keys (~/.config/sheepdog) and data (~/.local/share/sheepdog).")
 	fprintln(w, "It never changes herdr-tui's plugin registry: it prints the herdr-tui command to finish.")
 	fprintln(w, "")
 	fprintln(w, "  --yes        delete config and data without asking")
 	fprintln(w, "  --keep-data  keep config and data, ask nothing")
+	fprintln(w, "  --dry-run    print what uninstall would remove; change nothing")
 }
 
 // runUninstall implements `sheepdog uninstall`.
@@ -31,6 +34,7 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	configPath, envFile := lifecycleFlags(fs)
 	yes := fs.Bool("yes", false, "delete without asking")
 	keep := fs.Bool("keep-data", false, "keep config and data")
+	dryRun := fs.Bool("dry-run", false, "print what would change, do nothing")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -45,14 +49,24 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	failed := false
 
 	// 1. The daemon.
-	if code := l.stop(ctx); code != 0 {
-		fprintln(stderr, "sheepdog uninstall: the daemon is still running; stop it, then run this again.")
-		return 1
+	if *dryRun {
+		if _, _, running := l.running(ctx); running {
+			fprintln(stdout, "would stop the running sheepdog daemon")
+		} else {
+			fprintln(stdout, "sheepdog is not running")
+		}
+	} else {
+		if code := l.stop(ctx); code != 0 {
+			fprintln(stderr, "sheepdog uninstall: the daemon is still running; stop it, then run this again.")
+			return 1
+		}
 	}
 
 	// 2. The login service.
 	if !l.serviceInstalled() {
 		fprintln(stdout, "login service: not installed")
+	} else if *dryRun {
+		fprintf(stdout, "would stop and remove login service (%s)\n", l.mgr.Spec.UnitPath())
 	} else {
 		l.mgr.Out = stdout
 		if err := l.mgr.Uninstall(ctx); err != nil {
@@ -63,11 +77,24 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 
 	// 3. ~/.local/bin/sheepdog, when it is a link to this binary.
 	exe, _ := osExecutable()
-	if msg := removeLocalBinLink(exe); msg != "" {
+	if msg := removeOrPlanLocalBinLink(exe, *dryRun); msg != "" {
 		fprintln(stdout, msg)
 	}
 
-	// 4. Config and data, after asking. The default config directory
+	// 4. herdr-app panel, layout, opt-in shortcut and active layout.
+	panelPlan, err := panelsync.Uninstall(panelHome(), panelSource(), *dryRun)
+	if err != nil {
+		fprintf(stderr, "sheepdog uninstall: herdr-app panel: %v\n", err)
+		failed = true
+	}
+	for _, line := range panelPlan.Actions {
+		fprintln(stdout, line)
+	}
+	for _, line := range panelPlan.Kept {
+		fprintln(stdout, line)
+	}
+
+	// 5. Config and data, after asking. The default config directory
 	// goes as a whole; a config given with --config elsewhere is removed
 	// as a file (with the --env-file given), never its directory.
 	type target struct {
@@ -102,6 +129,14 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		if len(present) == 0 {
 			continue
 		}
+		if *dryRun {
+			if *keep {
+				fprintf(stdout, "would keep %s (%s)\n", d.show, d.what)
+			} else {
+				fprintf(stdout, "would delete %s (%s)\n", d.show, d.what)
+			}
+			continue
+		}
 		switch {
 		case *keep:
 			fprintf(stdout, "kept %s (%s)\n", d.show, d.what)
@@ -126,8 +161,12 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}
 	}
 
-	// 5. What only the user can do.
+	// 6. What only the user can do.
 	fprintln(stdout, "")
+	if panelPlan.RestoredLayout != "" && !*dryRun {
+		fprintln(stdout, "If herdr-app is open on the Sheepdog layout, switch the live window:")
+		fprintf(stdout, "  herdr-app do layout.switch '{\"name\":%q}'\n", panelPlan.RestoredLayout)
+	}
 	switch detectInstall(exe).Kind {
 	case "homebrew":
 		fprintln(stdout, "To remove the program: brew uninstall sheepdog")
@@ -155,6 +194,10 @@ func localBin() string {
 // that resolves to exe, and says what it did. A regular file there (a
 // `make install` copy) or a link to another sheepdog is left alone.
 func removeLocalBinLink(exe string) string {
+	return removeOrPlanLocalBinLink(exe, false)
+}
+
+func removeOrPlanLocalBinLink(exe string, dryRun bool) string {
 	link := localBin()
 	st, err := os.Lstat(link)
 	if err != nil {
@@ -169,6 +212,9 @@ func removeLocalBinLink(exe string) string {
 	if !same(link, exe) {
 		target, _ := os.Readlink(link)
 		return "left " + link + ": it points to another sheepdog (" + target + ")"
+	}
+	if dryRun {
+		return "would remove the link " + link
 	}
 	if err := os.Remove(link); err != nil {
 		return "could not remove " + link + ": " + err.Error()

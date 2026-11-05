@@ -230,6 +230,10 @@ func TestDetectHerdrAppLayout(t *testing.T) {
 			home + "/shared.json":           `{"layout":"sheepdog"}`,
 			home + "/layouts/sheepdog.json": string(wantLayout),
 		}, shown: "sheepdog", docked: true, layout: LayoutCurrent},
+		{name: "sheepdog layout resized is still current", files: map[string]string{
+			home + "/shared.json":           `{"layout":"sheepdog"}`,
+			home + "/layouts/sheepdog.json": `{"id":"root","type":"row","active":"panel","children":[{"id":"panel","type":"block","size":{"px":420},"hidden":true,"content":{"mod":"sheepdog"}}]}`,
+		}, shown: "sheepdog", docked: true, layout: LayoutCurrent},
 		{name: "sheepdog layout different", files: map[string]string{
 			home + "/shared.json":           `{"layout":"work"}`,
 			home + "/layouts/work.json":     notDocked,
@@ -351,6 +355,43 @@ func TestInstallPanel(t *testing.T) {
 	}
 	if got := Detect(config.Config{Herdr: testHerdr()}, p, panel, nil).Panel; got != PanelCurrent {
 		t.Errorf("panel after install = %v, want current", got)
+	}
+}
+
+func TestDoctorWarnsOnEnvOverridesAndMinimalServicePATH(t *testing.T) {
+	cfg := config.Default()
+	cfg.Herdr = testHerdr()
+	cfg.Push.Mode = config.PushModeOff
+	cfg.Web.Port = -1
+	env := Environment{
+		OS:           "darwin",
+		HerdrApp:     true,
+		HerdrAppHome: "/tmp/custom-app",
+		ShownLayout:  "sheepdog",
+		PanelDocked:  true,
+		Panel:        PanelCurrent,
+		SheepdogApp:  true,
+	}
+	rs := Doctor(context.Background(), cfg, DoctorOptions{
+		Environment:      &env,
+		Home:             "/Users/dev",
+		HerdrAppHomeEnv:  "/tmp/custom-app",
+		HCSessionEnv:     "scratch",
+		ServiceInstalled: true,
+		ServicePATH:      "/usr/bin:/bin",
+	})
+	byName := map[string]Result{}
+	for _, r := range rs {
+		byName[r.Name] = r
+	}
+	if r := byName["HERDR_APP_HOME"]; r.Status != Warn || !strings.Contains(r.Detail, "/tmp/custom-app") {
+		t.Errorf("HERDR_APP_HOME check = %+v", r)
+	}
+	if r := byName["HC_SESSION"]; r.Status != Warn || !strings.Contains(r.Detail, "scratch") {
+		t.Errorf("HC_SESSION check = %+v", r)
+	}
+	if r := byName["login service"]; r.Status != Warn || !strings.Contains(r.Fix, "sheepdog service install") {
+		t.Errorf("login service check = %+v", r)
 	}
 }
 
