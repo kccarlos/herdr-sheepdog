@@ -685,9 +685,7 @@ public final class DaemonClient: @unchecked Sendable {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
-            if let date = ISO8601DateFormatter.sheepdog.date(from: text) { return date }
-            let plain = ISO8601DateFormatter()
-            if let date = plain.date(from: text) { return date }
+            if let date = RFC3339Date.date(from: text) { return date }
             throw DecodingError.dataCorruptedError(in: try decoder.singleValueContainer(), debugDescription: "bad date \(text)")
         }
         return d

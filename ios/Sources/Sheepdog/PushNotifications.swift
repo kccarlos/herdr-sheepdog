@@ -73,23 +73,55 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// The device token (hex), once APNs gave one.
     private(set) var deviceToken: String?
-    /// The daemon this token was last registered with (`host:port`).
-    private(set) var registeredWith: String?
-    private(set) var registrationError: String?
+    /// Per-computer registration state and errors.
+    private var registrationState = PushRegistrationState()
+    private var apnsError: String?
+    var registrationError: String? {
+        if let apnsError { return apnsError }
+        let endpoint = makeSettings().endpoint
+        return registrationState.error(computerID: store.currentID, endpointDisplay: endpoint?.display ?? "")
+    }
     /// `GET /api/push/status` of the current daemon.
     private(set) var daemonStatus: PushStatus?
     private(set) var daemonStatusError: String?
 
-    private let defaults = UserDefaults.standard
-    /// The daemon's end-to-end content key, in the App Group keychain the
-    /// Notification Service Extension reads it from.
-    private let contentKeys = PushContentKeyStore()
-    private let center = UNUserNotificationCenter.current()
-    @ObservationIgnored private var pendingFocus: String?
+    private let defaults: UserDefaults
+    private let store: ComputerStore
+    private let makeSettings: () -> SettingsStore
+    private let makeKeyStore: (String?) -> PushContentKeyStore
+    private let namesSuite: String
+    private let makeClient: @Sendable (DaemonEndpoint) -> DaemonClient
+    private let notifyOpenHandler: ((PushPayload, String) async -> Void)?
+    private let removeDeliveredHandler: (([String]) -> Void)?
+    private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
+    @ObservationIgnored private var pendingFocus: AgentFocus?
+    @ObservationIgnored private var targetEpochs: [String: Int] = [:]
+    @ObservationIgnored private var statusEpoch = 0
+
+    private func epochKey(for id: String?) -> String { id ?? "_bare" }
+
+    private func bumpTargetEpoch(for id: String?) {
+        let key = epochKey(for: id)
+        targetEpochs[key, default: 0] &+= 1
+    }
+
+    private func bumpAllTargetEpochs() {
+        for key in Array(targetEpochs.keys) { targetEpochs[key, default: 0] &+= 1 }
+        targetEpochs["_bare", default: 0] &+= 1
+        for id in store.ids { targetEpochs[id, default: 0] &+= 1 }
+    }
+
+    private func isTargetStillValid(id: String?, endpoint: DaemonEndpoint) -> Bool {
+        if let id {
+            return store.computer(id) != nil
+        }
+        return store.count == 0 && makeSettings().endpoint?.display == endpoint.display
+    }
 
     private enum Key {
         static let token = "push.deviceToken"
         static let registeredWith = "push.registeredWith"
+        static let registeredTargets = "push.registeredTargets"
         static let asked = "push.askedPermission"
     }
 
@@ -98,10 +130,57 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     /// configuration, the same split as the `aps-environment` entitlement.
     static let environment = PushEnvironment(infoValue: Bundle.main.object(forInfoDictionaryKey: "SheepdogPushEnvironment") as? String)
 
-    override private init() {
+    override private convenience init() {
+        let rootStore = PushContentKeyStore()
+        self.init(
+            defaults: .standard,
+            store: .shared,
+            makeSettings: { SettingsStore() },
+            makeKeyStore: { id in id.map { PushContentKeyStore.forComputer($0) } ?? rootStore },
+            namesSuite: PushContentKeyStore.appGroup,
+            makeClient: { DaemonClient(endpoint: $0) }
+        )
+    }
+
+    init(
+        defaults: UserDefaults,
+        store: ComputerStore,
+        makeSettings: @escaping () -> SettingsStore,
+        makeKeyStore: @escaping (String?) -> PushContentKeyStore,
+        namesSuite: String,
+        makeClient: @escaping @Sendable (DaemonEndpoint) -> DaemonClient,
+        notifyOpenHandler: ((PushPayload, String) async -> Void)? = nil,
+        removeDeliveredHandler: (([String]) -> Void)? = nil,
+        initialDeviceToken: String? = nil
+    ) {
+        self.defaults = defaults
+        self.store = store
+        self.makeSettings = makeSettings
+        self.makeKeyStore = makeKeyStore
+        self.namesSuite = namesSuite
+        self.makeClient = makeClient
+        self.notifyOpenHandler = notifyOpenHandler
+        self.removeDeliveredHandler = removeDeliveredHandler
         super.init()
+        if let initialDeviceToken {
+            defaults.set(initialDeviceToken, forKey: Key.token)
+        }
         deviceToken = defaults.string(forKey: Key.token)
-        registeredWith = defaults.string(forKey: Key.registeredWith)
+        var saved = Set(defaults.stringArray(forKey: Key.registeredTargets) ?? [])
+        if saved.isEmpty, let legacy = defaults.string(forKey: Key.registeredWith), !legacy.isEmpty {
+            let migrated = PushRegistrationState.targetKey(computerID: store.currentID, endpointDisplay: legacy)
+            saved.insert(migrated)
+        }
+        registrationState = PushRegistrationState(registeredTargets: saved)
+    }
+
+    private func persistRegistrationTargets() {
+        if registrationState.registeredTargets.isEmpty {
+            defaults.removeObject(forKey: Key.registeredTargets)
+            defaults.removeObject(forKey: Key.registeredWith)
+        } else {
+            defaults.set(Array(registrationState.registeredTargets).sorted(), forKey: Key.registeredTargets)
+        }
     }
 
     // MARK: - Launch and permission
@@ -126,7 +205,21 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     func sessionConnected() {
         Task {
             await refreshAuthorization()
-            guard authorization == .notDetermined, !defaults.bool(forKey: Key.asked) else { return }
+            switch authorization {
+            case .authorized, .provisional, .ephemeral:
+                if deviceToken != nil {
+                    let current = makeSettings().endpoint
+                    if let current, !registrationState.isRegistered(computerID: store.currentID, endpointDisplay: current.display) {
+                        await register()
+                    }
+                }
+                return
+            case .notDetermined:
+                break
+            default:
+                return
+            }
+            guard !defaults.bool(forKey: Key.asked) else { return }
             await loadDaemonStatus()
             guard PushPolicy.shouldAskPermission(daemon: daemonStatus) else { return }
             defaults.set(true, forKey: Key.asked)
@@ -134,6 +227,19 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             await refreshAuthorization()
             if granted { UIApplication.shared.registerForRemoteNotifications() }
+        }
+    }
+
+    /// Retries push registration when a computer's link transitions `.online`
+    /// after being unreachable on launch.
+    func computerCameOnline(id: String?, endpoint: DaemonEndpoint?) {
+        guard deviceToken != nil, let endpoint else { return }
+        switch authorization {
+        case .authorized, .provisional, .ephemeral:
+            guard !registrationState.isRegistered(computerID: id, endpointDisplay: endpoint.display) else { return }
+            Task { await registerTarget(id: id, endpoint: endpoint) }
+        default:
+            break
         }
     }
 
@@ -165,7 +271,8 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         let previous = deviceToken
         deviceToken = hex
         defaults.set(hex, forKey: Key.token)
-        registrationError = nil
+        apnsError = nil
+        if previous != hex { bumpAllTargetEpochs() }
         Task {
             // A new token replaces the old one on every computer.
             if let previous, previous != hex { await unregisterEverywhere(token: previous) }
@@ -174,15 +281,27 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func didFailToRegister(_ error: Error) {
-        registrationError = "APNs refused: \(error.localizedDescription)"
+        apnsError = "APNs refused: \(error.localizedDescription)"
     }
 
     /// The computers or the address changed: register again with every
     /// computer (each keeps its own registration and content key). With
     /// nothing paired, the keys go.
     func endpointChanged(from old: DaemonEndpoint?) {
+        let current = makeSettings().endpoint
+        let sameCurrent = old.map { current.map(ConversationCache.key(for:)) == ConversationCache.key(for: $0) } ?? (current == nil)
+        if !sameCurrent || current == nil {
+            daemonStatus = nil
+            daemonStatusError = nil
+            statusEpoch &+= 1
+        }
         guard deviceToken != nil else {
-            if SettingsStore().endpoint == nil { removeAllKeys() }
+            if current == nil {
+                bumpAllTargetEpochs()
+                removeAllKeys()
+                registrationState.reset()
+                persistRegistrationTargets()
+            }
             writeNames()
             return
         }
@@ -192,10 +311,9 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     /// Where the token goes: every paired computer by its id, or the bare
     /// loopback address of the tests (nil id).
     private func targets() -> [(id: String?, endpoint: DaemonEndpoint)] {
-        let store = ComputerStore.shared
         let paired = store.ids.compactMap { id in store.endpoint(for: id).map { (id: Optional(id), endpoint: $0) } }
         if !paired.isEmpty { return paired }
-        return SettingsStore().endpoint.map { [(id: nil, endpoint: $0)] } ?? []
+        return makeSettings().endpoint.map { [(id: nil, endpoint: $0)] } ?? []
     }
 
     /// A request to one computer through its runtime, on the address its
@@ -206,11 +324,51 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         if let fleet = model?.fleet, let computer = id.flatMap({ fleet.model($0) }) ?? (id == nil ? fleet.current : nil) {
             return try await computer.request(as: DaemonClient.self, body)
         }
-        return try await body(DaemonClient(endpoint: endpoint))
+        let client = makeClient(endpoint)
+        defer { client.invalidate() }
+        return try await body(client)
     }
 
     private func keys(for id: String?) -> PushContentKeyStore {
-        id.map { PushContentKeyStore.forComputer($0) } ?? contentKeys
+        makeKeyStore(id)
+    }
+
+    /// Registers one computer or bare endpoint and updates `registrationState`.
+    private func registerTarget(id: String?, endpoint: DaemonEndpoint) async {
+        guard let token = deviceToken else { return }
+        let key = epochKey(for: id)
+        let epoch = targetEpochs[key, default: 0]
+        do {
+            let registration = PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name)
+            let answer = try await onComputer(id, endpoint: endpoint) { try await $0.registerPushDevice(registration) }
+            guard deviceToken == token,
+                  targetEpochs[key, default: 0] == epoch,
+                  isTargetStillValid(id: id, endpoint: endpoint)
+            else { return }
+            if let contentKey = answer?.contentKey {
+                keys(for: id).store(base64: contentKey)
+            } else {
+                keys(for: id).remove()
+            }
+            if answer != nil {
+                registrationState.recordSuccess(computerID: id, endpointDisplay: endpoint.display)
+            } else {
+                registrationState.recordNoService(computerID: id, endpointDisplay: endpoint.display)
+            }
+            persistRegistrationTargets()
+        } catch let error as DaemonError {
+            guard deviceToken == token,
+                  targetEpochs[key, default: 0] == epoch,
+                  isTargetStillValid(id: id, endpoint: endpoint)
+            else { return }
+            registrationState.recordError(error.message, computerID: id, endpointDisplay: endpoint.display)
+        } catch {
+            guard deviceToken == token,
+                  targetEpochs[key, default: 0] == epoch,
+                  isTargetStillValid(id: id, endpoint: endpoint)
+            else { return }
+            registrationState.recordError(error.localizedDescription, computerID: id, endpointDisplay: endpoint.display)
+        }
     }
 
     /// `POST /api/push/register` to every paired computer. Idempotent on
@@ -221,85 +379,99 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         writeNames()
         let targets = targets()
         guard !targets.isEmpty else {
+            bumpAllTargetEpochs()
             removeAllKeys()
+            registrationState.reset()
+            persistRegistrationTargets()
             return
         }
-        guard let token = deviceToken else { return }
-        let current = SettingsStore().endpoint
+        guard deviceToken != nil else { return }
         for target in targets {
-            let isCurrent = target.endpoint.computerID == current?.computerID && target.endpoint.display == current?.display
-            do {
-                let registration = PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name)
-                let answer = try await onComputer(target.id, endpoint: target.endpoint) { try await $0.registerPushDevice(registration) }
-                if let key = answer?.contentKey {
-                    keys(for: target.id).store(base64: key)
-                } else {
-                    keys(for: target.id).remove()
-                }
-                guard isCurrent else { continue }
-                if answer != nil {
-                    registeredWith = target.endpoint.display
-                    defaults.set(target.endpoint.display, forKey: Key.registeredWith)
-                    registrationError = nil
-                } else {
-                    registeredWith = nil
-                    defaults.removeObject(forKey: Key.registeredWith)
-                    registrationError = "This daemon has no notification service."
-                }
-            } catch let error as DaemonError {
-                if isCurrent { registrationError = error.message }
-            } catch {
-                if isCurrent { registrationError = error.localizedDescription }
-            }
+            await registerTarget(id: target.id, endpoint: target.endpoint)
         }
         // The one key from before several computers.
-        if targets.contains(where: { $0.id != nil }) { contentKeys.remove() }
+        if targets.contains(where: { $0.id != nil }) { keys(for: nil).remove() }
         await loadDaemonStatus()
     }
 
     /// Takes the token off one computer (Remove), with that computer's key.
     func unregister(computer id: String) async {
-        let store = ComputerStore.shared
+        bumpTargetEpoch(for: id)
+        if store.currentID == id || store.currentID == nil {
+            daemonStatus = nil
+            daemonStatusError = nil
+            statusEpoch &+= 1
+        }
         keys(for: id).remove()
+        registrationState.unregister(computerID: id)
+        persistRegistrationTargets()
         guard let token = deviceToken, let endpoint = store.endpoint(for: id) else { return }
         _ = try? await onComputer(id, endpoint: endpoint) { try await $0.unregisterPush(token: token) }
     }
 
     /// Takes the token off every computer, with their keys.
     private func unregisterEverywhere(token: String) async {
+        bumpAllTargetEpochs()
         for target in targets() {
             keys(for: target.id).remove()
             _ = try? await onComputer(target.id, endpoint: target.endpoint) { try await $0.unregisterPush(token: token) }
         }
-        registeredWith = nil
-        defaults.removeObject(forKey: Key.registeredWith)
+        registrationState.reset()
+        persistRegistrationTargets()
     }
 
     private func removeAllKeys() {
-        contentKeys.remove()
-        for id in ComputerStore.shared.ids { PushContentKeyStore.forComputer(id).remove() }
+        keys(for: nil).remove()
+        for id in store.ids { keys(for: id).remove() }
     }
 
     /// The names the extension adds to alerts, only with several computers.
     func writeNames() {
-        let computers = ComputerStore.shared.computers
-        PushComputerNames.write(Dictionary(computers.map { ($0.daemonID, $0.displayName) }, uniquingKeysWith: { a, _ in a }))
+        let computers = store.computers
+        PushComputerNames.write(Dictionary(computers.map { ($0.daemonID, $0.displayName) }, uniquingKeysWith: { a, _ in a }), suite: namesSuite)
     }
 
     private func forgetToken() {
+        bumpAllTargetEpochs()
+        daemonStatus = nil
+        daemonStatusError = nil
+        statusEpoch &+= 1
         removeAllKeys()
+        registrationState.reset()
+        persistRegistrationTargets()
         deviceToken = nil
         defaults.removeObject(forKey: Key.token)
     }
 
     func loadDaemonStatus() async {
-        guard let endpoint = SettingsStore().endpoint else { return }
+        guard let endpoint = makeSettings().endpoint else {
+            daemonStatus = nil
+            daemonStatusError = nil
+            return
+        }
+        let targetID = store.currentID
+        let targetKey = ConversationCache.key(for: endpoint)
+        statusEpoch &+= 1
+        let epoch = statusEpoch
         do {
-            daemonStatus = try await onComputer(ComputerStore.shared.currentID, endpoint: endpoint) { try await $0.pushStatus() }
-            daemonStatusError = daemonStatus == nil ? "This daemon predates notifications." : nil
+            let status = try await onComputer(targetID, endpoint: endpoint) { try await $0.pushStatus() }
+            guard statusEpoch == epoch,
+                  store.currentID == targetID,
+                  makeSettings().endpoint.map(ConversationCache.key(for:)) == targetKey
+            else { return }
+            daemonStatus = status
+            daemonStatusError = status == nil ? "This daemon predates notifications." : nil
         } catch let error as DaemonError {
+            guard statusEpoch == epoch,
+                  store.currentID == targetID,
+                  makeSettings().endpoint.map(ConversationCache.key(for:)) == targetKey
+            else { return }
             daemonStatusError = error.message
         } catch {
+            guard statusEpoch == epoch,
+                  store.currentID == targetID,
+                  makeSettings().endpoint.map(ConversationCache.key(for:)) == targetKey
+            else { return }
             daemonStatusError = error.localizedDescription
         }
     }
@@ -313,16 +485,22 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         }
         if let error = registrationError { return error }
         guard deviceToken != nil else { return "Waiting for Apple" }
-        if let registered = registeredWith, registered == SettingsStore().endpoint?.display { return "Registered" }
+        if let endpoint = makeSettings().endpoint,
+           registrationState.isRegistered(computerID: store.currentID, endpointDisplay: endpoint.display) {
+            return "Registered"
+        }
         return "Not registered yet"
     }
 
     // MARK: - UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        await MainActor.run {
-            // The app shows the card itself while the session is live.
-            (model?.sessionIsLive ?? false) ? [] : [.banner, .list, .sound]
+        let userInfo = notification.request.content.userInfo
+        let payload = PushPayload(userInfo: userInfo)
+        return await MainActor.run {
+            // Suppress only when the target computer's live stream / screen
+            // or voice already shows this update in the foreground.
+            (model?.shouldSuppressForegroundPush(payload) ?? false) ? [] : [.banner, .list, .sound]
         }
     }
 
@@ -334,37 +512,60 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         await handle(action: action, payload: payload, notificationID: identifier)
     }
 
-    private func handle(action: String, payload: PushPayload, notificationID: String) async {
+    func handle(action: String, payload: PushPayload, notificationID: String) async {
         guard let answer = PushActions.answer(actionIdentifier: action, payload: payload) else {
             if action == PushActions.approve || action == PushActions.decline {
                 // Nothing that action can mean for this prompt: let the
                 // user answer it on the card.
                 await notifyOpenInstead(payload, reason: "Open Sheepdog to answer this one.")
             } else if action != UNNotificationDismissActionIdentifier {
-                focus(paneID: payload.paneID)
+                focus(AgentFocus(computerID: payload.computer, paneID: payload.paneID))
             }
             return
         }
-        // Answered on the computer that asked.
-        guard let endpoint = payload.computer.flatMap({ ComputerStore.shared.endpoint(for: $0) }) ?? SettingsStore().endpoint else {
-            await notifyOpenInstead(payload, reason: "Sheepdog has no daemon address yet.")
+        // Answered strictly on the computer that asked; never guessed or
+        // routed to whatever computer happens to be current now.
+        let target = PushActionTarget.resolve(
+            payload: payload,
+            store: store,
+            bareEndpoint: store.count == 0 ? makeSettings().endpoint : nil,
+            interface: model?.fleet.path.interface
+        )
+        let targetID: String?
+        let candidates: [DaemonEndpoint]
+        switch target {
+        case let .refused(reason):
+            await notifyOpenInstead(payload, reason: reason)
             return
+        case let .paired(id, endpoints):
+            targetID = id
+            candidates = endpoints
+        case let .bare(endpoint):
+            targetID = nil
+            candidates = [endpoint]
         }
         let task = UIApplication.shared.beginBackgroundTask(withName: "answer approval")
         defer { UIApplication.shared.endBackgroundTask(task) }
         let pendingID = answer.pendingID
         let option = answer.option.index
         do {
-            if let computer = payload.computer.flatMap({ model?.fleet.model($0) }) ?? model?.fleet.current.flatMap({ payload.computer == nil ? $0 : nil }) {
+            if let computer = targetID.flatMap({ model?.fleet.model($0) }) ?? (targetID == nil && store.count == 0 ? model?.fleet.current : nil) {
                 // The running app: through the question's phase on its
                 // computer, under the question's own key, so its cards show
                 // it on its way and a tap on one joins this answer instead
                 // of sending a second.
                 try await computer.answerFromNotification(question: pendingID, option: answer.option)
             } else {
-                _ = try await DaemonClient(endpoint: endpoint).answerPending(id: pendingID, option: option)
+                let winner = try await PushActions.answerPending(id: pendingID, option: option, endpoints: candidates, makeClient: makeClient)
+                if let targetID, candidates.count > 1 {
+                    store.recordRaceWinner(winner.display, for: targetID, interface: model?.fleet.path.interface)
+                }
             }
-            center.removeDeliveredNotifications(withIdentifiers: [notificationID])
+            if let removeDeliveredHandler {
+                removeDeliveredHandler([notificationID])
+            } else {
+                center.removeDeliveredNotifications(withIdentifiers: [notificationID])
+            }
             Task { await model?.refreshState(quiet: true) }
         } catch DaemonError.pendingGone {
             await notifyOpenInstead(payload, reason: ApprovalFlow.goneMessage + " Open Sheepdog to see where things are.")
@@ -379,27 +580,34 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     /// stale or failed answer leaves a notification whose tap opens the
     /// agent's card instead.
     private func notifyOpenInstead(_ payload: PushPayload, reason: String) async {
+        if let notifyOpenHandler {
+            await notifyOpenHandler(payload, reason)
+            return
+        }
         let content = UNMutableNotificationContent()
         content.title = payload.agent ?? "Sheepdog"
         content.body = reason
         content.threadIdentifier = payload.paneID
         content.categoryIdentifier = PushActions.agentCategory
-        content.userInfo = ["sheepdog": ["kind": payload.kind, "pane_id": payload.paneID, "agent": payload.agent ?? ""]]
+        content.userInfo = payload.openInsteadUserInfo()
         let request = UNNotificationRequest(identifier: "open-\(payload.pendingID ?? payload.paneID)", content: content, trigger: nil)
         try? await center.add(request)
     }
 
     /// A tap on a notification: the app on that agent's Agents card.
-    func focus(paneID: String) {
-        pendingFocus = paneID.isEmpty ? nil : paneID
+    func focus(_ target: AgentFocus) {
+        pendingFocus = target.paneID.isEmpty ? nil : target
         applyPendingFocus()
     }
 
+    func focus(paneID: String) {
+        focus(AgentFocus(paneID: paneID))
+    }
+
     private func applyPendingFocus() {
-        guard let model, let id = pendingFocus else { return }
+        guard let model, let target = pendingFocus else { return }
         pendingFocus = nil
-        model.navigation.pane = .flock
-        model.navigation.focusedAgentPaneID = id
+        model.focusAgent(target)
     }
 }
 

@@ -35,6 +35,10 @@ struct AllAgentsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if model.notices.banner != nil {
+                SessionBanners()
+                    .padding(.top, 8)
+            }
             if paneState != .content, model.otherSnapshots.isEmpty {
                 FlockUnavailableView(state: paneState)
             } else if shown.isEmpty, model.otherSnapshots.isEmpty {
@@ -54,7 +58,11 @@ struct AllAgentsView: View {
                 grid
             }
         }
+        .animation(Theme.ease, value: model.notices.banner)
         .animation(Theme.ease(reduceMotion: reduceMotion), value: filter)
+        .onChange(of: model.navigation.focusedAgent, initial: true) { _, _ in
+            ensureFocusedAgentVisible()
+        }
     }
 
     // MARK: Header
@@ -143,46 +151,51 @@ struct AllAgentsView: View {
 
     @ViewBuilder
     private var grid: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                let sections = model.sectionSnapshots
-                if sections.isEmpty {
-                    sectioned(shown)
-                } else {
-                    ForEach(sections) { computer in
-                        let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
-                        let marker = marker(for: computer)
-                        ComputerSectionHeader(
-                            id: computer.id,
-                            name: computer.name,
-                            detail: offline ? nil : computer.summary(),
-                            marker: marker,
-                            isExpanded: model.agentsModel.isComputerExpanded(computer.id),
-                            toggleExpanded: {
-                                withAnimation(Theme.ease(reduceMotion: reduceMotion)) {
-                                    model.agentsModel.toggleComputer(computer.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    let sections = model.sectionSnapshots
+                    if sections.isEmpty {
+                        sectioned(shown)
+                    } else {
+                        ForEach(sections) { computer in
+                            let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
+                            let marker = marker(for: computer)
+                            ComputerSectionHeader(
+                                id: computer.id,
+                                name: computer.name,
+                                detail: offline ? nil : computer.summary(),
+                                marker: marker,
+                                isExpanded: model.agentsModel.isComputerExpanded(computer.id),
+                                toggleExpanded: {
+                                    withAnimation(Theme.ease(reduceMotion: reduceMotion)) {
+                                        model.agentsModel.toggleComputer(computer.id)
+                                    }
+                                },
+                                moveVoice: { model.talk(to: computer.id) },
+                                retry: { model.session(computer.id)?.retry() }
+                            )
+                            .padding(.top, computer.id == sections.first?.id ? 0 : 10)
+                            if model.agentsModel.isComputerExpanded(computer.id) {
+                                if computer.isCurrent {
+                                    sectioned(shown)
+                                } else if offline {
+                                    OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
+                                } else {
+                                    columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
                                 }
-                            },
-                            moveVoice: { model.talk(to: computer.id) },
-                            retry: { model.session(computer.id)?.retry() }
-                        )
-                        .padding(.top, computer.id == sections.first?.id ? 0 : 10)
-                        if model.agentsModel.isComputerExpanded(computer.id) {
-                            if computer.isCurrent {
-                                sectioned(shown)
-                            } else if offline {
-                                OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
-                            } else {
-                                columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
                             }
                         }
                     }
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
+            .accessibilityIdentifier("allAgents.grid")
+            .onAppear { scrollToFocus(proxy) }
+            .onChange(of: model.navigation.focusedAgent) { _, _ in scrollToFocus(proxy) }
+            .onChange(of: renderedFocusToken) { _, _ in scrollToFocus(proxy) }
         }
-        .accessibilityIdentifier("allAgents.grid")
     }
 
     private func marker(for computer: ComputerSnapshot) -> ComputerVoiceMarkerState {
@@ -225,6 +238,7 @@ struct AllAgentsView: View {
     /// `computer` is another computer's id, nil for the current one's.
     private func column(_ agents: [Agent], computer: String?) -> some View {
         let first = computer == nil ? shown.first { model.questionCard(for: $0.paneID) != nil }?.paneID : nil
+        let ownerID = computer ?? model.currentComputerID
         return LazyVStack(spacing: 12) {
             ForEach(agents) { agent in
                 let question = computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID)
@@ -242,10 +256,78 @@ struct AllAgentsView: View {
                             if open { model.agentsModel.expandedAgents.insert(key) } else { model.agentsModel.expandedAgents.remove(key) }
                         }
                     ),
-                    answer: { model.answer(question: $0, option: $1) }
+                    answer: { model.answer(question: $0, option: $1, on: ownerID) }
                 )
+                .id(key)
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private func ensureFocusedAgentVisible() {
+        guard let target = model.navigation.focusedAgent, filter != .all else { return }
+        let isOther = target.isOtherComputer(currentComputerID: model.currentComputerID)
+        let matchingAgent: Agent?
+        if isOther, let cid = target.computerID {
+            guard model.showsComputerLabels else { return }
+            let agents = model.sectionSnapshots.first(where: { $0.id == cid })?.agents ?? []
+            matchingAgent = Flock(agents).running.first(where: { $0.paneID == target.paneID })
+        } else {
+            matchingAgent = model.flock.running.first(where: { $0.paneID == target.paneID })
+        }
+        if matchingAgent == nil || !filter.matches(matchingAgent!) {
+            filter = .all
+        }
+    }
+
+    private var renderedFocusToken: [String] {
+        var ids = model.flock.running.map(\.paneID)
+        for computer in model.sectionSnapshots where !computer.isCurrent {
+            if case .offline = computer.reachability { continue }
+            ids.append(contentsOf: Flock(computer.agents).running.map { "\(computer.id)|\($0.paneID)" })
+        }
+        return ids
+    }
+
+    private func scrollToFocus(_ proxy: ScrollViewProxy) {
+        guard let target = model.navigation.focusedAgent else { return }
+        ensureFocusedAgentVisible()
+        let isOther = target.isOtherComputer(currentComputerID: model.currentComputerID)
+        if isOther, let cid = target.computerID {
+            guard model.showsComputerLabels else { return }
+            model.agentsModel.expandComputer(cid)
+        } else {
+            model.agentsModel.expandComputer(model.currentComputerID)
+        }
+        guard target.isTargetPresent(
+            currentComputerID: model.currentComputerID,
+            sectioned: model.showsComputerLabels,
+            currentAgents: model.flock.running,
+            otherComputerAgents: { cid in
+                guard let comp = model.sectionSnapshots.first(where: { $0.id == cid }) else { return nil }
+                if case .offline = comp.reachability { return nil }
+                return comp.agents
+            }
+        ) else { return }
+        let scrollID: String
+        if isOther, let cid = target.computerID {
+            let key = "\(cid)|\(target.paneID)"
+            if model.remoteCard(computer: cid, paneID: target.paneID) == nil {
+                model.agentsModel.expandedAgents.insert(key)
+            }
+            scrollID = key
+        } else {
+            if model.questionCard(for: target.paneID) == nil {
+                model.agentsModel.expandedAgents.insert(target.paneID)
+            }
+            scrollID = target.paneID
+        }
+        DispatchQueue.main.async {
+            guard model.navigation.focusedAgent == target else { return }
+            withAnimation(Theme.ease(reduceMotion: reduceMotion)) {
+                proxy.scrollTo(scrollID, anchor: .top)
+            }
+            model.navigation.focusedAgent = nil
+        }
     }
 }

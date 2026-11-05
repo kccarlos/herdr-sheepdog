@@ -371,6 +371,18 @@ extension LiveActivityContent {
         return label
     }
 
+    public func islandCenterTitle(isStale: Bool) -> String {
+        isStale ? Self.staleTitle : title
+    }
+
+    public func compactAccessibilityLabel(isStale: Bool) -> String {
+        isStale ? Self.staleAccessibilityLabel : compactAccessibilityLabel
+    }
+
+    public func islandWaitingCount(isStale: Bool) -> Int {
+        isStale ? 0 : waiting
+    }
+
     public static let staleTitle = "May have ended"
     public static func staleSubtitle(voiceName: String) -> String { "Open \(voiceName) to check" }
     public static let staleAccessibilityLabel = "The voice session may have ended. Open Sheepdog to check."

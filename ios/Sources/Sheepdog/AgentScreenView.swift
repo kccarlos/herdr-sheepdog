@@ -236,7 +236,8 @@ private struct AgentWindowContent: View, Equatable {
             }
             terminal
             if let approval {
-                FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID, area: questionArea) { id, index in model.answer(question: id, option: index) }
+                let ownerID = model.currentComputerID
+                FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID, area: questionArea) { id, index in model.answer(question: id, option: index, on: ownerID) }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .id(approval.pending.id)

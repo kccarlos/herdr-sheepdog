@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 // Phase 4 of docs/dev/design/phone-terminal.md: attachments and the
 // read-only changes view. Wire shapes are in docs/dev/ws-contract.md
@@ -143,6 +144,50 @@ public enum Attachments {
     /// The daemon's cap.
     public static let maxBytes = 20 << 20
     public static let tooBigMessage = "Too big (max 20 MB)"
+
+    public struct LoadedFile: Equatable, Sendable {
+        public let data: Data
+        public let name: String
+        public let mimeType: String
+
+        public init(data: Data, name: String, mimeType: String) {
+            self.data = data
+            self.name = name
+            self.mimeType = mimeType
+        }
+    }
+
+    public enum LoadError: Error, Equatable, Sendable {
+        case tooLarge
+        case unreadable
+
+        public var message: String {
+            switch self {
+            case .tooLarge: return Attachments.tooBigMessage
+            case .unreadable: return "Could not read that file."
+            }
+        }
+    }
+
+    public static func loadFile(at url: URL, maxBytes: Int = Attachments.maxBytes) async -> Result<LoadedFile, LoadError> {
+        await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+               let fileSize = values.fileSize,
+               fileSize > maxBytes {
+                return .failure(.tooLarge)
+            }
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+                return .failure(.unreadable)
+            }
+            guard data.count <= maxBytes else {
+                return .failure(.tooLarge)
+            }
+            let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+            return .success(LoadedFile(data: data, name: url.lastPathComponent, mimeType: mime))
+        }.value
+    }
 
     /// `draft` with `path` added where a prompt reads it: after the text,
     /// on its own word.

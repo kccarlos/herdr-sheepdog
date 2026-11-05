@@ -338,7 +338,7 @@ extension TimelineRow {
         func json(_ value: some Encodable) -> String {
             (try? encoder.encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         }
-        func time(_ date: Date) -> String { ISO8601DateFormatter.sheepdog.string(from: date) }
+        func time(_ date: Date) -> String { RFC3339Date.string(from: date) }
         switch self {
         case let .day(date):
             return json(["day": time(date)])
