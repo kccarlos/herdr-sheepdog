@@ -8,6 +8,7 @@ import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
 import { parsePairing, isAppleMobile, appLink, enroll, signIn, keyStore, MSG } from './pairing.js';
+import { voiceKeyAction } from './shortcuts.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -941,19 +942,48 @@ async function init() {
     if (state.fileSource) state.fileSource.loop = e.target.checked;
   });
 
-  document.addEventListener('keydown', (e) => {
-    const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
-    if ($('card-dialog').open) return; // Esc closes the card, not the voice
-    if (e.key === 'Escape') {
-      if (!$('btn-stop').disabled) stop();
-      return;
+  const shortcutsDialog = $('shortcuts-dialog');
+  const openShortcuts = () => {
+    if (!shortcutsDialog) return;
+    if (typeof shortcutsDialog.showModal === 'function') {
+      if (!shortcutsDialog.open) shortcutsDialog.showModal();
+    } else {
+      shortcutsDialog.setAttribute('open', '');
     }
-    if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === ' ') {
+  };
+  const closeShortcuts = () => {
+    if (!shortcutsDialog) return;
+    if (typeof shortcutsDialog.close === 'function') {
+      if (shortcutsDialog.open) shortcutsDialog.close();
+    } else {
+      shortcutsDialog.removeAttribute('open');
+    }
+  };
+  if ($('btn-shortcuts')) {
+    $('btn-shortcuts').addEventListener('click', () => (shortcutsDialog && shortcutsDialog.open ? closeShortcuts() : openShortcuts()));
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const inField = Boolean(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT'));
+    const action = voiceKeyAction(e, {
+      inField,
+      cardOpen: Boolean($('card-dialog') && $('card-dialog').open),
+      shortcutsOpen: Boolean(shortcutsDialog && shortcutsDialog.open),
+      canStop: !$('btn-stop').disabled,
+      canMute: !$('btn-mute').disabled,
+    });
+    if (!action) return;
+    if (action.preventDefault) e.preventDefault();
+    if (action.type === 'open-shortcuts') {
       e.preventDefault();
-      if (!$('btn-stop').disabled) stop();
-    } else if (e.key === 'm' || e.key === 'M') {
-      if (!$('btn-mute').disabled) setMuted(!state.muted);
+      openShortcuts();
+    } else if (action.type === 'close-shortcuts') {
+      e.preventDefault();
+      closeShortcuts();
+    } else if (action.type === 'stop') {
+      stop();
+    } else if (action.type === 'toggle-mute') {
+      setMuted(!state.muted);
     }
   });
 

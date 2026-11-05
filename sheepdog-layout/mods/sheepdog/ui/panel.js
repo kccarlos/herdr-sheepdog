@@ -15,6 +15,7 @@ import { composerView } from "./composer.js";
 import { questionBar, questionSheet, questionStack } from "./questions.js";
 import { notice, rowView } from "./rows.js";
 import { paused } from "./rail.js";
+import { shortcutsSheet } from "./shortcuts.js";
 import { voiceBar } from "./voice.js";
 import { button, command, dot, logo, toneColor } from "./widgets.js";
 
@@ -24,7 +25,7 @@ export const WINDOW = { width: 420, height: 640 };
 // The header: the logo, the needs-you count, the menu and the window's close
 // control on the first line; the voice (and who holds it) and Technical on the
 // second. A press the mod does not stop drags a window, so the controls stop it.
-function header(t, status, { technical, onToggleTechnical, onMenu, onClose }) {
+function header(t, status, { technical, onToggleTechnical, onShortcuts, onMenu, onClose }) {
   const stop = (_e, cx) => cx.stop_propagation();
   const control = (id, label, onClick) =>
     div().id(id).px(8).h(24).flex().items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted).hover((s) => s.bg(t.hover)).on_mouse_down("left", stop).on_click(onClick).child(label);
@@ -46,6 +47,7 @@ function header(t, status, { technical, onToggleTechnical, onMenu, onClose }) {
         .when((ok || status.phase === "setup") && status.needsYou > 0, (el) =>
           el.child(div().flex_none().px(8).h(20).flex().items_center().rounded(10).bg(t.blocked).text_size(11).font_semibold().text_color(t.solid_foreground).child(`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`)),
         )
+        .when(Boolean(onShortcuts), (el) => el.child(control("shortcuts", "?", onShortcuts)))
         .child(control("menu", "⋯", onMenu))
         .when(Boolean(onClose), (el) => el.child(control("close", "✕", onClose))),
     )
@@ -210,11 +212,12 @@ function empty(t, text, minHeight = 0) {
 // "put Sheepdog in the sidebar" hint of a window that is not the docked
 // block's, { note, onCopyLayout }, else null. `sheet`: what is open over the
 // list, or null: { type: "card", card, note, onFocus, onClose } or { type:
-// "questions", onClose }.
-export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, panelNotice, sheet, onSetup, onStart, downNote, onToggleTechnical, onMenu, onClose, onEndShown, onOpenRow }) {
+// "questions", onClose } or { type: "shortcuts", platform, onClose }.
+export function panelView(t, { status, entries, paging, technical, retryMs, compose, questions, voice, layout, dock, panelNotice, sheet, onSetup, onStart, downNote, onToggleTechnical, onShortcuts, onMenu, onClose, onEndShown, onOpenRow }) {
   const up = status.phase === "ok" || status.phase === "setup";
   let body;
-  if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
+  if (sheet?.type === "shortcuts") body = shortcutsSheet(t, sheet);
+  else if (status.phase === "loading") body = empty(t, "Looking for Sheepdog…");
   else if (status.phase === "down") body = down(t, status, retryMs, { onStart, onSetup, note: downNote });
   else if (sheet?.type === "card") body = cardSheet(t, sheet.card, sheet);
   else if (sheet?.type === "questions") body = questionSheet(t, questions.cards, { busy: questions.busy, onAnswer: questions.onAnswer, onClose: sheet.onClose });
@@ -223,7 +226,7 @@ export function panelView(t, { status, entries, paging, technical, retryMs, comp
   else body = timeline(t, { entries, ...paging, minHeight: layout.timelineMinHeight, onEndShown, onOpenRow });
   const floating = up && sheet?.type !== "questions" && questions.cards.length > 0;
   const showPanelNotice = Boolean(panelNotice) && status.phase === "ok";
-  const topVisible = up && (dock || showPanelNotice || status.phase === "setup" || status.paused || status.phase === "ok" || floating);
+  const topVisible = up && sheet?.type !== "shortcuts" && (dock || showPanelNotice || status.phase === "setup" || status.paused || status.phase === "ok" || floating);
   const top = v_flex()
     .w_full()
     .min_h(0)
@@ -242,8 +245,8 @@ export function panelView(t, { status, entries, paging, technical, retryMs, comp
     .size_full()
     .min_h(0)
     .bg(t.chrome)
-    .child(header(t, status, { technical, onToggleTechnical, onMenu, onClose }).flex_none())
+    .child(header(t, status, { technical, onToggleTechnical, onShortcuts, onMenu, onClose }).flex_none())
     .when(topVisible, (el) => el.child(top.flex_none()))
-    .when(up, (el) => el.child(composerView(t, compose)))
+    .when(up && sheet?.type !== "shortcuts", (el) => el.child(composerView(t, compose)))
     .child(body);
 }
