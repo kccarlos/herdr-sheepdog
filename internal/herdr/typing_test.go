@@ -30,3 +30,23 @@ func TestTypedInputUnclearWithoutPromptStyling(t *testing.T) {
 		}
 	}
 }
+
+func TestTypedInputLiveRegion(t *testing.T) {
+	for _, tc := range []struct {
+		name, screen string
+		typed, known bool
+	}{
+		{"nbsp", "────────\n\x1b[0m❯\u00a0typed\n────────\nstatus", true, true},
+		{"empty", "────────\n\x1b[0m❯\n────────\nstatus", false, true},
+		{"history", "\x1b[0m❯ old command\nworking\n\nstatus", false, false},
+		{"history separated", "\x1b[0m› old command\n\nworking\n  status", false, false},
+		{"live after history", "\x1b[0m❯ old command\n────────\n\x1b[0m❯\u00a0\x1b[2mplaceholder\x1b[0m\n────────\nstatus", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := TypedInput(tc.screen)
+			if a != tc.typed || b != tc.known {
+				t.Errorf("got %v %v", a, b)
+			}
+		})
+	}
+}

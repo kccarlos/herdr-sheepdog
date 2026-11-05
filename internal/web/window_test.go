@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
 // windowPath is /api/agents/{pane}/{what} with the pane id path-escaped.
@@ -299,5 +300,11 @@ func TestAgentInputEnterIsAPlainKey(t *testing.T) {
 		if ev.Type == "pending.confirmed" {
 			t.Errorf("plain keys confirmed the question: %s", ev.Payload)
 		}
+	}
+}
+
+func TestTerminalTypingStatusConflict(t *testing.T) {
+	if got := windowStatus(supervisor.ErrTerminalTyping); got != http.StatusConflict {
+		t.Fatalf("status = %d", got)
 	}
 }

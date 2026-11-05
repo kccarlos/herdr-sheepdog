@@ -104,6 +104,8 @@ func (s *Supervisor) Screen(ctx context.Context, paneID string, lines int) (Scre
 	}, nil
 }
 
+var ErrANSIUnavailable = errors.New("ANSI read unavailable")
+
 // ANSIReader is a Herdr that can read a pane with its colours kept
 // (herdr.Client, inject.Herdr).
 type ANSIReader interface {
@@ -124,6 +126,9 @@ func (s *Supervisor) ScreenANSI(ctx context.Context, paneID string) (Screen, err
 		return Screen{}, ErrNoSuchAgent
 	}
 	read, err := r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
+	if errors.Is(err, ErrANSIUnavailable) {
+		return s.Screen(ctx, paneID, 0)
+	}
 	if err != nil {
 		return Screen{}, err
 	}
@@ -162,8 +167,15 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	name := aliasOr(state.Say(row))
 	ps := s.paneSend(paneID)
 	ps.Lock()
+	if row, ok := s.store.Get(paneID); ok && row.State == herdr.StateBlocked {
+		ps.Unlock()
+		return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, herdr.ErrAgentBlocked)
+	}
 	if err := s.checkTypedInput(ctx, paneID); err != nil {
 		ps.Unlock()
+		if errors.Is(err, herdr.ErrAgentBlocked) {
+			return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
+		}
 		return WindowResult{}, err
 	}
 	// The row records the prompt before the RPC (see sendInstruction): a
@@ -302,6 +314,9 @@ func (s *Supervisor) checkTypedInput(ctx context.Context, paneID string) error {
 	if err != nil {
 		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
 		return nil
+	}
+	if _, menu := herdr.ParsePrompt(reANSI.ReplaceAllString(read.Text, "")); menu {
+		return herdr.ErrAgentBlocked
 	}
 	typed, known := herdr.TypedInput(read.Text)
 	if !known || read.Truncated {

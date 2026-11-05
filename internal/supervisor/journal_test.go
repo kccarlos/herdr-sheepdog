@@ -255,3 +255,15 @@ func TestSignOffSkipsSlashCommands(t *testing.T) {
 		t.Error("a slash command's task text is not the command")
 	}
 }
+
+func TestSignOffPreservesTrailingImagePath(t *testing.T) {
+	for _, in := range []string{"look\n/tmp/photo.png", "~/photo.png", "/tmp/photo.png"} {
+		got := withSignOff(in)
+		if got != in+"\n"+SignOff {
+			t.Errorf("got %q", got)
+		}
+		if again := withSignOff(got); again != got {
+			t.Errorf("sign-off duplicated: %q", again)
+		}
+	}
+}

@@ -894,3 +894,39 @@ func TestTypedTerminalInputBlocksPrompts(t *testing.T) {
 		t.Errorf("sent prompts: %v", got)
 	}
 }
+
+func TestWindowPromptApprovalIsNotTypedInput(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	screen := fixture(t, "codex-approval-prompt.screen.txt")
+	h.srv.SetScreen("w5:p1", strings.Replace(screen, "› 1. Yes", "\x1b[0m› 1. Yes", 1))
+	_, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests")
+	if !errors.Is(err, herdr.ErrAgentBlocked) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+type unavailableANSI struct{ Herdr }
+
+func (h *unavailableANSI) ReadANSI(context.Context, string, herdr.ReadSource, int) (herdr.ReadResult, error) {
+	return herdr.ReadResult{}, ErrANSIUnavailable
+}
+func TestScreenANSIFallsBackWhenUnavailable(t *testing.T) {
+	h := twoAgents(t)
+	h.srv.SetScreen("w5:p1", "plain screen")
+	h.sup.herdr = &unavailableANSI{Herdr: h.sup.herdr}
+	screen, err := h.sup.ScreenANSI(context.Background(), "w5:p1")
+	if err != nil || screen.ANSI || strings.TrimSpace(screen.Text) != "plain screen" {
+		t.Fatalf("screen=%+v err=%v", screen, err)
+	}
+}
+
+func TestWindowPromptDetectsUnreportedMenu(t *testing.T) {
+	h := twoAgents(t)
+	screen := fixture(t, "codex-approval-prompt.screen.txt")
+	h.srv.SetScreen("w5:p1", strings.Replace(screen, "› 1. Yes", "\x1b[0m› 1. Yes", 1))
+	_, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests")
+	if !errors.Is(err, herdr.ErrAgentBlocked) || !strings.Contains(err.Error(), "answer it first") {
+		t.Fatalf("got %v", err)
+	}
+}

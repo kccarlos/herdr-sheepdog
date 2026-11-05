@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-var inputMarker = regexp.MustCompile(`^\s*[❯›]\s`)
+var inputMarker = regexp.MustCompile(`^\s*[❯›](?:[\s\p{Zs}]|$)`)
 var inputRule = regexp.MustCompile(`^\s*[─━]{8,}`)
 
 // TypedInput reports whether the bottom-most input row contains non-dim text,
@@ -76,17 +76,57 @@ func TypedInput(screen string) (bool, bool) {
 		}
 		return b.String()
 	}
-	for i := len(lines) - 1; i >= 0; i-- {
+	// Claude encloses its input in horizontal rules. Codex uses an
+	// unboxed prompt immediately above its footer. Never search scrollback.
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(plain(lines[end-1])) == "" {
+		end--
+	}
+	bottomRule := -1
+	for i := end - 1; i >= 0 && i >= end-3; i-- {
+		if inputRule.MatchString(plain(lines[i])) {
+			bottomRule = i
+			break
+		}
+	}
+	start := end - 4
+	if start < 0 {
+		start = 0
+	}
+	if bottomRule >= 0 {
+		end = bottomRule
+		start = end - 1
+		for start >= 0 && !inputRule.MatchString(plain(lines[start])) && strings.TrimSpace(plain(lines[start])) != "" {
+			start--
+		}
+		start++
+	}
+	for i := end - 1; i >= start; i-- {
 		s := plain(lines[i])
 		loc := inputMarker.FindStringIndex(s)
 		if loc == nil {
 			continue
 		}
+		if bottomRule < 0 {
+			// An unboxed Codex input can have indented continuation rows,
+			// then a blank line and a single indented status footer.
+			footer := false
+			for j := i + 1; j < end; j++ {
+				next := plain(lines[j])
+				if strings.TrimSpace(next) == "" {
+					footer = true
+					continue
+				}
+				if (next[0] != ' ' && next[0] != '\t') || (footer && j != end-1) {
+					return false, false
+				}
+			}
+		}
 		if !styledLines[i] {
 			return false, false
 		}
 		prefix := len([]rune(s[:loc[1]]))
-		for j := i; j < len(lines); j++ {
+		for j := i; j < end; j++ {
 			l := lines[j]
 			if j > i && (strings.TrimSpace(plain(l)) == "" || inputRule.MatchString(plain(l))) {
 				break

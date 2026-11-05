@@ -116,7 +116,7 @@ func windowStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, supervisor.ErrWindowInput), errors.Is(err, supervisor.ErrNoSuchOption):
 		return http.StatusBadRequest
-	case errors.Is(err, herdr.ErrAgentBlocked), errors.Is(err, supervisor.ErrPendingGone):
+	case errors.Is(err, herdr.ErrAgentBlocked), errors.Is(err, supervisor.ErrPendingGone), errors.Is(err, supervisor.ErrTerminalTyping):
 		return http.StatusConflict
 	case errors.Is(err, supervisor.ErrNotSent):
 		return http.StatusBadGateway
