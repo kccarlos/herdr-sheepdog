@@ -164,7 +164,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	ps.Lock()
 	// The row records the prompt before the RPC (see sendInstruction): a
 	// quick turn's transitions can land before Prompt returns.
-	note := clipNote(text)
+	note := clipNote(s.cfg.Redactor.String(text))
 	s.mu.Lock()
 	now := s.cfg.Now()
 	prev, _ := s.store.Get(paneID)

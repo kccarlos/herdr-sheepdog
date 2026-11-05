@@ -162,11 +162,11 @@ func (s *Supervisor) recordJournal(row state.Agent, event string, finish bool) {
 
 	e := state.JournalEntry{At: s.cfg.Now(), Event: event, Tools: d.Tools}
 	if d.Fresh {
-		e.LastAssistant = workerlog.Clip(scrubLines(d.LastAssistant), journalAssistantRunes)
+		e.LastAssistant = workerlog.Clip(scrubLines(s.cfg.Redactor.String(d.LastAssistant)), journalAssistantRunes)
 	}
-	instruction := withoutSignOff(d.Instruction())
+	instruction := withoutSignOff(s.cfg.Redactor.String(d.Instruction()))
 	if instruction == "" {
-		instruction = withoutSignOff(row.CurrentTask)
+		instruction = withoutSignOff(s.cfg.Redactor.String(row.CurrentTask))
 	}
 	e.Instruction = workerlog.Clip(prose.Spoken(instruction, 0), journalInstructionRunes)
 	e.FilesTouched = d.Files
