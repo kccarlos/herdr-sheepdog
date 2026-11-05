@@ -385,3 +385,380 @@ func TestTitleTailWindow(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func writeSessionFile(t *testing.T, agent string, lines ...string) (string, Session) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, Session{Agent: agent, Kind: "path", Value: path}
+}
+
+func TestClaudeAPIErrorsAndAborts(t *testing.T) {
+	t.Run("529 overloaded does not pollute LastAssistant", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Audit the auth handler."}}`,
+			`{"type":"system","subtype":"api_error","error":{"status":529,"error":{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}},"retryInMs":1000,"retryAttempt":1,"maxRetries":10}`,
+			`{"type":"assistant","isApiErrorMessage":true,"error":"server_error","apiErrorStatus":529,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopOverloaded || d.Error.Status != 529 {
+			t.Fatalf("Error = %+v, want StopOverloaded 529", d.Error)
+		}
+		if d.LastAssistant != "" || d.Fresh {
+			t.Errorf("LastAssistant = %q, Fresh = %v; API error text must not look like an assistant answer", d.LastAssistant, d.Fresh)
+		}
+		if got, want := d.Error.Sentence("auth"), "auth stopped because the model provider returned 529 overloaded."; got != want {
+			t.Errorf("Sentence = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("retried system api_error cleared when assistant answers", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Run tests."}}`,
+			`{"type":"system","subtype":"api_error","error":{"status":529,"error":{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}},"retryAttempt":1,"maxRetries":10}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"All 14 tests passed."}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error != nil {
+			t.Errorf("Error = %+v, want nil after successful retry", d.Error)
+		}
+		if d.LastAssistant != "All 14 tests passed." || !d.Fresh {
+			t.Errorf("LastAssistant = %q, Fresh = %v", d.LastAssistant, d.Fresh)
+		}
+	})
+
+	t.Run("quota wall with reset time strips IANA timezone", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Finish refactoring."}}`,
+			`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 3pm (America/Los_Angeles)"}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopQuota {
+			t.Fatalf("Error = %+v, want StopQuota", d.Error)
+		}
+		if d.Error.ResetsAt != "3pm" {
+			t.Errorf("ResetsAt = %q, want 3pm", d.Error.ResetsAt)
+		}
+		if got, want := d.Error.Summary(), "stopped because it hit its usage limit, resets 3pm"; got != want {
+			t.Errorf("Summary = %q, want %q", got, want)
+		}
+		if strings.Contains(d.Error.Summary(), "America") {
+			t.Errorf("Summary leaked IANA timezone: %q", d.Error.Summary())
+		}
+	})
+
+	t.Run("pipe epoch quota, billing, 429 rate limit, auth, context full", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			line    string
+			kind    StopKind
+			summary string
+		}{
+			{
+				name:    "pipe epoch usage limit",
+				line:    `{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"Claude AI usage limit reached|1760000000"}]}}`,
+				kind:    StopQuota,
+				summary: "stopped because it hit its usage limit",
+			},
+			{
+				name:    "billing credit balance",
+				line:    `{"type":"assistant","isApiErrorMessage":true,"error":"billing_error","apiErrorStatus":402,"message":{"role":"assistant","content":[{"type":"text","text":"Credit balance is too low"}]}}`,
+				kind:    StopQuota,
+				summary: "stopped because its credit balance is too low",
+			},
+			{
+				name:    "429 organization rate limit",
+				line:    `{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your organization's rate limit.\"}}"}]}}`,
+				kind:    StopRateLimit,
+				summary: "stopped because its provider returned a 429 rate limit",
+			},
+			{
+				name:    "401 expired oauth",
+				line:    `{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","apiErrorStatus":401,"message":{"role":"assistant","content":[{"type":"text","text":"OAuth token has expired. Please obtain a new token or run /login."}]}}`,
+				kind:    StopAuth,
+				summary: "stopped because its provider login or API token failed",
+			},
+			{
+				name:    "context window exceeded",
+				line:    `{"type":"assistant","isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,"message":{"role":"assistant","content":[{"type":"text","text":"Prompt is too long"}]}}`,
+				kind:    StopContextFull,
+				summary: "stopped because its conversation reached the context limit",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, sess := writeSessionFile(t, "claude",
+					`{"type":"user","message":{"role":"user","content":"Check build."}}`,
+					tc.line,
+				)
+				d, err := New(Options{}).Tail(sess)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d.Error == nil || d.Error.Kind != tc.kind {
+					t.Fatalf("Error = %+v, want %s", d.Error, tc.kind)
+				}
+				if got := d.Error.Summary(); got != tc.summary {
+					t.Errorf("Summary = %q, want %q", got, tc.summary)
+				}
+				if strings.Contains(d.Error.Message, "|1760000000") || strings.Contains(d.Error.Message, `{"type":`) {
+					t.Errorf("Message kept raw envelope: %q", d.Error.Message)
+				}
+			})
+		}
+	})
+
+	t.Run("aborted turn and incremental recovery", func(t *testing.T) {
+		path, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Search the repo."}}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{}}]}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+		)
+		r := New(Options{})
+		d, err := r.Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopAborted {
+			t.Fatalf("Error = %+v, want StopAborted", d.Error)
+		}
+		if d.Instruction() != "Search the repo." {
+			t.Errorf("Instruction = %q; interrupt marker must not become an instruction", d.Instruction())
+		}
+		appendLines(t, path,
+			`{"type":"user","message":{"role":"user","content":"Now just check README."}}`+"\n",
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"README looks up to date."}]}}`+"\n",
+		)
+		recovered, err := r.Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recovered.Error != nil {
+			t.Errorf("recovered Error = %+v, want nil", recovered.Error)
+		}
+		if recovered.LastAssistant != "README looks up to date." || !recovered.Fresh {
+			t.Errorf("recovered = %+v", recovered)
+		}
+	})
+
+	t.Run("merge propagates and clears error", func(t *testing.T) {
+		var d Digest
+		d.Merge(Digest{Instructions: []string{"Build"}, Error: &TurnError{Kind: StopOverloaded, Status: 529}})
+		if d.Error == nil || d.Error.Kind != StopOverloaded {
+			t.Fatalf("after error merge: %+v", d.Error)
+		}
+		d.Merge(Digest{LastAssistant: "Built cleanly.", Fresh: true})
+		if d.Error != nil {
+			t.Errorf("after recovery merge: %+v, want nil", d.Error)
+		}
+	})
+}
+
+func TestClaudeNarrationBlocks(t *testing.T) {
+	// "narration" at byte offsets 0, 1 and 2 before base64 encoding.
+	sigs := []struct {
+		name string
+		sig  string
+	}{
+		{"align0", "EpgBbmFycmF0aW9uLXRleHQ="},
+		{"align1", "EAB5hcnJhdGlvbi10ZXh0"},
+		{"align2", "EAABuYXJyYXRpb24tdGV4dA=="},
+	}
+	for _, sc := range sigs {
+		t.Run("signature "+sc.name, func(t *testing.T) {
+			_, sess := writeSessionFile(t, "claude",
+				`{"type":"user","message":{"role":"user","content":"Fix flaky test."}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Fixed the race in pool_test.go and verified 20 runs.","signature":"`+sc.sig+`"}]}}`,
+			)
+			d, err := New(Options{}).Read("w1:p1", sess)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.LastAssistant != "Fixed the race in pool_test.go and verified 20 runs." || !d.Fresh {
+				t.Errorf("LastAssistant = %q, Fresh = %v", d.LastAssistant, d.Fresh)
+			}
+		})
+	}
+
+	t.Run("thinkingDisplay updates", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Deploy staging."}}`,
+			`{"type":"assistant","thinkingDisplay":"updates","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Staging deploy finished cleanly.","signature":"opaque"}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.LastAssistant != "Staging deploy finished cleanly." || !d.Fresh {
+			t.Errorf("LastAssistant = %q, Fresh = %v", d.LastAssistant, d.Fresh)
+		}
+	})
+
+	t.Run("real text block in turn always wins over narration", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Explain the failure."}}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The migration skipped step 3."}]}}`,
+			`{"type":"assistant","thinkingDisplay":"updates","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Internal progress note.","signature":"EpgBbmFycmF0aW9u"}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.LastAssistant != "The migration skipped step 3." {
+			t.Errorf("LastAssistant = %q; narration must not overwrite a real text block in the same turn", d.LastAssistant)
+		}
+	})
+
+	t.Run("private non-narration thinking is never read", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "claude",
+			`{"type":"user","message":{"role":"user","content":"Think quietly."}}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Private chain of thought that must stay unread.","signature":"ErUBCkYICxgCIkDprivateSignatureWithoutMarker=="}]}}`,
+		)
+		d, err := New(Options{}).Read("w1:p1", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.LastAssistant != "" || d.Fresh {
+			t.Errorf("private thinking leaked: LastAssistant = %q, Fresh = %v", d.LastAssistant, d.Fresh)
+		}
+	})
+}
+
+func TestCodexErrorsAndAborts(t *testing.T) {
+	t.Run("ordinary text mentioning 429 is not an error", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Investigate HTTP 429"}}`,
+			`{"type":"event_msg","payload":{"type":"agent_message","message":"The test covers a 429 response."}}`,
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"The test covers a 429 response."}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error != nil {
+			t.Fatalf("ordinary text classified as error: %+v", d.Error)
+		}
+	})
+	t.Run("terminal error survives completion carrying earlier message", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Do the work"}}`,
+			`{"type":"event_msg","payload":{"type":"error","message":"Rate limit","codex_error_info":"rate_limit_exceeded"}}`,
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"I checked the files."}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopRateLimit {
+			t.Fatalf("Error = %+v, want rate limit", d.Error)
+		}
+	})
+	t.Run("usage limit error is not overwritten by trailing turn_aborted", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"task_started"}}`,
+			`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"input_text","text":"Refactor billing."}]}}}`,
+			`{"type":"event_msg","payload":{"type":"error","message":"You've hit your usage limit. Try again in 2 hours.","codex_error_info":"usage_limit_exceeded"}}`,
+			`{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopQuota {
+			t.Fatalf("Error = %+v, want StopQuota", d.Error)
+		}
+		if d.Error.ResetsAt != "in 2 hours" {
+			t.Errorf("ResetsAt = %q, want 'in 2 hours'", d.Error.ResetsAt)
+		}
+		if got, want := d.Error.Summary(), "stopped because it hit its usage limit, resets in 2 hours"; got != want {
+			t.Errorf("Summary = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("map variant codex_error_info with 529 http_status_code", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"input_text","text":"Run linter."}]}}}`,
+			`{"type":"event_msg","payload":{"type":"error","message":"Upstream overloaded","codex_error_info":{"http_connection_failed":{"http_status_code":529}}}}`,
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopOverloaded || d.Error.Status != 529 {
+			t.Fatalf("Error = %+v, want StopOverloaded 529", d.Error)
+		}
+	})
+
+	t.Run("model_cap with reset_after_seconds", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Check types."}}`,
+			`{"type":"event_msg","payload":{"type":"error","message":"Model capacity reached","codex_error_info":{"model_cap":{"model":"gpt-5","reset_after_seconds":120}}}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopOverloaded || d.Error.ResetsAt != "in 2 minutes" {
+			t.Fatalf("Error = %+v, want StopOverloaded with ResetsAt 'in 2 minutes'", d.Error)
+		}
+	})
+
+	t.Run("plain turn_aborted", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Long search."}}`,
+			`{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopAborted {
+			t.Fatalf("Error = %+v, want StopAborted", d.Error)
+		}
+	})
+
+	t.Run("transient stream_error cleared when turn completes", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Update docs."}}`,
+			`{"type":"event_msg","payload":{"type":"stream_error","message":"Reconnecting... 1/5","codex_error_info":"response_stream_disconnected"}}`,
+			`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","phase":"final_answer","content":[{"type":"output_text","text":"Updated README."}]}}}`,
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"Updated README."}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error != nil {
+			t.Errorf("Error = %+v, want nil after stream reconnect", d.Error)
+		}
+		if d.LastAssistant != "Updated README." || !d.Fresh {
+			t.Errorf("LastAssistant = %q, Fresh = %v", d.LastAssistant, d.Fresh)
+		}
+	})
+
+	t.Run("unrecovered stream_error reports connection drop", func(t *testing.T) {
+		_, sess := writeSessionFile(t, "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Update docs."}}`,
+			`{"type":"event_msg","payload":{"type":"stream_error","message":"stream disconnected before completion","codex_error_info":"response_stream_disconnected"}}`,
+		)
+		d, err := New(Options{}).Read("w1:p2", sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Error == nil || d.Error.Kind != StopConnection {
+			t.Fatalf("Error = %+v, want StopConnection", d.Error)
+		}
+	})
+}

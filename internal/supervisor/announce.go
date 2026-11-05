@@ -69,8 +69,12 @@ type announcement struct {
 	// turn, for a finish that also asks (announceFinishAsking).
 	asking string
 	// sentence is the code sentence: the parsed prompt for a block,
-	// "<alias> finished." for a finish.
+	// "<alias> finished." (or "<alias> stopped because ….") for a finish.
 	sentence string
+	// stopReason and stopDetail are set when the worker's transcript
+	// shows the turn ended on an error or abort rather than finishing.
+	stopReason string
+	stopDetail string
 	// screen is the pane read taken for the event, when one was.
 	screen string
 	// pending is the id of the answer_prompt this block created, when it
@@ -132,7 +136,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		if s.brain != nil {
 			s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "space_muted"}, brain.Reply{}, kept, false)
 		}
-		s.recordFinish(a, doneResult)
+		s.recordFinish(a, "")
 		s.logMutedQuiet(a, level)
 		return
 	}
@@ -143,7 +147,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	if ceilingForbidsAll(level, a, kept) {
 		// Nothing the orchestrator could say would be spoken: no model call.
 		s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "ceiling"}, brain.Reply{}, kept, false)
-		s.recordFinish(a, doneResult)
+		s.recordFinish(a, "")
 		if a.kind != pushPromiseOnly {
 			s.log.Log(logSource, "supervisor.push_quiet", a.row.PaneID, map[string]any{"text": a.sentence, "chattiness": string(level)})
 		}
@@ -153,7 +157,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	for _, p := range kept {
 		infos = append(infos, promiseInfo(p))
 	}
-	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking, Link: eventLink(a.eventID), Facts: s.announceFacts(a)}
+	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking, StopError: a.stopReason, StopDetail: a.stopDetail, Link: eventLink(a.eventID), Facts: s.announceFacts(a)}
 	res := make(chan turnResult, 1)
 	start := s.cfg.Now()
 	go func() {
@@ -216,6 +220,9 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	rep := r.rep
 	spoken, overflow := earLine(rep)
+	if a.stopReason != "" {
+		spoken, overflow = a.sentence, ""
+	}
 	if !s.pendingStillOpen(a) {
 		// The prompt was answered or went away while the orchestrator wrote
 		// about it: whatever it says now is about something gone.
@@ -425,7 +432,7 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // newer turn about the same agent is about to speak; nor after a model
 // error, which is no matter of time).
 func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chattiness, reason string) {
-	s.recordFinish(a, doneResult)
+	s.recordFinish(a, "")
 	if s.brain != nil && reason != "promise" {
 		applied := brain.UrgencySkip
 		if a.owed || level.allows(a.kind) {
@@ -434,7 +441,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: applied, reason: reason}, brain.Reply{}, kept, false)
 	}
 	sentence := a.sentence
-	if owedFinish(a, kept) && a.asking == "" && reason == "timeout" {
+	if owedFinish(a, kept) && a.asking == "" && a.stopReason == "" && reason == "timeout" {
 		sentence = noFindingSentence(a)
 	}
 	if len(kept) == 0 {
@@ -490,18 +497,28 @@ func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply, overf
 	}
 }
 
+// defaultResult returns what the record keeps of a finish when the
+// orchestrator did not phrase one: the stop summary if the turn stopped
+// on an error or abort, else "finished".
+func (a announcement) defaultResult() string {
+	if a.stopReason != "" {
+		return a.stopReason
+	}
+	return doneResult
+}
+
 // recordFinish stores what was announced about a finish as the agent's
 // last result (docs/dev/roles.md: "last_result is the orchestrator's finish line");
 // with no line — the orchestrator was off, late or silent — the record says
-// only that the agent finished.
+// whether the agent stopped on an error or finished.
 func (s *Supervisor) recordFinish(a announcement, spoken string) {
 	if a.event != brain.PromiseEventDone {
 		return
 	}
 	if spoken == "" {
-		spoken = doneResult
+		spoken = a.defaultResult()
 	}
-	s.recordResult(a.row.PaneID, spoken)
+	s.recordResult(a.row.PaneID, spoken, a.stopReason)
 }
 
 // decision is one push judgment as logged (brain.push_decision).

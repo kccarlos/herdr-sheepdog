@@ -50,7 +50,11 @@ func agentState(a state.Agent, now time.Time) string {
 		return "no longer running"
 	}
 	if a.LastResult != nil && !a.LastResult.At.IsZero() {
-		st += fmt.Sprintf("; it last finished work %s ago", spokenAge(now.Sub(a.LastResult.At)))
+		if clause := stopClause(a.LastResult.StopReason); clause != "" {
+			st += fmt.Sprintf("; it last stopped %s ago %s", spokenAge(now.Sub(a.LastResult.At)), clause)
+		} else {
+			st += fmt.Sprintf("; it last finished work %s ago", spokenAge(now.Sub(a.LastResult.At)))
+		}
 	} else if a.State == herdr.StateIdle || a.State == herdr.StateDone {
 		st += "; no finished work recorded"
 	}
@@ -82,7 +86,11 @@ func taskFacts(a state.Agent, now time.Time) string {
 	}
 	if n := len(a.Journal); n > 0 && !a.Journal[n-1].At.IsZero() && now.After(a.Journal[n-1].At) {
 		e := a.Journal[n-1]
-		fmt.Fprintf(&b, "; last activity on record: %s %s ago", e.Event, spokenAge(now.Sub(e.At)))
+		act := e.Event
+		if e.Error != "" {
+			act = e.Error
+		}
+		fmt.Fprintf(&b, "; last activity on record: %s %s ago", act, spokenAge(now.Sub(e.At)))
 	}
 	return b.String()
 }
