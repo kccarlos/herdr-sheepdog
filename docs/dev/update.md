@@ -73,30 +73,50 @@ fails if the embed and the folder disagree or a runtime file is not embedded.
 `<herdr-app home>/mods/sheepdog/.sheepdog-install.json`:
 
 ```json
-{ "version": "v1.2.3", "files": { "main.js": "<sha256>", "model/store.js": "<sha256>" }, "layout": "<sha256>" }
+{
+  "version": "v1.2.3",
+  "files": { "main.js": "<sha256>", "model/store.js": "<sha256>" },
+  "layout": "<normalized-sha256>",
+  "previous_layout": "main",
+  "keybinding": { "section": "global", "key": "cmd-shift-s", "command": "sheepdog.focus", "had_file": true }
+}
 ```
 
-`files` is every embedded file as written; `layout` is the hash of `layouts/sheepdog.json` when setup
-wrote it (absent when the user's own layout was kept). If any file on disk differs from what the
-binary ships, no marker is written. herdr-app tolerates the extra dotfile (`herdr-app check` passes).
-`version` is for display; whether an update exists is decided by file hashes, so a development build
-(`dev`) works too.
+`files` is every embedded file as written; `layout` is the normalized hash of `layouts/sheepdog.json`
+(`panelsync.LayoutHash`, which strips runtime-mutated `size`, `hidden`, and `active` fields on layout
+tree nodes before hashing) when setup wrote it (absent when the user's own layout was kept);
+`previous_layout` is the layout `shared.json` showed before setup switched to `"sheepdog"`; and
+`keybinding` records any opt-in `keys.json` shortcut setup installed (`previous` restores a replaced
+binding on uninstall). If any mod file on disk differs from what the binary ships, no marker is
+written. herdr-app tolerates the extra dotfile (`herdr-app check` passes). `version` is for display;
+whether an update exists is decided by file hashes, so a development build (`dev`) works too.
 
 **At startup** (`panelTracker.Sync`, a fresh process after the restart for an upgrade; `$HERDR_APP_HOME`
 or `~/.config/herdr-app`), with `panel.auto_update` on:
 
 - No `mods/sheepdog` folder: nothing happens, nothing is created.
 - Marker present, every file listed in it still matches, and the binary's files differ: the folder is
-  replaced. The new tree is built in a temporary directory in the herdr-app home (same file system),
-  files that are not ours (`gpui-kit.d.ts`, `jsconfig.json`, `.gitignore`) are carried over, files the
-  new version dropped are not, and two renames swap it in (the old folder is put back if the second
-  fails). `panel.updated {from, to, files, layout}` is logged; a failure logs `panel.update_failed`
-  and leaves the old panel.
-- The layout is replaced the same way (a temporary file and a rename) when its hash is still the
-  marker's; a layout the user edited is left alone, with no notice, and the marker's `layout` hash
-  follows a replacement.
+  replaced (`panelsync.InstallPanel` uses the same staging and swap path). The new tree is built in a
+  temporary directory in the herdr-app home (same file system), files that are not ours
+  (`gpui-kit.d.ts`, `jsconfig.json`, `.gitignore`) are carried over, files the new version dropped are
+  not, and a single-syscall atomic directory swap (`renamex_np(..., RENAME_SWAP)` on macOS,
+  `renameat2(..., RENAME_EXCHANGE)` on Linux, falling back to two renames with rollback on filesystems
+  that return `ENOSYS`/`ENOTSUP`/`EINVAL`) swaps it in without a missing-directory window.
+  `panel.updated {from, to, files, layout, layout_sidecar}` is logged; a failure logs
+  `panel.update_failed` and leaves the old panel.
+- The layout is replaced atomically when its normalized hash (`LayoutHash`) still matches the marker's
+  (so pane resizes or folds herdr-app saved at runtime do not block layout updates). If the user edited
+  the layout's pane structure (`LayoutHash` differs from the marker) and the binary ships a structurally
+  different layout, the user's `layouts/sheepdog.json` is preserved and the new template is written
+  alongside it at `layouts/sheepdog.json.new` (`layout_sidecar: true`).
 - A changed file, a missing file, no marker, a marker that does not parse, or a symlinked folder (a
   development checkout): nothing is written.
+- **On `sheepdog uninstall`** (`panelsync.Uninstall`, with `--dry-run` preview): removes `mods/sheepdog`
+  only if `.sheepdog-install.json` is present and every file still matches its hash; removes
+  `layouts/sheepdog.json` if its normalized hash matches the marker or embedded layout (plus any
+  `layouts/sheepdog.json.new` sidecar); removes or restores the recorded `keys.json` shortcut if still
+  pointing at `"sheepdog.focus"`; and switches `shared.json` `"layout"` back to `previous_layout`
+  (default `"main"`) only if `"layout"` is still `"sheepdog"`. Modified files are preserved and reported.
 
 **`/api/state`** has `panel` `{installed, version, modified, update_available, auto_update}`
 (re-read from disk at most every 10 s, so it follows a user's edits and `sheepdog setup`). The panel

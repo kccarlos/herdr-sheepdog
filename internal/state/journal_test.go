@@ -64,3 +64,80 @@ func TestSessionAndJournalPersist(t *testing.T) {
 		t.Errorf("session after reload: %+v", a)
 	}
 }
+
+func TestPIDSessionNotOverwrittenByStaleHerdrSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initial herdr snapshot reports old-id from SessionStart.
+	initTr := tr("w5:p1", "", herdr.StateWorking, t0)
+	initTr.Agent = "claude"
+	initTr.Session = &herdr.AgentSession{Source: "herdr:claude", Agent: "claude", Kind: herdr.SessionKindID, Value: "old-id"}
+	mustApply(t, s, initTr)
+
+	// 2. Same-PID /clear rotates the live session to rotated-id via PID discovery.
+	if _, err := s.Update("w5:p1", func(a *Agent) {
+		a.SessionSource = "pid:claude"
+		a.SessionKind = herdr.SessionKindID
+		a.SessionValue = "rotated-id"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Subsequent transitions and 30s snapshots still carry Watcher's cached old-id:
+	// they must not clobber rotated-id or trigger redundant disk writes.
+	snap := tr("w5:p1", herdr.StateWorking, herdr.StateWorking, t0.Add(30*time.Second))
+	snap.Agent = "claude"
+	snap.Session = &herdr.AgentSession{Source: "herdr:claude", Agent: "claude", Kind: herdr.SessionKindID, Value: "old-id"}
+	if a, changed := mustApply(t, s, snap); changed || a.SessionSource != "pid:claude" || a.SessionValue != "rotated-id" {
+		t.Fatalf("after stale snapshot: changed=%v row=%+v, want unchanged pid:claude rotated-id", changed, a)
+	}
+
+	// 4. Across a daemon restart, the startup snapshot carrying old-id still preserves rotated-id.
+	re, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := mustApply(t, re, snap); a.SessionSource != "pid:claude" || a.SessionValue != "rotated-id" {
+		t.Fatalf("after restart + stale snapshot: row=%+v, want pid:claude rotated-id", a)
+	}
+
+	// 5. A genuinely new herdr session (new CLI process started in the pane) DOES update the row.
+	restarted := tr("w5:p1", herdr.StateWorking, herdr.StateWorking, t0.Add(time.Minute))
+	restarted.Agent = "claude"
+	restarted.Session = &herdr.AgentSession{Source: "herdr:claude", Agent: "claude", Kind: herdr.SessionKindID, Value: "fresh-process-id"}
+	if a, changed := mustApply(t, re, restarted); !changed || a.SessionSource != "herdr:claude" || a.SessionValue != "fresh-process-id" {
+		t.Fatalf("after fresh herdr session: changed=%v row=%+v, want herdr:claude fresh-process-id", changed, a)
+	}
+
+	// 6. Second-zero start + /new before the very first 30s snapshot: PID discovery
+	// already recorded codex-rotated when the first snapshot arrives with codex-initial.
+	z := tr("w6:p1", "", herdr.StateWorking, t0)
+	z.Agent = "codex"
+	mustApply(t, re, z)
+	if _, err := re.Update("w6:p1", func(a *Agent) {
+		a.SessionSource = "pid:codex"
+		a.SessionKind = herdr.SessionKindID
+		a.SessionValue = "codex-rotated"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstSnap := tr("w6:p1", herdr.StateWorking, herdr.StateWorking, t0.Add(30*time.Second))
+	firstSnap.Agent = "codex"
+	firstSnap.Session = &herdr.AgentSession{Source: "herdr:codex", Agent: "codex", Kind: herdr.SessionKindID, Value: "codex-initial"}
+	if a, _ := mustApply(t, re, firstSnap); a.SessionSource != "pid:codex" || a.SessionValue != "codex-rotated" {
+		t.Fatalf("after delayed first snapshot: row=%+v, want pid:codex codex-rotated", a)
+	}
+	// Repeating firstSnap is now a no-op, while a brand-new codex process session updates.
+	if _, changed := mustApply(t, re, firstSnap); changed {
+		t.Fatal("repeated firstSnap counted as a change")
+	}
+	secondProc := firstSnap
+	secondProc.Session = &herdr.AgentSession{Source: "herdr:codex", Agent: "codex", Kind: herdr.SessionKindID, Value: "codex-second-proc"}
+	if a, changed := mustApply(t, re, secondProc); !changed || a.SessionValue != "codex-second-proc" {
+		t.Fatalf("after second codex process: changed=%v row=%+v", changed, a)
+	}
+}

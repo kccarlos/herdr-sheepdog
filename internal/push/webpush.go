@@ -838,6 +838,12 @@ func (s *Sender) postWebPush(ctx context.Context, sub WebSubscription, plain []b
 	}
 	resp, err := s.webClient.Do(req)
 	if err != nil {
+		// Unwrap *url.Error so push.failed logs never emit the full bearer
+		// capability endpoint URL alongside endpoint_host / token_tail.
+		var ue *url.Error
+		if errors.As(err, &ue) && ue.Err != nil {
+			err = ue.Err
+		}
 		return 0, fmt.Errorf("webpush: %w", err)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))

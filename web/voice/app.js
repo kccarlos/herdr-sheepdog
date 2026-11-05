@@ -9,9 +9,10 @@ import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
 import { parsePairing, isAppleMobile, appLink, enroll, signIn, renewSession, classifyWsClose, keyStore, MSG } from './pairing.js';
 import { createWakeController, createPingTracker } from './wake.js';
-import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle, approvalDigitOption } from './approvals.js';
+import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle } from './approvals.js';
 import { createBuildReloader, takeReloadDraft } from './reload.js';
 import { pushSupport, enableWebPush, disableWebPush, syncExistingWebPush } from './push.js';
+import { voiceKeyAction } from './shortcuts.js';
 import { applyUpdateBanner } from '/static/update-banner.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1049,7 +1050,7 @@ const buildReloader = createBuildReloader({
     userDisconnected: state.userDisconnected,
     approvalsBusy: approvals.busy(),
     sinceTypedMs: state.lastTypedAt ? Date.now() - state.lastTypedAt : Infinity,
-    dialogOpen: Boolean($('card-dialog') && $('card-dialog').open),
+    dialogOpen: Boolean(($('card-dialog') && $('card-dialog').open) || ($('shortcuts-dialog') && $('shortcuts-dialog').open)),
   }),
   getDraft: () => ($('text-input') ? $('text-input').value : ''),
   storage: typeof sessionStorage !== 'undefined' ? sessionStorage : null,
@@ -1339,31 +1340,54 @@ async function init() {
     if (state.fileSource) state.fileSource.loop = e.target.checked;
   });
 
+  const shortcutsDialog = $('shortcuts-dialog');
+  if (shortcutsDialog) shortcutsDialog.addEventListener('close', () => buildReloader.check());
+  const openShortcuts = () => {
+    if (!shortcutsDialog) return;
+    if (typeof shortcutsDialog.showModal === 'function') {
+      if (!shortcutsDialog.open) shortcutsDialog.showModal();
+    } else {
+      shortcutsDialog.setAttribute('open', '');
+    }
+  };
+  const closeShortcuts = () => {
+    if (!shortcutsDialog) return;
+    if (typeof shortcutsDialog.close === 'function') {
+      if (shortcutsDialog.open) shortcutsDialog.close();
+    } else {
+      shortcutsDialog.removeAttribute('open');
+    }
+    buildReloader.check();
+  };
+  if ($('btn-shortcuts')) {
+    $('btn-shortcuts').addEventListener('click', () => (shortcutsDialog && shortcutsDialog.open ? closeShortcuts() : openShortcuts()));
+  }
+
   document.addEventListener('keydown', (e) => {
-    const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
-    if ($('card-dialog').open) return; // Esc closes the card, not the voice
-    if (e.key === 'Escape') {
-      if (!$('btn-stop').disabled) stop();
-      return;
-    }
-    const pick = approvalDigitOption(approvals.cards(state.appState), e.key, {
+    const inField = Boolean(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT'));
+    const action = voiceKeyAction(e, {
       inField,
-      metaKey: e.metaKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey,
-      dialogOpen: $('card-dialog').open,
+      cardOpen: Boolean($('card-dialog') && $('card-dialog').open),
+      shortcutsOpen: Boolean(shortcutsDialog && shortcutsDialog.open),
+      authOpen: Boolean($('auth-gate') && !$('auth-gate').classList.contains('hidden')),
+      canStop: !$('btn-stop').disabled,
+      canMute: !$('btn-mute').disabled,
+      cards: approvals.cards(state.appState),
     });
-    if (pick) {
+    if (!action) return;
+    if (action.preventDefault) e.preventDefault();
+    if (action.type === 'answer-approval') {
+      approvals.answer(action.question, action.option);
+    } else if (action.type === 'open-shortcuts') {
       e.preventDefault();
-      approvals.answer(pick.question, pick.option);
-      return;
-    }
-    if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === ' ') {
+      openShortcuts();
+    } else if (action.type === 'close-shortcuts') {
       e.preventDefault();
-      if (!$('btn-stop').disabled) stop();
-    } else if (e.key === 'm' || e.key === 'M') {
-      if (!$('btn-mute').disabled) setMuted(!state.muted);
+      closeShortcuts();
+    } else if (action.type === 'stop') {
+      stop();
+    } else if (action.type === 'toggle-mute') {
+      setMuted(!state.muted);
     }
   });
 

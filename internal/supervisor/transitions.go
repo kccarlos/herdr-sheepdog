@@ -21,14 +21,37 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 	}
 	prev, _ := s.store.Get(t.PaneID)
+	var previousQuestion string
+	for _, q := range s.store.Questions() {
+		if q.PaneID == t.PaneID {
+			previousQuestion = q.ID
+			break
+		}
+	}
 	row, _, err := s.store.Apply(t)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
-	if !t.Closed && !t.Released {
+	// Apply drops the pane's question when it leaves blocked or closes.
+	s.mu.Lock()
+	if previousQuestion != "" {
+		if _, ok := s.store.Question(previousQuestion); !ok {
+			s.attMu.Lock()
+			delete(s.held, previousQuestion)
+			s.attMu.Unlock()
+		}
+	}
+	s.syncToldLocked() // displaced.go
+	s.mu.Unlock()
+	var roots workerlog.ProcessRoots
+	pureRename := t.Renamed && !t.Closed && (t.From == "" || t.From == t.To)
+	if !t.Closed && !t.Released && t.To != herdr.StateUnknown {
+		if !pureRename || row.SessionValue == "" {
+			roots = s.paneRoots(ctx, row)
+		}
 		// The worker's own session title, read as a fact: it may
 		// change the spoken names (names.go).
-		s.refreshTitle(row)
+		s.refreshTitle(row, roots)
 		if r, ok := s.store.Get(t.PaneID); ok {
 			row = r
 		}
@@ -96,7 +119,10 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// a block"). A new block adds a journal entry first, so its
 		// announce turn hears what the worker last wrote.
 		if from != herdr.StateBlocked {
-			s.recordJournal(row, string(herdr.StateBlocked), false)
+			s.recordJournal(ctx, row, roots, string(herdr.StateBlocked), false)
+			if r, ok := s.store.Get(t.PaneID); ok {
+				row = r
+			}
 		}
 		s.onBlocked(ctx, row)
 	case herdr.StateUnknown:
@@ -104,6 +130,8 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "agent_exited")
 		s.forgetPrompt(t.PaneID)
 		s.mu.Unlock()
+		s.cfg.WorkerLog.Forget(t.PaneID)
+		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
 		}
@@ -137,7 +165,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
 			// seen at rest has no news (its transcript is history).
-			stopErr = s.recordJournal(row, string(t.To), finish)
+			stopErr = s.recordJournal(ctx, row, roots, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
 		if r, ok := s.store.Get(t.PaneID); ok {
@@ -311,9 +339,10 @@ const kindAgy = "agy"
 // level.
 func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool, stopErr *workerlog.TurnError) {
 	alias := aliasOr(state.Say(row))
-	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
+	phrase := s.cfg.Redactor.String(prompt.Phrase())
+	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": phrase})
 	s.touch(row.PaneID)
-	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
+	s.recordBlock(row.PaneID, phrase, false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
@@ -326,12 +355,12 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 		stopReason = verb
 		stopDetail = stopErr.Message
 	}
-	sentence := alias + " " + verb + ", and it's asking " + prompt.Phrase() + "."
-	if prompt.Phrase() == "" {
+	sentence := alias + " " + verb + ", and it's asking " + phrase + "."
+	if phrase == "" {
 		sentence = alias + " " + verb + ", and it's waiting at a prompt."
 	}
 	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventDone, alsoIdle: alsoIdle, alsoBlocked: true, owed: instructed,
-		sentence: sentence, asking: prompt.Phrase(), screen: screen, pending: p.ID, stopReason: stopReason, stopDetail: stopDetail})
+		sentence: sentence, asking: phrase, screen: screen, pending: p.ID, stopReason: stopReason, stopDetail: stopDetail})
 }
 
 // runningShepherdTask reports whether row's current task is an
@@ -441,6 +470,8 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 	// The pane left its prompt (answered in the terminal, say): a prompt
 	// that reads the same later appeared then, not now (inputs.go).
 	delete(s.promptSeenAt, paneID)
+	delete(s.told.asked, paneID)
+	s.closedLocked() // displaced.go
 }
 
 // aliasOf returns the alias of a pane, or "another agent" when unknown

@@ -317,6 +317,26 @@ func TestWebPushEndToEndVAPIDAndCleanup(t *testing.T) {
 	if got := s.Status().WebDevices; got != 0 {
 		t.Errorf("WebDevices after 410 = %d, want 0", got)
 	}
+
+	// Transport errors must not leak the full capability endpoint URL into push.failed logs.
+	if err := s.RegisterWebPush(WebSubscription{
+		Endpoint: secretEndpoint,
+		Keys:     keys,
+		Name:     "Android · Chrome",
+		DeviceID: "dev-android",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pushSrv.Close()
+	s.Notify(Notification{EventID: "evt-44", Kind: KindApproval, Text: "auth asks to run make.", NeedsYou: true})
+	s.Wait()
+	if len(log.of("push.failed")) == 0 {
+		t.Errorf("expected push.failed after push server closed")
+	}
+	logBytes, _ = json.Marshal(log.events)
+	if strings.Contains(string(logBytes), "SUPER_SECRET_CAPABILITY_TOKEN") {
+		t.Errorf("capability endpoint leaked into push.failed log: %s", logBytes)
+	}
 }
 
 func verifyVAPIDJWT(t *testing.T, jwtStr, pubB64, wantOrigin string, now time.Time) {

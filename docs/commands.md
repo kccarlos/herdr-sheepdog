@@ -11,7 +11,7 @@
 |---|---|
 | `sheepdog setup` | The browser wizard: key, checks, start at login, phone, talk. Starts the daemon if needed. Run it again any time. `--terminal` asks in the terminal; `--no-open` prints the URL only. |
 | `sheepdog init` | The Models step in the terminal (also `sheepdog setup --terminal`): starting point, voice, orchestrator, keys checked live, a summary, then saved like the setup page. `--non-interactive` for scripts: [flags](#flags-of-sheepdog-init). |
-| `sheepdog doctor` | One line per check with its fix: herdr, the herdr-app panel and `Sheepdog.app` on macOS, every key, the orchestrator's tool calling, the web port, bind, project folders, push, config and env file permissions, and a warning when your keys live in a `./.env` instead of `~/.config/sheepdog/.env`. Exit 1 on any FAIL. `--no-probe` spends no tokens. |
+| `sheepdog doctor` | One line per check with its fix: herdr, the herdr-app panel and `Sheepdog.app` on macOS, login service `PATH`, `HERDR_APP_HOME` / `HC_SESSION` shell overrides, every key, the orchestrator's tool calling, the web port, bind, project folders, push, config and env file permissions, and a warning when your keys live in a `./.env` instead of `~/.config/sheepdog/.env`. Exit 1 on any FAIL. `--no-probe` spends no tokens. |
 | `sheepdog doctor --report` | A redacted diagnostic bundle for a bug report. `--out FILE` writes it (mode 0600); `--lines N` sets the log lines (default 200). |
 | `sheepdog pair` | The QR code the iPhone app scans. `--compact` for a small window, `--plain` for no colour. |
 | `sheepdog demo` | Three scripted agents, no herdr needed (needs the Gemini key: the one `sheepdog setup` saved, or `GEMINI_API_KEY`). `--port N`, `--no-open`. |
@@ -33,7 +33,7 @@
 | Command | What it does |
 |---|---|
 | `sheepdog update` | Check for a new release now and print how to upgrade for the way you installed it. Changes nothing. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
-| `sheepdog uninstall` | Stop, remove the login service and the `~/.local/bin/sheepdog` link, ask before deleting config and data, then print the herdr-tui command that finishes the job. `--yes` deletes without asking; `--keep-data` keeps everything. |
+| `sheepdog uninstall` | Stop, remove the login service, the `~/.local/bin/sheepdog` link, and unchanged `herdr-app` panel/layout/shortcut files (restoring your previous layout if `sheepdog` was active), ask before deleting config and data, then print the herdr-tui command that finishes the job. `--dry-run` previews every step without changing anything; `--yes` deletes without asking; `--keep-data` keeps config and data. |
 | `sheepdog service install` | Start at login (launchd on macOS, `systemd --user` on Linux). Also `uninstall`, `start`, `status`, `logs`; `install --dry-run` prints the unit. |
 | `sheepdog data clear` | Delete the event log and transcripts (`--events`, the default) or everything under the data directory (`--all`). Asks first; `--yes` skips. Stop the daemon first. |
 | `sheepdog config show` | Print the effective config, secrets redacted. `sheepdog config init` writes a commented `config.toml`. Keys: [CONFIG.md](../CONFIG.md). |

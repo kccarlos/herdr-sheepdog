@@ -67,15 +67,21 @@ type Agent struct {
 	// (SourceInject); herdr-sourced removals are ignored.
 	Synthetic bool `json:"synthetic,omitempty"`
 
-	// SessionSource, SessionKind and SessionValue are the agent_session
-	// herdr reports for the pane (herdr.AgentSession: the reporting
-	// integration, "id" or "path", and the session id or transcript
-	// path), and Cwd the pane's working directory: where the worker's own
-	// transcript is found (docs/dev/iteration-2.md WP4, internal/workerlog).
-	SessionSource string `json:"session_source,omitempty"`
-	SessionKind   string `json:"session_kind,omitempty"`
-	SessionValue  string `json:"session_value,omitempty"`
-	Cwd           string `json:"cwd,omitempty"`
+	// SessionSource, SessionKind and SessionValue identify the worker's
+	// active transcript session: either from live foreground-PID discovery
+	// ("pid:claude", "pid:codex") or from herdr's agent_session
+	// (herdr.AgentSession: the reporting integration, "id" or "path", and
+	// the session id or transcript path). ReportedSession remembers the
+	// last session value herdr itself reported, so repeated snapshots
+	// carrying a pre-/clear or pre-/new SessionStart id do not overwrite a
+	// rotated PID-discovered session while a genuinely new herdr session
+	// still updates. Cwd is the pane's working directory
+	// (docs/dev/iteration-2.md WP4, internal/workerlog).
+	SessionSource   string `json:"session_source,omitempty"`
+	SessionKind     string `json:"session_kind,omitempty"`
+	SessionValue    string `json:"session_value,omitempty"`
+	ReportedSession string `json:"reported_session,omitempty"`
+	Cwd             string `json:"cwd,omitempty"`
 	// Journal is the agent's work journal, oldest first, capped at
 	// MaxJournal: one entry per done, idle or blocked transition, read
 	// from the worker's own transcript (docs/dev/roles.md "Worker history").
@@ -269,8 +275,10 @@ type PendingAction struct {
 	// Options are the choices on screen for an answer_prompt action.
 	Options []Option `json:"options,omitempty"`
 	// YesKeys / NoKeys are the keystrokes for a plain yes / no.
-	YesKeys []string `json:"yes_keys,omitempty"`
-	NoKeys  []string `json:"no_keys,omitempty"`
+	YesKeys  []string `json:"yes_keys,omitempty"`
+	NoKeys   []string `json:"no_keys,omitempty"`
+	Held     bool     `json:"held,omitempty"`
+	Promoted bool     `json:"promoted,omitempty"`
 }
 
 // Option is one selectable choice of an answer_prompt action.
@@ -299,6 +307,15 @@ type Option struct {
 type Note struct {
 	Text string    `json:"text"`
 	At   time.Time `json:"at"`
+}
+
+// ToldPrompt is one prompt the user was told about (pane, prompt
+// signature, and when it closed if no longer open), kept in the session
+// so the displacement rail survives a daemon restart.
+type ToldPrompt struct {
+	PaneID   string    `json:"pane_id"`
+	Sig      string    `json:"sig"`
+	ClosedAt time.Time `json:"closed_at,omitzero"`
 }
 
 // Session is the voice-session bookkeeping.
@@ -331,6 +348,9 @@ type Session struct {
 	// Investigations are the background jobs, newest last, capped at
 	// MaxInvestigations.
 	Investigations []Investigation `json:"investigations,omitempty"`
+	// ToldPrompts are the prompts told to the user, oldest first, open or
+	// recently closed, so the displacement rail survives a restart.
+	ToldPrompts []ToldPrompt `json:"told_prompts,omitempty"`
 }
 
 // MaxInvestigations is how many investigation records the session keeps
@@ -424,6 +444,7 @@ func (t Table) clone() Table {
 	if len(out.Session.Investigations) == 0 {
 		out.Session.Investigations = nil
 	}
+	out.Session.ToldPrompts = append([]ToldPrompt(nil), t.Session.ToldPrompts...)
 	return out
 }
 

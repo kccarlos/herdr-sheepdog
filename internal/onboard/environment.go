@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
 
 // Probe is the machine access environment detection needs. Tests replace
@@ -265,7 +266,7 @@ func detectLayout(home string, p Probe, want []byte) LayoutState {
 	if err != nil {
 		return LayoutMissing
 	}
-	if bytes.Equal(got, want) {
+	if panelsync.LayoutsEqual(got, want) {
 		return LayoutCurrent
 	}
 	return LayoutDifferent
@@ -301,49 +302,14 @@ func InstallLayout(home string, layout []byte) error {
 	return os.Chmod(filepath.Join(dir, "sheepdog.json"), 0o644)
 }
 
-// InstallPanel replaces every file in panel under home/mods/sheepdog. Other
-// files are left alone, and each file is replaced atomically in its directory.
+// InstallPanel stages the panel files under home and swaps home/mods/sheepdog
+// into place atomically, preserving non-Sheepdog files and removing dropped
+// files from an earlier marker.
 func InstallPanel(home string, panel fs.FS) error {
 	if panel == nil {
 		return errors.New("onboard: panel filesystem is nil")
 	}
-	return fs.WalkDir(panel, "mods/sheepdog", func(name string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		data, err := fs.ReadFile(panel, name)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(home, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		tmp, err := os.CreateTemp(filepath.Dir(dst), ".sheepdog-panel-*")
-		if err != nil {
-			return err
-		}
-		tmpName := tmp.Name()
-		defer func() { _ = os.Remove(tmpName) }()
-		if err := tmp.Chmod(0o644); err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		if _, err := tmp.Write(data); err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		if err := tmp.Close(); err != nil {
-			return err
-		}
-		if err := os.Rename(tmpName, dst); err != nil {
-			return err
-		}
-		return os.Chmod(dst, 0o644)
-	})
+	return panelsync.InstallPanel(home, panel)
 }
 
 // BackendAdvice is how setup should resolve herdr.backend = auto.

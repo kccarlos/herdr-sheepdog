@@ -82,6 +82,18 @@ func TestKeyTermCoverage(t *testing.T) {
 			said:  "README Claude is done with the install part.",
 			heard: true,
 		},
+		{
+			name:  "hyphenated agent spoken with space and compound numbers",
+			push:  "bench-claude: 23 of 42 checks passed on the 6th try.",
+			said:  "Bench Claude says twenty three out of forty-two checks passed on the sixth try.",
+			heard: true,
+		},
+		{
+			name:  "plain news with camelCase and filename joiners",
+			push:  "parseHTTPResponse in ws_proto.go is fixed.",
+			said:  "Good news: parse HTTP response in ws proto dot go is fixed now.",
+			heard: true,
+		},
 	}
 	all := append([]string{"README Claude", "Claude"}, names...)
 	for _, c := range cases {
@@ -96,6 +108,8 @@ func TestSpokenNumbers(t *testing.T) {
 	for text, want := range map[string]string{
 		"三": "3", "十五": "15", "二十五": "25", "三百二十": "320", "两": "2", "一二三": "123",
 		"five": "5", "twenty": "20", "42": "42", "007": "7",
+		"twenty three": "23", "forty-two": "42", "ninety-ninth": "99",
+		"sixth": "6", "twelfth": "12", "twentieth": "20", "21st": "21", "one hundred": "100",
 	} {
 		got := spokenNumbers(text)
 		found := false
@@ -134,4 +148,14 @@ func TestHeardTrackerCoverageJudge(t *testing.T) {
 	if len(v) != 1 || v[0].Reason != UnheardUserTurn {
 		t.Fatalf("verdicts = %+v, want one user_turn", v)
 	}
+}
+
+func TestContentTokensRetainsChineseNumbers(t *testing.T) {
+	got := contentTokens("数量是二十五")
+	for _, tok := range got {
+		if tok == "25" {
+			return
+		}
+	}
+	t.Fatalf("missing number: %v", got)
 }

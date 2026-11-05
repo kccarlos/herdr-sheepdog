@@ -198,7 +198,14 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	sctx, flight := s.beginSendLocked(ctx, row.PaneID)
 	s.mu.Unlock()
 
+	slash := isSlashCommand(text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+	}
 	err := s.prompt(sctx, row, text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+	}
 
 	s.mu.Lock()
 	// A turn cancelled by the stop (ctx done) aborted its Prompt before
@@ -296,7 +303,7 @@ func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.T
 		return voice.ToolResult{}, nil, false
 	}
 	if s.blockedNow(ctx, row.PaneID) {
-		return s.pendingFromPrompt(row, prompt), herdr.ErrAgentBlocked, true
+		return s.pendingFromPrompt(ctx, row, prompt), herdr.ErrAgentBlocked, true
 	}
 	s.mu.Lock()
 	mark, declined := s.declined[row.PaneID]
@@ -395,18 +402,30 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 	if !ok {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first; answer that before a new instruction.", Scheduling: voice.UrgencyInterrupt}
 	}
-	return s.pendingFromPrompt(row, prompt)
+	return s.pendingFromPrompt(ctx, row, prompt)
 }
 
 // pendingFromPrompt records the prompt on a blocked pane as the pending
-// question and says it, asking for its answer first.
-func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voice.ToolResult {
+// question and says it, asking for its answer first. The result goes to
+// the orchestrator, not to the user: the question counts as told only once
+// a reply that states it is delivered (displaced.go). In a muted space it
+// stays held until then (a reply that states it promotes it), so nothing
+// the user says before that can answer it.
+func (s *Supervisor) pendingFromPrompt(ctx context.Context, row state.Agent, prompt herdr.Prompt) voice.ToolResult {
 	alias := aliasOr(state.Say(row))
 	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
+	muted := s.paneMuted(ctx, row.PaneID) // outside s.mu: it may read herdr
 	s.mu.Lock()
-	// The tool result says it aloud, so it is heard even in a muted space.
-	spoken := s.setPendingMuted(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince), false)
+	// Only from now: the words that led to this call came before it and
+	// cannot answer it (inputs.go's promptSinceLocked).
+	now := s.cfg.Now()
+	p := s.newAnswerPrompt(row.PaneID, prompt, alias, now)
+	s.promptSeenAt[row.PaneID] = now
+	spoken := s.setPendingMuted(p, muted)
 	s.mu.Unlock()
+	if muted {
+		spoken += " It is in a muted space; the user can answer it on the phone, or by voice once you have told them."
+	}
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }
 
@@ -508,7 +527,7 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 		confirmed[k] = v
 	}
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, confirmed)
-	s.startReprompt(p.PaneID)
+	s.startRepromptLocked(p.PaneID)
 	return voice.ToolResult{Spoken: say(label), Scheduling: voice.UrgencyInterrupt}, true
 }
 
@@ -539,7 +558,7 @@ func findAlias(rows []state.Agent, name string) (state.Agent, bool) {
 	var hit state.Agent
 	hits := 0
 	for _, r := range rows {
-		if slug != "" && (strings.HasPrefix(r.Alias, slug) || strings.Contains(r.Alias, slug) || strings.Contains(slug, r.Alias)) {
+		if slug != "" && (strings.HasPrefix(r.Alias, slug) || strings.Contains(r.Alias, slug)) {
 			hit, hits = r, hits+1
 		}
 	}

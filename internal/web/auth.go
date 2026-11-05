@@ -85,12 +85,18 @@ func (s *Server) authFunc(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dev, reason := s.authenticate(r)
 		if reason != "" {
-			s.log.Log(logSource, "web.device.auth_failed", "", map[string]any{"reason": reason, "remote": r.RemoteAddr, "path": r.URL.Path})
+			fields := map[string]any{"reason": reason, "remote": r.RemoteAddr, "path": r.URL.Path}
+			if s.kindOf(r.RemoteAddr) == "loopback" {
+				if why := s.isUntrustedLoopback(r); why != "" {
+					fields["loopback_blocked"] = why
+				}
+			}
+			s.log.Log(logSource, "web.device.auth_failed", "", fields)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized", "reason": reason})
 			return
 		}
 		if dev != localDevice {
-			s.devices.seen(dev, s.kindOf(r.RemoteAddr), s.deps.Now(), false)
+			s.devices.seen(dev, s.requestKind(r), s.deps.Now(), false)
 			s.phones.note(r, s.deps.Now())
 		}
 		h(w, r.WithContext(context.WithValue(r.Context(), deviceCtxKey{}, dev)))
@@ -113,7 +119,7 @@ func presentedTicket(r *http.Request) string {
 func (s *Server) authenticate(r *http.Request) (string, string) {
 	t := presentedTicket(r)
 	if t == "" {
-		if s.kindOf(r.RemoteAddr) == "loopback" {
+		if s.kindOf(r.RemoteAddr) == "loopback" && s.isUntrustedLoopback(r) == "" {
 			return localDevice, ""
 		}
 		return "", reasonNoSession
@@ -148,8 +154,8 @@ type ChallengeResponse struct {
 
 // handleChallenge hands out a one-time nonce (public).
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackAddr(r.RemoteAddr) {
-		ip, now := sourceIP(r.RemoteAddr), s.deps.Now()
+	if s.isRateLimitedCaller(r) {
+		ip, now := s.rateLimitSource(r), s.deps.Now()
 		if s.limits.isBlocked("signature", ip, now) || !s.limits.allow("challenge", ip, challengesPerMinute, now) {
 			writeRateLimited(w)
 			return
@@ -221,7 +227,9 @@ func SignedText(daemonID, pin, deviceID, nonce string, unix int64) string {
 
 // handleSession checks a signed challenge and issues a ticket.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackAddr(r.RemoteAddr) && s.limits.isBlocked("signature", sourceIP(r.RemoteAddr), s.deps.Now()) {
+	limited := s.isRateLimitedCaller(r)
+	src := s.rateLimitSource(r)
+	if limited && s.limits.isBlocked("signature", src, s.deps.Now()) {
 		writeRateLimited(w)
 		return
 	}
@@ -231,8 +239,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fail := func(reason string) {
-		if reason == "bad_signature" && !isLoopbackAddr(r.RemoteAddr) {
-			s.limits.fail("signature", sourceIP(r.RemoteAddr), badSignaturesPerMinute, s.deps.Now())
+		if reason == "bad_signature" && limited {
+			s.limits.fail("signature", src, badSignaturesPerMinute, s.deps.Now())
 		}
 		s.log.Log(logSource, "web.device.auth_failed", "", map[string]any{"reason": reason, "remote": r.RemoteAddr, "device_id": req.DeviceID})
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized", "reason": reason})
@@ -300,13 +308,13 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auth.tickets[t] = ticket{device: d.ID, expires: now.Add(TicketLifetime)}
 	s.auth.mu.Unlock()
-	kind := s.kindOf(r.RemoteAddr)
+	kind := s.requestKind(r)
 	s.devices.seen(d.ID, kind, now, true)
 	s.log.Log(logSource, "web.device.session", "", map[string]any{"device_id": d.ID, "remote_kind": kind})
 	if req.Client == "browser" {
 		http.SetCookie(w, &http.Cookie{
 			Name: sessionCookie, Value: t, Path: "/", MaxAge: int(TicketLifetime / time.Second),
-			HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode,
+			HttpOnly: true, Secure: r.TLS != nil || forwardedHTTPS(r), SameSite: http.SameSiteStrictMode,
 		})
 	}
 	responseTicket := t

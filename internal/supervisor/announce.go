@@ -81,6 +81,9 @@ type announcement struct {
 	// created one: a line about a prompt that is no longer open is
 	// dropped.
 	pending string
+	// queued: announced right after another question of the same batch
+	// (announceHeld), so it waits for the one before it to be said.
+	queued bool
 	// eventID is the worker event's id (links.go), set by announce: the
 	// turn's request and every push about the event carry it.
 	eventID string
@@ -214,6 +217,10 @@ func noFindingSentence(a announcement) string {
 // applyResult turns the orchestrator's answer (or failure) into the event's one
 // push and its logs.
 func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Chattiness, r turnResult) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	if r.err != nil {
 		s.codePath(a, kept, level, fallbackReason(r.err))
 		return
@@ -263,7 +270,11 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		s.promoteHeld(a)
 	}
 	s.notify(a, kept, spoken)
-	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
+	// A queued announcement (the second of the held questions unmuting
+	// announces) does not claim the needs_user exception that lets an
+	// interrupt cut the voice off: it would cut off the question before it.
+	needsUser := rep.NeedsUser && (!a.queued || u != voice.UrgencyInterrupt)
+	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, needsUser, a.pending), kept)))
 	if u != voice.UrgencySilent {
 		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
 	}
@@ -333,6 +344,10 @@ func promiseIDs(ps []state.Promise) []string {
 //     the line relates the finish to a request of theirs (relates_to),
 //     which the code could not know.
 func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	dur := s.cfg.Now().Sub(start).Milliseconds()
 	audible := len(kept) > 0 || a.owed || level.allows(a.kind)
 	if r.err != nil {
@@ -429,6 +444,10 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // newer turn about the same agent is about to speak; nor after a model
 // error, which is no matter of time).
 func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chattiness, reason string) {
+	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
+		s.logMutedQuiet(a, level)
+		return
+	}
 	s.recordFinish(a, "")
 	if s.brain != nil && reason != "promise" {
 		applied := brain.UrgencySkip

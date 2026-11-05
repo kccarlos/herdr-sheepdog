@@ -84,6 +84,7 @@ type inflightUtterance struct {
 	started   bool
 	coalesced bool
 	merged    int
+	typed     bool
 }
 
 // utteranceOutcome is what one utterance turn produced. ok is false
@@ -231,11 +232,13 @@ func (s *Supervisor) TypedTurn(ctx context.Context) (TypedReply, error) {
 		return TypedReply{}, ErrNoTypedInput
 	}
 	s.log.Log(logSource, "supervisor.relay", "", map[string]any{"heard": c.text, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id})
-	res, acted := s.handleUtterance(ctx, c, "", false, true)
-	if res.Spoken != "" {
-		s.pushTagged("", fmt.Sprintf("The user typed %q and the orchestrator answered in text: %q. Nothing was spoken.", c.text, res.Spoken), voice.UrgencySilent, map[string]any{"utterance_id": c.id, "answers_text": c.text})
+	tctx, tr := withTypedReasks(ctx)
+	res, acted := s.handleUtterance(tctx, c, "", false, true)
+	reply := s.finishTypedReasks(tctx, res.Spoken, tr)
+	if reply != "" {
+		s.pushTagged("", fmt.Sprintf("The user typed %q and the orchestrator answered in text: %q. Nothing was spoken.", c.text, reply), voice.UrgencySilent, map[string]any{"utterance_id": c.id, "answers_text": c.text})
 	}
-	return TypedReply{Text: res.Spoken, TurnID: c.id, Acted: acted}, nil
+	return TypedReply{Text: reply, TurnID: c.id, Acted: acted}, nil
 }
 
 // handleUtterance runs the user's claimed words: the fast paths,
@@ -283,13 +286,14 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	u.echoNote = note
 	u.ins = c.ins
 	u.retryOf = c.retryOf
+	u.typed = forceSync
 	s.mu.Unlock()
 	if s.cfg.bareAnswers || s.brain == nil {
 		// With an orchestrator, the orchestrator reads every answer (dual-brain
 		// ablation G4); the bare-answer fast path is left for a
 		// brain-less daemon (--brain=off), where nothing else could,
 		// and for the test harness (Config.bareAnswers).
-		if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
+		if res, ok := s.fastAnswer(turnCtx, c.in, text, u, daemon); ok {
 			s.endUtterance(u)
 			return res, false
 		}
@@ -355,6 +359,7 @@ func (s *Supervisor) beginUtterance(parent context.Context, text, callID, id str
 	if u.id == "" {
 		u.id = s.nextID("utt")
 	}
+	s.noteCallUtteranceLocked(callID, u.id)
 	u.accepted = s.acceptedSeq
 	u.prev = s.utterance
 	// A second utterance while one is in flight takes the slot over: the

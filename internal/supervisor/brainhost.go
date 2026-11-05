@@ -44,7 +44,10 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 		info.LastResult = a.LastResult.Spoken
 		info.LastDetail = a.LastResult.Detail
 	}
-	if a.LastBlock != nil && a.LastBlock.Question != "" {
+	if a.LastBlock != nil && a.LastBlock.Question != "" && !h.s.holdsQuestionOf(a.PaneID) {
+		// A held question (muted space) is not the orchestrator's to state:
+		// its prompt is left out here as in Pending below, so a status
+		// reply cannot tell it in passing (displaced.go).
 		info.LastBlock = a.LastBlock.Question
 		if a.LastBlock.Answered {
 			info.LastBlock += " (answered)"
@@ -53,7 +56,15 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if a.LastInteraction != nil {
 		info.LastInteraction = *a.LastInteraction
 	}
-	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
+	if !has || pending.PaneID != a.PaneID {
+		for _, q := range h.s.store.Questions() {
+			if q.PaneID == a.PaneID {
+				pending, has = q, true
+				break
+			}
+		}
+	}
+	if has && !pending.Held && !h.s.heldQuestion(pending.ID) && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
 			// Meta goes along as a fact: the orchestrator must know the
@@ -129,13 +140,15 @@ func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (st
 // when the window holds none, the row's instruction stands in. A session
 // that cannot be read is an error carrying the worker.session_missing
 // reason, for the model to read.
-func (h brainHost) ReadSession(_ context.Context, paneID string) (brain.SessionRead, error) {
+func (h brainHost) ReadSession(ctx context.Context, paneID string) (brain.SessionRead, error) {
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
 		return brain.SessionRead{}, errors.New("that agent is gone")
 	}
 	alias := aliasOr(row.Alias)
-	d, err := h.s.cfg.WorkerLog.Tail(workerSession(row))
+	roots := h.s.paneRoots(ctx, row)
+	d, err := h.s.cfg.WorkerLog.Tail(workerSessionWithRoots(row, roots))
+	h.s.syncDiscoveredSession(paneID)
 	if err != nil {
 		reason := workerlog.Reason(err)
 		return brain.SessionRead{}, fmt.Errorf("no session record for %s: %s (%s)", alias, reason, sessionMissingWhy[reason])
@@ -238,43 +251,103 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	ps := s.paneSend(paneID)
 	ps.Lock()
 	defer ps.Unlock()
-
+	// The space mute is read fresh, outside s.mu (it may read herdr): the
+	// folder index a lock-held check reads can be cold or stale.
+	muted := s.paneMuted(ctx, paneID)
+	// So is the screen when the question may have to be revived: a slow
+	// herdr must not stall voice events and transitions on s.mu. The
+	// revival re-checks the pane under s.mu.
+	var screen *paneScreen
+	defer s.pushReask()
 	s.mu.Lock()
+	for {
+		p, has := s.store.Pending()
+		if has && p.Kind == state.PendingAnswerPrompt && p.PaneID == paneID || screen != nil {
+			break
+		}
+		row, ok := s.store.Get(paneID)
+		if !ok || row.State == herdr.StateWorking {
+			break
+		}
+		sig := s.lastPrompt[paneID]
+		s.mu.Unlock()
+		screen = s.readScreen(ctx, paneID)
+		s.mu.Lock()
+		current, ok := s.store.Get(paneID)
+		if !ok || current.State != row.State || current.StateSince != row.StateSince || s.lastPrompt[paneID] != sig {
+			s.mu.Unlock()
+			return "", fmt.Errorf("%w: the question changed while reading it; please ask again", brain.ErrNotPermitted)
+		}
+	}
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
+	reviving := false
+	for _, q := range s.store.Questions() {
+		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
+			return "", fmt.Errorf("%w: %s's question is held in a muted space; answer it on the phone or unmute the space to hear it; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+		}
+	}
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		s.mu.Unlock()
-		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys")
-		s.mu.Lock()
+		found, revived, ok, why := s.revivePrompt(paneID, "send_keys", screen)
 		if !ok {
 			if why != "" {
-				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)
+				return "", fmt.Errorf("%w: %s; ask the user to clarify; nothing was sent", brain.ErrNotPermitted, why)
 			}
-			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
+			return "", fmt.Errorf("%w: %s has no pending approval prompt now; check the agent window and ask again", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
-		p = revived
-		if s.heldQuestion(p.ID) {
-			return "", fmt.Errorf("%w: %s's question is in a muted space and the user has not heard it; it can be answered on the phone; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+		p = found
+		reviving = revived
+		if p.Held || s.heldQuestion(p.ID) {
+			return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
+	} else if p.Held || s.heldQuestion(p.ID) {
+		return "", fmt.Errorf("%w: %s's question is held in a muted space; answer it on the phone or unmute the space to hear it; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
+	}
+	if muted && (reviving || !p.Promoted || !s.toldOpenLocked(p)) {
+		// Recorded unheld while the folder index was cold, or muted since
+		// without being promoted: still a muted space's question.
+		return "", fmt.Errorf("%w: %s's question is in a muted space; answer it on the phone or unmute the space and ask again; nothing was sent", brain.ErrNotPermitted, s.aliasOf(paneID))
 	}
 	allowed := allowedKeys(p)
 	for _, k := range keys {
 		if !allowed[k] {
-			return "", fmt.Errorf("%w: key %q is not in the prompt's option set", brain.ErrNotPermitted, k)
+			return "", fmt.Errorf("%w: key %q is not in the prompt's option set; ask the user to choose an available option", brain.ErrNotPermitted, k)
 		}
 	}
 	if len(keys) == 0 {
-		return "", fmt.Errorf("%w: no keys", brain.ErrNotPermitted)
+		return "", fmt.Errorf("%w: no keys; ask the user to choose an available option", brain.ErrNotPermitted)
 	}
 	if !selectedBy(p, keys) {
-		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
+		return "", fmt.Errorf("%w: keys %v mix more than one option; ask the user to choose one option", brain.ErrNotPermitted, keys)
 	}
 	// The one rail reads the user's own recorded words, never what the
 	// model says they were (inputs.go). Claim the input before answerKeys
 	// releases s.mu so a concurrent call cannot spend the same approval.
 	in, reason := s.railInputLocked(p, keys)
 	if reason != "" {
+		if last := s.lastInputLocked(); reason == s.displacedLocked(p, last) {
+			// displaced.go: the user hears why and is asked again, in
+			// code; the orchestrator must not answer for them.
+			if line := s.reaskLocked(p, last); line != "" {
+				if reviving {
+					s.registerRevivedQuestionLocked(p)
+				}
+				if tr := typedReasksOf(ctx); tr != nil {
+					tr.add(keyOf(p), p.PaneID, line)
+				} else {
+					s.queueReaskLocked(p, line)
+				}
+				reason += "; the daemon has told the user why and asked them again, so do not ask again yourself"
+			} else {
+				reason += "; the daemon has already told the user why and asked them again"
+			}
+		} else {
+			reason += "; ask the user to repeat their choice"
+		}
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
+	}
+	if reviving {
+		s.setPendingMuted(p, false)
 	}
 	in.used = true
 	// A tool result: a fact for the orchestrator, which phrases the reply.

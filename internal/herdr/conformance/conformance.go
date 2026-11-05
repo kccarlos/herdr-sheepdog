@@ -26,12 +26,18 @@ type Program struct {
 	// Args are the program arguments. Resume is represented here just as
 	// the agent's own command line reports it.
 	Args []string
+	// Wrapper prefixes the command line in backends that inspect process
+	// argv (such as nice / taskpolicy / ionice utility wrappers).
+	Wrapper []string
 	// Reported says the program reports OSC 7501 status (hc); the old
 	// backend's screen detection does not depend on this field.
 	Reported bool
 	// State is the state while the program runs. For an hc program that
 	// does not report, the screen decides blocked versus unknown.
 	State herdr.State
+	// PID is the program's foreground PID; zero lets the driver assign a
+	// unique PID per program launch.
+	PID int
 }
 
 // Driver performs the machine actions a scenario needs. Its implementations
@@ -119,6 +125,10 @@ func Scenarios() []Scenario {
 			Run:  agentsAreDetectedFreshAndResumed,
 		},
 		{
+			Name: "utility priority wrapped agent is detected and survives daemon restart",
+			Run:  wrappedAgentDetectedAcrossRestart,
+		},
+		{
 			Name: "an exited agent leaves the terminal at a plain shell",
 			Run:  exitedAgentIsNoLongerListed,
 		},
@@ -145,6 +155,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "a periodic snapshot with no change logs nothing and emits no transition",
 			Run:  unchangedSnapshotIsSilent,
+		},
+		{
+			Name: "foreground process tree identifies each pane's live session",
+			Run:  foregroundProcessTreeIdentifiesLiveSessions,
 		},
 	}, markScenarios()...)
 }
@@ -247,6 +261,36 @@ func agentsAreDetectedFreshAndResumed(t *testing.T, newDriver NewDriver) {
 				t.Fatalf("spoken name = %q, want %q", got, tc.say)
 			}
 		})
+	}
+}
+
+func wrappedAgentDetectedAcrossRestart(t *testing.T, newDriver NewDriver) {
+	d := newDriver(t)
+	ctx := testContext(t)
+	shells := NewShellBook()
+	pane, _, err := shells.Open(ctx, d.ShellHost(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetScreen(ctx, pane.PaneID, blockedScreen); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Run(ctx, pane.PaneID, Program{
+		Kind:    "codex",
+		Wrapper: []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility"},
+		Args:    []string{"--no-daemon"},
+		State:   herdr.StateBlocked,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := oneAgent(t, ctx, d.Backend())
+	if agent.PaneID != pane.PaneID || agent.Agent != "codex" || agent.Status != herdr.StateBlocked || spoken(agent) != "Codex" {
+		t.Fatalf("wrapped agent before restart = %+v", agent)
+	}
+	restarted := d.RestartDaemon(t)
+	after := oneAgent(t, ctx, restarted.Backend())
+	if after.PaneID != pane.PaneID || after.Agent != "codex" || after.Status != herdr.StateBlocked {
+		t.Fatalf("wrapped agent after restart = %+v", after)
 	}
 }
 

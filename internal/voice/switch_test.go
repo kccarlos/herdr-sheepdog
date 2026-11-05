@@ -415,3 +415,217 @@ func TestProviderSwitchCarriesTheFocus(t *testing.T) {
 		t.Errorf("focus = %q, order = %v", o.focus, order)
 	}
 }
+
+type chunkFakeSess struct {
+	*fakeSess
+	chunks chan AudioChunk
+	epoch  uint64
+}
+
+func newChunkFake(name string) *chunkFakeSess {
+	return &chunkFakeSess{
+		fakeSess: newFake(name),
+		chunks:   make(chan AudioChunk),
+		epoch:    NextAudioEpoch(),
+	}
+}
+
+func (f *chunkFakeSess) AudioChunks() <-chan AudioChunk { return f.chunks }
+func (f *chunkFakeSess) BumpAudioEpoch() {
+	f.mu.Lock()
+	f.epoch = NextAudioEpoch()
+	f.mu.Unlock()
+}
+func (f *chunkFakeSess) currentEpoch() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch
+}
+func (f *chunkFakeSess) Close() error {
+	f.mu.Lock()
+	if !f.closed {
+		close(f.chunks)
+	}
+	f.mu.Unlock()
+	return f.fakeSess.Close()
+}
+
+func TestSwitcherRetireAbortsInFlightAudioAndFencesEpoch(t *testing.T) {
+	g, o := newChunkFake("gemini"), newChunkFake("openai")
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+	}, "gemini", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+
+	// g hands a chunk to Switcher.forwardLocked; with nobody reading
+	// sw.AudioChunks() yet, forwardLocked is parked mid-delivery.
+	g.chunks <- AudioChunk{Data: []byte("retired-gemini"), Epoch: g.currentEpoch()}
+
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	var fence uint64
+	deadline := time.After(time.Second)
+	for fence == 0 {
+		select {
+		case ev := <-sw.Events():
+			if intr, ok := ev.(EventInterrupted); ok {
+				fence = intr.Epoch
+			}
+		case <-deadline:
+			t.Fatal("missing EventInterrupted from SetProvider")
+		}
+	}
+
+	go func() {
+		o.chunks <- AudioChunk{Data: []byte("fresh-openai"), Epoch: o.currentEpoch()}
+	}()
+
+	select {
+	case ch := <-sw.AudioChunks():
+		if string(ch.Data) != "fresh-openai" {
+			t.Fatalf("got %q (epoch %d), want fresh-openai; retired chunk was not aborted", ch.Data, ch.Epoch)
+		}
+		if ch.Epoch <= fence {
+			t.Fatalf("fresh chunk epoch %d <= fence %d", ch.Epoch, fence)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fresh-openai audio chunk")
+	}
+}
+
+func TestSwitcherSetProviderOrdersFlushBeforeNewProvider(t *testing.T) {
+	g, o := newChunkFake("gemini"), newChunkFake("openai")
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) {
+			go func() {
+				// Offer an audio chunk immediately as soon as the new provider starts.
+				o.chunks <- AudioChunk{Data: []byte("immediate-openai"), Epoch: o.currentEpoch()}
+			}()
+			return o, nil
+		}},
+	}, "gemini", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+	// Drain initial gemini status.
+	if ev := <-sw.Events(); ev.(EventStatus).Reason != "gemini" {
+		t.Fatalf("initial event = %#v, want gemini status", ev)
+	}
+
+	// Hold consumer of sw.AudioChunks until SetProvider returns; if SetProvider
+	// starts forwarding before emitting EventInterrupted, o's events/audio race
+	// ahead of the flush barrier.
+	gotAudio := make(chan AudioChunk, 1)
+	audioBeforeFlush := make(chan bool, 1)
+	var sawFlush sync.Mutex
+	flushed := false
+	go func() {
+		ch := <-sw.AudioChunks()
+		sawFlush.Lock()
+		before := !flushed
+		sawFlush.Unlock()
+		audioBeforeFlush <- before
+		gotAudio <- ch
+	}()
+
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// EventInterrupted must precede any event from the new provider ("openai").
+	ev1 := <-sw.Events()
+	intr, ok := ev1.(EventInterrupted)
+	if !ok {
+		t.Fatalf("first event on SetProvider = %#v (%T), want EventInterrupted before new provider events", ev1, ev1)
+	}
+	sawFlush.Lock()
+	flushed = true
+	sawFlush.Unlock()
+
+	select {
+	case ch := <-gotAudio:
+		if ch.Epoch <= intr.Epoch {
+			t.Fatalf("new provider chunk epoch %d <= flush fence %d", ch.Epoch, intr.Epoch)
+		}
+		if len(ch.FlushedEpochs) == 0 || ch.FlushedEpochs[0] != intr.Epoch {
+			t.Fatalf("new provider chunk FlushedEpochs = %v, want fence %d", ch.FlushedEpochs, intr.Epoch)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for immediate-openai audio chunk")
+	}
+}
+
+type flushAckSess struct {
+	*chunkFakeSess
+	play PlaybackTracker
+}
+
+func (f *flushAckSess) ExpectFlush() {
+	f.mu.Lock()
+	f.play.Flush(time.Unix(1000, 0))
+	f.mu.Unlock()
+}
+
+func (f *flushAckSess) ClientAttached(a bool) {
+	f.mu.Lock()
+	f.client = a
+	f.play.Detach()
+	f.mu.Unlock()
+}
+
+func (f *flushAckSess) ClientPlayback(state string, playedMs int) {
+	f.mu.Lock()
+	f.play.Report(time.Unix(1000, 0), state, playedMs)
+	f.mu.Unlock()
+}
+
+func TestSwitcherSetProviderExpectsFlushAckWhenClientAttached(t *testing.T) {
+	g := &flushAckSess{chunkFakeSess: newChunkFake("gemini")}
+	o := &flushAckSess{chunkFakeSess: newChunkFake("openai")}
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+	}, "gemini", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+
+	sw.ClientAttached(true)
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// New provider begins speaking before the client's empty flush ack for the
+	// provider-switch EventInterrupted arrives.
+	o.mu.Lock()
+	sendRun(&o.play, time.Unix(1000, 0), []string{"Carried", "push"}, 800)
+	o.mu.Unlock()
+
+	sw.ClientPlayback(PlaybackFlushed, 0)
+
+	o.mu.Lock()
+	empty := o.play.Empty()
+	last := o.play.Last()
+	o.mu.Unlock()
+	if empty || last.Cut != nil || !last.Awaited {
+		t.Fatalf("new provider run consumed by switch flush ack: empty=%v last=%+v", empty, last)
+	}
+}

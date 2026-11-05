@@ -1,13 +1,16 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +34,229 @@ import (
 // name: the name (lower case, no trailing dot) and the PEM certificate
 // chain and key.
 type TailscaleCertFunc func(ctx context.Context) (name string, certPEM, keyPEM []byte, err error)
+
+// TailscaleFunnelFunc reports whether Tailscale Funnel is currently exposing
+// port (or any port when port <= 0) on this computer.
+type TailscaleFunnelFunc func(ctx context.Context, port int) (bool, error)
+
+// AnyFunnelActive reports whether `tailscale serve status --json` output shows
+// any active Funnel listener (background or foreground).
+func AnyFunnelActive(data []byte) bool {
+	cfg, ok := parseTailscaleServeConfig(data)
+	if !ok {
+		return false
+	}
+	for _, on := range cfg.AllowFunnel {
+		if on {
+			return true
+		}
+	}
+	for _, fg := range cfg.Foreground {
+		for _, on := range fg.AllowFunnel {
+			if on {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// FunnelTargetsPort reports whether `tailscale serve status --json` output
+// shows an active Funnel forwarding to local port. If AllowFunnel is true on
+// an entry whose handler schema is unrecognised, FunnelTargetsPort fails closed
+// (returns true).
+func FunnelTargetsPort(data []byte, port int) bool {
+	cfg, ok := parseTailscaleServeConfig(data)
+	if !ok {
+		return false
+	}
+	if port <= 0 {
+		return AnyFunnelActive(data)
+	}
+	if serveConfigTargetsPort(cfg, port) {
+		return true
+	}
+	for _, fg := range cfg.Foreground {
+		if serveConfigTargetsPort(fg, port) {
+			return true
+		}
+	}
+	return false
+}
+
+type tsServeConfig struct {
+	TCP         map[string]tsTCPPortHandler  `json:"TCP"`
+	Web         map[string]tsWebServerConfig `json:"Web"`
+	AllowFunnel map[string]bool              `json:"AllowFunnel"`
+	Foreground  map[string]tsServeConfig     `json:"Foreground"`
+}
+
+type tsTCPPortHandler struct {
+	HTTPS      bool   `json:"HTTPS"`
+	HTTP       bool   `json:"HTTP"`
+	TCPForward string `json:"TCPForward"`
+}
+
+type tsWebServerConfig struct {
+	Handlers map[string]tsHTTPHandler `json:"Handlers"`
+}
+
+type tsHTTPHandler struct {
+	Proxy string `json:"Proxy"`
+	Path  string `json:"Path"`
+	Text  string `json:"Text"`
+}
+
+func parseTailscaleServeConfig(data []byte) (tsServeConfig, bool) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return tsServeConfig{}, false
+	}
+	var cfg tsServeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return tsServeConfig{}, false
+	}
+	return cfg, true
+}
+
+func serveConfigTargetsPort(cfg tsServeConfig, port int) bool {
+	for hostPort, enabled := range cfg.AllowFunnel {
+		if !enabled {
+			continue
+		}
+		_, extPort, _ := net.SplitHostPort(hostPort)
+		recognized := false
+		if extPort != "" {
+			if tcp, ok := cfg.TCP[extPort]; ok && tcp.TCPForward != "" {
+				matched, valid := forwardTargetsPort(tcp.TCPForward, port)
+				if !valid || matched {
+					return true
+				}
+				recognized = true
+			}
+		}
+		if webCfg, ok := lookupWebConfig(cfg.Web, hostPort); ok && len(webCfg.Handlers) > 0 {
+			for _, h := range webCfg.Handlers {
+				switch {
+				case h.Proxy != "":
+					matched, valid := proxyTargetsPort(h.Proxy, port)
+					if !valid || matched {
+						return true
+					}
+					recognized = true
+				case h.Path != "" || h.Text != "":
+					recognized = true
+				default:
+					return true
+				}
+			}
+		}
+		if !recognized {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupWebConfig(web map[string]tsWebServerConfig, hostPort string) (tsWebServerConfig, bool) {
+	if w, ok := web[hostPort]; ok {
+		return w, true
+	}
+	low := strings.ToLower(hostPort)
+	for k, w := range web {
+		if strings.ToLower(k) == low {
+			return w, true
+		}
+	}
+	return tsWebServerConfig{}, false
+}
+
+func proxyTargetsPort(proxy string, port int) (matched, valid bool) {
+	proxy = strings.TrimSpace(proxy)
+	if strings.Contains(proxy, "://") {
+		u, err := url.Parse(proxy)
+		if err != nil || u.Host == "" {
+			return false, false
+		}
+		if p := u.Port(); p != "" {
+			n, err := strconv.Atoi(p)
+			if err != nil || n <= 0 || n > 65535 {
+				return false, false
+			}
+			return n == port, true
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			return port == 80, true
+		case "https", "https+insecure":
+			return port == 443, true
+		default:
+			return false, false
+		}
+	}
+	return forwardTargetsPort(proxy, port)
+}
+
+func forwardTargetsPort(addr string, port int) (matched, valid bool) {
+	addr = strings.TrimSpace(addr)
+	if _, p, err := net.SplitHostPort(addr); err == nil {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 || n > 65535 {
+			return false, false
+		}
+		return n == port, true
+	}
+	n, err := strconv.Atoi(addr)
+	if err != nil || n <= 0 || n > 65535 {
+		return false, false
+	}
+	return n == port, true
+}
+
+var funnelCLICache struct {
+	mu      sync.Mutex
+	bin     string
+	checked time.Time
+	out     []byte
+	err     error
+}
+
+// TailscaleFunnelCLI checks `tailscale serve status --json` when tailscale is
+// installed.
+func TailscaleFunnelCLI() TailscaleFunnelFunc {
+	return func(ctx context.Context, port int) (bool, error) {
+		bin := tailscaleBin()
+		if bin == "" {
+			return false, nil
+		}
+		out, err := cachedTailscaleServeStatus(ctx, bin)
+		if err != nil {
+			return false, nil
+		}
+		return FunnelTargetsPort(out, port), nil
+	}
+}
+
+func cachedTailscaleServeStatus(ctx context.Context, bin string) ([]byte, error) {
+	funnelCLICache.mu.Lock()
+	if funnelCLICache.bin == bin && time.Since(funnelCLICache.checked) < 2*time.Second {
+		out, err := funnelCLICache.out, funnelCLICache.err
+		funnelCLICache.mu.Unlock()
+		return out, err
+	}
+	funnelCLICache.mu.Unlock()
+
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(cctx, bin, "serve", "status", "--json").Output() //nolint:gosec // bin is resolved via tailscaleBin()
+
+	funnelCLICache.mu.Lock()
+	funnelCLICache.bin = bin
+	funnelCLICache.checked = time.Now()
+	funnelCLICache.out = out
+	funnelCLICache.err = err
+	funnelCLICache.mu.Unlock()
+	return out, err
+}
 
 // tailscaleFetchTimeout bounds one `tailscale cert` run (it may wait for
 // Let's Encrypt).
@@ -222,11 +448,14 @@ const tailscaleCertFix = "Check that Tailscale is running and logged in, and tha
 // TailscaleCertCLI is the daemon's TailscaleCertFunc: `tailscale status
 // --json` for the name, then `tailscale cert` into <dataDir>/tls/
 // (tsnet.crt, tsnet.key, 0600).
-func TailscaleCertCLI(dataDir string) TailscaleCertFunc {
+func TailscaleCertCLI(dataDir string, port int) TailscaleCertFunc {
 	return func(ctx context.Context) (string, []byte, []byte, error) {
 		bin := tailscaleBin()
 		if bin == "" {
 			return "", nil, nil, errors.New("the tailscale command is not installed")
+		}
+		if serveOut, err := exec.CommandContext(ctx, bin, "serve", "status", "--json").Output(); err == nil && FunnelTargetsPort(serveOut, port) { //nolint:gosec // bin is resolved via tailscaleBin()
+			return "", nil, nil, errors.New("Tailscale Funnel is active on this port (public internet); run `tailscale funnel reset` first")
 		}
 		out, err := exec.CommandContext(ctx, bin, "status", "--json").Output()
 		if err != nil {
