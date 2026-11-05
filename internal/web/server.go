@@ -558,8 +558,6 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/pending/answer", accessDevice, s.handlePendingAnswer},
 		route{"POST /api/push/register", accessDevice, s.handlePushRegister},
 		route{"DELETE /api/push/register", accessDevice, s.handlePushUnregister},
-		route{"POST /api/push/web", accessDevice, s.handleWebPushRegister},
-		route{"DELETE /api/push/web", accessDevice, s.handleWebPushUnregister},
 		route{"POST /api/push/activity", accessDevice, s.handlePushActivity},
 		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
@@ -632,11 +630,6 @@ func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 	files := http.FileServerFS(sub)
 	serve := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
-		if name == "voice" && r.URL.Path == "/sw.js" {
-			// Let /voice/sw.js control /voice (without a trailing slash), the
-			// canonical URL GET / redirects to.
-			w.Header().Set("Service-Worker-Allowed", "/voice")
-		}
 		files.ServeHTTP(w, r)
 	}
 	return []route{

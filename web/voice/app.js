@@ -11,7 +11,6 @@ import { parsePairing, isAppleMobile, appLink, enroll, signIn, renewSession, cla
 import { createWakeController, createPingTracker } from './wake.js';
 import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle } from './approvals.js';
 import { createBuildReloader, takeReloadDraft } from './reload.js';
-import { pushSupport, enableWebPush, disableWebPush, syncExistingWebPush } from './push.js';
 import { voiceKeyAction } from './shortcuts.js';
 import { applyUpdateBanner } from '/static/update-banner.js';
 
@@ -59,8 +58,6 @@ const state = {
   eventsSource: null,
   eventsRetryTimer: 0,
   lastTypedAt: 0,
-  pushEnabled: false,
-  pushBusy: false,
 
   muted: false,
   daemonMuted: false,
@@ -1114,12 +1111,6 @@ function applyStateSnapshot(data) {
   applyUpdateBanner(document, data.update);
   if (data.version) buildReloader.noteVersion(data.version);
   renderApprovals();
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({
-      type: 'sync-open-questions',
-      openIds: openQuestions(data).map((q) => q.id),
-    });
-  }
 }
 
 let refreshInFlight = null;
@@ -1168,104 +1159,6 @@ function openEventsStream() {
   };
 }
 
-// ---------------------------------------------------------------- web push
-
-function pushDeps() {
-  return {
-    fetch: (u, o) => authedFetch(u, o),
-    swContainer: navigator.serviceWorker,
-    Notification: window.Notification,
-    ua: navigator.userAgent,
-    touchPoints: navigator.maxTouchPoints || 0,
-  };
-}
-
-function renderPushRow(statusMsg = '') {
-  const btn = $('btn-push');
-  const status = $('push-status');
-  if (!btn || !status) return;
-  btn.disabled = state.pushBusy;
-  btn.textContent = state.pushEnabled ? 'Disable notifications' : 'Enable notifications';
-  status.textContent = statusMsg || (state.pushEnabled ? 'Browser notifications on' : '');
-}
-
-async function initWebPush() {
-  const row = $('push-row');
-  if (!row) return;
-  const sup = pushSupport({
-    isSecureContext: Boolean(window.isSecureContext),
-    hasSW: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
-    hasPushManager: typeof window !== 'undefined' && 'PushManager' in window,
-    hasNotification: typeof window !== 'undefined' && 'Notification' in window,
-    ua: navigator.userAgent,
-    touchPoints: navigator.maxTouchPoints || 0,
-  });
-  if (!sup.supported) {
-    if (sup.reason === 'insecure_context' && sup.message) {
-      row.classList.remove('hidden');
-      $('btn-push').disabled = true;
-      $('push-status').textContent = sup.message;
-    }
-    return;
-  }
-
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data && (e.data.type === 'push-event' || e.data.type === 'pending-answered')) {
-      refreshAppState();
-    }
-  });
-
-  let pushStatus = null;
-  try {
-    const stRes = await authedFetch('/api/push/status', { cache: 'no-store' });
-    const st = await stRes.json().catch(() => ({}));
-    if (stRes.ok) {
-      pushStatus = st;
-      if (st.web_push_enabled === false) {
-        row.classList.remove('hidden');
-        $('btn-push').disabled = true;
-        $('push-status').textContent = 'Notifications are off on the computer (push.mode = off).';
-        return;
-      }
-    }
-  } catch (_) {
-    /* keep button available for retry */
-  }
-
-  row.classList.remove('hidden');
-  const existing = await syncExistingWebPush({ ...pushDeps(), pushStatus });
-  state.pushEnabled = Boolean(existing && existing.active);
-  renderPushRow();
-}
-
-async function toggleWebPush() {
-  if (state.pushBusy) return;
-  state.pushBusy = true;
-  renderPushRow(state.pushEnabled ? 'Disabling…' : 'Enabling…');
-  try {
-    if (state.pushEnabled) {
-      const r = await disableWebPush(pushDeps());
-      if (!r.ok) {
-        renderPushRow(r.message);
-        return;
-      }
-      state.pushEnabled = false;
-      renderPushRow('Browser notifications off');
-    } else {
-      const r = await enableWebPush(pushDeps());
-      if (!r.ok) {
-        renderPushRow(r.message);
-        return;
-      }
-      state.pushEnabled = true;
-      renderPushRow('Browser notifications on');
-    }
-  } finally {
-    state.pushBusy = false;
-    $('btn-push').disabled = false;
-  }
-}
-
 // ---------------------------------------------------------------- wiring
 
 // gateOptions reads the silence gate knobs from the URL: ?gate=off disables
@@ -1308,7 +1201,6 @@ async function init() {
   $('btn-mute').addEventListener('click', () => setMuted(!state.muted));
   $('btn-stop').addEventListener('click', stop);
   $('btn-new-conversation').addEventListener('click', resetConversation);
-  $('btn-push').addEventListener('click', toggleWebPush);
   $('btn-reload-now').addEventListener('click', () => buildReloader.reloadNow());
   $('card-dialog').addEventListener('close', () => buildReloader.check());
   $('approvals').addEventListener('click', (e) => {
@@ -1435,7 +1327,6 @@ async function init() {
 
   refreshAppState();
   openEventsStream();
-  initWebPush();
 
   setInterval(() => {
     render();
