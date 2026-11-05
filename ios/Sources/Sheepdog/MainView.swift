@@ -156,10 +156,11 @@ struct PhoneRootView: View {
                     case .flock where paneState != .content && model.otherSnapshots.isEmpty:
                         FlockUnavailableView(state: paneState)
                     case .flock:
+                        let ownerID = model.currentComputerID
                         FlockView(
                             flock: model.flock,
                             question: { model.questionCard(for: $0) },
-                            answer: { model.answer(question: $0, option: $1) },
+                            answer: { model.answer(question: $0, option: $1, on: ownerID) },
                             expanded: Bindable(model.agentsModel).expandedAgents,
                             focusedAgent: Bindable(model.navigation).focusedAgent,
                             onNewAgent: model.agentActionsAvailable ? { model.presentation.present(.newAgent) } : nil,
@@ -713,7 +714,17 @@ struct SessionChrome: ViewModifier {
                 guard report.owns else { return }
                 model.setScreen(visible: report.visible, voiceScreen: report.voiceScreen, agentsScreen: report.agentsScreen)
             }
-            .onAppear { model.start() }
+            .onAppear {
+                model.start()
+                if owns, appPhase == .active, model.appPhase != .active {
+                    model.becameActive()
+                }
+            }
+            .onChange(of: owns) { _, isOwner in
+                if isOwner, appPhase == .active, model.appPhase != .active {
+                    model.becameActive()
+                }
+            }
             .onDisappear {
                 if scenes.scenes.filter({ $0 != sceneID }).isEmpty {
                     model.setScreen(visible: appPhase == .active, voiceScreen: false, agentsScreen: false)

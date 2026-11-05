@@ -176,11 +176,13 @@ final class PairingSafetyTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         await settle(2)
 
         // Simulate interactive swipe-down dismissal without tapping "Done".
         window.rootViewController = UIViewController()
         window.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         await settle(2)
         window.isHidden = true
 

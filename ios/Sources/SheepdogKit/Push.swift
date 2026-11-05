@@ -223,6 +223,63 @@ public struct AgentFocus: Equatable, Sendable {
         }
         return paneID
     }
+
+    /// True when the focused agent card is present in the rendered agent list
+    /// for its target computer, so `ScrollViewReader` can scroll to it before
+    /// clearing `focusedAgent`.
+    public func isTargetPresent(
+        currentComputerID: String?,
+        sectioned: Bool,
+        currentAgents: [Agent],
+        otherComputerAgents: (String) -> [Agent]?
+    ) -> Bool {
+        if sectioned, isOtherComputer(currentComputerID: currentComputerID), let cid = computerID {
+            guard let remote = otherComputerAgents(cid) else { return false }
+            return Flock(remote).running.contains { $0.paneID == paneID }
+        }
+        return currentAgents.contains { $0.paneID == paneID }
+    }
+}
+
+/// Which computer an Approve / Decline notification action may answer on.
+/// Never guesses another computer or falls back to the current endpoint when
+/// the computer that asked was removed or cannot be identified.
+public enum PushActionTarget: Equatable, Sendable {
+    case paired(computerID: String, endpoints: [DaemonEndpoint])
+    case bare(endpoint: DaemonEndpoint)
+    case refused(reason: String)
+
+    public static func resolve(
+        payload: PushPayload,
+        store: ComputerStore,
+        bareEndpoint: DaemonEndpoint?,
+        interface: NetworkInterface? = nil
+    ) -> PushActionTarget {
+        if let rawID = payload.computer?.trimmed, !rawID.isEmpty {
+            guard store.computer(rawID) != nil else {
+                return .refused(reason: "That computer is no longer paired. Your answer was not sent.")
+            }
+            let ordered = store.candidateEndpoints(for: rawID, interface: interface)
+            guard !ordered.isEmpty else {
+                return .refused(reason: "Sheepdog has no address for that computer. Open Sheepdog to check its connection.")
+            }
+            return .paired(computerID: rawID, endpoints: ordered)
+        }
+        if store.count > 1 {
+            return .refused(reason: "Open Sheepdog to answer — more than one computer is paired.")
+        }
+        if store.count == 1, let onlyID = store.ids.first {
+            let ordered = store.candidateEndpoints(for: onlyID, interface: interface)
+            guard !ordered.isEmpty else {
+                return .refused(reason: "Sheepdog has no daemon address yet.")
+            }
+            return .paired(computerID: onlyID, endpoints: ordered)
+        }
+        if let bareEndpoint {
+            return .bare(endpoint: bareEndpoint)
+        }
+        return .refused(reason: "Sheepdog has no daemon address yet.")
+    }
 }
 
 /// The notification categories and actions the app registers, and what
@@ -472,16 +529,19 @@ public enum PushPolicy {
         currentEventsOpen: Bool,
         voiceConnected: Bool,
         viewingAgents: Bool,
-        otherComputerEventsOpen: Bool
+        otherComputerEventsOpen: Bool,
+        viewingVoiceScreen: Bool = true,
+        demoActive: Bool = false
     ) -> Bool {
-        guard let payload else { return false }
+        guard let payload, !demoActive else { return false }
+        let approvalSurfaceVisible = viewingVoiceScreen || viewingAgents
         let isOther = payload.computer != nil && currentComputerID != nil && payload.computer != currentComputerID
         if isOther {
             guard otherComputerEventsOpen else { return false }
-            return payload.isAnswerable || viewingAgents
+            return (payload.isAnswerable && approvalSurfaceVisible) || viewingAgents
         }
         guard currentLinkUsable && (currentEventsOpen || voiceConnected) else { return false }
-        return payload.isAnswerable || voiceConnected || viewingAgents
+        return (payload.isAnswerable && approvalSurfaceVisible) || voiceConnected || viewingAgents
     }
 }
 

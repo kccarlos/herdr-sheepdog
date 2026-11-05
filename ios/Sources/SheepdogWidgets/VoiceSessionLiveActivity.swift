@@ -17,7 +17,7 @@ struct VoiceSessionLiveActivity: Widget {
                 .activityBackgroundTint(ActivityPalette.card)
                 .activitySystemActionForegroundColor(ActivityPalette.ink)
         } dynamicIsland: { context in
-            let state = context.state
+            let state = context.state.openedWithStoredKey()
             let isStale = context.isStale
             let look = PhaseLook(state, isStale: isStale)
             let waitingCount = state.islandWaitingCount(isStale: isStale)
@@ -44,7 +44,7 @@ struct VoiceSessionLiveActivity: Widget {
                         .accessibilityLabel(isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: context.attributes.voiceName))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    SessionButtons(state: state)
+                    SessionButtons(state: state, isStale: isStale)
                 }
             } compactLeading: {
                 Image(systemName: look.symbol)
@@ -109,9 +109,13 @@ struct VoiceSessionLockScreenView: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
+    var orbLook: PhaseLook {
+        PhaseLook(state, isStale: isStale)
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
-            PhaseOrb(look: PhaseLook(state), size: 40)
+            PhaseOrb(look: orbLook, size: 40)
                 .opacity(isStale ? 0.5 : 1)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
@@ -126,7 +130,7 @@ struct VoiceSessionLockScreenView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(isStale ? LiveActivityContent.staleAccessibilityLabel : state.accessibilityLabel(voiceName: voiceName))
-            SessionButtons(state: state)
+            SessionButtons(state: state, isStale: isStale)
         }
     }
 }
@@ -192,15 +196,19 @@ struct MoreWaitingLine: View {
 /// the app's process (`LiveActivityIntent`). 44 pt targets.
 struct SessionButtons: View {
     let state: LiveActivityContent
+    var isStale = false
 
+    var showsLiveControl: Bool { !isStale }
     private var muted: Bool { state.muted }
 
     var body: some View {
         HStack(spacing: 8) {
-            if state.holdToTalk {
-                talkButton
-            } else {
-                muteButton
+            if showsLiveControl {
+                if state.holdToTalk {
+                    talkButton
+                } else {
+                    muteButton
+                }
             }
 
             Button(intent: EndVoiceSessionIntent()) {
@@ -214,6 +222,7 @@ struct SessionButtons: View {
             .accessibilityLabel("End session")
             .accessibilityHint("Ends the voice session. Your agents keep working.")
         }
+        .opacity(isStale ? 0.65 : 1)
     }
 }
 

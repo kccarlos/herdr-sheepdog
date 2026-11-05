@@ -31,14 +31,20 @@ final class SettingsModel {
     @ObservationIgnored weak var session: SessionViewModel?
     /// The audio engine's jitter-buffer profile follows the provider.
     @ObservationIgnored var onVoiceProvidersChange: (() -> Void)?
+    /// Incremented on every computer switch so late completions and defers
+    /// from the computer the app left never overwrite the new computer's state.
+    @ObservationIgnored private var generation = 0
 
     /// The computer changed: what was loaded was the old one's.
     func clear() {
+        generation &+= 1
         brainModels = nil
+        switchingBrain = false
         brainError = nil
         daemonSettings = nil
         settingsError = nil
         voiceProviders = nil
+        switchingProvider = false
         providerError = nil
     }
 
@@ -50,8 +56,10 @@ final class SettingsModel {
 
     func loadVoiceProviders() async {
         guard let session, session.settings.endpoint != nil else { return }
+        let gen = generation
         do {
             let list = try await session.current { try await $0.voiceProviders() }
+            guard generation == gen else { return }
             #if DEBUG
             // The fixture daemon (`--voice=off`) lists no providers.
             if list?.providers.isEmpty ?? true, DebugLaunch.fakeProviders {
@@ -60,7 +68,7 @@ final class SettingsModel {
             }
             #endif
             voiceProviders = list
-        } catch where Self.isSuperseded(error) {
+        } catch where Self.isSuperseded(error) || generation != gen {
             return
         } catch {
             // Hidden rather than an error: the picker is a convenience, and
@@ -74,15 +82,19 @@ final class SettingsModel {
         guard id != voiceProviders?.provider, !switchingProvider else { return }
         switchingProvider = true
         providerError = nil
+        let gen = generation
         Task { [weak self] in
             guard let self, let session = self.session else { return }
-            defer { self.switchingProvider = false }
+            defer {
+                if self.generation == gen { self.switchingProvider = false }
+            }
             do {
                 let list = try await session.current { try await $0.setVoiceProvider(id) }
+                guard self.generation == gen else { return }
                 self.voiceProviders = list
                 session.voiceProviderSelected(list.provider)
                 Haptics.tap()
-            } catch where Self.isSuperseded(error) {
+            } catch where Self.isSuperseded(error) || self.generation != gen {
                 return
             } catch let error as DaemonError {
                 #if DEBUG
@@ -96,6 +108,7 @@ final class SettingsModel {
             } catch {
                 self.providerError = error.localizedDescription
             }
+            guard self.generation == gen else { return }
             await session.refreshState(quiet: true)
         }
     }
@@ -119,10 +132,13 @@ final class SettingsModel {
 
     func loadBrainModels(provider: String? = nil) async {
         guard let session else { return }
+        let gen = generation
         do {
-            brainModels = try await session.current { try await $0.brainModels(provider: provider) }
+            let loaded = try await session.current { try await $0.brainModels(provider: provider) }
+            guard generation == gen else { return }
+            brainModels = loaded
             brainError = nil
-        } catch where Self.isSuperseded(error) {
+        } catch where Self.isSuperseded(error) || generation != gen {
             return
         } catch let error as DaemonError {
             brainError = error.message
@@ -136,19 +152,25 @@ final class SettingsModel {
         guard !switchingBrain else { return }
         switchingBrain = true
         brainError = nil
+        let gen = generation
         Task { [weak self] in
             guard let self, let session = self.session else { return }
-            defer { self.switchingBrain = false }
+            defer {
+                if self.generation == gen { self.switchingBrain = false }
+            }
             do {
-                self.brainModels = try await session.current { try await $0.setBrainModel(provider: provider, model: model) }
+                let updated = try await session.current { try await $0.setBrainModel(provider: provider, model: model) }
+                guard self.generation == gen else { return }
+                self.brainModels = updated
                 Haptics.tap()
-            } catch where Self.isSuperseded(error) {
+            } catch where Self.isSuperseded(error) || self.generation != gen {
                 return
             } catch let error as DaemonError {
                 self.brainError = error.message
             } catch {
                 self.brainError = error.localizedDescription
             }
+            guard self.generation == gen else { return }
             await session.refreshState(quiet: true)
         }
     }
@@ -157,10 +179,13 @@ final class SettingsModel {
 
     func loadDaemonSettings() async {
         guard let session else { return }
+        let gen = generation
         do {
-            daemonSettings = try await session.current { try await $0.settings() }
+            let loaded = try await session.current { try await $0.settings() }
+            guard generation == gen else { return }
+            daemonSettings = loaded
             settingsError = nil
-        } catch where Self.isSuperseded(error) {
+        } catch where Self.isSuperseded(error) || generation != gen {
             return
         } catch let error as DaemonError {
             // No orchestrator is a 503: hide the control, say why.
@@ -173,13 +198,16 @@ final class SettingsModel {
 
     func setChattiness(_ level: String) {
         guard level != daemonSettings?.chattiness else { return }
+        let gen = generation
         Task { [weak self] in
             guard let self, let session = self.session else { return }
             do {
-                self.daemonSettings = try await session.current { try await $0.setChattiness(level) }
+                let updated = try await session.current { try await $0.setChattiness(level) }
+                guard self.generation == gen else { return }
+                self.daemonSettings = updated
                 self.settingsError = nil
                 Haptics.tap()
-            } catch where Self.isSuperseded(error) {
+            } catch where Self.isSuperseded(error) || self.generation != gen {
                 return
             } catch let error as DaemonError {
                 self.settingsError = error.message
@@ -198,17 +226,22 @@ final class SettingsModel {
             optimistic.languages = codes
             daemonSettings = optimistic
         }
+        let gen = generation
         Task { [weak self] in
             guard let self, let session = self.session else { return }
             do {
-                self.daemonSettings = try await session.current { try await $0.setLanguages(codes) }
+                let updated = try await session.current { try await $0.setLanguages(codes) }
+                guard self.generation == gen else { return }
+                self.daemonSettings = updated
                 self.settingsError = nil
                 Haptics.tap()
-            } catch where Self.isSuperseded(error) {
+            } catch where Self.isSuperseded(error) || self.generation != gen {
                 return
             } catch {
+                guard self.generation == gen else { return }
                 // Back to what the daemon has, then say why it refused.
                 await self.loadDaemonSettings()
+                guard self.generation == gen else { return }
                 self.settingsError = (error as? DaemonError)?.message ?? error.localizedDescription
             }
         }

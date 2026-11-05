@@ -190,3 +190,35 @@ public struct DeviceAuth: Sendable {
         ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String ?? ""
     }
 }
+
+/// Validates a daemon's enrollment reply against the scanned `PairingCode`
+/// before any paired record or keychain key is committed.
+public enum PairingEnrollment {
+    public static func pairedComputer(
+        code: PairingCode,
+        reachableAddress: String,
+        enrolled: DeviceAuth.Enrolled,
+        pairedAt: Date = Date()
+    ) throws -> PairedComputer {
+        let daemonID = code.daemonID.trimmed
+        guard !daemonID.isEmpty else {
+            throw DaemonError.malformed("pairing code missing daemon id")
+        }
+        let replyDaemonID = enrolled.daemonID.trimmed
+        guard replyDaemonID.isEmpty || replyDaemonID == daemonID else {
+            throw DaemonError.malformed("the computer answered with a different id than its pairing code")
+        }
+        let deviceID = enrolled.deviceID.trimmed
+        guard !deviceID.isEmpty else {
+            throw DaemonError.malformed("the computer did not return a device id")
+        }
+        return PairedComputer(
+            daemonID: daemonID,
+            name: code.name.isEmpty ? enrolled.name : code.name,
+            addresses: [reachableAddress] + code.addresses.filter { $0 != reachableAddress },
+            pin: code.pin,
+            deviceID: deviceID,
+            pairedAt: pairedAt
+        )
+    }
+}

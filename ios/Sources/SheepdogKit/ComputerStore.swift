@@ -99,6 +99,16 @@ public final class ComputerStore: @unchecked Sendable {
         defaults.set(address, forKey: Key.address(id))
     }
 
+    /// Records the address that won a background race on `interface` without
+    /// overwriting the user's preferred address (`Key.address`).
+    public func recordRaceWinner(_ address: String, for id: String, interface: NetworkInterface?) {
+        guard let interface, !address.isEmpty, computer(id) != nil else { return }
+        let store = LinkWinnerDefaults(defaults: defaults)
+        var winners = store.load(computerID: id)
+        winners[interface] = address
+        store.save(winners, computerID: id)
+    }
+
     /// The address with no paired computer behind it (a loopback fixture).
     public var looseAddress: String {
         get { defaults.string(forKey: Key.looseAddress) ?? "" }

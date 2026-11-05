@@ -248,7 +248,11 @@ private struct AgentWindowContent: View {
             }
             #endif
             // A window restored on its own, before any main window.
+            scenes.registerAgent(agentSceneID)
             model.start()
+            if scenes.isAgentLifecycleOwner(agentSceneID), appPhase == .active, model.appPhase != .active {
+                model.becameActive()
+            }
         }
         .onChange(of: appPhase) { _, phase in
             guard scenes.isAgentLifecycleOwner(agentSceneID) else { return }

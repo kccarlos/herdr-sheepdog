@@ -78,6 +78,7 @@ struct PairingFlowView: View {
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State var stage: PairingStage
     /// Runs after "Done" or swipe-dismissal on the paired screen.
@@ -257,43 +258,61 @@ struct PairingFlowView: View {
                 if case let .paired(name) = stage, let suggestion = ComputerNaming.suggestion(for: name) {
                     nameSuggestion(for: name, suggestion: suggestion)
                 }
+                if dynamicTypeSize.isAccessibilitySize {
+                    actionButtons(copy)
+                        .padding(.top, 12)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
             .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity, minHeight: geo.size.height * 0.8)
+            .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? nil : geo.size.height * 0.8)
           }
           .scrollBounceBehavior(.basedOnSize)
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 4) {
-                Button { primary() } label: {
-                    Text(copy.primary)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.onAccent)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.accentColor))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("pairing.primary")
-                if let secondary = copy.secondary {
-                    Button(secondary) { dismiss() }
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("pairing.secondary")
-                }
+            if !dynamicTypeSize.isAccessibilitySize {
+                actionButtons(copy)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: 520)
+                    .background(Theme.surface)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-            .frame(maxWidth: 520)
-            .background(Theme.surface)
         }
         .background(Theme.surface.ignoresSafeArea())
+    }
+
+    private func actionButtons(_ copy: Copy) -> some View {
+        VStack(spacing: 4) {
+            Button { primary() } label: {
+                Text(copy.primary)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.onAccent)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("pairing.primary")
+            if let secondary = copy.secondary {
+                Button { dismiss() } label: {
+                    Text(secondary)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("pairing.secondary")
+            }
+        }
     }
 
     /// A computer named like a machine ID ("M944QD4VY") gets a plain
