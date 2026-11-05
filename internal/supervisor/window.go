@@ -175,7 +175,14 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	sctx, flight := s.beginSendLocked(ctx, paneID)
 	s.mu.Unlock()
 
+	slash := isSlashCommand(text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(paneID)
+	}
 	_, err := s.herdr.Prompt(sctx, paneID, text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(paneID)
+	}
 
 	s.mu.Lock()
 	s.endSendLocked(paneID, flight)

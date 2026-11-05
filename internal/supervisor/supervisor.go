@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
@@ -287,6 +288,11 @@ type Supervisor struct {
 	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
 	idxMu   sync.Mutex
 	idx     *folderIndex
+
+	// noProcessInfo is latched once an older herdr rejects pane.process_info
+	// as an unknown method, so later transitions fall back to agent_session
+	// without repeating the RPC.
+	noProcessInfo atomic.Bool
 
 	// sendMu guards paneSends. Each pane's mutex serializes write RPCs
 	// (Prompt, SendKeys, Interrupt) on that pane without holding s.mu

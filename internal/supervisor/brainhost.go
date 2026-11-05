@@ -129,13 +129,15 @@ func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (st
 // when the window holds none, the row's instruction stands in. A session
 // that cannot be read is an error carrying the worker.session_missing
 // reason, for the model to read.
-func (h brainHost) ReadSession(_ context.Context, paneID string) (brain.SessionRead, error) {
+func (h brainHost) ReadSession(ctx context.Context, paneID string) (brain.SessionRead, error) {
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
 		return brain.SessionRead{}, errors.New("that agent is gone")
 	}
 	alias := aliasOr(row.Alias)
-	d, err := h.s.cfg.WorkerLog.Tail(workerSession(row))
+	roots := h.s.paneRoots(ctx, row)
+	d, err := h.s.cfg.WorkerLog.Tail(workerSessionWithRoots(row, roots))
+	h.s.syncDiscoveredSession(paneID)
 	if err != nil {
 		reason := workerlog.Reason(err)
 		return brain.SessionRead{}, fmt.Errorf("no session record for %s: %s (%s)", alias, reason, sessionMissingWhy[reason])

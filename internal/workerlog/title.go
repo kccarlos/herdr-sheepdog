@@ -32,16 +32,34 @@ const maxIndexBytes = 4 << 20
 // Title returns the worker's current session title, "" when it has
 // none yet. The errors are those of Locate (and ReasonUnreadable).
 func (r *Reader) Title(sess Session) (string, error) {
-	switch sess.format() {
+	f := sess.format()
+	if f == "" && (sess.Agent != "" || sess.Source != "") {
+		if sess.Value == "" && !sess.Roots.HasPID() {
+			return "", missing(ReasonNotReported, nil)
+		}
+		return "", missing(ReasonUnsupported, nil)
+	}
+	if f == "" && sess.Roots.HasPID() {
+		res, err := r.Resolve(sess)
+		if err != nil {
+			return "", err
+		}
+		sess.Pane = ""
+		sess.Roots = ProcessRoots{}
+		if res.Format == FormatClaude {
+			sess.Agent, sess.Kind, sess.Value = "claude", "path", res.Path
+			return r.claudeTitle(sess)
+		}
+		sess.Agent, sess.Kind, sess.Value = "codex", "id", res.ID
+		return r.codexTitle(sess)
+	}
+	switch f {
 	case FormatCodex:
 		return r.codexTitle(sess)
 	case FormatClaude:
 		return r.claudeTitle(sess)
 	}
-	if sess.Value == "" {
-		return "", missing(ReasonNotReported, nil)
-	}
-	return "", missing(ReasonUnsupported, nil)
+	return "", missing(ReasonNotReported, nil)
 }
 
 // claudeTitle scans the transcript's tail window for the last custom
@@ -82,18 +100,29 @@ func (r *Reader) claudeTitle(sess Session) (string, error) {
 
 // codexTitle reads the session's last thread name from the index.
 func (r *Reader) codexTitle(sess Session) (string, error) {
-	if sess.Value == "" {
-		return "", missing(ReasonNotReported, nil)
-	}
-	id := sess.Value
-	if sess.Kind == "path" {
-		// rollout-<timestamp>-<id>.jsonl: the id is a UUID, 36
-		// characters before the extension.
-		base := strings.TrimSuffix(filepath.Base(id), ".jsonl")
-		if len(base) < 36 {
-			return "", missing(ReasonNotFound, nil)
+	var id string
+	if sess.Roots.HasPID() {
+		if res, handled, err := r.discoverByPID(sess, FormatCodex); handled {
+			if err != nil {
+				return "", err
+			}
+			id = res.ID
 		}
-		id = base[len(base)-36:]
+	}
+	if id == "" {
+		if !sess.hasValueFor(FormatCodex) {
+			return "", missing(ReasonNotReported, nil)
+		}
+		id = sess.Value
+		if sess.Kind == "path" {
+			// rollout-<timestamp>-<id>.jsonl: the id is a UUID, 36
+			// characters before the extension.
+			base := strings.TrimSuffix(filepath.Base(id), ".jsonl")
+			if len(base) < 36 {
+				return "", missing(ReasonNotFound, nil)
+			}
+			id = base[len(base)-36:]
+		}
 	}
 	if id == "" || strings.ContainsAny(id, `/\*?[`) {
 		return "", missing(ReasonNotFound, nil)

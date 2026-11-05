@@ -15,6 +15,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 var t0 = time.Date(2026, 9, 17, 16, 55, 0, 0, time.UTC)
@@ -206,6 +207,14 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond, bareAnswers: true}
 	for _, o := range opts {
 		o(&cfg)
+	}
+	if cfg.WorkerLog == nil {
+		cfg.WorkerLog = workerlog.New(workerlog.Options{
+			ClaudeProjects: filepath.Join(h.dir, "claude", "projects"),
+			CodexSessions:  filepath.Join(h.dir, "codex", "sessions"),
+			TreePIDs:       func(roots workerlog.ProcessRoots) []int { return roots.Direct() },
+			OpenFiles:      func([]int) []string { return nil },
+		})
 	}
 	h.sup, err = New(h.store, h.client, nil, h.pusher, h.log, cfg)
 	if err != nil {

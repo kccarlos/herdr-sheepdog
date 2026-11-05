@@ -62,6 +62,7 @@ type Server struct {
 	panes      map[string]herdr.PaneInfo
 	agents     map[string]herdr.AgentInfo
 	screens    map[string]string
+	procs      map[string]herdr.ProcessInfo
 	nextSpace  int
 	nextTab    int
 	nextTerm   int
@@ -99,6 +100,7 @@ func New(t testing.TB) *Server {
 		agents:      map[string]herdr.AgentInfo{},
 		completions: map[string]uint64{},
 		screens:     map[string]string{},
+		procs:       map[string]herdr.ProcessInfo{},
 		subs:        map[*subConn]struct{}{},
 		handlers:    map[string]Handler{},
 	}
@@ -240,6 +242,7 @@ func (s *Server) RemovePane(paneID string) {
 	defer s.mu.Unlock()
 	delete(s.agents, paneID)
 	delete(s.panes, paneID)
+	delete(s.procs, paneID)
 }
 
 // SetScreen sets the text returned by pane.read / agent.read for a pane.
@@ -247,6 +250,13 @@ func (s *Server) SetScreen(paneID, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.screens[paneID] = text
+}
+
+// SetProcessInfo sets the process tree returned by pane.process_info for info.PaneID.
+func (s *Server) SetProcessInfo(info herdr.ProcessInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.procs[info.PaneID] = info
 }
 
 // Handle overrides the handler for a method.
@@ -681,6 +691,26 @@ func (s *Server) builtin(method string) Handler {
 			}
 			return map[string]any{"type": "session_snapshot", "snapshot": snap}, nil
 		}
+	case "pane.process_info":
+		return func(p json.RawMessage) (any, error) {
+			var params struct {
+				PaneID string `json:"pane_id"`
+			}
+			if err := json.Unmarshal(p, &params); err != nil {
+				return nil, &herdr.Error{Code: "invalid_params", Message: err.Error()}
+			}
+			s.mu.Lock()
+			_, ok := s.panes[params.PaneID]
+			info, hasInfo := s.procs[params.PaneID]
+			s.mu.Unlock()
+			if !ok {
+				return nil, &herdr.Error{Code: "pane_not_found", Message: "pane " + params.PaneID + " not found"}
+			}
+			if !hasInfo {
+				info = herdr.ProcessInfo{PaneID: params.PaneID}
+			}
+			return map[string]any{"type": "process_info", "process_info": info}, nil
+		}
 	case "agent.start":
 		// Only records the request: a test makes the agent appear itself.
 		return func(p json.RawMessage) (any, error) {
@@ -842,6 +872,7 @@ func (s *Server) closePane(paneID string) bool {
 	delete(s.panes, paneID)
 	delete(s.agents, paneID)
 	delete(s.screens, paneID)
+	delete(s.procs, paneID)
 	if w, ok := s.workspaces[pane.WorkspaceID]; ok {
 		w.PaneCount--
 		if w.PaneCount <= 0 {

@@ -27,7 +27,12 @@ func jsonString(s string) string {
 // withWorkerLog points the transcript reader at a temp home.
 func withWorkerLog(dir string) func(*Config) {
 	return func(c *Config) {
-		c.WorkerLog = workerlog.New(workerlog.Options{ClaudeProjects: filepath.Join(dir, "projects"), CodexSessions: filepath.Join(dir, "sessions")})
+		c.WorkerLog = workerlog.New(workerlog.Options{
+			ClaudeProjects: filepath.Join(dir, "projects"),
+			CodexSessions:  filepath.Join(dir, "sessions"),
+			TreePIDs:       func(roots workerlog.ProcessRoots) []int { return roots.Direct() },
+			OpenFiles:      func([]int) []string { return nil },
+		})
 	}
 }
 

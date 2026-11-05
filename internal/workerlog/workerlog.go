@@ -3,12 +3,14 @@
 // what the worker wrote for a human instead of relaying its screen
 // (docs/dev/iteration-2.md WP4, docs/dev/roles.md "Worker history").
 //
-// The session comes from herdr's agent_session (internal/herdr
-// AgentSession, kept on the state row). Files can be many megabytes, so
-// a Reader remembers a byte offset per pane and every Read scans only
-// the lines appended since the previous one; a first read, or one that
-// fell far behind, starts at a tail window instead of the top. Nothing
-// here is ever handed to a model whole: a Digest carries the last
+// The session comes from the pane's foreground process tree when live
+// (~/.claude/sessions/<pid>.json for Claude Code, open rollout-*.jsonl
+// descriptors for Codex), falling back to herdr's agent_session
+// (internal/herdr AgentSession, kept on the state row). Files can be many
+// megabytes, so a Reader remembers a byte offset per pane and every Read
+// scans only the lines appended since the previous one; a first read, or
+// one that fell far behind, starts at a tail window instead of the top.
+// Nothing here is ever handed to a model whole: a Digest carries the last
 // assistant message, the instructions and a tool/file summary, and the
 // caller caps and scrubs them.
 //
@@ -20,7 +22,6 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -72,9 +73,15 @@ func Reason(err error) string {
 
 func missing(reason string, err error) error { return &MissingError{Reason: reason, Err: err} }
 
-// Session identifies a worker's session: herdr's agent_session plus the
-// pane's agent kind and working directory.
+// Session identifies a worker's session: herdr's agent_session or its
+// pane's foreground process tree, plus the agent kind and working directory.
 type Session struct {
+	// Pane is the pane identifier, used to cache foreground-PID discovery
+	// per pane; optional when locating by Value alone.
+	Pane string
+	// Roots is the pane's foreground process tree; when set, live process
+	// discovery runs before falling back to Value.
+	Roots ProcessRoots
 	// Agent is the pane's kind label (claude, codex, agy).
 	Agent string
 	// Source is the reporting integration ("herdr:claude").
@@ -96,19 +103,37 @@ const (
 	FormatCodex  Format = "codex"
 )
 
-// format picks the transcript format from the reporting integration,
-// falling back to the pane's kind label.
-func (s Session) format() Format {
-	for _, v := range []string{s.Source, s.Agent} {
-		v = strings.ToLower(v)
-		switch {
-		case strings.Contains(v, "claude"):
-			return FormatClaude
-		case strings.Contains(v, "codex"):
-			return FormatCodex
-		}
+func formatOf(v string) Format {
+	v = strings.ToLower(v)
+	switch {
+	case strings.Contains(v, "claude"):
+		return FormatClaude
+	case strings.Contains(v, "codex"):
+		return FormatCodex
 	}
 	return ""
+}
+
+// format picks the transcript format from the pane's current agent kind,
+// falling back to the reporting integration when Agent is unset.
+func (s Session) format() Format {
+	if f := formatOf(s.Agent); f != "" {
+		return f
+	}
+	if s.Agent != "" {
+		return ""
+	}
+	return formatOf(s.Source)
+}
+
+func (s Session) hasValueFor(f Format) bool {
+	if s.Value == "" || f == "" {
+		return false
+	}
+	if sf := formatOf(s.Source); sf != "" && sf != f {
+		return false
+	}
+	return true
 }
 
 // Limits of one read.
@@ -208,12 +233,21 @@ type Options struct {
 	// ClaudeProjects is Claude Code's projects directory (default
 	// $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects).
 	ClaudeProjects string
+	// ClaudeSessions is Claude Code's per-PID active session directory
+	// (default sessions next to ClaudeProjects).
+	ClaudeSessions string
 	// CodexSessions is Codex's sessions directory (default
 	// $CODEX_HOME/sessions or ~/.codex/sessions).
 	CodexSessions string
 	// CodexIndex is Codex's session index, where it keeps each thread's
 	// name (default session_index.jsonl next to CodexSessions).
 	CodexIndex string
+	// TreePIDs returns the live PIDs in roots' process tree, foreground
+	// first. Nil uses the host OS.
+	TreePIDs func(roots ProcessRoots) []int
+	// OpenFiles returns the regular file paths open in pids. Nil uses the
+	// host OS (/proc/<pid>/fd on Linux, lsof elsewhere).
+	OpenFiles func(pids []int) []string
 }
 
 // Reader reads transcripts incrementally, one cursor per pane. It is
@@ -223,10 +257,12 @@ type Reader struct {
 
 	mu      sync.Mutex
 	cursors map[string]*cursor
+	pids    map[string]pidEntry
+	gen     uint64
 }
 
 type cursor struct {
-	session       string // Session.Value the offset belongs to
+	session       string // session id (or path) the offset belongs to
 	path          string
 	offset        int64
 	lastAssistant string
@@ -242,6 +278,9 @@ func New(opts Options) *Reader {
 		}
 		opts.ClaudeProjects = filepath.Join(base, "projects")
 	}
+	if opts.ClaudeSessions == "" {
+		opts.ClaudeSessions = filepath.Join(filepath.Dir(opts.ClaudeProjects), "sessions")
+	}
 	if opts.CodexSessions == "" {
 		base := os.Getenv("CODEX_HOME")
 		if base == "" {
@@ -252,51 +291,26 @@ func New(opts Options) *Reader {
 	if opts.CodexIndex == "" {
 		opts.CodexIndex = filepath.Join(filepath.Dir(opts.CodexSessions), "session_index.jsonl")
 	}
-	return &Reader{opts: opts, cursors: map[string]*cursor{}}
+	return &Reader{opts: opts, cursors: map[string]*cursor{}, pids: map[string]pidEntry{}}
 }
 
 // Locate returns the transcript file of sess.
 //
-// Claude Code: the reported path when Kind is "path"; else
+// When sess.Roots has live process roots, Locate first probes the pane's
+// foreground process tree (Claude Code's <sessions>/<pid>.json, Codex's
+// open rollout-*.jsonl descriptor), cached per (pane, roots). Otherwise:
+// Claude Code uses the reported path when Kind is "path", else
 // <projects>/<slug>/<id>.jsonl, the slug being the working directory
 // with "/" and "." replaced by "-" (verified against ~/.claude/projects
 // on 2026-09-24), falling back to any project directory holding
-// <id>.jsonl (ids are UUIDs) when the cwd is unknown or was renamed.
-// Codex: <sessions>/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl.
+// <id>.jsonl (ids are UUIDs) when the cwd is unknown or was renamed;
+// Codex uses <sessions>/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl.
 func (r *Reader) Locate(sess Session) (string, error) {
-	if sess.Value == "" {
-		return "", missing(ReasonNotReported, nil)
+	res, err := r.Resolve(sess)
+	if err != nil {
+		return "", err
 	}
-	f := sess.format()
-	if f == "" {
-		return "", missing(ReasonUnsupported, fmt.Errorf("agent %q", sess.Agent))
-	}
-	if sess.Kind == "path" {
-		if fileExists(sess.Value) {
-			return sess.Value, nil
-		}
-		return "", missing(ReasonNotFound, nil)
-	}
-	if strings.ContainsAny(sess.Value, `/\*?[`) {
-		return "", missing(ReasonNotFound, fmt.Errorf("session id %q is not a plain id", sess.Value))
-	}
-	switch f {
-	case FormatClaude:
-		if sess.Cwd != "" {
-			p := filepath.Join(r.opts.ClaudeProjects, ClaudeSlug(sess.Cwd), sess.Value+".jsonl")
-			if fileExists(p) {
-				return p, nil
-			}
-		}
-		if m, _ := filepath.Glob(filepath.Join(r.opts.ClaudeProjects, "*", sess.Value+".jsonl")); len(m) > 0 {
-			return m[0], nil
-		}
-	case FormatCodex:
-		if m, _ := filepath.Glob(filepath.Join(r.opts.CodexSessions, "*", "*", "*", "*-"+sess.Value+".jsonl")); len(m) > 0 {
-			return m[len(m)-1], nil
-		}
-	}
-	return "", missing(ReasonNotFound, nil)
+	return res.Path, nil
 }
 
 // ClaudeSlug is the directory name Claude Code keeps a working
@@ -311,10 +325,23 @@ func fileExists(p string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-// Forget drops the pane's cursor (the pane closed).
+func sameCursorFile(curPath, newPath string, newInfo os.FileInfo) bool {
+	if curPath == newPath {
+		return true
+	}
+	if curPath == "" || newInfo == nil {
+		return false
+	}
+	prev, err := os.Stat(curPath)
+	return err == nil && os.SameFile(prev, newInfo)
+}
+
+// Forget drops the pane's cursor and cached PID probe (the pane closed).
 func (r *Reader) Forget(pane string) {
 	r.mu.Lock()
+	r.gen++
 	delete(r.cursors, pane)
+	delete(r.pids, pane)
 	r.mu.Unlock()
 }
 
@@ -324,10 +351,14 @@ func (r *Reader) Forget(pane string) {
 // window. A line not yet terminated by a newline is left for the next
 // read.
 func (r *Reader) Read(pane string, sess Session) (Digest, error) {
-	path, err := r.Locate(sess)
+	if sess.Pane == "" {
+		sess.Pane = pane
+	}
+	res, err := r.Resolve(sess)
 	if err != nil {
 		return Digest{}, err
 	}
+	path := res.Path
 	fh, err := os.Open(path)
 	if err != nil {
 		return Digest{}, missing(ReasonUnreadable, err)
@@ -338,17 +369,23 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 		return Digest{}, missing(ReasonUnreadable, err)
 	}
 	size := st.Size()
+	sessionKey := res.ID
+	if sessionKey == "" {
+		sessionKey = path
+	}
 
 	r.mu.Lock()
 	cur := r.cursors[pane]
-	if cur == nil || cur.session != sess.Value || cur.path != path || cur.offset > size {
-		cur = &cursor{session: sess.Value, path: path}
+	if cur == nil || cur.session != sessionKey || !sameCursorFile(cur.path, path, st) || cur.offset > size {
+		cur = &cursor{session: sessionKey, path: path}
 		r.cursors[pane] = cur
+	} else {
+		cur.path = path
 	}
 	start, lastAssistant := cur.offset, cur.lastAssistant
 	r.mu.Unlock()
 
-	d := Digest{Format: sess.format(), Path: path}
+	d := Digest{Format: res.Format, Path: path}
 	align := false
 	fresh := start == 0 && size > TailWindow
 	if fresh || size-start > MaxBacklog {
@@ -385,10 +422,11 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 // a message for a human; Instructions, Tools and Files are those of the
 // window, so the work since the last instruction in it.
 func (r *Reader) Tail(sess Session) (Digest, error) {
-	path, err := r.Locate(sess)
+	res, err := r.Resolve(sess)
 	if err != nil {
 		return Digest{}, err
 	}
+	path := res.Path
 	fh, err := os.Open(path)
 	if err != nil {
 		return Digest{}, missing(ReasonUnreadable, err)
@@ -399,7 +437,7 @@ func (r *Reader) Tail(sess Session) (Digest, error) {
 		return Digest{}, missing(ReasonUnreadable, err)
 	}
 	size := st.Size()
-	d := Digest{Format: sess.format(), Path: path}
+	d := Digest{Format: res.Format, Path: path}
 	var start int64
 	if size > TailWindow {
 		start = size - TailWindow

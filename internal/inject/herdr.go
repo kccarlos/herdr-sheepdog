@@ -356,6 +356,9 @@ func (h *Herdr) AgentKinds(ctx context.Context) ([]string, error) {
 
 // ProcessInfo implements supervisor.Spawner.
 func (h *Herdr) ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error) {
+	if h.IsSynthetic(paneID) {
+		return herdr.ProcessInfo{PaneID: paneID}, nil
+	}
 	sp, err := h.spawner()
 	if err != nil {
 		return herdr.ProcessInfo{}, err

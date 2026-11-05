@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,41 @@ func TestBackendConformance(t *testing.T) {
 	conformance.RunAll(t, newOldDriver)
 }
 
+type oldProcTable struct {
+	mu      sync.Mutex
+	nextPID uint32
+	shells  map[string]uint32
+}
+
+func newOldProcTable() *oldProcTable {
+	return &oldProcTable{nextPID: 1000, shells: map[string]uint32{}}
+}
+
+func (p *oldProcTable) alloc() uint32 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nextPID++
+	return p.nextPID
+}
+
+func (p *oldProcTable) shellPID(paneID string) uint32 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if sh, ok := p.shells[paneID]; ok {
+		return sh
+	}
+	p.nextPID++
+	sh := p.nextPID
+	p.shells[paneID] = sh
+	return sh
+}
+
 type oldDriver struct {
 	client *herdr.Client
 	srv    *herdrtest.Server
 	local  *attention.Local
 	store  string
+	procs  *oldProcTable
 }
 
 func newOldDriver(t *testing.T) conformance.Driver {
@@ -29,18 +60,18 @@ func newOldDriver(t *testing.T) conformance.Driver {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.Path)
 	client.ReconnectBackoff = herdr.Backoff{Min: 10 * time.Millisecond, Max: 50 * time.Millisecond}
-	return newOldDriverOver(t, client, srv, filepath.Join(t.TempDir(), attention.FileName))
+	return newOldDriverOver(t, client, srv, filepath.Join(t.TempDir(), attention.FileName), newOldProcTable())
 }
 
 // newOldDriverOver is a daemon's view of the machine: the old herdr's marks
 // live in a store file, which a restarted daemon opens again.
-func newOldDriverOver(t *testing.T, client *herdr.Client, srv *herdrtest.Server, store string) *oldDriver {
+func newOldDriverOver(t *testing.T, client *herdr.Client, srv *herdrtest.Server, store string, procs *oldProcTable) *oldDriver {
 	t.Helper()
 	local, err := attention.NewLocal(store, client, attention.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &oldDriver{client: client, srv: srv, local: local, store: store}
+	return &oldDriver{client: client, srv: srv, local: local, store: store, procs: procs}
 }
 
 func (d *oldDriver) Marker() herdr.Marker { return d.local }
@@ -51,7 +82,7 @@ func (d *oldDriver) MarkWrites() int { return d.local.Writes() }
 
 func (d *oldDriver) RestartDaemon(t *testing.T) conformance.Driver {
 	t.Helper()
-	return newOldDriverOver(t, d.client, d.srv, d.store)
+	return newOldDriverOver(t, d.client, d.srv, d.store, d.procs)
 }
 
 func (d *oldDriver) EndTurn(_ context.Context, paneID string) error {
@@ -113,7 +144,21 @@ func (d *oldDriver) TerminalSize(_ context.Context, _ string) (int, int, bool) {
 }
 
 func (d *oldDriver) StartPlain(ctx context.Context, cwd string) (herdr.PaneInfo, error) {
-	return d.client.CreateWorkspace(ctx, cwd, "conformance")
+	pane, err := d.client.CreateWorkspace(ctx, cwd, "conformance")
+	if err == nil {
+		d.setShellForeground(pane.PaneID)
+	}
+	return pane, err
+}
+
+func (d *oldDriver) setShellForeground(paneID string) {
+	sh := d.procs.shellPID(paneID)
+	d.srv.SetProcessInfo(herdr.ProcessInfo{
+		PaneID:                 paneID,
+		ShellPID:               sh,
+		ForegroundProcessGroup: sh,
+		ForegroundProcesses:    []herdr.ProcessItem{{PID: sh, Name: "zsh", Argv: []string{"zsh"}}},
+	})
 }
 
 func (d *oldDriver) Run(ctx context.Context, paneID string, p conformance.Program) error {
@@ -121,6 +166,19 @@ func (d *oldDriver) Run(ctx context.Context, paneID string, p conformance.Progra
 	if err != nil {
 		return err
 	}
+	sh := d.procs.shellPID(paneID)
+	var fg uint32
+	if p.PID > 0 {
+		fg = uint32(p.PID)
+	} else {
+		fg = d.procs.alloc()
+	}
+	d.srv.SetProcessInfo(herdr.ProcessInfo{
+		PaneID:                 pane.PaneID,
+		ShellPID:               sh,
+		ForegroundProcessGroup: fg,
+		ForegroundProcesses:    []herdr.ProcessItem{{PID: fg, Name: p.Kind, Argv: append([]string{p.Kind}, p.Args...)}},
+	})
 	agent := herdr.AgentInfo{
 		PaneID:      pane.PaneID,
 		WorkspaceID: pane.WorkspaceID,
@@ -141,6 +199,7 @@ func (d *oldDriver) Exit(ctx context.Context, paneID string) error {
 	if err != nil {
 		return err
 	}
+	d.setShellForeground(paneID)
 	d.srv.EmitAgentDetected(paneID, pane.WorkspaceID, pane.Agent, true, herdr.StateDone)
 	d.srv.RemoveAgent(paneID)
 	d.srv.EmitStatus(paneID, herdr.StateUnknown)

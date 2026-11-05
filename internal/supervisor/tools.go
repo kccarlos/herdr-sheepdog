@@ -194,7 +194,14 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	sctx, flight := s.beginSendLocked(ctx, row.PaneID)
 	s.mu.Unlock()
 
+	slash := isSlashCommand(text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+	}
 	_, err := s.herdr.Prompt(sctx, row.PaneID, text)
+	if slash {
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+	}
 
 	s.mu.Lock()
 	// A turn cancelled by the stop (ctx done) aborted its Prompt before
