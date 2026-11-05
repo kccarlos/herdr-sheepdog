@@ -1,7 +1,6 @@
 package brain
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -554,51 +553,47 @@ func (b *Brain) ingest(m Message, turn int) {
 }
 
 func (b *Brain) redactMessage(m Message) Message {
-	m.Content = b.cfg.Redactor.String(m.Content)
-	m.Words = b.cfg.Redactor.String(m.Words)
+	m.Content, _ = redactString(m.Content, b.cfg.Redactor)
+	m.Words, _ = redactString(m.Words, b.cfg.Redactor)
 	if m.ToolResult != nil {
 		r := *m.ToolResult
-		r.Error = b.cfg.Redactor.String(r.Error)
-		r.Summary = b.cfg.Redactor.String(r.Summary)
+		r.Error, _ = redactString(r.Error, b.cfg.Redactor)
+		r.Summary, _ = redactString(r.Summary, b.cfg.Redactor)
 		m.ToolResult = &r
 	}
 	if m.ToolCall != nil {
 		c := *m.ToolCall
-		c.Args, _ = b.redactValue(c.Args).(map[string]any)
+		if c.Args != nil {
+			redArgs, _ := redactAny(c.Args, b.cfg.Redactor)
+			c.Args, _ = redArgs.(map[string]any)
+		}
 		m.ToolCall = &c
 	}
+	if m.Promise != nil {
+		p := *m.Promise
+		p.Text, _ = redactString(p.Text, b.cfg.Redactor)
+		m.Promise = &p
+	}
 	if len(m.Raw) > 0 {
-		var value any
-		dec := json.NewDecoder(bytes.NewReader(m.Raw))
-		dec.UseNumber()
-		if json.Valid(m.Raw) && dec.Decode(&value) == nil {
-			m.Raw, _ = json.Marshal(b.redactValue(value))
+		if value, ok := decodeSingleJSON(m.Raw); ok {
+			if redVal, changed := redactAny(value, b.cfg.Redactor); changed {
+				if enc, err := encodeSingleLineJSON(redVal); err == nil {
+					m.Raw = enc
+				} else {
+					m.Raw = nil
+				}
+			} else if after := b.cfg.Redactor.String(string(m.Raw)); after != string(m.Raw) {
+				if json.Valid([]byte(after)) {
+					m.Raw = json.RawMessage(after)
+				} else {
+					m.Raw = nil
+				}
+			}
 		} else {
 			m.Raw = nil
 		}
 	}
 	return m
-}
-
-func (b *Brain) redactValue(v any) any {
-	switch v := v.(type) {
-	case string:
-		return b.cfg.Redactor.String(v)
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for k, x := range v {
-			out[k] = b.redactValue(x)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, x := range v {
-			out[i] = b.redactValue(x)
-		}
-		return out
-	default:
-		return v
-	}
 }
 
 // Heard ingests a fragment of the user's speech (voice.transcript.in);

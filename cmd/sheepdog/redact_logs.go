@@ -40,7 +40,7 @@ func runRedactLogs(ctx context.Context, args []string, stdout, stderr io.Writer)
 		fprintln(stderr, "sheepdog is running; stop it first (sheepdog stop), then run this again.")
 		return 1
 	}
-	res, err := brain.RedactLogs(l.cfg.DataDir, redact.ForConfig(l.cfg))
+	res, err := brain.RedactLogsContext(ctx, l.cfg.DataDir, redact.ForConfig(l.cfg))
 	if err != nil {
 		fprintf(stderr, "sheepdog redact-logs: %v\n", err)
 		return 1

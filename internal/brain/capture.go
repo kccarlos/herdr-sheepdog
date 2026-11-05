@@ -42,6 +42,7 @@ func (b *Brain) captureStep(t *turn, step int, forced bool, secs []PromptSection
 	if b.requests == nil {
 		return
 	}
+	addition, _ = redactString(addition, b.cfg.Redactor)
 	snap, format := renderRequest(t.impl, t.provider, t.model, secs, addition, msgs, cfg, t.n)
 	b.mu.Lock()
 	segment := b.curRunID
@@ -52,7 +53,7 @@ func (b *Brain) captureStep(t *turn, step int, forced bool, secs []PromptSection
 		Tokens: snap.Tokens(), DurMS: dur.Milliseconds(), Snapshot: snap,
 	}
 	if callErr != nil {
-		st.Error = callErr.Error()
+		st.Error, _ = redactString(callErr.Error(), b.cfg.Redactor)
 	} else if resp != nil && resp.UsageMetadata != nil {
 		u := resp.UsageMetadata
 		st.Usage = &ctxcap.Usage{PromptTokens: int(u.PromptTokenCount), CompletionTokens: int(u.CandidatesTokenCount), ReasoningTokens: int(u.ThoughtsTokenCount), CachedTokens: int(u.CachedContentTokenCount)}

@@ -3,14 +3,18 @@ package brain
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
@@ -21,6 +25,20 @@ type RedactResult struct {
 	CheckedFiles int
 	ChangedFiles int
 	ChangedLines int
+}
+
+// credentialKeyRe matches structured JSON map keys that hold secrets,
+// mirroring the key=value credential pattern in redact.Redactor for decoded
+// JSON maps where the key and value are separate strings.
+var credentialKeyRe = regexp.MustCompile(`(?i)(?:^|[^0-9A-Za-z])(?:api[_-]?key|(?:access|auth|refresh|id|bearer)[_-]?token|client[_-]?secret|password|passwd)$`)
+
+const (
+	minCredentialValLen = 6
+	maxFailedJSONProbes = 4096
+)
+
+func isCredentialKey(k string) bool {
+	return credentialKeyRe.MatchString(k)
 }
 
 // protectedBrainDir reports whether dir sits inside repository fixtures or
@@ -44,7 +62,20 @@ func protectedBrainDir(dir string) bool {
 // rewriting changed files atomically (mode 0600) while keeping every JSON
 // line valid and preserving ctxcap.Snapshot section offsets.
 func RedactLogs(dataDir string, r *redact.Redactor) (RedactResult, error) {
+	return RedactLogsContext(context.Background(), dataDir, r)
+}
+
+// RedactLogsContext is RedactLogs with cancellation support: if ctx is
+// cancelled before a file is renamed, that file and all remaining files are
+// left untouched and no temporary files remain.
+func RedactLogsContext(ctx context.Context, dataDir string, r *redact.Redactor) (RedactResult, error) {
 	var res RedactResult
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
 	if dataDir == "" || protectedBrainDir(dataDir) {
 		return res, nil
 	}
@@ -69,8 +100,11 @@ func RedactLogs(dataDir string, r *redact.Redactor) (RedactResult, error) {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		res.CheckedFiles++
-		lines, err := redactJSONLFile(p, r)
+		lines, err := redactJSONLFile(ctx, p, r)
 		if err != nil {
 			return res, err
 		}
@@ -79,10 +113,29 @@ func RedactLogs(dataDir string, r *redact.Redactor) (RedactResult, error) {
 			res.ChangedLines += lines
 		}
 	}
+	if res.ChangedFiles > 0 {
+		syncDir(brainDir)
+	}
 	return res, nil
 }
 
-func redactJSONLFile(path string, r *redact.Redactor) (int, error) {
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
+}
+
+func redactJSONLFile(ctx context.Context, path string, r *redact.Redactor) (int, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return 0, err
+	}
+	if !fi.Mode().IsRegular() {
+		return 0, nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -91,6 +144,10 @@ func redactJSONLFile(path string, r *redact.Redactor) (int, error) {
 	var outLines [][]byte
 	changedLines := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			_ = f.Close()
+			return 0, err
+		}
 		raw, readErr := reader.ReadBytes('\n')
 		if len(raw) > 0 {
 			trimmed := bytes.TrimRight(raw, "\r\n")
@@ -121,6 +178,9 @@ func redactJSONLFile(path string, r *redact.Redactor) (int, error) {
 		}
 	}
 	if err := f.Close(); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	if changedLines == 0 {
@@ -157,6 +217,9 @@ func redactJSONLFile(path string, r *redact.Redactor) (int, error) {
 	if err := tmp.Close(); err != nil {
 		return 0, err
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return 0, err
 	}
@@ -167,10 +230,11 @@ func redactJSONLFile(path string, r *redact.Redactor) (int, error) {
 func redactJSONLLine(line []byte, r *redact.Redactor) ([]byte, bool, error) {
 	val, ok := decodeSingleJSON(line)
 	if !ok {
-		// Truncated or malformed crash tail: still mask any secret text.
+		// Truncated crash tail or concatenated JSON records: redact embedded
+		// JSON structures as well as plain text without corrupting valid spans.
 		s := string(line)
-		red := r.String(s)
-		if red == s {
+		red, changed := redactEmbeddedJSON(s, r)
+		if !changed {
 			return line, false, nil
 		}
 		return []byte(red), true, nil
@@ -238,7 +302,6 @@ func redactSnapshotObject(m map[string]any, textStr string, secSlice []any, r *r
 	changed := false
 	var b strings.Builder
 	newSecs := make([]any, len(secSlice))
-	totalTokens := 0
 	textChanged := false
 	for i, elem := range secSlice {
 		secMap := elem.(map[string]any)
@@ -256,67 +319,48 @@ func redactSnapshotObject(m map[string]any, textStr string, secSlice []any, r *r
 		newStart := b.Len()
 		b.WriteString(redPiece)
 		newEnd := b.Len()
-		newTok := ctxcap.EstimateTokens(redPiece)
 		if textChanged {
 			newSec["start"] = newStart
 			newSec["end"] = newEnd
-			newSec["tokens"] = newTok
+			newSec["tokens"] = ctxcap.EstimateTokens(redPiece)
+			if _, hasSecText := newSec["text"].(string); hasSecText {
+				newSec["text"] = redPiece
+			}
 		}
-		totalTokens += newTok
 		newSecs[i] = newSec
 	}
 
 	built := b.String()
-	// Catch a secret that somehow straddled a section boundary.
+	// Catch a secret that straddled a section boundary while snapping every
+	// adjusted offset to valid UTF-8 rune boundaries.
 	if full := r.String(built); full != built {
 		textChanged = true
 		changed = true
+		newSecs = realignSectionsUTF8(newSecs, built, full)
 		built = full
-		totalTokens = ctxcap.EstimateTokens(full)
-		if len(newSecs) == 1 {
-			sec := newSecs[0].(map[string]any)
-			sec["start"] = 0
-			sec["end"] = len(full)
-			sec["tokens"] = totalTokens
-		} else if len(full) >= len(newSecs) {
-			// Collapse onto valid contiguous bounds if a cross-boundary match shifted length.
-			cursor := 0
-			for i := range newSecs {
-				sec := newSecs[i].(map[string]any)
-				oldEnd, _ := asInt(sec["end"])
-				end := min(oldEnd, len(full)-(len(newSecs)-1-i))
-				if i == len(newSecs)-1 || end <= cursor {
-					if i == len(newSecs)-1 {
-						end = len(full)
-					} else {
-						end = cursor + 1
-					}
-				}
-				sec["start"] = cursor
-				sec["end"] = end
-				sec["tokens"] = ctxcap.EstimateTokens(full[cursor:end])
-				cursor = end
-			}
-		}
 	}
 
 	for k, v := range m {
 		if k == "text" || k == "sections" {
 			continue
 		}
-		rk := r.String(k)
-		if rk != k {
-			changed = true
-		}
-		rv, vc := redactAny(v, r)
-		if vc {
+		rk, rv, entryChanged := redactMapEntry(k, v, r)
+		if entryChanged {
 			changed = true
 		}
 		out[rk] = rv
 	}
 	if textChanged {
 		out["text"] = built
-		if _, hasTok := out["tokens"]; hasTok {
+		if _, hasIntTok := asInt(out["tokens"]); hasIntTok {
+			totalTokens := 0
+			for _, elem := range newSecs {
+				if sec, ok := elem.(map[string]any); ok {
+					if tok, ok := asInt(sec["tokens"]); ok {
+						totalTokens += tok
+					}
+				}
+			}
 			out["tokens"] = totalTokens
 		}
 	} else {
@@ -324,6 +368,140 @@ func redactSnapshotObject(m map[string]any, textStr string, secSlice []any, r *r
 	}
 	out["sections"] = newSecs
 	return out, true, changed
+}
+
+// realignSectionsUTF8 adjusts newSecs so [start, end) byte offsets partition
+// full contiguously on valid UTF-8 rune boundaries, preserving unchanged
+// prefix/suffix sections when possible and collapsing trailing sections if
+// full has fewer runes than len(newSecs).
+func realignSectionsUTF8(newSecs []any, built, full string) []any {
+	if full == "" || len(newSecs) == 0 {
+		return nil
+	}
+	runeOffsets := make([]int, 0, len(full)+1)
+	for idx := range full {
+		runeOffsets = append(runeOffsets, idx)
+	}
+	runeOffsets = append(runeOffsets, len(full))
+	runeCount := len(runeOffsets) - 1
+	if len(newSecs) > runeCount {
+		newSecs = newSecs[:runeCount]
+	}
+	n := len(newSecs)
+	if n == 1 {
+		sec := newSecs[0].(map[string]any)
+		sec["start"] = 0
+		sec["end"] = len(full)
+		sec["tokens"] = ctxcap.EstimateTokens(full)
+		if _, hasSecText := sec["text"].(string); hasSecText {
+			sec["text"] = full
+		}
+		return newSecs
+	}
+
+	commonPrefix := 0
+	for commonPrefix < len(built) && commonPrefix < len(full) && built[commonPrefix] == full[commonPrefix] {
+		commonPrefix++
+	}
+	for commonPrefix > 0 && commonPrefix < len(full) && !utf8.RuneStart(full[commonPrefix]) {
+		commonPrefix--
+	}
+	commonSuffix := 0
+	for commonSuffix < len(built)-commonPrefix && commonSuffix < len(full)-commonPrefix &&
+		built[len(built)-1-commonSuffix] == full[len(full)-1-commonSuffix] {
+		commonSuffix++
+	}
+	for commonSuffix > 0 && !utf8.RuneStart(full[len(full)-commonSuffix]) {
+		commonSuffix--
+	}
+
+	prevRI := 0
+	for i := range n {
+		sec := newSecs[i].(map[string]any)
+		var endRI int
+		if i == n-1 {
+			endRI = runeCount
+		} else {
+			oldEnd, _ := asInt(sec["end"])
+			targetByte := oldEnd
+			if oldEnd <= commonPrefix {
+				targetByte = oldEnd
+			} else if oldEnd >= len(built)-commonSuffix {
+				targetByte = len(full) - (len(built) - oldEnd)
+			}
+			ri := sort.SearchInts(runeOffsets, targetByte)
+			minRI := prevRI + 1
+			maxRI := runeCount - (n - 1 - i)
+			endRI = max(minRI, min(ri, maxRI))
+		}
+		startByte := runeOffsets[prevRI]
+		endByte := runeOffsets[endRI]
+		piece := full[startByte:endByte]
+		sec["start"] = startByte
+		sec["end"] = endByte
+		sec["tokens"] = ctxcap.EstimateTokens(piece)
+		if _, hasSecText := sec["text"].(string); hasSecText {
+			sec["text"] = piece
+		}
+		prevRI = endRI
+	}
+	return newSecs
+}
+
+func redactMapEntry(k string, x any, r *redact.Redactor) (string, any, bool) {
+	rk := r.String(k)
+	changed := rk != k
+	var rx any
+	var xc bool
+	if isCredentialKey(k) {
+		rx, xc = redactCredentialValue(x, r)
+	} else {
+		rx, xc = redactAny(x, r)
+	}
+	if xc {
+		changed = true
+	}
+	return rk, rx, changed
+}
+
+func redactCredentialValue(x any, r *redact.Redactor) (any, bool) {
+	switch x := x.(type) {
+	case string:
+		trimmed := strings.TrimSpace(x)
+		if trimmed == redact.Mask || len(trimmed) < minCredentialValLen {
+			return redactString(x, r)
+		}
+		if (trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}') || (trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']') {
+			if json.Valid([]byte(trimmed)) {
+				return redactString(x, r)
+			}
+		}
+		return redact.Mask, true
+	case []any:
+		out := make([]any, len(x))
+		changed := false
+		for i, elem := range x {
+			re, ec := redactCredentialValue(elem, r)
+			if ec {
+				changed = true
+			}
+			out[i] = re
+		}
+		return out, changed
+	case []string:
+		out := make([]string, len(x))
+		changed := false
+		for i, elem := range x {
+			re, ec := redactCredentialValue(elem, r)
+			if ec {
+				changed = true
+			}
+			out[i], _ = re.(string)
+		}
+		return out, changed
+	default:
+		return redactAny(x, r)
+	}
 }
 
 func redactAny(v any, r *redact.Redactor) (any, bool) {
@@ -334,15 +512,22 @@ func redactAny(v any, r *redact.Redactor) (any, bool) {
 		out := make(map[string]any, len(v))
 		changed := false
 		for k, x := range v {
-			rk := r.String(k)
-			if rk != k {
-				changed = true
-			}
-			rx, xc := redactAny(x, r)
-			if xc {
+			rk, rx, entryChanged := redactMapEntry(k, x, r)
+			if entryChanged {
 				changed = true
 			}
 			out[rk] = rx
+		}
+		return out, changed
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		changed := false
+		for k, x := range v {
+			rk, rx, entryChanged := redactMapEntry(k, x, r)
+			if entryChanged {
+				changed = true
+			}
+			out[rk], _ = rx.(string)
 		}
 		return out, changed
 	case []any:
@@ -350,6 +535,17 @@ func redactAny(v any, r *redact.Redactor) (any, bool) {
 		changed := false
 		for i, x := range v {
 			rx, xc := redactAny(x, r)
+			if xc {
+				changed = true
+			}
+			out[i] = rx
+		}
+		return out, changed
+	case []string:
+		out := make([]string, len(v))
+		changed := false
+		for i, x := range v {
+			rx, xc := redactString(x, r)
 			if xc {
 				changed = true
 			}
@@ -365,21 +561,208 @@ func redactString(s string, r *redact.Redactor) (string, bool) {
 	trimmed := strings.TrimSpace(s)
 	if len(trimmed) >= 2 && ((trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}') || (trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']')) {
 		if inner, ok := decodeSingleJSON([]byte(trimmed)); ok {
+			idx := strings.Index(s, trimmed)
+			lead := s[:idx]
+			trail := s[idx+len(trimmed):]
 			redInner, innerChanged := redactAny(inner, r)
 			if innerChanged {
 				if encoded, err := encodeSingleLineJSON(redInner); err == nil {
-					return string(encoded), true
+					out := lead + string(encoded) + trail
+					return out, out != s
 				}
 			}
 			// Even if inner strings did not change, fall back only if result stays valid JSON.
-			if after := r.String(s); after != s && json.Valid([]byte(after)) {
-				return after, true
+			if after := r.String(trimmed); after != trimmed && json.Valid([]byte(after)) {
+				out := lead + after + trail
+				return out, true
 			}
 			return s, false
 		}
 	}
-	after := r.String(s)
-	return after, after != s
+	return redactEmbeddedJSON(s, r)
+}
+
+// redactEmbeddedJSON scans s for embedded JSON objects and arrays (such as
+// renderGemini's "→ send_keys({...})\n\n" or concatenated JSON objects) so
+// structured credential keys and JSON-escaped secrets inside them are masked
+// cleanly while non-JSON text around them is passed through r.String.
+func redactEmbeddedJSON(s string, r *redact.Redactor) (string, bool) {
+	if !strings.ContainsAny(s, "{[") {
+		after := r.String(s)
+		return after, after != s
+	}
+	var out strings.Builder
+	changed := false
+	plainStart := 0
+	probes := 0
+	for i := 0; i < len(s); {
+		rel := strings.IndexAny(s[i:], "{[")
+		if rel < 0 || probes >= maxFailedJSONProbes {
+			break
+		}
+		cand := i + rel
+		end, ok := scanJSONValueEnd(s, cand)
+		if !ok {
+			probes++
+			i = cand + 1
+			continue
+		}
+		inner, decoded := decodeSingleJSON([]byte(s[cand:end]))
+		if !decoded {
+			probes++
+			i = cand + 1
+			continue
+		}
+		if cand > plainStart {
+			plain := s[plainStart:cand]
+			redPlain := r.String(plain)
+			if redPlain != plain {
+				changed = true
+			}
+			out.WriteString(redPlain)
+		}
+		span := s[cand:end]
+		var redInner any
+		var innerChanged bool
+		if m, isMap := inner.(map[string]any); isMap {
+			redInner, innerChanged = redactTopObject(m, r)
+		} else {
+			redInner, innerChanged = redactAny(inner, r)
+		}
+		wroteSpan := false
+		if innerChanged {
+			if encoded, err := encodeSingleLineJSON(redInner); err == nil {
+				encStr := string(encoded)
+				if encStr != span {
+					changed = true
+				}
+				out.WriteString(encStr)
+				wroteSpan = true
+			}
+		}
+		if !wroteSpan {
+			if after := r.String(span); after != span && json.Valid([]byte(after)) {
+				changed = true
+				out.WriteString(after)
+			} else {
+				out.WriteString(span)
+			}
+		}
+		plainStart = end
+		i = end
+	}
+	if plainStart == 0 {
+		after := r.String(s)
+		return after, after != s
+	}
+	if plainStart < len(s) {
+		tail := s[plainStart:]
+		redTail := r.String(tail)
+		if redTail != tail {
+			changed = true
+		}
+		out.WriteString(redTail)
+	}
+	res := out.String()
+	return res, changed && res != s
+}
+
+// scanJSONValueEnd finds the byte index just past a balanced JSON object or
+// array starting at s[start], rejecting non-JSON code/prose early.
+func scanJSONValueEnd(s string, start int) (int, bool) {
+	if start >= len(s) {
+		return 0, false
+	}
+	open := s[start]
+	if open != '{' && open != '[' {
+		return 0, false
+	}
+	// Quick structural check on the first non-whitespace token inside: a
+	// non-empty JSON object must begin with a quoted key, and an empty {} or []
+	// holds nothing to redact.
+	first := start + 1
+	for first < len(s) && isJSONSpace(s[first]) {
+		first++
+	}
+	if first >= len(s) {
+		return 0, false
+	}
+	if open == '{' && s[first] != '"' {
+		return 0, false
+	}
+	if open == '[' && s[first] == ']' {
+		return 0, false
+	}
+
+	stack := make([]byte, 1, 8)
+	if open == '{' {
+		stack[0] = '}'
+	} else {
+		stack[0] = ']'
+	}
+	inString := false
+	escaped := false
+	for j := start + 1; j < len(s); j++ {
+		c := s[j]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+				continue
+			}
+			if c < 0x20 {
+				return 0, false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if stack[len(stack)-1] != c {
+				return 0, false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				if !json.Valid([]byte(s[start : j+1])) {
+					return 0, false
+				}
+				return j + 1, true
+			}
+		default:
+			if !isJSONOutsideStringByte(c) {
+				return 0, false
+			}
+		}
+	}
+	return 0, false
+}
+
+func isJSONSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
+}
+
+func isJSONOutsideStringByte(c byte) bool {
+	if isJSONSpace(c) || (c >= '0' && c <= '9') {
+		return true
+	}
+	switch c {
+	case ':', ',', '-', '+', '.', 'e', 'E', 't', 'r', 'u', 'f', 'a', 'l', 's', 'n':
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeSingleJSON(b []byte) (any, bool) {
@@ -409,7 +792,11 @@ func encodeSingleLineJSON(v any) ([]byte, error) {
 	if err := enc.Encode(v); err != nil {
 		return nil, err
 	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	out := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	if bytes.ContainsAny(out, "\r\n") || !json.Valid(out) {
+		return nil, fmt.Errorf("brain: encoded JSON line is invalid")
+	}
+	return out, nil
 }
 
 func asInt(v any) (int, bool) {

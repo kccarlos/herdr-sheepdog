@@ -8,8 +8,15 @@ enum ChangesPhase {
     /// A daemon from before the route.
     case olderDaemon
     /// The words, and the request's own failure when the computer did not
-    /// answer at all.
-    case failed(String, RequestFailure?)
+    /// answer at all, or the daemon's folder refusal.
+    case failed(String, RequestFailure?, FileProblem? = nil)
+
+    static func failed(_ error: Error, describe: (Error) -> RequestFailure) -> ChangesPhase {
+        if let refusal = error as? FilesRefusal {
+            return .failed(changesErrorText(error, subject: .folder), nil, refusal.problem)
+        }
+        return .failed(changesErrorText(error, subject: .folder), describe(error), nil)
+    }
 }
 
 /// The agent's changes, read-only (docs/dev/design/phone-terminal.md §5
@@ -37,17 +44,11 @@ struct ChangesListView: View {
                 identifier: "changes.older"
             )
             .scrolling()
-        case let .failed(message, request):
-            if let request, request.isUnreachable {
-                BrowserWords.state(.request(request), subject: .folder, root: name, retry: { Task { await reload() } }).scrolling()
-            } else {
-                BrowserState(
-                    symbol: "exclamationmark.triangle", title: "Could not read the changes", message: message,
-                    action: .init(title: "Try again", identifier: "changes.retry") { Task { await reload() } },
-                    identifier: "changes.failed"
-                )
-                .scrolling()
+        case let .failed(message, request, problem):
+            Self.failedState(message: message, request: request, problem: problem, name: name) {
+                Task { await reload() }
             }
+            .scrolling()
         case let .loaded(changes) where !changes.repo:
             noRepository(changes)
         case let .loaded(changes) where changes.files.isEmpty:
@@ -62,6 +63,23 @@ struct ChangesListView: View {
         case let .loaded(changes):
             list(changes)
         }
+    }
+
+    static func failedState(
+        message: String, request: RequestFailure?, problem: FileProblem? = nil,
+        name: String, retry: @escaping () -> Void
+    ) -> BrowserState {
+        if let problem {
+            return BrowserWords.state(.problem(problem), subject: .folder, root: name, retry: retry)
+        }
+        if let request, request.isUnreachable {
+            return BrowserWords.state(.request(request), subject: .folder, root: name, retry: retry)
+        }
+        return BrowserState(
+            symbol: "exclamationmark.triangle", title: "Could not read the changes", message: message,
+            action: .init(title: "Try again", identifier: "changes.retry", run: retry),
+            identifier: "changes.failed"
+        )
     }
 
     private func noRepository(_ changes: AgentChanges) -> some View {
@@ -215,9 +233,14 @@ struct DiffView: View {
     var files: [ChangedFile] = []
     var jump: (ChangedFile) -> Void = { _ in }
 
+    private enum Failure {
+        case olderDaemon
+        case error(Error)
+    }
+
     @State private var lines: [DiffLine]?
     @State private var diff: FileDiff?
-    @State private var error: String?
+    @State private var failure: Failure?
     @State private var wrap = true
     @State private var jumping = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -278,12 +301,19 @@ struct DiffView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let error {
-            BrowserState(
-                symbol: "exclamationmark.triangle", title: "Could not read the diff", message: error,
-                action: .init(title: "Try again", identifier: "diff.retry") { Task { await refresh() } }, identifier: "diff.failed"
-            )
-            .scrolling()
+        if let failure {
+            switch failure {
+            case .olderDaemon:
+                BrowserState(
+                    symbol: "arrow.clockwise", title: "Update sheepdog",
+                    message: "Update sheepdog on your computer to read diffs.",
+                    identifier: "diff.older"
+                )
+                .scrolling()
+            case let .error(error):
+                Self.failedState(error, fileName: file.fileName) { Task { await refresh() } }
+                    .scrolling()
+            }
         } else if let lines {
             if lines.isEmpty {
                 let binary = file.isBinary || diff?.binary == true
@@ -316,17 +346,28 @@ struct DiffView: View {
         }
     }
 
+    static func failedState(_ error: Error, fileName: String, retry: @escaping () -> Void) -> BrowserState {
+        if let refusal = error as? FilesRefusal {
+            return BrowserWords.state(.problem(refusal.problem), subject: .file, root: "this folder", name: fileName, retry: retry)
+        }
+        return BrowserState(
+            symbol: "exclamationmark.triangle", title: "Could not read the diff", message: changesErrorText(error, subject: .file),
+            action: .init(title: "Try again", identifier: "diff.retry", run: retry), identifier: "diff.failed"
+        )
+    }
+
     private func refresh() async {
         do {
             guard let got = try await load() else {
-                error = "Update sheepdog on your computer to read diffs."
+                failure = .olderDaemon
                 return
             }
             diff = got
             lines = DiffParser.parse(got.diff)
-            error = nil
+            failure = nil
         } catch {
-            self.error = changesErrorText(error)
+            if error is CancellationError { return }
+            failure = .error(error)
         }
     }
 }
@@ -451,8 +492,8 @@ private struct DiffJumpSheet: View {
 }
 
 /// The daemon's own words, or a plain sentence.
-func changesErrorText(_ error: Error) -> String {
-    if let refusal = error as? FilesRefusal { return refusal.problem.words(subject: .file, root: "this folder").message }
+func changesErrorText(_ error: Error, subject: FileProblem.Subject = .file, root: String = "this folder") -> String {
+    if let refusal = error as? FilesRefusal { return refusal.problem.words(subject: subject, root: root).message }
     if let daemon = error as? DaemonError {
         if case let .rejected(_, message) = daemon, !message.isEmpty { return message }
         return daemon.message

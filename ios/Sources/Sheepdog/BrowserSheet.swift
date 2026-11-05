@@ -243,8 +243,7 @@ struct BrowserSheet: View {
             changes = .loaded(loaded)
         } catch {
             if error is CancellationError { return }
-            let request = (error is FilesRefusal) ? nil : services.describe(error)
-            changes = .failed(changesErrorText(error), request)
+            changes = .failed(error, describe: services.describe)
         }
     }
 }
