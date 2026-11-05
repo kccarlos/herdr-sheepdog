@@ -26,6 +26,9 @@ type Program struct {
 	// Args are the program arguments. Resume is represented here just as
 	// the agent's own command line reports it.
 	Args []string
+	// Wrapper prefixes the command line in backends that inspect process
+	// argv (such as nice / taskpolicy / ionice utility wrappers).
+	Wrapper []string
 	// Reported says the program reports OSC 7501 status (hc); the old
 	// backend's screen detection does not depend on this field.
 	Reported bool
@@ -120,6 +123,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "claude and codex are detected fresh and resumed",
 			Run:  agentsAreDetectedFreshAndResumed,
+		},
+		{
+			Name: "utility priority wrapped agent is detected and survives daemon restart",
+			Run:  wrappedAgentDetectedAcrossRestart,
 		},
 		{
 			Name: "an exited agent leaves the terminal at a plain shell",
@@ -254,6 +261,36 @@ func agentsAreDetectedFreshAndResumed(t *testing.T, newDriver NewDriver) {
 				t.Fatalf("spoken name = %q, want %q", got, tc.say)
 			}
 		})
+	}
+}
+
+func wrappedAgentDetectedAcrossRestart(t *testing.T, newDriver NewDriver) {
+	d := newDriver(t)
+	ctx := testContext(t)
+	shells := NewShellBook()
+	pane, _, err := shells.Open(ctx, d.ShellHost(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetScreen(ctx, pane.PaneID, blockedScreen); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Run(ctx, pane.PaneID, Program{
+		Kind:    "codex",
+		Wrapper: []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility"},
+		Args:    []string{"--no-daemon"},
+		State:   herdr.StateBlocked,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := oneAgent(t, ctx, d.Backend())
+	if agent.PaneID != pane.PaneID || agent.Agent != "codex" || agent.Status != herdr.StateBlocked || spoken(agent) != "Codex" {
+		t.Fatalf("wrapped agent before restart = %+v", agent)
+	}
+	restarted := d.RestartDaemon(t)
+	after := oneAgent(t, ctx, restarted.Backend())
+	if after.PaneID != pane.PaneID || after.Agent != "codex" || after.Status != herdr.StateBlocked {
+		t.Fatalf("wrapped agent after restart = %+v", after)
 	}
 }
 

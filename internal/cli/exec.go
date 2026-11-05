@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
 )
 
 // stderrCapBytes bounds the stderr captured for the log/error message,
@@ -41,7 +43,8 @@ type execResult struct {
 // group. It blocks until the process exits or ctx is done, in which case
 // the whole process group is killed (SIGKILL) so no grandchild survives.
 func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes int, withhold []string) execResult {
-	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // argv is built from config templates, not a shell
+	execArgv := procprio.WrapArgv(argv)
+	cmd := exec.Command(execArgv[0], execArgv[1:]...) //nolint:gosec // argv is built from config templates, not a shell
 	cmd.Dir = dir
 	cmd.Env = scrubEnv(os.Environ(), withhold...)
 	cmd.Stdin = nil // exec.Cmd connects a nil Stdin to the null device
@@ -55,6 +58,7 @@ func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes i
 	if err := cmd.Start(); err != nil {
 		return execResult{StartErr: err, Exit: -1}
 	}
+	procprio.ApplyProcessGroup(cmd.Process.Pid)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

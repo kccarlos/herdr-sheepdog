@@ -289,8 +289,10 @@ type Supervisor struct {
 	attMu   sync.Mutex
 	attLast map[string]AgentAttention
 	held    map[string]bool // question ids held out of the pending slot (holdQuestion)
+	missMu  sync.Mutex
 	idxMu   sync.Mutex
 	idx     *folderIndex
+	missAt  time.Time
 
 	// noProcessInfo is latched once an older herdr rejects pane.process_info
 	// as an unknown method, so later transitions fall back to agent_session
@@ -389,6 +391,11 @@ type Supervisor struct {
 	// promptHeard is whether the user has likely heard the open prompt's
 	// announcement (buried.go).
 	promptHeard promptHearing
+	// told is which questions the user was told about, for the
+	// displacement rail (displaced.go); reasks are its re-ask lines
+	// waiting to be pushed once s.mu is released.
+	told   toldState
+	reasks []reask
 	// acceptedSeq counts the user's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (reply.go). Unlike
@@ -477,6 +484,12 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(), conversationStartedAt: cfg.Now(),
 		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, promptSeenAt: map[string]time.Time{}, inputWake: make(chan struct{}), investigating: map[string]*liveInvestigation{}}
 	s.life, s.endLife = context.WithCancel(context.Background())
+	for _, q := range store.Questions() {
+		if q.Held {
+			s.holdQuestion(q.ID)
+		}
+	}
+	s.restoreTold()
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.
@@ -685,6 +698,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 				s.brain.SaidCut(e.Text, e.Cut.Full, e.Cut.HeardMs)
 			}
 			s.onAnswerCut(e.Cut, e.Text) // unanswered.go
+			s.onToldCut(e.Cut, e.Text)   // displaced.go
 			return
 		}
 		if e.Dir == voice.DirIn {
@@ -708,6 +722,9 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventTurnComplete:
 		s.closeVoiceInput()
 		s.pushSpoken(false)
+		s.mu.Lock()
+		s.notePushTurnDoneLocked()
+		s.mu.Unlock()
 		s.voiceStopped()
 		s.promptTurnDone() // buried.go
 		if s.brain != nil {
@@ -727,15 +744,20 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			// markPushed). A silent push is context the voice never
 			// speaks.
 			s.pushSpoken(true)
-			s.markPushed(e.Text)
+			s.markPushed(e.Text, e.PendingID)
 			s.noteNamesSaid(e.Text) // names.go: what the user was told
 		}
 	case voice.EventInterrupted:
 		// The user barged in on whatever was playing, a push
 		// included: what the voice says next answers them.
+		s.mu.Lock()
+		s.notePushInterruptedLocked()
+		s.mu.Unlock()
 		s.pushSpoken(false)
 		s.voiceStopped()
 		s.flushFocus()
+	case voice.EventToolResult:
+		s.onToolResult(e) // displaced.go
 	case voice.EventPushUnheard:
 		s.onPushUnheard(e) // unheard.go
 	}

@@ -128,11 +128,30 @@ func isPageRoute(path string) bool {
 	return true
 }
 
+func canonicalOriginHost(scheme, hostPort string) string {
+	hostPort = strings.TrimSpace(hostPort)
+	if hostPort == "" {
+		return ""
+	}
+	h, p, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return strings.ToLower(strings.TrimSuffix(hostPort, "."))
+	}
+	h = strings.ToLower(strings.TrimSuffix(h, "."))
+	if (strings.EqualFold(scheme, "https") && p == "443") || (strings.EqualFold(scheme, "http") && p == "80") {
+		if strings.Contains(h, ":") {
+			return "[" + h + "]"
+		}
+		return h
+	}
+	return net.JoinHostPort(h, p)
+}
+
 // crossOrigin reports a request another website made: an upgrade or a
 // request that changes something, whose Origin is present and is not
 // this daemon's own. The app sends no Origin. This stops cross-site
 // WebSocket hijacking and request forgery even with a cookie.
-func crossOrigin(r *http.Request) bool {
+func crossOrigin(r *http.Request, allowForwardedHost bool) bool {
 	o := r.Header.Get("Origin")
 	if o == "" {
 		return false
@@ -142,15 +161,32 @@ func crossOrigin(r *http.Request) bool {
 		return false
 	}
 	u, err := url.Parse(o)
-	return err != nil || !strings.EqualFold(u.Host, r.Host)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	origHost := canonicalOriginHost(u.Scheme, u.Host)
+	if origHost == "" {
+		return true
+	}
+	if origHost == canonicalOriginHost(u.Scheme, r.Host) {
+		return false
+	}
+	if allowForwardedHost {
+		if fh := forwardedHost(r); fh != "" && origHost == canonicalOriginHost(u.Scheme, fh) {
+			return false
+		}
+	}
+	return true
 }
 
 // guard is the first check on every request:
 //   - plain HTTP from another machine: a page is redirected (308) to the
 //     same address over https, anything else is refused with 426
 //     {"error":"tls_required"};
-//   - from loopback, the Host must be a loopback name (127.0.0.1, ::1,
-//     localhost), which stops a DNS-rebinding page;
+//   - from unproxied loopback without a paired device ticket, the Host must
+//     be a loopback name (127.0.0.1, ::1, localhost), which stops a
+//     DNS-rebinding page while allowing reverse-proxied sign-in/pairing
+//     (which never receives ticketless local authority);
 //   - an upgrade or a change from another website's Origin is refused.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,12 +202,14 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeError(w, http.StatusUpgradeRequired, "tls_required")
 			return
 		}
-		if loop && !isLoopbackHost(r.Host) {
+		proxied := loop && isProxiedRequest(r)
+		validTicket := loop && s.hasValidTicket(r)
+		if loop && !isLoopbackHost(r.Host) && !validTicket && !proxied {
 			s.log.Log(logSource, "web.host_refused", "", map[string]any{"path": r.URL.Path, "host": r.Host})
 			writeError(w, http.StatusForbidden, "host_not_allowed")
 			return
 		}
-		if crossOrigin(r) {
+		if crossOrigin(r, validTicket || proxied) {
 			s.log.Log(logSource, "web.origin_refused", "", map[string]any{"path": r.URL.Path, "origin": r.Header.Get("Origin")})
 			writeError(w, http.StatusForbidden, "origin_not_allowed")
 			return

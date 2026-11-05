@@ -116,6 +116,14 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		s.mentionedIn(out.res.Spoken)
 		s.noteFocus(out.focus, u.text)
 		s.answered(u, out) // unanswered.go
+		// The reply reaches the user now: the questions it states were
+		// told (displaced.go). A typed reply shows only Spoken, never
+		// Options.
+		if u.typed {
+			s.toldInReply(out.res.Spoken)
+		} else {
+			s.toldInReplyFor(replyText(out.res), u.id)
+		}
 		return out.res
 	}
 	s.fellBack(u, out) // unanswered.go
@@ -205,6 +213,13 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 			tags[voice.TagOnScreen] = out.res.Shown
 		}
 	}
+	if out.ok && urgency != voice.UrgencySilent {
+		// The questions the reply states are told when it goes out
+		// (displaced.go).
+		s.mu.Lock()
+		s.replyLineForLocked(line, u.id)
+		s.mu.Unlock()
+	}
 	s.pushTagged(paneID, line, urgency, tags)
 	if out.ok && !stale {
 		// A stale reply is context, not what is being discussed: it
@@ -271,6 +286,15 @@ func (s *Supervisor) subjectOf(spoken, asked string, actedOn []string) (state.Ag
 		}
 	}
 	return state.Agent{}, false
+}
+
+// replyText is what the user hears of a reply: its words and its
+// options.
+func replyText(res voice.ToolResult) string {
+	if len(res.Options) == 0 {
+		return res.Spoken
+	}
+	return res.Spoken + " " + strings.Join(res.Options, "; ")
 }
 
 // answerPromptOpen reports whether a worker's approval prompt is waiting

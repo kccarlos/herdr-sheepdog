@@ -26,6 +26,9 @@ func (s *Supervisor) openDecisions() []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(row state.Agent, question string) {
+		if s.paneMutedCached(row.PaneID) {
+			return
+		}
 		if seen[row.PaneID] {
 			return
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
 // muteWorld puts auth's pane in a real folder, so the space has a path, and
@@ -55,6 +56,153 @@ func (w *muteWorld) mute(t *testing.T) {
 	t.Helper()
 	if _, err := w.mutes.Set(w.path, nil, ViaPhone); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Review item 4: a prompt tool that finds a muted space's prompt hands it
+// to the orchestrator, not to the user. It stays held until a reply states
+// it to the user; then a fresh answer goes through.
+func TestMutedPromptToolSurfacesQuestionForNextAnswer(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	prompt, ok := herdr.ParsePrompt(fixture(t, "codex-approval-prompt.screen.txt"))
+	if !ok {
+		t.Fatal("prompt did not parse")
+	}
+	w.sup.ShepherdInput(InputTyped, "tell auth to deploy")
+	// The orchestrator's prompt tool runs after the words that led to it.
+	w.clock.Advance(time.Second)
+	row, _ := w.store.Get("w5:p1")
+	res := w.sup.pendingFromPrompt(context.Background(), row, prompt)
+	if p, ok := w.store.Pending(); ok && p.PaneID == "w5:p1" {
+		t.Fatalf("a muted space's prompt took the voice's slot before the user heard it: %+v", p)
+	}
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("surfaced prompt not held: %+v", qs)
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err == nil {
+		t.Fatal("a yes approved a muted space's prompt the user never heard")
+	}
+	// The orchestrator's reply states it: now the user has heard it.
+	w.sup.toldInReply(qs[0].SpokenSummary + " Answer that first.")
+	if p, ok := w.store.Pending(); !ok || p.ID != qs[0].ID || w.sup.heldQuestion(p.ID) {
+		t.Fatalf("stated prompt not promoted: %+v %v", p, ok)
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err != nil {
+		t.Fatalf("follow-up answer: %v", err)
+	}
+	_ = res
+}
+
+// Review item 4: send_keys checks the space mute itself, not the folder
+// index as a lock-held check last left it (cold at startup, or stale for a
+// new workspace): a muted space's prompt with no recorded question is not
+// revived for the voice.
+func TestSendKeysChecksTheSpaceMuteFresh(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.srv.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
+	w.srv.SetStatus("w5:p1", herdr.StateBlocked)
+	if _, err := w.store.Update("w5:p1", func(a *state.Agent) { a.State = herdr.StateBlocked }); err != nil {
+		t.Fatal(err)
+	}
+	w.clock.Advance(time.Second)
+	w.sup.ShepherdInput(InputTyped, "yes, let auth go ahead")
+	if _, err := (brainHost{w.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"}); err == nil {
+		t.Fatal("send_keys answered a muted space's prompt the user never heard")
+	}
+	if n := w.keysTo("w5:p1"); n != 0 {
+		t.Fatalf("keys sent: %d", n)
+	}
+}
+
+func TestMutedQuestionExcludedFromDecisions(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if got := w.sup.openDecisions(); len(got) != 0 {
+		t.Fatalf("muted decision announced: %v", got)
+	}
+}
+
+func TestWindowAnswerFindsHeldQuestion(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	qs := w.store.Questions()
+	if len(qs) != 1 {
+		t.Fatal("missing question")
+	}
+	q := qs[0]
+	id, option, ok := w.sup.windowAnswer("w5:p1", q.Options[0].Keys)
+	if !ok || id != q.ID || option != 1 {
+		t.Fatalf("window answer = %q, %d, %v", id, option, ok)
+	}
+}
+
+func TestMutedRepromptIsRecognized(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	prompt, ok := herdr.ParsePrompt(fixture(t, "codex-approval-prompt.screen.txt"))
+	if !ok {
+		t.Fatal("prompt did not parse")
+	}
+	row, _ := w.store.Get("w5:p1")
+	if !w.sup.raiseReprompt(context.Background(), row, prompt, "test", 0) {
+		t.Fatal("held reprompt was not recognized")
+	}
+}
+
+func TestReconciledMutedQuestionRemainsHeld(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	q := w.store.Questions()[0]
+	w.srv.SetScreen(q.PaneID, fixture(t, "claude-permission-prompt.screen.txt"))
+	row, _ := w.store.Get(q.PaneID)
+	w.sup.checkQuestion(context.Background(), row, q)
+	qs := w.store.Questions()
+	if len(qs) != 1 || qs[0].ID == q.ID || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("replacement not held: %+v", qs)
+	}
+	if w.log.count("pending.cancelled") != 1 || w.log.count("pending.created") != 2 {
+		t.Fatal("replacement events missing")
+	}
+}
+
+func TestMuteLookupRefreshesRecentIndexOnNewPane(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.sup.WarmFolders(context.Background())
+	w.addAgent("w6:p1", "new", "codex", herdr.StateWorking)
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "w6:p1", WorkspaceID: "new", Cwd: w.path})
+	if !w.sup.paneMuted(context.Background(), "w6:p1") {
+		t.Fatal("new pane in muted folder was not recognized")
+	}
+}
+
+func TestHeldQuestionSurvivesRestart(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "codex-approval-prompt.screen.txt")
+	store, err := state.Open(w.store.Path(), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup, err := New(store, w.client, nil, w.pusher, w.log, Config{Now: w.clock.Now, Mutes: w.mutes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qs := store.Questions()
+	if len(qs) != 1 || !sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("held question lost on restart: %+v", qs)
 	}
 }
 

@@ -247,11 +247,11 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 		switch {
 		case errors.Is(err, ErrNotSent):
 			return WindowResult{Kind: "answer", Spoken: res.Spoken}, err
+		case errors.Is(err, ErrPendingGone):
+			return WindowResult{Kind: "answer"}, err
 		case !errors.Is(err, ErrPendingGone):
 			return WindowResult{Kind: "answer"}, fmt.Errorf("%w: %v", ErrWindowRefused, err)
 		}
-		// Answered or replaced between the look and the tap: the keys
-		// still go to the window as plain keys.
 	}
 	ps := s.paneSend(paneID)
 	ps.Lock()
@@ -259,6 +259,9 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 	ps.Unlock()
 	if err != nil {
 		return WindowResult{}, err
+	}
+	if row.State == herdr.StateBlocked {
+		s.startReprompt(paneID)
 	}
 	name := aliasOr(state.Say(row))
 	if s.brain != nil {
@@ -278,7 +281,16 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 func (s *Supervisor) windowAnswer(paneID string, keys []string) (string, int, bool) {
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		return "", 0, false
+		has = false
+		for _, q := range s.store.Questions() {
+			if q.PaneID == paneID && q.Kind == state.PendingAnswerPrompt {
+				p, has = q, true
+				break
+			}
+		}
+		if !has {
+			return "", 0, false
+		}
 	}
 	for i, o := range p.Options {
 		if o.Meta {
