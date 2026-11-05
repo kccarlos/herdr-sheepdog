@@ -116,6 +116,10 @@ on GitHub-hosted Macs (free for a public repository; the `xcode-27`
 image, Xcode 27.1 picked with `xcode-select`). A Linux `plan` job reads the
 paths a PR or push changes (`ios/scripts/ci-plan.sh tier`) and picks a tier:
 
+Route iOS-tier PRs through one integration branch at a time and run the full
+suite once: a full run uses seven Mac jobs, while the account limit is five.
+Keep Go-only PRs separate so they do not queue behind that integration run.
+
 | Change | Mac jobs |
 |---|---|
 | A PR that changes `ios/` (Markdown and `ios/docs/` aside) or `ios.yml`; a manual run | smoke and five shards, the full suite |

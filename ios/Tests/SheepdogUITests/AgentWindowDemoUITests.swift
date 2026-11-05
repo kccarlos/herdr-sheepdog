@@ -19,24 +19,6 @@ final class AgentWindowDemoUITests: XCTestCase {
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + suffix + ".png"))
     }
 
-    /// The real main view stays under the demo's cover with the same
-    /// identifiers: tap the one on screen.
-    private func tapVisible(_ query: XCUIElementQuery, _ id: String) {
-        let matches = query.matching(identifier: id)
-        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 10), id)
-        // It can exist a moment before it is hittable (a sheet or the
-        // demo's cover still animating, slower on a CI Mac): keep looking.
-        let deadline = Date().addingTimeInterval(10)
-        repeat {
-            for i in 0 ..< matches.count where matches.element(boundBy: i).isTappable {
-                matches.element(boundBy: i).tap()
-                return
-            }
-            usleep(200_000)
-        } while Date() < deadline
-        XCTFail("no visible \(id)")
-    }
-
     /// Launches the demo and opens `alias`'s window.
     private func openWindow(_ alias: String, term: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
@@ -48,7 +30,8 @@ final class AgentWindowDemoUITests: XCTestCase {
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
         showAgentsPane(app)
-        tapVisible(app.buttons, "flock.agent.\(alias).window")
+        let ready = term == "gone" ? app.buttons["agentScreen.ended.back"] : nil
+        openAgentWindow(app, alias: alias, until: ready)
         return app
     }
 
