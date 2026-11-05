@@ -167,3 +167,42 @@ func TestReseedEndsWithTheFocusLine(t *testing.T) {
 		t.Errorf("re-seed does not end with the focus line:\n%s", recap)
 	}
 }
+
+func TestRecapCutEllipsisNoteAndJoinAroundOnGemini(t *testing.T) {
+	c1 := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c1)}})
+	h.s.ClientAttached(true)
+
+	// User starts speaking, assistant starts replying, cut at 0 ms, user finishes sentence.
+	c1.serve(inputTranscriptMsg("check auth", true))
+	c1.serve(audioMsg(make([]byte, 48*1000)))
+	c1.serve(outputTranscriptMsg("Let me check auth right now."))
+	h.waitEvent("speaking 1", func(ev voice.Event) bool { return h.s.Speaking() })
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c1.serve(interruptedMsg())
+	h.waitEvent("interrupted 1", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	c1.serve(inputTranscriptMsg("and docs", true))
+
+	// Assistant replies again, cut 50% in.
+	c1.serve(audioMsg(make([]byte, 48*1000)))
+	c1.serve(outputTranscriptMsg("Checking auth and docs"))
+	c1.serve(audioMsg(make([]byte, 48*1000)))
+	c1.serve(outputTranscriptMsg(" right now for you."))
+	h.waitEvent("speaking 2", func(ev voice.Event) bool { return h.s.Speaking() })
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c1.serve(interruptedMsg())
+	h.waitEvent("interrupted 2", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 1000)
+
+	text, _, _ := h.s.reseedText()
+	if !strings.Contains(text, "User: check auth and docs") {
+		t.Errorf("recap missing merged user turn:\n%s", text)
+	}
+	if strings.Contains(text, "Let me check auth") {
+		t.Errorf("recap kept 0-heard reply:\n%s", text)
+	}
+	if !strings.Contains(text, "You (cut off after 1 s): Checking auth and docs…") {
+		t.Errorf("recap missing ellipsis on cut reply:\n%s", text)
+	}
+}

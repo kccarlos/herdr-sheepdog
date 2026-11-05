@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
@@ -54,20 +55,23 @@ type Switcher struct {
 	// /debug Context tab).
 	ctxlog *ctxcap.VoiceLog
 
-	audio  chan []byte
-	events chan Event
+	audio       chan []byte
+	audioChunks chan AudioChunk
+	events      chan Event
 
-	mu        sync.RWMutex
-	ctx       context.Context
-	started   bool
-	closed    bool
-	switching bool
-	starting  bool
-	current   string
-	inner     Session
-	muted     bool
-	client    bool
-	openCheck OpenCheck
+	mu           sync.RWMutex
+	ctx          context.Context
+	started      bool
+	closed       bool
+	switching    bool
+	starting     bool
+	current      string
+	inner        Session
+	innerRetired chan struct{}
+	innerEpoch   atomic.Uint64
+	muted        bool
+	client       bool
+	openCheck    OpenCheck
 	// billedRetired is the billed duration of retired sessions (a
 	// GPT-Live session switched away from).
 	billedRetired float64
@@ -87,7 +91,13 @@ func NewSwitcher(providers []Provider, initial string, log logging.Logger) (*Swi
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	sw := &Switcher{log: log, providers: providers, audio: make(chan []byte), events: make(chan Event, 1024)}
+	sw := &Switcher{
+		log:         log,
+		providers:   providers,
+		audio:       make(chan []byte),
+		audioChunks: make(chan AudioChunk),
+		events:      make(chan Event, 1024),
+	}
 	if _, err := sw.lookup(initial); err != nil && !errors.Is(err, ErrUnavailableProvider) {
 		return nil, err
 	}
@@ -192,7 +202,7 @@ func (sw *Switcher) Start(ctx context.Context) error {
 		ca.ClientAttached(sw.client)
 	}
 	setOpenCheck(inner, sw.openCheck)
-	sw.forwardLocked(inner)
+	sw.forwardLocked(inner, 0, nil)
 	return nil
 }
 
@@ -249,22 +259,42 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		return errors.New("voice: switcher closed")
 	}
 	old := sw.inner
+	if sw.innerRetired != nil {
+		close(sw.innerRetired)
+		sw.innerRetired = nil
+	}
+	fence := NextAudioEpoch()
+	if b, ok := inner.(interface{ BumpAudioEpoch() }); ok {
+		b.BumpAudioEpoch()
+	}
 	sw.current, sw.inner = id, inner
 	muted, client, check := sw.muted, sw.client, sw.openCheck
-	sw.forwardLocked(inner)
+	ready := make(chan struct{})
+	sw.forwardLocked(inner, fence, ready)
 	sw.retire.Add(1)
 	sw.mu.Unlock()
 
+	if pa, ok := old.(interface{ PurgeAudio() uint64 }); ok {
+		pa.PurgeAudio()
+	} else if fa, ok := old.(interface{ FlushAudio() uint64 }); ok {
+		fa.FlushAudio()
+	}
 	inner.SetMuted(muted)
 	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(client)
+	}
+	if client {
+		if ef, ok := inner.(interface{ ExpectFlush() }); ok {
+			ef.ExpectFlush()
+		}
 	}
 	setOpenCheck(inner, check)
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
 	sw.carryRecap(old, inner, from, id)
 	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
-	sw.emit(EventInterrupted{}) // drop the old voice's audio (its queued pushes were carried)
+	sw.emit(EventInterrupted{Epoch: fence}) // drop the old voice's audio (its queued pushes were carried)
+	close(ready)
 	go func() {
 		defer sw.retire.Done()
 		_ = old.Close()
@@ -351,24 +381,90 @@ func (sw *Switcher) carryPushes(old, inner Session, from, to string) {
 }
 
 // forwardLocked pumps inner's audio and events onto the switcher's while
-// inner is the current session.
-func (sw *Switcher) forwardLocked(inner Session) {
+// inner is the current session. When ready is non-nil, forwarding waits
+// until ready closes (after SetProvider has flushed the retired session and
+// emitted its EventInterrupted barrier).
+func (sw *Switcher) forwardLocked(inner Session, fence uint64, ready <-chan struct{}) {
 	ctx := sw.ctx
+	retired := make(chan struct{})
+	sw.innerRetired = retired
+	sw.innerEpoch.Store(NextAudioEpoch())
+	var fenceOnly []uint64
+	if fence != 0 {
+		fenceOnly = []uint64{fence}
+	}
+	waitReady := func() bool {
+		if ready == nil {
+			return true
+		}
+		select {
+		case <-ready:
+			return true
+		case <-retired:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+	stampFence := func(flushes []uint64) []uint64 {
+		if fence == 0 {
+			return flushes
+		}
+		if len(flushes) == 0 {
+			return fenceOnly
+		}
+		for _, ep := range flushes {
+			if ep == fence {
+				return flushes
+			}
+		}
+		out := make([]uint64, 0, len(flushes)+1)
+		inserted := false
+		for _, ep := range flushes {
+			if !inserted && ep > fence {
+				out = append(out, fence)
+				inserted = true
+			}
+			out = append(out, ep)
+		}
+		if !inserted {
+			out = append(out, fence)
+		}
+		return out
+	}
 	sw.fwd.Add(2)
 	go func() {
 		defer sw.fwd.Done()
-		for chunk := range inner.Audio() {
+		if !waitReady() {
+			return
+		}
+		send := func(chunk AudioChunk) {
 			if !sw.isCurrent(inner) {
-				continue
+				return
 			}
+			chunk.FlushedEpochs = stampFence(chunk.FlushedEpochs)
 			select {
-			case sw.audio <- chunk:
+			case sw.audio <- chunk.Data:
+			case sw.audioChunks <- chunk:
+			case <-retired:
 			case <-ctx.Done():
 			}
+		}
+		if ac, ok := inner.(interface{ AudioChunks() <-chan AudioChunk }); ok {
+			for chunk := range ac.AudioChunks() {
+				send(chunk)
+			}
+			return
+		}
+		for data := range inner.Audio() {
+			send(AudioChunk{Data: data, Epoch: sw.innerEpoch.Load()})
 		}
 	}()
 	go func() {
 		defer sw.fwd.Done()
+		if !waitReady() {
+			return
+		}
 		for ev := range inner.Events() {
 			if !sw.isCurrent(inner) {
 				continue // a retired session's goodbyes
@@ -420,17 +516,23 @@ func (sw *Switcher) Close() error {
 	if !sw.started {
 		sw.closed = true
 		close(sw.audio)
+		close(sw.audioChunks)
 		sw.closeEvents()
 		sw.mu.Unlock()
 		return nil
 	}
 	sw.closed = true
+	if sw.innerRetired != nil {
+		close(sw.innerRetired)
+		sw.innerRetired = nil
+	}
 	inner := sw.inner
 	sw.mu.Unlock()
 	err := inner.Close()
 	sw.retire.Wait()
 	sw.fwd.Wait()
 	close(sw.audio)
+	close(sw.audioChunks)
 	sw.closeEvents()
 	return err
 }
@@ -526,6 +628,23 @@ func (sw *Switcher) Speaking() bool {
 // Audio implements Session.
 func (sw *Switcher) Audio() <-chan []byte { return sw.audio }
 
+// AudioChunks yields outbound audio frames paired with their flush epoch.
+func (sw *Switcher) AudioChunks() <-chan AudioChunk { return sw.audioChunks }
+
+// FlushAudio purges any queued outbound audio in the current session and
+// returns the flushed epoch so the caller can drop racing pre-flush frames.
+func (sw *Switcher) FlushAudio() uint64 {
+	cur := sw.cur()
+	if fa, ok := cur.(interface{ FlushAudio() uint64 }); ok {
+		return fa.FlushAudio()
+	}
+	old := sw.innerEpoch.Swap(NextAudioEpoch())
+	if old == 0 {
+		return NextAudioEpoch()
+	}
+	return old
+}
+
 // Events implements Session.
 func (sw *Switcher) Events() <-chan Event { return sw.events }
 
@@ -588,9 +707,7 @@ func (sw *Switcher) HasListener() bool {
 }
 
 // ClientPlayback forwards a /ws client playback report to the current
-// session (docs/dev/ws-contract.md "Playback reports"). A new provider's
-// session starts with no run, so a report about the old one's audio
-// (the flush a switch sends) is logged and otherwise ignored there.
+// session (docs/dev/ws-contract.md "Playback reports").
 func (sw *Switcher) ClientPlayback(state string, playedMs int) {
 	if p, ok := sw.cur().(interface{ ClientPlayback(string, int) }); ok {
 		p.ClientPlayback(state, playedMs)

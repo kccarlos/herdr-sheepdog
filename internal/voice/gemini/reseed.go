@@ -42,8 +42,9 @@ const reseedPrefix = "[system context, not spoken by the user] The voice connect
 // flushRecapLocked moves the user's pending words and the voice's
 // reply so far into the recap. Caller holds s.mu.
 func (s *Session) flushRecapLocked() {
-	s.recap.Add(voice.RecapUser, s.inText)
-	s.recap.Add(voice.RecapAssistant, s.outText)
+	s.recap.AddSeq(voice.RecapUser, s.inText)
+	seq := s.recap.AddSeq(voice.RecapAssistant, s.outText)
+	s.play.SetRecapSeq(seq)
 	s.inText, s.outText = "", ""
 }
 

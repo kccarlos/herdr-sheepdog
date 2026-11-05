@@ -75,8 +75,12 @@ type EventTranscript struct {
 }
 
 // EventInterrupted means queued model audio was dropped; the browser must
-// flush its playback buffer.
-type EventInterrupted struct{}
+// flush its playback buffer. Epoch, when non-zero, fences outbound AudioChunk
+// frames: any chunk with Epoch <= EventInterrupted.Epoch came from before the
+// flush and must not be delivered after the flush control frame.
+type EventInterrupted struct {
+	Epoch uint64
+}
 
 // EventToolCall is emitted when the model requests a tool (for logging and
 // the debug page; the ToolHandler is invoked separately).
