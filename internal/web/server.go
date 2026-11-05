@@ -634,12 +634,33 @@ func (s *Server) staticRoutes(name string, a access) ([]route, error) {
 // for every event; the supervisor gets the same events separately.
 func (s *Server) OnVoiceEvent(ev voice.Event) { s.hub.onVoiceEvent(ev) }
 
+// audioChunker is implemented by voice sessions that stamp outbound
+// audio chunks with an interrupt epoch so an in-flight chunk cannot
+// overtake a flush.
+type audioChunker interface {
+	AudioChunks() <-chan voice.AudioChunk
+}
+
 // Run pumps model audio to the browser until ctx ends or the session's
 // Audio channel closes. It returns immediately when there is no voice
 // session.
 func (s *Server) Run(ctx context.Context) {
 	if s.deps.Voice == nil {
 		return
+	}
+	if ac, ok := s.deps.Voice.(audioChunker); ok {
+		chunks := ac.AudioChunks()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok := <-chunks:
+				if !ok {
+					return
+				}
+				s.hub.sendAudioChunk(chunk)
+			}
+		}
 	}
 	audio := s.deps.Voice.Audio()
 	for {

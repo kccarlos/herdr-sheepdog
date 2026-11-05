@@ -114,9 +114,9 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 				s.audioTiming.Chunk(now, len(p.InlineData.Data))
 				s.play.SentPCM(now, p.InlineData.Data)
 				s.echo.Out(p.InlineData.Data)
+				s.out.Push(p.InlineData.Data)
 				s.mu.Unlock()
 				s.clearStalled()
-				s.out.Push(p.InlineData.Data)
 			}
 		}
 	}
@@ -186,17 +186,24 @@ func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	now := s.now()
 	s.speaking = false
-	s.flushRecapLocked() // a cut report may shorten it to what was heard
-	s.play.Flush(now)
+	seq := s.recap.AddSeq(voice.RecapAssistant, s.outText) // a cut report may shorten it
+	s.outText = ""
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	s.play.FlushMeta(now, voice.FlushMeta{
+		RecapSeq:    seq,
+		UtteranceID: uttID,
+		ByPush:      by == "push",
+	})
 	s.brief.flushBy, s.brief.flushAt = by, now
 	armed := s.echo.Flush(now)
 	timing := s.finishAudioTimingLocked()
+	dropped, epoch := s.out.FlushEpoch()
 	s.mu.Unlock()
-	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	if armed {
 		s.log.Log(logSource, "voice.echo_gate", "", map[string]any{"open": false, "why": "armed", "by": "self_interruption"})
 	}
 	s.logAudioTiming(timing)
-	s.emit(voice.EventInterrupted{})
+	s.emit(voice.EventInterrupted{Epoch: epoch})
 }

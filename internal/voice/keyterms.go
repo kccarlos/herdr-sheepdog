@@ -267,7 +267,7 @@ func contentTokens(text string) []string {
 		cjk := len(r) == 1 && unicode.Is(unicode.Han, r[0])
 		switch {
 		case cjk && cjkParticles[t]:
-		case !cjk && (len(r) < 3 || stopWords[t] || spokenJoiners[t]):
+		case !cjk && !unicode.IsDigit(r[0]) && (len(r) < 3 || stopWords[t] || spokenJoiners[t]):
 		case seen[t]:
 		default:
 			seen[t] = true

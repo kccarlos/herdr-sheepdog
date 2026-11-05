@@ -415,3 +415,89 @@ func TestProviderSwitchCarriesTheFocus(t *testing.T) {
 		t.Errorf("focus = %q, order = %v", o.focus, order)
 	}
 }
+
+type chunkFakeSess struct {
+	*fakeSess
+	chunks chan AudioChunk
+	epoch  uint64
+}
+
+func newChunkFake(name string) *chunkFakeSess {
+	return &chunkFakeSess{
+		fakeSess: newFake(name),
+		chunks:   make(chan AudioChunk),
+		epoch:    NextAudioEpoch(),
+	}
+}
+
+func (f *chunkFakeSess) AudioChunks() <-chan AudioChunk { return f.chunks }
+func (f *chunkFakeSess) BumpAudioEpoch() {
+	f.mu.Lock()
+	f.epoch = NextAudioEpoch()
+	f.mu.Unlock()
+}
+func (f *chunkFakeSess) currentEpoch() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch
+}
+func (f *chunkFakeSess) Close() error {
+	f.mu.Lock()
+	if !f.closed {
+		close(f.chunks)
+	}
+	f.mu.Unlock()
+	return f.fakeSess.Close()
+}
+
+func TestSwitcherRetireAbortsInFlightAudioAndFencesEpoch(t *testing.T) {
+	g, o := newChunkFake("gemini"), newChunkFake("openai")
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+	}, "gemini", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+
+	// g hands a chunk to Switcher.forwardLocked; with nobody reading
+	// sw.AudioChunks() yet, forwardLocked is parked mid-delivery.
+	g.chunks <- AudioChunk{Data: []byte("retired-gemini"), Epoch: g.currentEpoch()}
+
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	var fence uint64
+	deadline := time.After(time.Second)
+	for fence == 0 {
+		select {
+		case ev := <-sw.Events():
+			if intr, ok := ev.(EventInterrupted); ok {
+				fence = intr.Epoch
+			}
+		case <-deadline:
+			t.Fatal("missing EventInterrupted from SetProvider")
+		}
+	}
+
+	go func() {
+		o.chunks <- AudioChunk{Data: []byte("fresh-openai"), Epoch: o.currentEpoch()}
+	}()
+
+	select {
+	case ch := <-sw.AudioChunks():
+		if string(ch.Data) != "fresh-openai" {
+			t.Fatalf("got %q (epoch %d), want fresh-openai; retired chunk was not aborted", ch.Data, ch.Epoch)
+		}
+		if ch.Epoch <= fence {
+			t.Fatalf("fresh chunk epoch %d <= fence %d", ch.Epoch, fence)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fresh-openai audio chunk")
+	}
+}

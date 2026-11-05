@@ -149,3 +149,13 @@ func TestHeardTrackerCoverageJudge(t *testing.T) {
 		t.Fatalf("verdicts = %+v, want one user_turn", v)
 	}
 }
+
+func TestContentTokensRetainsChineseNumbers(t *testing.T) {
+	got := contentTokens("数量是二十五")
+	for _, tok := range got {
+		if tok == "25" {
+			return
+		}
+	}
+	t.Fatalf("missing number: %v", got)
+}

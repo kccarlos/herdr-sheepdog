@@ -71,7 +71,6 @@ binary version.
 
   | Feature | Meaning | Listed |
   |---|---|---|
-  | `run-id` | optional tagged server audio and playback reports (*Audio run IDs*) | always |
   | `playback` | playback reports drive "speaking" and cut transcripts (*Playback reports*) | always |
   | `speaking` | the client speech detector (*Client speech detector*) | always |
   | `silence` | the silence gate (*Silence gate*) | always |
@@ -136,7 +135,7 @@ binary version.
 | binary       | server → client  | raw PCM16 little-endian, mono, **24 000 Hz**        |
 | text         | both             | one JSON object per frame, `{"type": …}`            |
 
-Without `run-id` negotiation there is no framing inside a binary frame: it is a contiguous run of samples
+There is no framing inside a binary frame: it is a contiguous run of samples
 (`byte length` must be even). Recommended client frame size is 20–100 ms
 (640–3 200 bytes at 16 kHz); the daemon forwards frames as they arrive.
 Server frames are whatever the model returns (observed 40–730 ms); the client
@@ -349,19 +348,6 @@ that. The client therefore gates its capture:
 
 `mute` and `silence` are independent: a muted client sends neither frames
 nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
-
-## Audio run IDs
-
-A client that supports tagged audio includes `"features":["run-id"]` in
-`client-ready`. If `bot-ready` also lists `run-id`, each server-to-client
-binary audio frame has a four-byte little-endian unsigned run ID followed by
-24 kHz PCM16. Client-to-server audio remains raw PCM. IDs increase for each
-outbound run within the daemon; zero means no run is identified. A `flush`
-may include `run_id`, and playback reports may echo it to identify the run
-being reported. A client should discard stale audio and report the ID of the
-run it flushed or drained. A flush without an ID still flushes playback.
-Clients that do not advertise the feature receive raw PCM and can continue to
-send untagged playback reports; extra JSON fields are optional.
 
 ## Playback reports
 

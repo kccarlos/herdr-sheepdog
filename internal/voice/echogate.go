@@ -635,14 +635,14 @@ func (g *EchoGate) Heard(now time.Time, heard string) bool {
 // user's own sentence often shares words with the reply that
 // answers it, rarely their run.
 func EchoText(heard, said string) bool {
-	h, sd := echoTokens(heard), echoTokens(said)
+	h, sd := normWordTokens(heard), echoTokens(said)
 	if len(h) < 3 || len(sd) < 2 {
 		return false
 	}
 	in := tokenBigrams(sd, true)
-	compact := make([]string, 0, len(h))
+	compact := make([]wordToken, 0, len(h))
 	for i, tok := range h {
-		if i > 0 && i+1 < len(h) && spokenJoiners[tok] && in[[2]string{h[i-1], h[i+1]}] {
+		if i > 0 && i+1 < len(h) && spokenJoiners[tok.text] && in[[2]string{h[i-1].text, h[i+1].text}] {
 			continue
 		}
 		compact = append(compact, tok)
@@ -650,13 +650,19 @@ func EchoText(heard, said string) bool {
 	if len(compact) < 3 {
 		return false
 	}
-	n := 0
+	// Require at least one matched bigram to cross a whitespace word (or CJK
+	// character) boundary so sub-tokens split out of a single code identifier
+	// in a user command ("Stop parseHTTPResponse") cannot trigger echo alone.
+	n, crossWord := 0, 0
 	for i := 1; i < len(compact); i++ {
-		if in[[2]string{compact[i-1], compact[i]}] {
+		if in[[2]string{compact[i-1].text, compact[i].text}] {
 			n++
+			if compact[i-1].word != compact[i].word {
+				crossWord++
+			}
 		}
 	}
-	return n >= 2 && n*2 >= len(compact)-1
+	return n >= 2 && crossWord >= 1 && n*2 >= len(compact)-1
 }
 
 // echoTokens splits text into normalised lower-case tokens (canonical

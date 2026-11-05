@@ -250,7 +250,11 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 	}
 	heard := strings.TrimSpace(rep.Heard)
 	who := "the user cut you off"
-	if s.cutByPushLocked(rep.At) {
+	byPush := rep.Cut.ByPush
+	if !rep.Awaited && !byPush {
+		byPush = s.cutByPushLocked(rep.At)
+	}
+	if byPush {
 		who = "the daemon cut you off to make way for an urgent briefing"
 	}
 	fact := fmt.Sprintf("at %s %s after %.1f s of %.1f s", clock(rep.At), who, float64(rep.PlayedMs)/1000, float64(rep.RunMs)/1000)

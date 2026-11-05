@@ -11,6 +11,11 @@ import (
 // when it reopens a billed session, and Gemini re-seeds a connection that
 // came back without its resumption handle (docs/dev/timelines.md C23). It is
 // not safe for concurrent use: the session calls it under its own lock.
+type ackMarker struct {
+	seq         uint64
+	prevUserSeq uint64
+}
+
 type Recap struct {
 	// Max bounds the entries kept (the oldest go first); 0 keeps
 	// DefaultRecapTurns.
@@ -22,6 +27,8 @@ type Recap struct {
 	// joinNextUser merges the next RecapUser utterance onto the trailing
 	// RecapUser entry when an intervening 0-heard assistant turn was cut.
 	joinNextUser bool
+	nextSeq      uint64
+	acks         []ackMarker
 }
 
 // CutEllipsis formats the heard prefix of a cut assistant reply with a
@@ -71,6 +78,7 @@ type RecapEntry struct {
 	// off after this long: Text is only the part the user heard.
 	CutAfterMs int
 	Cut        bool
+	seq        uint64
 }
 
 // Add remembers one finished utterance. Blank text is ignored, and so
@@ -82,24 +90,43 @@ type RecapEntry struct {
 // question relayed as if the user had asked it). Run 1's 18-hour
 // session had relayed 17 of 17 Chinese push questions with "on it".
 func (r *Recap) Add(role, text string) {
+	r.AddSeq(role, text)
+}
+
+// AddSeq is Add returning a monotonic sequence id for the utterance (0 when
+// ignored as blank or duplicate), so a later CutSeq targets this exact turn.
+func (r *Recap) AddSeq(role, text string) uint64 {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return
+		return 0
 	}
 	if role == RecapAssistant && BareAck(text) {
-		return
+		r.joinNextUser = false
+		r.nextSeq++
+		seq := r.nextSeq
+		var prevUser uint64
+		if n := len(r.entries); n > 0 && r.entries[n-1].Role == RecapUser {
+			prevUser = r.entries[n-1].seq
+		}
+		r.acks = append(r.acks, ackMarker{seq: seq, prevUserSeq: prevUser})
+		if len(r.acks) > maxAwaiting {
+			r.acks = r.acks[len(r.acks)-maxAwaiting:]
+		}
+		return seq
 	}
 	if role == RecapUser && r.repeatsRecent(text) {
-		return
+		return 0
 	}
 	if r.joinNextUser {
 		r.joinNextUser = false
 		if role == RecapUser && len(r.entries) > 0 && r.entries[len(r.entries)-1].Role == RecapUser {
 			r.entries[len(r.entries)-1].Text = strings.TrimSpace(r.entries[len(r.entries)-1].Text) + " " + text
-			return
+			return r.entries[len(r.entries)-1].seq
 		}
 	}
-	r.entries = append(r.entries, RecapEntry{Role: role, Text: text})
+	r.nextSeq++
+	seq := r.nextSeq
+	r.entries = append(r.entries, RecapEntry{Role: role, Text: text, seq: seq})
 	max := r.Max
 	if max <= 0 {
 		max = DefaultRecapTurns
@@ -107,6 +134,7 @@ func (r *Recap) Add(role, text string) {
 	if len(r.entries) > max {
 		r.entries = r.entries[len(r.entries)-max:]
 	}
+	return seq
 }
 
 // recapAckWords are the voice's bare acknowledgements, normalised
@@ -170,6 +198,12 @@ func recapNorm(text string) string {
 // and surrounding user turns are joined (join_around). It reports whether
 // an entry matched.
 func (r *Recap) Cut(full, heard string, heardMs int) bool {
+	return r.CutSeq(0, full, heard, heardMs)
+}
+
+// CutSeq cuts the assistant turn recorded with seq (or falls back to Cut's
+// newest substring match when seq == 0).
+func (r *Recap) CutSeq(seq uint64, full, heard string, heardMs int) bool {
 	full = strings.TrimSpace(full)
 	heard = strings.TrimSpace(heard)
 	for i := len(r.entries) - 1; i >= 0; i-- {
@@ -177,23 +211,62 @@ func (r *Recap) Cut(full, heard string, heardMs int) bool {
 		if e.Role != RecapAssistant || e.Cut {
 			continue
 		}
-		if full == "" || !strings.Contains(full, e.Text) {
-			return false
+		if seq != 0 {
+			if e.seq != seq {
+				continue
+			}
+		} else if full == "" || !strings.Contains(full, e.Text) {
+			continue
 		}
+		wasTail := i == len(r.entries)-1
 		if heard == "" {
 			r.entries = append(r.entries[:i], r.entries[i+1:]...)
 			if i > 0 && i < len(r.entries) && r.entries[i-1].Role == RecapUser && r.entries[i].Role == RecapUser {
 				r.entries[i-1].Text = strings.TrimSpace(r.entries[i-1].Text) + " " + strings.TrimSpace(r.entries[i].Text)
 				r.entries = append(r.entries[:i], r.entries[i+1:]...)
-				r.joinNextUser = false
+				if wasTail {
+					r.joinNextUser = false
+				}
+			} else if i > 1 && r.entries[i-1].Role == RecapUser && r.entries[i-2].Role == RecapUser {
+				r.entries[i-2].Text = strings.TrimSpace(r.entries[i-2].Text) + " " + strings.TrimSpace(r.entries[i-1].Text)
+				r.entries = append(r.entries[:i-1], r.entries[i:]...)
 			} else if i == len(r.entries) && i > 0 && r.entries[i-1].Role == RecapUser {
 				r.joinNextUser = true
 			}
 			return true
 		}
 		e.Text, e.Cut, e.CutAfterMs = heard, true, heardMs
-		r.joinNextUser = false
+		if wasTail {
+			r.joinNextUser = false
+		}
 		return true
+	}
+	if seq != 0 {
+		for k, m := range r.acks {
+			if m.seq != seq {
+				continue
+			}
+			r.acks = append(r.acks[:k], r.acks[k+1:]...)
+			if heard == "" && m.prevUserSeq != 0 {
+				for u := range r.entries {
+					if r.entries[u].seq != m.prevUserSeq || r.entries[u].Role != RecapUser {
+						continue
+					}
+					if u+1 < len(r.entries) && r.entries[u+1].Role == RecapUser {
+						r.entries[u].Text = strings.TrimSpace(r.entries[u].Text) + " " + strings.TrimSpace(r.entries[u+1].Text)
+						r.entries = append(r.entries[:u+1], r.entries[u+2:]...)
+					} else if u == len(r.entries)-1 {
+						r.joinNextUser = true
+					}
+					break
+				}
+			}
+			break
+		}
+		return false
+	}
+	if heard == "" && BareAck(full) && len(r.entries) > 0 && r.entries[len(r.entries)-1].Role == RecapUser {
+		r.joinNextUser = true
 	}
 	return false
 }
@@ -212,6 +285,8 @@ func (r *Recap) Seed(entries []RecapEntry) {
 		if e.Cut && strings.TrimSpace(e.Text) == "" {
 			continue
 		}
+		r.nextSeq++
+		e.seq = r.nextSeq
 		clean = append(clean, e)
 	}
 	r.entries = append(clean, r.entries...)
@@ -225,7 +300,7 @@ func (r *Recap) Seed(entries []RecapEntry) {
 }
 
 // Reset forgets everything ("New conversation"), the focus included.
-func (r *Recap) Reset() { r.entries, r.focus, r.joinNextUser = nil, "", false }
+func (r *Recap) Reset() { r.entries, r.focus, r.joinNextUser, r.acks = nil, "", false, nil }
 
 // Len is the number of entries kept.
 func (r *Recap) Len() int { return len(r.entries) }

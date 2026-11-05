@@ -145,3 +145,70 @@ func TestRecapCutEllipsisAndNote(t *testing.T) {
 		t.Fatalf("CutEllipsis doubled ellipsis: %q", CutEllipsis("already…"))
 	}
 }
+
+func TestRecapLateCutSkipsNewerReply(t *testing.T) {
+	var r Recap
+	r.Add(RecapUser, "check auth")
+	r.Add(RecapAssistant, "The auth tests are running.")
+	r.Add(RecapUser, "check docs")
+	r.Add(RecapAssistant, "Docs are building.")
+	if !r.Cut("The auth tests are running.", "The auth tests", 300) {
+		t.Fatal("late cut did not find reply")
+	}
+	if got := r.Entries(); got[1].Text != "The auth tests" || got[3].Text != "Docs are building." {
+		t.Fatalf("entries: %+v", got)
+	}
+}
+
+func TestRecapUnheardAckJoinsUser(t *testing.T) {
+	var r Recap
+	r.Add(RecapUser, "check auth")
+	r.Add(RecapAssistant, "On it.")
+	r.Cut("On it.", "", 0)
+	r.Add(RecapUser, "and docs")
+	if got := r.Entries(); len(got) != 1 || got[0].Text != "check auth and docs" {
+		t.Fatalf("entries: %+v", got)
+	}
+}
+
+func TestRecapCutJoinsBargeInRecordedBeforeAssistant(t *testing.T) {
+	var r Recap
+	r.Add(RecapUser, "check auth")
+	r.Add(RecapUser, "and docs")
+	r.Add(RecapAssistant, "Auth tests are running.")
+	r.Cut("Auth tests are running.", "", 0)
+	if got := r.Entries(); len(got) != 1 || got[0].Text != "check auth and docs" {
+		t.Fatalf("entries: %+v", got)
+	}
+}
+
+func TestRecapLateCutDoesNotCutNewerSubstringReply(t *testing.T) {
+	var r Recap
+	r.AddSeq(RecapUser, "check auth")
+	seq1 := r.AddSeq(RecapAssistant, "The auth tests are running.")
+	r.AddSeq(RecapUser, "which tests?")
+	r.AddSeq(RecapAssistant, "auth tests") // substring of turn 1's full text!
+
+	if !r.CutSeq(seq1, "The auth tests are running.", "The auth", 300) {
+		t.Fatal("CutSeq did not find turn 1")
+	}
+	got := r.Entries()
+	if len(got) != 4 || got[1].Text != "The auth" || !got[1].Cut || got[3].Text != "auth tests" || got[3].Cut {
+		t.Fatalf("entries = %+v, want turn 1 cut to %q and turn 2 intact %q", got, "The auth", "auth tests")
+	}
+}
+
+func TestRecapLateUnheardAckAfterBargeInSettledJoinsUser(t *testing.T) {
+	var r Recap
+	r.AddSeq(RecapUser, "check auth")
+	ackSeq := r.AddSeq(RecapAssistant, "On it.")
+	// Barge-in user turn and its new reply settle before Turn 1's flushed(0ms) arrives.
+	r.AddSeq(RecapUser, "and check docs")
+	r.AddSeq(RecapAssistant, "Checking both auth and docs.")
+
+	r.CutSeq(ackSeq, "On it.", "", 0)
+	got := r.Entries()
+	if len(got) != 2 || got[0].Role != RecapUser || got[0].Text != "check auth and check docs" || got[1].Text != "Checking both auth and docs." {
+		t.Fatalf("entries = %+v, want joined user turn followed by intact new reply", got)
+	}
+}

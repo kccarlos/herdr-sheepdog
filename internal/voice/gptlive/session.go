@@ -40,9 +40,10 @@ type Session struct {
 	// rec records the voice context (capture.go); nil records nothing.
 	rec *ctxcap.VoiceSession
 
-	audio  chan []byte
-	events chan voice.Event
-	out    *outQueue
+	audio       chan []byte
+	audioChunks chan voice.AudioChunk
+	events      chan voice.Event
+	out         *outQueue
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -139,11 +140,11 @@ type Session struct {
 // outItemSpan tracks the active assistant output item's server-generated
 // audio so conversation.item.truncate never exceeds server_audio_ms.
 type outItemSpan struct {
-	runID        uint32
 	itemID       string
 	contentIndex int
 	serverBytes  int
 	startedAt    time.Time
+	flushedAt    time.Time
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -159,14 +160,15 @@ type liveConn struct {
 	pace     inputPacer    // input audio sent vs the wall clock (pace.go)
 
 	// under Session.mu
-	usage         float64
-	closeWhy      string // our reason, when we asked to close
-	finalized     bool
-	startedOnce   sync.Once
-	outItem       *outItemSpan
-	awaitingItems []outItemSpan
-	truncatedID   string
-	truncSeq      int
+	usage          float64
+	closeWhy       string // our reason, when we asked to close
+	finalized      bool
+	startedOnce    sync.Once
+	outItem        *outItemSpan
+	awaitingItems  []outItemSpan
+	interruptedIDs []string
+	truncatedIDs   []string
+	truncSeq       int
 }
 
 // pushItem is one queued Push.
@@ -196,12 +198,13 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 	}
 	s := &Session{
 		cfg: cfg, dial: dial, log: log, now: time.Now, rec: cfg.Context.Session("openai", cfg.Model),
-		audio:    make(chan []byte),
-		events:   make(chan voice.Event, cfg.EventBuffer),
-		out:      newOutQueue(),
-		inflight: map[string]context.CancelFunc{},
-		armed:    true,
-		recap:    voice.Recap{Max: cfg.RecapTurns},
+		audio:       make(chan []byte),
+		audioChunks: make(chan voice.AudioChunk),
+		events:      make(chan voice.Event, cfg.EventBuffer),
+		out:         newOutQueue(),
+		inflight:    map[string]context.CancelFunc{},
+		armed:       true,
+		recap:       voice.Recap{Max: cfg.RecapTurns},
 	}
 	s.heard.Coverage = s.keyTermCoverage
 	return s, nil
@@ -221,7 +224,7 @@ func (s *Session) Start(ctx context.Context) error {
 	s.emit(voice.EventStatus{Status: voice.StatusConnected, Reason: ReasonStandby})
 	s.log.Log(logSource, "voice.standby", "", map[string]any{"provider": "openai", "model": s.cfg.Model, "idle_close_s": s.cfg.IdleClose.Seconds()})
 	s.wg.Add(2)
-	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio) }()
+	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio, s.audioChunks) }()
 	go func() { defer s.wg.Done(); s.tickLoop(s.ctx) }()
 	return nil
 }
@@ -266,6 +269,24 @@ func (s *Session) Close() error {
 
 // Audio implements voice.Session.
 func (s *Session) Audio() <-chan []byte { return s.audio }
+
+// AudioChunks yields outbound audio frames paired with their flush epoch.
+func (s *Session) AudioChunks() <-chan voice.AudioChunk { return s.audioChunks }
+
+// FlushAudio purges queued outbound audio and returns the flushed epoch.
+func (s *Session) FlushAudio() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, epoch := s.out.FlushEpoch()
+	return epoch
+}
+
+// BumpAudioEpoch advances the outbound audio queue's epoch across a switch.
+func (s *Session) BumpAudioEpoch() {
+	s.mu.Lock()
+	s.out.BumpEpoch()
+	s.mu.Unlock()
+}
 
 // Events implements voice.Session.
 func (s *Session) Events() <-chan voice.Event { return s.events }
@@ -339,14 +360,40 @@ func (s *Session) AudioStreamEnd() {
 // or goes away (false). A session opens only while one is attached.
 func (s *Session) ClientAttached(attached bool) {
 	s.mu.Lock()
+	now := s.now()
 	changed := s.client != attached
 	s.client = attached
 	if attached {
 		s.armed = true
 	}
 	s.play.Detach()
+	unheard := s.heard.Detach()
+	var truncs []truncateEvent
+	lc := s.live
+	if lc != nil && s.lcActiveLocked(lc) && len(lc.awaitingItems) > 0 {
+		for _, span := range lc.awaitingItems {
+			ref := span.flushedAt
+			if ref.IsZero() {
+				ref = now
+			}
+			estMs := int(ref.Sub(span.startedAt).Milliseconds())
+			if tr := buildTruncateLocked(lc, span, estMs); tr != nil {
+				truncs = append(truncs, *tr)
+			}
+		}
+		lc.awaitingItems = nil
+	}
 	s.vad.Reset()
 	s.mu.Unlock()
+	for _, tr := range truncs {
+		if err := s.send(lc, tr); err == nil {
+			s.log.Log(logSource, "voice.item_truncated", "", map[string]any{
+				"item_id": tr.ItemID, "content_index": tr.ContentIndex,
+				"audio_end_ms": tr.AudioEndMS, "session_id": lc.id,
+			})
+		}
+	}
+	s.reportUnheard(unheard)
 	if changed {
 		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
 	}
@@ -405,7 +452,7 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 }
 
 func buildTruncateLocked(lc *liveConn, span outItemSpan, playedMs int) *truncateEvent {
-	if lc == nil || span.itemID == "" || span.serverBytes <= 0 || span.itemID == lc.truncatedID {
+	if lc == nil || span.itemID == "" || span.serverBytes <= 0 || lc.wasTruncated(span.itemID) {
 		return nil
 	}
 	serverAudioMs := span.serverBytes / (SampleRate * 2 / 1000)
@@ -416,7 +463,8 @@ func buildTruncateLocked(lc *liveConn, span outItemSpan, playedMs int) *truncate
 	if endMs > serverAudioMs {
 		endMs = serverAudioMs
 	}
-	lc.truncatedID = span.itemID
+	lc.markInterrupted(span.itemID)
+	lc.markTruncated(span.itemID)
 	lc.truncSeq++
 	return &truncateEvent{
 		Type:         evItemTruncate,
@@ -427,94 +475,50 @@ func buildTruncateLocked(lc *liveConn, span outItemSpan, playedMs int) *truncate
 	}
 }
 
-// NoteAudioRun tags the current playback and push-watch run with runID
-// when the /ws hub starts delivering a new spoken run.
-func (s *Session) NoteAudioRun(runID uint32) {
-	s.mu.Lock()
-	s.play.SetRunID(runID)
-	s.heard.SetRunID(runID)
-	if s.live != nil && s.live.outItem != nil && s.live.outItem.runID == 0 {
-		s.live.outItem.runID = runID
-	}
-	s.mu.Unlock()
-}
-
-// AssignFlushedRun tags an untagged awaiting run when a flush arrived at
-// the /ws hub before any audio chunk of that run left the session.
-func (s *Session) AssignFlushedRun(next func() uint32) uint32 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id := s.play.AssignAwaitingRunID(next)
-	if id != 0 {
-		s.heard.TagLastCutRun(id)
-		if s.live != nil {
-			if n := len(s.live.awaitingItems); n > 0 && s.live.awaitingItems[n-1].runID == 0 {
-				s.live.awaitingItems[n-1].runID = id
-			} else if s.live.outItem != nil && s.live.outItem.runID == 0 {
-				s.live.outItem.runID = id
-			}
-		}
-	}
-	return id
-}
-
-// ClientPlayback applies an untagged /ws client playback report.
+// ClientPlayback applies a /ws client playback report
+// (docs/dev/ws-contract.md "Playback reports"): it logs voice.playback and,
+// when a flushed run was cut short, truncates the live server item, trims the
+// recap, and emits the heard part as a cut transcript for the orchestrator.
 func (s *Session) ClientPlayback(state string, playedMs int) {
-	s.ClientPlaybackRun(state, playedMs, 0)
-}
-
-// ClientPlaybackRun applies a /ws client playback report optionally tagged
-// with runID (docs/dev/ws-contract.md "Playback reports"): it logs
-// voice.playback and, when a flushed run was cut short, truncates the live
-// server item, trims the recap, and emits the heard part as a cut
-// transcript for the orchestrator.
-func (s *Session) ClientPlaybackRun(state string, playedMs int, runID uint32) {
 	s.mu.Lock()
 	now := s.now()
-	rep := s.play.ReportRun(now, state, playedMs, runID)
+	rep := s.play.Report(now, state, playedMs)
 	utt := s.playUtt.Started(state)
 	var unheard []voice.UnheardPush
 	var trunc *truncateEvent
 	var truncConn *liveConn
 	switch state {
 	case voice.PlaybackDrained:
-		if s.live != nil && (runID == 0 || s.live.outItem == nil || s.live.outItem.runID == 0 || s.live.outItem.runID == runID) {
+		if s.live != nil {
 			s.live.outItem = nil
 		}
 	case voice.PlaybackFlushed:
+		if !rep.Awaited {
+			s.out.FlushEpoch()
+		}
 		if lc := s.live; lc != nil && s.lcActiveLocked(lc) {
-			if runID != 0 {
-				matched := false
-				for i := range lc.awaitingItems {
-					if lc.awaitingItems[i].runID == runID {
-						span := lc.awaitingItems[i]
-						lc.awaitingItems = lc.awaitingItems[i+1:]
-						trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
-						matched = true
-						break
-					}
-				}
-				if !matched && lc.outItem != nil && (lc.outItem.runID == 0 || lc.outItem.runID == runID) && rep.RunMs > 0 {
-					span := *lc.outItem
-					lc.outItem = nil
-					trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
-				}
-			} else if len(lc.awaitingItems) > 0 {
+			if len(lc.awaitingItems) > 0 {
 				var span outItemSpan
 				span, lc.awaitingItems = lc.awaitingItems[0], lc.awaitingItems[1:]
 				trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
-			} else if lc.outItem != nil {
+			} else if lc.outItem != nil && !rep.Awaited {
 				span := *lc.outItem
 				lc.outItem = nil
+				lc.markInterrupted(span.itemID)
 				trunc, truncConn = buildTruncateLocked(lc, span, playedMs), lc
 			}
 		}
-		unheard = s.heard.FlushedRun(now, rep.Cut, rep.Heard, runID)
+		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
 		if rep.Cut != nil {
-			rep.Cut.UtteranceID = s.playUtt.Run()
-			rep.Cut.ByPush = s.flushBy == "push" && now.Sub(s.flushAt) < 10*time.Second
-			s.flushReplyLocked()
-			s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+			if !rep.Awaited {
+				rep.Cut.UtteranceID = s.playUtt.Flushed(true)
+				rep.Cut.ByPush = s.flushBy == "push" && now.Sub(s.flushAt) < 10*time.Second
+				if rep.RecapSeq == 0 {
+					rep.RecapSeq = s.addRecapLocked(voice.RecapAssistant, s.outText)
+					s.outText = ""
+				}
+			}
+			s.recap.CutSeq(rep.RecapSeq, rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
 		}
 	}
 	s.mu.Unlock()
@@ -751,17 +755,23 @@ func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	now := s.now()
 	s.flushBy, s.flushAt = by, now
-	s.flushReplyLocked()
-	runID, awaited := s.play.FlushRun(now)
+	seq := s.flushReplyLocked()
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	awaited := s.play.FlushMeta(now, voice.FlushMeta{
+		RecapSeq:    seq,
+		UtteranceID: uttID,
+		ByPush:      by == "push",
+	})
+	dropped, epoch := s.out.FlushEpoch()
 	var trunc *truncateEvent
 	var truncConn *liveConn
 	if lc := s.live; lc != nil && s.lcActiveLocked(lc) && lc.outItem != nil {
 		span := *lc.outItem
-		if span.runID == 0 {
-			span.runID = runID
-		}
+		span.flushedAt = now
 		lc.outItem = nil
-		if s.play.Reports() && awaited {
+		lc.markInterrupted(span.itemID)
+		if s.client && awaited {
 			lc.awaitingItems = append(lc.awaitingItems, span)
 			if len(lc.awaitingItems) > 4 {
 				lc.awaitingItems = lc.awaitingItems[len(lc.awaitingItems)-4:]
@@ -771,7 +781,7 @@ func (s *Session) interrupt(by string) {
 			trunc, truncConn = buildTruncateLocked(lc, span, estMs), lc
 		}
 	}
-	unheard := s.heard.InterruptedRun(now, by, awaited, runID)
+	unheard := s.heard.Interrupted(now, by, awaited)
 	s.mu.Unlock()
 	if trunc != nil && truncConn != nil {
 		if err := s.send(truncConn, *trunc); err == nil {
@@ -782,9 +792,8 @@ func (s *Session) interrupt(by string) {
 		}
 	}
 	s.reportUnheard(unheard)
-	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
-	s.emit(voice.EventInterrupted{})
+	s.emit(voice.EventInterrupted{Epoch: epoch})
 }
 
 // classify maps an utterance to its tool call.

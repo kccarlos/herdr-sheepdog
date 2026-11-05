@@ -30,25 +30,30 @@ import (
 
 // fakeSession is an in-memory voice.Session.
 type fakeSession struct {
-	mu     sync.Mutex
-	audio  chan []byte
-	events chan voice.Event
-	sent   [][]byte
-	texts  []string
-	pushes []string
-	muted  bool
-	status voice.Status
-	ends   int // AudioStreamEnd calls
-	speaks bool
+	mu          sync.Mutex
+	audio       chan []byte
+	rawChunks   chan voice.AudioChunk
+	outAudio    chan []byte
+	audioChunks chan voice.AudioChunk
+	flushed     chan struct{}
+	closed      chan struct{}
+	pumpHold    chan struct{}
+	epoch       uint64
+	events      chan voice.Event
+	sent        [][]byte
+	texts       []string
+	pushes      []string
+	muted       bool
+	status      voice.Status
+	ends        int // AudioStreamEnd calls
+	speaks      bool
 	// attached is the last ClientAttached value.
 	attached bool
 	// resets records every Reset(reason) call.
 	resets []string
 	// playback and speaking record ClientPlayback / ClientSpeaking.
-	playback     []string
-	playbackRuns []string
-	audioRuns    []uint32
-	speaking     []bool
+	playback []string
+	speaking []bool
 	// pushTags records the tags of every PushTagged call.
 	pushTags []map[string]any
 	// pushUrgency records the urgency of every PushTagged call.
@@ -56,11 +61,86 @@ type fakeSession struct {
 }
 
 func newFakeSession() *fakeSession {
-	return &fakeSession{audio: make(chan []byte, 64), events: make(chan voice.Event, 64), status: voice.StatusConnected}
+	f := &fakeSession{
+		audio:       make(chan []byte, 64),
+		rawChunks:   make(chan voice.AudioChunk, 64),
+		outAudio:    make(chan []byte),
+		audioChunks: make(chan voice.AudioChunk),
+		flushed:     make(chan struct{}),
+		closed:      make(chan struct{}),
+		epoch:       voice.NextAudioEpoch(),
+		events:      make(chan voice.Event, 64),
+		status:      voice.StatusConnected,
+	}
+	go func() {
+		defer close(f.outAudio)
+		defer close(f.audioChunks)
+		deliver := func(ch voice.AudioChunk) {
+			f.mu.Lock()
+			fl := f.flushed
+			hold := f.pumpHold
+			f.mu.Unlock()
+			if hold != nil {
+				select {
+				case <-hold:
+				case <-fl:
+					return
+				case <-f.closed:
+					return
+				}
+			}
+			select {
+			case f.outAudio <- ch.Data:
+			case f.audioChunks <- ch:
+			case <-fl:
+			case <-f.closed:
+			}
+		}
+		for f.audio != nil || f.rawChunks != nil {
+			select {
+			case <-f.closed:
+				return
+			case b, ok := <-f.audio:
+				if !ok {
+					f.audio = nil
+					continue
+				}
+				deliver(voice.AudioChunk{Data: b, Epoch: f.currentEpoch()})
+			case ch, ok := <-f.rawChunks:
+				if !ok {
+					f.rawChunks = nil
+					continue
+				}
+				deliver(ch)
+			}
+		}
+	}()
+	return f
 }
 
 func (f *fakeSession) Start(context.Context) error { return nil }
-func (f *fakeSession) Close() error                { close(f.audio); close(f.events); return nil }
+func (f *fakeSession) Close() error {
+	f.holdPump(false)
+	close(f.closed)
+	close(f.audio)
+	close(f.rawChunks)
+	close(f.events)
+	return nil
+}
+func (f *fakeSession) holdPump(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if on {
+		if f.pumpHold == nil {
+			f.pumpHold = make(chan struct{})
+		}
+		return
+	}
+	if f.pumpHold != nil {
+		close(f.pumpHold)
+		f.pumpHold = nil
+	}
+}
 func (f *fakeSession) SendAudio(pcm []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -97,7 +177,40 @@ func (f *fakeSession) taggedPushes() []map[string]any {
 	defer f.mu.Unlock()
 	return append([]map[string]any(nil), f.pushTags...)
 }
-func (f *fakeSession) Audio() <-chan []byte       { return f.audio }
+func (f *fakeSession) Audio() <-chan []byte                 { return f.outAudio }
+func (f *fakeSession) AudioChunks() <-chan voice.AudioChunk { return f.audioChunks }
+func (f *fakeSession) currentEpoch() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch
+}
+func (f *fakeSession) pushAudio(pcm []byte) {
+	f.rawChunks <- voice.AudioChunk{Data: pcm, Epoch: f.currentEpoch()}
+}
+func (f *fakeSession) emitChunk(ch voice.AudioChunk) {
+	f.rawChunks <- ch
+}
+func (f *fakeSession) FlushAudio() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for {
+		select {
+		case <-f.audio:
+		case <-f.rawChunks:
+		default:
+			close(f.flushed)
+			f.flushed = make(chan struct{})
+			old := f.epoch
+			f.epoch = voice.NextAudioEpoch()
+			return old
+		}
+	}
+}
+func (f *fakeSession) BumpAudioEpoch() {
+	f.mu.Lock()
+	f.epoch = voice.NextAudioEpoch()
+	f.mu.Unlock()
+}
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
 func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
 func (f *fakeSession) Status() voice.Status       { return f.status }
@@ -130,17 +243,8 @@ func (f *fakeSession) ClientAttached(a bool) {
 	f.mu.Unlock()
 }
 func (f *fakeSession) ClientPlayback(state string, playedMs int) {
-	f.ClientPlaybackRun(state, playedMs, 0)
-}
-func (f *fakeSession) ClientPlaybackRun(state string, playedMs int, runID uint32) {
 	f.mu.Lock()
 	f.playback = append(f.playback, fmt.Sprintf("%s:%d", state, playedMs))
-	f.playbackRuns = append(f.playbackRuns, fmt.Sprintf("%s:%d:%d", state, playedMs, runID))
-	f.mu.Unlock()
-}
-func (f *fakeSession) NoteAudioRun(runID uint32) {
-	f.mu.Lock()
-	f.audioRuns = append(f.audioRuns, runID)
 	f.mu.Unlock()
 }
 func (f *fakeSession) ClientSpeaking(on bool) {
@@ -152,11 +256,6 @@ func (f *fakeSession) playbackReports() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.playback...)
-}
-func (f *fakeSession) playbackRunReports() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.playbackRuns...)
 }
 func (f *fakeSession) speakingReports() []bool {
 	f.mu.Lock()

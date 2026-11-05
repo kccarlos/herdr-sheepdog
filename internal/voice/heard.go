@@ -91,8 +91,7 @@ type HeardTracker struct {
 	// and judges by key terms (KeyTermCoverage).
 	Coverage func(text string, tags map[string]any, said string) float64
 
-	cur      *pushWatch
-	curRunID uint32
+	cur *pushWatch
 	// cut are watches whose speech the daemon flushed, waiting for the
 	// client's flushed report to say how much was played (oldest first,
 	// like PlaybackTracker's awaiting runs).
@@ -102,25 +101,8 @@ type HeardTracker struct {
 // cutRun is one flushed run waiting for the client's report: the watch
 // it cut (nil for a run no push was watched in) and when.
 type cutRun struct {
-	id uint32
 	w  *pushWatch
 	at time.Time
-}
-
-// SetRunID tags the active watched speech with a monotonic run_id so
-// FlushedRun matches its exact flushed run.
-func (h *HeardTracker) SetRunID(id uint32) {
-	if id != 0 {
-		h.curRunID = id
-	}
-}
-
-// TagLastCutRun stamps the newest untagged cutRun when a flush raced
-// ahead of outbound audio delivery.
-func (h *HeardTracker) TagLastCutRun(id uint32) {
-	if id != 0 && len(h.cut) > 0 && h.cut[len(h.cut)-1].id == 0 {
-		h.cut[len(h.cut)-1].id = id
-	}
 }
 
 // Pushed starts watching a spoken push; a push still watched is judged
@@ -135,7 +117,6 @@ func (h *HeardTracker) Pushed(now time.Time, text string, tags map[string]any, r
 		out = h.judge(out, w, w.said.String(), reason)
 	}
 	h.cur = &pushWatch{text: text, tags: tags, requeued: requeued, sentAt: now}
-	h.curRunID = 0
 	return out
 }
 
@@ -170,26 +151,16 @@ func (h *HeardTracker) TurnComplete() {
 // interruption an interrupting push itself causes — so it stays
 // watched.
 func (h *HeardTracker) Interrupted(now time.Time, by string, awaited bool) []UnheardPush {
-	return h.InterruptedRun(now, by, awaited, h.curRunID)
-}
-
-// InterruptedRun is Interrupted tagged with runID (0 when untagged).
-func (h *HeardTracker) InterruptedRun(now time.Time, by string, awaited bool, runID uint32) []UnheardPush {
-	if runID == 0 {
-		runID = h.curRunID
-	}
 	w := h.cur
 	if w == nil || !w.voiced {
 		w = nil
 	} else {
 		h.cur = nil
-		h.curRunID = 0
 		w.cutBy = by
 	}
 	switch {
 	case awaited:
-		h.curRunID = 0
-		h.cut = append(h.cut, cutRun{id: runID, w: w, at: now})
+		h.cut = append(h.cut, cutRun{w: w, at: now})
 		if len(h.cut) > maxAwaiting {
 			out := h.judgeRuns(h.cut[:len(h.cut)-maxAwaiting])
 			h.cut = h.cut[len(h.cut)-maxAwaiting:]
@@ -201,56 +172,22 @@ func (h *HeardTracker) InterruptedRun(now time.Time, by string, awaited bool, ru
 	return nil
 }
 
-// Flushed applies an untagged client flushed report: cut (nil when the run
-// was heard whole) and heard (the played part).
+// Flushed applies a client flushed report: cut (nil when the run was heard
+// whole) and heard (the played part).
 func (h *HeardTracker) Flushed(now time.Time, cut *TranscriptCut, heard string) []UnheardPush {
-	return h.FlushedRun(now, cut, heard, 0)
-}
-
-// FlushedRun applies a client flushed report optionally tagged with runID
-// (0 falls back to FIFO matching). When runID != 0, duplicate or late
-// reports for already-settled runs are ignored without touching a newer
-// watched push.
-func (h *HeardTracker) FlushedRun(now time.Time, cut *TranscriptCut, heard string, runID uint32) []UnheardPush {
 	out := h.expire(now)
 	var w *pushWatch
-	if runID != 0 {
-		idx := -1
-		for i := range h.cut {
-			if h.cut[i].id == runID {
-				idx = i
-				break
-			}
+	switch {
+	case len(h.cut) > 0:
+		w, h.cut = h.cut[0].w, h.cut[1:]
+		if w == nil {
+			return out // a run no push was watched in
 		}
-		switch {
-		case idx >= 0:
-			if idx > 0 {
-				out = append(out, h.judgeRuns(h.cut[:idx])...)
-			}
-			w = h.cut[idx].w
-			h.cut = h.cut[idx+1:]
-			if w == nil {
-				return out
-			}
-		case h.cur != nil && h.cur.voiced && cut != nil && (h.curRunID == 0 || h.curRunID == runID):
-			w, h.cur, h.curRunID = h.cur, nil, 0
-			w.cutBy = "client"
-		default:
-			return out
-		}
-	} else {
-		switch {
-		case len(h.cut) > 0:
-			w, h.cut = h.cut[0].w, h.cut[1:]
-			if w == nil {
-				return out // a run no push was watched in
-			}
-		case h.cur != nil && h.cur.voiced && cut != nil:
-			w, h.cur, h.curRunID = h.cur, nil, 0
-			w.cutBy = "client"
-		default:
-			return out
-		}
+	case h.cur != nil && h.cur.voiced && cut != nil:
+		w, h.cur = h.cur, nil
+		w.cutBy = "client"
+	default:
+		return out
 	}
 	said := w.said.String()
 	if cut != nil {
@@ -259,13 +196,21 @@ func (h *HeardTracker) FlushedRun(now time.Time, cut *TranscriptCut, heard strin
 	return h.judge(out, w, said, cutReason(w))
 }
 
+// Detach settles any awaiting flushed runs when a client disconnects or is
+// replaced (judged on what was generated, matching PlaybackTracker.Detach).
+func (h *HeardTracker) Detach() []UnheardPush {
+	out := h.judgeRuns(h.cut)
+	h.cut = nil
+	return out
+}
+
 // Settle judges the watched push once its speech is over: the model
 // completed the turn that voiced it and the client is no longer
 // playing it. playing is the session's view of the client.
 func (h *HeardTracker) Settle(now time.Time, playing bool) []UnheardPush {
 	out := h.expire(now)
 	if w := h.cur; w != nil && w.turnDone && !playing {
-		h.cur, h.curRunID = nil, 0
+		h.cur = nil
 		reason := UnheardBodySkipped
 		if w.userTurn {
 			reason = UnheardUserTurn
@@ -280,7 +225,7 @@ func (h *HeardTracker) Lost() []UnheardPush {
 	out := h.judgeRuns(h.cut)
 	h.cut = nil
 	if w := h.cur; w != nil {
-		h.cur, h.curRunID = nil, 0
+		h.cur = nil
 		out = h.judge(out, w, w.said.String(), UnheardConnectionLost)
 	}
 	return out
@@ -334,7 +279,7 @@ func (h *HeardTracker) expire(now time.Time) []UnheardPush {
 	out := h.judgeRuns(h.cut[:n])
 	h.cut = h.cut[n:]
 	if w := h.cur; w != nil && now.Sub(w.sentAt) > heardTimeout {
-		h.cur, h.curRunID = nil, 0
+		h.cur = nil
 		reason := UnheardNotVoiced
 		if w.userTurn {
 			reason = UnheardUserTurn

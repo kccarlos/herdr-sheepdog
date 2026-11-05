@@ -7,7 +7,6 @@
 package wsproto
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -99,32 +98,7 @@ const (
 	// /api/agents/{pane_id}/files[/{path}] and /api/spaces/{id}/files[/{path}]
 	// ("Files").
 	FeatureFiles = "files"
-	// FeatureRunID: monotonic uint32 run_id on server→client binary audio
-	// frames (when the client also lists run-id in client-ready), flush
-	// and playback ("Audio run IDs").
-	FeatureRunID = "run-id"
 )
-
-// AudioRunHeaderBytes is the 4-byte little-endian uint32 run_id prefix on
-// server→client binary audio frames when both sides list FeatureRunID.
-const AudioRunHeaderBytes = 4
-
-// PackAudioRun prepends runID as a 4-byte little-endian uint32 before pcm.
-func PackAudioRun(runID uint32, pcm []byte) []byte {
-	out := make([]byte, AudioRunHeaderBytes+len(pcm))
-	binary.LittleEndian.PutUint32(out[:AudioRunHeaderBytes], runID)
-	copy(out[AudioRunHeaderBytes:], pcm)
-	return out
-}
-
-// UnpackAudioRun splits a run-tagged binary audio frame into its 4-byte
-// little-endian uint32 run_id and the trailing PCM16 bytes.
-func UnpackAudioRun(frame []byte) (runID uint32, pcm []byte, ok bool) {
-	if len(frame) < AudioRunHeaderBytes {
-		return 0, nil, false
-	}
-	return binary.LittleEndian.Uint32(frame[:AudioRunHeaderBytes]), frame[AudioRunHeaderBytes:], true
-}
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
 // playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe,
@@ -285,11 +259,9 @@ type Message struct {
 
 	// playback: the client's player started, drained or flushed, and
 	// how much of the current spoken run it played (ms of the 24 kHz
-	// stream the daemon sent). RunID (on flush and playback) identifies
-	// the monotonic audio run when FeatureRunID is in use.
-	State    string  `json:"state,omitempty"`
-	PlayedMs *int    `json:"played_ms,omitempty"`
-	RunID    *uint32 `json:"run_id,omitempty"`
+	// stream the daemon sent).
+	State    string `json:"state,omitempty"`
+	PlayedMs *int   `json:"played_ms,omitempty"`
 
 	// drain: the client's player ran dry (docs/dev/ws-contract.md "Feedback
 	// and drains"). At is when, on the client's clock (RFC 3339 with
@@ -376,16 +348,6 @@ func ClientReady(protocol int, client ClientInfo) Message {
 	return Message{Type: TypeClientReady, Protocol: &protocol, Client: &client}
 }
 
-// ClientReadyFeatures builds a client-ready message advertising optional
-// client features (such as FeatureRunID).
-func ClientReadyFeatures(protocol int, client ClientInfo, features ...string) Message {
-	m := ClientReady(protocol, client)
-	if len(features) > 0 {
-		m.Features = features
-	}
-	return m
-}
-
 // BotReady builds the server→client reply to ClientReady: the protocol
 // the daemon speaks on this connection, the oldest it serves, its
 // version and its features.
@@ -409,16 +371,6 @@ func Speaking(on bool) Message { return Message{Type: TypeSpeaking, On: &on} }
 // Playback builds a client→server playback report.
 func Playback(state string, playedMs int) Message {
 	return Message{Type: TypePlayback, State: state, PlayedMs: &playedMs}
-}
-
-// PlaybackRun builds a client→server playback report tagged with runID
-// (omitted when 0).
-func PlaybackRun(state string, playedMs int, runID uint32) Message {
-	m := Playback(state, playedMs)
-	if runID != 0 {
-		m.RunID = &runID
-	}
-	return m
 }
 
 // Drain builds a client→server drain message; at is RFC 3339 and reason
@@ -458,15 +410,6 @@ func Ping() Message { return Message{Type: TypePing} }
 
 // Flush builds the server→client "drop your playback buffer" message.
 func Flush() Message { return Message{Type: TypeFlush} }
-
-// FlushRun builds a server→client flush message tagged with runID (omitted
-// when 0).
-func FlushRun(runID uint32) Message {
-	if runID == 0 {
-		return Flush()
-	}
-	return Message{Type: TypeFlush, RunID: &runID}
-}
 
 // Status builds a server→client status message. reason may be empty.
 func Status(voice string, muted bool, reason string) Message {

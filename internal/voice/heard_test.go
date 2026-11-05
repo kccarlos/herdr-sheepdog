@@ -160,36 +160,28 @@ func TestRequeueHoldCollisionTimeline(t *testing.T) {
 	}
 }
 
-func TestHeardTrackerRunIDMatchesAndIgnoresStaleFlushed(t *testing.T) {
+func TestHeardTrackerLateFlushedJudgesInterruptedPushWithoutTouchingNewPush(t *testing.T) {
 	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	var h HeardTracker
 
 	// Run 1: push 1 cut by barge-in.
 	h.Pushed(t0, "first push body needs full coverage here", nil, false)
-	h.SetRunID(1)
 	h.Said("first push body needs full coverage here")
-	h.InterruptedRun(t0.Add(100*time.Millisecond), "model", true, 1)
+	h.Interrupted(t0.Add(100*time.Millisecond), "model", true)
 
-	// Run 2: push 2 starts speaking before flushed(1) arrives.
+	// Run 2: push 2 starts speaking before push 1's flushed report arrives.
 	h.Pushed(t0.Add(200*time.Millisecond), "second push body stays heard completely", nil, false)
-	h.SetRunID(2)
 	h.Said("second push body stays heard completely")
 	h.TurnComplete()
 
-	// Late flushed(1) judges push 1 as unheard, leaving push 2 watched.
+	// Late flushed report judges push 1 as unheard, leaving push 2 watched.
 	cut1 := &TranscriptCut{HeardMs: 300, RunMs: 2000, Full: "first push body needs full coverage here"}
-	unheard := h.FlushedRun(t0.Add(250*time.Millisecond), cut1, "first", 1)
+	unheard := h.Flushed(t0.Add(250*time.Millisecond), cut1, "first")
 	if len(unheard) != 1 || unheard[0].Text != "first push body needs full coverage here" {
-		t.Fatalf("FlushedRun(1) = %+v, want push 1 unheard", unheard)
+		t.Fatalf("Flushed = %+v, want push 1 unheard", unheard)
 	}
 	if !h.Watching() {
-		t.Fatal("push 2 should still be watched after flushed(1)")
-	}
-
-	// Duplicate flushed(1) must NOT cut push 2.
-	dupCut := &TranscriptCut{HeardMs: 0, RunMs: 2000, Full: "second push body stays heard completely"}
-	if dup := h.FlushedRun(t0.Add(260*time.Millisecond), dupCut, "", 1); len(dup) != 0 {
-		t.Fatalf("duplicate FlushedRun(1) falsely cut push 2: %+v", dup)
+		t.Fatal("push 2 should still be watched after push 1 flushed")
 	}
 	if settled := h.Settle(t0.Add(500*time.Millisecond), false); len(settled) != 0 {
 		t.Fatalf("Settle push 2 = %+v, want heard", settled)

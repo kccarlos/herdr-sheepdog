@@ -3,7 +3,14 @@ package gemini
 import (
 	"context"
 	"sync"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
+
+type outItem struct {
+	data  []byte
+	epoch uint64
+}
 
 // outQueue is the model→browser audio queue. The reader goroutine pushes
 // chunks without blocking; a pump goroutine hands them to the unbuffered
@@ -12,13 +19,14 @@ import (
 type outQueue struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
-	items   [][]byte
+	items   []outItem
+	epoch   uint64
 	flushed chan struct{} // closed and replaced on Flush
 	closed  bool
 }
 
 func newOutQueue() *outQueue {
-	q := &outQueue{flushed: make(chan struct{})}
+	q := &outQueue{epoch: voice.NextAudioEpoch(), flushed: make(chan struct{})}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
@@ -30,19 +38,34 @@ func (q *outQueue) Push(chunk []byte) {
 	if q.closed {
 		return
 	}
-	q.items = append(q.items, chunk)
+	q.items = append(q.items, outItem{data: chunk, epoch: q.epoch})
 	q.cond.Signal()
 }
 
 // Flush drops every queued chunk and returns how many were dropped.
 func (q *outQueue) Flush() int {
+	n, _ := q.FlushEpoch()
+	return n
+}
+
+// FlushEpoch drops every queued chunk, advances the queue's epoch, and
+// returns the dropped count and the flushed epoch.
+func (q *outQueue) FlushEpoch() (dropped int, flushedEpoch uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	n := len(q.items)
+	dropped = len(q.items)
 	q.items = nil
+	flushedEpoch = q.epoch
+	q.epoch = voice.NextAudioEpoch()
 	close(q.flushed)
 	q.flushed = make(chan struct{})
-	return n
+	return dropped, flushedEpoch
+}
+
+func (q *outQueue) BumpEpoch() {
+	q.mu.Lock()
+	q.epoch = voice.NextAudioEpoch()
+	q.mu.Unlock()
 }
 
 // Len returns the number of queued chunks (for tests).
@@ -63,7 +86,14 @@ func (q *outQueue) Close() {
 // pump delivers chunks to out until Close (and the queue is empty) or ctx
 // ends, then closes out.
 func (q *outQueue) pump(ctx context.Context, out chan<- []byte) {
+	q.pumpBoth(ctx, out, nil)
+}
+
+func (q *outQueue) pumpBoth(ctx context.Context, out chan<- []byte, outChunks chan<- voice.AudioChunk) {
 	defer close(out)
+	if outChunks != nil {
+		defer close(outChunks)
+	}
 	go func() {
 		<-ctx.Done()
 		q.Close()
@@ -77,12 +107,13 @@ func (q *outQueue) pump(ctx context.Context, out chan<- []byte) {
 			q.mu.Unlock()
 			return
 		}
-		chunk := q.items[0]
+		item := q.items[0]
 		q.items = q.items[1:]
 		flushed := q.flushed
 		q.mu.Unlock()
 		select {
-		case out <- chunk:
+		case out <- item.data:
+		case outChunks <- voice.AudioChunk{Data: item.data, Epoch: item.epoch}:
 		case <-flushed:
 		case <-ctx.Done():
 			return

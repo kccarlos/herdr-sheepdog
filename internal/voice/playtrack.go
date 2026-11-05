@@ -80,18 +80,30 @@ type TranscriptCut struct {
 	ByPush bool
 }
 
+// FlushMeta captures the session context of a daemon-flushed run at the
+// moment it is interrupted, so a late PlaybackFlushed report carries the
+// interrupted turn's own recap sequence, utterance id, and interrupt cause.
+type FlushMeta struct {
+	RecapSeq    uint64
+	UtteranceID string
+	ByPush      bool
+}
+
 // PlaybackReport is one client playback report as the session saw it
 // (voice.playback): RunMs is the audio the daemon sent in that run.
 type PlaybackReport struct {
 	State    string
 	PlayedMs int
 	RunMs    int
-	RunID    uint32
 	At       time.Time
 	// Cut is set when a flushed run was cut short.
 	Cut *TranscriptCut
 	// Heard is the heard part of a cut run.
 	Heard string
+	// Awaited identifies a daemon-interrupted run, already saved in recap.
+	Awaited bool
+	// RecapSeq is the Recap sequence id of the cut assistant entry when known.
+	RecapSeq uint64
 }
 
 // PlaybackUtterance tags the next playback start with the utterance the
@@ -128,12 +140,26 @@ func TagPayload(payload map[string]any, id string) map[string]any {
 // that run is not a reply).
 func (p *PlaybackUtterance) Run() string { return p.run }
 
+// Flushed returns and clears the utterance id of a flushed run: the active
+// started run when set, or the handed utterance when awaited is true (the
+// model had already begun producing the reply before PlaybackStarted arrived).
+func (p *PlaybackUtterance) Flushed(awaited bool) string {
+	if p.run != "" {
+		id := p.run
+		p.run = ""
+		return id
+	}
+	if awaited && p.id != "" {
+		id := p.id
+		p.id = ""
+		return id
+	}
+	return ""
+}
+
 // Payload is the voice.playback event payload.
 func (r PlaybackReport) Payload() map[string]any {
 	p := map[string]any{"state": r.State, "played_ms": r.PlayedMs, "run_ms": r.RunMs}
-	if r.RunID != 0 {
-		p["run_id"] = r.RunID
-	}
 	if r.Cut != nil {
 		p["cut"] = true
 		p["heard"] = r.Heard
@@ -160,11 +186,11 @@ type playSeg struct {
 // playRun is the audio and output transcript sent since the last
 // boundary (the client's drained, a flush).
 type playRun struct {
-	id     uint32
 	sent   int
 	voiced int
 	segs   []playSeg
 	frags  []spokenFrag
+	meta   FlushMeta
 	// flushedAt is when the daemon flushed the run (awaiting runs).
 	flushedAt time.Time
 }
@@ -284,31 +310,15 @@ func (p *PlaybackTracker) advanceEst(now time.Time, n int) {
 // Reports reports whether the attached client has sent playback messages.
 func (p *PlaybackTracker) Reports() bool { return p.reports }
 
-// SetRunID tags the current run with a monotonic run_id so flushed and
-// drained reports match their exact run instead of relying on arrival order.
-func (p *PlaybackTracker) SetRunID(id uint32) {
-	if id != 0 {
-		p.run.id = id
-	}
-}
+// Empty reports whether nothing has been sent or said in the current run.
+func (p *PlaybackTracker) Empty() bool { return p.run.empty() }
 
-// RunID returns the current run's id (0 when untagged).
-func (p *PlaybackTracker) RunID() uint32 { return p.run.id }
-
-// AssignAwaitingRunID stamps the latest untagged awaiting (or active) run
-// with next() when a flush raced ahead of outbound audio delivery.
-func (p *PlaybackTracker) AssignAwaitingRunID(next func() uint32) uint32 {
-	if n := len(p.awaiting); n > 0 && p.awaiting[n-1].id == 0 {
-		id := next()
-		p.awaiting[n-1].id = id
-		return id
+// SetRecapSeq associates the Recap sequence id of a settled assistant turn
+// with the current run so a subsequent flush targets that exact entry.
+func (p *PlaybackTracker) SetRecapSeq(seq uint64) {
+	if seq != 0 && !p.run.empty() {
+		p.run.meta.RecapSeq = seq
 	}
-	if !p.run.empty() && p.run.id == 0 {
-		id := next()
-		p.run.id = id
-		return id
-	}
-	return 0
 }
 
 // Said records an output transcript fragment at the run's current byte
@@ -325,15 +335,20 @@ func (p *PlaybackTracker) Said(text string) {
 // flushed report, and nothing is playing any more. It reports whether
 // a run now waits for that report (false: nothing had been sent).
 func (p *PlaybackTracker) Flush(now time.Time) bool {
-	_, awaited := p.FlushRun(now)
-	return awaited
+	return p.FlushMeta(now, FlushMeta{})
 }
 
-// FlushRun is Flush, also returning the flushed run's id (0 when untagged).
-func (p *PlaybackTracker) FlushRun(now time.Time) (uint32, bool) {
-	runID := p.run.id
+// FlushMeta is Flush, also recording the interrupted turn's session metadata
+// on the awaiting run so a late PlaybackFlushed report uses that turn's own
+// RecapSeq, UtteranceID, and ByPush rather than a newer turn's state.
+func (p *PlaybackTracker) FlushMeta(now time.Time, meta FlushMeta) bool {
 	awaited := !p.run.empty()
 	if awaited {
+		if meta.RecapSeq != 0 {
+			p.run.meta.RecapSeq = meta.RecapSeq
+		}
+		p.run.meta.UtteranceID = meta.UtteranceID
+		p.run.meta.ByPush = meta.ByPush
 		p.run.flushedAt = now
 		p.awaiting = append(p.awaiting, p.run)
 		if len(p.awaiting) > maxAwaiting {
@@ -345,7 +360,7 @@ func (p *PlaybackTracker) FlushRun(now time.Time) (uint32, bool) {
 	p.holdUntil = time.Time{}
 	p.est = time.Time{}
 	p.endedAt = now
-	return runID, awaited
+	return awaited
 }
 
 // Detach forgets the client (it went away, or a new one replaced it):
@@ -354,31 +369,16 @@ func (p *PlaybackTracker) Detach() {
 	*p = PlaybackTracker{last: p.last}
 }
 
-// Report applies an untagged client playback report and returns it as the
-// session should log it; a flushed run that was cut short carries Cut.
+// Report applies a client playback report and returns it as the session
+// should log it; a flushed run that was cut short carries Cut.
 func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) PlaybackReport {
-	return p.ReportRun(now, state, playedMs, 0)
-}
-
-// ReportRun applies a client playback report optionally tagged with runID
-// (0 falls back to FIFO matching for legacy clients). When runID != 0, a
-// late or duplicate report for an already-settled run is ignored without
-// touching a newer active run.
-func (p *PlaybackTracker) ReportRun(now time.Time, state string, playedMs int, runID uint32) PlaybackReport {
 	if playedMs < 0 {
 		playedMs = 0
 	}
 	p.reports = true
-	rep := PlaybackReport{State: state, PlayedMs: playedMs, RunID: runID, At: now}
+	rep := PlaybackReport{State: state, PlayedMs: playedMs, At: now}
 	switch state {
 	case PlaybackStarted:
-		if runID != 0 && runID != p.run.id {
-			p.last = rep
-			return rep
-		}
-		if rep.RunID == 0 {
-			rep.RunID = p.run.id
-		}
 		rep.RunMs = p.run.sent / outBytesPerMs
 		if !p.playing {
 			p.playingSince = now
@@ -386,13 +386,6 @@ func (p *PlaybackTracker) ReportRun(now time.Time, state string, playedMs int, r
 		p.playing = true
 		p.holdUntil = time.Time{}
 	case PlaybackDrained:
-		if runID != 0 && runID != p.run.id {
-			p.last = rep
-			return rep
-		}
-		if rep.RunID == 0 {
-			rep.RunID = p.run.id
-		}
 		rep.RunMs = p.run.sent / outBytesPerMs
 		p.playing = false
 		p.holdUntil = now.Add(PlaybackGapHold)
@@ -403,46 +396,30 @@ func (p *PlaybackTracker) ReportRun(now time.Time, state string, playedMs int, r
 			p.awaiting = p.awaiting[1:]
 		}
 		var r playRun
-		matched := false
-		if runID != 0 {
-			for i := range p.awaiting {
-				if p.awaiting[i].id == runID {
-					r = p.awaiting[i]
-					p.awaiting = p.awaiting[i+1:]
-					matched = true
-					break
-				}
-			}
-			if !matched && p.run.id == runID {
-				r, p.run = p.run, playRun{}
-				p.est = time.Time{}
-				matched = true
-			}
-			if !matched {
-				p.last = rep
-				return rep
-			}
+		if len(p.awaiting) > 0 {
+			r, p.awaiting = p.awaiting[0], p.awaiting[1:]
+			rep.Awaited = true
 		} else {
-			if len(p.awaiting) > 0 {
-				r, p.awaiting = p.awaiting[0], p.awaiting[1:]
-			} else {
-				// The client flushed on its own (the stop button) or ahead
-				// of the daemon's interrupt: the current run is what it cut.
-				r, p.run = p.run, playRun{}
-				p.est = time.Time{}
-			}
-			if rep.RunID == 0 {
-				rep.RunID = r.id
-			}
+			// The client flushed on its own (the stop button) or ahead
+			// of the daemon's interrupt: the current run is what it cut.
+			r, p.run = p.run, playRun{}
+			p.est = time.Time{}
 		}
 		rep.RunMs = r.sent / outBytesPerMs
+		rep.RecapSeq = r.meta.RecapSeq
 		if p.run.empty() {
 			p.playing = false
 			p.holdUntil = time.Time{}
 			p.endedAt = now
 		}
 		if heard, full, cut := r.heard(playedMs * outBytesPerMs); cut {
-			rep.Cut = &TranscriptCut{HeardMs: playedMs, RunMs: rep.RunMs, Full: full}
+			rep.Cut = &TranscriptCut{
+				HeardMs:     playedMs,
+				RunMs:       rep.RunMs,
+				Full:        full,
+				UtteranceID: r.meta.UtteranceID,
+				ByPush:      r.meta.ByPush,
+			}
 			rep.Heard = heard
 		}
 	}
@@ -502,7 +479,7 @@ func (r playRun) advance(n int) playRun {
 		return playRun{}
 	}
 	vDrop := r.voicedAt(n)
-	out := playRun{id: r.id, sent: r.sent - n, voiced: r.voiced - vDrop}
+	out := playRun{sent: r.sent - n, voiced: r.voiced - vDrop, meta: r.meta}
 	for _, seg := range r.segs {
 		if seg.sent > n {
 			out.segs = append(out.segs, playSeg{sent: seg.sent - n, voiced: seg.voiced - vDrop})
@@ -520,6 +497,41 @@ func (r playRun) advance(n int) playRun {
 	return out
 }
 
+func (r playRun) fragOffset(i int, useVoiced bool) int {
+	if useVoiced {
+		return r.frags[i].voicedAt
+	}
+	return r.frags[i].at
+}
+
+// nextFragGroup coalesces consecutive fragments starting at i that share the
+// same audio span above prev, returning the combined text, the next index j,
+// and the span's end offset fat.
+func (r playRun) nextFragGroup(i, prev, total int, useVoiced bool) (text string, j, fat int) {
+	off := r.fragOffset(i, useVoiced)
+	var b strings.Builder
+	b.WriteString(r.frags[i].text)
+	j = i + 1
+	if off <= prev {
+		for j < len(r.frags) && r.fragOffset(j, useVoiced) <= prev {
+			b.WriteString(r.frags[j].text)
+			j++
+		}
+		if j < len(r.frags) {
+			fat = r.fragOffset(j, useVoiced)
+		} else {
+			fat = total
+		}
+		return b.String(), j, fat
+	}
+	at := r.frags[i].at
+	for j < len(r.frags) && r.frags[j].at == at {
+		b.WriteString(r.frags[j].text)
+		j++
+	}
+	return b.String(), j, off
+}
+
 // heard maps n played bytes onto the run's transcript: whole fragments
 // that arrived by then, and a proportional share of the words of the one
 // straddling it, using voiced-audio checkpoints when voiced PCM was seen
@@ -531,32 +543,49 @@ func (r playRun) heard(n int) (heard, full string, cut bool) {
 		all.WriteString(f.text)
 	}
 	full = strings.TrimSpace(all.String())
-	tol := int(cutTolerance/time.Millisecond) * outBytesPerMs
-	if full == "" || (n > 0 && n >= r.sent-tol) {
+	if full == "" {
 		return "", full, false
 	}
+	tol := int(cutTolerance/time.Millisecond) * outBytesPerMs
 	useVoiced := r.voiced > 0
+	total := r.sent
+	if useVoiced {
+		total = r.voiced
+	}
+	unvoicedTail := false
+	for i, prev := 0, 0; i < len(r.frags); {
+		txt, j, fat := r.nextFragGroup(i, prev, total, useVoiced)
+		if fat <= prev && strings.TrimSpace(txt) != "" {
+			unvoicedTail = true
+			break
+		}
+		prev, i = fat, j
+	}
 	pos := n
 	if useVoiced {
 		pos = r.voicedAt(n)
-		if pos > 0 && pos >= r.voiced-tol {
+	}
+	if !unvoicedTail {
+		if n > 0 && (n >= r.sent || (r.sent > tol && n >= r.sent-tol)) {
+			return "", full, false
+		}
+		if useVoiced && pos > 0 && (pos >= r.voiced || (r.voiced > tol && pos >= r.voiced-tol)) {
 			return "", full, false
 		}
 	}
 	var b strings.Builder
-	prev := 0
-	for _, f := range r.frags {
-		fat := f.at
-		if useVoiced {
-			fat = f.voicedAt
+	for i, prev := 0, 0; i < len(r.frags); {
+		txt, j, fat := r.nextFragGroup(i, prev, total, useVoiced)
+		if fat <= prev {
+			break
 		}
 		if fat <= pos && pos > 0 {
-			b.WriteString(f.text)
-			prev = fat
+			b.WriteString(txt)
+			prev, i = fat, j
 			continue
 		}
 		if pos > prev && fat > prev {
-			b.WriteString(wordPrefix(f.text, float64(pos-prev)/float64(fat-prev)))
+			b.WriteString(wordPrefix(txt, float64(pos-prev)/float64(fat-prev)))
 		}
 		break
 	}

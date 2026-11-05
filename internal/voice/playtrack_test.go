@@ -291,86 +291,144 @@ func TestPlaybackSentPCMVoicedCheckpoints(t *testing.T) {
 	})
 }
 
-func TestPlaybackRunIDMatchesAndDropsStaleFlushed(t *testing.T) {
+func TestPlaybackFlushMetaPreservedAcrossNewTurn(t *testing.T) {
 	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	var p PlaybackTracker
 
-	// Run 1: 2000 ms sent, flushed on interrupt.
-	p.SetRunID(1)
+	// Run 1: 2000 ms sent, settled recap seq 2, flushed on barge-in.
 	p.Sent(t0, 2000*outBytesPerMs)
 	p.Said("first reply in full")
-	runID, awaited := p.FlushRun(t0.Add(500 * time.Millisecond))
-	if runID != 1 || !awaited {
-		t.Fatalf("FlushRun = (%d, %v), want (1, true)", runID, awaited)
+	p.SetRecapSeq(2)
+	if !p.FlushMeta(t0.Add(500*time.Millisecond), FlushMeta{UtteranceID: "utt-1", ByPush: false}) {
+		t.Fatal("FlushMeta = false, want true")
 	}
 
-	// Run 2 starts immediately before client's flushed(1) arrives.
+	// Run 2 starts immediately before client's flushed report for Run 1 arrives.
 	t2 := t0.Add(600 * time.Millisecond)
-	p.SetRunID(2)
 	p.Sent(t2, 2000*outBytesPerMs)
 	p.Said("second reply stays intact")
-	if rep := p.ReportRun(t2, PlaybackStarted, 0, 2); rep.RunID != 2 {
-		t.Fatalf("started RunID = %d, want 2", rep.RunID)
-	}
+	p.SetRecapSeq(4)
+	p.Report(t2, PlaybackStarted, 0)
 
-	// Late flushed(1) cuts run 1 without ending run 2's active playback.
-	rep1 := p.ReportRun(t2.Add(50*time.Millisecond), PlaybackFlushed, 500, 1)
-	if rep1.RunID != 1 || rep1.Cut == nil || rep1.Cut.Full != "first reply in full" || rep1.Heard != "first" {
-		t.Fatalf("flushed(1) = %+v (cut=%+v), want cut of run 1", rep1, rep1.Cut)
+	// Late flushed report cuts Run 1 with Run 1's own metadata without ending Run 2.
+	rep1 := p.Report(t2.Add(50*time.Millisecond), PlaybackFlushed, 500)
+	if !rep1.Awaited || rep1.RecapSeq != 2 || rep1.Cut == nil || rep1.Cut.Full != "first reply in full" || rep1.Heard != "first" {
+		t.Fatalf("flushed(1) = %+v (cut=%+v), want cut of run 1 with RecapSeq=2", rep1, rep1.Cut)
 	}
-	if got := rep1.Payload()["run_id"]; got != uint32(1) {
-		t.Fatalf("Payload run_id = %#v, want uint32(1)", got)
+	if rep1.Cut.UtteranceID != "utt-1" || rep1.Cut.ByPush {
+		t.Fatalf("flushed(1) cut meta = %+v, want UtteranceID=utt-1 ByPush=false", rep1.Cut)
 	}
 	if playing, _ := p.Playing(t2.Add(100 * time.Millisecond)); !playing {
 		t.Fatal("late flushed(1) falsely ended active run 2")
 	}
 
-	// Duplicate flushed(1) and stale drained(1) must not touch run 2.
-	if dup := p.ReportRun(t2.Add(120*time.Millisecond), PlaybackFlushed, 0, 1); dup.Cut != nil {
-		t.Fatalf("duplicate flushed(1) cut active run: %+v", dup.Cut)
-	}
-	_ = p.ReportRun(t2.Add(130*time.Millisecond), PlaybackDrained, 2000, 1)
-	if playing, _ := p.Playing(t2.Add(140 * time.Millisecond)); !playing {
-		t.Fatal("stale drained(1) falsely ended active run 2")
-	}
-
-	// Flushing run 2 by its own run_id cuts run 2 cleanly.
-	rep2 := p.ReportRun(t2.Add(200*time.Millisecond), PlaybackFlushed, 500, 2)
-	if rep2.RunID != 2 || rep2.Cut == nil || rep2.Cut.Full != "second reply stays intact" || rep2.Heard != "second" {
-		t.Fatalf("flushed(2) = %+v (cut=%+v), want cut of run 2", rep2, rep2.Cut)
+	// Unsolicited client flush of Run 2 carries Run 2's RecapSeq.
+	rep2 := p.Report(t2.Add(200*time.Millisecond), PlaybackFlushed, 500)
+	if rep2.Awaited || rep2.RecapSeq != 4 || rep2.Cut == nil || rep2.Cut.Full != "second reply stays intact" || rep2.Heard != "second" {
+		t.Fatalf("flushed(2) = %+v (cut=%+v), want cut of run 2 with RecapSeq=4", rep2, rep2.Cut)
 	}
 }
 
-func TestPlaybackRunIDOutOfOrderSkipsUnansweredRun(t *testing.T) {
-	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
-	var p PlaybackTracker
+func TestPlaybackEarlyTranscriptDoesNotCountAllWords(t *testing.T) {
+	now := time.Unix(1000, 0)
 
-	p.SetRunID(1)
-	p.Sent(t0, 2000*outBytesPerMs)
-	p.Said("alpha beta gamma delta")
-	p.FlushRun(t0.Add(100 * time.Millisecond))
+	t.Run("single_early_fragment", func(t *testing.T) {
+		var p PlaybackTracker
+		p.Said("one two three four ")
+		p.SentPCM(now, voicedPCM(1000))
+		p.Said("five six seven eight")
+		p.SentPCM(now, voicedPCM(1000))
+		rep := p.Report(now, PlaybackFlushed, 100)
+		if rep.Cut == nil || rep.Heard != "" {
+			t.Fatalf("early transcript overcounted: %+v", rep)
+		}
+	})
 
-	p.SetRunID(2)
-	p.Sent(t0.Add(200*time.Millisecond), 2000*outBytesPerMs)
-	p.Said("one two three four")
-	p.FlushRun(t0.Add(300 * time.Millisecond))
+	t.Run("multiple_early_fragments_before_audio", func(t *testing.T) {
+		var p PlaybackTracker
+		p.Said("one two ")
+		p.Said("three four ")
+		p.SentPCM(now, voicedPCM(1000))
+		rep := p.Report(now, PlaybackFlushed, 500)
+		if rep.Cut == nil || rep.Heard != "one two" {
+			t.Fatalf("50%% of 4 pre-voiced words = %+v (heard=%q), want %q", rep.Cut, rep.Heard, "one two")
+		}
 
-	// Client reports flushed for run 2 directly (run 1 never answered).
-	rep := p.ReportRun(t0.Add(400*time.Millisecond), PlaybackFlushed, 1000, 2)
-	if rep.Cut == nil || rep.Cut.Full != "one two three four" || rep.Heard != "one two" {
-		t.Fatalf("flushed(2) = %+v (cut=%+v), want run 2 cut", rep, rep.Cut)
-	}
+		var p2 PlaybackTracker
+		p2.Said("one two ")
+		p2.Said("three four ")
+		p2.SentPCM(now, voicedPCM(1000))
+		rep2 := p2.Report(now, PlaybackFlushed, 750)
+		if rep2.Cut == nil || rep2.Heard != "one two three" {
+			t.Fatalf("75%% of 4 pre-voiced words = %+v (heard=%q), want %q", rep2.Cut, rep2.Heard, "one two three")
+		}
+	})
+
+	t.Run("multiple_fragments_during_mid_turn_pause", func(t *testing.T) {
+		build := func() PlaybackTracker {
+			var p PlaybackTracker
+			p.SentPCM(now, voicedPCM(500))
+			p.Said("one two ")
+			p.SentPCM(now, silentPCM(400))
+			p.Said("three ")
+			p.Said("four ")
+			p.SentPCM(now, voicedPCM(500))
+			return p
+		}
+		pPause := build()
+		if rep := pPause.Report(now, PlaybackFlushed, 700); rep.Cut == nil || rep.Heard != "one two" {
+			t.Fatalf("cut in silent pause = %+v (heard=%q), want %q", rep.Cut, rep.Heard, "one two")
+		}
+		pHalf := build()
+		if rep := pHalf.Report(now, PlaybackFlushed, 1150); rep.Cut == nil || rep.Heard != "one two three" {
+			t.Fatalf("cut mid second span = %+v (heard=%q), want %q", rep.Cut, rep.Heard, "one two three")
+		}
+	})
+
+	t.Run("unvoiced_trailing_transcript_not_counted_whole", func(t *testing.T) {
+		var p PlaybackTracker
+		p.Said("one two ")
+		p.SentPCM(now, voicedPCM(200))
+		p.Said("three four five six")
+		rep := p.Report(now, PlaybackFlushed, 200)
+		if rep.Cut == nil || rep.Heard != "one two" {
+			t.Fatalf("unvoiced trailing transcript treated as heard: %+v (heard=%q)", rep.Cut, rep.Heard)
+		}
+	})
 }
 
-func TestPlaybackStaleDrainDoesNotConsumeUntaggedNewRun(t *testing.T) {
+func TestPlaybackShortVoicedRunIsCut(t *testing.T) {
+	now := time.Unix(1000, 0)
+
+	t.Run("with_trailing_silence", func(t *testing.T) {
+		var p PlaybackTracker
+		p.SentPCM(now, voicedPCM(100))
+		p.Said("one two three four")
+		p.SentPCM(now, silentPCM(1900))
+		rep := p.Report(now, PlaybackFlushed, 10)
+		if rep.Cut == nil {
+			t.Fatalf("short voiced run considered complete: %+v", rep)
+		}
+	})
+
+	t.Run("without_trailing_silence", func(t *testing.T) {
+		var p PlaybackTracker
+		p.SentPCM(now, voicedPCM(100))
+		p.Said("one two three four")
+		rep := p.Report(now, PlaybackFlushed, 10)
+		if rep.Cut == nil || rep.Heard != "" {
+			t.Fatalf("short 100ms run played 10ms = %+v (heard=%q), want cut", rep.Cut, rep.Heard)
+		}
+	})
+}
+
+func TestPlaybackShortVoicedRunHeardBeforeTrailingSilence(t *testing.T) {
 	var p PlaybackTracker
-	now := time.Now()
-	p.Sent(now, 2000*outBytesPerMs)
-	p.Said("new reply stays intact")
-	p.ReportRun(now, PlaybackDrained, 2000, 7)
-	p.SetRunID(8)
-	rep := p.ReportRun(now, PlaybackFlushed, 0, 8)
-	if rep.Cut == nil || rep.Cut.Full != "new reply stays intact" {
-		t.Fatalf("stale drain consumed new run: %+v", rep)
+	now := time.Unix(1000, 0)
+	p.SentPCM(now, voicedPCM(100))
+	p.Said("hello there")
+	p.SentPCM(now, silentPCM(1900))
+	if rep := p.Report(now, PlaybackFlushed, 200); rep.Cut != nil {
+		t.Fatalf("all voiced audio was heard: %+v", rep)
 	}
 }

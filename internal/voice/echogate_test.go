@@ -620,3 +620,24 @@ func TestEchoGateUnarmedNeverResends(t *testing.T) {
 		t.Fatalf("%d frames sent for 40", sent)
 	}
 }
+
+func TestEchoTextIdentifierAloneDoesNotHideCommand(t *testing.T) {
+	if EchoText("Stop parseHTTPResponse", "I am checking parseHTTPResponse now") {
+		t.Fatal("2-word command with identifier matched as echo")
+	}
+	if EchoText("Please stop parseHTTPResponse", "I am checking parseHTTPResponse right now") {
+		t.Fatal("3-word command with identifier matched as echo")
+	}
+	if EchoText("parseHTTPResponse", "Checking parseHTTPResponse") {
+		t.Fatal("single identifier answer matched as echo")
+	}
+	if !EchoText("Checking ws_proto.go", "I am checking ws_proto.go right now") {
+		t.Fatal("two-word phrase with identifier missed as echo")
+	}
+	if !EchoText("ws underscore proto dot go", "Checking ws_proto.go") {
+		t.Fatal("spoken-joiner identifier missed as echo")
+	}
+	if !EchoText("正在检查测试", "我现在正在检查测试结果") {
+		t.Fatal("CJK echo missed")
+	}
+}

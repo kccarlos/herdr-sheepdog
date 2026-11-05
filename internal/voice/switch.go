@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
@@ -54,20 +55,23 @@ type Switcher struct {
 	// /debug Context tab).
 	ctxlog *ctxcap.VoiceLog
 
-	audio  chan []byte
-	events chan Event
+	audio       chan []byte
+	audioChunks chan AudioChunk
+	events      chan Event
 
-	mu        sync.RWMutex
-	ctx       context.Context
-	started   bool
-	closed    bool
-	switching bool
-	starting  bool
-	current   string
-	inner     Session
-	muted     bool
-	client    bool
-	openCheck OpenCheck
+	mu           sync.RWMutex
+	ctx          context.Context
+	started      bool
+	closed       bool
+	switching    bool
+	starting     bool
+	current      string
+	inner        Session
+	innerRetired chan struct{}
+	innerEpoch   atomic.Uint64
+	muted        bool
+	client       bool
+	openCheck    OpenCheck
 	// billedRetired is the billed duration of retired sessions (a
 	// GPT-Live session switched away from).
 	billedRetired float64
@@ -87,7 +91,13 @@ func NewSwitcher(providers []Provider, initial string, log logging.Logger) (*Swi
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	sw := &Switcher{log: log, providers: providers, audio: make(chan []byte), events: make(chan Event, 1024)}
+	sw := &Switcher{
+		log:         log,
+		providers:   providers,
+		audio:       make(chan []byte),
+		audioChunks: make(chan AudioChunk),
+		events:      make(chan Event, 1024),
+	}
 	if _, err := sw.lookup(initial); err != nil && !errors.Is(err, ErrUnavailableProvider) {
 		return nil, err
 	}
@@ -249,12 +259,23 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		return errors.New("voice: switcher closed")
 	}
 	old := sw.inner
+	if sw.innerRetired != nil {
+		close(sw.innerRetired)
+		sw.innerRetired = nil
+	}
+	fence := NextAudioEpoch()
+	if b, ok := inner.(interface{ BumpAudioEpoch() }); ok {
+		b.BumpAudioEpoch()
+	}
 	sw.current, sw.inner = id, inner
 	muted, client, check := sw.muted, sw.client, sw.openCheck
 	sw.forwardLocked(inner)
 	sw.retire.Add(1)
 	sw.mu.Unlock()
 
+	if fa, ok := old.(interface{ FlushAudio() uint64 }); ok {
+		fa.FlushAudio()
+	}
 	inner.SetMuted(muted)
 	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(client)
@@ -264,7 +285,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	sw.carryRecap(old, inner, from, id)
 	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
-	sw.emit(EventInterrupted{}) // drop the old voice's audio (its queued pushes were carried)
+	sw.emit(EventInterrupted{Epoch: fence}) // drop the old voice's audio (its queued pushes were carried)
 	go func() {
 		defer sw.retire.Done()
 		_ = old.Close()
@@ -354,17 +375,31 @@ func (sw *Switcher) carryPushes(old, inner Session, from, to string) {
 // inner is the current session.
 func (sw *Switcher) forwardLocked(inner Session) {
 	ctx := sw.ctx
+	retired := make(chan struct{})
+	sw.innerRetired = retired
+	sw.innerEpoch.Store(NextAudioEpoch())
 	sw.fwd.Add(2)
 	go func() {
 		defer sw.fwd.Done()
-		for chunk := range inner.Audio() {
+		send := func(chunk AudioChunk) {
 			if !sw.isCurrent(inner) {
-				continue
+				return
 			}
 			select {
-			case sw.audio <- chunk:
+			case sw.audio <- chunk.Data:
+			case sw.audioChunks <- chunk:
+			case <-retired:
 			case <-ctx.Done():
 			}
+		}
+		if ac, ok := inner.(interface{ AudioChunks() <-chan AudioChunk }); ok {
+			for chunk := range ac.AudioChunks() {
+				send(chunk)
+			}
+			return
+		}
+		for data := range inner.Audio() {
+			send(AudioChunk{Data: data, Epoch: sw.innerEpoch.Load()})
 		}
 	}()
 	go func() {
@@ -420,17 +455,23 @@ func (sw *Switcher) Close() error {
 	if !sw.started {
 		sw.closed = true
 		close(sw.audio)
+		close(sw.audioChunks)
 		sw.closeEvents()
 		sw.mu.Unlock()
 		return nil
 	}
 	sw.closed = true
+	if sw.innerRetired != nil {
+		close(sw.innerRetired)
+		sw.innerRetired = nil
+	}
 	inner := sw.inner
 	sw.mu.Unlock()
 	err := inner.Close()
 	sw.retire.Wait()
 	sw.fwd.Wait()
 	close(sw.audio)
+	close(sw.audioChunks)
 	sw.closeEvents()
 	return err
 }
@@ -526,6 +567,23 @@ func (sw *Switcher) Speaking() bool {
 // Audio implements Session.
 func (sw *Switcher) Audio() <-chan []byte { return sw.audio }
 
+// AudioChunks yields outbound audio frames paired with their flush epoch.
+func (sw *Switcher) AudioChunks() <-chan AudioChunk { return sw.audioChunks }
+
+// FlushAudio purges any queued outbound audio in the current session and
+// returns the flushed epoch so the caller can drop racing pre-flush frames.
+func (sw *Switcher) FlushAudio() uint64 {
+	cur := sw.cur()
+	if fa, ok := cur.(interface{ FlushAudio() uint64 }); ok {
+		return fa.FlushAudio()
+	}
+	old := sw.innerEpoch.Swap(NextAudioEpoch())
+	if old == 0 {
+		return NextAudioEpoch()
+	}
+	return old
+}
+
 // Events implements Session.
 func (sw *Switcher) Events() <-chan Event { return sw.events }
 
@@ -587,37 +645,10 @@ func (sw *Switcher) HasListener() bool {
 	return sw.client
 }
 
-// NoteAudioRun forwards a monotonic audio run id to the current session.
-func (sw *Switcher) NoteAudioRun(runID uint32) {
-	if p, ok := sw.cur().(interface{ NoteAudioRun(uint32) }); ok {
-		p.NoteAudioRun(runID)
-	}
-}
-
-// AssignFlushedRun forwards untagged awaiting-run assignment to the
-// current session.
-func (sw *Switcher) AssignFlushedRun(next func() uint32) uint32 {
-	if p, ok := sw.cur().(interface{ AssignFlushedRun(func() uint32) uint32 }); ok {
-		return p.AssignFlushedRun(next)
-	}
-	return 0
-}
-
-// ClientPlayback forwards an untagged /ws client playback report to the
-// current session (docs/dev/ws-contract.md "Playback reports").
+// ClientPlayback forwards a /ws client playback report to the current
+// session (docs/dev/ws-contract.md "Playback reports").
 func (sw *Switcher) ClientPlayback(state string, playedMs int) {
-	sw.ClientPlaybackRun(state, playedMs, 0)
-}
-
-// ClientPlaybackRun forwards a /ws client playback report (optionally
-// tagged with runID) to the current session.
-func (sw *Switcher) ClientPlaybackRun(state string, playedMs int, runID uint32) {
-	cur := sw.cur()
-	if p, ok := cur.(interface{ ClientPlaybackRun(string, int, uint32) }); ok {
-		p.ClientPlaybackRun(state, playedMs, runID)
-		return
-	}
-	if p, ok := cur.(interface{ ClientPlayback(string, int) }); ok {
+	if p, ok := sw.cur().(interface{ ClientPlayback(string, int) }); ok {
 		p.ClientPlayback(state, playedMs)
 	}
 }

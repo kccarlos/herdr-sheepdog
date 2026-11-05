@@ -254,3 +254,81 @@ func TestPlaybackStartTaggedWithReplyUtterance(t *testing.T) {
 		t.Fatalf("voice.playback = %v", ps)
 	}
 }
+
+func TestGeminiLateFlushedAndUnsolicitedFlushRaces(t *testing.T) {
+	t.Run("late_flushed_preserves_new_turn_and_utterance", func(t *testing.T) {
+		c := newFakeConn("c1")
+		h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+		// Run 1 answers utt-1 and is interrupted by the user (model barge-in).
+		h.s.mu.Lock()
+		h.s.playUtt.Handed("utt-1")
+		h.s.mu.Unlock()
+		speakReply(h, c, strings.Fields("Checking the auth failure right now"), 200)
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+		c.serve(interruptedMsg())
+		h.waitEvent("flush 1", isFlushEvent)
+
+		// Before Run 1's PlaybackFlushed arrives, Run 2 (an urgent push answering
+		// utt-2) goes out, speaks a substring reply ("Checking failure"), and starts playing.
+		if err := h.s.PushTagged("Checking failure", voice.UrgencyInterrupt, map[string]any{"utterance_id": "utt-2", "needs_user": true}); err != nil {
+			t.Fatal(err)
+		}
+		h.waitEvent("push 2 sent", func(voice.Event) bool { return h.log.has("voice.push") })
+		speakReply(h, c, []string{"Checking", "failure"}, 200)
+		c.serve(turnCompleteMsg())
+		h.waitEvent("turn 2 complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+
+		// Now Run 1's late PlaybackFlushed arrives.
+		h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+		ev := h.waitEvent("cut transcript for run 1", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Cut != nil
+		})
+		tr := ev.(voice.EventTranscript)
+		if tr.Cut.UtteranceID != "utt-1" {
+			t.Fatalf("cut UtteranceID = %q, want %q", tr.Cut.UtteranceID, "utt-1")
+		}
+		if tr.Cut.ByPush {
+			t.Fatalf("cut ByPush = true, want false (run 1 was cut by user)")
+		}
+		entries := h.s.RecapEntries()
+		last := entries[len(entries)-1]
+		if last.Text != "Checking failure" || last.Cut {
+			t.Fatalf("newer reply corrupted by late cut: entries=%+v", entries)
+		}
+	})
+
+	t.Run("unsolicited_flushed_does_not_split_user_input_in_progress", func(t *testing.T) {
+		c := newFakeConn("c1")
+		h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+		speakReply(h, c, strings.Fields("Auth is running the migration suite"), 300)
+		h.s.ClientPlayback(voice.PlaybackStarted, 0)
+
+		// User starts speaking (partial input transcript) while client flushes playback
+		// ahead of the server's interrupted signal.
+		c.serve(inputTranscriptMsg("check the ", false))
+		h.waitEvent("partial in", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Dir == voice.DirIn && strings.Contains(tr.Text, "check")
+		})
+		h.s.ClientPlayback(voice.PlaybackFlushed, 600)
+		c.serve(inputTranscriptMsg("build logs", true))
+		h.waitEvent("final in", func(ev voice.Event) bool {
+			tr, ok := ev.(voice.EventTranscript)
+			return ok && tr.Dir == voice.DirIn && tr.Final
+		})
+
+		var userTexts []string
+		for _, e := range h.s.RecapEntries() {
+			if e.Role == voice.RecapUser {
+				userTexts = append(userTexts, e.Text)
+			}
+		}
+		if len(userTexts) != 1 || userTexts[0] != "check the build logs" {
+			t.Fatalf("user recap entries = %q, want single [\"check the build logs\"]", userTexts)
+		}
+	})
+}

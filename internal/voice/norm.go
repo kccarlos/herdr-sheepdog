@@ -87,6 +87,15 @@ type rawToken struct {
 	// previous one, so "twenty three" and "twenty-three" form 23 while
 	// "twenty, three" stays two numbers.
 	joinable bool
+	// word identifies the whitespace-delimited token (or CJK character) this
+	// sub-token came from, so EchoText can tell multi-word speech apart from
+	// a single split code identifier.
+	word int
+}
+
+type wordToken struct {
+	text string
+	word int
 }
 
 func isCJKRune(r rune) bool {
@@ -167,20 +176,39 @@ func splitIdent(run []rune) []string {
 // canonical digits), identifiers split on joiners and camelCase, and
 // English number words (0..99, 100, ordinals) map to canonical digits.
 func normTokens(text string) []string {
+	wt := normWordTokens(text)
+	out := make([]string, len(wt))
+	for i, t := range wt {
+		out[i] = t.text
+	}
+	return out
+}
+
+func normWordTokens(text string) []wordToken {
 	var raw []rawToken
 	var ident []rune
 	var zhNum []rune
 	sepJoinable := false
 	hasTokens := false
+	wordSeq := 0
+	curWord := -1
 
-	appendTok := func(t string, join bool) {
-		raw = append(raw, rawToken{text: t, joinable: hasTokens && join})
+	appendTok := func(t string, join bool, w int) {
+		raw = append(raw, rawToken{text: t, joinable: hasTokens && join, word: w})
 		hasTokens = true
+	}
+	ensureWord := func() int {
+		if curWord < 0 {
+			curWord = wordSeq
+			wordSeq++
+		}
+		return curWord
 	}
 	flushIdent := func() {
 		if len(ident) == 0 {
 			return
 		}
+		w := ensureWord()
 		parts := splitIdent(ident)
 		ident = ident[:0]
 		for i, p := range parts {
@@ -188,7 +216,7 @@ func normTokens(text string) []string {
 			if i > 0 {
 				join = false
 			}
-			appendTok(p, join)
+			appendTok(p, join, w)
 		}
 		sepJoinable = false
 	}
@@ -196,12 +224,15 @@ func normTokens(text string) []string {
 		if len(zhNum) == 0 {
 			return
 		}
+		w := wordSeq
+		wordSeq++
+		curWord = -1
 		// A lone 百 or 千 ("百度", "千万") without a digit is a word character,
 		// whereas 十 ("十", "十五") is 10 / 15.
 		if len(zhNum) == 1 && (zhNum[0] == '百' || zhNum[0] == '千') {
-			appendTok(string(zhNum[0]), false)
+			appendTok(string(zhNum[0]), false, w)
 		} else {
-			appendTok(chineseNumber(zhNum), false)
+			appendTok(chineseNumber(zhNum), false, w)
 		}
 		zhNum = zhNum[:0]
 		sepJoinable = false
@@ -213,6 +244,9 @@ func normTokens(text string) []string {
 		if !inSep {
 			inSep = true
 			sepClean = true
+		}
+		if unicode.IsSpace(r) {
+			curWord = -1
 		}
 		if !unicode.IsSpace(r) && r != '-' {
 			sepClean = false
@@ -229,7 +263,10 @@ func normTokens(text string) []string {
 			flushIdent()
 			flushZhNum()
 			inSep = false
-			appendTok(string(r), false)
+			curWord = -1
+			w := wordSeq
+			wordSeq++
+			appendTok(string(r), false, w)
 		case unicode.IsLetter(r) || isASCIIDigit(r):
 			flushZhNum()
 			if inSep {
@@ -246,33 +283,34 @@ func normTokens(text string) []string {
 	flushIdent()
 	flushZhNum()
 
-	out := make([]string, 0, len(raw))
+	out := make([]wordToken, 0, len(raw))
 	for i := 0; i < len(raw); i++ {
 		w := raw[i].text
+		wid := raw[i].word
 		if i+1 < len(raw) && raw[i+1].joinable {
 			next := raw[i+1].text
 			if tens, ok := englishTensWords[w]; ok {
 				if ones, ok := englishOnesWords[next]; ok {
-					out = append(out, strconv.Itoa(tens+ones))
+					out = append(out, wordToken{text: strconv.Itoa(tens + ones), word: wid})
 					i++
 					continue
 				}
 			}
 			if mult, ok := englishCardinalOnes[w]; ok && (next == "hundred" || next == "hundredth") {
-				out = append(out, strconv.Itoa(mult*100))
+				out = append(out, wordToken{text: strconv.Itoa(mult * 100), word: wid})
 				i++
 				continue
 			}
 		}
-		if w == "one" && len(out) > 0 && oneDeterminers[out[len(out)-1]] {
-			out = append(out, w)
+		if w == "one" && len(out) > 0 && oneDeterminers[out[len(out)-1].text] {
+			out = append(out, wordToken{text: w, word: wid})
 			continue
 		}
 		if n, ok := englishExactNumbers[w]; ok {
-			out = append(out, strconv.Itoa(n))
+			out = append(out, wordToken{text: strconv.Itoa(n), word: wid})
 			continue
 		}
-		out = append(out, w)
+		out = append(out, wordToken{text: w, word: wid})
 	}
 	return out
 }

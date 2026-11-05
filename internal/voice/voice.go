@@ -10,8 +10,25 @@ package voice
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
+
+// AudioChunk pairs a 24 kHz PCM16 LE mono frame with the session's monotonic
+// outbound audio epoch at the time the frame was queued, so consumers can drop
+// in-flight frames that raced across a flush.
+type AudioChunk struct {
+	Data  []byte
+	Epoch uint64
+}
+
+var audioEpochSeq atomic.Uint64
+
+// NextAudioEpoch returns a process-wide strictly increasing outbound audio
+// epoch (> 0).
+func NextAudioEpoch() uint64 {
+	return audioEpochSeq.Add(1)
+}
 
 // Urgency says how a push or a tool result should reach the user (plan §5,
 // §6). The zero value is UrgencyIdle: speak when the model is not already

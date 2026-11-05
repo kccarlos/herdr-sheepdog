@@ -288,8 +288,8 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 	case evOutputItemAdded:
 		if ev.Item != nil && ev.Item.Role == "assistant" && ev.Item.ID != "" {
 			s.mu.Lock()
-			if s.lcActiveLocked(lc) && ev.Item.ID != lc.truncatedID {
-				lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: ev.Item.ID, startedAt: s.now()}
+			if s.lcActiveLocked(lc) && !lc.interruptedItem(ev.Item.ID) {
+				lc.outItem = &outItemSpan{itemID: ev.Item.ID, startedAt: s.now()}
 			}
 			s.mu.Unlock()
 		}
@@ -350,15 +350,14 @@ func (s *Session) onOutputAudio(lc *liveConn, chunk []byte, itemID string, conte
 		return
 	}
 	if lc != nil && itemID != "" {
-		if itemID == lc.truncatedID {
+		if lc.interruptedItem(itemID) {
 			s.mu.Unlock()
 			return
 		}
 		if lc.outItem == nil || lc.outItem.itemID != itemID {
-			lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: itemID, contentIndex: contentIndex, startedAt: now}
-		} else if lc.outItem.runID == 0 {
-			lc.outItem.runID = s.play.RunID()
+			lc.outItem = &outItemSpan{itemID: itemID, contentIndex: contentIndex, startedAt: now}
 		}
+		lc.outItem.contentIndex = contentIndex
 		lc.outItem.serverBytes += len(chunk)
 	}
 	if s.audioTiming == nil {
@@ -376,10 +375,10 @@ func (s *Session) onOutputAudio(lc *liveConn, chunk []byte, itemID string, conte
 		s.outBytes += int64(len(chunk))
 		s.play.SentPCM(now, chunk)
 	}
-	s.mu.Unlock()
 	if forward {
 		s.out.Push(chunk)
 	}
+	s.mu.Unlock()
 }
 
 func (s *Session) onInputText(lc *liveConn, delta string) {
@@ -408,14 +407,12 @@ func (s *Session) onOutputText(lc *liveConn, delta string, itemID string, conten
 		return
 	}
 	if lc != nil && itemID != "" {
-		if itemID == lc.truncatedID {
+		if lc.interruptedItem(itemID) {
 			s.mu.Unlock()
 			return
 		}
 		if lc.outItem == nil || lc.outItem.itemID != itemID {
-			lc.outItem = &outItemSpan{runID: s.play.RunID(), itemID: itemID, contentIndex: contentIndex, startedAt: now}
-		} else if lc.outItem.runID == 0 {
-			lc.outItem.runID = s.play.RunID()
+			lc.outItem = &outItemSpan{itemID: itemID, contentIndex: contentIndex, startedAt: now}
 		}
 	}
 	s.lastOutText = now
@@ -431,15 +428,18 @@ func (s *Session) onOutputText(lc *liveConn, delta string, itemID string, conten
 }
 
 // addRecapLocked remembers one finished utterance for the next session's
-// history.
-func (s *Session) addRecapLocked(role, text string) {
-	s.recap.Add(role, text)
+// history and returns its Recap sequence id.
+func (s *Session) addRecapLocked(role, text string) uint64 {
+	return s.recap.AddSeq(role, text)
 }
 
-// flushReplyLocked moves the reply being spoken into the recap.
-func (s *Session) flushReplyLocked() {
-	s.addRecapLocked("assistant", s.outText)
+// flushReplyLocked moves the reply being spoken into the recap and binds its
+// sequence id to the active playback run.
+func (s *Session) flushReplyLocked() uint64 {
+	seq := s.addRecapLocked("assistant", s.outText)
+	s.play.SetRecapSeq(seq)
 	s.outText = ""
+	return seq
 }
 
 // recapItemsLocked renders the recap (newest kept within RecapChars) and
@@ -483,4 +483,54 @@ func (s *Session) recapItemsLocked() []initialItem {
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: text}}})
 	}
 	return items
+}
+
+const maxTrackedItems = 16
+
+func (lc *liveConn) markInterrupted(id string) {
+	if lc == nil || id == "" || lc.interruptedItem(id) {
+		return
+	}
+	lc.interruptedIDs = append(lc.interruptedIDs, id)
+	if len(lc.interruptedIDs) > maxTrackedItems {
+		lc.interruptedIDs = lc.interruptedIDs[len(lc.interruptedIDs)-maxTrackedItems:]
+	}
+}
+
+func (lc *liveConn) wasTruncated(id string) bool {
+	for _, seen := range lc.truncatedIDs {
+		if seen == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (lc *liveConn) markTruncated(id string) {
+	if lc == nil || id == "" || lc.wasTruncated(id) {
+		return
+	}
+	lc.truncatedIDs = append(lc.truncatedIDs, id)
+	if len(lc.truncatedIDs) > maxTrackedItems {
+		lc.truncatedIDs = lc.truncatedIDs[len(lc.truncatedIDs)-maxTrackedItems:]
+	}
+}
+
+// interruptedItem rejects deltas for any item already interrupted on lc.
+// Caller holds s.mu.
+func (lc *liveConn) interruptedItem(id string) bool {
+	if lc == nil || id == "" {
+		return false
+	}
+	for _, seen := range lc.interruptedIDs {
+		if seen == id {
+			return true
+		}
+	}
+	for _, span := range lc.awaitingItems {
+		if span.itemID == id {
+			return true
+		}
+	}
+	return false
 }

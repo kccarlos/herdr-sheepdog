@@ -26,14 +26,51 @@ func (s *Session) tickLoop(ctx context.Context) {
 	}
 }
 
+const firstTurnReportWait = 200 * time.Millisecond
+
 func (s *Session) tick() {
 	now := s.now()
 	s.keepAlive(now)
+	s.flushUnreportedTruncates(now)
 	s.settle(now)
 	s.speechEnd(now)
 	s.settleHeard(now)
 	s.idleCheck(now)
 	s.pumpPushes(now)
+}
+
+// flushUnreportedTruncates sends wall-clock fallback conversation.item.truncate
+// events when an attached client has never sent any playback reports (e.g.
+// headless voice-test) and does not answer a flush within firstTurnReportWait.
+func (s *Session) flushUnreportedTruncates(now time.Time) {
+	s.mu.Lock()
+	lc := s.live
+	if lc == nil || !s.lcActiveLocked(lc) || len(lc.awaitingItems) == 0 || s.play.Reports() {
+		s.mu.Unlock()
+		return
+	}
+	var truncs []truncateEvent
+	kept := lc.awaitingItems[:0]
+	for _, span := range lc.awaitingItems {
+		if !span.flushedAt.IsZero() && now.Sub(span.flushedAt) >= firstTurnReportWait {
+			estMs := int(span.flushedAt.Sub(span.startedAt).Milliseconds())
+			if tr := buildTruncateLocked(lc, span, estMs); tr != nil {
+				truncs = append(truncs, *tr)
+			}
+			continue
+		}
+		kept = append(kept, span)
+	}
+	lc.awaitingItems = kept
+	s.mu.Unlock()
+	for _, tr := range truncs {
+		if err := s.send(lc, tr); err == nil {
+			s.log.Log(logSource, "voice.item_truncated", "", map[string]any{
+				"item_id": tr.ItemID, "content_index": tr.ContentIndex,
+				"audio_end_ms": tr.AudioEndMS, "session_id": lc.id,
+			})
+		}
+	}
 }
 
 // keepAlive sends silence while the client sends nothing (silence gate

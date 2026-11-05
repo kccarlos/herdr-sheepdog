@@ -138,81 +138,98 @@ func TestWSCancelPushIsTaggedStop(t *testing.T) {
 	}
 }
 
-func TestWSRunIDNegotiationFramingFlushAndLegacyCompat(t *testing.T) {
-	h := newHarness(t, harnessOpts{voice: true})
-	c := dialWSRaw(t, h)
-	c.expect(wsproto.TypeStatus)
+func TestWSInFlightAudioDoesNotCrossFlush(t *testing.T) {
+	t.Run("in_flight_pre_interrupt_chunk_after_event_interrupted", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{voice: true})
+		c := dialWS(t, h)
+		c.expect(wsproto.TypeStatus)
 
-	// Audio sent before client-ready is held until bot-ready goes out, then
-	// delivered with the 4-byte LE run_id prefix once run-id is negotiated.
-	h.session.audio <- []byte{1, 2, 3, 4}
-	c.send(wsproto.ClientReadyFeatures(wsproto.ProtocolVersion, testClient, wsproto.FeatureRunID))
+		ep1 := h.session.currentEpoch()
+		flushed := h.session.FlushAudio()
+		h.session.emit(voice.EventInterrupted{Epoch: flushed})
+		c.expect(wsproto.TypeFlush)
 
-	m, data, err := c.read(2 * time.Second)
-	if err != nil || m.Type != wsproto.TypeBotReady {
-		t.Fatalf("first post-ready frame = %+v %x %v, want bot-ready", m, data, err)
-	}
-	hasRunID := false
-	for _, f := range m.Features {
-		if f == wsproto.FeatureRunID {
-			hasRunID = true
+		// Simulate Server.Run / Switcher delivering an already-popped ep1 chunk
+		// after EventInterrupted flushed the client, followed by a fresh ep2 chunk.
+		h.session.emitChunk(voice.AudioChunk{Data: []byte("stale-ep1"), Epoch: ep1})
+		h.session.pushAudio([]byte("fresh-ep2"))
+
+		var got []byte
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			_, bin, err := c.read(time.Until(deadline))
+			if err != nil {
+				t.Fatalf("read audio: %v", err)
+			}
+			if bin != nil {
+				got = bin
+				break
+			}
 		}
-	}
-	if !hasRunID {
-		t.Fatalf("bot-ready features = %v, missing %q", m.Features, wsproto.FeatureRunID)
-	}
+		if string(got) != "fresh-ep2" {
+			t.Fatalf("first binary frame after flush = %q, want %q (pre-flush chunk crossed flush)", got, "fresh-ep2")
+		}
+	})
 
-	_, frame1, err := c.read(2 * time.Second)
-	if err != nil {
-		t.Fatalf("read binary run 1: %v", err)
-	}
-	run1, pcm1, ok := wsproto.UnpackAudioRun(frame1)
-	if !ok || run1 != 1 || string(pcm1) != string([]byte{1, 2, 3, 4}) {
-		t.Fatalf("run 1 frame = (%d, %v, %v), want (1, [1 2 3 4], true)", run1, pcm1, ok)
-	}
+	t.Run("cancel_purges_session_audio_before_flush", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{voice: true})
+		c := dialWS(t, h)
+		c.expect(wsproto.TypeStatus)
 
-	// Flush carries run_id=1; next audio starts run_id=2.
-	h.session.emit(voice.EventInterrupted{})
-	fl := c.expect(wsproto.TypeFlush)
-	if fl.RunID == nil || *fl.RunID != 1 {
-		t.Fatalf("flush RunID = %v, want 1", fl.RunID)
-	}
+		// Hold the session's outbound pump so pre-cancel audio is guaranteed to
+		// be both in-flight in the pump and queued in rawChunks when Cancel() runs.
+		h.session.holdPump(true)
+		h.session.pushAudio([]byte("pre-cancel"))
+		h.session.pushAudio([]byte("pre-cancel"))
+		c.send(wsproto.Cancel())
+		c.expect(wsproto.TypeFlush)
+		h.session.holdPump(false)
 
-	h.session.audio <- []byte{5, 6}
-	_, frame2, err := c.read(2 * time.Second)
-	if err != nil {
-		t.Fatalf("read binary run 2: %v", err)
-	}
-	run2, pcm2, ok := wsproto.UnpackAudioRun(frame2)
-	if !ok || run2 != 2 || string(pcm2) != string([]byte{5, 6}) {
-		t.Fatalf("run 2 frame = (%d, %v, %v), want (2, [5 6], true)", run2, pcm2, ok)
-	}
+		h.session.pushAudio([]byte("post-cancel"))
 
-	// Client echoes run_id on playback reports; session receives it.
-	c.send(wsproto.PlaybackRun(wsproto.PlaybackFlushed, 350, 1))
-	c.send(wsproto.PlaybackRun(wsproto.PlaybackDrained, 100, 2))
-	waitFor(t, time.Second, func() bool { return len(h.session.playbackRunReports()) == 2 }, "playback run reports")
-	if got := h.session.playbackRunReports(); got[0] != "flushed:350:1" || got[1] != "drained:100:2" {
-		t.Fatalf("playbackRunReports = %v", got)
-	}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			_, bin, err := c.read(time.Until(deadline))
+			if err != nil {
+				t.Fatalf("read after cancel flush: %v", err)
+			}
+			if bin == nil {
+				continue
+			}
+			if string(bin) == "pre-cancel" {
+				t.Fatalf("received pre-cancel audio frame %q after flush", bin)
+			}
+			if string(bin) == "post-cancel" {
+				break
+			}
+		}
+	})
 
-	// Legacy client (no run-id feature in client-ready) still receives raw PCM.
-	legacy := dialWS(t, h)
-	legacy.expect(wsproto.TypeStatus)
-	_ = c.expect(wsproto.TypeStatus) // replaced
-	h.session.audio <- []byte{9, 8, 7, 6}
-	_, rawPCM, err := legacy.read(2 * time.Second)
-	if err != nil || string(rawPCM) != string([]byte{9, 8, 7, 6}) {
-		t.Fatalf("legacy client binary = %v, %v; want raw [9 8 7 6]", rawPCM, err)
-	}
-}
+	t.Run("replaced_client_playback_report_ignored", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{voice: true})
+		c1 := dialWS(t, h)
+		c1.expect(wsproto.TypeStatus)
+		waitFor(t, time.Second, func() bool { return h.srv.hub.current() != nil }, "c1 attached")
+		oldClient := h.srv.hub.current()
 
-func TestAudioWaitsForBotReadyDuringHandshake(t *testing.T) {
-	h := newHarness(t, harnessOpts{voice: true})
-	c := newClient(h.srv.hub, nil, "test", 10)
-	c.hs.resolved = true // protocol accepted, bot-ready not yet queued
-	c.enqueue(frame{binary: true, data: []byte{1, 2}})
-	if len(c.queue) != 0 || len(c.preHandshake) != 1 {
-		t.Fatalf("audio escaped before bot-ready: queue=%d held=%d", len(c.queue), len(c.preHandshake))
-	}
+		c2 := dialWS(t, h)
+		c2.expect(wsproto.TypeStatus)
+		waitFor(t, time.Second, func() bool {
+			cur := h.srv.hub.current()
+			return cur != nil && cur != oldClient
+		}, "c2 replaced c1")
+
+		// Simulate oldClient's readLoop delivering an already-read playback frame
+		// right after c2 replaced oldClient.
+		h.srv.hub.setPlayback(oldClient, wsproto.PlaybackFlushed, 0)
+		if got := h.session.playbackReports(); len(got) != 0 {
+			t.Fatalf("replaced client's playback report reached session: %v", got)
+		}
+
+		c2.send(wsproto.Playback(wsproto.PlaybackStarted, 0))
+		waitFor(t, time.Second, func() bool { return len(h.session.playbackReports()) == 1 }, "c2 playback report")
+		if got := h.session.playbackReports(); got[0] != "started:0" {
+			t.Fatalf("c2 reports = %v, want [started:0]", got)
+		}
+	})
 }
