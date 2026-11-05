@@ -20,7 +20,7 @@ import { createLive, POLL_MS } from "./net/live.js";
 import { focusCommand } from "./model/cards.js";
 import { DRAFT_KEY, keyMaker, readDraft, restored, serializeDraft, submission } from "./model/composer.js";
 import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
-import { createOutbox, OUTBOX_KEY, pendingItems } from "./model/outbox.js";
+import { createOutbox, OUTBOX_KEY, PANEL_WINDOW_FRESH_MS, PANEL_WINDOW_KEY, pendingItems } from "./model/outbox.js";
 import { atMemoryLimit, canLoadOlder } from "./model/history.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
@@ -62,7 +62,15 @@ export default class Sheepdog extends View {
     this.base = base;
     this.exec = exec;
     this.platform = () => appWindow()?.platform;
+    this.sized = Boolean(this.overlay);
     this.size = this.overlay ? { width: WINDOW.width, height: WINDOW.height } : { width: DOCKED_WIDTH, height: 640 };
+    if (this.overlayRole === "panel") {
+      try {
+        setShared(PANEL_WINDOW_KEY, Date.now());
+      } catch {
+        // shared state errors must not break window init
+      }
+    }
     this.technical = false;
     this.wantOlder = false; // the end of the list was drawn
     this.memo = null;
@@ -89,6 +97,26 @@ export default class Sheepdog extends View {
     }
   }
 
+  isOutboxOwner() {
+    if (this.overlayRole === "panel") return true;
+    if (this.overlayRole !== "block" || !this.sized) return false;
+    if (layoutMode({ width: this.size.width, overlay: this.overlay }) !== "panel") return false;
+    const winAt = shared(PANEL_WINDOW_KEY);
+    return !(typeof winAt === "number" && Date.now() - winAt < PANEL_WINDOW_FRESH_MS);
+  }
+
+  syncOutbox() {
+    if (!this.outbox || !this.store) return;
+    const owner = this.isOutboxOwner();
+    this.outbox.setActive(owner);
+    if (!owner) return;
+    const snapshot = this.store.getState();
+    this.outbox.reconcile(snapshot.history.items);
+    if (snapshot.history.synced || snapshot.daemon === "down") {
+      void this.outbox.resume();
+    }
+  }
+
   initLive(cx, base) {
     // The data layer is a task: it keeps asking until close().
     cx.spawn(async (cx) => {
@@ -97,14 +125,9 @@ export default class Sheepdog extends View {
       this.outbox.subscribe(() => cx.notify());
       this.answers.subscribe(() => cx.notify());
       this.voice.subscribe(() => cx.notify());
-      let outboxResumed = false;
-      this.store.subscribe((snapshot) => {
+      this.store.subscribe(() => {
         // The conversation may now show what the outbox is waiting on.
-        this.outbox?.reconcile(snapshot.history.items);
-        if (!outboxResumed && (snapshot.history.synced || snapshot.error != null)) {
-          outboxResumed = true;
-          void this.outbox?.resume();
-        }
+        this.syncOutbox();
         cx.notify();
       });
       this.live = createLive({
@@ -146,9 +169,10 @@ export default class Sheepdog extends View {
     const action = keyAction(event.key, {
       onPanel: this.panelFocus.is_focused(),
       question,
+      questionVisible: this.sheet?.type === "questions" || this.presentation !== "compact",
       suggestions: this.derived().live,
       modified: Boolean(event.ctrl || event.alt || event.cmd || event.platform),
-      sheet: this.sheet != null,
+      sheet: this.sheet?.type ?? false,
       window: Boolean(this.overlay),
       busy: this.answers.busy(),
       active: phase === "ok" || phase === "setup",
@@ -160,6 +184,7 @@ export default class Sheepdog extends View {
     else if (action.type === "shortcuts") this.toggleShortcuts(cx);
     else if (action.type === "sheet") {
       this.sheet = null;
+      this.panelFocus?.focus();
       cx.notify();
     } else if (action.type === "close") this.closeOverlaySelf();
     else if (action.type === "leave") this.leave();
@@ -169,6 +194,7 @@ export default class Sheepdog extends View {
 
   toggleShortcuts(cx) {
     this.sheet = this.sheet?.type === "shortcuts" ? null : { type: "shortcuts" };
+    this.panelFocus?.focus();
     cx.notify();
   }
 
@@ -196,8 +222,13 @@ export default class Sheepdog extends View {
       newKey,
       refresh,
       items: () => this.store.getState().history.items,
+      active: this.isOutboxOwner(),
       saved: shared(OUTBOX_KEY),
-      save: (value) => setShared(OUTBOX_KEY, value),
+      load: () => shared(OUTBOX_KEY),
+      save: (value) => {
+        if (this.overlayRole === "panel") setShared(PANEL_WINDOW_KEY, Date.now());
+        setShared(OUTBOX_KEY, value);
+      },
     });
     this.answers = createAnswers({ http, newKey, refresh });
     this.voice = createVoice({ http, exec, exists, home, newKey, refresh, platform: this.platform, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
@@ -323,6 +354,7 @@ export default class Sheepdog extends View {
     if (item?.card) {
       this.sheet = { type: "card", card: item.card };
       this.focusNote = null;
+      this.panelFocus?.focus();
       cx.notify();
       return;
     }
@@ -373,12 +405,20 @@ export default class Sheepdog extends View {
       onAnswer: (q, option, cx) => this.answer(q, option, cx),
       onOpen: (_e, cx) => {
         this.sheet = { type: "questions" };
+        this.panelFocus?.focus();
         cx.notify();
       },
     };
   }
 
   async close() {
+    if (this.overlayRole === "panel") {
+      try {
+        setShared(PANEL_WINDOW_KEY, null);
+      } catch {
+        // shared state errors must not break teardown
+      }
+    }
     this.live?.stop();
     // A held hold-to-talk must not leave the microphone open.
     this.voice?.pttUp();
@@ -388,6 +428,14 @@ export default class Sheepdog extends View {
   // The rail opens the panel as a window; `docked` tells that copy it came
   // from the docked block, so it does not offer docking.
   openPanel() {
+    if (this.overlayRole === "block") {
+      try {
+        setShared(PANEL_WINDOW_KEY, Date.now());
+      } catch {
+        // shared state errors must not block opening the window
+      }
+      this.syncOutbox();
+    }
     // One window, remembered where it was dropped and back after a restart.
     openOverlay({ mod: "sheepdog", props: { role: "panel", docked: true, ...(this.url ? { url: this.url } : {}) }, kind: "window", key: "sheepdog-panel", keep: true, ...WINDOW });
   }
@@ -605,8 +653,10 @@ export default class Sheepdog extends View {
     const snapshot = this.store.getState();
     const status = deriveStatus(snapshot, this.host());
     const onSize = (size, cx) => {
-      const changed = Math.round(size.width) !== Math.round(this.size.width) || Math.round(size.height) !== Math.round(this.size.height);
+      const changed = !this.sized || Math.round(size.width) !== Math.round(this.size.width) || Math.round(size.height) !== Math.round(this.size.height);
+      this.sized = true;
       this.size = size;
+      this.syncOutbox();
       if (changed) cx.notify();
     };
     if (layoutMode({ width: this.size.width, overlay: this.overlay }) === "panel") {
@@ -641,6 +691,7 @@ export default class Sheepdog extends View {
       const layout = budgetFor(questions.presentation === "compact" ? COMPACT_QUESTION_HEIGHT : natural(questionHeights));
       const closeSheet = (_e, cx) => {
         this.sheet = null;
+        this.panelFocus?.focus();
         cx.notify();
       };
       return panelView(t, {

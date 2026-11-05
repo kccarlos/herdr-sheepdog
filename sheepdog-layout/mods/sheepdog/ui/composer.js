@@ -32,14 +32,14 @@ function smallAction(t, id, label, onClick, primary = false) {
 // than inside timeline `list()` because GPUI list rows only deliver item-level
 // clicks, not child button clicks.
 function outboxItems(t, entries, { busy, onRetry, onEdit, onRemove }) {
-  const hasFailed = entries.some((e) => e.phase === "failed");
+  const firstFailed = entries.findIndex((e) => e.phase === "failed");
   return v_flex()
     .w_full()
     .gap(6)
     .children(
-      entries.map((entry) => {
+      entries.map((entry, i) => {
         const failed = entry.phase === "failed";
-        const canSendNow = !busy && (failed || !hasFailed);
+        const canAct = failed ? i === firstFailed : firstFailed < 0;
         return v_flex()
           .w_full()
           .px(10)
@@ -71,7 +71,7 @@ function outboxItems(t, entries, { busy, onRetry, onEdit, onRemove }) {
             h_flex()
               .gap(6)
               .items_center()
-              .when(failed || canSendNow, (el) =>
+              .when(canAct && (failed || !busy), (el) =>
                 el.child(
                   smallAction(
                     t,
@@ -127,7 +127,11 @@ export function composerView(t, { state, live, entries = [], notice, busy, compa
   const pending = entries.filter((e) => e.phase === "failed" || e.phase === "queued");
   const hasFailed = pending.some((e) => e.phase === "failed");
   const showNotice = notice && !(notice.tone === "error" && hasFailed);
-  const hint = busy ? "Waiting for the reply · Enter queues a follow-up" : "Enter sends · Shift+Enter for a new line";
+  const hint = busy
+    ? "Waiting for the reply · Enter queues a follow-up"
+    : hasFailed
+      ? "Paused on failed send · Enter queues a follow-up"
+      : "Enter sends · Shift+Enter for a new line";
   const input = isLight(t.chrome) ? t.raised : t.input;
   return v_flex()
     .w_full()

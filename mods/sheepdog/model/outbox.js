@@ -11,6 +11,8 @@
 // and 6.4).
 
 export const OUTBOX_KEY = "sheepdog.outbox";
+export const PANEL_WINDOW_KEY = "sheepdog.panel_window";
+export const PANEL_WINDOW_FRESH_MS = 10 * 1000;
 // Matches internal/web/idempotency.go's idemTTL (10 minutes).
 export const IDEM_TTL_MS = 10 * 60 * 1000;
 // How long persisted queued/failed entries survive across reloads.
@@ -130,8 +132,19 @@ function serializeEntries(entries) {
 
 // `items` gives the conversation's items as they are now: the stream can show
 // the exchange before `turn` returns, and nothing would match it afterwards.
-export function createOutbox({ http, newKey, now = Date.now, refresh = async () => {}, items = () => [], saved = null, save = () => {} }) {
-  const initialEntries = loadSavedEntries(saved, now());
+export function createOutbox({
+  http,
+  newKey,
+  now = Date.now,
+  refresh = async () => {},
+  items = () => [],
+  saved = null,
+  load = () => saved,
+  save = () => {},
+  active: initialActive = true,
+}) {
+  let active = Boolean(initialActive);
+  const initialEntries = active ? loadSavedEntries(saved, now()) : [];
   const initialBusy = initialEntries.some((e) => e.phase === "sending");
   const initialFailed = initialEntries.find((e) => e.phase === "failed");
   let snapshot = {
@@ -142,10 +155,22 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
   // When a failed entry with unknown outcome is moved back into the composer
   // via `take(key)`, keep its key so submitting the exact same words reuses it.
   let takenRetry = null;
+  let activeKey = null;
+  let editingHead = false;
   let resumedOnce = false;
+  const reconciledIds = new Set();
   const listeners = new Set();
 
+  const rememberReconciled = (id) => {
+    if (id == null) return;
+    if (reconciledIds.size >= 200) {
+      reconciledIds.delete(reconciledIds.values().next().value);
+    }
+    reconciledIds.add(id);
+  };
+
   const persist = (entries) => {
+    if (!active && !activeKey) return;
     try {
       save(serializeEntries(entries));
     } catch {
@@ -166,18 +191,34 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     return null;
   };
 
-  const hasBlockingFailureAhead = () => {
-    const firstQueued = snapshot.entries.findIndex((e) => e.phase === "queued");
-    if (firstQueued < 0) return false;
-    return snapshot.entries.slice(0, firstQueued).some((e) => e.phase === "failed");
-  };
+  const hasFailure = () => snapshot.entries.some((e) => e.phase === "failed");
+
+  function prepareNextQueued() {
+    if (!active || activeKey || hasFailure() || editingHead) return null;
+    const next = snapshot.entries.find((e) => e.phase === "queued");
+    if (!next) return null;
+    const sendKey = next.reuseKey ? next.key : newKey();
+    if (sendKey !== next.key) {
+      set({ entries: snapshot.entries.map((e) => (e.key === next.key ? { ...e, key: sendKey, reuseKey: true } : e)) }, true);
+    }
+    return sendKey;
+  }
+
+  function startNextQueued() {
+    const sendKey = prepareNextQueued();
+    if (!sendKey) return false;
+    void runEntry(sendKey);
+    return true;
+  }
 
   async function runEntry(entryKey) {
     const current = snapshot.entries.find((e) => e.key === entryKey);
     if (!current) return { restore: null };
+    activeKey = entryKey;
+    const sendAt = current.phase === "queued" || (!current.resumed && !current.reuseKey) ? now() * 1000 : current.at;
     set(
       {
-        entries: snapshot.entries.map((e) => (e.key === entryKey ? { ...e, phase: "sending", error: null, resumed: false } : e)),
+        entries: snapshot.entries.map((e) => (e.key === entryKey ? { ...e, at: sendAt, phase: "sending", error: null, resumed: false } : e)),
         busy: true,
         notice: null,
       },
@@ -190,21 +231,24 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       // If the conversation stream already recorded the completed exchange
       // while the request was in flight, reconcile already dropped this entry.
       if (!snapshot.entries.some((e) => e.key === entryKey)) {
-        set({ busy: false }, true);
-        void drainNext();
+        if (activeKey === entryKey) activeKey = null;
+        if (!startNextQueued()) set({ busy: false }, true);
         return { restore: null };
       }
       if (err.status === 409 && !/Idempotency-Key/.test(err.message)) {
         // A spoken turn claimed the words first and answers them.
+        if (activeKey === entryKey) activeKey = null;
+        const remaining = snapshot.entries.filter((e) => e.key !== entryKey);
+        const willDrain = active && !editingHead && !remaining.some((e) => e.phase === "failed") && remaining.some((e) => e.phase === "queued");
         set(
           {
-            entries: snapshot.entries.filter((e) => e.key !== entryKey),
-            busy: false,
+            entries: remaining,
+            busy: willDrain,
             notice: { tone: "info", text: "Answered by voice.", at: now() },
           },
           true,
         );
-        void drainNext();
+        if (willDrain) startNextQueued();
         return { restore: null };
       }
       let errorText;
@@ -217,6 +261,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
         errorText = "Sheepdog did not answer. Retry to send again, or edit it.";
         reuseKey = true;
       }
+      if (activeKey === entryKey) activeKey = null;
       set(
         {
           entries: snapshot.entries.map((e) =>
@@ -229,38 +274,54 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       );
       return { restore: null, failed: true };
     }
-    set(
-      {
-        entries: snapshot.entries.map((e) =>
-          e.key === entryKey
-            ? { ...e, phase: "replied", reply: typeof res.reply === "string" ? res.reply : "", repliedAt: now(), error: null, resumed: false }
-            : e,
-        ),
-        busy: false,
-      },
-      true,
-    );
-    reconcile(items());
-    await refresh();
-    void drainNext();
+    if (snapshot.entries.some((e) => e.key === entryKey)) {
+      set(
+        {
+          entries: snapshot.entries.map((e) =>
+            e.key === entryKey
+              ? { ...e, phase: "replied", reply: typeof res?.reply === "string" ? res.reply : "", repliedAt: now(), error: null, resumed: false }
+              : e,
+          ),
+        },
+        true,
+      );
+      reconcile(items());
+    }
+    try {
+      await refresh();
+    } catch {
+      // refresh failures do not drop queued follow-ups
+    } finally {
+      if (activeKey === entryKey) activeKey = null;
+    }
+    if (!startNextQueued() && snapshot.busy) {
+      set({ busy: false });
+    }
     return { restore: null };
   }
 
   function drainNext() {
-    if (snapshot.busy || hasBlockingFailureAhead()) return Promise.resolve({ restore: null });
-    const next = snapshot.entries.find((e) => e.phase === "queued");
-    if (!next) return Promise.resolve({ restore: null });
-    const sendKey = next.reuseKey ? next.key : newKey();
-    if (sendKey !== next.key) {
-      set({ entries: snapshot.entries.map((e) => (e.key === next.key ? { ...e, key: sendKey, reuseKey: true } : e)) }, true);
-    }
+    if (snapshot.busy) return Promise.resolve({ restore: null });
+    const sendKey = prepareNextQueued();
+    if (!sendKey) return Promise.resolve({ restore: null });
     return runEntry(sendKey);
   }
 
   // Sends `text` (already stripped; see model/composer.js), or queues it if a
   // turn is already running or paused behind a failure.
   async function submit(text) {
-    if (snapshot.busy || hasBlockingFailureAhead()) {
+    if (!snapshot.busy && !editingHead) {
+      const existingIdx = snapshot.entries.findIndex((e) => e.phase === "failed" && same(e.text, text));
+      if (
+        existingIdx >= 0 &&
+        !snapshot.entries.slice(0, existingIdx).some((e) => e.phase === "failed") &&
+        !snapshot.entries.slice(existingIdx + 1).some((e) => e.phase === "queued")
+      ) {
+        consumeTakenKey(text);
+        return retry(snapshot.entries[existingIdx].key);
+      }
+    }
+    if (snapshot.busy || hasFailure()) {
       const key = consumeTakenKey(text) ?? newKey();
       const queued = {
         key,
@@ -278,11 +339,8 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       set({ entries: [...snapshot.entries, queued] }, true);
       return { restore: null, queued: true };
     }
-    const existingFailed = snapshot.entries.find((e) => e.phase === "failed" && same(e.text, text));
-    if (existingFailed) {
-      consumeTakenKey(text);
-      return retry(existingFailed.key);
-    }
+    const spliceHead = editingHead;
+    editingHead = false;
     const key = consumeTakenKey(text) ?? newKey();
     const entry = {
       key,
@@ -298,7 +356,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       replyId: null,
     };
     // Insert ahead of any queued entries that were paused while editing a failed item.
-    const firstQueued = snapshot.entries.findIndex((e) => e.phase === "queued");
+    const firstQueued = spliceHead ? snapshot.entries.findIndex((e) => e.phase === "queued") : -1;
     const entries =
       firstQueued < 0
         ? [...snapshot.entries, entry]
@@ -307,11 +365,14 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     return runEntry(key);
   }
 
-  // Retries a failed entry (or starts a paused queued entry when idle).
+  // Retries a failed entry (or starts a paused queued entry when idle and unblocked).
   async function retry(key) {
     if (snapshot.busy) return { restore: null };
-    const target = snapshot.entries.find((e) => e.key === key && (e.phase === "failed" || e.phase === "queued"));
-    if (!target) return { restore: null };
+    const idx = snapshot.entries.findIndex((e) => e.key === key && (e.phase === "failed" || e.phase === "queued"));
+    if (idx < 0) return { restore: null };
+    if (snapshot.entries.slice(0, idx).some((e) => e.phase === "failed")) return { restore: null };
+    editingHead = false;
+    const target = snapshot.entries[idx];
     const sendKey = target.reuseKey ? target.key : newKey();
     if (sendKey !== target.key) {
       set({ entries: snapshot.entries.map((e) => (e.key === key ? { ...e, key: sendKey, reuseKey: true } : e)) }, true);
@@ -325,31 +386,65 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     const target = snapshot.entries.find((e) => e.key === key && (e.phase === "queued" || e.phase === "failed"));
     if (!target) return;
     const entries = snapshot.entries.filter((e) => e.key !== key);
+    if (!entries.some((e) => e.phase === "queued")) editingHead = false;
     const stillFailed = entries.some((e) => e.phase === "failed");
     const notice = snapshot.notice?.tone === "error" && !stillFailed ? null : snapshot.notice;
     set({ entries, notice }, true);
-    if (!snapshot.busy) void drainNext();
+    if (target.phase === "failed" && !snapshot.busy && !stillFailed && !editingHead) void drainNext();
   }
 
   // Removes a queued or failed entry and returns its text so the composer can
   // edit it without prematurely firing queued follow-ups behind it.
   function take(key) {
-    const target = snapshot.entries.find((e) => e.key === key && (e.phase === "queued" || e.phase === "failed"));
-    if (!target) return null;
+    const idx = snapshot.entries.findIndex((e) => e.key === key && (e.phase === "queued" || e.phase === "failed"));
+    if (idx < 0) return null;
+    const target = snapshot.entries[idx];
     if (target.phase === "failed" && target.reuseKey) {
       takenRetry = { text: target.text, key: target.key, reuseKey: true };
     }
     const entries = snapshot.entries.filter((e) => e.key !== key);
+    if (target.phase === "failed" && idx === 0 && entries.some((e) => e.phase === "queued")) {
+      editingHead = true;
+    } else if (!entries.some((e) => e.phase === "queued")) {
+      editingHead = false;
+    }
     const stillFailed = entries.some((e) => e.phase === "failed");
     const notice = snapshot.notice?.tone === "error" && !stillFailed ? null : snapshot.notice;
     set({ entries, notice }, true);
     return target.text;
   }
 
+  function setActive(next) {
+    const want = Boolean(next);
+    if (want === active) return;
+    active = want;
+    if (!active) {
+      if (!activeKey) {
+        resumedOnce = false;
+        editingHead = false;
+        if (snapshot.entries.length > 0 || snapshot.busy || snapshot.notice) {
+          set({ entries: [], busy: false, notice: null });
+        }
+      }
+      return;
+    }
+    if (!activeKey && snapshot.entries.length === 0) {
+      const loaded = loadSavedEntries(load(), now());
+      const busy = loaded.some((e) => e.phase === "sending");
+      const failed = loaded.find((e) => e.phase === "failed");
+      resumedOnce = false;
+      set({
+        entries: loaded,
+        busy,
+        notice: !busy && failed ? { tone: "error", text: failed.error, at: now() } : null,
+      });
+    }
+  }
+
   // Reattaches to an in-flight persisted turn (or drains restored queued items)
   // once the initial conversation snapshot has been reconciled.
   async function resume() {
-    if (resumedOnce) return { restore: null };
+    if (!active || resumedOnce) return { restore: null };
     resumedOnce = true;
     reconcile(items());
     const restoredSending = snapshot.entries.find((e) => e.phase === "sending" && e.resumed);
@@ -361,7 +456,8 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
   // Matches the entries against the conversation's items by id and drops the
   // ones it shows in full.
   function reconcile(convItems) {
-    const claimed = new Set();
+    if (!active && !activeKey) return;
+    const claimed = new Set(reconciledIds);
     const find = (match) => convItems.find((i) => !claimed.has(i.id) && match(i));
     let changed = false;
     let droppedSending = false;
@@ -401,6 +497,8 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
           ((entry.phase === "sending" || (entry.phase === "failed" && entry.reuseKey)) && replyId != null));
       if (shown) {
         changed = true;
+        rememberReconciled(userId);
+        rememberReconciled(replyId);
         if (entry.phase === "sending") droppedSending = true;
         if (entry.phase === "sending" || entry.phase === "failed") shouldPersist = true;
         continue;
@@ -416,13 +514,14 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
       const stillSending = entries.some((e) => e.phase === "sending");
       const stillFailed = entries.some((e) => e.phase === "failed");
       const notice = snapshot.notice?.tone === "error" && !stillFailed ? null : snapshot.notice;
-      set({ entries, busy: droppedSending ? stillSending : snapshot.busy, notice }, shouldPersist);
+      set({ entries, busy: droppedSending ? activeKey != null || stillSending : snapshot.busy, notice }, shouldPersist);
     }
   }
 
   // Drops what has stayed long enough: a replied entry the history never
   // matched, expired queued/failed entries, and the note under the textarea.
   function prune() {
+    if (!active && !activeKey) return;
     const t = now();
     let shouldPersist = false;
     const entries = snapshot.entries.filter((e) => {
@@ -450,6 +549,7 @@ export function createOutbox({ http, newKey, now = Date.now, refresh = async () 
     retry,
     remove,
     take,
+    setActive,
     resume,
     reconcile,
     prune,

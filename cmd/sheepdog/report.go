@@ -105,11 +105,19 @@ func buildReport(ctx context.Context, o reportOptions) string {
 	if o.loadErr == nil {
 		h("Doctor")
 		var lines []string
-		environment := onboard.Detect(o.cfg, onboard.SystemProbe(), herdrsheepdog.Panel, herdrsheepdog.Layout)
-		for _, r := range onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
+		probe := onboard.SystemProbe()
+		environment := onboard.Detect(o.cfg, probe, herdrsheepdog.Panel, herdrsheepdog.Layout)
+		svcInstalled, svcPATH := installedServicePATH()
+		results := onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
 			Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath,
-			Environment: &environment,
-		}) {
+			Environment: &environment, Home: probe.Home,
+			HerdrAppHomeEnv: os.Getenv("HERDR_APP_HOME"), HCSessionEnv: os.Getenv("HC_SESSION"),
+			ServiceInstalled: svcInstalled, ServicePATH: svcPATH,
+		})
+		if r, ok := envLocationCheck(o.cfg.DataDir, o.envPath); ok {
+			results = append(results, r)
+		}
+		for _, r := range results {
 			lines = append(lines, r.Line())
 		}
 		code(strings.Join(lines, "\n"))

@@ -285,12 +285,15 @@ func InstallKeybinding(home, key string) error {
 		}
 	}
 	dir := modDir(home)
-	mk, hasMk := Marker{}, false
-	if m, err := ReadMarker(dir); err == nil {
-		mk, hasMk = m, true
+	if isSymlink(dir) {
+		return errors.New("panelsync: panel folder is a symlink")
+	}
+	mk, err := ReadMarker(dir)
+	if err != nil {
+		return fmt.Errorf("read install marker: %w", err)
 	}
 	cur, hadBinding := global[key]
-	if cur == FocusCommand && hasMk && mk.Keybinding != nil && mk.Keybinding.Key == key {
+	if cur == FocusCommand && mk.Keybinding != nil && mk.Keybinding.Key == key {
 		return nil
 	}
 	if hadFile {
@@ -307,7 +310,7 @@ func InstallKeybinding(home, key string) error {
 	}
 	if rec.HadBinding {
 		rec.Previous = cur
-	} else if hasMk && mk.Keybinding != nil && mk.Keybinding.Key == key {
+	} else if mk.Keybinding != nil && mk.Keybinding.Key == key {
 		rec = mk.Keybinding
 	}
 	global[key] = FocusCommand
@@ -323,13 +326,8 @@ func InstallKeybinding(home, key string) error {
 	if err := writeAtomic(home, keysFile, append(out, '\n')); err != nil {
 		return err
 	}
-	if hasMk {
-		mk.Keybinding = rec
-		if err := writeMarker(dir, mk); err != nil {
-			return err
-		}
-	}
-	return nil
+	mk.Keybinding = rec
+	return writeMarker(dir, mk)
 }
 
 func parseKeysJSON(raw []byte) (map[string]json.RawMessage, map[string]string, error) {
@@ -538,6 +536,7 @@ func uninstallKeybinding(home string, rec *KeybindingRecord, dryRun bool, plan *
 		if err := writeAtomic(home, keysFile, append(out, '\n')); err != nil {
 			return err
 		}
+		_ = os.Remove(filepath.Join(home, keysBackupFile))
 		plan.Actions = append(plan.Actions, fmt.Sprintf("restored %s in %s", rec.Key, keysPath))
 		return nil
 	}
@@ -574,6 +573,7 @@ func uninstallKeybinding(home string, rec *KeybindingRecord, dryRun bool, plan *
 	if err := writeAtomic(home, keysFile, append(out, '\n')); err != nil {
 		return err
 	}
+	_ = os.Remove(filepath.Join(home, keysBackupFile))
 	plan.Actions = append(plan.Actions, fmt.Sprintf("removed %s from %s", rec.Key, keysPath))
 	return nil
 }

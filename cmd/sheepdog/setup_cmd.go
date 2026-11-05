@@ -363,12 +363,14 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		if err := panelsync.Record(env.HerdrAppHome, src); err != nil {
 			fprintf(o.Out, "Warning: could not record the panel install: %v\n", err)
 		}
-		if switched && prevShown != "" && prevShown != "sheepdog" {
-			if err := panelsync.RecordPreviousLayout(env.HerdrAppHome, prevShown); err != nil {
-				fprintf(o.Out, "Warning: could not record the previous layout: %v\n", err)
+		if _, err := panelsync.ReadMarker(filepath.Join(env.HerdrAppHome, "mods", "sheepdog")); err == nil {
+			if switched && prevShown != "" && prevShown != "sheepdog" {
+				if err := panelsync.RecordPreviousLayout(env.HerdrAppHome, prevShown); err != nil {
+					fprintf(o.Out, "Warning: could not record the previous layout: %v\n", err)
+				}
 			}
+			setupSheepdogShortcut(env, o)
 		}
-		setupSheepdogShortcut(env, o)
 	}
 	if env.OS == "darwin" && env.HerdrApp && !env.SheepdogApp {
 		fprintln(o.Out, "")

@@ -134,6 +134,26 @@ func TestModifiedLayoutIsKeptButPanelStillUpdates(t *testing.T) {
 	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json.new")); got != `{"v":2}` {
 		t.Fatalf("layout sidecar = %q", got)
 	}
+	// If the user deletes sheepdog.json.new after reviewing it, subsequent daemon starts of the same release must not recreate it.
+	if err := os.Remove(filepath.Join(home, "layouts", "sheepdog.json.new")); err != nil {
+		t.Fatal(err)
+	}
+	res2, err := Sync(home, newer())
+	if err != nil || res2.LayoutSidecar {
+		t.Fatalf("second sync recreated deleted sidecar: %+v %v", res2, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "layouts", "sheepdog.json.new")); !os.IsNotExist(err) {
+		t.Fatalf("deleted sidecar came back: %v", err)
+	}
+	// A later release with a newer layout writes the sidecar once for that new version.
+	v3 := Source{Panel: panelFS("new main", ""), Layout: []byte(`{"v":3}`), Version: "v1.2.0"}
+	res3, err := Sync(home, v3)
+	if err != nil || !res3.LayoutSidecar {
+		t.Fatalf("v3 sync did not write sidecar: %+v %v", res3, err)
+	}
+	if got := read(t, filepath.Join(home, "layouts", "sheepdog.json.new")); got != `{"v":3}` {
+		t.Fatalf("v3 sidecar = %q", got)
+	}
 }
 
 func TestResizedOrToggledLayoutStillUpdatesCleanly(t *testing.T) {
@@ -317,9 +337,38 @@ func TestKeybindingAndCleanUninstall(t *testing.T) {
 	if !strings.Contains(keysAfter, `"app.palette"`) || !strings.Contains(keysAfter, `"terminal.copy"`) || strings.Contains(keysAfter, "sheepdog.focus") {
 		t.Fatalf("keys.json not restored cleanly:\n%s", keysAfter)
 	}
+	if _, err := os.Stat(filepath.Join(home, "keys.json.bak")); !os.IsNotExist(err) {
+		t.Fatalf("keys.json.bak left behind after restoring binding: %v", err)
+	}
 	sharedAfter := read(t, filepath.Join(home, "shared.json"))
 	if !strings.Contains(sharedAfter, `"layout":"work"`) && !strings.Contains(sharedAfter, `"layout": "work"`) {
 		t.Fatalf("shared.json layout not restored:\n%s", sharedAfter)
+	}
+
+	// Also verify keys.json.bak is removed when no prior binding on that key existed in a pre-existing keys.json.
+	home2, _ := installOld(t)
+	put(t, filepath.Join(home2, "keys.json"), `{"global":{"cmd-t":"tab.new"}}`)
+	if err := InstallKeybinding(home2, "cmd-shift-s"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home2, "keys.json.bak")); err != nil {
+		t.Fatalf("expected keys.json.bak before uninstall: %v", err)
+	}
+	if _, err := Uninstall(home2, src, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home2, "keys.json.bak")); !os.IsNotExist(err) {
+		t.Fatalf("keys.json.bak left behind after removing added binding: %v", err)
+	}
+
+	// InstallKeybinding refuses to mutate keys.json without an install marker.
+	noMarkerHome := t.TempDir()
+	put(t, filepath.Join(noMarkerHome, "keys.json"), `{"global":{"cmd-t":"tab.new"}}`)
+	if err := InstallKeybinding(noMarkerHome, "cmd-shift-s"); err == nil {
+		t.Fatal("expected error from InstallKeybinding without an install marker")
+	}
+	if got := read(t, filepath.Join(noMarkerHome, "keys.json")); strings.Contains(got, "sheepdog.focus") {
+		t.Fatalf("InstallKeybinding mutated keys.json without marker: %s", got)
 	}
 	_ = src
 }

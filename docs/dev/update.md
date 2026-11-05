@@ -78,7 +78,7 @@ fails if the embed and the folder disagree or a runtime file is not embedded.
   "files": { "main.js": "<sha256>", "model/store.js": "<sha256>" },
   "layout": "<normalized-sha256>",
   "previous_layout": "main",
-  "keybinding": { "key": "cmd-shift-s", "action": "sheepdog.focus", "previous": "" }
+  "keybinding": { "section": "global", "key": "cmd-shift-s", "command": "sheepdog.focus", "had_file": true }
 }
 ```
 

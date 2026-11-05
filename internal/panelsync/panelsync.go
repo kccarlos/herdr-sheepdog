@@ -265,6 +265,12 @@ func Sync(home string, src Source) (Result, error) {
 				}
 				res.LayoutSidecar = true
 			}
+			ev.marker.Layout = wantHash
+			if !ev.state.UpdateAvailable || ev.state.Modified {
+				if err := writeMarker(dir, ev.marker); err != nil {
+					return res, err
+				}
+			}
 		}
 	}
 	if ev.state.UpdateAvailable && !ev.state.Modified {

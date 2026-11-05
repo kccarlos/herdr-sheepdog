@@ -347,16 +347,203 @@ test("persisted sending entries past IDEM_TTL_MS become retryable failures inste
   assert.deepEqual(expired.outbox.getState().entries, []);
 });
 
-test("a new send clears the last note, and subscribers hear every change", async () => {
-  const h = harness([new DaemonError("http", "off", 503), reply("ok")]);
+test("retrying or removing a failed send clears the error notice, and a follow-up after a failure queues in order", async () => {
+  const h = harness([new DaemonError("http", "off", 503), reply("fixed"), reply("committed")]);
   let heard = 0;
   h.outbox.subscribe(() => heard++);
-  await h.outbox.submit("a");
+  assert.deepEqual(await h.outbox.submit("fix the bug"), { restore: null, failed: true });
   assert.ok(h.outbox.getState().notice);
+
+  // Submitting a follow-up after a failure (when no other item was queued yet) must queue behind the failed turn, never bypass it!
   const before = heard;
-  await h.outbox.submit("b");
-  assert.equal(h.outbox.getState().notice, null);
+  assert.deepEqual(await h.outbox.submit("commit the fix"), { restore: null, queued: true });
   assert.ok(heard > before);
+  assert.equal(h.calls.length, 1, "follow-up did not run ahead of the failed turn");
+  assert.deepEqual(
+    h.outbox.getState().entries.map((e) => [e.text, e.phase]),
+    [
+      ["fix the bug", "failed"],
+      ["commit the fix", "queued"],
+    ],
+  );
+
+  // Trying to manually start the queued follow-up while an earlier turn is still failed is refused.
+  const [, queuedEntry] = h.outbox.getState().entries;
+  await h.outbox.retry(queuedEntry.key);
+  assert.equal(h.calls.length, 1, "cannot bypass earlier failed turn via retry");
+
+  // Retrying the failed turn clears the notice and runs both turns in FIFO order.
+  const [failedEntry] = h.outbox.getState().entries;
+  await h.outbox.retry(failedEntry.key);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.outbox.getState().notice, null);
+  assert.deepEqual(
+    h.calls.map((c) => c.text),
+    ["fix the bug", "fix the bug", "commit the fix"],
+  );
+});
+
+test("removing a trailing queued item while editing a failed head does not prematurely drain earlier queued items", async () => {
+  const h = harness([new DaemonError("down", "offline"), reply("fixed"), reply("tested")]);
+  await h.outbox.submit("fix");
+  await h.outbox.submit("test");
+  await h.outbox.submit("deploy");
+
+  const [failed, , deploy] = h.outbox.getState().entries;
+  assert.equal(h.outbox.take(failed.key), "fix");
+  h.outbox.remove(deploy.key);
+  assert.equal(h.calls.length, 1, "removing trailing queued item did not fire 'test' before 'fix' was resubmitted");
+
+  await h.outbox.submit("fix v2");
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(
+    h.calls.map((c) => c.text),
+    ["fix", "fix v2", "test"],
+  );
+});
+
+test("reconciling an in-flight turn before http.turn resolves keeps busy true and preserves FIFO order", async () => {
+  const history = [];
+  const firstTurn = deferred();
+  const secondTurn = deferred();
+  const thirdTurn = deferred();
+  const refreshGate = deferred();
+  let refreshBlocked = false;
+  let outbox;
+  let n = 0;
+  const calls = [];
+  const outcomes = [() => firstTurn.promise, () => secondTurn.promise, () => thirdTurn.promise, reply("d")];
+  const http = {
+    async turn(text, key) {
+      calls.push({ text, key });
+      const outcome = outcomes.shift();
+      return typeof outcome === "function" ? await outcome() : await outcome;
+    },
+  };
+  outbox = createOutbox({
+    http,
+    newKey: () => `k${++n}`,
+    now: () => 1_000_000,
+    items: () => history,
+    refresh: async () => {
+      if (refreshBlocked) await refreshGate.promise;
+    },
+  });
+
+  const p1 = outbox.submit("one");
+  assert.deepEqual(await outbox.submit("two"), { restore: null, queued: true });
+
+  // SSE delivers the completed exchange for "one" while http.turn("one") is still in flight.
+  const at = outbox.getState().entries[0].at;
+  history.push(line(at + 1, "one"), answer(at + 2, "a"));
+  outbox.reconcile(history);
+
+  assert.equal(outbox.getState().busy, true, "outbox stays busy until runEntry completes");
+  assert.deepEqual(await outbox.submit("three"), { restore: null, queued: true });
+  assert.equal(calls.length, 1, "submitting 'three' did not start a concurrent turn");
+  assert.deepEqual(
+    outbox.getState().entries.map((e) => [e.text, e.phase]),
+    [
+      ["two", "queued"],
+      ["three", "queued"],
+    ],
+  );
+
+  // Also keep busy true across await refresh() so a submission during refresh cannot splice ahead.
+  refreshBlocked = true;
+  firstTurn.resolve(reply("a"));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(outbox.getState().busy, true, "outbox stays busy while refresh() is awaiting");
+  assert.deepEqual(await outbox.submit("four"), { restore: null, queued: true });
+  assert.equal(calls.length, 1);
+
+  refreshBlocked = false;
+  refreshGate.resolve();
+  await p1;
+  assert.deepEqual(
+    calls.map((c) => c.text),
+    ["one", "two"],
+  );
+  secondTurn.resolve(reply("b"));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(
+    calls.map((c) => c.text),
+    ["one", "two", "three"],
+  );
+  thirdTurn.resolve(reply("c"));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(
+    calls.map((c) => c.text),
+    ["one", "two", "three", "four"],
+  );
+});
+
+test("a second identical send after the first was reconciled and dropped does not claim the first exchange", async () => {
+  const history = [];
+  const secondTurn = deferred();
+  let clock = 1_000_000;
+  let outbox;
+  let n = 0;
+  const outcomes = [reply("First answer."), () => secondTurn.promise];
+  const http = {
+    async turn() {
+      const outcome = outcomes.shift();
+      return typeof outcome === "function" ? await outcome() : await outcome;
+    },
+  };
+  outbox = createOutbox({
+    http,
+    newKey: () => `k${++n}`,
+    now: () => clock,
+    items: () => history,
+  });
+
+  await outbox.submit("status");
+  const at1 = outbox.getState().entries[0].at;
+  history.push(line(at1 + 5, "status"), answer(at1 + 9, "First answer."));
+  outbox.reconcile(history);
+  assert.deepEqual(outbox.getState().entries, []);
+
+  // 5 seconds later (well within SLACK), user sends "status" again while history still holds the first exchange.
+  clock += 5_000;
+  const p2 = outbox.submit("status");
+  outbox.reconcile(history);
+  assert.equal(outbox.getState().entries.length, 1, "second 'status' was not dropped by claiming the first exchange");
+  assert.equal(outbox.getState().entries[0].phase, "sending");
+
+  secondTurn.resolve(reply("Second answer."));
+  await p2;
+});
+
+test("an inactive outbox (narrow rail) neither resumes nor clobbers shared state until activated", async () => {
+  let sharedState = {
+    entries: [{ key: "k-saved", text: "run tests", at: 1_000_000 * 1000, phase: "queued", error: null, reuseKey: true }],
+  };
+  const railCalls = [];
+  const railSaves = [];
+  const railOutbox = createOutbox({
+    http: { async turn(text, key) { railCalls.push({ text, key }); return reply("ok"); } },
+    newKey: () => "kr1",
+    now: () => 1_000_500,
+    active: false,
+    saved: sharedState,
+    load: () => sharedState,
+    save: (v) => { railSaves.push(v); sharedState = v; },
+  });
+
+  await railOutbox.resume();
+  railOutbox.reconcile([]);
+  railOutbox.prune();
+  assert.equal(railCalls.length, 0, "inactive rail outbox did not resume");
+  assert.equal(railSaves.length, 0, "inactive rail outbox did not overwrite shared state");
+
+  // Meanwhile the panel window updates sharedState, then closes, and the block widens to become active.
+  sharedState = {
+    entries: [{ key: "k-win", text: "lint", at: 1_000_400 * 1000, phase: "queued", error: null, reuseKey: true }],
+  };
+  railOutbox.setActive(true);
+  await railOutbox.resume();
+  assert.deepEqual(railCalls, [{ text: "lint", key: "k-win" }]);
 });
 
 test("a reply the stream showed before the turn returned is not shown twice", async () => {
