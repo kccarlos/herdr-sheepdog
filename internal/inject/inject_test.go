@@ -350,3 +350,21 @@ func TestRouter(t *testing.T) {
 		}
 	}
 }
+
+type plainReadCounter struct {
+	supervisor.Herdr
+	reads int
+}
+
+func (p *plainReadCounter) Read(context.Context, string, herdr.ReadSource, int) (herdr.ReadResult, error) {
+	p.reads++
+	return herdr.ReadResult{}, nil
+}
+func TestReadANSINoPlainFallbackForRealPane(t *testing.T) {
+	p := &plainReadCounter{}
+	h := NewHerdr(p, nil)
+	_, err := h.ReadANSI(context.Background(), "real", herdr.SourceVisible, 0)
+	if err == nil || p.reads != 0 {
+		t.Fatalf("err=%v reads=%d", err, p.reads)
+	}
+}
