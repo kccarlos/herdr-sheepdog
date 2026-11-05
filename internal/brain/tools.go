@@ -506,6 +506,13 @@ func sessionText(r SessionRead) string {
 	if len(did) > 0 {
 		fmt.Fprintf(&b, "What it did for it: %s\n", strings.Join(did, "; "))
 	}
+	if stop := strings.TrimSpace(r.StopError); stop != "" {
+		if detail := strings.TrimSpace(r.StopDetail); detail != "" {
+			fmt.Fprintf(&b, "How its last turn ended: %s (%s)\n", stop, clipRunes(strings.Join(strings.Fields(detail), " "), sessionInstructionRunes))
+		} else {
+			fmt.Fprintf(&b, "How its last turn ended: %s\n", stop)
+		}
+	}
 	msg := strings.TrimSpace(r.LastAssistant)
 	switch {
 	case msg == "":

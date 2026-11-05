@@ -204,11 +204,20 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// What the worker itself wrote for a human, before its screen:
 		// the finding in its words, not its working notes
 		// (docs/dev/iteration-2.md WP4).
+		var transcript string
 		if a, ok := b.host.Resolve(t.req.Agent); ok {
-			if text := workerWrote(a); text != "" {
-				b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "transcript", text), Agent: t.req.Agent,
-					ToolResult: &ToolResult{Name: toolWorkerLog, Summary: fmt.Sprintf("what %s wrote at %s", aliasOr(t.req.Agent), t.req.Event)}}, t.n)
+			transcript = workerWrote(a)
+		}
+		if detail := strings.TrimSpace(t.req.StopDetail); detail != "" {
+			if transcript != "" {
+				transcript += "\nSession error: " + detail
+			} else {
+				transcript = "Session error: " + detail
 			}
+		}
+		if transcript != "" {
+			b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "transcript", transcript), Agent: t.req.Agent,
+				ToolResult: &ToolResult{Name: toolWorkerLog, Summary: fmt.Sprintf("what %s wrote at %s", aliasOr(t.req.Agent), t.req.Event)}}, t.n)
 		}
 	}
 	if t.req.Screen != "" {
