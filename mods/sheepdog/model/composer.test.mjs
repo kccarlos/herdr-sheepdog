@@ -2,7 +2,7 @@
 // `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { keyMaker, restored, submission } from "./composer.js";
+import { DRAFT_KEY, DRAFT_TTL_MS, keyMaker, readDraft, restored, serializeDraft, submission } from "./composer.js";
 
 test("Enter sends the value minus one trailing newline", () => {
   assert.equal(submission("hello\n"), "hello");
@@ -31,4 +31,18 @@ test("keys are visible ASCII of at most 128 characters and differ", () => {
   const [a, b] = [key(), key()];
   assert.notEqual(a, b);
   for (const k of [a, b]) assert.match(k, /^[\x21-\x7e]{1,128}$/);
+});
+
+test("draft persistence keeps non-blank text across reloads and expires stale drafts", () => {
+  assert.equal(DRAFT_KEY, "sheepdog.draft");
+  assert.equal(serializeDraft("", 1000), null);
+  assert.equal(serializeDraft("   \n", 1000), null);
+
+  const saved = serializeDraft("tell api agent to rebase\nsecond line", 10_000);
+  assert.deepEqual(saved, { text: "tell api agent to rebase\nsecond line", at: 10_000 });
+  assert.equal(readDraft(saved, 10_000 + DRAFT_TTL_MS - 1), "tell api agent to rebase\nsecond line");
+  assert.equal(readDraft(JSON.stringify(saved), 10_500), "tell api agent to rebase\nsecond line");
+  assert.equal(readDraft(saved, 10_000 + DRAFT_TTL_MS), "", "expired draft is dropped");
+  assert.equal(readDraft(null, 10_000), "");
+  assert.equal(readDraft("not json", 10_000), "");
 });

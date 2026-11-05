@@ -97,10 +97,12 @@ func (s *Supervisor) setPending(p state.PendingAction) {
 func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 	spoken := p.SpokenSummary
 	if muted && p.Kind == state.PendingAnswerPrompt {
+		p.Held = true
 		if old, had := s.store.Pending(); had && old.PaneID == p.PaneID && old.Kind == state.PendingAnswerPrompt {
 			// The same pane asks again: what was pending is out of date.
 			s.clearPending(old, "superseded")
 		}
+		s.installedLocked(p) // displaced.go
 		if err := s.store.SetQuestion(p); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 		}
@@ -119,6 +121,7 @@ func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 			spoken = replacedLine(s.sayOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
 		}
 	}
+	s.installedLocked(p) // displaced.go
 	if err := s.store.SetPending(p); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
@@ -157,6 +160,7 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	}
 	if p.Kind == state.PendingAnswerPrompt {
 		s.dropQuestionLocked(p)
+		s.closedLocked() // displaced.go: also when the list had dropped it already
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
@@ -165,12 +169,16 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 // dropQuestionLocked removes p from the open questions when it is
 // still its pane's question. Caller holds s.mu.
 func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
+	s.attMu.Lock()
+	delete(s.held, p.ID)
+	s.attMu.Unlock()
 	if q, ok := s.store.Question(p.ID); !ok || q.PaneID != p.PaneID {
 		return
 	}
 	if err := s.store.DropQuestion(p.PaneID); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	s.closedLocked() // displaced.go
 }
 
 // questionByID finds an open answer_prompt by id: the one the voice is
@@ -246,39 +254,97 @@ func (s *Supervisor) ExpirePending() {
 // it) is revived too, but only when the user's newest words are
 // about it (wordsAboutMenuLocked): they name one of its options or words
 // of its question. The rail then checks those words as for any prompt.
-// Caller must not hold s.mu; ok is false when the pane is gone or working, its
-// screen does not parse as a prompt, or — not blocked — the user's
-// words are not about the menu (why says so).
-func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p state.PendingAction, ok bool, why string) {
+// Caller holds s.mu; revived reports whether a new action was minted from the
+// screen rather than reusing an open question; ok is false when the pane is
+// gone or working, its screen does not parse as a prompt, or — not blocked —
+// the user's words are not about the menu (why says so). screen is the pane
+// read the caller took outside s.mu; a missing read cannot safely revive the
+// prompt.
+func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p state.PendingAction, revived, ok bool, why string) {
 	row, found := s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
-	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
-	if err != nil {
-		return state.PendingAction{}, false, ""
+	if screen == nil || screen.err != nil {
+		return state.PendingAction{}, false, false, ""
 	}
-	prompt, parsed := herdr.ParsePrompt(read.Text)
+	prompt, parsed := herdr.ParsePrompt(screen.text)
 	if !parsed {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == s.promptSignature(prompt) {
-		return cur, true, ""
+		return cur, false, true, ""
+	}
+	for _, q := range s.store.Questions() {
+		if q.Kind == state.PendingAnswerPrompt && q.PaneID == paneID && pendingSignature(q) == s.promptSignature(prompt) {
+			return q, false, true, ""
+		}
 	}
 	row, found = s.store.Get(paneID)
 	if !found || row.State == herdr.StateWorking {
-		return state.PendingAction{}, false, ""
+		return state.PendingAction{}, false, false, ""
 	}
 	blocked := row.State == herdr.StateBlocked
 	if !blocked && !s.wordsAboutMenuLocked(prompt, row) {
-		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
+		return state.PendingAction{}, false, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
-	s.setPending(p)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
-	return p, true, ""
+	return p, true, true, ""
+}
+
+// registerRevivedQuestionLocked lists a revived answer_prompt in the open
+// questions without moving the voice's pending slot, so a re-ask of it
+// carries a live pending_id and a follow-up answer or phone tap resolves.
+// Caller holds s.mu.
+func (s *Supervisor) registerRevivedQuestionLocked(p state.PendingAction) {
+	if p.Kind != state.PendingAnswerPrompt {
+		return
+	}
+	if _, ok := s.openByIDLocked(p.ID); ok {
+		return
+	}
+	var old *state.PendingAction
+	for _, q := range s.store.Questions() {
+		if q.PaneID == p.PaneID {
+			cp := q
+			old = &cp
+			s.attMu.Lock()
+			delete(s.held, q.ID)
+			s.attMu.Unlock()
+		}
+	}
+	s.installedLocked(p) // displaced.go
+	if err := s.store.SetQuestion(p); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
+		if a.LastBlock == nil {
+			a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
+		}
+		a.LastBlock.Question = p.Question
+		a.LastBlock.Answered = false
+	}); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
+	}
+	s.invalidateBriefingLocked()
+	if old != nil {
+		s.log.Log(logSource, "pending.cancelled", old.PaneID, map[string]any{"id": old.ID, "kind": old.Kind, "reason": "superseded"})
+	}
+	s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
+}
+
+// paneScreen is one read of a pane's screen.
+type paneScreen struct {
+	text string
+	err  error
+}
+
+// readScreen reads paneID's screen for revivePrompt. Call it without
+// s.mu: it reads herdr.
+func (s *Supervisor) readScreen(ctx context.Context, paneID string) *paneScreen {
+	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	return &paneScreen{text: read.Text, err: err}
 }
 
 // menuStopWords are words too common to tie the user's words to a

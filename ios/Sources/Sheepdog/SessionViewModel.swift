@@ -946,17 +946,20 @@ final class SessionViewModel: ObservableObject {
             send(.toolResult)
         case "pending.created":
             if let pending = PendingAction(event: event) {
-                fleet.current?.questionCreated(pending)
+                if event.bool("held") != true { fleet.current?.questionCreated(pending) }
+                let firstCue = cuedPendingIDs.insert(pending.id).inserted
                 // The needs-you cue: a new open question with options, once
                 // per question, and only when it is news (not a replay). A
                 // question in a muted space makes no sound or tap.
-                if pending.isAnswerPrompt, isFresh(event), !AttentionEvents.isMuted(event), cuedPendingIDs.insert(pending.id).inserted {
+                if pending.isAnswerPrompt, isFresh(event), !AttentionEvents.isMuted(event), firstCue {
                     Haptics.needsYou()
                 }
             }
             refreshSoon()
         case "card.shown":
             scheduleHistorySync()
+        case "pending.promoted":
+            refreshSoon()
         case "conversation.reset":
             // Fires for every reset, including our own (the app resets its
             // own reducer immediately on the POST reply too, so a replay
@@ -1045,7 +1048,7 @@ final class SessionViewModel: ObservableObject {
             // agent's, read from the state) rises with a light tap; the
             // event-driven one already had the needs-you cue.
             if questionsSeen {
-                for q in open where q.isAnswerPrompt && q.id != state.pendingAction?.id && cuedPendingIDs.insert(q.id).inserted {
+                for q in open where q.isAnswerPrompt && q.id != state.pendingAction?.id && agents.first(where: { $0.paneID == q.paneID })?.isMuted != true && cuedPendingIDs.insert(q.id).inserted {
                     Haptics.push()
                 }
             } else {

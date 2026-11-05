@@ -416,7 +416,10 @@ func (s *Supervisor) SetSpaceMute(ctx context.Context, spaceID string, muted boo
 		return SpaceMuteResult{}, err
 	}
 	// The next decisions find the folder of this space without a herdr call.
-	s.folders(ctx)
+	idx := s.folders(ctx)
+	if muted {
+		s.holdSpaceQuestions(idx, sp.Path)
+	}
 	f := map[string]any{"path": sp.Path, "name": sp.Name, "muted": muted, "via": via}
 	if res.Until != nil {
 		f["until"] = *res.Until
@@ -436,6 +439,54 @@ func viaPlace(via string) string {
 		return "panel"
 	}
 	return "phone"
+}
+
+// holdSpaceQuestions holds the open questions of the space at path, just
+// muted, as if they had been asked in it: the voice's pending question
+// leaves the slot, and each is held (listed for the phone, answerable by
+// tap) and no longer counts as told, so neither a bare yes nor the
+// orchestrator's send_keys answers it until it is announced again
+// (unmuting does that, announceHeld). The user muted the space; a
+// question there is the phone's now, heard or not.
+func (s *Supervisor) holdSpaceQuestions(idx *folderIndex, path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for pane := range s.told.asked {
+		if row, ok := s.store.Get(pane); ok && s.folderOfPane(idx, row) == path {
+			delete(s.told.asked, pane)
+		}
+	}
+	for k := range s.told.stated {
+		if row, ok := s.store.Get(k.pane); ok && s.folderOfPane(idx, row) == path {
+			delete(s.told.stated, k)
+		}
+	}
+	open := s.openKeysLocked()
+	p, has := s.store.Pending()
+	changed := false
+	for k, q := range open {
+		row, ok := s.store.Get(q.PaneID)
+		if !ok || s.folderOfPane(idx, row) != path || (q.Held && s.heldQuestion(q.ID)) {
+			continue
+		}
+		if has && p.ID == q.ID {
+			if err := s.store.ClearPending(); err != nil {
+				s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
+			}
+		}
+		q.Held = true
+		q.Promoted = false
+		if err := s.store.SetQuestion(q); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.holdQuestion(q.ID)
+		s.untellLocked(k)
+		changed = true
+		s.log.Log(logSource, "pending.held", q.PaneID, map[string]any{"id": q.ID, "agent": s.aliasOf(q.PaneID), "reason": "space_muted"})
+	}
+	if changed {
+		s.invalidateBriefingLocked()
+	}
 }
 
 // folderTTL is how long the folder index is trusted before the next decision
@@ -572,8 +623,23 @@ func (s *Supervisor) paneMuted(ctx context.Context, paneID string) bool {
 	}
 	idx := s.folders(ctx)
 	if s.folderOfPane(idx, row) == "" {
-		// Not in the index: a space opened since it was read.
-		idx = s.foldersWithin(ctx, folderMissAge)
+		// Serialize misses so concurrent panes see the completed refresh.
+		s.missMu.Lock()
+		s.idxMu.Lock()
+		idx = s.idx
+		now := s.cfg.Now()
+		refresh := s.folderOfPane(idx, row) == "" && (s.missAt.IsZero() || now.Sub(s.missAt) >= folderMissAge)
+		s.idxMu.Unlock()
+		if refresh {
+			if fresh, err := s.readFolders(ctx); err == nil {
+				s.idxMu.Lock()
+				s.idx = fresh
+				s.missAt = s.cfg.Now()
+				s.idxMu.Unlock()
+				idx = fresh
+			}
+		}
+		s.missMu.Unlock()
 	}
 	return s.rowMuted(idx, row)
 }
@@ -638,6 +704,16 @@ func (s *Supervisor) heldQuestions() []state.PendingAction {
 	return out
 }
 
+// holdsQuestionOf reports whether paneID's open question is held.
+func (s *Supervisor) holdsQuestionOf(paneID string) bool {
+	for _, q := range s.store.Questions() {
+		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
+			return true
+		}
+	}
+	return false
+}
+
 // heldQuestionsLine is what a bare yes or no gets when the only open
 // questions are held ones: plain words, no keys sent. "" when none is held.
 // Caller holds s.mu (it reads the store only).
@@ -667,44 +743,68 @@ func (s *Supervisor) promoteHeld(a announcement) {
 	if !ok {
 		return
 	}
+	s.promoteHeldLocked(q)
+}
+
+// promoteHeldLocked is promoteHeld for the open question q, also when a
+// line that states it reached the user some other way (displaced.go: a
+// reply that says it). It returns q as promoted. Caller holds s.mu.
+func (s *Supervisor) promoteHeldLocked(q state.PendingAction) state.PendingAction {
+	q.Held = false
+	q.Promoted = true
+	if err := s.store.SetQuestion(q); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
+		return q
+	}
 	s.attMu.Lock()
-	delete(s.held, a.pending)
+	delete(s.held, q.ID)
 	s.attMu.Unlock()
 	if old, had := s.store.Pending(); had && old.ID != q.ID {
 		s.log.Log(logSource, "pending.replaced", q.PaneID, map[string]any{"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": q.ID, "new_kind": q.Kind})
 	}
+	s.installedLocked(q) // displaced.go
 	if err := s.store.SetPending(q); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", q.PaneID, map[string]any{"error": err.Error()})
-		return
+		return q
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.promoted", q.PaneID, map[string]any{"id": q.ID, "agent": s.aliasOf(q.PaneID)})
+	return q
 }
 
 // announceHeld announces, once, the questions that were held in the space at
 // path now that it is not muted: each is spoken like a new block (and so
 // becomes answerable by voice when it is heard). A question whose agent has
-// moved on is dropped quietly.
+// moved on is dropped quietly. They are announced one after the other,
+// oldest first, on one tracked goroutine (shutdown ends and waits for it
+// before the orchestrator closes): the question the voice is on is the
+// last one spoken, and a later one does not cut the one before it off
+// (queued).
 func (s *Supervisor) announceHeld(path string) {
-	idx := s.folders(s.life)
-	for _, q := range s.heldQuestions() {
-		row, ok := s.store.Get(q.PaneID)
-		if !ok || s.folderOfPane(idx, row) != path {
-			continue
-		}
-		if row.State != herdr.StateBlocked && row.State != herdr.StateDone && row.State != herdr.StateIdle {
-			continue
-		}
-		if !s.track() {
-			return
-		}
-		go func(row state.Agent, q state.PendingAction) {
-			defer s.replies.Done()
-			ctx, cancel := context.WithTimeout(s.life, 2*time.Minute)
-			defer cancel()
-			s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, pending: q.ID})
-		}(row, q)
+	if !s.track() {
+		return
 	}
+	go func() {
+		defer s.replies.Done()
+		idx := s.folders(s.life)
+		announced := 0
+		for _, q := range s.heldQuestions() {
+			if s.life.Err() != nil {
+				return
+			}
+			row, ok := s.store.Get(q.PaneID)
+			if !ok || s.folderOfPane(idx, row) != path || !s.heldQuestion(q.ID) {
+				continue
+			}
+			if row.State != herdr.StateBlocked && row.State != herdr.StateDone && row.State != herdr.StateIdle {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(s.life, 2*time.Minute)
+			s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, pending: q.ID, queued: announced > 0})
+			cancel()
+			announced++
+		}
+	}()
 }
 
 // mutedQuiet reports whether the space mute silences a: it is muted and

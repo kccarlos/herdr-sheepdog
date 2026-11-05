@@ -25,8 +25,10 @@ const STATE = new Set([
   "voice.standby", "voice.provider_changed",
   // An agent's state moved (older daemons say nothing else), its attention or
   // its group changed, a space was muted, or a provider hit an account problem:
-  // the status line's counts and notice follow.
-  "herdr.transition", "agent.attention", "space.muted",
+  // the status line's counts and notice follow. A held question promoted (a
+  // kept promise, a finished instruction) becomes the voice's question with no
+  // other event.
+  "herdr.transition", "agent.attention", "space.muted", "pending.promoted",
   "brain.account_problem", "web.account_problem",
 ]);
 

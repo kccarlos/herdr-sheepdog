@@ -71,7 +71,14 @@ func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 // pane without a model, when the one rail's reading of in, the newest
 // input, allows it (inputs.go). ok is false for anything else, which
 // goes to the orchestrator.
-func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
+func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string, u *inflightUtterance, daemon bool) (voice.ToolResult, bool) {
+	// The space mute of the pending question's pane is read fresh, outside
+	// s.mu (it may read herdr), as send_keys reads it: the folder index a
+	// lock-held check reads can be cold or stale.
+	mutedPane := ""
+	if p, has := s.store.Pending(); has && p.Kind == state.PendingAnswerPrompt && s.paneMuted(ctx, p.PaneID) {
+		mutedPane = p.PaneID
+	}
 	s.mu.Lock()
 	text = strings.TrimSpace(text)
 	p, has := s.store.Pending()
@@ -90,6 +97,15 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	keys, label, ok := bareAnswer(p, text)
 	if !ok {
+		s.mu.Unlock()
+		return voice.ToolResult{}, false
+	}
+	if p.Held || s.heldQuestion(p.ID) || ((mutedPane == p.PaneID || s.paneMutedCached(p.PaneID)) && (!p.Promoted || !s.toldOpenLocked(p))) {
+		// A muted space's question the user was not told about (recorded
+		// unheld while the folder index was cold, or its space muted
+		// since): a bare word does not answer it, as send_keys would not
+		// (brainHost.AnswerPrompt).
+		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "space_muted", "text": text, "id": p.ID})
 		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
@@ -120,6 +136,29 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 			reason = "the user said something newer than the words being answered"
 		}
 		s.railBlockedLocked(p, keys, "fast_path", reason)
+		if reason == s.displacedLocked(p, in) {
+			// displaced.go: the user hears why and is asked again, and
+			// that reply tells them the question.
+			if line := s.reaskLocked(p, in); line != "" {
+				if ctx.Err() == nil {
+					switch {
+					case daemon:
+						uttID := ""
+						if u != nil {
+							uttID = u.id
+						}
+						s.promptLineForLocked(line, p.ID, uttID)
+					case u != nil && !u.typed:
+						s.toldKeyForLocked(keyOf(p), "", u.id)
+					default:
+						s.toldKeyForLocked(keyOf(p), "", "")
+					}
+				}
+				s.mu.Unlock()
+				s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "asked_again", "text": text, "id": p.ID, "input": string(in.kind)})
+				return voice.ToolResult{Spoken: line, Clarify: true, Scheduling: voice.UrgencyInterrupt}, true
+			}
+		}
 		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}

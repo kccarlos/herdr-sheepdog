@@ -77,11 +77,17 @@ func (t *panelTracker) Sync(log logging.Logger) string {
 		log.Log("daemon", "panel.update_failed", "", map[string]any{"error": err.Error()})
 		return "could not update the herdr-app panel: " + err.Error()
 	}
-	if !res.Updated && !res.LayoutUpdated {
+	if !res.Updated && !res.LayoutUpdated && !res.LayoutSidecar {
 		return ""
 	}
 	log.Log("daemon", "panel.updated", "", map[string]any{
-		"from": res.From, "to": res.To, "files": res.Files, "layout": res.LayoutUpdated,
+		"from": res.From, "to": res.To, "files": res.Files, "layout": res.LayoutUpdated, "layout_sidecar": res.LayoutSidecar,
 	})
-	return "updated the herdr-app panel to " + t.src.Version
+	line := "updated the herdr-app panel to " + t.src.Version
+	if !res.Updated && res.LayoutSidecar {
+		line = "wrote updated layout beside your edited layouts/sheepdog.json as layouts/sheepdog.json.new"
+	} else if res.LayoutSidecar {
+		line += " (kept edited layouts/sheepdog.json; wrote layouts/sheepdog.json.new)"
+	}
+	return line
 }

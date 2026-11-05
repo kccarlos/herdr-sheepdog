@@ -66,7 +66,7 @@ export function deviceKind(d) {
 // "Tailscale · just now", "never".
 export function lastSeen(d, now) {
   if (!d || !d.last_seen) return 'Not seen yet';
-  const net = { tailscale: 'Tailscale', lan: 'Wi-Fi', loopback: 'this computer' }[d.last_network] || '';
+  const net = { tailscale: 'Tailscale', lan: 'Wi-Fi', loopback: 'this computer', proxy: 'proxy' }[d.last_network] || '';
   const s = Math.max(0, Math.floor((Number(now) - Date.parse(d.last_seen)) / 1000));
   let ago;
   if (s < 60) ago = 'just now';

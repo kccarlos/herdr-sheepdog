@@ -28,6 +28,7 @@ func TestVoicePageFilesAndContentTypes(t *testing.T) {
 		{"/voice/audio-util.js", "text/javascript", "export class Player"},
 		{"/voice/audio-capture.worklet.js", "text/javascript", "registerProcessor('sheepdog-capture'"},
 		{"/voice/audio-playback.worklet.js", "text/javascript", "registerProcessor('sheepdog-playback'"},
+		{"/voice/shortcuts.js", "text/javascript", "export function voiceKeyAction"},
 		{"/voice/style.css", "text/css", "prefers-color-scheme"},
 	}
 	for _, tc := range cases {
