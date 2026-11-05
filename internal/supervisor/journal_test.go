@@ -28,7 +28,12 @@ func jsonString(s string) string {
 // withWorkerLog points the transcript reader at a temp home.
 func withWorkerLog(dir string) func(*Config) {
 	return func(c *Config) {
-		c.WorkerLog = workerlog.New(workerlog.Options{ClaudeProjects: filepath.Join(dir, "projects"), CodexSessions: filepath.Join(dir, "sessions")})
+		c.WorkerLog = workerlog.New(workerlog.Options{
+			ClaudeProjects: filepath.Join(dir, "projects"),
+			CodexSessions:  filepath.Join(dir, "sessions"),
+			TreePIDs:       func(roots workerlog.ProcessRoots) []int { return roots.Direct() },
+			OpenFiles:      func([]int) []string { return nil },
+		})
 	}
 }
 
@@ -513,7 +518,7 @@ func TestJournalRedactsWorkerSecrets(t *testing.T) {
 	secret := "sk-" + "example1234567890abcdef"
 	claudeTurn(t, h, "w5:p1", "result "+secret)
 	row, _ := h.store.Get("w5:p1")
-	h.sup.recordJournal(row, "done", false)
+	h.sup.recordJournal(t.Context(), row, workerlog.ProcessRoots{}, "done", false)
 	row, _ = h.store.Get("w5:p1")
 	if len(row.Journal) != 1 || strings.Contains(row.Journal[0].LastAssistant, secret) || !strings.Contains(row.Journal[0].LastAssistant, "[REDACTED]") {
 		t.Error("journal did not redact the worker secret")

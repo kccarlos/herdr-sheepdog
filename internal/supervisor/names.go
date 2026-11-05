@@ -12,6 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // Agent names (docs/dev/roles.md "Agent names"). The store computes every
@@ -54,11 +55,12 @@ type namesState struct {
 // refreshTitle reads the worker's session title and stores it on the
 // row (the store recomputes the spoken names). Any error just leaves
 // the title as it was: the title is a nicety, never a reason to log.
-func (s *Supervisor) refreshTitle(row state.Agent) {
-	if row.SessionValue == "" || s.cfg.WorkerLog == nil {
+func (s *Supervisor) refreshTitle(row state.Agent, roots workerlog.ProcessRoots) {
+	if (row.SessionValue == "" && !roots.HasPID()) || s.cfg.WorkerLog == nil {
 		return
 	}
-	title, err := s.cfg.WorkerLog.Title(workerSession(row))
+	title, err := s.cfg.WorkerLog.Title(workerSessionWithRoots(row, roots))
+	s.syncDiscoveredSession(row.PaneID)
 	if err != nil || title == "" {
 		return
 	}

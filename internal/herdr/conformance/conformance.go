@@ -35,6 +35,9 @@ type Program struct {
 	// State is the state while the program runs. For an hc program that
 	// does not report, the screen decides blocked versus unknown.
 	State herdr.State
+	// PID is the program's foreground PID; zero lets the driver assign a
+	// unique PID per program launch.
+	PID int
 }
 
 // Driver performs the machine actions a scenario needs. Its implementations
@@ -152,6 +155,10 @@ func Scenarios() []Scenario {
 		{
 			Name: "a periodic snapshot with no change logs nothing and emits no transition",
 			Run:  unchangedSnapshotIsSilent,
+		},
+		{
+			Name: "foreground process tree identifies each pane's live session",
+			Run:  foregroundProcessTreeIdentifiesLiveSessions,
 		},
 	}, markScenarios()...)
 }
