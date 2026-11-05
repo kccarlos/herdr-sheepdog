@@ -18,9 +18,9 @@ import { baseUrl, hostPort } from "./net/config.js";
 import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
 import { focusCommand } from "./model/cards.js";
-import { keyMaker, restored, submission } from "./model/composer.js";
+import { DRAFT_KEY, keyMaker, readDraft, restored, serializeDraft, submission } from "./model/composer.js";
 import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
-import { createOutbox, pendingItems } from "./model/outbox.js";
+import { createOutbox, OUTBOX_KEY, pendingItems } from "./model/outbox.js";
 import { atMemoryLimit, canLoadOlder } from "./model/history.js";
 import { amber } from "./model/palette.js";
 import { decide, estimateHeight, natural } from "./model/presentation.js";
@@ -97,9 +97,14 @@ export default class Sheepdog extends View {
       this.outbox.subscribe(() => cx.notify());
       this.answers.subscribe(() => cx.notify());
       this.voice.subscribe(() => cx.notify());
+      let outboxResumed = false;
       this.store.subscribe((snapshot) => {
         // The conversation may now show what the outbox is waiting on.
         this.outbox?.reconcile(snapshot.history.items);
+        if (!outboxResumed && (snapshot.history.synced || snapshot.error != null)) {
+          outboxResumed = true;
+          void this.outbox?.resume();
+        }
         cx.notify();
       });
       this.live = createLive({
@@ -124,8 +129,12 @@ export default class Sheepdog extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         if ((await nextCommand()) === "focus") {
-          this.panelFocus.focus();
-          cx.notify();
+          if (layoutMode({ width: this.size.width, overlay: this.overlay }) !== "panel") {
+            this.openPanel();
+          } else {
+            this.panelFocus.focus();
+            cx.notify();
+          }
         }
       }
     });
@@ -148,6 +157,7 @@ export default class Sheepdog extends View {
     cx.stop_propagation();
     if (action.type === "composer") this.composer.focus();
     else if (action.type === "panel") this.panelFocus.focus();
+    else if (action.type === "shortcuts") this.toggleShortcuts(cx);
     else if (action.type === "sheet") {
       this.sheet = null;
       cx.notify();
@@ -155,6 +165,11 @@ export default class Sheepdog extends View {
     else if (action.type === "leave") this.leave();
     else if (action.type === "answer") this.answer(action.question, action.option, cx);
     else if (action.type === "send") this.send(action.text, cx, false);
+  }
+
+  toggleShortcuts(cx) {
+    this.sheet = this.sheet?.type === "shortcuts" ? null : { type: "shortcuts" };
+    cx.notify();
   }
 
   // Esc on the panel: the keys go back to the pane that had them (a click
@@ -171,28 +186,53 @@ export default class Sheepdog extends View {
   // The composer's textarea (made here, it needs a live host call), the typed
   // lines on their way, the taps on questions and the voice's controls.
   initPanel(http, cx) {
-    this.sheet = null; // what is open over the list: a card, or the questions
+    this.sheet = null; // what is open over the list: a card, the questions, or shortcuts
     this.presentation = null; // inline | compact, once decided (model/presentation.js)
     this.focusNote = null;
     const newKey = keyMaker();
     const refresh = () => this.store.refresh();
-    this.outbox = createOutbox({ http, newKey, refresh, items: () => this.store.getState().history.items });
+    this.outbox = createOutbox({
+      http,
+      newKey,
+      refresh,
+      items: () => this.store.getState().history.items,
+      saved: shared(OUTBOX_KEY),
+      save: (value) => setShared(OUTBOX_KEY, value),
+    });
     this.answers = createAnswers({ http, newKey, refresh });
     this.voice = createVoice({ http, exec, exists, home, newKey, refresh, platform: this.platform, openSetup: () => openSetup({ exec, platform: this.platform(), base: this.base }) });
     // Is Sheepdog.app installed? (Read-only; the timer looks again.)
     this.voice.check();
     this.composer = TextareaState.new({ placeholder: "Message Sheepdog…", rows: 1 });
     this.composer.set_auto_grow(1, 5);
-    // `submit`, never `change`: an input method's commit fires `change`.
+    const savedDraft = readDraft(shared(DRAFT_KEY));
+    if (savedDraft) this.composer.set_value(savedDraft);
+    this.composer.on("change", () => {
+      this.saveDraft(this.composer.value());
+    });
+    // `submit`, never `change`, triggers sending: an input method's commit fires `change`.
     this.composer.on("submit", (e, cx) => {
       const text = submission(this.composer.value(), e);
       if (text == null) {
         // Enter on nothing: drop the newline it inserted. Shift+Enter keeps its.
-        if (!e.shift) this.composer.set_value("");
+        if (!e.shift) this.setComposerValue("");
         return;
       }
       this.send(text, cx, true);
     });
+  }
+
+  saveDraft(value) {
+    try {
+      setShared(DRAFT_KEY, serializeDraft(value));
+    } catch {
+      // shared state errors must never break typing
+    }
+  }
+
+  setComposerValue(value) {
+    this.composer.set_value(value);
+    this.saveDraft(value);
   }
 
   initSettings(cx) {
@@ -225,19 +265,36 @@ export default class Sheepdog extends View {
   }
 
   // Sends a typed line: what the textarea held (`fromComposer`) or a tapped
-  // suggested reply. One line at a time; while one is on its way the text stays.
+  // suggested reply. Follow-ups sent while a turn runs queue in FIFO order;
+  // failed sends stay retryable inline in the composer.
   send(text, cx, fromComposer) {
-    if (this.outbox.getState().busy) {
-      if (fromComposer) this.composer.set_value(text);
-      return;
-    }
-    if (fromComposer) this.composer.set_value("");
+    if (fromComposer) this.setComposerValue("");
     cx.spawn(async (cx) => {
       const { restore } = await this.outbox.submit(text);
-      // A failed line goes back into the textarea; a tapped option stays a button.
-      if (restore != null && fromComposer) this.composer.set_value(restored(restore, this.composer.value()));
+      if (restore != null && fromComposer) this.setComposerValue(restored(restore, this.composer.value()));
       cx.notify();
     });
+  }
+
+  retryOutbox(key, cx) {
+    cx.spawn(async (cx) => {
+      await this.outbox.retry(key);
+      cx.notify();
+    });
+  }
+
+  editOutbox(key, cx) {
+    const text = this.outbox.take(key);
+    if (text != null) {
+      this.setComposerValue(restored(text, this.composer.value()));
+      this.composer.focus();
+    }
+    cx.notify();
+  }
+
+  removeOutbox(key, cx) {
+    this.outbox.remove(key);
+    cx.notify();
   }
 
   answer(question, option, cx) {
@@ -568,7 +625,8 @@ export default class Sheepdog extends View {
       const voiceHeight = status.phase === "ok"
         ? (controls.action ? 130 : controls.useHere || controls.hint || controls.install || voice.notice ? 88 : 58)
         : 0;
-      const composerHeight = derived.live ? 116 : 80;
+      const interactiveOutbox = outbox.entries.filter((e) => e.phase === "failed" || e.phase === "queued").length;
+      const composerHeight = (derived.live ? 116 : 80) + Math.min(interactiveOutbox, 2) * 58;
       const budgetFor = (question) =>
         panelBudget({
           height: this.size.height,
@@ -591,13 +649,30 @@ export default class Sheepdog extends View {
         paging: { synced: snapshot.history.synced, canLoadOlder: canLoadOlder(snapshot.history), atMemoryLimit: atMemoryLimit(snapshot.history), loadingOlder: snapshot.loadingOlder },
         technical: this.technical,
         retryMs: POLL_MS,
-        compose: { state: this.composer, live: derived.live, notice: outbox.notice, busy: outbox.busy, compact: layout.compactBanners || layout.detailsScroll, maxHeight: composerHeight, onSend: (text, cx) => this.send(text, cx, false) },
+        compose: {
+          state: this.composer,
+          live: derived.live,
+          entries: outbox.entries,
+          notice: outbox.notice,
+          busy: outbox.busy,
+          compact: layout.compactBanners || layout.detailsScroll,
+          maxHeight: composerHeight,
+          onSend: (text, cx) => this.send(text, cx, false),
+          onRetry: (key, cx) => this.retryOutbox(key, cx),
+          onEdit: (key, cx) => this.editOutbox(key, cx),
+          onRemove: (key, cx) => this.removeOutbox(key, cx),
+        },
         questions,
         voice: { controls, state: voice, on: this.voiceHandlers(controls) },
         layout,
         panelNotice,
         dock: this.offerDock ? { note: this.dockNote, onCopyLayout: (_e, cx) => this.copyLayout(cx) } : null,
-        sheet: this.sheet?.type === "card" ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet } : this.sheet && { ...this.sheet, onClose: closeSheet },
+        sheet:
+          this.sheet?.type === "card"
+            ? { ...this.sheet, note: this.focusNote, onFocus: (_e, cx) => this.focusAgent(this.sheet.card, cx), onClose: closeSheet }
+            : this.sheet?.type === "shortcuts"
+              ? { ...this.sheet, platform: this.platform(), onClose: closeSheet }
+              : this.sheet && { ...this.sheet, onClose: closeSheet },
         onSetup: (_e, cx) => this.runSetup(cx),
         onStart: (_e, cx) => this.startDaemon(cx),
         downNote: this.downNote ?? null,
@@ -605,6 +680,7 @@ export default class Sheepdog extends View {
           this.technical = !this.technical;
           cx.notify();
         },
+        onShortcuts: (_e, cx) => this.toggleShortcuts(cx),
         onMenu: () => this.openHeaderMenu(),
         onClose: this.overlay ? () => closeOverlay(this.overlay) : null,
         onEndShown: () => {

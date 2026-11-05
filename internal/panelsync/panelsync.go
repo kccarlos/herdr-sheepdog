@@ -8,7 +8,6 @@
 package panelsync
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +29,10 @@ const (
 	layoutFile = "sheepdog.json"
 )
 
+// swapDirsFn is the OS single-syscall directory swap; tests replace it to
+// exercise the two-rename fallback.
+var swapDirsFn = swapDirs
+
 // Source is the panel and layout built into this binary.
 type Source struct {
 	// Panel holds the mod under mods/sheepdog (the root package's Panel).
@@ -47,9 +50,14 @@ type Marker struct {
 	// Files maps each file (slash path inside the panel folder) to the
 	// SHA-256 of what was written.
 	Files map[string]string `json:"files"`
-	// Layout is the SHA-256 of layouts/sheepdog.json as written; empty when
-	// setup did not write that file.
+	// Layout is the normalized SHA-256 of layouts/sheepdog.json as written;
+	// empty when setup did not write that file.
 	Layout string `json:"layout,omitempty"`
+	// PreviousLayout is the layout herdr-app showed before setup switched to
+	// sheepdog, restored by uninstall when sheepdog is still shown.
+	PreviousLayout string `json:"previous_layout,omitempty"`
+	// Keybinding records an opt-in keys.json shortcut setup added.
+	Keybinding *KeybindingRecord `json:"keybinding,omitempty"`
 }
 
 // State is what /api/state reports as `panel`.
@@ -143,7 +151,7 @@ type evaluation struct {
 	marker Marker
 	hasMk  bool
 	emb    map[string]file
-	// layoutUnmodified: the layout file exists and is what setup wrote.
+	// layoutUnmodified: the layout file exists and structurally matches what setup wrote.
 	layoutUnmodified bool
 }
 
@@ -185,8 +193,9 @@ func evaluate(home string, src Source) (evaluation, error) {
 		ev.state.Modified = !unmodified
 	}
 	if ev.hasMk && ev.marker.Layout != "" && !isSymlink(dir) {
-		h, ok := hashOf(filepath.Join(home, "layouts", layoutFile))
-		ev.layoutUnmodified = ok && h == ev.marker.Layout
+		if disk, err := os.ReadFile(filepath.Join(home, "layouts", layoutFile)); err == nil {
+			ev.layoutUnmodified = layoutMatchesMarker(disk, ev.marker.Layout, src.Layout)
+		}
 	}
 	return ev, nil
 }
@@ -207,6 +216,9 @@ type Result struct {
 	Files    int
 	// LayoutUpdated: layouts/sheepdog.json was replaced.
 	LayoutUpdated bool
+	// LayoutSidecar: layouts/sheepdog.json had structural user edits, so the
+	// new shipped layout was written beside it as layouts/sheepdog.json.new.
+	LayoutSidecar bool
 }
 
 // Sync replaces the installed panel and layout with this binary's when
@@ -219,17 +231,41 @@ func Sync(home string, src Source) (Result, error) {
 		return res, err
 	}
 	dir := modDir(home)
-	// The layout first, and its new hash into the marker at once, so a
-	// failure later cannot leave a layout the marker does not know.
-	if ev.layoutUnmodified && len(src.Layout) > 0 && sum(src.Layout) != ev.marker.Layout {
-		if err := writeAtomic(filepath.Join(home, "layouts"), layoutFile, src.Layout); err != nil {
-			return res, fmt.Errorf("replace the layout: %w", err)
+	layoutsDir := filepath.Join(home, "layouts")
+	if ev.hasMk && ev.marker.Layout != "" && !isSymlink(dir) && len(src.Layout) > 0 {
+		wantHash := LayoutHash(src.Layout)
+		disk, diskErr := os.ReadFile(filepath.Join(layoutsDir, layoutFile))
+		if ev.layoutUnmodified {
+			_ = os.Remove(filepath.Join(layoutsDir, layoutSidecarFile))
+			if diskErr == nil && LayoutsEqual(disk, src.Layout) {
+				if ev.marker.Layout != wantHash {
+					ev.marker.Layout = wantHash
+					if !ev.state.UpdateAvailable || ev.state.Modified {
+						if err := writeMarker(dir, ev.marker); err != nil {
+							return res, err
+						}
+					}
+				}
+			} else if wantHash != ev.marker.Layout || diskErr != nil {
+				// The layout first, and its new hash into the marker at once, so a
+				// failure later cannot leave a layout the marker does not know.
+				if err := writeAtomic(layoutsDir, layoutFile, src.Layout); err != nil {
+					return res, fmt.Errorf("replace the layout: %w", err)
+				}
+				ev.marker.Layout = wantHash
+				if err := writeMarker(dir, ev.marker); err != nil {
+					return res, err
+				}
+				res.LayoutUpdated = true
+			}
+		} else if diskErr == nil && !LayoutsEqual(disk, src.Layout) && wantHash != ev.marker.Layout {
+			if existing, err := os.ReadFile(filepath.Join(layoutsDir, layoutSidecarFile)); err != nil || string(existing) != string(src.Layout) {
+				if err := writeAtomic(layoutsDir, layoutSidecarFile, src.Layout); err != nil {
+					return res, fmt.Errorf("write layout sidecar: %w", err)
+				}
+				res.LayoutSidecar = true
+			}
 		}
-		ev.marker.Layout = sum(src.Layout)
-		if err := writeMarker(dir, ev.marker); err != nil {
-			return res, err
-		}
-		res.LayoutUpdated = true
 	}
 	if ev.state.UpdateAvailable && !ev.state.Modified {
 		n, err := replacePanel(home, ev, src)
@@ -279,62 +315,76 @@ func writeAtomic(dir, name string, data []byte) error {
 	return os.Rename(tmpName, filepath.Join(dir, name))
 }
 
+func buildStage(home, dir string, emb map[string]file, prev Marker, hasPrev bool, mk *Marker) (string, error) {
+	stage, err := os.MkdirTemp(home, ".sheepdog-panel-new-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(stage, 0o755); err != nil {
+		_ = os.RemoveAll(stage)
+		return "", err
+	}
+	for rel, f := range emb {
+		dst := filepath.Join(stage, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			_ = os.RemoveAll(stage)
+			return "", err
+		}
+		if err := os.WriteFile(dst, f.data, 0o644); err != nil {
+			_ = os.RemoveAll(stage)
+			return "", err
+		}
+	}
+	if mk != nil {
+		if err := writeMarker(stage, *mk); err != nil {
+			_ = os.RemoveAll(stage)
+			return "", err
+		}
+	}
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		// Files we did not write stay; files of the old version that the new one
+		// dropped go.
+		err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(dir, p)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			_, isNew := emb[rel]
+			_, wasOurs := prev.Files[rel]
+			if isNew || (hasPrev && wasOurs) || rel == MarkerName {
+				return nil
+			}
+			return copyFile(p, filepath.Join(stage, filepath.FromSlash(rel)))
+		})
+		if err != nil {
+			_ = os.RemoveAll(stage)
+			return "", err
+		}
+	}
+	return stage, nil
+}
+
 // replacePanel builds the new panel folder beside the old one (in home, the
 // same file system), carries over files that are not ours (herdr-app's own
-// gpui-kit.d.ts and jsconfig.json, .gitignore), and swaps it in with two
-// renames; a failure puts the old folder back.
+// gpui-kit.d.ts and jsconfig.json, .gitignore), and swaps it in atomically; a
+// failure leaves the old folder in place.
 func replacePanel(home string, ev evaluation, src Source) (int, error) {
 	dir := modDir(home)
-	stage, err := os.MkdirTemp(home, ".sheepdog-panel-new-")
+	mk := newMarker(src, ev.emb, ev.marker.Layout)
+	mk.PreviousLayout = ev.marker.PreviousLayout
+	mk.Keybinding = ev.marker.Keybinding
+	stage, err := buildStage(home, dir, ev.emb, ev.marker, ev.hasMk, &mk)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	if err := os.Chmod(stage, 0o755); err != nil {
+	if err := swapOrReplace(stage, dir); err != nil {
 		return 0, err
 	}
-	for rel, f := range ev.emb {
-		dst := filepath.Join(stage, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return 0, err
-		}
-		if err := os.WriteFile(dst, f.data, 0o644); err != nil {
-			return 0, err
-		}
-	}
-	if err := writeMarker(stage, newMarker(src, ev.emb, ev.marker.Layout)); err != nil {
-		return 0, err
-	}
-	// Files we did not write stay; files of the old version that the new one
-	// dropped go.
-	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		_, isNew := ev.emb[rel]
-		_, wasOurs := ev.marker.Files[rel]
-		if isNew || wasOurs || rel == MarkerName {
-			return nil
-		}
-		return copyFile(p, filepath.Join(stage, filepath.FromSlash(rel)))
-	})
-	if err != nil {
-		return 0, err
-	}
-	old := stage + ".old"
-	if err := os.Rename(dir, old); err != nil {
-		return 0, err
-	}
-	if err := os.Rename(stage, dir); err != nil {
-		_ = os.Rename(old, dir)
-		return 0, err
-	}
-	_ = os.RemoveAll(old)
 	return len(ev.emb), nil
 }
 
@@ -371,7 +421,16 @@ func Record(home string, src Source) error {
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() || isSymlink(dir) {
 		return nil
 	}
-	m := Marker{Version: src.Version, Files: map[string]string{}}
+	var prev Marker
+	if existing, err := ReadMarker(dir); err == nil {
+		prev = existing
+	}
+	m := Marker{
+		Version:        src.Version,
+		Files:          map[string]string{},
+		PreviousLayout: prev.PreviousLayout,
+		Keybinding:     prev.Keybinding,
+	}
 	rels := make([]string, 0, len(emb))
 	for rel := range emb {
 		rels = append(rels, rel)
@@ -382,8 +441,8 @@ func Record(home string, src Source) error {
 			m.Files[rel] = h
 		}
 	}
-	if got, err := os.ReadFile(filepath.Join(home, "layouts", layoutFile)); err == nil && bytes.Equal(got, src.Layout) {
-		m.Layout = sum(got)
+	if got, err := os.ReadFile(filepath.Join(home, "layouts", layoutFile)); err == nil && len(src.Layout) > 0 && LayoutsEqual(got, src.Layout) {
+		m.Layout = LayoutHash(src.Layout)
 	}
 	if len(m.Files) != len(emb) {
 		// Not what this binary ships: no claim that it is ours.

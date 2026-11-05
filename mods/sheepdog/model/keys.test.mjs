@@ -47,6 +47,14 @@ test("in the composer digits and Enter are text, and 0 or letters mean nothing",
   assert.equal(keyAction("a", { onPanel: true, suggestions }), null);
 });
 
+test("? on the panel opens or closes keyboard shortcuts, but stays text in the composer", () => {
+  assert.deepEqual(keyAction("?", { onPanel: true }), { type: "shortcuts" });
+  assert.deepEqual(keyAction("?", { onPanel: true, active: false }), { type: "shortcuts" });
+  assert.deepEqual(keyAction("?", { onPanel: true, sheet: true }), { type: "shortcuts" });
+  assert.equal(keyAction("?", { onPanel: false }), null, "typing ? in the composer types ?");
+  assert.equal(keyAction("?", { onPanel: true, modified: true }), null);
+});
+
 test("leaving focuses the pane that had the keys, whether the panel was entered by pane.go or a click", () => {
   assert.deepEqual(leaveCommand({ pane: "p1", terminal: "t1" }), { name: "pane.focus", args: { pane: "p1" } });
   assert.deepEqual(leaveCommand({ pane: null, terminal: "t1" }), { name: "pane.focus", args: { terminal: "t1" } });

@@ -1,18 +1,19 @@
 // The keyboard of the docked panel, once herdr-app hands it the keys
-// (`"focusable": true`, a "focus" command from `pane.go`). What a key means is
-// decided here and only here; main.js does what it says. Pure. No herdr
-// imports.
+// (`"focusable": true`, a "focus" command from `pane.go` or `sheepdog.focus`).
+// What a key means is decided here and only here; main.js does what it says.
+// Pure. No herdr imports.
 
-// `key` is the key event's `key` ("enter", "escape", "1"…). `onPanel` is
-// whether the panel itself holds the keys; in the composer the digits are
-// text. `question` is the first open question card ({ pending, phase }) or
+// `key` is the key event's `key` ("enter", "escape", "?", "1"…). `onPanel` is
+// whether the panel itself holds the keys; in the composer the digits and `?`
+// are text. `question` is the first open question card ({ pending, phase }) or
 // null, `suggestions` the live suggested replies ({ options }) or null.
 // `modified`: Cmd, Ctrl or Alt is down, which is the app's shortcut, not ours.
-// `sheet`: a card or the questions are open over the list. `window`: this is
-// the panel's own window, which Esc closes. `busy`: an answer is on its way,
-// so a digit must not send a suggested reply instead. `active`: the panel
-// shows its conversation (not the daemon-down or rail states).
+// `sheet`: a card, the questions, or the shortcuts sheet is open over the list.
+// `window`: this is the panel's own window, which Esc closes. `busy`: an answer
+// is on its way, so a digit must not send a suggested reply instead. `active`:
+// the panel shows its conversation (not the daemon-down or rail states).
 // Returns what to do, or null when the key means nothing here:
+//   { type: "shortcuts" }                ?: open or close keyboard shortcuts
 //   { type: "composer" }                 Enter: write a message
 //   { type: "answer", question, option } 1-9: tap that option of the question
 //   { type: "send", text }               1-9: send that suggested reply
@@ -27,6 +28,7 @@ export function keyAction(key, { onPanel, question = null, suggestions = null, m
     if (!onPanel) return { type: "panel" };
     return { type: window ? "close" : "leave" };
   }
+  if (key === "?" && onPanel) return { type: "shortcuts" };
   if (!onPanel || !active) return null;
   if (key === "enter") return { type: "composer" };
   if (!/^[1-9]$/.test(key)) return null;
