@@ -34,6 +34,8 @@ go.work.sum
 # Claude Code project state
 .claude/*
 !.claude/settings.json
+!.claude/skills/
+!.claude/skills/**
 
 # macOS
 .DS_Store
