@@ -123,7 +123,8 @@ type Deps struct {
 	VoiceSwitch VoiceSwitcher
 	// Watcher receives POST /api/herdr/event status events; nil means
 	// --herdr=mock.
-	Watcher EventInjector
+	Watcher    EventInjector
+	ClaudeHook func(paneID string, raw []byte)
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
 	// and PUT /api/brain/model (the runtime provider/model switch,
 	// persisted in Store's session.brain_provider / brain_model); nil
@@ -579,6 +580,12 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/inject/screen", accessLoopback, s.handleInjectScreen},
 		route{"POST /api/inject/remove", accessLoopback, s.handleInjectRemove},
 		route{"POST /api/herdr/event", accessLoopback, s.handleHerdrEvent},
+		route{"POST /api/hooks/claude-permission", accessSetup, func(w http.ResponseWriter, r *http.Request) {
+			if raw, err := io.ReadAll(io.LimitReader(r.Body, 256<<10)); err == nil && s.deps.ClaudeHook != nil {
+				s.deps.ClaudeHook(r.Header.Get("X-Sheepdog-Pane"), raw)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}},
 		route{"POST /api/prompts/reload", accessLoopback, s.handleReloadPrompts},
 		route{"GET /api/voice/system_prompt", accessLoopback, s.handleSystemPrompt},
 		route{"GET /api/brain/transcript", accessLoopback, s.handleBrainTranscript},

@@ -157,6 +157,11 @@ type Computer struct {
 	Name string `toml:"name"`
 }
 
+// Hooks configures agent hooks installed by sheepdog setup.
+type Hooks struct {
+	ClaudePermission bool `toml:"claude_permission"`
+}
+
 // HCSocketPath is HCSocket, or hc's own default when it is empty.
 func (h Herdr) HCSocketPath() string {
 	if h.HCSocket != "" {

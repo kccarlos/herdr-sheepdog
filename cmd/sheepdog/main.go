@@ -81,6 +81,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runService(ctx, args[1:], stdout, stderr)
 	case "config":
 		return runConfig(ctx, args[1:], stdout, stderr)
+	case "hook":
+		return runHook(args[1:], os.Stdin)
 	case "dev":
 		return runDev(ctx, args[1:], stdout, stderr)
 	case "version", "--version":

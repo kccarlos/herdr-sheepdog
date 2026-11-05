@@ -595,21 +595,7 @@ const claudeBashHeader = "bash command"
 // rules around the file's contents ("Create file" … "1 hello from
 // claude"). Both are "" when the layout is not there.
 func claudeCommand(lines []string) (command, reason string) {
-	dashed := func(line string) bool { return strings.Contains(line, "╌") && reRule.MatchString(line) }
-	r2 := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if dashed(lines[i]) {
-			r2 = i
-			break
-		}
-	}
-	r1 := -1
-	for i := r2 - 1; i >= 0; i-- {
-		if dashed(lines[i]) {
-			r1 = i
-			break
-		}
-	}
+	r1, r2 := dashedBox(lines)
 	if r1 < 0 {
 		return "", ""
 	}
@@ -651,6 +637,41 @@ func claudeCommand(lines []string) (command, reason string) {
 		}
 	}
 	return join(lines[r1+1 : r2]), join(desc)
+}
+
+func dashedBox(lines []string) (r1, r2 int) {
+	dashed := func(s string) bool { return strings.Contains(s, "╌") && reRule.MatchString(s) }
+	for r2 = len(lines) - 1; r2 >= 0 && !dashed(lines[r2]); r2-- {
+	}
+	for r1 = r2 - 1; r1 >= 0 && !dashed(lines[r1]); r1-- {
+	}
+	return r1, r2
+}
+
+// MatchClaudeCommand reports whether the command box on screen agrees with cmd.
+func MatchClaudeCommand(screen, cmd string) bool {
+	lines := tailLines(screen, promptTailLines)
+	r1, r2 := dashedBox(lines)
+	if r2 < 0 {
+		return false
+	}
+	compact := func(s string) string { return strings.Join(strings.Fields(s), "") }
+	head, tail, cut := "", "", false
+	for _, raw := range lines[r1+1 : r2] {
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "│"))
+		if strings.HasPrefix(t, "…") || strings.HasPrefix(t, "...") {
+			cut = true
+		} else if cut {
+			tail += compact(t)
+		} else {
+			head += compact(t)
+		}
+	}
+	cc := compact(cmd)
+	if cut {
+		return (head != "" || tail != "") && strings.HasPrefix(cc, head) && strings.HasSuffix(cc, tail) && len(cc) >= len(head)+len(tail)
+	}
+	return head != "" && ((r1 < 0 && strings.HasSuffix(cc, head)) || (r1 >= 0 && cc == head))
 }
 
 // tailLines returns the last n lines of text.

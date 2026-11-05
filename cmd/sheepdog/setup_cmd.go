@@ -377,6 +377,17 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		fprintln(o.Out, "Install Sheepdog.app for voice on this Mac:")
 		fprintln(o.Out, "  brew install --cask kccarlos/tap/sheepdog-app")
 	}
+	hookBin, _ := stableExecutable()
+	if !cfg.Hooks.ClaudePermission {
+		hookBin = ""
+	}
+	if !cfg.Hooks.ClaudePermission || (env.Claude && hookBin != "") {
+		if msg, err := onboard.UpdateClaudeHook(o.Probe.Home, hookBin, false); err != nil {
+			fprintf(o.Out, "Warning: claude hook: %v\n", err)
+		} else if msg != "" {
+			fprintln(o.Out, msg)
+		}
+	}
 	return wroteBackend, nil
 }
 

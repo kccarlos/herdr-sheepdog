@@ -460,6 +460,8 @@ type Supervisor struct {
 
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
+	hookMu  sync.Mutex
+	hooks   map[string]string
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done

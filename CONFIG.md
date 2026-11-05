@@ -542,6 +542,12 @@ before a line is written.
 |---|---|---|---|
 | `computer.name` | `SHEEPDOG_COMPUTER_NAME` | the system's computer name | What the apps call this computer (`GET /api/hello` `computer.name`). Empty uses macOS's computer name (System Settings ▸ General ▸ Sharing), else the host name. The app may rename it on the phone. The app tells computers apart by the daemon id in `<data_dir>/tls/daemon_id`, made once at first start. |
 
+## `[hooks]`
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `hooks.claude_permission` | *(TOML only)* | `true` | Adds a `PermissionRequest` entry (`sheepdog hook claude-permission`) to `~/.claude/settings.json` during `sheepdog setup` (keeping `~/.claude/settings.json.bak`) so long Claude Code commands arrive in full instead of being cut at 40 screen lines. The hook exits at once outside a herdr pane, never holds or decides, and answers still go through the approval rail. Set `false` to opt out; `sheepdog uninstall` removes the entry. |
+
 ## What sheepdog stores
 
 Everything is under two directories (and `data_dir` moves the second).

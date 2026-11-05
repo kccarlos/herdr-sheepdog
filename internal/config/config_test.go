@@ -773,3 +773,20 @@ func TestWebFiles(t *testing.T) {
 		t.Error("invalid boolean accepted")
 	}
 }
+
+func TestHooksClaudePermissionConfig(t *testing.T) {
+	if !Default().Hooks.ClaudePermission {
+		t.Fatal("hooks.claude_permission should default on")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[hooks]\nclaude_permission = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, noEnv)
+	if err != nil || cfg.Hooks.ClaudePermission {
+		t.Fatalf("file: hooks=%+v err=%v", cfg.Hooks, err)
+	}
+	if !strings.Contains(cfg.String(), "hooks.claude_permission=false") {
+		t.Errorf("String() missing hooks.claude_permission: %s", cfg.String())
+	}
+}

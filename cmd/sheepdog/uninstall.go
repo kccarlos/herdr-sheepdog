@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
 
@@ -92,6 +93,14 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	for _, line := range panelPlan.Kept {
 		fprintln(stdout, line)
+	}
+	if home, _ := serviceHome(); home != "" {
+		if msg, err := onboard.UpdateClaudeHook(home, "", *dryRun); err != nil {
+			fprintf(stderr, "sheepdog uninstall: claude hook: %v\n", err)
+			failed = true
+		} else if msg != "" {
+			fprintln(stdout, msg)
+		}
 	}
 
 	// 5. Config and data, after asking. The default config directory

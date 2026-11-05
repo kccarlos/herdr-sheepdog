@@ -263,6 +263,9 @@ func (a *App) wire() error {
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent
 	}
+	if cfg.Hooks.ClaudePermission {
+		deps.ClaudeHook = sup.RecordClaudeHook
+	}
 	if so := opts.Setup; so != nil {
 		deps.Setup = &web.SetupDeps{
 			ConfigPath: so.ConfigPath, EnvPath: so.EnvPath, Config: cfg, Endpoints: so.Endpoints,

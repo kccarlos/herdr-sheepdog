@@ -109,7 +109,7 @@ func (s *Supervisor) pollReprompt(paneID string) {
 			}
 			continue
 		}
-		prompt, ok := herdr.ParsePrompt(read.Text)
+		prompt, ok := s.parsePrompt(paneID, read.Text)
 		if !ok {
 			continue
 		}
@@ -168,7 +168,7 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 			s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
 			continue
 		}
-		prompt, ok := herdr.ParsePrompt(read.Text)
+		prompt, ok := s.parsePrompt(row.PaneID, read.Text)
 		if !ok {
 			continue
 		}
@@ -205,7 +205,7 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
 		return
 	}
-	prompt, ok := herdr.ParsePrompt(read.Text)
+	prompt, ok := s.parsePrompt(row.PaneID, read.Text)
 	if !ok {
 		gone()
 		return
@@ -241,7 +241,7 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
 		return
 	}
-	prompt, ok := herdr.ParsePrompt(read.Text)
+	prompt, ok := s.parsePrompt(row.PaneID, read.Text)
 	muted := ok && row.State == herdr.StateBlocked && s.promptSignature(prompt) != pendingSignature(q) && s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,7 +303,7 @@ func (s *Supervisor) stillAsking(ctx context.Context, p state.PendingAction) (as
 		s.log.Log(logSource, "supervisor.reconcile_error", p.PaneID, map[string]any{"error": err.Error(), "for": "tap"})
 		return false, false
 	}
-	prompt, parsed := herdr.ParsePrompt(read.Text)
+	prompt, parsed := s.parsePrompt(p.PaneID, read.Text)
 	return parsed && s.promptSignature(prompt) == pendingSignature(p), true
 }
 

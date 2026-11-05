@@ -177,6 +177,7 @@ func environmentChecks(cfg config.Config, env Environment, o DoctorOptions) []Re
 			Fix:    "unset HC_SESSION, or set herdr.hc_socket in config.toml so the daemon uses the same session",
 		})
 	}
+	out = append(out, claudeHookCheck(cfg.Hooks.ClaudePermission, env))
 	return out
 }
 

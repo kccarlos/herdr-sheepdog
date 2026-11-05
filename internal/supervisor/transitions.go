@@ -314,7 +314,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 		return
 	}
 	if herdr.EndsInQuestion(read.Text) {
-		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
+		if prompt, ok := s.parsePrompt(row.PaneID, read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
 			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed, stopErr)
 			return
 		}
@@ -416,7 +416,7 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 // block gets: the orchestrator's, or the parsed prompt's own sentence.
 func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
 	alias := aliasOr(state.Say(row))
-	prompt, ok := herdr.ParsePrompt(screen)
+	prompt, ok := s.parsePrompt(row.PaneID, screen)
 	if !ok {
 		// Blocked at something with no options to send: the user has to
 		// look. Nothing is pending, so nothing can be answered for them.

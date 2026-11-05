@@ -198,6 +198,9 @@ func Template() string {
 # After an upgrade the daemon replaces the herdr-app panel (and its layout)
 # with the new version, when you have not changed them.
 # auto_update = %[57]t
+
+[hooks]
+# claude_permission = %[59]t
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -228,5 +231,6 @@ func Template() string {
 		d.Anthropic.BaseURL, d.Anthropic.Effort, d.Anthropic.EventEffort, d.Anthropic.Fallbacks,
 		d.Panel.AutoUpdate,
 		d.Push.Relay.URL,
+		d.Hooks.ClaudePermission,
 	)
 }

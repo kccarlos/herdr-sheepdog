@@ -370,7 +370,7 @@ func (s *Supervisor) menuOf(ctx context.Context, paneID string) (herdr.Prompt, b
 	if err != nil {
 		return herdr.Prompt{}, false
 	}
-	return herdr.ParsePrompt(read.Text)
+	return s.parsePrompt(paneID, read.Text)
 }
 
 // sameQuestion reports whether two prompt questions read the same
@@ -407,7 +407,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 	if err != nil {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first, but I could not read it.", Scheduling: voice.UrgencyInterrupt}
 	}
-	prompt, ok := herdr.ParsePrompt(read.Text)
+	prompt, ok := s.parsePrompt(row.PaneID, read.Text)
 	if !ok {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first; answer that before a new instruction.", Scheduling: voice.UrgencyInterrupt}
 	}

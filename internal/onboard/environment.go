@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
@@ -102,6 +104,8 @@ type Environment struct {
 	PanelDocked  bool
 	Layout       LayoutState
 	SheepdogApp  bool
+	Claude       bool
+	ClaudeHook   string
 }
 
 // Detect inspects the installed herdr tools and compares the panel in panel
@@ -128,6 +132,12 @@ func Detect(cfg config.Config, p Probe, panel fs.FS, layout []byte) Environment 
 	env.ShownLayout = detectShownLayout(env.HerdrAppHome, p)
 	env.PanelDocked = detectPanelDocked(env.HerdrAppHome, env.ShownLayout, p)
 	env.Layout = detectLayout(env.HerdrAppHome, p, layout)
+	env.Claude = probeLookPath(p, "claude")
+	if p.ReadFile != nil && p.Home != "" {
+		if raw, err := p.ReadFile(filepath.Join(p.Home, ".claude", "settings.json")); err == nil {
+			_, env.ClaudeHook, _ = editClaudeSettings(raw, "")
+		}
+	}
 	return env
 }
 
@@ -356,4 +366,100 @@ func AdviseBackend(cfg config.Config, env Environment) BackendAdvice {
 		return BackendAdvice{Set: config.HerdrBackendHC, Why: whyCore}
 	}
 	return BackendAdvice{}
+}
+
+const claudeHookArgs = " hook claude-permission"
+
+// UpdateClaudeHook sets (wantBin != "") or removes (wantBin == "") Sheepdog's
+// PermissionRequest entry in <home>/.claude/settings.json.
+func UpdateClaudeHook(home, wantBin string, dryRun bool) (string, error) {
+	p := filepath.Join(home, ".claude", "settings.json")
+	raw, err := os.ReadFile(p)
+	existed := err == nil
+	if errors.Is(err, os.ErrNotExist) {
+		err = nil
+	}
+	if err != nil || home == "" || (wantBin == "" && !existed) {
+		return "", err
+	}
+	next, prev, err := editClaudeSettings(raw, wantBin)
+	if err != nil || (wantBin == "" && prev == "") || (wantBin != "" && prev == wantBin && bytes.Count(raw, []byte(claudeHookArgs)) == 1) {
+		return "", err
+	}
+	if dryRun {
+		return "would remove Sheepdog hook from " + p, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return "", err
+	}
+	bak := ""
+	if wantBin != "" && existed {
+		if err := os.WriteFile(p+".bak", raw, 0o600); err != nil {
+			return "", err
+		}
+		bak = " (backup kept at " + p + ".bak)"
+	}
+	if err := os.WriteFile(p, next, 0o600); err != nil {
+		return "", err
+	}
+	if wantBin == "" {
+		return "removed Sheepdog hook from " + p, nil
+	}
+	return "Added Sheepdog's PermissionRequest hook to " + p + bak + ".", nil
+}
+
+func claudeHookCheck(enabled bool, env Environment) Result {
+	switch _, missing := os.Stat(env.ClaudeHook); {
+	case !enabled:
+		return Result{Name: "claude hook", Status: Skip, Detail: "disabled by hooks.claude_permission"}
+	case !env.Claude && env.ClaudeHook == "":
+		return Result{Name: "claude hook", Status: Skip, Detail: "claude not found"}
+	case env.ClaudeHook == "":
+		return Result{Name: "claude hook", Status: Warn, Detail: "not installed in ~/.claude/settings.json", Fix: "sheepdog setup"}
+	case missing != nil:
+		return Result{Name: "claude hook", Status: Warn, Detail: "hook binary missing: " + env.ClaudeHook, Fix: "sheepdog setup"}
+	default:
+		return Result{Name: "claude hook", Status: OK, Detail: "installed in ~/.claude/settings.json"}
+	}
+}
+
+func editClaudeSettings(raw []byte, wantBin string) ([]byte, string, error) {
+	root, hooks := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	var groups []map[string]json.RawMessage
+	if len(bytes.TrimSpace(raw)) > 0 && (json.Unmarshal(raw, &root) != nil || root == nil) ||
+		len(root["hooks"]) > 0 && string(root["hooks"]) != "null" && json.Unmarshal(root["hooks"], &hooks) != nil ||
+		len(hooks["PermissionRequest"]) > 0 && json.Unmarshal(hooks["PermissionRequest"], &groups) != nil {
+		return nil, "", errors.New("invalid settings.json")
+	}
+	var found string
+	groups = slices.DeleteFunc(groups, func(g map[string]json.RawMessage) bool {
+		var hs []map[string]any
+		if json.Unmarshal(g["hooks"], &hs) != nil {
+			return false
+		}
+		hs = slices.DeleteFunc(hs, func(h map[string]any) bool {
+			s, _ := h["command"].(string)
+			b, ok := strings.CutSuffix(strings.TrimSpace(s), claudeHookArgs)
+			if ok {
+				found = b
+			}
+			return ok
+		})
+		g["hooks"], _ = json.Marshal(hs)
+		return len(hs) == 0
+	})
+	if wantBin != "" {
+		b, _ := json.Marshal([]map[string]string{{"type": "command", "command": wantBin + claudeHookArgs}})
+		groups = append(groups, map[string]json.RawMessage{"hooks": b})
+	}
+	delete(hooks, "PermissionRequest")
+	if len(groups) > 0 {
+		hooks["PermissionRequest"], _ = json.Marshal(groups)
+	}
+	delete(root, "hooks")
+	if len(hooks) > 0 {
+		root["hooks"], _ = json.Marshal(hooks)
+	}
+	out, err := json.MarshalIndent(root, "", "  ")
+	return append(out, '\n'), found, err
 }

@@ -8,6 +8,8 @@ package main
 // stop signals the pid in <data_dir>/sheepdog.pid.
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -488,4 +490,38 @@ func getJSON(ctx context.Context, base, path string, v any) error {
 		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+func runHook(args []string, stdin io.Reader) int {
+	pane := cmp.Or(os.Getenv("HC_TERMINAL_ID"), os.Getenv("HERDR_PANE_ID"))
+	if len(args) != 1 || args[0] != "claude-permission" || pane == "" {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if os.Getenv("SHEEPDOG_DATA_DIR") == "" {
+			_, _ = config.LoadEnvFileNames(config.DefaultEnvPath())
+		}
+		cfg, err := config.Load("")
+		info, ok := daemon.Running(cfg.DataDir)
+		if err != nil || !cfg.Hooks.ClaudePermission || !ok ||
+			(!strings.HasPrefix(info.URL, "http://127.0.0.1:") && !strings.HasPrefix(info.URL, "http://[::1]:")) {
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(stdin, 128<<10))
+		if req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, info.URL+"/api/hooks/claude-permission", bytes.NewReader(raw)); err == nil && rerr == nil && json.Valid(raw) {
+			req.Header = http.Header{"Content-Type": {"application/json"}, "X-Sheepdog-Pane": {pane}}
+			if resp, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Do(req); err == nil {
+				_ = resp.Body.Close()
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+	}
+	return 0
 }

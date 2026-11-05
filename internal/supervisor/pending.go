@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -268,7 +269,7 @@ func (s *Supervisor) revivePrompt(paneID, source string, screen *paneScreen) (p 
 	if screen == nil || screen.err != nil {
 		return state.PendingAction{}, false, false, ""
 	}
-	prompt, parsed := herdr.ParsePrompt(screen.text)
+	prompt, parsed := s.parsePrompt(paneID, screen.text)
 	if !parsed {
 		return state.PendingAction{}, false, false, ""
 	}
@@ -543,4 +544,37 @@ func replacedLine(oldAlias, summary string, zh bool) string {
 		return "先放下 " + oldAlias + " 之前的问题。现在 " + prose.Terminate(summary)
 	}
 	return fmt.Sprintf("Dropping the earlier question from %s; now %s.", oldAlias, lowerFirst(strings.TrimRight(summary, ".。")))
+}
+
+// RecordClaudeHook records a Claude Code PermissionRequest payload for paneID.
+func (s *Supervisor) RecordClaudeHook(paneID string, raw []byte) {
+	var req struct {
+		Event string                   `json:"hook_event_name"`
+		Tool  string                   `json:"tool_name"`
+		Input struct{ Command string } `json:"tool_input"`
+	}
+	if paneID == "" || paneID == s.cfg.OwnPane || json.Unmarshal(raw, &req) != nil || req.Event != "PermissionRequest" {
+		return
+	}
+	cmd := strings.TrimSpace(req.Input.Command)
+	if req.Tool != "Bash" {
+		cmd = ""
+	}
+	s.hookMu.Lock()
+	if s.hooks == nil {
+		s.hooks = map[string]string{}
+	}
+	s.hooks[paneID] = cmd[:min(len(cmd), 64<<10)]
+	s.hookMu.Unlock()
+}
+
+func (s *Supervisor) parsePrompt(paneID, screen string) (herdr.Prompt, bool) {
+	prompt, ok := herdr.ParsePrompt(screen)
+	s.hookMu.Lock()
+	cmd := s.hooks[paneID]
+	s.hookMu.Unlock()
+	if ok && cmd != "" && herdr.MatchClaudeCommand(screen, cmd) {
+		prompt.Command = cmd
+	}
+	return prompt, ok
 }
