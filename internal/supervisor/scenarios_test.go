@@ -921,12 +921,12 @@ func TestScreenANSIFallsBackWhenUnavailable(t *testing.T) {
 	}
 }
 
-func TestWindowPromptDetectsUnreportedMenu(t *testing.T) {
+func TestTypingCheckDoesNotTreatIdleMenuAsBlocked(t *testing.T) {
 	h := twoAgents(t)
 	screen := fixture(t, "codex-approval-prompt.screen.txt")
 	h.srv.SetScreen("w5:p1", strings.Replace(screen, "› 1. Yes", "\x1b[0m› 1. Yes", 1))
-	_, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests")
-	if !errors.Is(err, herdr.ErrAgentBlocked) || !strings.Contains(err.Error(), "answer it first") {
+	err := h.sup.checkTypedInput(context.Background(), "w5:p1")
+	if err != nil {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -75,7 +75,7 @@ func withSignOff(text string) string {
 // command: after trimming, a single line that starts with "/".
 func isSlashCommand(text string) bool {
 	text = strings.TrimSpace(text)
-	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n")
+	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n") && !picturePath.MatchString(text)
 }
 
 // trimCommandPunct drops sentence punctuation and quotes from the very

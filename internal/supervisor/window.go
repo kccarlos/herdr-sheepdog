@@ -173,9 +173,6 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	}
 	if err := s.checkTypedInput(ctx, paneID); err != nil {
 		ps.Unlock()
-		if errors.Is(err, herdr.ErrAgentBlocked) {
-			return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
-		}
 		return WindowResult{}, err
 	}
 	// The row records the prompt before the RPC (see sendInstruction): a
@@ -316,7 +313,7 @@ func (s *Supervisor) checkTypedInput(ctx context.Context, paneID string) error {
 		return nil
 	}
 	if _, menu := herdr.ParsePrompt(reANSI.ReplaceAllString(read.Text, "")); menu {
-		return herdr.ErrAgentBlocked
+		return nil
 	}
 	typed, known := herdr.TypedInput(read.Text)
 	if !known || read.Truncated {

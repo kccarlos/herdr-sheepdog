@@ -179,9 +179,6 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	ps.Lock()
 	if err := s.checkTypedInput(ctx, row.PaneID); err != nil {
 		ps.Unlock()
-		if errors.Is(err, herdr.ErrAgentBlocked) {
-			return s.reportBlocked(ctx, row), err
-		}
 		return voice.ToolResult{Spoken: "The terminal may have text being typed. Finish or clear it before sending; nothing was sent.", Scheduling: voice.UrgencyInterrupt}, err
 	}
 

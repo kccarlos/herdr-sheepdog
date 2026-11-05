@@ -33,11 +33,15 @@ func TypedInput(screen string) (bool, bool) {
 			if j == len(rs) {
 				break
 			}
-			if rs[j] == 'm' {
+			if rs[j] == 'm' && (i+2 == j || rs[i+2] < '<' || rs[i+2] > '?') {
 				styled = true
 				parts := strings.Split(string(rs[i+2:j]), ";")
 				for k := 0; k < len(parts); k++ {
-					n, _ := strconv.Atoi(parts[k])
+					part := strings.SplitN(parts[k], ":", 2)[0]
+					n, err := strconv.Atoi(part)
+					if err != nil && part != "" {
+						continue
+					}
 					switch n {
 					case 0, 22:
 						dim = false
@@ -89,17 +93,16 @@ func TypedInput(screen string) (bool, bool) {
 			break
 		}
 	}
-	start := end - 4
-	if start < 0 {
-		start = 0
-	}
+	start := 0
+	boxed := false
 	if bottomRule >= 0 {
 		end = bottomRule
-		start = end - 1
-		for start >= 0 && !inputRule.MatchString(plain(lines[start])) && strings.TrimSpace(plain(lines[start])) != "" {
-			start--
+		for i := end - 1; i >= 0; i-- {
+			if inputRule.MatchString(plain(lines[i])) {
+				start, boxed = i+1, true
+				break
+			}
 		}
-		start++
 	}
 	for i := end - 1; i >= start; i-- {
 		s := plain(lines[i])
@@ -107,7 +110,7 @@ func TypedInput(screen string) (bool, bool) {
 		if loc == nil {
 			continue
 		}
-		if bottomRule < 0 {
+		if !boxed {
 			// An unboxed Codex input can have indented continuation rows,
 			// then a blank line and a single indented status footer.
 			footer := false
@@ -122,13 +125,21 @@ func TypedInput(screen string) (bool, bool) {
 				}
 			}
 		}
+		if boxed {
+			for j := i + 1; j < end; j++ {
+				next := plain(lines[j])
+				if strings.TrimSpace(next) != "" && next[0] != ' ' && next[0] != '\t' {
+					return false, false
+				}
+			}
+		}
 		if !styledLines[i] {
 			return false, false
 		}
 		prefix := len([]rune(s[:loc[1]]))
 		for j := i; j < end; j++ {
 			l := lines[j]
-			if j > i && (strings.TrimSpace(plain(l)) == "" || inputRule.MatchString(plain(l))) {
+			if j > i && !boxed && strings.TrimSpace(plain(l)) == "" {
 				break
 			}
 			if j == i {
