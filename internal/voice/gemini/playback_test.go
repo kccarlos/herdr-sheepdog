@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -415,5 +416,82 @@ func TestGeminiCutAfterUnderrunKeepsHeardFirstSentence(t *testing.T) {
 	entries := h.s.RecapEntries()
 	if len(entries) != 1 || entries[0].Text != "Auth passed tests." || !entries[0].Cut || entries[0].CutAfterMs != 900 {
 		t.Fatalf("recap entries = %+v, want single cut entry 'Auth passed tests.' at 900ms", entries)
+	}
+}
+
+func TestGeminiClientFlushDoesNotCreateUntrackedDaemonFlush(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	var (
+		flushedEpoch  uint64
+		daemonFlushes int
+		mu            sync.Mutex
+	)
+	noteBarrier := func(ep uint64) {
+		mu.Lock()
+		if ep > flushedEpoch {
+			flushedEpoch = ep
+			daemonFlushes++
+		}
+		mu.Unlock()
+	}
+	go func() {
+		for ch := range h.s.AudioChunks() {
+			for _, ep := range ch.FlushedEpochs {
+				noteBarrier(ep)
+			}
+		}
+	}()
+
+	speakReply(h, c, strings.Fields("Auth is running the long test suite"), 200)
+
+	// Client flushes locally on Stop, and Gemini streams one more chunk while
+	// the stop tool waits for herdr before afterCancel runs.
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+	h.waitEvent("cut 1", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+	c.serve(audioMsg(outAudio(200)))
+	c.serve(outputTranscriptMsg("still "))
+	time.Sleep(40 * time.Millisecond)
+
+	noteBarrier(h.s.FlushAudio())
+	if err := h.s.PushTagged("Stopped auth.", voice.UrgencyInterrupt, map[string]any{"stop": true}); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("stop push flush", isFlushEvent)
+	c.waitSent(t, "stop push", isContent("Stopped auth."))
+
+	speakReply(h, c, []string{"Stopped", "auth."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("stop reply complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+	time.Sleep(20 * time.Millisecond)
+
+	h.evMu.Lock()
+	evs := append([]voice.Event(nil), h.events...)
+	h.evMu.Unlock()
+	for _, ev := range evs {
+		if intr, ok := ev.(voice.EventInterrupted); ok {
+			noteBarrier(intr.Epoch)
+		}
+	}
+
+	mu.Lock()
+	acks := daemonFlushes
+	mu.Unlock()
+	if acks != 2 {
+		t.Fatalf("daemon flush barriers emitted = %d, want 2 (client flush created an untracked barrier)", acks)
+	}
+	for i := 0; i < acks; i++ {
+		h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	}
+	entries := h.s.RecapEntries()
+	last := entries[len(entries)-1]
+	if last.Text != "Stopped auth." || last.Cut {
+		t.Fatalf("last recap entry = %+v, want intact 'Stopped auth.'", last)
 	}
 }

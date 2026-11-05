@@ -327,7 +327,7 @@ func (s *Session) FlushAudio() uint64 {
 func (s *Session) PurgeAudio() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, epoch := s.out.FlushEpoch()
+	_, epoch := s.out.Purge()
 	return epoch
 }
 
@@ -858,7 +858,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.echo.Playback(now, state)
 	utt := s.playUtt.Started(state)
 	if state == voice.PlaybackFlushed && !rep.Awaited {
-		s.out.FlushEpoch()
+		s.out.Purge()
 	}
 	if rep.Cut != nil {
 		// Which reply the cut run played, and who cut it: the supervisor

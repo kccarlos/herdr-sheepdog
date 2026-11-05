@@ -436,6 +436,76 @@ func TestWSStopSwitchAndUnderrunPlaybackEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("stop_while_streaming_does_not_emit_extra_daemon_flush", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{voice: true, brain: true, trackPlayback: true})
+		c := dialWS(t, h)
+		c.expect(wsproto.TypeStatus)
+		waitFor(t, time.Second, func() bool { return h.session.isAttached() }, "client attached")
+
+		firstFull := "one two three four five six seven eight"
+		h.session.pushTrackedSpeech(make([]byte, 4*bytesPerSec24k), firstFull)
+
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			_, bin, err := c.read(time.Until(deadline))
+			if err != nil {
+				t.Fatalf("read first reply audio: %v", err)
+			}
+			if bin != nil {
+				break
+			}
+		}
+
+		// User taps Stop while the model is still streaming: client flushes
+		// locally first, then another model audio chunk arrives before cancel
+		// finishes stopping the agents and runs afterCancel.
+		c.send(wsproto.Playback(wsproto.PlaybackStarted, 0))
+		c.send(wsproto.Playback(wsproto.PlaybackFlushed, 2000))
+		waitFor(t, time.Second, func() bool { return len(h.session.playbackReports()) == 2 }, "client flush processed")
+
+		h.session.pushTrackedSpeech(make([]byte, bytesPerSec24k), " nine ten")
+		time.Sleep(30 * time.Millisecond)
+
+		c.send(wsproto.Cancel())
+		waitFor(t, 2*time.Second, func() bool { return len(h.session.taggedPushes()) == 1 }, "stop push delivered")
+
+		stopReply := "Stopped everything for you."
+		h.session.pushTrackedSpeech(make([]byte, 2*bytesPerSec24k), stopReply)
+		h.session.endTrackedTurn()
+
+		flushes := 0
+		gotPostStopAudio := false
+		deadline = time.Now().Add(2 * time.Second)
+		for (!gotPostStopAudio || flushes < 2) && time.Now().Before(deadline) {
+			msg, bin, err := c.read(time.Until(deadline))
+			if err != nil {
+				t.Fatalf("read stop sequence (flushes=%d): %v", flushes, err)
+			}
+			if bin != nil {
+				if flushes >= 2 {
+					gotPostStopAudio = true
+				}
+				continue
+			}
+			if msg.Type == wsproto.TypeFlush {
+				flushes++
+				c.send(wsproto.Playback(wsproto.PlaybackFlushed, 0))
+			}
+		}
+		if flushes != 2 {
+			t.Fatalf("daemon flushes = %d, want 2 (client flush created an untracked daemon flush)", flushes)
+		}
+
+		c.send(wsproto.Playback(wsproto.PlaybackStarted, 0))
+		c.send(wsproto.Playback(wsproto.PlaybackDrained, 2000))
+		waitFor(t, 2*time.Second, func() bool { return len(h.session.playbackReports()) == 6 }, "all playback reports processed")
+
+		entries := h.session.recapEntries()
+		if len(entries) == 0 || entries[len(entries)-1].Text != stopReply || entries[len(entries)-1].Cut {
+			t.Fatalf("session recap = %+v, want intact trailing %q", entries, stopReply)
+		}
+	})
+
 	t.Run("provider_switch_flush_ack_preserves_new_provider_reply", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{voice: true, brain: true, switcher: true, trackPlayback: true})
 		c := dialWS(t, h)

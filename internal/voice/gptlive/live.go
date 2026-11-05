@@ -75,6 +75,7 @@ func (s *Session) open(reason string, resets int) {
 		"dur_ms": s.now().Sub(started).Milliseconds(), "replayed_chunks": len(pending), "sessions": n,
 	})
 	s.emit(voice.EventStatus{Status: voice.StatusConnected, Reason: ReasonLive})
+	s.pumpPushes(s.now())
 }
 
 func (s *Session) dialStart(reason string) (*liveConn, error) {
@@ -95,7 +96,7 @@ func (s *Session) dialStart(reason string) (*liveConn, error) {
 	rctx, rcancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	seq := s.sessions + 1
-	input := s.recapItemsLocked()
+	input := s.recapItemsLocked(reason)
 	s.held = nil
 	s.mu.Unlock()
 	lc := &liveConn{conn: conn, seq: seq, reason: reason, openedAt: s.now(), cancel: rcancel, started: make(chan struct{}), done: make(chan struct{})}
@@ -328,30 +329,25 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		s.log.Log(logSource, "voice.error_event", "", payload)
 		s.emit(voice.EventError{Err: errors.New(msg)})
 	case evInstructionsApplied, evThinkingApplied, evCommentaryApplied:
-		if ev.Type == evInstructionsApplied || ev.Type == evCommentaryApplied {
-			s.mu.Lock()
-			if s.lcActiveLocked(lc) && lc.suppressOutput && ev.ClientEventID != "" && ev.ClientEventID == lc.resumeAckID {
-				lc.suppressOutput = false
-				lc.resumeAckID = ""
-				lc.suppressedAt = time.Time{}
-			}
-			s.mu.Unlock()
-		}
 		s.log.Log(logSource, "voice.append_ack", "", map[string]any{"type": ev.Type, "client_event_id": ev.ClientEventID, "start_ms": ev.StartMS, "end_ms": ev.EndMS})
 	}
 	return false
 }
 
-func (s *Session) allowOutputLocked(lc *liveConn, now time.Time, active bool) bool {
+func (s *Session) outputSuppressedLocked(lc *liveConn, now time.Time) bool {
 	if lc == nil || !lc.suppressOutput {
-		return true
-	}
-	if lc.resumeAckID != "" {
 		return false
 	}
 	if !lc.suppressedAt.IsZero() && now.Sub(lc.suppressedAt) >= s.cfg.SpeechHold {
 		lc.suppressOutput = false
 		lc.suppressedAt = time.Time{}
+		return false
+	}
+	return true
+}
+
+func (s *Session) allowOutputLocked(lc *liveConn, now time.Time, active bool) bool {
+	if !s.outputSuppressedLocked(lc, now) {
 		return true
 	}
 	if active {
@@ -395,10 +391,6 @@ func (s *Session) onInputText(lc *liveConn, delta string) {
 	if !s.lcActiveLocked(lc) {
 		s.mu.Unlock()
 		return
-	}
-	if lc != nil && lc.suppressOutput && lc.resumeAckID == "" {
-		lc.suppressOutput = false
-		lc.suppressedAt = time.Time{}
 	}
 	s.lastInput = now
 	s.inputOpen = true
@@ -447,7 +439,7 @@ func (s *Session) flushReplyLocked() uint64 {
 
 // recapItemsLocked renders the recap (newest kept within RecapChars) and
 // any silent context received in standby as session.input messages.
-func (s *Session) recapItemsLocked() []initialItem {
+func (s *Session) recapItemsLocked(reason string) []initialItem {
 	var items []initialItem
 	entries := s.recap.Recent(s.cfg.RecapChars)
 	for _, e := range entries {
@@ -470,6 +462,8 @@ func (s *Session) recapItemsLocked() []initialItem {
 		if s.recapCarried {
 			note = "You have just taken over this voice conversation from another voice model; the messages above are the recent conversation. Carry on from them; do not greet the user again."
 			s.recapCarried = false
+		} else if reason == "interrupt" {
+			note = "The previous reply was cut off for an urgent update; the messages above are the recent conversation. Carry on from them; do not greet the user again."
 		}
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: note}}})
 	}

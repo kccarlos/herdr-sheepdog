@@ -111,21 +111,33 @@ func (q *outQueue) Push(chunk []byte) {
 }
 
 func (q *outQueue) Flush() int {
-	n, _ := q.FlushEpoch()
+	n, _ := q.Purge()
 	return n
+}
+
+func (q *outQueue) Purge() (dropped int, purgedEpoch uint64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.purgeLocked(false)
 }
 
 func (q *outQueue) FlushEpoch() (dropped int, flushedEpoch uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.purgeLocked(true)
+}
+
+func (q *outQueue) purgeLocked(barrier bool) (dropped int, oldEpoch uint64) {
 	dropped = len(q.items)
 	q.items = nil
-	flushedEpoch = q.epoch
-	q.flushes = voice.AppendFlushEpoch(q.flushes, flushedEpoch)
+	oldEpoch = q.epoch
+	if barrier {
+		q.flushes = voice.AppendFlushEpoch(q.flushes, oldEpoch)
+	}
 	q.epoch = voice.NextAudioEpoch()
 	close(q.flushed)
 	q.flushed = make(chan struct{})
-	return dropped, flushedEpoch
+	return dropped, oldEpoch
 }
 
 func (q *outQueue) BumpEpoch() {

@@ -44,25 +44,40 @@ func (q *outQueue) Push(chunk []byte) {
 	q.cond.Signal()
 }
 
-// Flush drops every queued chunk and returns how many were dropped.
+// Flush drops every queued chunk (and any chunk in flight in the pump)
+// without recording a daemon flush barrier for the client.
 func (q *outQueue) Flush() int {
-	n, _ := q.FlushEpoch()
+	n, _ := q.Purge()
 	return n
 }
 
+// Purge drops every queued chunk (and any chunk in flight in the pump) and
+// advances the queue's epoch without recording a client flush barrier.
+func (q *outQueue) Purge() (dropped int, purgedEpoch uint64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.purgeLocked(false)
+}
+
 // FlushEpoch drops every queued chunk, advances the queue's epoch, and
-// returns the dropped count and the flushed epoch.
+// records the flushed epoch as a client flush barrier on subsequent chunks.
 func (q *outQueue) FlushEpoch() (dropped int, flushedEpoch uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.purgeLocked(true)
+}
+
+func (q *outQueue) purgeLocked(barrier bool) (dropped int, oldEpoch uint64) {
 	dropped = len(q.items)
 	q.items = nil
-	flushedEpoch = q.epoch
-	q.flushes = voice.AppendFlushEpoch(q.flushes, flushedEpoch)
+	oldEpoch = q.epoch
+	if barrier {
+		q.flushes = voice.AppendFlushEpoch(q.flushes, oldEpoch)
+	}
 	q.epoch = voice.NextAudioEpoch()
 	close(q.flushed)
 	q.flushed = make(chan struct{})
-	return dropped, flushedEpoch
+	return dropped, oldEpoch
 }
 
 func (q *outQueue) BumpEpoch() {

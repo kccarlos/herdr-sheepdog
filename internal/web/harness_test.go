@@ -236,7 +236,7 @@ func (f *fakeSession) recapEntries() []voice.RecapEntry {
 func (f *fakeSession) emitChunk(ch voice.AudioChunk) {
 	f.rawChunks <- ch
 }
-func (f *fakeSession) purgeQueueLocked() uint64 {
+func (f *fakeSession) purgeQueueLocked(barrier bool) uint64 {
 	for {
 		select {
 		case <-f.audio:
@@ -245,7 +245,9 @@ func (f *fakeSession) purgeQueueLocked() uint64 {
 			close(f.flushed)
 			f.flushed = make(chan struct{})
 			old := f.epoch
-			f.flushes = voice.AppendFlushEpoch(f.flushes, old)
+			if barrier {
+				f.flushes = voice.AppendFlushEpoch(f.flushes, old)
+			}
 			f.epoch = voice.NextAudioEpoch()
 			return old
 		}
@@ -263,12 +265,12 @@ func (f *fakeSession) FlushAudio() uint64 {
 			f.play.Detach()
 		}
 	}
-	return f.purgeQueueLocked()
+	return f.purgeQueueLocked(true)
 }
 func (f *fakeSession) PurgeAudio() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.purgeQueueLocked()
+	return f.purgeQueueLocked(false)
 }
 func (f *fakeSession) ExpectFlush() {
 	f.mu.Lock()
@@ -323,7 +325,7 @@ func (f *fakeSession) ClientPlayback(state string, playedMs int) {
 	if f.trackPlayback {
 		rep := f.play.Report(time.Now(), state, playedMs)
 		if state == voice.PlaybackFlushed && !rep.Awaited {
-			f.purgeQueueLocked()
+			f.purgeQueueLocked(false)
 		}
 		if rep.Cut != nil {
 			if !rep.Awaited && rep.RecapSeq == 0 {

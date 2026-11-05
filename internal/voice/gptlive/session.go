@@ -155,7 +155,6 @@ type liveConn struct {
 	finalized      bool
 	startedOnce    sync.Once
 	suppressOutput bool
-	resumeAckID    string
 	suppressedAt   time.Time
 }
 
@@ -169,6 +168,10 @@ type pushItem struct {
 	// heldAt is when the push was first held for want of a listener
 	// (zero: never held); see pumpPushes.
 	heldAt time.Time
+	// flushedConn is the speaking liveConn already flushed and retired for an
+	// UrgencyInterrupt push, so delivering it on the replacement connection
+	// does not emit a duplicate flush.
+	flushedConn *liveConn
 }
 
 // New builds a Session; it does not connect (see Start).
@@ -268,7 +271,7 @@ func (s *Session) FlushAudio() uint64 {
 	now := s.now()
 	s.flushBy, s.flushAt = "stop", now
 	seq := s.flushReplyLocked()
-	s.suppressOutputLocked(now, "")
+	s.suppressOutputLocked(now)
 	timing := s.finishAudioTimingLocked()
 	willAwait := !s.play.Empty()
 	uttID := s.playUtt.Flushed(willAwait)
@@ -295,8 +298,8 @@ func (s *Session) FlushAudio() uint64 {
 // recording a client flush acknowledgement slot.
 func (s *Session) PurgeAudio() uint64 {
 	s.mu.Lock()
-	s.suppressOutputLocked(s.now(), "")
-	_, epoch := s.out.FlushEpoch()
+	s.suppressOutputLocked(s.now())
+	_, epoch := s.out.Purge()
 	s.mu.Unlock()
 	return epoch
 }
@@ -474,9 +477,9 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	var timing map[string]any
 	if state == voice.PlaybackFlushed {
 		if !rep.Awaited {
-			s.suppressOutputLocked(now, "")
+			s.suppressOutputLocked(now)
 			timing = s.finishAudioTimingLocked()
-			s.out.FlushEpoch()
+			s.out.Purge()
 		}
 		unheard = s.heard.FlushedReport(now, rep)
 		if rep.Cut != nil {
@@ -715,31 +718,37 @@ func (s *Session) finishAudioTimingLocked() map[string]any {
 	return t.Finish()
 }
 
-// suppressOutputLocked gates incoming server output deltas from an
-// interrupted speech run until the stream stops or a new reply is triggered.
-// Caller holds s.mu.
-func (s *Session) suppressOutputLocked(now time.Time, resumeAckID string) {
+// suppressOutputLocked gates incoming server output deltas from a locally
+// interrupted speech run until the stream goes quiet for SpeechHold.
+//
+// Protocol limit: GPT-Live's output_audio.delta and output_transcript.delta
+// carry no turn or item IDs, and session.*.appended only acknowledges that an
+// append entered the timeline without guaranteeing the model stopped speaking
+// its earlier run. On a user or client barge-in we keep the connection open to
+// avoid reconnect latency and avoid splitting an utterance in progress: old
+// output is dropped until SpeechHold of output silence, while the server's own
+// history retains the untrimmed assistant turn until idle close reopens with
+// the trimmed recap. When an interrupting push must cut active or still-draining
+// speech and speak immediately, pumpPushes retires the connection and reopens
+// with the corrected recap instead of treating session.instructions.appended as
+// a cancellation boundary. Caller holds s.mu.
+func (s *Session) suppressOutputLocked(now time.Time) {
 	wasSpeaking := s.speakingNow || s.speakingLocked(now) || s.outText != ""
 	s.speakingNow = false
 	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
-	if lc := s.live; lc != nil && s.lcActiveLocked(lc) && (wasSpeaking || resumeAckID != "" || lc.suppressOutput) {
+	if lc := s.live; lc != nil && s.lcActiveLocked(lc) && (wasSpeaking || s.outputSuppressedLocked(lc, now)) {
 		lc.suppressOutput = true
 		lc.suppressedAt = now
-		lc.resumeAckID = resumeAckID
 	}
 }
 
 // interrupt drops queued model audio and tells the client to flush.
 func (s *Session) interrupt(by string) {
-	s.interruptForEvent(by, "")
-}
-
-func (s *Session) interruptForEvent(by, resumeAckID string) {
 	s.mu.Lock()
 	now := s.now()
 	s.flushBy, s.flushAt = by, now
 	seq := s.flushReplyLocked()
-	s.suppressOutputLocked(now, resumeAckID)
+	s.suppressOutputLocked(now)
 	timing := s.finishAudioTimingLocked()
 	willAwait := !s.play.Empty()
 	uttID := s.playUtt.Flushed(willAwait)

@@ -1,7 +1,9 @@
 package gptlive
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -236,13 +238,17 @@ func TestGPTLiveLateFlushedPreservesNewTurnAndUtterance(t *testing.T) {
 	s.interrupt("user")
 
 	// Before Run 1's PlaybackFlushed arrives, Run 2 (an urgent push answering
-	// utt-2) interrupts, starts playing, and finishes a short reply ("Checking
-	// failure") whose text is a substring of Run 1.
+	// utt-2) interrupts, retires the speaking connection, starts playing on the
+	// fresh session, and finishes a short reply ("Checking failure") whose text
+	// is a substring of Run 1.
 	_ = s.PushTagged("Checking failure", voice.UrgencyInterrupt, map[string]any{"utterance_id": "utt-2", "needs_user": true})
-	waitFor(t, "push 2 sent", func() bool { return len(c.events(evInstructionsAppend)) == 1 })
+	waitFor(t, "push 2 sent", func() bool {
+		return d.count() == 2 && len(d.last().events(evInstructionsAppend)) == 1
+	})
+	c2 := d.last()
 	for _, w := range []string{"Checking", "failure"} {
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 100*24))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": w + " "})
+		c2.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 100*24))})
+		c2.server(map[string]any{"type": evOutputTranscript, "delta": w + " "})
 	}
 	waitFor(t, "run 2 finished", func() bool {
 		s.mu.Lock()
@@ -290,7 +296,7 @@ drained:
 }
 
 func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
-	t.Run("urgent_push_gates_until_instructions_appended", func(t *testing.T) {
+	t.Run("urgent_push_does_not_leak_post_instructions_appended_speech", func(t *testing.T) {
 		d := &fakeDialer{}
 		l := &recLog{}
 		s, err := newSession(testConfig(), l, d)
@@ -314,14 +320,14 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 		s.ClientAttached(true)
 		_ = s.SendAudio(tone(3000, 640))
 		waitFor(t, "open", s.Live)
-		c := d.last()
-		c.mu.Lock()
-		c.holdAppendAck = true
-		c.mu.Unlock()
+		c1 := d.last()
+		c1.mu.Lock()
+		c1.holdAppendAck = true
+		c1.mu.Unlock()
 
 		// Real GPT-Live wire shapes carry delta/start_ms/end_ms and no item_id.
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 500*24))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": "old reply ", "start_ms": 0, "end_ms": 500})
+		c1.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 500*24))})
+		c1.server(map[string]any{"type": evOutputTranscript, "delta": "old reply ", "start_ms": 0, "end_ms": 500})
 		waitFor(t, "old reply", func() bool {
 			s.mu.Lock()
 			defer s.mu.Unlock()
@@ -329,22 +335,31 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 		})
 		s.ClientPlayback(voice.PlaybackStarted, 0)
 
-		// Urgent push interrupts with session.instructions.append.
+		// Urgent push interrupts active speech.
 		if err := s.PushTagged("urgent alert", voice.UrgencyInterrupt, map[string]any{"needs_user": true}); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, "instructions append", func() bool { return len(c.events(evInstructionsAppend)) == 1 })
-		ins := c.events(evInstructionsAppend)[0]
-		eventID, _ := ins["event_id"].(string)
+		waitFor(t, "urgent push dispatched", func() bool {
+			return len(d.last().events(evInstructionsAppend, evCommentaryAppend)) >= 1
+		})
 
-		// Pre-interrupt server deltas still in flight before session.instructions.appended.
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 200*24))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": "stale tail ", "start_ms": 500, "end_ms": 700})
+		// Even if c1 acknowledges session.instructions.appended and THEN keeps
+		// streaming pre-cancellation speech (because session.instructions.appended
+		// only acknowledges timeline insertion), none of c1's continuing speech
+		// may pass into the new epoch.
+		eventID := "push_1"
+		if ins := c1.events(evInstructionsAppend); len(ins) > 0 {
+			eventID, _ = ins[0]["event_id"].(string)
+		}
+		c1.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 200*24))})
+		c1.server(map[string]any{"type": evOutputTranscript, "delta": "stale before ack ", "start_ms": 500, "end_ms": 700})
+		c1.server(map[string]any{"type": evInstructionsApplied, "client_event_id": eventID, "start_ms": 700, "end_ms": 700})
+		c1.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 200*24))})
+		c1.server(map[string]any{"type": evOutputTranscript, "delta": "stale after ack ", "start_ms": 700, "end_ms": 900})
 
-		// Server acknowledges the instruction append, then streams the new speech.
-		c.server(map[string]any{"type": evInstructionsApplied, "client_event_id": eventID, "start_ms": 700, "end_ms": 700})
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 300*24))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": "urgent alert", "start_ms": 700, "end_ms": 1000})
+		active := d.last()
+		active.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 300*24))})
+		active.server(map[string]any{"type": evOutputTranscript, "delta": "urgent alert", "start_ms": 900, "end_ms": 1200})
 
 		waitFor(t, "new reply", func() bool {
 			s.mu.Lock()
@@ -359,12 +374,11 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 		gotChunks := append([]voice.AudioChunk(nil), chunks...)
 		s.mu.Unlock()
 		if gotText != "urgent alert" {
-			t.Fatalf("outText = %q, want %q (pre-ack stale speech leaked into new epoch)", gotText, "urgent alert")
+			t.Fatalf("outText = %q, want %q (post-ack stale speech leaked into new epoch)", gotText, "urgent alert")
 		}
-		if got := c.events("conversation.item.truncate"); len(got) != 0 {
+		if got := c1.events("conversation.item.truncate"); len(got) != 0 {
 			t.Fatalf("unexpected conversation.item.truncate on GPT-Live wire: %v", got)
 		}
-		// Only the 300 ms new reply chunk (300*24*2 = 14400 bytes) may appear in the new epoch.
 		if len(gotChunks) == 0 {
 			t.Fatal("expected new reply audio chunk")
 		}
@@ -376,11 +390,11 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 			}
 		}
 		if newEpochBytes != 300*24*2 {
-			t.Fatalf("new epoch audio bytes = %d, want %d (200ms pre-ack stale audio leaked)", newEpochBytes, 300*24*2)
+			t.Fatalf("new epoch audio bytes = %d, want %d (stale audio leaked into new epoch)", newEpochBytes, 300*24*2)
 		}
 	})
 
-	t.Run("local_interrupt_rejects_continuing_deltas_without_item_id", func(t *testing.T) {
+	t.Run("local_interrupt_gates_across_append_acks_and_overlapping_input", func(t *testing.T) {
 		s, d, _ := startSession(t, testConfig())
 		s.ClientAttached(true)
 		_ = s.SendAudio(tone(3000, 640))
@@ -394,22 +408,32 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 		s.interrupt("user")
 		s.ClientPlayback(voice.PlaybackFlushed, 100)
 
-		// Continuing deltas from the interrupted utterance carry no item_id.
+		// Continuing deltas from the interrupted utterance carry no item_id; even
+		// overlapping user input transcripts or append acknowledgements while old
+		// speech is still streaming must not open the gate early.
 		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 4800))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": "zombie", "start_ms": 1000, "end_ms": 1200})
-		time.Sleep(40 * time.Millisecond)
+		c.server(map[string]any{"type": evOutputTranscript, "delta": "zombie1 ", "start_ms": 1000, "end_ms": 1200})
+		c.server(map[string]any{"type": evInputTranscript, "delta": "what about docs?", "start_ms": 1200, "end_ms": 1400})
+		c.server(map[string]any{"type": evCommentaryApplied, "client_event_id": "push_1", "start_ms": 1400, "end_ms": 1400})
+		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 4800))})
+		c.server(map[string]any{"type": evOutputTranscript, "delta": "zombie2", "start_ms": 1400, "end_ms": 1600})
+		time.Sleep(20 * time.Millisecond)
 		s.mu.Lock()
 		got := s.outText
 		s.mu.Unlock()
 		if got != "" {
-			t.Fatalf("continuing delta accepted after interrupt: %q", got)
+			t.Fatalf("continuing delta accepted during barge-in overlap: %q", got)
+		}
+		if d.count() != 1 {
+			t.Fatalf("barge-in reconnected (%d sessions), want single open session", d.count())
 		}
 
-		// Once the user speaks, the model's answer flows normally.
-		c.server(map[string]any{"type": evInputTranscript, "delta": "what about docs?", "start_ms": 1300, "end_ms": 1600})
+		// Once the interrupted speech run has gone quiet for SpeechHold, the
+		// model's answer to the user's new turn flows on the same connection.
+		time.Sleep(testConfig().SpeechHold + 20*time.Millisecond)
 		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 4800))})
 		c.server(map[string]any{"type": evOutputTranscript, "delta": "Docs are green.", "start_ms": 1700, "end_ms": 2000})
-		waitFor(t, "answer after user turn", func() bool {
+		waitFor(t, "answer after quiet gap", func() bool {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			return s.outText == "Docs are green."
@@ -419,7 +443,7 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 
 func TestGPTLiveStopSequenceEmptyFlushAcksDoNotCutNewReply(t *testing.T) {
 	s, d, _ := startSession(t, testConfig())
-	c := openWithReply(t, s, d, strings.Fields("Auth is running the long test suite"), 150)
+	openWithReply(t, s, d, strings.Fields("Auth is running the long test suite"), 150)
 	s.ClientPlayback(voice.PlaybackStarted, 0)
 
 	// iOS/web Stop: client locally flushes first, then daemon afterCancel calls
@@ -429,13 +453,20 @@ func TestGPTLiveStopSequenceEmptyFlushAcksDoNotCutNewReply(t *testing.T) {
 	if err := s.PushTagged("Stopped auth.", voice.UrgencyInterrupt, map[string]any{"stop": true, "needs_user": true}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "stop push sent", func() bool { return len(c.events(evInstructionsAppend)) == 1 })
+	waitFor(t, "stop push sent on fresh session", func() bool {
+		return d.count() == 2 && len(d.last().events(evInstructionsAppend)) == 1
+	})
+	c2 := d.last()
+	startInput := fmt.Sprint(c2.events(evSessionStart)[0]["session"].(map[string]any)["input"])
+	if !strings.Contains(startInput, "Auth is…") || strings.Contains(startInput, "long test suite") {
+		t.Fatalf("reopened session input = %s, want trimmed 'Auth is…' recap", startInput)
+	}
 
 	// Stop confirmation streams and settles into recap before the two empty
 	// flush acknowledgements arrive from the client.
 	for _, w := range []string{"Stopped", "auth."} {
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 200*24))})
-		c.server(map[string]any{"type": evOutputTranscript, "delta": w + " "})
+		c2.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 200*24))})
+		c2.server(map[string]any{"type": evOutputTranscript, "delta": w + " "})
 	}
 	waitFor(t, "stop reply settled", func() bool {
 		s.mu.Lock()
@@ -525,5 +556,79 @@ func TestGPTLiveCutAfterUnderrunKeepsHeardFirstSentence(t *testing.T) {
 	entries := s.recap.Entries()
 	if len(entries) != 1 || entries[0].Text != "Auth passed." || !entries[0].Cut || entries[0].CutAfterMs != 400 {
 		t.Fatalf("recap entries = %+v, want single cut entry 'Auth passed.' at 400ms", entries)
+	}
+}
+
+func TestGPTLiveClientFlushDoesNotCreateUntrackedDaemonFlush(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 120 * time.Millisecond
+	d := &fakeDialer{}
+	l := &recLog{}
+	s, err := newSession(cfg, l, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	var (
+		flushedEpoch  uint64
+		daemonFlushes int
+		mu            sync.Mutex
+	)
+	noteBarrier := func(ep uint64) {
+		mu.Lock()
+		if ep > flushedEpoch {
+			flushedEpoch = ep
+			daemonFlushes++
+		}
+		mu.Unlock()
+	}
+	go func() {
+		for ch := range s.AudioChunks() {
+			for _, ep := range ch.FlushedEpochs {
+				noteBarrier(ep)
+			}
+		}
+	}()
+
+	c1 := openWithReply(t, s, d, []string{"Auth", "is", "running", "tests."}, 150)
+	s.ClientPlayback(voice.PlaybackStarted, 0)
+	s.ClientPlayback(voice.PlaybackFlushed, 300)
+
+	// After the interrupted reply goes quiet, the user asks a follow-up on c1
+	// and gets a new reply without any daemon-initiated flush.
+	time.Sleep(cfg.SpeechHold + 20*time.Millisecond)
+	c1.server(map[string]any{"type": evInputTranscript, "delta": "How is docs?"})
+	c1.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 300*24))})
+	c1.server(map[string]any{"type": evOutputTranscript, "delta": "Docs is idle."})
+	waitFor(t, "follow-up reply", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.outText == "Docs is idle."
+	})
+	// Idle close (finishDetach) and reopen must not attach an untracked flush barrier either.
+	waitFor(t, "idle close", func() bool { return !s.Live() })
+	s.SetMuted(true)
+	s.SetMuted(false)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "reopen", func() bool { return d.count() == 2 && s.Live() })
+	c2 := d.last()
+	c2.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 300*24))})
+	c2.server(map[string]any{"type": evOutputTranscript, "delta": "All green."})
+	waitFor(t, "reopened reply", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.outText == "All green."
+	})
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	gotFlushes := daemonFlushes
+	mu.Unlock()
+	if gotFlushes != 0 {
+		t.Fatalf("daemon flush barriers emitted = %d, want 0 (client flush or detach created an untracked barrier)", gotFlushes)
 	}
 }

@@ -212,6 +212,18 @@ func (s *Session) pumpPushes(now time.Time) {
 		h["reason"] = "no_listener"
 		s.log.Log(logSource, "voice.push_held", "", h)
 	}
+	if p.retire != nil {
+		if p.flushBeforeRetire {
+			s.interrupt("push")
+		}
+		s.closeLive(p.retire, "interrupt")
+		s.mu.Lock()
+		if s.live == nil && s.client && !s.opening && !s.now().Before(s.nextOpen) {
+			s.startOpenLocked("interrupt")
+		}
+		s.mu.Unlock()
+		return
+	}
 	if !p.ok || lc == nil {
 		return
 	}
@@ -232,6 +244,11 @@ type pushPick struct {
 	item pushItem
 	// over are the items the picked one overtook (voice.push_overtook).
 	over []pushItem
+	// retire is set when an interrupting push must cut active or still-draining
+	// speech: pumpPushes flushes the client once, retires retire, and reopens
+	// with the corrected recap before delivering the push.
+	retire            *liveConn
+	flushBeforeRetire bool
 	// deferred, held and dropped are items downgraded to WHEN_IDLE while
 	// the model speaks, first held for want of a listener, and dropped
 	// after PushTTL.
@@ -271,15 +288,28 @@ func (s *Session) pickPushLocked(now time.Time) pushPick {
 	if len(s.pushQ) == 0 {
 		return p
 	}
+	hasInterrupted := false
+	for i := range s.pushQ {
+		if s.pushQ[i].flushedConn != nil {
+			hasInterrupted = true
+			break
+		}
+	}
 	if lc == nil && s.client {
-		if !s.muted && !s.opening && !now.Before(s.nextOpen) {
-			s.startOpenLocked("push")
+		if (!s.muted || hasInterrupted) && !s.opening && !now.Before(s.nextOpen) {
+			reason := "push"
+			if hasInterrupted {
+				reason = "interrupt"
+			}
+			s.startOpenLocked(reason)
 		}
 		return p
 	}
 	// Speaking includes the client still playing the reply, and the gap
 	// runs from the real end of speech (the client's drained).
 	speaking := s.speakingOrPlayingLocked(now)
+	suppressed := s.outputSuppressedLocked(lc, now)
+	dirtySpeech := lc != nil && (s.speakingNow || s.speakingLocked(now) || s.outText != "" || suppressed)
 	shepherd := s.inputOpen || s.vad.Hold(now) > 0 // never over the user
 	last := s.lastSpoken
 	if ended := s.play.EndedAt(now); ended.After(last) {
@@ -313,7 +343,7 @@ func (s *Session) pickPushLocked(now time.Time) pushPick {
 				it.urgency = voice.UrgencyIdle
 				p.deferred++
 			}
-			ready = !shepherd && (it.urgency == voice.UrgencyInterrupt || (!speaking && gapOK))
+			ready = !shepherd && (it.urgency == voice.UrgencyInterrupt || (!speaking && !suppressed && gapOK))
 		}
 		utt := voice.PushUtterance(it.tags)
 		if ready && !blocked[utt] {
@@ -332,6 +362,14 @@ func (s *Session) pickPushLocked(now time.Time) pushPick {
 		pick = firstOther
 	}
 	if pick < 0 {
+		return p
+	}
+	if s.pushQ[pick].urgency == voice.UrgencyInterrupt && dirtySpeech {
+		p.retire = lc
+		if s.pushQ[pick].flushedConn != lc {
+			s.pushQ[pick].flushedConn = lc
+			p.flushBeforeRetire = true
+		}
 		return p
 	}
 	p.ok, p.item = true, s.pushQ[pick]
@@ -384,25 +422,15 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	case voice.UrgencySilent:
 		ev = appendEvent{Type: evThinkingAppend, EventID: eventID, Content: clip(item.text)}
 	case voice.UrgencyInterrupt:
-		s.interruptForEvent("push", eventID)
+		if item.flushedConn == nil {
+			s.interrupt("push")
+		}
 		ev = appendEvent{Type: evInstructionsAppend, EventID: eventID, Content: clip("Stop what you are saying and tell the user this now, briefly, in your own words: " + item.text)}
 	default:
-		s.mu.Lock()
-		if lc != nil && s.lcActiveLocked(lc) && lc.suppressOutput {
-			lc.resumeAckID = eventID
-		}
-		s.mu.Unlock()
 		ev = appendEvent{Type: evCommentaryAppend, EventID: eventID, Content: clip(item.text)}
 	}
 	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
-	if err != nil {
-		s.mu.Lock()
-		if lc != nil && lc.resumeAckID == eventID {
-			lc.resumeAckID = ""
-		}
-		s.mu.Unlock()
-	}
 	var unheard []voice.UnheardPush
 	if err == nil && item.urgency != voice.UrgencySilent {
 		s.mu.Lock()
