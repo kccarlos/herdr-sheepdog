@@ -19,8 +19,8 @@ Sources, in order of authority:
    one raw `gorilla/websocket` client to see exact wire JSON. Trimmed output is
    in §9.
 3. Reference implementations (Python SDK / raw JS) under
-   `/Users/kc/Documents/reference_repo/gemini-live-api-examples` and
-   `/Users/kc/Documents/reference_repo/live-api-web-console` for cross-checks.
+   `~/Documents/reference_repo/gemini-live-api-examples` and
+   `~/Documents/reference_repo/live-api-web-console` for cross-checks.
 
 ---
 

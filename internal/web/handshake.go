@@ -126,6 +126,7 @@ func (c *client) onClientReady(m wsproto.Message) {
 	if c.hs.timer != nil {
 		c.hs.timer.Stop()
 	}
+	_, _ = c.noteMonoLocked(c.h.s.deps.Now(), m.MonoMs)
 	c.mu.Unlock()
 	var info any
 	if m.Client != nil {

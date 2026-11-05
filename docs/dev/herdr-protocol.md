@@ -3,7 +3,7 @@
 Recorded 2026-09-17 against **herdr 0.9.0, protocol 22**, running locally on
 macOS. Everything below was either read from the bundled schema
 (`herdr api schema --json`, also at
-`/Users/kc/Documents/herdr/docs/next/api/herdr-api.schema.json`), from the Rust
+`~/Documents/herdr/docs/next/api/herdr-api.schema.json`), from the Rust
 source (`src/api/`, `src/app/api/`, `src/app/api/plugins/`), or observed live
 against the running server. Captured raw samples live in `testdata/herdr/`
 (see §10).
@@ -13,7 +13,7 @@ Sources of truth, in order of preference:
 1. `herdr api schema --json` — JSON Schema for `request`, `success_response`,
    `error_response`, `event`, `subscription_event`.
 2. `herdr --skill` — agent-facing usage guide (semantics of states, waits).
-3. `/Users/kc/Documents/herdr/docs/next/website/src/content/docs/socket-api.mdx`
+3. `~/Documents/herdr/docs/next/website/src/content/docs/socket-api.mdx`
    — the human docs page (this is what the plan called `SOCKET_API.md`).
 4. Rust source, notably `src/api/server.rs` (framing), `src/api/subscriptions.rs`
    (subscription semantics), `src/app/api.rs` (`emit_pane_state_update`),

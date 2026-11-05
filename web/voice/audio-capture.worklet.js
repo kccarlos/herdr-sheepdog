@@ -58,7 +58,15 @@ class CaptureProcessor extends AudioWorkletProcessor {
         continue;
       }
       const r = this.gate.push(frame);
-      if (r.transition) this.port.postMessage({ type: 'silence', on: r.transition === 'on', peak: this.gate.peak });
+      if (r.transition) {
+        this.port.postMessage({
+          type: 'silence',
+          on: r.transition === 'on',
+          peak: this.gate.peak,
+          speechEndMs: r.speechEndMs,
+          audioTime: currentTime,
+        });
+      }
       for (const f of r.send) this.post(f);
     }
     return true;

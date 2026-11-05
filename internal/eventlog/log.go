@@ -37,6 +37,9 @@ type Options struct {
 	// Stderr receives the one-line report of a write failure; nil means
 	// os.Stderr.
 	Stderr io.Writer
+
+	// openDay overrides day-file creation in tests (e.g. stalled disk I/O).
+	openDay func(day string) (io.WriteCloser, error)
 }
 
 func (o Options) withDefaults() Options {
@@ -59,29 +62,40 @@ func (o Options) withDefaults() Options {
 }
 
 // Log is the event log. It is safe for concurrent use; Log never blocks
-// on subscribers or on disk beyond the buffered write itself.
+// on subscribers or on disk I/O (disk writes and flushes run on the
+// background flush goroutine).
 type Log struct {
 	dir  string // "" keeps the log in memory only
 	opts Options
 
-	redact atomic.Pointer[func(string) string]
+	redact   atomic.Pointer[func(string) string]
+	reported atomic.Bool // write error already reported to stderr
 
 	mu       sync.Mutex
 	seq      uint64
 	lastID   int64 // the last event id handed out (or found on disk at Open)
-	file     *os.File
-	w        *bufio.Writer
-	fileDay  string
+	pending  []diskEntry
 	ring     []Event
 	ringHead int // index of the oldest entry when the ring is full
 	ringLen  int
 	subs     map[*subscriber]struct{}
 	taps     map[*Tap]struct{} // lossy observer feeds (tap.go)
 	closed   bool
-	reported bool // write error already reported to stderr
 
-	stop chan struct{}
-	done chan struct{}
+	// Owned exclusively by flushLoop.
+	file    io.WriteCloser
+	w       *bufio.Writer
+	fileDay string
+
+	wake     chan struct{}
+	flushReq chan chan error
+	stop     chan struct{}
+	done     chan struct{}
+}
+
+type diskEntry struct {
+	day     string
+	encoded []byte
 }
 
 type subscriber struct {
@@ -94,7 +108,14 @@ var _ logging.Logger = (*Log)(nil)
 // Open creates <dataDir>/events and starts the flush ticker. An empty
 // dataDir keeps the log in memory (ring + subscribers only).
 func Open(dataDir string, opts Options) (*Log, error) {
-	l := &Log{opts: opts.withDefaults(), subs: map[*subscriber]struct{}{}, stop: make(chan struct{}), done: make(chan struct{})}
+	l := &Log{
+		opts:     opts.withDefaults(),
+		subs:     map[*subscriber]struct{}{},
+		wake:     make(chan struct{}, 1),
+		flushReq: make(chan chan error),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+	}
 	l.ring = make([]Event, l.opts.RingSize)
 	if dataDir != "" {
 		l.dir = filepath.Join(dataDir, "events")
@@ -153,7 +174,13 @@ func (l *Log) Log(source, typ, paneID string, payload any) {
 	now := l.opts.Now()
 	l.lastID = nextID(l.lastID, now)
 	ev := newEvent(l.seq, l.lastID, now, source, typ, paneID, payload, l.redactFn())
-	l.writeLocked(ev)
+	if l.dir != "" {
+		l.pending = append(l.pending, diskEntry{day: dayOf(ev.TS), encoded: ev.encoded})
+		select {
+		case l.wake <- struct{}{}:
+		default:
+		}
+	}
 	l.pushRingLocked(ev)
 	dropped := l.fanOutLocked(ev)
 	l.offerTapsLocked(ev)
@@ -165,60 +192,78 @@ func (l *Log) Log(source, typ, paneID string, payload any) {
 	}
 }
 
-// writeLocked appends the line to the current day's file, rotating when
-// the day changed. Caller holds l.mu.
-func (l *Log) writeLocked(ev Event) {
+// writeBatch appends queued entries to the current day's file, rotating
+// when the day changed. Runs only on flushLoop.
+func (l *Log) writeBatch(batch []diskEntry) {
 	if l.dir == "" {
 		return
 	}
-	day := dayOf(ev.TS)
-	if l.file == nil || day != l.fileDay {
-		l.rotateLocked(day)
-	}
-	if l.w == nil {
-		return
-	}
-	if _, err := l.w.Write(append(ev.encoded, '\n')); err != nil {
-		l.reportLocked(err)
+	for _, e := range batch {
+		if l.file == nil || e.day != l.fileDay {
+			l.rotate(e.day)
+		}
+		if l.w == nil {
+			continue
+		}
+		if _, err := l.w.Write(e.encoded); err != nil {
+			l.reportError(err)
+			continue
+		}
+		if err := l.w.WriteByte('\n'); err != nil {
+			l.reportError(err)
+		}
 	}
 }
 
-// rotateLocked flushes and closes the current file and opens the one for
-// day. Caller holds l.mu.
-func (l *Log) rotateLocked(day string) {
-	l.closeFileLocked()
-	path := filepath.Join(l.dir, day+".jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+// rotate flushes and closes the current file and opens the one for day.
+// Runs only on flushLoop.
+func (l *Log) rotate(day string) {
+	l.closeFile()
+	var (
+		f   io.WriteCloser
+		err error
+	)
+	if l.opts.openDay != nil {
+		f, err = l.opts.openDay(day)
+	} else {
+		path := filepath.Join(l.dir, day+".jsonl")
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	}
 	if err != nil {
-		l.reportLocked(err)
+		l.reportError(err)
 		l.fileDay = day // do not retry on every line
 		return
 	}
 	l.file, l.w, l.fileDay = f, bufio.NewWriterSize(f, fileBufferBytes), day
 }
 
-func (l *Log) closeFileLocked() {
-	if l.w != nil {
-		if err := l.w.Flush(); err != nil {
-			l.reportLocked(err)
-		}
+func (l *Log) flushWriter() error {
+	if l.w == nil {
+		return nil
 	}
+	if err := l.w.Flush(); err != nil {
+		l.reportError(err)
+		return err
+	}
+	return nil
+}
+
+func (l *Log) closeFile() {
+	_ = l.flushWriter()
 	if l.file != nil {
 		if err := l.file.Close(); err != nil {
-			l.reportLocked(err)
+			l.reportError(err)
 		}
 	}
 	l.file, l.w = nil, nil
 }
 
-// reportLocked prints the first write error; later ones are silent so a
-// full disk does not flood stderr. Caller holds l.mu.
-func (l *Log) reportLocked(err error) {
-	if l.reported {
-		return
+// reportError prints the first write error; later ones are silent so a
+// full disk does not flood stderr. Runs only on flushLoop.
+func (l *Log) reportError(err error) {
+	if l.reported.CompareAndSwap(false, true) {
+		_, _ = fmt.Fprintf(l.opts.Stderr, "eventlog: write error (further errors suppressed): %v\n", err)
 	}
-	l.reported = true
-	_, _ = fmt.Fprintf(l.opts.Stderr, "eventlog: write error (further errors suppressed): %v\n", err)
 }
 
 func (l *Log) pushRingLocked(ev Event) {
@@ -300,30 +345,70 @@ func (l *Log) Subscribe(ctx context.Context) <-chan Event {
 	return s.ch
 }
 
-// Flush writes buffered lines to disk.
+// Flush writes queued and buffered lines to disk.
 func (l *Log) Flush() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.w == nil {
+	if l.dir == "" {
 		return nil
 	}
-	if err := l.w.Flush(); err != nil {
-		l.reportLocked(err)
-		return err
+	reply := make(chan error, 1)
+	select {
+	case l.flushReq <- reply:
+		return <-reply
+	case <-l.done:
+		return nil
 	}
-	return nil
+}
+
+func (l *Log) takePending(reuse *[]diskEntry) []diskEntry {
+	l.mu.Lock()
+	batch := l.pending
+	if len(batch) == 0 {
+		l.mu.Unlock()
+		return nil
+	}
+	l.pending = (*reuse)[:0]
+	l.mu.Unlock()
+	return batch
+}
+
+func (l *Log) recycleBatch(batch []diskEntry, reuse *[]diskEntry) {
+	clear(batch)
+	if cap(batch) <= 1024 {
+		*reuse = batch[:0]
+	} else {
+		*reuse = nil
+	}
 }
 
 func (l *Log) flushLoop() {
 	defer close(l.done)
 	t := time.NewTicker(l.opts.FlushInterval)
 	defer t.Stop()
+	var reuse []diskEntry
+	drain := func() {
+		for {
+			batch := l.takePending(&reuse)
+			if len(batch) == 0 {
+				return
+			}
+			l.writeBatch(batch)
+			l.recycleBatch(batch, &reuse)
+		}
+	}
 	for {
 		select {
 		case <-l.stop:
+			drain()
+			l.closeFile()
 			return
+		case <-l.wake:
+			drain()
 		case <-t.C:
-			_ = l.Flush()
+			drain()
+			_ = l.flushWriter()
+		case reply := <-l.flushReq:
+			drain()
+			reply <- l.flushWriter()
 		}
 	}
 }
@@ -334,6 +419,7 @@ func (l *Log) Close() error {
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
+		<-l.done
 		return nil
 	}
 	l.closed = true
@@ -344,14 +430,12 @@ func (l *Log) Close() error {
 	}
 	l.subs = map[*subscriber]struct{}{}
 	l.closeTapsLocked()
-	l.closeFileLocked()
-	reported := l.reported
 	l.mu.Unlock()
 	<-l.done
 	for _, s := range subs {
 		s.cancel()
 	}
-	if reported {
+	if l.reported.Load() {
 		return fmt.Errorf("eventlog: a write error occurred (see stderr)")
 	}
 	return nil

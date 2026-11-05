@@ -147,7 +147,7 @@ scheduling each frame at "now".
 | Message                              | Meaning                                                                                                   |
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
-| `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
+| `{"type":"silence","on":true\|false,"speech_end_ms":N?,"seq":N?,"mono_ms":N?,"rtt_ms":N?}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). Optional timing stamps on `on:true` decompose end-of-speech latency; see *Silence gate*. |
 | `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the user) or closed. Optional; see *Client speech detector*. |
 | `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
 | `{"type":"drain","at":"…","buffer_ms":N,"played_ms":N,"received_ms":N?,"reason":"dry\|early"?}` | The client's player ran dry, for diagnosis only. Requires the `feedback` feature. See *Feedback and drains*. |
@@ -167,6 +167,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 ```json
 {"type":"mute","on":true}
 {"type":"silence","on":false}
+{"type":"silence","on":true,"speech_end_ms":300,"seq":48,"mono_ms":12400,"rtt_ms":22}
 {"type":"speaking","on":true}
 {"type":"cancel"}
 {"type":"text","text":"what is auth doing"}
@@ -329,7 +330,14 @@ that. The client therefore gates its capture:
   `{"type":"silence","on":false}`, then the last **100 ms** of withheld
   frames (pre-roll, so the first syllable is not clipped), then the live
   frames.
-- The daemon logs each transition as `web.client.silence {on}`; on
+- The daemon logs each transition as `web.client.silence {on}`; when the
+  client includes optional timing stamps on `on:true` (`speech_end_ms`,
+  ms elapsed on the client since the last voiced frame in the open
+  segment, omitted when 0 voiced frames occurred; `seq`, cumulative
+  binary frames sent on this socket; `mono_ms`, client monotonic ms, also
+  sent on `client-ready` and `ping`; `rtt_ms`, latest `/ws` `ping`→`pong`
+  round-trip ms), the daemon logs `speech_end_ms`, `seq`,
+  `audio_frames_in` and skew-free `uplink_lag_ms` alongside `on`. On
   `on:true` it tells the model the audio stream paused (Gemini: 1 s of a
   ±8 LSB comfort-noise floor at real-time pace, then `audioStreamEnd`,
   the same signal `mute` sends) so the server VAD closes the user's turn

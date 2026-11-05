@@ -77,6 +77,41 @@ final class CaptureGateTests: XCTestCase {
         XCTAssertEqual(CaptureGate.Diagnostics.format(dBFS: VoiceActivityDetector.silenceDBFS), "—")
     }
 
+    func testSpeechEndOffsetIsNilForQuietRoomAndHangoverAfterSpeech() {
+        var gate = CaptureGate()
+        var rng = VADTestAudio.RNG(seed: 7)
+        var initialClose: CaptureGate.Output?
+        for _ in 0 ..< 50 {
+            let out = gate.push(noise(&rng, 200))
+            if out.transition == .closed { initialClose = out; break }
+        }
+        XCTAssertEqual(initialClose?.transition, .closed)
+        XCTAssertNil(initialClose?.speechEndMs, "closing on initial room silence had no speech")
+
+        // Speak above the floor until the gate opens, then return to quiet.
+        var opened = false
+        for _ in 0 ..< 10 {
+            if gate.push(tone).transition == .opened { opened = true }
+        }
+        XCTAssertTrue(opened)
+        var speechClose: CaptureGate.Output?
+        for _ in 0 ..< 30 {
+            let out = gate.push(noise(&rng, 200))
+            if out.transition == .closed { speechClose = out; break }
+        }
+        XCTAssertEqual(speechClose?.transition, .closed)
+        XCTAssertEqual(speechClose?.speechEndMs, VADTuning().hangoverMilliseconds)
+
+        // Hold-to-talk: initial unheld close has nil speechEndMs; releasing after a hold stamps it.
+        var ptt = CaptureGate()
+        ptt.manual = false
+        XCTAssertNil(ptt.push(quiet).speechEndMs)
+        ptt.manual = true
+        _ = ptt.push(tone)
+        ptt.manual = false
+        XCTAssertEqual(ptt.push(quiet).speechEndMs, AudioContract.frameMilliseconds)
+    }
+
     func testPeakIsTheLargestAbsoluteSample() {
         XCTAssertEqual(PCMLevel.peak(of: [0, -32_768, 5]), 32_768)
         XCTAssertEqual(PCMLevel.peak(of: [3, -7, 5]), 7)

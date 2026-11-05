@@ -62,13 +62,15 @@ type mic struct {
 	// (no silence on before the first audio).
 	startOpen bool
 
-	open     bool // gate open (frames flow)
-	held     [][]int16
-	voiced   []bool // last iosWindow frames
-	unvoiced int
-	quietFor time.Duration
-	gated    int // frames withheld so far
-	peak     int // last input peak
+	open       bool // gate open (frames flow)
+	held       [][]int16
+	voiced     []bool // last iosWindow frames
+	unvoiced   int
+	quietFor   time.Duration
+	hadSpeech  bool // voiced frame seen in the current open segment
+	framesSent int  // cumulative binary frames emitted on this socket
+	gated      int  // frames withheld so far
+	peak       int  // last input peak
 
 	speaking  bool
 	silentFor time.Duration
@@ -84,28 +86,32 @@ func newMic(mode string, sendSpeaking bool) *mic {
 // reset is the state of a fresh connection: the iOS gate starts closed
 // (and says so), the web gate open.
 func (m *mic) reset() []wsproto.Message {
-	m.held, m.voiced, m.unvoiced, m.quietFor, m.speaking, m.silentFor = nil, nil, 0, 0, false, 0
+	m.held, m.voiced, m.unvoiced, m.quietFor, m.hadSpeech, m.framesSent, m.speaking, m.silentFor = nil, nil, 0, 0, false, 0, false, 0
 	if m.mode == GateIOS && !m.startOpen {
 		m.open = false
-		return []wsproto.Message{wsproto.Silence(true)}
+		seq := 0
+		sil := wsproto.Silence(true)
+		sil.Seq = &seq
+		return []wsproto.Message{sil}
 	}
 	m.open = true
 	return nil
 }
 
-// push takes one frame: frame is the mixed microphone signal, voicePeak
-// the peak of what the detector hears.
 func (m *mic) push(frame []int16, voicePeak int) micOut {
 	m.peak = pcm.Peak(frame)
+	var out micOut
 	switch m.mode {
 	case GateOff:
-		return micOut{msgs: m.webSpeaking(voicePeak), frames: [][]int16{frame}}
+		out = micOut{msgs: m.webSpeaking(voicePeak), frames: [][]int16{frame}}
 	case GateWeb:
-		out := micOut{msgs: m.webSpeaking(voicePeak)}
+		out = micOut{msgs: m.webSpeaking(voicePeak)}
 		m.webGate(frame, &out)
-		return out
+	default:
+		out = m.iosGate(frame, voicePeak >= voiceFloor)
 	}
-	return m.iosGate(frame, voicePeak >= voiceFloor)
+	m.framesSent += len(out.frames)
+	return out
 }
 
 func (m *mic) iosGate(frame []int16, voiced bool) micOut {
@@ -129,7 +135,7 @@ func (m *mic) iosGate(frame []int16, voiced bool) micOut {
 			m.gated++
 			return out
 		}
-		m.open, m.unvoiced = true, 0
+		m.open, m.unvoiced, m.hadSpeech = true, 0, true
 		out.msgs = append(out.msgs, wsproto.Silence(false))
 		if m.sendSpeaking {
 			m.speaking = true
@@ -141,6 +147,7 @@ func (m *mic) iosGate(frame []int16, voiced bool) micOut {
 	}
 	if voiced {
 		m.unvoiced = 0
+		m.hadSpeech = true
 	} else {
 		m.unvoiced++
 	}
@@ -150,7 +157,15 @@ func (m *mic) iosGate(frame []int16, voiced bool) micOut {
 		m.open = false
 		m.voiced = nil
 		m.gated++
-		out.msgs = append(out.msgs, wsproto.Silence(true))
+		sil := wsproto.Silence(true)
+		seq := m.framesSent
+		sil.Seq = &seq
+		if m.hadSpeech {
+			hold := int((time.Duration(m.unvoiced) * FrameDur).Milliseconds())
+			sil.SpeechEndMs = &hold
+		}
+		m.hadSpeech = false
+		out.msgs = append(out.msgs, sil)
 		if m.sendSpeaking {
 			m.speaking = false
 			out.msgs = append(out.msgs, wsproto.Speaking(false))
@@ -194,7 +209,7 @@ func (m *mic) webGate(frame []int16, out *micOut) {
 			}
 			return
 		}
-		m.open, m.quietFor = true, 0
+		m.open, m.quietFor, m.hadSpeech = true, 0, true
 		out.msgs = append(out.msgs, wsproto.Silence(false))
 		out.frames = append(append(out.frames, m.held...), frame)
 		m.held = nil
@@ -202,12 +217,21 @@ func (m *mic) webGate(frame []int16, out *micOut) {
 	}
 	if loud {
 		m.quietFor = 0
+		m.hadSpeech = true
 	} else {
 		m.quietFor += FrameDur
 		if m.quietFor >= webHold {
 			m.open = false
 			m.gated++
-			out.msgs = append(out.msgs, wsproto.Silence(true))
+			sil := wsproto.Silence(true)
+			seq := m.framesSent
+			sil.Seq = &seq
+			if m.hadSpeech {
+				hold := int(m.quietFor.Milliseconds())
+				sil.SpeechEndMs = &hold
+			}
+			m.hadSpeech = false
+			out.msgs = append(out.msgs, sil)
 			return
 		}
 	}

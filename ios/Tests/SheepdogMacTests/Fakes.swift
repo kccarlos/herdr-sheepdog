@@ -84,7 +84,7 @@ struct Boom: Error {}
 @MainActor
 final class FakeAudio: VoiceAudio {
     var onFrame: ((Data) -> Void)?
-    var onGate: ((Bool) -> Void)?
+    var onGate: ((Bool, Int?) -> Void)?
     var onSpeakingChanged: ((Bool) -> Void)?
     var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
     var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?

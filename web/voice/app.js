@@ -55,6 +55,7 @@ const state = {
   voiceStalled: false,
 
   framesSent: 0,
+  uplinkSeq: 0,
   bytesOut: 0,
   bytesIn: 0,
   framesDropped: 0,
@@ -129,6 +130,14 @@ async function ensureAudio() {
   return ctx;
 }
 
+function monoNow() {
+  return Math.max(0, Math.round(performance.now()));
+}
+
+function rttNow() {
+  return state.pongMs == null ? undefined : Math.max(0, Math.round(state.pongMs));
+}
+
 function onCaptureMessage(m) {
   if (m.type === 'level') {
     state.level = m;
@@ -139,7 +148,17 @@ function onCaptureMessage(m) {
     // frames it affects, exactly like mute.
     state.gate.on = m.on;
     state.gate.transitions++;
-    send({ type: 'silence', on: m.on });
+    const msg = { type: 'silence', on: m.on, mono_ms: monoNow(), rtt_ms: rttNow() };
+    if (m.on) {
+      msg.seq = state.uplinkSeq;
+      if (m.speechEndMs != null) {
+        const hop = (state.ctx && typeof m.audioTime === 'number')
+          ? Math.max(0, Math.round((state.ctx.currentTime - m.audioTime) * 1000))
+          : 0;
+        msg.speech_end_ms = m.speechEndMs + hop;
+      }
+    }
+    send(msg);
     console.log(`[voice] silence gate ${m.on ? 'on' : 'off'} (peak ${Math.round(m.peak)} LSB, frames sent ${state.framesSent})`);
     return;
   }
@@ -152,6 +171,7 @@ function onCaptureMessage(m) {
     return;
   }
   ws.send(m.data);
+  state.uplinkSeq++;
   state.framesSent++;
   state.bytesOut += m.data.byteLength;
 }
@@ -342,7 +362,9 @@ function openWS() {
     // waits for bot-ready — an older daemon never sends one.
     state.handshake = new Handshake();
     state.cardsOn = false;
-    send(clientReady());
+    state.uplinkSeq = 0;
+    state.pongMs = null;
+    send({ ...clientReady(), mono_ms: monoNow() });
     clearTimeout(state.handshakeTimer);
     state.handshakeTimer = setTimeout(() => {
       if (state.ws !== ws || !state.handshake) return;
@@ -351,7 +373,7 @@ function openWS() {
     }, HANDSHAKE_TIMEOUT_MS);
     // Reconnecting clients start unmuted and ungated on the daemon (contract).
     if (state.muted) send({ type: 'mute', on: true });
-    if (state.gate.on) send({ type: 'silence', on: true });
+    if (state.gate.on) send({ type: 'silence', on: true, seq: state.uplinkSeq, mono_ms: monoNow() });
     startPing();
     render();
   };
@@ -427,6 +449,8 @@ function startPing() {
     // stats so web.client.stats can report them (docs/dev/ws-contract.md).
     state.pingOutstanding = send({
       type: 'ping',
+      mono_ms: monoNow(),
+      rtt_ms: rttNow(),
       gated_frames: state.level.gatedFrames || 0,
       peak: Math.round((state.level.peak || 0) * 0x7fff),
       underruns: state.playback.underruns || 0,

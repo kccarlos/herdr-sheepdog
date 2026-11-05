@@ -38,7 +38,7 @@ final class MacAudioEngine: VoiceAudio {
     }
 
     var onFrame: ((Data) -> Void)?
-    var onGate: ((Bool) -> Void)?
+    var onGate: ((Bool, Int?) -> Void)?
     var onSpeakingChanged: ((Bool) -> Void)?
     var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
     var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?
@@ -197,7 +197,7 @@ final class MacAudioEngine: VoiceAudio {
             resetCapture()
             if isGateClosed {
                 isGateClosed = false
-                onGate?(false)
+                onGate?(false, nil)
             }
         } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: false, gateClosed: gate.manual == false) {
             watchdog.arm(at: CFAbsoluteTimeGetCurrent())
@@ -299,7 +299,7 @@ final class MacAudioEngine: VoiceAudio {
             if let transition = out.transition {
                 let closed = transition == .closed
                 isGateClosed = closed
-                onGate?(closed)
+                onGate?(closed, out.speechEndMs)
             }
             for send in out.send {
                 onFrame?(send.pcm16LEData)

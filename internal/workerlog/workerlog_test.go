@@ -26,7 +26,7 @@ func TestLocateClaudeBySlugAndByGlob(t *testing.T) {
 			t.Errorf("cwd %q: Locate = %q, %v; want %q", cwd, got, err, want)
 		}
 	}
-	if got := ClaudeSlug("/Users/kc/Documents/herdr-sheepdog/.claude/worktrees/x"); got != "-Users-kc-Documents-herdr-sheepdog--claude-worktrees-x" {
+	if got := ClaudeSlug("/Users/you/Documents/herdr-sheepdog/.claude/worktrees/x"); got != "-Users-you-Documents-herdr-sheepdog--claude-worktrees-x" {
 		t.Errorf("ClaudeSlug = %q", got)
 	}
 }
