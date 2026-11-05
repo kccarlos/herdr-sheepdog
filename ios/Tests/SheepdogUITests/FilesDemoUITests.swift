@@ -245,11 +245,17 @@ final class FilesDemoUITests: XCTestCase {
     // MARK: From the design: the agent card and the diff's jump
 
     func testTheAgentCardOpensTheBrowser() throws {
-        let app = launch()
+        // Keep the scripted agent from moving between sections while its
+        // card is being opened.
+        let app = launch(extra: ["-sheepdogDemoPaused"])
         showAgentsPane(app)
         let files = app.buttons["flock.agent.claude-auth.files"]
-        if !files.waitForExistence(timeout: 3) { tapWhenTappable(app.buttons["flock.agent.claude-auth.toggle"], "the card") }
-        scrollToVisible(app, files)
+        if !files.exists {
+            let card = app.buttons["flock.agent.claude-auth.toggle"]
+            revealAboveCapsule(app, card)
+            tapWhenTappable(card, "the card")
+        }
+        revealAboveCapsule(app, files)
         sleep(1)
         shot("entry-card")
         tapWhenTappable(files, "Browse files")
