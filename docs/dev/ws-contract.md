@@ -1814,10 +1814,11 @@ way to answer (the user answers through the existing approval card,
 ## Phone notifications
 
 Not part of `/ws`: the iOS app registers its APNs device token over
-`POST /api/push/register` and the daemon sends system notifications for
-events that need the user, whether or not a `/ws` client is attached.
-The contract (routes, payload, when an alert is sent) is in
-[`push.md`](push.md).
+`POST /api/push/register` and `/voice` on Android, Linux and desktop
+browsers registers a Web Push subscription over `POST /api/push/web`, so
+the daemon sends system notifications for events that need the user
+whether or not a `/ws` client is attached. The contract (routes, payload,
+when an alert is sent) is in [`push.md`](push.md).
 
 ### Desktop notifications
 

@@ -72,6 +72,26 @@ input[type=file] { max-width: 100%; }
 .transcript .line.partial .text { opacity: .7; }
 .transcript .text { overflow-wrap: anywhere; }
 
+/* Open approval / question cards (/api/state → POST /api/pending/answer). */
+.approvals { display: flex; flex-direction: column; gap: .6rem; }
+.approval-card { display: flex; flex-direction: column; gap: .45rem; }
+.approval-card.primary { border: 2px solid var(--blocked); }
+.approval-card.answered { border-color: var(--done); }
+.approval-head { display: flex; align-items: center; gap: .45rem; font-size: .95rem; }
+.approval-summary { margin: 0; overflow-wrap: anywhere; }
+.approval-cmd { background: var(--code); border-radius: 4px; padding: .45rem .6rem; margin: 0; overflow-x: auto; font-size: .85em; line-height: 1.35; }
+.approval-cmd code { background: none; padding: 0; white-space: pre; }
+.approval-options { display: flex; flex-direction: column; gap: .4rem; }
+.approval-opt { display: flex; align-items: center; justify-content: space-between; gap: .6rem; width: 100%; text-align: left; padding: .5rem .7rem; background: var(--card); border: 1px solid var(--btn-line); border-radius: var(--radius-sm); }
+.approval-opt:hover:not(:disabled) { background: var(--code); border-color: var(--primary); }
+.approval-opt.sending { border-color: var(--blocked); opacity: .85; }
+.approval-opt-main { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.approval-opt-desc { display: block; overflow-wrap: anywhere; }
+.approval-rec { display: inline-block; margin-left: .35rem; padding: .05rem .45rem; border-radius: var(--radius-pill); font-size: .8em; font-weight: 600; background: color-mix(in srgb, var(--blocked) 10%, var(--card)); color: var(--blocked-text); }
+.approval-outcome { margin: 0; font-weight: 600; color: var(--done); }
+.approval-error { margin: .2rem 0 0; }
+#reload-banner button { flex: none; background: var(--card); }
+
 /* Cards (the orchestrator's show tool): a dialog with the card, and a row in the transcript that opens it again. */
 .transcript .card-open { background: none; border: none; padding: 0; color: var(--primary-text); text-align: left; text-decoration: underline; text-underline-offset: 2px; }
 .card-dialog { width: min(40rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); padding: 0; }

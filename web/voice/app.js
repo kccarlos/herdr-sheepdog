@@ -8,6 +8,11 @@ import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
 import { parsePairing, isAppleMobile, appLink, enroll, signIn, keyStore, MSG } from './pairing.js';
+import { createWakeController } from './wake.js';
+import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle, approvalDigitOption } from './approvals.js';
+import { createBuildReloader, takeReloadDraft } from './reload.js';
+import { pushSupport, enableWebPush, disableWebPush, syncExistingWebPush } from './push.js';
+import { applyUpdateBanner } from '/static/update-banner.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -35,6 +40,7 @@ const state = {
 
   ws: null,
   wsState: 'idle', // idle | connecting | open | closed
+  connectStartedAt: 0,
   userDisconnected: true,
   reconnectDelay: RECONNECT_MIN_MS,
   reconnectTimer: 0,
@@ -46,6 +52,14 @@ const state = {
   // The /ws protocol handshake of the current connection (handshake.js).
   handshake: null,
   handshakeTimer: 0,
+
+  appState: null,
+  daemonId: '',
+  eventsSource: null,
+  eventsRetryTimer: 0,
+  lastTypedAt: 0,
+  pushEnabled: false,
+  pushBusy: false,
 
   muted: false,
   daemonMuted: false,
@@ -331,9 +345,12 @@ function openWS() {
   ws.binaryType = 'arraybuffer';
   state.ws = ws;
   state.wsState = 'connecting';
+  state.connectStartedAt = performance.now();
+  let opened = false;
   render();
   ws.onopen = () => {
     if (state.ws !== ws) return;
+    opened = true;
     state.wsState = 'open';
     state.reconnectDelay = RECONNECT_MIN_MS;
     // client-ready goes first, before anything else on the connection
@@ -369,6 +386,7 @@ function openWS() {
     state.ws = null;
     state.wsState = 'closed';
     stopPing();
+    wakeController.reset();
     clearTimeout(state.handshakeTimer);
     console.log(`[voice] ws closed code=${e.code} reason=${JSON.stringify(e.reason)}`);
     if (state.handshake && (state.handshake.state === 'rejected' || state.handshake.state === 'daemon_old')) {
@@ -384,7 +402,18 @@ function openWS() {
       showError('Another client took over the voice session. Press Connect to take it back.');
       return;
     }
-    if (!state.userDisconnected) scheduleReconnect();
+    if (!state.userDisconnected) {
+      if (!opened) {
+        // An upgrade refused before onopen may be a 401 after a daemon restart
+        // invalidated in-memory session cookies: renew once before backing off.
+        reSignIn().finally(() => {
+          if (!state.userDisconnected && !state.ws && !state.reconnectTimer) scheduleReconnect();
+        });
+        render();
+        return;
+      }
+      scheduleReconnect();
+    }
     render();
   };
   ws.onerror = () => { /* onclose follows */ };
@@ -395,10 +424,34 @@ function scheduleReconnect() {
   state.reconnectDelay = Math.min(state.reconnectDelay * 2, RECONNECT_MAX_MS);
   console.log(`[voice] reconnecting in ${delay} ms`);
   state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = 0;
     if (state.userDisconnected) return;
     state.reconnects++;
     openWS();
   }, delay);
+}
+
+function dropAndReconnect(sock) {
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = 0;
+  stopPing();
+  clearTimeout(state.handshakeTimer);
+  if (state.ws === sock) state.ws = null;
+  try { sock.close(4000, 'wake timeout'); } catch (_) { /* ignore */ }
+  if (state.userDisconnected) return;
+  console.log('[voice] wake probe timed out; reconnecting immediately');
+  state.reconnectDelay = RECONNECT_MIN_MS;
+  state.reconnects++;
+  openWS();
+}
+
+function reconnectNow() {
+  if (state.userDisconnected) return;
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = 0;
+  state.reconnectDelay = RECONNECT_MIN_MS;
+  state.reconnects++;
+  openWS();
 }
 
 function send(m) {
@@ -406,6 +459,26 @@ function send(m) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(m));
   return true;
+}
+
+function sendPingPacket() {
+  state.pingSentAt = performance.now();
+  // The ping carries the gate counters and the jitter buffer's playback
+  // stats so web.client.stats can report them (docs/dev/ws-contract.md).
+  state.pingOutstanding = send({
+    type: 'ping',
+    gated_frames: state.level.gatedFrames || 0,
+    peak: Math.round((state.level.peak || 0) * 0x7fff),
+    underruns: state.playback.underruns || 0,
+    drains: state.playback.drains || 0,
+    buffer_ms: state.playback.bufferedMs || 0,
+    rate: state.playback.rate || 1,
+    stretched_ms: state.playback.stretchedMs || 0,
+    // A context that is not running plays nothing and its worklet stops
+    // reporting: the counters above are then its last values.
+    audio_state: state.ctx ? state.ctx.state : undefined,
+    aec: state.aec,
+  });
 }
 
 function startPing() {
@@ -421,23 +494,7 @@ function startPing() {
       }
       return;
     }
-    state.pingSentAt = performance.now();
-    // The ping carries the gate counters and the jitter buffer's playback
-    // stats so web.client.stats can report them (docs/dev/ws-contract.md).
-    state.pingOutstanding = send({
-      type: 'ping',
-      gated_frames: state.level.gatedFrames || 0,
-      peak: Math.round((state.level.peak || 0) * 0x7fff),
-      underruns: state.playback.underruns || 0,
-      drains: state.playback.drains || 0,
-      buffer_ms: state.playback.bufferedMs || 0,
-      rate: state.playback.rate || 1,
-      stretched_ms: state.playback.stretchedMs || 0,
-      // A context that is not running plays nothing and its worklet stops
-      // reporting: the counters above are then its last values.
-      audio_state: state.ctx ? state.ctx.state : undefined,
-      aec: state.aec,
-    });
+    sendPingPacket();
   }, PING_EVERY_MS);
 }
 
@@ -446,6 +503,21 @@ function stopPing() {
   state.pingTimer = 0;
   state.pingOutstanding = false;
 }
+
+const wakeController = createWakeController({
+  getState: () => ({
+    hidden: document.hidden,
+    userDisconnected: state.userDisconnected,
+    wsState: state.wsState,
+    ws: state.ws,
+    connectStartedAt: state.connectStartedAt,
+    hasReconnectTimer: Boolean(state.reconnectTimer),
+  }),
+  sendPing: sendPingPacket,
+  dropAndReconnect,
+  reconnectNow,
+  onWake: () => { refreshAppState(); },
+});
 
 function onControl(m) {
   if (state.handshake) {
@@ -460,10 +532,13 @@ function onControl(m) {
       return;
     }
     if (r.consumed) {
-      if (state.handshake.state === 'ready' && cardsEnabled(state.handshake.features)) {
-        // Each connection starts "not visible" on the daemon: say so now.
-        state.cardsOn = true;
-        send(visibilityMessage(document.hidden));
+      if (state.handshake.state === 'ready') {
+        if (state.handshake.daemonVersion) buildReloader.noteVersion(state.handshake.daemonVersion);
+        if (cardsEnabled(state.handshake.features)) {
+          // Each connection starts "not visible" on the daemon: say so now.
+          state.cardsOn = true;
+          send(visibilityMessage(document.hidden));
+        }
       }
       render();
       return;
@@ -503,6 +578,7 @@ function onControl(m) {
     case 'pong':
       state.pongMs = performance.now() - state.pingSentAt;
       state.pingOutstanding = false;
+      wakeController.onPong();
       break;
     default:
       break;
@@ -560,6 +636,7 @@ function disconnect() {
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = 0;
   stopPing();
+  wakeController.reset();
   if (state.ws) {
     const ws = state.ws;
     state.ws = null;
@@ -571,6 +648,7 @@ function disconnect() {
   if (state.ctx && state.ctx.state === 'running') state.ctx.suspend().catch(() => {});
   state.voice = '…';
   render();
+  buildReloader.check();
 }
 
 function setMuted(on) {
@@ -612,7 +690,7 @@ async function resetConversation() {
   btn.disabled = true;
   result.textContent = '…';
   try {
-    const r = await fetch('/api/conversation/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ via: 'voice_page' }) });
+    const r = await authedFetch('/api/conversation/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ via: 'voice_page' }) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `${r.status}`);
     result.textContent = `reset ${data.reset_id} at ${data.at}`;
@@ -632,6 +710,7 @@ function sendText() {
     return;
   }
   input.value = '';
+  state.lastTypedAt = 0;
   // The voice session does not transcribe typed input; show it ourselves.
   closeTranscript('out');
   state.transcript.push({ dir: 'in', text, final: true, local: true });
@@ -799,6 +878,65 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------------------------------------------------------------- auth
 
+function authDeps() {
+  return {
+    fetch: (u, o) => fetch(u, o),
+    subtle: crypto.subtle,
+    ua: navigator.userAgent,
+    touch: navigator.maxTouchPoints,
+    now: Date.now,
+    ...keyStore(indexedDB),
+  };
+}
+
+function showAuthGate(title, text) {
+  $('auth-title').textContent = title;
+  $('auth-text').textContent = text;
+  $('auth-gate').classList.remove('hidden');
+  $('app-main').classList.add('hidden');
+  return false;
+}
+
+let signInPromise = null;
+
+// reSignIn renews an expired or post-restart sheepdog_session cookie using the
+// paired key in IndexedDB, deduplicating concurrent 401 callers.
+function reSignIn() {
+  if (signInPromise) return signInPromise;
+  signInPromise = (async () => {
+    try {
+      let id = state.daemonId;
+      if (!id) {
+        const hello = await fetch('/api/hello', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({}));
+        id = (hello.computer && hello.computer.id) || '';
+        if (id) state.daemonId = id;
+      }
+      if (!id) return false;
+      const s = await signIn(id, authDeps()).catch(() => ({ ok: false }));
+      if (s.ok) return true;
+      if (s.reason === 'device_revoked' || s.reason === 'unknown_device') {
+        disconnect();
+        if (state.eventsSource) {
+          state.eventsSource.close();
+          state.eventsSource = null;
+        }
+        showAuthGate('Scan the pairing code again', MSG.revoked);
+      }
+      return false;
+    } finally {
+      signInPromise = null;
+    }
+  })();
+  return signInPromise;
+}
+
+async function authedFetch(url, init = {}) {
+  let res = await fetch(url, init);
+  if (res.status !== 401) return res;
+  if (!(await reSignIn())) return res;
+  return fetch(url, init);
+}
+
 // authGate makes sure this browser may use the daemon before anything
 // else runs (docs/dev/design/security.md "Browser or Android phone"). On
 // this computer (loopback) nothing is needed. A pairing link (the QR's
@@ -808,14 +946,8 @@ document.addEventListener('visibilitychange', () => {
 // asks the user to scan the pairing code. Returns false while the gate is
 // up.
 async function authGate() {
-  const deps = { fetch: (u, o) => fetch(u, o), subtle: crypto.subtle, ua: navigator.userAgent, touch: navigator.maxTouchPoints, now: Date.now, ...keyStore(indexedDB) };
-  const gate = (title, text) => {
-    $('auth-title').textContent = title;
-    $('auth-text').textContent = text;
-    $('auth-gate').classList.remove('hidden');
-    $('app-main').classList.add('hidden');
-    return false;
-  };
+  const deps = authDeps();
+  const gate = showAuthGate;
   const pairing = parsePairing(location.hash);
   if (pairing) {
     const hash = location.hash;
@@ -837,10 +969,15 @@ async function authGate() {
   } catch (_) {
     return true; // offline: let the rest of the page surface the error
   }
-  if (res.status !== 401) return true;
+  if (res.status !== 401) {
+    const data = await res.json().catch(() => null);
+    if (data) applyStateSnapshot(data);
+    return true;
+  }
   const hello = await fetch('/api/hello').then((r) => r.json()).catch(() => ({}));
   const id = hello.computer && hello.computer.id;
   if (id) {
+    state.daemonId = id;
     const s = await signIn(id, deps).catch(() => ({ ok: false }));
     if (s.ok) return true;
     if (s.reason === 'device_revoked' || s.reason === 'unknown_device') return gate('Scan the pairing code again', MSG.revoked);
@@ -857,6 +994,221 @@ async function pairHere(pairing, deps, gate) {
   if (!s.ok) return gate('Could not sign in', 'Paired, but the computer refused the sign-in. Reload the page to try again.');
   location.reload();
   return false;
+}
+
+// ---------------------------------------------------------------- approvals, state & reload
+
+const approvals = createApprovals({
+  postAnswer: async (id, option, idempotencyKey) => {
+    const r = await authedFetch('/api/pending/answer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify({ id, option }),
+    });
+    const body = await r.json().catch(() => ({}));
+    return { status: r.status, body };
+  },
+  refresh: () => refreshAppState(),
+  onChange: () => {
+    renderApprovals();
+    buildReloader.check();
+  },
+});
+
+const buildReloader = createBuildReloader({
+  getIdleState: () => ({
+    userDisconnected: state.userDisconnected,
+    approvalsBusy: approvals.busy(),
+    sinceTypedMs: state.lastTypedAt ? Date.now() - state.lastTypedAt : Infinity,
+    dialogOpen: Boolean($('card-dialog') && $('card-dialog').open),
+  }),
+  getDraft: () => ($('text-input') ? $('text-input').value : ''),
+  storage: typeof sessionStorage !== 'undefined' ? sessionStorage : null,
+  reload: () => location.reload(),
+  onPendingChange: () => renderReloadBanner(),
+});
+
+function renderReloadBanner() {
+  const pending = buildReloader.pending();
+  const banner = $('reload-banner');
+  if (!banner) return;
+  if (!pending) {
+    banner.classList.add('hidden');
+    return;
+  }
+  $('reload-text').textContent = `sheepdog restarted onto ${pending}; this page will reload when you disconnect.`;
+  banner.classList.remove('hidden');
+}
+
+function renderApprovals() {
+  const box = $('approvals');
+  if (!box) return;
+  const cards = approvals.cards(state.appState);
+  const waiting = openQuestions(state.appState).length;
+  document.title = pageTitle(waiting);
+  const html = renderApprovalCardsHTML(cards, approvals.busy());
+  if (box.dataset.key !== html) {
+    box.dataset.key = html;
+    box.innerHTML = html; // approvals.js escapes all fields
+  }
+  box.classList.toggle('hidden', cards.length === 0);
+}
+
+function applyStateSnapshot(data) {
+  if (!data || typeof data !== 'object') return;
+  state.appState = data;
+  applyUpdateBanner(document, data.update);
+  if (data.version) buildReloader.noteVersion(data.version);
+  renderApprovals();
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: 'sync-open-questions',
+      openIds: openQuestions(data).map((q) => q.id),
+    });
+  }
+}
+
+let refreshInFlight = null;
+
+function refreshAppState() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const r = await authedFetch('/api/state', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json().catch(() => null);
+      if (data) applyStateSnapshot(data);
+    } catch (_) {
+      /* offline: next wake or SSE reconnect retries */
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+function openEventsStream() {
+  clearTimeout(state.eventsRetryTimer);
+  state.eventsRetryTimer = 0;
+  if (state.eventsSource) {
+    state.eventsSource.close();
+    state.eventsSource = null;
+  }
+  if (typeof EventSource === 'undefined') return;
+  const es = new EventSource('/events?kinds=pending,daemon');
+  state.eventsSource = es;
+  es.addEventListener('open', () => { refreshAppState(); });
+  es.addEventListener('log', () => { refreshAppState(); });
+  es.onerror = () => {
+    if (state.eventsSource !== es) return;
+    if (es.readyState === EventSource.CLOSED) {
+      // EventSource gives up permanently on HTTP 401 (e.g. daemon restart
+      // cleared session cookies): renew the session and reopen the stream.
+      es.close();
+      state.eventsSource = null;
+      reSignIn().finally(() => {
+        if ($('app-main').classList.contains('hidden')) return;
+        state.eventsRetryTimer = setTimeout(openEventsStream, 2000);
+      });
+    }
+  };
+}
+
+// ---------------------------------------------------------------- web push
+
+function pushDeps() {
+  return {
+    fetch: (u, o) => authedFetch(u, o),
+    swContainer: navigator.serviceWorker,
+    Notification: window.Notification,
+    ua: navigator.userAgent,
+    touchPoints: navigator.maxTouchPoints || 0,
+  };
+}
+
+function renderPushRow(statusMsg = '') {
+  const btn = $('btn-push');
+  const status = $('push-status');
+  if (!btn || !status) return;
+  btn.disabled = state.pushBusy;
+  btn.textContent = state.pushEnabled ? 'Disable notifications' : 'Enable notifications';
+  status.textContent = statusMsg || (state.pushEnabled ? 'Browser notifications on' : '');
+}
+
+async function initWebPush() {
+  const row = $('push-row');
+  if (!row) return;
+  const sup = pushSupport({
+    isSecureContext: Boolean(window.isSecureContext),
+    hasSW: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
+    hasPushManager: typeof window !== 'undefined' && 'PushManager' in window,
+    hasNotification: typeof window !== 'undefined' && 'Notification' in window,
+    ua: navigator.userAgent,
+    touchPoints: navigator.maxTouchPoints || 0,
+  });
+  if (!sup.supported) {
+    if (sup.reason === 'insecure_context' && sup.message) {
+      row.classList.remove('hidden');
+      $('btn-push').disabled = true;
+      $('push-status').textContent = sup.message;
+    }
+    return;
+  }
+
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && (e.data.type === 'push-event' || e.data.type === 'pending-answered')) {
+      refreshAppState();
+    }
+  });
+
+  try {
+    const stRes = await authedFetch('/api/push/status', { cache: 'no-store' });
+    const st = await stRes.json().catch(() => ({}));
+    if (stRes.ok && st.web_push_enabled === false) {
+      row.classList.remove('hidden');
+      $('btn-push').disabled = true;
+      $('push-status').textContent = 'Notifications are off on the computer (push.mode = off).';
+      return;
+    }
+  } catch (_) {
+    /* keep button available for retry */
+  }
+
+  row.classList.remove('hidden');
+  const existing = await syncExistingWebPush(pushDeps());
+  state.pushEnabled = Boolean(existing && existing.active);
+  renderPushRow();
+}
+
+async function toggleWebPush() {
+  if (state.pushBusy) return;
+  state.pushBusy = true;
+  renderPushRow(state.pushEnabled ? 'Disabling…' : 'Enabling…');
+  try {
+    if (state.pushEnabled) {
+      const r = await disableWebPush(pushDeps());
+      if (!r.ok) {
+        renderPushRow(r.message);
+        return;
+      }
+      state.pushEnabled = false;
+      renderPushRow('Browser notifications off');
+    } else {
+      const r = await enableWebPush(pushDeps());
+      if (!r.ok) {
+        renderPushRow(r.message);
+        return;
+      }
+      state.pushEnabled = true;
+      renderPushRow('Browser notifications on');
+    }
+  } finally {
+    state.pushBusy = false;
+    $('btn-push').disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------- wiring
@@ -894,11 +1246,27 @@ async function init() {
     loadBundledFixture(true).catch(() => {});
   }
 
+  const restoredDraft = takeReloadDraft(typeof sessionStorage !== 'undefined' ? sessionStorage : null);
+  if (restoredDraft) $('text-input').value = restoredDraft;
+
   $('btn-connect').addEventListener('click', () => (state.userDisconnected ? connect() : disconnect()));
   $('btn-mute').addEventListener('click', () => setMuted(!state.muted));
   $('btn-stop').addEventListener('click', stop);
   $('btn-new-conversation').addEventListener('click', resetConversation);
+  $('btn-push').addEventListener('click', toggleWebPush);
+  $('btn-reload-now').addEventListener('click', () => buildReloader.reloadNow());
+  $('card-dialog').addEventListener('close', () => buildReloader.check());
+  $('approvals').addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('button[data-pending-id]');
+    if (!btn || btn.disabled) return;
+    const id = btn.dataset.pendingId;
+    const optIdx = Number(btn.dataset.optionIndex);
+    const card = approvals.cards(state.appState).find((c) => c.pending && c.pending.id === id);
+    const opt = card && card.pending && (card.pending.options || []).find((o) => o.index === optIdx);
+    if (card && opt) approvals.answer(card.pending, opt);
+  });
   $('btn-text').addEventListener('click', sendText);
+  $('text-input').addEventListener('input', () => { state.lastTypedAt = Date.now(); });
   $('text-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -948,6 +1316,18 @@ async function init() {
       if (!$('btn-stop').disabled) stop();
       return;
     }
+    const pick = approvalDigitOption(approvals.cards(state.appState), e.key, {
+      inField,
+      metaKey: e.metaKey,
+      ctrlKey: e.ctrlKey,
+      altKey: e.altKey,
+      dialogOpen: $('card-dialog').open,
+    });
+    if (pick) {
+      e.preventDefault();
+      approvals.answer(pick.question, pick.option);
+      return;
+    }
     if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === ' ') {
       e.preventDefault();
@@ -957,16 +1337,33 @@ async function init() {
     }
   });
 
-  // Tab hidden / phone locked: keep the socket; if the browser suspended
-  // the context, resume it when we are visible again or on the next gesture.
+  // Tab hidden / phone locked: keep the socket; when visible again or back
+  // online, resume a suspended AudioContext and run the 1.5 s wake probe.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') resumeIfSuspended();
+    if (document.visibilityState === 'visible') {
+      resumeIfSuspended();
+      wakeController.wake();
+    }
   });
-  window.addEventListener('pageshow', resumeIfSuspended);
+  window.addEventListener('pageshow', () => {
+    resumeIfSuspended();
+    wakeController.wake();
+  });
+  window.addEventListener('online', () => {
+    wakeController.wake();
+  });
   window.addEventListener('pagehide', () => { /* nothing: the daemon keeps the session (D2) */ });
   document.addEventListener('pointerdown', resumeIfSuspended, { capture: true });
 
-  setInterval(render, 100);
+  refreshAppState();
+  openEventsStream();
+  initWebPush();
+
+  setInterval(() => {
+    render();
+    approvals.prune(state.appState);
+    buildReloader.check();
+  }, 100);
   render();
 
   // Debug handle (console only): inspect state, inject 24 kHz PCM16 into

@@ -107,7 +107,7 @@ export function cardBodyHTML(card) {
       let h = `<p>${esc(card.question || '')}</p>`;
       if (card.command) h += `<pre class="code"><code>${esc(card.command)}</code></pre>`;
       if (card.options && card.options.length) h += '<p class="muted small">Options: ' + card.options.map((o) => esc(o.label)).join(' · ') + '</p>';
-      return h + '<p class="muted small">Answer it by voice, or in the app.</p>';
+      return h + '<p class="muted small">Answer it in the question card on this page, or by voice.</p>';
     }
     case 'agent':
       return `<p>${name}'s live window: open it in the Sheepdog app or in herdr.</p>`;

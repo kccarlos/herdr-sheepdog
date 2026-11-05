@@ -22,9 +22,14 @@ func TestVoicePageFilesAndContentTypes(t *testing.T) {
 		path, ctype, contains string
 	}{
 		{"/voice", "text/html", `<script type="module" src="/voice/app.js">`},
-		{"/voice/", "text/html", `id="btn-connect"`},
-		{"/voice/index.html", "text/html", "sheepdog voice"},
+		{"/voice/", "text/html", `id="approvals"`},
+		{"/voice/index.html", "text/html", `id="reload-banner"`},
 		{"/voice/app.js", "text/javascript", "registerProcessor"},
+		{"/voice/wake.js", "text/javascript", "createWakeController"},
+		{"/voice/approvals.js", "text/javascript", "createApprovals"},
+		{"/voice/reload.js", "text/javascript", "createBuildReloader"},
+		{"/voice/push.js", "text/javascript", "enableWebPush"},
+		{"/voice/sw.js", "text/javascript", "addEventListener('push'"},
 		{"/voice/audio-util.js", "text/javascript", "export class Player"},
 		{"/voice/audio-capture.worklet.js", "text/javascript", "registerProcessor('sheepdog-capture'"},
 		{"/voice/audio-playback.worklet.js", "text/javascript", "registerProcessor('sheepdog-playback'"},
@@ -52,7 +57,19 @@ func TestVoicePageFilesAndContentTypes(t *testing.T) {
 			if strings.Contains(string(body), tc.contains) {
 				t.Errorf("app.js registers a processor: worklet code leaked into the page script")
 			}
-			for _, want := range []string{"audio-capture.worklet.js", "audio-playback.worklet.js", `type: 'cancel'`, `type: 'mute'`, `type: 'ping'`} {
+			for _, want := range []string{
+				"audio-capture.worklet.js",
+				"audio-playback.worklet.js",
+				`type: 'cancel'`,
+				`type: 'mute'`,
+				`type: 'ping'`,
+				"./wake.js",
+				"./approvals.js",
+				"./reload.js",
+				"./push.js",
+				"/api/pending/answer",
+				"/events?kinds=pending,daemon",
+			} {
 				if !strings.Contains(string(body), want) {
 					t.Errorf("app.js does not contain %q", want)
 				}
