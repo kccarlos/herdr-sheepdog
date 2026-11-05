@@ -99,6 +99,9 @@ type JournalEntry struct {
 	FilesTouched []string `json:"files_touched,omitempty"`
 	// Tools counts its tool calls by name.
 	Tools map[string]int `json:"tools,omitempty"`
+	// Error is non-empty when the turn stopped on an API, quota,
+	// rate-limit, auth, connection or abort condition ("stopped because …").
+	Error string `json:"error,omitempty"`
 }
 
 // MaxJournal is how many journal entries each agent keeps (the oldest
@@ -133,6 +136,9 @@ type Result struct {
 	// one: what the finish related to and what was still open (for
 	// recall and the ledger).
 	Detail string `json:"detail,omitempty"`
+	// StopReason is non-empty when the turn stopped on an error or abort
+	// ("stopped because …") rather than finishing work cleanly.
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 // Promise is promised work (docs/dev/roles.md "Promises"): the user asked to

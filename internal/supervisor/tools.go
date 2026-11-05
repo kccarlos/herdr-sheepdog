@@ -177,6 +177,10 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	}
 	ps := s.paneSend(row.PaneID)
 	ps.Lock()
+	if err := s.checkTypedInput(ctx, row.PaneID); err != nil {
+		ps.Unlock()
+		return voice.ToolResult{Spoken: "The terminal may have text being typed. Finish or clear it before sending; nothing was sent.", Scheduling: voice.UrgencyInterrupt}, err
+	}
 
 	// The row records the instruction before the RPC, as sendInterrupt
 	// marks before its own: a transition the send causes can be handled
@@ -185,7 +189,7 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
-	task, now := withoutSignOff(text), s.cfg.Now()
+	task, now := s.cfg.Redactor.String(withoutSignOff(text)), s.cfg.Now()
 	prev, hadRow := s.store.Get(row.PaneID)
 	if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = task, &now }); uerr != nil {
 		s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
@@ -194,7 +198,7 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	sctx, flight := s.beginSendLocked(ctx, row.PaneID)
 	s.mu.Unlock()
 
-	_, err := s.herdr.Prompt(sctx, row.PaneID, text)
+	err := s.prompt(sctx, row, text)
 
 	s.mu.Lock()
 	// A turn cancelled by the stop (ctx done) aborted its Prompt before
@@ -319,7 +323,7 @@ func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.T
 		fact += ", " + fmt.Sprintf("%q", q)
 	}
 	fact += ", with the options " + strings.Join(labels, ", ") + "; nothing was typed."
-	stale := declined && sameQuestion(prompt.Phrase(), mark.question)
+	stale := declined && sameQuestion(s.cfg.Redactor.String(prompt.Phrase()), mark.question)
 	if stale {
 		fact += fmt.Sprintf(" It is the menu the user declined %d s ago, still on screen after the decline was sent: it may be a stale picture that has not redrawn, and herdr reports %s %s, not blocked.", int(since.Seconds()), alias, row.State)
 	}
@@ -402,7 +406,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 // the user says before that can answer it.
 func (s *Supervisor) pendingFromPrompt(ctx context.Context, row state.Agent, prompt herdr.Prompt) voice.ToolResult {
 	alias := aliasOr(state.Say(row))
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
 	muted := s.paneMuted(ctx, row.PaneID) // outside s.mu: it may read herdr
 	s.mu.Lock()
 	// Only from now: the words that led to this call came before it and

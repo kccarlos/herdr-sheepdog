@@ -7,6 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // HandleTransition folds one debounced herdr transition into the state
@@ -148,14 +149,18 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// agent running an instruction the user gave this run?
 		instructed := s.runningShepherdTask(row)
 		finish := from == herdr.StateWorking || s.finishedAfterApproval(prev, from)
+		var stopErr *workerlog.TurnError
 		if from != herdr.StateDone && from != "" {
 			// The journal entry comes before the announce turn (onDone),
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
 			// seen at rest has no news (its transcript is history).
-			s.recordJournal(row, string(t.To), finish)
+			stopErr = s.recordJournal(row, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
+		if r, ok := s.store.Get(t.PaneID); ok {
+			row = r
+		}
 		// working -> done and working -> idle are both a finish: herdr
 		// reports done when the user was not looking at the pane and
 		// idle when it was focused when the agent finished
@@ -170,7 +175,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 				// promise to tell when it is done stays open.
 				s.log.Log(logSource, "supervisor.finished_suppressed", t.PaneID, map[string]any{"reason": "interrupted"})
 			} else {
-				s.onDone(ctx, row, instructed)
+				s.onDone(ctx, row, instructed, stopErr)
 			}
 			return
 		}
@@ -278,9 +283,16 @@ func (s *Supervisor) finishTask(paneID string) {
 // (Claude Code's "teach auto mode about your environment?"): the finish
 // is announced — what it found — together with the question, in one line
 // (announceFinishAsking).
-func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed bool) {
+func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed bool, stopErr *workerlog.TurnError) {
 	alias := aliasOr(state.Say(row))
 	kind := s.doneKind(row)
+	sentence := alias + " finished."
+	var stopReason, stopDetail string
+	if stopErr != nil {
+		stopReason = stopErr.Summary()
+		stopDetail = stopErr.Message
+		sentence = stopErr.Sentence(alias)
+	}
 	// herdr reports the finish as idle rather than done when the user
 	// had the pane focused (herdr/src/pane/state.rs's "seen" bit): an
 	// "idle" promise is kept by this finish too, alongside "done".
@@ -288,12 +300,12 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
-		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: alias + " finished."})
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: sentence, stopReason: stopReason, stopDetail: stopDetail})
 		return
 	}
 	if herdr.EndsInQuestion(read.Text) {
 		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
-			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed)
+			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed, stopErr)
 			return
 		}
 		s.log.Log(logSource, "supervisor.done_question", row.PaneID, map[string]any{"alias": alias})
@@ -301,7 +313,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 		s.announceBlock(ctx, row, read.Text)
 		return
 	}
-	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: alias + " finished.", screen: read.Text})
+	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: sentence, screen: read.Text, stopReason: stopReason, stopDetail: stopDetail})
 }
 
 // kindAgy is herdr's agent kind label for the Antigravity CLI, which
@@ -315,22 +327,29 @@ const kindAgy = "agy"
 // are kept by it) and the question. The code sentence is "<alias>
 // finished, and it's asking <question>."; a question is heard at every
 // level.
-func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool) {
+func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool, stopErr *workerlog.TurnError) {
 	alias := aliasOr(state.Say(row))
 	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
 	s.touch(row.PaneID)
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
 	s.setPendingMuted(p, muted)
 	s.mu.Unlock()
-	sentence := alias + " finished, and it's asking " + prompt.Phrase() + "."
+	verb := "finished"
+	var stopReason, stopDetail string
+	if stopErr != nil {
+		verb = stopErr.Summary()
+		stopReason = verb
+		stopDetail = stopErr.Message
+	}
+	sentence := alias + " " + verb + ", and it's asking " + prompt.Phrase() + "."
 	if prompt.Phrase() == "" {
-		sentence = alias + " finished, and it's waiting at a prompt."
+		sentence = alias + " " + verb + ", and it's waiting at a prompt."
 	}
 	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventDone, alsoIdle: alsoIdle, alsoBlocked: true, owed: instructed,
-		sentence: sentence, asking: prompt.Phrase(), screen: screen, pending: p.ID})
+		sentence: sentence, asking: prompt.Phrase(), screen: screen, pending: p.ID, stopReason: stopReason, stopDetail: stopDetail})
 }
 
 // runningShepherdTask reports whether row's current task is an
@@ -346,10 +365,10 @@ const doneResult = "finished"
 
 // recordResult stores what was announced about the finish as the row's
 // last_result.
-func (s *Supervisor) recordResult(paneID, spoken string) {
+func (s *Supervisor) recordResult(paneID, spoken, stopReason string) {
 	now := s.cfg.Now()
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
-		a.LastResult = &state.Result{Spoken: spoken, At: now}
+		a.LastResult = &state.Result{Spoken: s.cfg.Redactor.String(spoken), At: now, StopReason: s.cfg.Redactor.String(stopReason)}
 	})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
@@ -395,7 +414,7 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen})
 		return
 	}
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)

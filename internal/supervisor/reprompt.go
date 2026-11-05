@@ -113,7 +113,7 @@ func (s *Supervisor) pollReprompt(paneID string) {
 		if !ok {
 			continue
 		}
-		sig := promptSignature(prompt)
+		sig := s.promptSignature(prompt)
 		prev, claimed := s.claimPrompt(paneID, sig)
 		if !claimed {
 			sawSamePrompt = true
@@ -172,7 +172,7 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		sig := promptSignature(prompt)
+		sig := s.promptSignature(prompt)
 		prev, claimed := s.claimPrompt(row.PaneID, sig)
 		if !claimed {
 			continue
@@ -210,7 +210,7 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 		gone()
 		return
 	}
-	sig := promptSignature(prompt)
+	sig := s.promptSignature(prompt)
 	if sig == pendingSignature(p) {
 		return
 	}
@@ -242,14 +242,14 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		return
 	}
 	prompt, ok := herdr.ParsePrompt(read.Text)
-	muted := ok && row.State == herdr.StateBlocked && promptSignature(prompt) != pendingSignature(q) && s.paneMuted(ctx, row.PaneID)
+	muted := ok && row.State == herdr.StateBlocked && s.promptSignature(prompt) != pendingSignature(q) && s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cur, has := s.store.Question(q.ID); !has || cur.PaneID != q.PaneID {
 		return
 	}
 	switch {
-	case ok && promptSignature(prompt) == pendingSignature(q):
+	case ok && s.promptSignature(prompt) == pendingSignature(q):
 		return
 	case !ok || row.State != herdr.StateBlocked:
 		s.dropQuestionLocked(q)
@@ -272,7 +272,7 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 			if a.LastBlock == nil {
 				a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
 			}
-			a.LastBlock.Question = prompt.Phrase()
+			a.LastBlock.Question = p.Question
 			a.LastBlock.Answered = false
 		}); err != nil {
 			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": err.Error()})
@@ -304,7 +304,7 @@ func (s *Supervisor) stillAsking(ctx context.Context, p state.PendingAction) (as
 		return false, false
 	}
 	prompt, parsed := herdr.ParsePrompt(read.Text)
-	return parsed && promptSignature(prompt) == pendingSignature(p), true
+	return parsed && s.promptSignature(prompt) == pendingSignature(p), true
 }
 
 // claimPrompt atomically compares sig against s.lastPrompt[paneID] and,
@@ -361,11 +361,11 @@ func (s *Supervisor) raiseReprompt(ctx context.Context, row state.Agent, prompt 
 	s.log.Log(logSource, "herdr.transition", row.PaneID, t)
 	s.HandleTransition(ctx, t)
 	p, has := s.store.Pending()
-	if has && p.PaneID == row.PaneID && p.Kind == state.PendingAnswerPrompt && pendingSignature(p) == promptSignature(prompt) {
+	if has && p.PaneID == row.PaneID && p.Kind == state.PendingAnswerPrompt && pendingSignature(p) == s.promptSignature(prompt) {
 		return true
 	}
 	for _, q := range s.store.Questions() {
-		if q.PaneID == row.PaneID && pendingSignature(q) == promptSignature(prompt) {
+		if q.PaneID == row.PaneID && pendingSignature(q) == s.promptSignature(prompt) {
 			return true
 		}
 	}
@@ -377,12 +377,12 @@ func (s *Supervisor) raiseReprompt(ctx context.Context, row state.Agent, prompt 
 // empty for agents that do not show one) and each option's label, in
 // order — never the spoken summary, which the daemon composes fresh
 // every time and would never compare equal.
-func promptSignature(p herdr.Prompt) string {
+func (s *Supervisor) promptSignature(p herdr.Prompt) string {
 	labels := make([]string, len(p.Options))
 	for i, o := range p.Options {
-		labels[i] = o.Label
+		labels[i] = s.cfg.Redactor.String(o.Label)
 	}
-	return p.Phrase() + "\x00" + p.Command + "\x00" + strings.Join(labels, "\x00")
+	return s.cfg.Redactor.String(p.Phrase()) + "\x00" + s.cfg.Redactor.String(p.Command) + "\x00" + strings.Join(labels, "\x00")
 }
 
 // pendingSignature is promptSignature's counterpart for an already-built

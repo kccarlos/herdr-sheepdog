@@ -160,7 +160,12 @@ func (h brainHost) ReadSession(_ context.Context, paneID string) (brain.SessionR
 	if instruction == "" {
 		instruction = withoutSignOff(row.LastTask)
 	}
-	return brain.SessionRead{LastAssistant: d.LastAssistant, Instruction: instruction, Files: d.Files, Tools: d.Tools}, nil
+	var stopErr, stopDetail string
+	if d.Error != nil {
+		stopErr = d.Error.Summary()
+		stopDetail = d.Error.Message
+	}
+	return brain.SessionRead{LastAssistant: d.LastAssistant, Instruction: instruction, StopError: stopErr, StopDetail: stopDetail, Files: d.Files, Tools: d.Tools}, nil
 }
 
 // sessionMissingWhy explains each worker.session_missing reason to the

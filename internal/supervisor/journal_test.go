@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -253,5 +254,268 @@ func TestSignOffSkipsSlashCommands(t *testing.T) {
 	}
 	if withoutSignOff(withSignOff("/permissions")) != "/permissions" {
 		t.Error("a slash command's task text is not the command")
+	}
+}
+
+func setSessionLines(t *testing.T, h *harness, pane, kind string, lines ...string) {
+	t.Helper()
+	path := filepath.Join(h.dir, strings.ReplaceAll(pane, ":", "-")+"-"+kind+".jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.Update(pane, func(a *state.Agent) {
+		a.SessionSource, a.SessionKind, a.SessionValue = "herdr:"+kind, herdr.SessionKindPath, path
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopErrorsNeverSayFinishedWithoutBrain(t *testing.T) {
+	t.Run("claude 529 overloaded speaks at chatty and never says finished", func(t *testing.T) {
+		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Chatty) })
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Audit the auth handler."}}`,
+			`{"type":"assistant","isApiErrorMessage":true,"error":"server_error","apiErrorStatus":529,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"}]}}`,
+		)
+		// Chatty announces an uninvolved stop honestly.
+		doneAuth(h)
+
+		got := h.pusher.last(t).Text
+		want := "auth stopped because the model provider returned 529 overloaded."
+		if got != want {
+			t.Fatalf("push = %q, want %q", got, want)
+		}
+		row, _ := h.store.Get("w5:p1")
+		if row.LastResult == nil || row.LastResult.Spoken != "stopped because the model provider returned 529 overloaded" || row.LastResult.StopReason != "stopped because the model provider returned 529 overloaded" {
+			t.Fatalf("LastResult = %+v", row.LastResult)
+		}
+		if len(row.Journal) != 1 || row.Journal[0].Error != "stopped because the model provider returned 529 overloaded" || row.Journal[0].LastAssistant != "" {
+			t.Fatalf("Journal = %+v", row.Journal)
+		}
+
+		brief, _ := h.sup.briefingText()
+		if !strings.Contains(brief, "it stopped under a minute ago because the model provider returned 529 overloaded") || strings.Contains(brief, "finished work") {
+			t.Errorf("briefing = %q", brief)
+		}
+		h.clock.Advance(3 * time.Minute)
+		brief3, _ := h.sup.briefingText()
+		if !strings.Contains(brief3, "it stopped 3 min ago because the model provider returned 529 overloaded") || strings.Contains(brief3, "finished work") {
+			t.Errorf("briefing after 3m = %q", brief3)
+		}
+		_, st, ok := h.sup.AgentNow("auth")
+		if !ok || !strings.Contains(st, "it last stopped 3 min ago because the model provider returned 529 overloaded") || strings.Contains(st, "finished work") {
+			t.Errorf("AgentNow = %q", st)
+		}
+	})
+
+	t.Run("codex quota wall on working to idle", func(t *testing.T) {
+		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Chatty) })
+		h.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
+		setSessionLines(t, h, "w6:p1", "codex",
+			`{"type":"event_msg","payload":{"type":"user_message","message":"Write release notes."}}`,
+			`{"type":"event_msg","payload":{"type":"error","message":"You've hit your usage limit. Try again in 2 hours.","codex_error_info":"usage_limit_exceeded"}}`,
+			`{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}`,
+		)
+		h.srv.SetScreen("w6:p1", "Usage limit exceeded")
+		h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
+
+		if got, want := h.pusher.last(t).Text, "docs stopped because it hit its usage limit, resets in 2 hours."; got != want {
+			t.Errorf("push = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("user abort stays quiet when uninvolved at normal, honest when involved", func(t *testing.T) {
+		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Normal) })
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Search everything."}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+		)
+		doneAuth(h)
+		if all := h.pusher.all(); len(all) != 0 {
+			t.Errorf("uninvolved abort pushed at normal: %+v", all)
+		}
+		row, _ := h.store.Get("w5:p1")
+		if row.LastResult == nil || row.LastResult.StopReason != "stopped because its turn was aborted" {
+			t.Errorf("LastResult = %+v", row.LastResult)
+		}
+
+		// Involved agent aborting is spoken honestly.
+		h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+		h.sup.touch("w6:p1")
+		setSessionLines(t, h, "w6:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Build docs."}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+		)
+		h.srv.SetScreen("w6:p1", "Interrupted")
+		h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+		if got, want := h.pusher.last(t).Text, "docs stopped because its turn was aborted."; got != want {
+			t.Errorf("involved abort push = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestStopErrorsAndNarrationReachBrain(t *testing.T) {
+	t.Run("orchestrator reply is preserved", func(t *testing.T) {
+		m := braintest.NewModel()
+		m.EventDefault = announceReply("Auth stopped after a provider error.", "idle", "", "", false)
+		h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		h.sup.touch("w5:p1")
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`,
+		)
+		doneAuth(h)
+		if got := h.pusher.last(t).Text; got != "Auth stopped after a provider error." {
+			t.Fatalf("push = %q", got)
+		}
+	})
+	t.Run("quota wall reaches announce turn and read_screen session", func(t *testing.T) {
+		m := braintest.NewModel(
+			braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "auth", "source": "session"})}},
+			*announceReply("Auth hit its usage limit and resets at 3pm.", "idle", "", "", false),
+		)
+		h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+		m.EventDefault = nil
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Finish the migration."}}`,
+			`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 3pm (America/Los_Angeles)"}]}}`,
+		)
+		h.sup.touch("w5:p1")
+		doneAuth(h)
+
+		calls := m.Calls()
+		if len(calls) < 2 {
+			t.Fatalf("calls = %d, want 2", len(calls))
+		}
+		first := calls[0].Text()
+		if !strings.Contains(first, `template="auth stopped because it hit its usage limit, resets 3pm."`) || !strings.Contains(first, "did not finish cleanly") {
+			t.Errorf("announce request missing stop error:\n%s", first)
+		}
+		if !strings.Contains(first, "source=transcript>>>") || !strings.Contains(first, "You've hit your limit") {
+			t.Errorf("announce turn missing wrapped transcript stop detail:\n%s", first)
+		}
+		second := calls[1].Text()
+		if !strings.Contains(second, "How its last turn ended: stopped because it hit its usage limit, resets 3pm") {
+			t.Errorf("read_screen(source=session) missing stop error:\n%s", second)
+		}
+	})
+
+	t.Run("owed stop timeout falls back to stop sentence instead of noFindingSentence", func(t *testing.T) {
+		m := braintest.NewModel(
+			braintest.Step{Err: context.DeadlineExceeded},
+		)
+		h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+		m.EventDefault = nil
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		now := h.clock.Now()
+		if _, err := h.store.Update("w5:p1", func(a *state.Agent) {
+			a.CurrentTask = "Run the migration."
+			a.LastInteraction = &now
+		}); err != nil {
+			t.Fatal(err)
+		}
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Run the migration."}}`,
+			`{"type":"assistant","isApiErrorMessage":true,"error":"server_error","apiErrorStatus":529,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"}]}}`,
+		)
+		doneAuth(h)
+		if got, want := h.pusher.last(t).Text, "auth stopped because the model provider returned 529 overloaded."; got != want {
+			t.Errorf("timeout fallback push = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("narration-only claude turn populates journal and announce transcript", func(t *testing.T) {
+		m := braintest.NewModel()
+		m.EventDefault = announceReply("Auth fixed the race.", "idle", "", "", false)
+		h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+		setSessionLines(t, h, "w5:p1", "claude",
+			`{"type":"user","message":{"role":"user","content":"Fix the race in pool."}}`,
+			`{"type":"assistant","thinkingDisplay":"updates","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Fixed the pool race and verified with -race.","signature":"EpgBbmFycmF0aW9u"}]}}`,
+		)
+		h.sup.touch("w5:p1")
+		doneAuth(h)
+
+		row, _ := h.store.Get("w5:p1")
+		if len(row.Journal) != 1 || row.Journal[0].LastAssistant != "Fixed the pool race and verified with -race." {
+			t.Fatalf("Journal = %+v", row.Journal)
+		}
+		calls := m.Calls()
+		if len(calls) == 0 || !strings.Contains(calls[0].Text(), "Fixed the pool race and verified with -race.") {
+			t.Fatalf("narration missing from announce turn:\n%+v", calls)
+		}
+	})
+}
+
+func TestStopAnnouncementRespectsReply(t *testing.T) {
+	for _, tc := range []struct{ name, spoken, urgency string }{{"honest", "Auth hit its limit.", "idle"}, {"skip", "", "skip"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := braintest.NewModel()
+			m.EventDefault = announceReply(tc.spoken, tc.urgency, "", "", false)
+			h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+			h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+			h.sup.touch("w5:p1")
+			setSessionLines(t, h, "w5:p1", "claude", `{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`)
+			doneAuth(h)
+			pushes := h.pusher.all()
+			if tc.spoken == "" {
+				if len(pushes) != 0 {
+					t.Errorf("skip pushed: %+v", pushes)
+				}
+				return
+			}
+			if len(pushes) != 1 || pushes[0].Text != tc.spoken {
+				t.Errorf("pushes = %+v", pushes)
+			}
+		})
+	}
+}
+
+func TestUninvolvedTransientStopQuietAtNormal(t *testing.T) {
+	h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Normal) })
+	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+	setSessionLines(t, h, "w5:p1", "claude", `{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`)
+	doneAuth(h)
+	if pushes := h.pusher.all(); len(pushes) != 0 {
+		t.Errorf("pushes = %+v", pushes)
+	}
+}
+
+func TestAgentNowDoesNotRepeatStop(t *testing.T) {
+	now := time.Now()
+	a := state.Agent{State: herdr.StateWorking, LastResult: &state.Result{At: now.Add(-time.Minute), StopReason: "stopped because its turn was aborted"}, Journal: []state.JournalEntry{{At: now.Add(-time.Minute), Error: "stopped because its turn was aborted"}}}
+	if got := agentState(a, now); strings.Count(got, "because its turn was aborted") != 1 {
+		t.Errorf("state = %q", got)
+	}
+}
+
+func TestSignOffPreservesTrailingImagePath(t *testing.T) {
+	if isSlashCommand("/tmp/photo.png") {
+		t.Error("image path is not a slash command")
+	}
+	for _, in := range []string{"look\n/tmp/photo.png", "~/photo.png", "/tmp/photo.png"} {
+		got := withSignOff(in)
+		if got != in+"\n"+SignOff {
+			t.Errorf("got %q", got)
+		}
+		if again := withSignOff(got); again != got {
+			t.Errorf("sign-off duplicated: %q", again)
+		}
+	}
+}
+
+func TestJournalRedactsWorkerSecrets(t *testing.T) {
+	h := newHarness(t, withWorkerLog(t.TempDir()))
+	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+	secret := "sk-" + "example1234567890abcdef"
+	claudeTurn(t, h, "w5:p1", "result "+secret)
+	row, _ := h.store.Get("w5:p1")
+	h.sup.recordJournal(row, "done", false)
+	row, _ = h.store.Get("w5:p1")
+	if len(row.Journal) != 1 || strings.Contains(row.Journal[0].LastAssistant, secret) || !strings.Contains(row.Journal[0].LastAssistant, "[REDACTED]") {
+		t.Error("journal did not redact the worker secret")
 	}
 }

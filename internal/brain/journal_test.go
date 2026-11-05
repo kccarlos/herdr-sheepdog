@@ -75,3 +75,54 @@ func TestJournalRecallLine(t *testing.T) {
 		t.Errorf("recall line =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestStopErrorFormattingInBrain(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 5, 0, 0, time.UTC)
+
+	st := sessionText(SessionRead{
+		Instruction: "Audit the auth handler.",
+		StopError:   "stopped because the model provider returned 529 overloaded",
+		StopDetail:  "API Error: 529 Overloaded",
+	})
+	if !strings.Contains(st, "How its last turn ended: stopped because the model provider returned 529 overloaded (API Error: 529 Overloaded)\n") {
+		t.Errorf("sessionText missing stop error:\n%s", st)
+	}
+
+	reqText := eventRequestText(Request{
+		Kind:      KindAnnounce,
+		Agent:     "auth",
+		Event:     "done",
+		Template:  "auth stopped because the model provider returned 529 overloaded.",
+		Owed:      true,
+		StopError: "stopped because the model provider returned 529 overloaded",
+	})
+	if !strings.HasPrefix(reqText, `Event from the supervisor (announce): agent="auth" event="done" template="auth stopped because the model provider returned 529 overloaded."`+"\n") {
+		t.Errorf("first line shape changed:\n%s", reqText)
+	}
+	if !strings.Contains(reqText, "did not finish cleanly") || strings.Contains(reqText, "not only that it finished") {
+		t.Errorf("eventRequestText did not frame stop error honestly:\n%s", reqText)
+	}
+
+	j := []JournalEntry{
+		{At: now.Add(-2 * time.Minute), Event: "done", Error: "stopped because it hit its usage limit, resets 3pm", Instruction: "refactor billing"},
+		{At: now.Add(-1 * time.Minute), Event: "done", Error: "stopped because the model provider returned 529 overloaded", LastAssistant: "Checked two files first."},
+	}
+	ledger := journalLedgerLines(j, now)
+	if !strings.Contains(ledger, "stopped because it hit its") || !strings.Contains(ledger, "stopped because the model") {
+		t.Errorf("ledger hid stop errors:\n%s", ledger)
+	}
+	recall := journalRecallLine("auth", j[0])
+	if !strings.Contains(recall, "stopped because it hit its usage limit, resets 3pm") {
+		t.Errorf("recall missing stop error:\n%s", recall)
+	}
+	rec := agentRecords([]AgentInfo{{
+		Alias:      "auth",
+		State:      "done",
+		StateSince: now.Add(-time.Minute),
+		LastResult: "stopped because the model provider returned 529 overloaded",
+		Journal:    j,
+	}}, "how is auth doing?", "", func() time.Time { return now })
+	if !strings.Contains(rec, "stopped because the model provider returned 529 overloaded") {
+		t.Errorf("agentRecords missing stop error:\n%s", rec)
+	}
+}

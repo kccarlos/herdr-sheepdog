@@ -76,6 +76,9 @@ func TestSendInstructionReleasesThePaneBeforeItsFollowUpReads(t *testing.T) {
 			return herdr.AgentInfo{}, herdr.ErrNoReply
 		},
 		onRead: func(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+			if source == herdr.SourceVisible {
+				return base.Read(ctx, paneID, source, lines)
+			}
 			ps := h.sup.paneSend(paneID)
 			got := make(chan struct{})
 			go func() {
