@@ -562,7 +562,6 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/wrapups.json` | Wrap-up commands you saved per project folder from the iPhone app: label, shell command and folder path (mode 0600). | Until you delete a command in the app or run `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/attachments/<pane>/` | Photos and files you attached from the iPhone app for an agent (mode 0600). | 7 days. |
 | `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications: device tokens, relay tokens and each phone's notification content key. | Until a phone unregisters. |
-| `~/.local/share/sheepdog/vapid_key.json`, `web_push_devices.json` | This computer's VAPID P-256 keypair and the paired browsers registered for Web Push notifications on `/voice` (mode 0600). | Until a browser unregisters or is revoked. |
 | `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
@@ -582,7 +581,7 @@ three ways to set them up are in docs/iphone-app.md "Notifications").
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `push.mode` | `SHEEPDOG_PUSH_MODE` | unset: `apns` when all four `[push.apns]` keys are set, else `relay` | How notifications reach Apple (browser Web Push on `/voice` needs no Apple key or relay and runs whenever this is not `off`). `relay`: through sheepdog's shared relay (or your own, `push.relay.url`); the daemon needs no Apple key, and the content is end-to-end encrypted with a key only the phone has, so the relay sees only the device token, the timing, the size and the kind. `apns`: straight to Apple with your own key (`[push.apns]`), for an app you build yourself. `off`: no notifications (devices can still register). |
+| `push.mode` | `SHEEPDOG_PUSH_MODE` | unset: `apns` when all four `[push.apns]` keys are set, else `relay` | How notifications reach Apple. `relay`: through sheepdog's shared relay (or your own, `push.relay.url`); the daemon needs no Apple key, and the content is end-to-end encrypted with a key only the phone has, so the relay sees only the device token, the timing, the size and the kind. `apns`: straight to Apple with your own key (`[push.apns]`), for an app you build yourself. `off`: no notifications (phones can still register). |
 | `push.relay.url` | `SHEEPDOG_PUSH_RELAY_URL` | sheepdog's shared relay | The relay's base URL, for `push.mode = "relay"`. Point it at your own deployment of `relay/` (relay/README.md) to self-host. |
 
 ## `[push.apns]`

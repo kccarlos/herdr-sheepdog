@@ -114,7 +114,7 @@ func toolCall(text string) voice.ToolCall {
 	return voice.ToolCall{ID: "v1", Name: supervisor.ToolToSupervisor, Args: map[string]any{"text": text}}
 }
 
-// /voice approval cards, 1–9 digit shortcuts and Web Push inline actions all
+// /voice approval cards and 1–9 digit shortcuts both
 // submit POST /api/pending/answer: every answer goes through the same auth,
 // idempotency, screen-verification and user-input approval rail as spoken or
 // typed answers.
