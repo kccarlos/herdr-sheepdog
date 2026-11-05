@@ -535,3 +535,105 @@ final class AttentionEventTests: XCTestCase {
         XCTAssertFalse(AttentionEvents.isMuted(off))
     }
 }
+
+#if os(iOS)
+import SwiftUI
+import UIKit
+@testable import Sheepdog
+
+@MainActor
+final class UnreadNameWeightTests: XCTestCase {
+    private func render<V: View>(
+        _ view: V,
+        style: UIUserInterfaceStyle,
+        sizeCategory: UIContentSizeCategory,
+        legibility: UILegibilityWeight
+    ) -> (size: CGSize, inkMass: Double, orangePixels: Int) {
+        let host = UIHostingController(rootView: view.fixedSize())
+        host.traitOverrides.userInterfaceStyle = style
+        host.traitOverrides.preferredContentSizeCategory = sizeCategory
+        host.traitOverrides.legibilityWeight = legibility
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        let fit = host.sizeThatFits(in: CGSize(width: 800, height: 400))
+        host.view.frame = CGRect(origin: .zero, size: fit)
+        host.view.layoutIfNeeded()
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        let img = UIGraphicsImageRenderer(size: fit, format: format).image { _ in
+            host.view.drawHierarchy(in: CGRect(origin: .zero, size: fit), afterScreenUpdates: true)
+        }
+        window.isHidden = true
+        guard let cg = img.cgImage else { return (fit, 0, 0) }
+        let w = cg.width, h = cg.height
+        var buf = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // Corner pixel approximates background luminance; contrast against it measures foreground ink.
+        let bgLuma = (Double(buf[0]) + Double(buf[1]) + Double(buf[2])) / 3.0
+        var ink = 0.0
+        var orange = 0
+        for i in stride(from: 0, to: buf.count, by: 4) {
+            let r = Double(buf[i]), g = Double(buf[i + 1]), b = Double(buf[i + 2])
+            let luma = (r + g + b) / 3.0
+            ink += abs(luma - bgLuma) / 255.0
+            if r > 200, g > 80, g < 180, b < 80 { orange += 1 }
+        }
+        return (fit, ink, orange)
+    }
+
+    func testUnreadNameIsBolderThanReadAcrossModesSizesAndBoldTextWithoutADot() throws {
+        let suite = "UnreadNameWeightTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let cacheDir = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cacheDir)
+        }
+        let store = ComputerStore(defaults: defaults, secrets: InMemorySecretStore())
+        let model = SessionViewModel(settings: SettingsStore(defaults: defaults, computers: store), cache: ConversationCache(directory: cacheDir))
+
+        let unread = Agent(paneID: "p1", alias: "claude-auth", kind: "claude", state: .done,
+                           attention: AgentAttention(group: .done, unread: true, turn: 2, seen: 1))
+        let read = Agent(paneID: "p1", alias: "claude-auth", kind: "claude", state: .done,
+                         attention: AgentAttention(group: .done, unread: false, turn: 2, seen: 2))
+        XCTAssertEqual(AgentAttentionWords.value(unread), "Unread")
+        XCTAssertEqual(AgentAttentionWords.value(read), "")
+
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            for cat in [UIContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+                for leg in [UILegibilityWeight.regular, .bold] {
+                    let uChip = render(AgentChip(agent: unread, subtitle: nil), style: style, sizeCategory: cat, legibility: leg)
+                    let rChip = render(AgentChip(agent: read, subtitle: nil), style: style, sizeCategory: cat, legibility: leg)
+                    let ctx = "chip style=\(style.rawValue) cat=\(cat.rawValue) leg=\(leg.rawValue) u=\(uChip) r=\(rChip)"
+                    XCTAssertEqual(uChip.orangePixels, 0, "no accent unread dot: \(ctx)")
+                    XCTAssertGreaterThan(uChip.size.width, rChip.size.width, "bold name is wider: \(ctx)")
+                    XCTAssertGreaterThan(uChip.inkMass, rChip.inkMass * 1.05, "unread reads heavier: \(ctx)")
+
+                    let uCard = render(
+                        AgentCard(agent: unread, question: nil, expanded: .constant(false), answer: { _, _ in })
+                            .frame(width: 360)
+                            .environmentObject(model),
+                        style: style, sizeCategory: cat, legibility: leg
+                    )
+                    let rCard = render(
+                        AgentCard(agent: read, question: nil, expanded: .constant(false), answer: { _, _ in })
+                            .frame(width: 360)
+                            .environmentObject(model),
+                        style: style, sizeCategory: cat, legibility: leg
+                    )
+                    let cardCtx = "card style=\(style.rawValue) cat=\(cat.rawValue) leg=\(leg.rawValue) uInk=\(uCard.inkMass) rInk=\(rCard.inkMass)"
+                    XCTAssertEqual(uCard.orangePixels, 0, "no accent unread dot on card: \(cardCtx)")
+                    XCTAssertGreaterThan(uCard.inkMass, rCard.inkMass * 1.02, "card unread name reads heavier: \(cardCtx)")
+                }
+            }
+        }
+    }
+}
+#endif

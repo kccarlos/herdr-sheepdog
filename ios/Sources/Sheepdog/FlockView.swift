@@ -497,16 +497,6 @@ struct AgentCard: View {
         )
         // The window zooms out of the whole card.
         .zoomSource(agent.paneID)
-        // The unread dot sits in the card's left margin, as in Mail.
-        .overlay(alignment: .topLeading) {
-            if agent.isUnread {
-                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                    .padding(.leading, 3)
-                    .padding(.top, 18)
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("flock.agent.\(agent.alias).unread")
-            }
-        }
         .contextMenu {
             if controllable { attentionActions }
         }
@@ -628,9 +618,10 @@ struct AgentCard: View {
     private var name: some View {
         HStack(spacing: 5) {
             Text(agent.alias)
-                .font(.body.weight(.semibold))
+                .font(.body.weight(agent.isUnread ? .bold : .regular))
                 .foregroundStyle(Theme.ink)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .accessibilityIdentifier(agent.isUnread ? "flock.agent.\(agent.alias).unread" : "")
             // Said by the card's VoiceOver value, so the glyphs are silent.
             if agent.isPinned {
                 Image(systemName: "pin.fill")

@@ -235,7 +235,7 @@ phone").
   new "Attention" section and a row in "Spaces".
 - **New phone, old daemon.** No feature, no `attention` field. Kit groups by
   state only: blocked → Needs you, working → Working, idle and done → Done,
-  with no unread dot and no pin or mute controls. Nothing is written.
+  with no unread state and no pin or mute controls. Nothing is written.
 - **Old phone, new daemon.** It ignores the new fields and never writes
   seen. Unread then clears only from another client: herdr-app, the TUI, or
   a newer phone.
@@ -334,15 +334,15 @@ forwards calls ([ios-state-architecture.md](ios-state-architecture.md)).
 - `FlockView` and `AllAgentsView`: section headers "Needs you", "Working",
   "Done". An empty section is not shown. With no agents, the existing
   sleeping mascot.
-- Unread row: an accent dot before the name, semibold name, VoiceOver value
+- Unread row: bold name (regular weight when read), VoiceOver value
   "Unread".
 - Pinned row: a pin glyph, VoiceOver value "Pinned".
 - Swipe and context menu: Pin / Unpin, Mark as unread (only for a read done
   agent).
 - Opening the agent window or expanding the card marks it seen (through
   `SeenTracker`).
-- The agent strip keeps its order rule (blocked first) but adds the unread
-  dot.
+- The agent strip keeps its order rule (blocked first) and bolds unread
+  names (regular weight when read).
 - Spaces (`SpacesView`, space detail): "Mute notifications" with "For 1
   hour", "Until tomorrow morning" and "Until I turn them back on"; "Unmute" when muted. A `bell.slash`
   glyph shows on the space and its agents' rows.
@@ -370,7 +370,7 @@ forwards calls ([ios-state-architecture.md](ios-state-architecture.md)).
 | Live Activity | A new waiting agent in a muted space goes at priority 5, not 10, so it does not alert. | Rows and counts. |
 | Sheepdog.app notifications | Dropped by `NotificationGate`. `pending.created` and `herdr.transition` events gain `muted: true` for such agents. | Voice-error notices. |
 | Phone haptics for `pending.created` | Off for muted agents. | — |
-| Lists, groups, unread dots, Agents badge, panel amber, question cards, answering by tap or voice, "what needs me" | — | All unchanged. |
+| Lists, groups, unread state, Agents badge, panel amber, question cards, answering by tap or voice, "what needs me" | — | All unchanged. |
 
 With no space muted, the code path is byte-for-byte today's, so this needs
 no eval run (§9).
@@ -537,6 +537,6 @@ KC decided these on 2026-11-03.
 - **Q2. Hearing the voice announce a finish does not count as seen.** Only a
   screen in front of someone does, so the agent stays unread under Done.
 - **Q3. The Agents badge and the panel amber count needs you only.** Unread
-  shows as dots.
+  shows as a bold name.
 - **Q4. Three mute durations:** 1 hour, until tomorrow morning (08:00 local)
   and until unmuted.

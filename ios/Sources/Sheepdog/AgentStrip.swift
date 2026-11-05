@@ -83,13 +83,9 @@ struct AgentChip: View {
                 .animation(Theme.ease, value: agent.state)
                 .accessibilityHidden(true)
             Text(agent.alias)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(agent.isUnread ? .bold : .regular))
                 .foregroundStyle(Theme.ink)
-            if agent.isUnread {
-                Circle().fill(Color.accentColor).frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("agent.chip.\(agent.alias).unread")
-            }
+                .accessibilityIdentifier(agent.isUnread ? "agent.chip.\(agent.alias).unread" : "")
             if let computer {
                 Text(computer)
                     .font(.caption)

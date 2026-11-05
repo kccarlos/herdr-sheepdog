@@ -1427,7 +1427,7 @@ of them, and a client then groups by `state` alone.
   muted.
 - `attention_counts` count the same groups across all agents. **The badges do
   not count unread done agents**: the Agents badge and the panel's amber
-  stay "needs you" only; unread shows as a dot. (Product default, design
+  stay "needs you" only; unread shows as a bold name. (Product default, design
   question Q3.)
 - `space_mutes` lists the muted spaces (folder, the space's name, the end
   time when there is one). A mute that ended is not listed.
@@ -1469,7 +1469,7 @@ herdr refused the write, `503` a daemon without the feature.
   `attention.UntilTomorrowMorning`.)
 
 **What a space mute silences**, and nothing else. The lists, the groups, the
-unread dots, the badges, the question cards, answering by tap or by voice
+unread state, the badges, the question cards, answering by tap or by voice
 and "what needs me" are unchanged. The check is in code, next to the
 chattiness ceiling, not in a prompt.
 
