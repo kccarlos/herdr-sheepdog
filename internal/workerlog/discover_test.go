@@ -451,6 +451,60 @@ func TestDiscoverConcurrentInvalidateAndForgetRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestDiscoverInvalidateOtherPaneDoesNotDropInFlightProbe(t *testing.T) {
+	dir := t.TempDir()
+	idA := "01a0c000-0000-7000-8000-000000000401"
+	rolloutA := filepath.Join(dir, "codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T13-00-00-"+idA+".jsonl")
+	writeJSONFile(t, rolloutA, `{"type":"event_msg","payload":{"type":"agent_message","message":"Pane A."}}`+"\n")
+
+	inProbe := make(chan struct{})
+	release := make(chan struct{})
+	var openCalls atomic.Int32
+	r := New(Options{
+		ClaudeProjects: filepath.Join(dir, "claude", "projects"),
+		CodexSessions:  filepath.Join(dir, "codex", "sessions"),
+		TreePIDs:       func(roots ProcessRoots) []int { return roots.Direct() },
+		OpenFiles: func([]int) []string {
+			if openCalls.Add(1) == 1 {
+				close(inProbe)
+				<-release
+			}
+			return []string{rolloutA}
+		},
+	})
+
+	sessA := Session{Pane: "w1:p1", Roots: ProcessRoots{PID: 901}, Agent: "codex"}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := r.Resolve(sessA); err != nil {
+			t.Errorf("Resolve(pane A): %v", err)
+		}
+	}()
+	select {
+	case <-inProbe:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for pane A probe")
+	}
+
+	// Invalidating or forgetting unrelated panes must not drop pane A's in-flight cache write.
+	r.Invalidate("w2:p1")
+	r.Forget("w3:p1")
+	close(release)
+	wg.Wait()
+
+	if disc, ok := r.Discovered("w1:p1"); !ok || disc.ID != idA {
+		t.Fatalf("Discovered(w1:p1) = %+v, %v; want %s cached despite other-pane invalidations", disc, ok, idA)
+	}
+	if d, err := r.Read("w1:p1", sessA); err != nil || d.LastAssistant != "Pane A." {
+		t.Fatalf("Read(w1:p1) = %+v, %v", d, err)
+	}
+	if got := openCalls.Load(); got != 1 {
+		t.Fatalf("openCalls = %d, want 1 (pane A probe stayed cached)", got)
+	}
+}
+
 func TestProcessTableAndLsofParsers(t *testing.T) {
 	psOut := []byte("  100     1   100\n  400   100   400\n  401   400   400\n  402   401   400\n  888   100   888\n")
 	rows := parsePsTable(psOut)

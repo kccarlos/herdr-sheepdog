@@ -143,6 +143,9 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		changed, identity = true, true
 	}
 	if t.Agent != "" && a.Kind != t.Agent {
+		if a.Kind != "" {
+			a.SessionSource, a.SessionKind, a.SessionValue, a.ReportedSession = "", "", "", ""
+		}
 		a.Kind, identity = t.Agent, true
 	}
 	if t.WorkspaceID != "" && a.Workspace != t.WorkspaceID {
@@ -154,8 +157,19 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if t.Name != "" && !IsLaunchName(t.Name) && a.Name != t.Name && !herdrSpelling(a.Name, t.Name) {
 		a.Name, identity = t.Name, true
 	}
-	if sess := t.Session; sess != nil && sess.Value != "" && (a.SessionValue != sess.Value || a.SessionKind != sess.Kind || a.SessionSource != sess.Source) {
-		a.SessionSource, a.SessionKind, a.SessionValue, changed = sess.Source, sess.Kind, sess.Value, true
+	if sess := t.Session; sess != nil && sess.Value != "" {
+		fromPID := strings.HasPrefix(sess.Source, "pid:")
+		prevReported := a.ReportedSession
+		if prevReported == "" && !strings.HasPrefix(a.SessionSource, "pid:") {
+			prevReported = a.SessionValue
+		}
+		keepPID := !fromPID && pidSessionForKind(a.SessionSource, a.Kind) && (prevReported == "" || sess.Value == prevReported)
+		if !fromPID && a.ReportedSession != sess.Value {
+			a.ReportedSession, changed = sess.Value, true
+		}
+		if !keepPID && (a.SessionValue != sess.Value || a.SessionKind != sess.Kind || a.SessionSource != sess.Source) {
+			a.SessionSource, a.SessionKind, a.SessionValue, changed = sess.Source, sess.Kind, sess.Value, true
+		}
 	}
 	if t.Cwd != "" && a.Cwd != t.Cwd {
 		a.Cwd, changed = t.Cwd, true
@@ -196,6 +210,19 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 func herdrSpelling(name, reported string) bool {
 	h, ok := HerdrName(name)
 	return ok && name != "" && h == reported
+}
+
+// pidSessionForKind reports whether source is a live-PID session discovery
+// ("pid:claude", "pid:codex") matching agent kind.
+func pidSessionForKind(source, kind string) bool {
+	rest, ok := strings.CutPrefix(source, "pid:")
+	if !ok || rest == "" {
+		return false
+	}
+	if kind == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(kind), strings.ToLower(rest))
 }
 
 // defaultAlias returns the config alias for the pane (pinned) or a derived

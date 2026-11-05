@@ -169,7 +169,8 @@ func TestSessionRotationAcrossClearAndNewSamePID(t *testing.T) {
 	newClaude := "11111111-2222-4333-8444-000000000002"
 	oldCodex := "01a0c000-2222-7333-8444-000000000001"
 	newCodexWindow := "01a0c000-2222-7333-8444-000000000002"
-	newCodexTerm := "01a0c000-2222-7333-8444-000000000003"
+	newCodexBlocked := "01a0c000-2222-7333-8444-000000000003"
+	newCodexTerm := "01a0c000-2222-7333-8444-000000000004"
 
 	inv := &fakeInvestigator{answer: "Post-clear context.", session: forkSession, backend: "claude"}
 	h := newInvestigationHarness(t, inv, proc.option())
@@ -216,36 +217,123 @@ func TestSessionRotationAcrossClearAndNewSamePID(t *testing.T) {
 		t.Fatalf("forked session = %q, want %q (not stale pre-/clear %q)", got, newClaude, oldClaude)
 	}
 
+	// Subsequent transitions carrying Watcher's cached pre-/clear session (even after
+	// cache invalidation or restart when pane.process_info returns no live PIDs)
+	// must not revert row.SessionValue to oldClaude.
+	h.sup.cfg.WorkerLog.Invalidate("w5:p1")
+	h.srv.SetProcessInfo(herdr.ProcessInfo{PaneID: "w5:p1"})
+	h.sup.HandleTransition(context.Background(), herdr.Transition{
+		PaneID:  "w5:p1",
+		From:    herdr.StateDone,
+		To:      herdr.StateIdle,
+		Agent:   "claude",
+		Cwd:     "/work/w5:p1",
+		Session: &herdr.AgentSession{Source: "herdr:claude", Agent: "claude", Kind: herdr.SessionKindID, Value: oldClaude},
+	})
+	setPaneFG(h.srv, "w5:p1", 100, 420, "claude")
+	if afterStale, _ := h.store.Get("w5:p1"); afterStale.SessionValue != newClaude || afterStale.SessionSource != "pid:claude" || afterStale.Title != "After clear" {
+		t.Fatalf("claude after stale transition + missing roots = title %q source %q session %q, want After clear pid:claude %q", afterStale.Title, afterStale.SessionSource, afterStale.SessionValue, newClaude)
+	}
+
 	// Codex /new sent through WindowPrompt invalidates the cached FD for PID 520.
+	proc.write(t, filepath.Join("codex", "session_index.jsonl"), strings.Join([]string{
+		fmt.Sprintf(`{"id":%q,"thread_name":"Window thread"}`, newCodexWindow),
+		fmt.Sprintf(`{"id":%q,"thread_name":"Blocked thread"}`, newCodexBlocked),
+		fmt.Sprintf(`{"id":%q,"thread_name":"Terminal thread"}`, newCodexTerm),
+	}, "\n")+"\n")
 	if _, err := h.sup.WindowPrompt(context.Background(), "w6:p1", "/new"); err != nil {
 		t.Fatalf("WindowPrompt(/new): %v", err)
 	}
 	rNewWin := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T10-05-00-"+newCodexWindow+".jsonl"),
 		`{"type":"event_msg","payload":{"type":"agent_message","message":"Codex after window /new."}}`+"\n")
 	now := time.Now()
-	_ = os.Chtimes(rOld, now.Add(-2*time.Minute), now.Add(-2*time.Minute))
-	_ = os.Chtimes(rNewWin, now.Add(-time.Minute), now.Add(-time.Minute))
+	_ = os.Chtimes(rOld, now.Add(-3*time.Minute), now.Add(-3*time.Minute))
+	_ = os.Chtimes(rNewWin, now.Add(-2*time.Minute), now.Add(-2*time.Minute))
 	proc.setOpen(520, rNewWin)
 
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
 	xRow, _ := h.store.Get("w6:p1")
-	if len(xRow.Journal) != 2 || xRow.Journal[1].LastAssistant != "Codex after window /new." || xRow.SessionValue != newCodexWindow {
-		t.Fatalf("codex after WindowPrompt(/new) = session %q journal %+v", xRow.SessionValue, xRow.Journal)
+	if len(xRow.Journal) != 2 || xRow.Journal[1].LastAssistant != "Codex after window /new." || xRow.SessionValue != newCodexWindow || xRow.Title != "Window thread" {
+		t.Fatalf("codex after WindowPrompt(/new) = title %q session %q journal %+v", xRow.Title, xRow.SessionValue, xRow.Journal)
 	}
 
-	// Codex /new typed directly in the terminal (outside sheepdog): rNewWin has 0 new bytes,
-	// so recordJournal's finish retry invalidates the cache and discovers rNewTerm.
+	// Codex /new typed directly in the terminal (outside sheepdog) followed by a
+	// blocked transition (working -> blocked): rNewWin has 0 new bytes, so
+	// recordJournal invalidates immediately, journals rNewBlocked, updates Title
+	// and SessionValue, and ReadSession sees the rotated rollout while blocked.
+	rNewBlocked := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T10-08-00-"+newCodexBlocked+".jsonl"),
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"Codex needs approval in new thread."}}`+"\n")
+	_ = os.Chtimes(rNewBlocked, now.Add(-time.Minute), now.Add(-time.Minute))
+	proc.setOpen(520, rNewBlocked)
+	h.srv.SetScreen("w6:p1", "Allow command?\n1. Yes\n2. No\n")
+
+	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateBlocked)
+	xBlocked, _ := h.store.Get("w6:p1")
+	if len(xBlocked.Journal) != 3 || xBlocked.Journal[2].Event != "blocked" || xBlocked.Journal[2].LastAssistant != "Codex needs approval in new thread." || xBlocked.SessionValue != newCodexBlocked || xBlocked.Title != "Blocked thread" {
+		t.Fatalf("codex on blocked after terminal /new = title %q session %q journal %+v", xBlocked.Title, xBlocked.SessionValue, xBlocked.Journal)
+	}
+	if sr, err := (brainHost{h.sup}).ReadSession(context.Background(), "w6:p1"); err != nil || sr.LastAssistant != "Codex needs approval in new thread." {
+		t.Fatalf("ReadSession while blocked after terminal /new = %+v, %v", sr, err)
+	}
+
+	// Another terminal /new finishing on working -> done also updates both journal and Title.
 	rNewTerm := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T10-10-00-"+newCodexTerm+".jsonl"),
 		`{"type":"event_msg","payload":{"type":"agent_message","message":"Codex after terminal /new."}}`+"\n")
 	_ = os.Chtimes(rNewTerm, now, now)
 	proc.setOpen(520, rNewTerm)
+	h.srv.SetScreen("w6:p1", "Done.\n")
 
-	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateBlocked, herdr.StateWorking)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
 	xRow2, _ := h.store.Get("w6:p1")
-	if len(xRow2.Journal) != 3 || xRow2.Journal[2].LastAssistant != "Codex after terminal /new." || xRow2.SessionValue != newCodexTerm {
-		t.Fatalf("codex after terminal /new = session %q journal %+v", xRow2.SessionValue, xRow2.Journal)
+	if len(xRow2.Journal) != 4 || xRow2.Journal[3].LastAssistant != "Codex after terminal /new." || xRow2.SessionValue != newCodexTerm || xRow2.Title != "Terminal thread" {
+		t.Fatalf("codex after terminal /new = title %q session %q journal %+v", xRow2.Title, xRow2.SessionValue, xRow2.Journal)
+	}
+}
+
+func TestCodexTerminalNewRotationDiscoveredOnBlockedTurn(t *testing.T) {
+	proc := newFakeProcFS(t)
+	firstID := "01a0c000-3333-7444-8555-000000000001"
+	rotatedID := "01a0c000-3333-7444-8555-000000000002"
+
+	inv := &fakeInvestigator{answer: "ok", session: forkSession, backend: "codex"}
+	h := newInvestigationHarness(t, inv, proc.option())
+	h.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
+	setPaneFG(h.srv, "w6:p1", 101, 530, "codex")
+
+	now := time.Now()
+	rFirst := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T11-00-00-"+firstID+".jsonl"),
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"First thread turn."}}`+"\n")
+	_ = os.Chtimes(rFirst, now.Add(-time.Minute), now.Add(-time.Minute))
+	proc.write(t, filepath.Join("codex", "session_index.jsonl"), strings.Join([]string{
+		fmt.Sprintf(`{"id":%q,"thread_name":"First thread"}`, firstID),
+		fmt.Sprintf(`{"id":%q,"thread_name":"Rotated thread"}`, rotatedID),
+	}, "\n")+"\n")
+	proc.setOpen(530, rFirst)
+
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
+
+	// User types /new directly in Codex's terminal; the new thread hits an approval prompt (working -> blocked).
+	rRotated := proc.write(t, filepath.Join("codex", "sessions", "2026", "11", "04", "rollout-2026-11-04T11-05-00-"+rotatedID+".jsonl"),
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"Need approval in rotated thread."}}`+"\n")
+	_ = os.Chtimes(rRotated, now, now)
+	proc.setOpen(530, rRotated)
+	h.srv.SetScreen("w6:p1", "Allow command?\n1. Yes\n2. No\n")
+
+	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateBlocked)
+
+	row, _ := h.store.Get("w6:p1")
+	if row.SessionValue != rotatedID || row.Title != "Rotated thread" {
+		t.Fatalf("blocked row after terminal /new = title %q session %q, want Rotated thread %s", row.Title, row.SessionValue, rotatedID)
+	}
+	if len(row.Journal) != 2 || row.Journal[1].Event != "blocked" || row.Journal[1].LastAssistant != "Need approval in rotated thread." {
+		t.Fatalf("blocked journal after terminal /new = %+v", row.Journal)
+	}
+	if sr, err := (brainHost{h.sup}).ReadSession(context.Background(), "w6:p1"); err != nil || sr.LastAssistant != "Need approval in rotated thread." {
+		t.Fatalf("ReadSession while blocked = %+v, %v", sr, err)
 	}
 }
 
@@ -296,14 +384,14 @@ func TestOlderHerdrWithoutProcessInfoFallsBackCleanly(t *testing.T) {
 	h.srv.Handle("pane.process_info", func(json.RawMessage) (any, error) {
 		return nil, &herdr.Error{Code: "invalid_request", Message: "invalid request: unknown variant `pane.process_info`"}
 	})
-	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
-	claudeTurn(t, h, "w5:p1", "Fallback transcript works on older herdr.")
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	claudeTurn(t, h, "w6:p1", "Fallback transcript works on older herdr.")
 
-	doneAuth(h)
-	h.transition("w5:p1", herdr.StateDone, herdr.StateWorking)
-	doneAuth(h)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
 
-	row, _ := h.store.Get("w5:p1")
+	row, _ := h.store.Get("w6:p1")
 	if len(row.Journal) == 0 || !strings.Contains(row.Journal[0].LastAssistant, "Fallback transcript works") {
 		t.Fatalf("journal = %+v", row.Journal)
 	}

@@ -109,14 +109,14 @@ func (r *Reader) Invalidate(pane string) {
 		return
 	}
 	r.mu.Lock()
-	r.gen++
+	r.gens[pane]++
 	delete(r.pids, pane)
 	r.mu.Unlock()
 }
 
 func (r *Reader) discoverByPID(sess Session, f Format) (Resolved, bool, error) {
 	r.mu.Lock()
-	gen := r.gen
+	gen := r.gens[sess.Pane]
 	cached, hasCached := r.pids[sess.Pane]
 	r.mu.Unlock()
 
@@ -205,7 +205,7 @@ func (r *Reader) storePIDCache(pane string, gen uint64, entry pidEntry) {
 		return
 	}
 	r.mu.Lock()
-	if r.gen == gen {
+	if r.gens[pane] == gen {
 		r.pids[pane] = entry
 	}
 	r.mu.Unlock()

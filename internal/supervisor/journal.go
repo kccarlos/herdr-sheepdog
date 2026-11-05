@@ -221,12 +221,15 @@ func (s *Supervisor) syncDiscoveredSession(paneID string) {
 	if !exists {
 		return
 	}
-	if row.SessionKind == herdr.SessionKindID && row.SessionValue == disc.ID {
+	if row.SessionKind == herdr.SessionKindID && row.SessionValue == disc.ID && row.SessionSource == disc.Source {
 		return
 	}
 	_, _ = s.store.Update(paneID, func(a *state.Agent) {
-		if a.SessionKind == herdr.SessionKindID && a.SessionValue == disc.ID {
+		if a.SessionKind == herdr.SessionKindID && a.SessionValue == disc.ID && a.SessionSource == disc.Source {
 			return
+		}
+		if !strings.HasPrefix(a.SessionSource, "pid:") && a.SessionValue != "" && a.ReportedSession == "" {
+			a.ReportedSession = a.SessionValue
 		}
 		a.SessionSource = disc.Source
 		a.SessionKind = herdr.SessionKindID
@@ -246,19 +249,31 @@ func (s *Supervisor) syncDiscoveredSession(paneID string) {
 func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots workerlog.ProcessRoots, event string, finish bool) *workerlog.TurnError {
 	alias := aliasOr(row.Alias)
 	sess := workerSessionWithRoots(row, roots)
+	prevDisc, _ := s.cfg.WorkerLog.Discovered(row.PaneID)
 	d, err := s.cfg.WorkerLog.Read(row.PaneID, sess)
+	if err == nil && d.Bytes == 0 && roots.HasPID() {
+		// A same-PID session rotation (/new in Codex) leaves 0 new bytes
+		// on the previous rollout file: drop the cached FD probe and re-read
+		// once so both blocked and finished turns find a rotated rollout.
+		s.cfg.WorkerLog.Invalidate(row.PaneID)
+		sess.Roots = s.paneRoots(ctx, row)
+		d, err = s.cfg.WorkerLog.Read(row.PaneID, sess)
+		if disc, ok := s.cfg.WorkerLog.Discovered(row.PaneID); ok && disc.ID != prevDisc.ID {
+			s.refreshTitle(row, sess.Roots)
+		}
+	}
 	s.syncDiscoveredSession(row.PaneID)
 	if err == nil && !d.Fresh && d.Error == nil && finish && journalRetry > 0 {
-		if d.Bytes == 0 {
-			// A same-PID session rotation (/new in Codex) leaves 0 new bytes
-			// on the previous rollout file: drop the cached FD probe before
-			// the retry so a rotated rollout is found.
+		time.Sleep(journalRetry)
+		if d.Bytes == 0 && roots.HasPID() {
 			s.cfg.WorkerLog.Invalidate(row.PaneID)
 			sess.Roots = s.paneRoots(ctx, row)
 		}
-		time.Sleep(journalRetry)
 		if next, nerr := s.cfg.WorkerLog.Read(row.PaneID, sess); nerr == nil {
 			d.Merge(next)
+		}
+		if disc, ok := s.cfg.WorkerLog.Discovered(row.PaneID); ok && disc.ID != prevDisc.ID {
+			s.refreshTitle(row, sess.Roots)
 		}
 		s.syncDiscoveredSession(row.PaneID)
 	}

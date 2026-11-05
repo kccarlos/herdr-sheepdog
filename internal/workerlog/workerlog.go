@@ -273,7 +273,7 @@ type Reader struct {
 	mu      sync.Mutex
 	cursors map[string]*cursor
 	pids    map[string]pidEntry
-	gen     uint64
+	gens    map[string]uint64
 }
 
 type cursor struct {
@@ -306,7 +306,7 @@ func New(opts Options) *Reader {
 	if opts.CodexIndex == "" {
 		opts.CodexIndex = filepath.Join(filepath.Dir(opts.CodexSessions), "session_index.jsonl")
 	}
-	return &Reader{opts: opts, cursors: map[string]*cursor{}, pids: map[string]pidEntry{}}
+	return &Reader{opts: opts, cursors: map[string]*cursor{}, pids: map[string]pidEntry{}, gens: map[string]uint64{}}
 }
 
 // Locate returns the transcript file of sess.
@@ -354,7 +354,9 @@ func sameCursorFile(curPath, newPath string, newInfo os.FileInfo) bool {
 // Forget drops the pane's cursor and cached PID probe (the pane closed).
 func (r *Reader) Forget(pane string) {
 	r.mu.Lock()
-	r.gen++
+	if pane != "" {
+		r.gens[pane]++
+	}
 	delete(r.cursors, pane)
 	delete(r.pids, pane)
 	r.mu.Unlock()

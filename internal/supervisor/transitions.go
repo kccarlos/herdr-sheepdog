@@ -102,6 +102,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// announce turn hears what the worker last wrote.
 		if from != herdr.StateBlocked {
 			s.recordJournal(ctx, row, roots, string(herdr.StateBlocked), false)
+			if r, ok := s.store.Get(t.PaneID); ok {
+				row = r
+			}
 		}
 		s.onBlocked(ctx, row)
 	case herdr.StateUnknown:
