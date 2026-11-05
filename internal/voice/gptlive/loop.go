@@ -26,51 +26,14 @@ func (s *Session) tickLoop(ctx context.Context) {
 	}
 }
 
-const firstTurnReportWait = 200 * time.Millisecond
-
 func (s *Session) tick() {
 	now := s.now()
 	s.keepAlive(now)
-	s.flushUnreportedTruncates(now)
 	s.settle(now)
 	s.speechEnd(now)
 	s.settleHeard(now)
 	s.idleCheck(now)
 	s.pumpPushes(now)
-}
-
-// flushUnreportedTruncates sends wall-clock fallback conversation.item.truncate
-// events when an attached client has never sent any playback reports (e.g.
-// headless voice-test) and does not answer a flush within firstTurnReportWait.
-func (s *Session) flushUnreportedTruncates(now time.Time) {
-	s.mu.Lock()
-	lc := s.live
-	if lc == nil || !s.lcActiveLocked(lc) || len(lc.awaitingItems) == 0 || s.play.Reports() {
-		s.mu.Unlock()
-		return
-	}
-	var truncs []truncateEvent
-	kept := lc.awaitingItems[:0]
-	for _, span := range lc.awaitingItems {
-		if !span.flushedAt.IsZero() && now.Sub(span.flushedAt) >= firstTurnReportWait {
-			estMs := int(span.flushedAt.Sub(span.startedAt).Milliseconds())
-			if tr := buildTruncateLocked(lc, span, estMs); tr != nil {
-				truncs = append(truncs, *tr)
-			}
-			continue
-		}
-		kept = append(kept, span)
-	}
-	lc.awaitingItems = kept
-	s.mu.Unlock()
-	for _, tr := range truncs {
-		if err := s.send(lc, tr); err == nil {
-			s.log.Log(logSource, "voice.item_truncated", "", map[string]any{
-				"item_id": tr.ItemID, "content_index": tr.ContentIndex,
-				"audio_end_ms": tr.AudioEndMS, "session_id": lc.id,
-			})
-		}
-	}
 }
 
 // keepAlive sends silence while the client sends nothing (silence gate
@@ -158,6 +121,7 @@ func (s *Session) speechEnd(now time.Time) {
 	s.speakingNow = false
 	s.turnDoneAt = now
 	s.flushReplyLocked()
+	s.play.TurnComplete()
 	s.heard.TurnComplete()
 	timing := s.finishAudioTimingLocked()
 	owed := s.inputOpen
@@ -410,22 +374,35 @@ func heldPayload(item pushItem) map[string]any {
 // interrupt → local flush + session.instructions.append, which the docs
 // say can interrupt speech in progress.
 func (s *Session) deliverPush(lc *liveConn, item pushItem) {
+	s.mu.Lock()
+	s.toolSeq++
+	eventID := "push_" + strconv.Itoa(s.toolSeq)
+	s.mu.Unlock()
+
 	var ev appendEvent
 	switch item.urgency {
 	case voice.UrgencySilent:
-		ev = appendEvent{Type: evThinkingAppend, Content: clip(item.text)}
+		ev = appendEvent{Type: evThinkingAppend, EventID: eventID, Content: clip(item.text)}
 	case voice.UrgencyInterrupt:
-		s.interrupt("push")
-		ev = appendEvent{Type: evInstructionsAppend, Content: clip("Stop what you are saying and tell the user this now, briefly, in your own words: " + item.text)}
+		s.interruptForEvent("push", eventID)
+		ev = appendEvent{Type: evInstructionsAppend, EventID: eventID, Content: clip("Stop what you are saying and tell the user this now, briefly, in your own words: " + item.text)}
 	default:
-		ev = appendEvent{Type: evCommentaryAppend, Content: clip(item.text)}
+		s.mu.Lock()
+		if lc != nil && s.lcActiveLocked(lc) && lc.suppressOutput {
+			lc.resumeAckID = eventID
+		}
+		s.mu.Unlock()
+		ev = appendEvent{Type: evCommentaryAppend, EventID: eventID, Content: clip(item.text)}
 	}
-	s.mu.Lock()
-	s.toolSeq++
-	ev.EventID = "push_" + strconv.Itoa(s.toolSeq)
-	s.mu.Unlock()
 	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
+	if err != nil {
+		s.mu.Lock()
+		if lc != nil && lc.resumeAckID == eventID {
+			lc.resumeAckID = ""
+		}
+		s.mu.Unlock()
+	}
 	var unheard []voice.UnheardPush
 	if err == nil && item.urgency != voice.UrgencySilent {
 		s.mu.Lock()

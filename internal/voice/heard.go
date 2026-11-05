@@ -175,23 +175,37 @@ func (h *HeardTracker) Interrupted(now time.Time, by string, awaited bool) []Unh
 // Flushed applies a client flushed report: cut (nil when the run was heard
 // whole) and heard (the played part).
 func (h *HeardTracker) Flushed(now time.Time, cut *TranscriptCut, heard string) []UnheardPush {
+	return h.FlushedReport(now, PlaybackReport{State: PlaybackFlushed, Cut: cut, Heard: heard})
+}
+
+// FlushedReport applies a PlaybackReport for PlaybackFlushed, keeping the
+// watched-push queue aligned with PlaybackTracker's awaiting flush slots.
+func (h *HeardTracker) FlushedReport(now time.Time, rep PlaybackReport) []UnheardPush {
 	out := h.expire(now)
+	if rep.fromTracker && rep.awaitedPopped > 1 {
+		skip := rep.awaitedPopped - 1
+		if skip > len(h.cut) {
+			skip = len(h.cut)
+		}
+		out = append(out, h.judgeRuns(h.cut[:skip])...)
+		h.cut = h.cut[skip:]
+	}
 	var w *pushWatch
 	switch {
-	case len(h.cut) > 0:
+	case (!rep.fromTracker || rep.awaitedPopped > 0) && len(h.cut) > 0:
 		w, h.cut = h.cut[0].w, h.cut[1:]
 		if w == nil {
 			return out // a run no push was watched in
 		}
-	case h.cur != nil && h.cur.voiced && cut != nil:
+	case !rep.Awaited && h.cur != nil && h.cur.voiced && rep.Cut != nil:
 		w, h.cur = h.cur, nil
 		w.cutBy = "client"
 	default:
 		return out
 	}
 	said := w.said.String()
-	if cut != nil {
-		said = heardPart(said, cut.Full, heard)
+	if rep.Cut != nil {
+		said = heardPart(said, rep.Cut.Full, rep.Heard)
 	}
 	return h.judge(out, w, said, cutReason(w))
 }

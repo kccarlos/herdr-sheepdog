@@ -187,3 +187,35 @@ func TestHeardTrackerLateFlushedJudgesInterruptedPushWithoutTouchingNewPush(t *t
 		t.Fatalf("Settle push 2 = %+v, want heard", settled)
 	}
 }
+
+func TestHeardTrackerStaysAlignedWithPlaybackTrackerAcrossNonPushAndEmptySlots(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	var p PlaybackTracker
+	var h HeardTracker
+
+	// Slot 1: non-push assistant reply with real audio (w == nil, non-empty run).
+	p.Sent(t0, 4000*outBytesPerMs)
+	p.Said("normal reply one two three four")
+	p.Flush(t0.Add(100 * time.Millisecond))
+	h.Interrupted(t0.Add(100*time.Millisecond), "model", true)
+
+	// Slot 2: watched push voiced and interrupted.
+	h.Pushed(t0.Add(200*time.Millisecond), "watched push body needs full coverage", nil, false)
+	p.Sent(t0.Add(250*time.Millisecond), 3000*outBytesPerMs)
+	p.Said("watched push body needs full coverage")
+	h.Said("watched push body needs full coverage")
+	p.Flush(t0.Add(300 * time.Millisecond))
+	h.Interrupted(t0.Add(300*time.Millisecond), "push", true)
+
+	// Client reports played_ms: 1000 for Slot 1 (non-push reply): must NOT pop Slot 2!
+	rep1 := p.Report(t0.Add(350*time.Millisecond), PlaybackFlushed, 1000)
+	if unheard := h.FlushedReport(t0.Add(350*time.Millisecond), rep1); len(unheard) != 0 {
+		t.Fatalf("Slot 1 report judged Slot 2 prematurely: %+v", unheard)
+	}
+
+	// Client reports played_ms: 3000 (heard whole) for Slot 2: push is heard!
+	rep2 := p.Report(t0.Add(400*time.Millisecond), PlaybackFlushed, 3000)
+	if unheard := h.FlushedReport(t0.Add(400*time.Millisecond), rep2); len(unheard) != 0 {
+		t.Fatalf("Slot 2 heard report judged unheard: %+v", unheard)
+	}
+}

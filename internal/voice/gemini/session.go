@@ -298,12 +298,47 @@ func (s *Session) Audio() <-chan []byte { return s.audio }
 // AudioChunks yields outbound audio frames paired with their flush epoch.
 func (s *Session) AudioChunks() <-chan voice.AudioChunk { return s.audioChunks }
 
-// FlushAudio purges queued outbound audio and returns the flushed epoch.
+// FlushAudio purges queued outbound audio for a daemon-initiated client flush
+// (afterCancel) and returns the flushed epoch.
 func (s *Session) FlushAudio() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.speaking = false
+	seq := s.recap.AddSeq(voice.RecapAssistant, s.outText)
+	s.outText = ""
+	willAwait := !s.play.Empty()
+	uttID := s.playUtt.Flushed(willAwait)
+	if !s.noClient {
+		s.play.FlushMeta(now, voice.FlushMeta{
+			RecapSeq:    seq,
+			UtteranceID: uttID,
+			ByPush:      false,
+		})
+	} else {
+		s.play.Detach()
+	}
+	_, epoch := s.out.FlushEpoch()
+	return epoch
+}
+
+// PurgeAudio drops queued outbound audio on a retiring session without
+// recording a client flush acknowledgement slot.
+func (s *Session) PurgeAudio() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, epoch := s.out.FlushEpoch()
 	return epoch
+}
+
+// ExpectFlush records a daemon flush barrier emitted outside the session
+// (e.g. a provider switch) whose client acknowledgement will arrive here.
+func (s *Session) ExpectFlush() {
+	s.mu.Lock()
+	if !s.noClient {
+		s.play.Flush(s.now())
+	}
+	s.mu.Unlock()
 }
 
 // BumpAudioEpoch advances the outbound audio queue's epoch across a switch.
@@ -612,6 +647,7 @@ func (s *Session) SendText(text string) error {
 	s.mu.Lock()
 	s.openTurnLocked()
 	s.flushRecapLocked()
+	s.play.TurnComplete()
 	s.recap.Add(voice.RecapUser, text)
 	s.mu.Unlock()
 	s.logTurn(s.noteInput(s.now()))

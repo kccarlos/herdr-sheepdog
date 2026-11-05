@@ -332,3 +332,88 @@ func TestGeminiLateFlushedAndUnsolicitedFlushRaces(t *testing.T) {
 		}
 	})
 }
+
+func TestGeminiStopSequenceEmptyFlushAcksDoNotCutNewReply(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	// Run 1 is playing when the user taps Stop on iOS/web: client locally
+	// flushes first, then sends cancel (afterCancel -> FlushAudio + stop push).
+	speakReply(h, c, strings.Fields("Auth is running the long test suite"), 200)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 400)
+	h.waitEvent("cut 1", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+
+	_ = h.s.FlushAudio()
+	if err := h.s.PushTagged("Stopped auth.", voice.UrgencyInterrupt, map[string]any{"stop": true}); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("stop push flush", isFlushEvent)
+	c.waitSent(t, "stop push", isContent("Stopped auth."))
+
+	// Model begins speaking the stop confirmation before the client's two
+	// empty flush acknowledgements (for FlushAudio and interrupt("push")) arrive.
+	speakReply(h, c, []string{"Stopped", "auth."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("stop reply complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+
+	isCut := func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	}
+	cutsBefore := h.countEvents(isCut)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+	time.Sleep(30 * time.Millisecond)
+
+	if n := h.countEvents(isCut) - cutsBefore; n != 0 {
+		t.Fatalf("empty flush acks emitted %d spurious cut transcripts on new reply", n)
+	}
+	entries := h.s.RecapEntries()
+	if len(entries) == 0 {
+		t.Fatal("recap is empty; new reply was deleted by empty flush ack")
+	}
+	last := entries[len(entries)-1]
+	if last.Text != "Stopped auth." || last.Cut {
+		t.Fatalf("last recap entry = %+v, want intact 'Stopped auth.'", last)
+	}
+}
+
+func TestGeminiCutAfterUnderrunKeepsHeardFirstSentence(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(true)
+
+	// First sentence plays and drains mid-turn (underrun before TurnComplete).
+	speakReply(h, c, []string{"Auth", "passed", "tests."}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackDrained, 900)
+
+	// Same turn resumes with a second sentence, then is cut at 0 ms of the second run.
+	speakReply(h, c, []string{"Now", "deploying", "staging."}, 300)
+	c.serve(turnCompleteMsg())
+	h.waitEvent("turn complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
+
+	ev := h.waitEvent("cut transcript", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	})
+	tr := ev.(voice.EventTranscript)
+	if tr.Text != "Auth passed tests." || tr.Cut.HeardMs != 900 {
+		t.Fatalf("cut transcript = %+v (cut=%+v), want Text='Auth passed tests.' HeardMs=900", tr, tr.Cut)
+	}
+	wantFull := "Auth passed tests. Now deploying staging."
+	if tr.Cut.Full != wantFull {
+		t.Fatalf("cut Full = %q, want %q", tr.Cut.Full, wantFull)
+	}
+	entries := h.s.RecapEntries()
+	if len(entries) != 1 || entries[0].Text != "Auth passed tests." || !entries[0].Cut || entries[0].CutAfterMs != 900 {
+		t.Fatalf("recap entries = %+v, want single cut entry 'Auth passed tests.' at 900ms", entries)
+	}
+}

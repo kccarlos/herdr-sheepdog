@@ -314,6 +314,26 @@ func (h *hub) sendAudio(chunk []byte) {
 }
 
 func (h *hub) sendAudioChunk(chunk voice.AudioChunk) {
+	if n := len(chunk.FlushedEpochs); n > 0 {
+		h.mu.Lock()
+		latest := h.flushedEpoch
+		c := h.client
+		h.mu.Unlock()
+		if c != nil {
+			c.mu.Lock()
+			if c.flushedEpoch < latest {
+				latest = c.flushedEpoch
+			}
+			c.mu.Unlock()
+		}
+		if chunk.FlushedEpochs[n-1] > latest {
+			for _, ep := range chunk.FlushedEpochs {
+				if ep > latest {
+					h.flush(ep)
+				}
+			}
+		}
+	}
 	h.mu.Lock()
 	if chunk.Epoch != 0 && chunk.Epoch <= h.flushedEpoch {
 		h.mu.Unlock()
@@ -440,21 +460,27 @@ func (h *hub) push(text string, u voice.Urgency, tags map[string]any) error {
 	return h.s.deps.Voice.Push(text, u)
 }
 
-// flush drops queued audio, fences off epoch, and tells the client to
-// drop its buffer.
+// flush drops queued pre-flush audio, fences off epoch, and tells the client
+// to drop its buffer. Epoch-tagged flushes are idempotent so a flush barrier
+// delivered ahead of newer-epoch audio is not sent a second time when the
+// matching EventInterrupted arrives.
 func (h *hub) flush(epoch uint64) {
-	h.s.audio.EndRun()
 	h.mu.Lock()
-	if epoch > h.flushedEpoch {
-		h.flushedEpoch = epoch
+	alreadyFlushed := epoch != 0 && epoch <= h.flushedEpoch
+	if !alreadyFlushed {
+		if epoch > h.flushedEpoch {
+			h.flushedEpoch = epoch
+		}
+		h.s.audio.EndRun()
 	}
 	c := h.client
 	h.mu.Unlock()
 	if c == nil {
 		return
 	}
-	dropped := c.flush(epoch, controlFrame(wsproto.Flush()))
-	h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
+	if dropped, sent := c.flush(epoch, controlFrame(wsproto.Flush())); sent {
+		h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
+	}
 }
 
 // cancel runs the stop tool and applies its effect to the audio pipe
@@ -793,28 +819,64 @@ func (c *client) enqueueLocked(f frame) (bpDropped int, enqueued bool) {
 	return bpDropped, true
 }
 
-// flush atomically advances the client's flushed audio epoch, drops every
-// queued audio frame, and enqueues ctrl so no pre-flush audio frame can
-// slip into the queue after the flush message.
-func (c *client) flush(epoch uint64, ctrl frame) int {
+// flush atomically advances the client's flushed audio epoch, drops queued
+// pre-flush audio frames while preserving newer-epoch frames behind the
+// barrier, and enqueues ctrl ahead of any newer-epoch audio.
+func (c *client) flush(epoch uint64, ctrl frame) (int, bool) {
 	if ctrl.at.IsZero() {
 		ctrl.at = c.h.s.deps.Now()
 	}
 	c.mu.Lock()
+	if epoch != 0 && epoch <= c.flushedEpoch {
+		c.mu.Unlock()
+		return 0, false
+	}
 	if epoch > c.flushedEpoch {
 		c.flushedEpoch = epoch
 	}
-	kept := c.queue[:0]
+	kept := make([]frame, 0, len(c.queue)+1)
 	n := 0
+	inserted := false
+	canSendCtrl := !c.closing || ctrl.close
 	for _, f := range c.queue {
 		if f.binary {
-			n++
-			continue
+			if epoch == 0 || f.epoch == 0 || f.epoch <= epoch {
+				n++
+				continue
+			}
+			if !inserted && canSendCtrl {
+				kept = append(kept, ctrl)
+				inserted = true
+			}
 		}
 		kept = append(kept, f)
 	}
-	c.queue = kept
-	bp, ok := c.enqueueLocked(ctrl)
+	var bp int
+	ok := false
+	if inserted {
+		c.queue = kept
+		if len(c.queue) > c.max {
+			idx := 0
+			for i, q := range c.queue {
+				if q.binary {
+					idx = i
+					break
+				}
+			}
+			if c.queue[idx].binary {
+				c.droppedAudio++
+			}
+			c.dropped++
+			c.queue = append(c.queue[:idx], c.queue[idx+1:]...)
+			if c.dropped == 1 || c.dropped%backpressureEvery == 0 {
+				bp = c.dropped
+			}
+		}
+		ok = true
+	} else {
+		c.queue = kept
+		bp, ok = c.enqueueLocked(ctrl)
+	}
 	c.mu.Unlock()
 	if bp > 0 {
 		c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": bp, "queue": c.max})
@@ -825,7 +887,7 @@ func (c *client) flush(epoch uint64, ctrl frame) int {
 		default:
 		}
 	}
-	return n
+	return n, ok
 }
 
 // closeAfterFlush lets queued frames go out, then closes.

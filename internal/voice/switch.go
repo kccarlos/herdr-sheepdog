@@ -202,7 +202,7 @@ func (sw *Switcher) Start(ctx context.Context) error {
 		ca.ClientAttached(sw.client)
 	}
 	setOpenCheck(inner, sw.openCheck)
-	sw.forwardLocked(inner)
+	sw.forwardLocked(inner, 0, nil)
 	return nil
 }
 
@@ -269,16 +269,24 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	}
 	sw.current, sw.inner = id, inner
 	muted, client, check := sw.muted, sw.client, sw.openCheck
-	sw.forwardLocked(inner)
+	ready := make(chan struct{})
+	sw.forwardLocked(inner, fence, ready)
 	sw.retire.Add(1)
 	sw.mu.Unlock()
 
-	if fa, ok := old.(interface{ FlushAudio() uint64 }); ok {
+	if pa, ok := old.(interface{ PurgeAudio() uint64 }); ok {
+		pa.PurgeAudio()
+	} else if fa, ok := old.(interface{ FlushAudio() uint64 }); ok {
 		fa.FlushAudio()
 	}
 	inner.SetMuted(muted)
 	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(client)
+	}
+	if client {
+		if ef, ok := inner.(interface{ ExpectFlush() }); ok {
+			ef.ExpectFlush()
+		}
 	}
 	setOpenCheck(inner, check)
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
@@ -286,6 +294,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
 	sw.emit(EventInterrupted{Epoch: fence}) // drop the old voice's audio (its queued pushes were carried)
+	close(ready)
 	go func() {
 		defer sw.retire.Done()
 		_ = old.Close()
@@ -372,19 +381,68 @@ func (sw *Switcher) carryPushes(old, inner Session, from, to string) {
 }
 
 // forwardLocked pumps inner's audio and events onto the switcher's while
-// inner is the current session.
-func (sw *Switcher) forwardLocked(inner Session) {
+// inner is the current session. When ready is non-nil, forwarding waits
+// until ready closes (after SetProvider has flushed the retired session and
+// emitted its EventInterrupted barrier).
+func (sw *Switcher) forwardLocked(inner Session, fence uint64, ready <-chan struct{}) {
 	ctx := sw.ctx
 	retired := make(chan struct{})
 	sw.innerRetired = retired
 	sw.innerEpoch.Store(NextAudioEpoch())
+	var fenceOnly []uint64
+	if fence != 0 {
+		fenceOnly = []uint64{fence}
+	}
+	waitReady := func() bool {
+		if ready == nil {
+			return true
+		}
+		select {
+		case <-ready:
+			return true
+		case <-retired:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+	stampFence := func(flushes []uint64) []uint64 {
+		if fence == 0 {
+			return flushes
+		}
+		if len(flushes) == 0 {
+			return fenceOnly
+		}
+		for _, ep := range flushes {
+			if ep == fence {
+				return flushes
+			}
+		}
+		out := make([]uint64, 0, len(flushes)+1)
+		inserted := false
+		for _, ep := range flushes {
+			if !inserted && ep > fence {
+				out = append(out, fence)
+				inserted = true
+			}
+			out = append(out, ep)
+		}
+		if !inserted {
+			out = append(out, fence)
+		}
+		return out
+	}
 	sw.fwd.Add(2)
 	go func() {
 		defer sw.fwd.Done()
+		if !waitReady() {
+			return
+		}
 		send := func(chunk AudioChunk) {
 			if !sw.isCurrent(inner) {
 				return
 			}
+			chunk.FlushedEpochs = stampFence(chunk.FlushedEpochs)
 			select {
 			case sw.audio <- chunk.Data:
 			case sw.audioChunks <- chunk:
@@ -404,6 +462,9 @@ func (sw *Switcher) forwardLocked(inner Session) {
 	}()
 	go func() {
 		defer sw.fwd.Done()
+		if !waitReady() {
+			return
+		}
 		for ev := range inner.Events() {
 			if !sw.isCurrent(inner) {
 				continue // a retired session's goodbyes

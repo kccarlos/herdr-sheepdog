@@ -15,11 +15,13 @@ import (
 )
 
 // AudioChunk pairs a 24 kHz PCM16 LE mono frame with the session's monotonic
-// outbound audio epoch at the time the frame was queued, so consumers can drop
-// in-flight frames that raced across a flush.
+// outbound audio epoch at the time the frame was queued and any preceding
+// flushed epochs, so consumers emit pending flush barriers before newer-epoch
+// audio and drop pre-flush frames that raced across a flush.
 type AudioChunk struct {
-	Data  []byte
-	Epoch uint64
+	Data          []byte
+	Epoch         uint64
+	FlushedEpochs []uint64
 }
 
 var audioEpochSeq atomic.Uint64
@@ -28,6 +30,24 @@ var audioEpochSeq atomic.Uint64
 // epoch (> 0).
 func NextAudioEpoch() uint64 {
 	return audioEpochSeq.Add(1)
+}
+
+const maxTrackedFlushEpochs = 16
+
+// AppendFlushEpoch returns a new immutable slice with ep appended (capped to
+// the most recent maxTrackedFlushEpochs entries).
+func AppendFlushEpoch(prev []uint64, ep uint64) []uint64 {
+	if ep == 0 {
+		return prev
+	}
+	base := prev
+	if len(base) >= maxTrackedFlushEpochs {
+		base = base[len(base)-(maxTrackedFlushEpochs-1):]
+	}
+	next := make([]uint64, len(base)+1)
+	copy(next, base)
+	next[len(base)] = ep
+	return next
 }
 
 // Urgency says how a push or a tool result should reach the user (plan §5,

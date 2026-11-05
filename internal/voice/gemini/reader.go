@@ -168,6 +168,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		s.flushRecapLocked()
+		s.play.TurnComplete()
 		turn := s.noteTurnCompleteLocked()
 		timing := s.finishAudioTimingLocked()
 		s.mu.Unlock()
@@ -190,11 +191,15 @@ func (s *Session) interrupt(by string) {
 	s.outText = ""
 	willAwait := !s.play.Empty()
 	uttID := s.playUtt.Flushed(willAwait)
-	s.play.FlushMeta(now, voice.FlushMeta{
-		RecapSeq:    seq,
-		UtteranceID: uttID,
-		ByPush:      by == "push",
-	})
+	if !s.noClient {
+		s.play.FlushMeta(now, voice.FlushMeta{
+			RecapSeq:    seq,
+			UtteranceID: uttID,
+			ByPush:      by == "push",
+		})
+	} else {
+		s.play.Detach()
+	}
 	s.brief.flushBy, s.brief.flushAt = by, now
 	armed := s.echo.Flush(now)
 	timing := s.finishAudioTimingLocked()

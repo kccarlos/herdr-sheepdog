@@ -285,18 +285,10 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		}
 		s.mu.Unlock()
 		lc.startedOnce.Do(func() { close(lc.started) })
-	case evOutputItemAdded:
-		if ev.Item != nil && ev.Item.Role == "assistant" && ev.Item.ID != "" {
-			s.mu.Lock()
-			if s.lcActiveLocked(lc) && !lc.interruptedItem(ev.Item.ID) {
-				lc.outItem = &outItemSpan{itemID: ev.Item.ID, startedAt: s.now()}
-			}
-			s.mu.Unlock()
-		}
 	case evOutputAudioDelta:
 		chunk, err := base64.StdEncoding.DecodeString(ev.Delta)
 		if err == nil && len(chunk) > 0 {
-			s.onOutputAudio(lc, chunk, ev.ItemID, ev.ContentIndex)
+			s.onOutputAudio(lc, chunk)
 		}
 	case evInputTranscript:
 		if ev.Delta != "" {
@@ -304,7 +296,7 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		}
 	case evOutputTranscript:
 		if ev.Delta != "" {
-			s.onOutputText(lc, ev.Delta, ev.ItemID, ev.ContentIndex)
+			s.onOutputText(lc, ev.Delta)
 		}
 	case evDelegationCreated:
 		if ev.Delegation != nil && ev.Delegation.Target == "client" {
@@ -336,29 +328,45 @@ func (s *Session) handleEvent(lc *liveConn, ev *serverEvent) bool {
 		s.log.Log(logSource, "voice.error_event", "", payload)
 		s.emit(voice.EventError{Err: errors.New(msg)})
 	case evInstructionsApplied, evThinkingApplied, evCommentaryApplied:
+		if ev.Type == evInstructionsApplied || ev.Type == evCommentaryApplied {
+			s.mu.Lock()
+			if s.lcActiveLocked(lc) && lc.suppressOutput && ev.ClientEventID != "" && ev.ClientEventID == lc.resumeAckID {
+				lc.suppressOutput = false
+				lc.resumeAckID = ""
+				lc.suppressedAt = time.Time{}
+			}
+			s.mu.Unlock()
+		}
 		s.log.Log(logSource, "voice.append_ack", "", map[string]any{"type": ev.Type, "client_event_id": ev.ClientEventID, "start_ms": ev.StartMS, "end_ms": ev.EndMS})
 	}
 	return false
 }
 
-func (s *Session) onOutputAudio(lc *liveConn, chunk []byte, itemID string, contentIndex int) {
+func (s *Session) allowOutputLocked(lc *liveConn, now time.Time, active bool) bool {
+	if lc == nil || !lc.suppressOutput {
+		return true
+	}
+	if lc.resumeAckID != "" {
+		return false
+	}
+	if !lc.suppressedAt.IsZero() && now.Sub(lc.suppressedAt) >= s.cfg.SpeechHold {
+		lc.suppressOutput = false
+		lc.suppressedAt = time.Time{}
+		return true
+	}
+	if active {
+		lc.suppressedAt = now
+	}
+	return false
+}
+
+func (s *Session) onOutputAudio(lc *liveConn, chunk []byte) {
 	now := s.now()
 	voiced := peak(chunk) >= s.cfg.VoicedPeak
 	s.mu.Lock()
-	if !s.lcActiveLocked(lc) {
+	if !s.lcActiveLocked(lc) || !s.allowOutputLocked(lc, now, voiced) {
 		s.mu.Unlock()
 		return
-	}
-	if lc != nil && itemID != "" {
-		if lc.interruptedItem(itemID) {
-			s.mu.Unlock()
-			return
-		}
-		if lc.outItem == nil || lc.outItem.itemID != itemID {
-			lc.outItem = &outItemSpan{itemID: itemID, contentIndex: contentIndex, startedAt: now}
-		}
-		lc.outItem.contentIndex = contentIndex
-		lc.outItem.serverBytes += len(chunk)
 	}
 	if s.audioTiming == nil {
 		s.audioTurnSeq++
@@ -388,6 +396,10 @@ func (s *Session) onInputText(lc *liveConn, delta string) {
 		s.mu.Unlock()
 		return
 	}
+	if lc != nil && lc.suppressOutput && lc.resumeAckID == "" {
+		lc.suppressOutput = false
+		lc.suppressedAt = time.Time{}
+	}
 	s.lastInput = now
 	s.inputOpen = true
 	s.lastActivity = now
@@ -399,21 +411,12 @@ func (s *Session) onInputText(lc *liveConn, delta string) {
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: delta})
 }
 
-func (s *Session) onOutputText(lc *liveConn, delta string, itemID string, contentIndex int) {
+func (s *Session) onOutputText(lc *liveConn, delta string) {
 	now := s.now()
 	s.mu.Lock()
-	if !s.lcActiveLocked(lc) {
+	if !s.lcActiveLocked(lc) || !s.allowOutputLocked(lc, now, true) {
 		s.mu.Unlock()
 		return
-	}
-	if lc != nil && itemID != "" {
-		if lc.interruptedItem(itemID) {
-			s.mu.Unlock()
-			return
-		}
-		if lc.outItem == nil || lc.outItem.itemID != itemID {
-			lc.outItem = &outItemSpan{itemID: itemID, contentIndex: contentIndex, startedAt: now}
-		}
 	}
 	s.lastOutText = now
 	s.lastActivity = now
@@ -483,54 +486,4 @@ func (s *Session) recapItemsLocked() []initialItem {
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: text}}})
 	}
 	return items
-}
-
-const maxTrackedItems = 16
-
-func (lc *liveConn) markInterrupted(id string) {
-	if lc == nil || id == "" || lc.interruptedItem(id) {
-		return
-	}
-	lc.interruptedIDs = append(lc.interruptedIDs, id)
-	if len(lc.interruptedIDs) > maxTrackedItems {
-		lc.interruptedIDs = lc.interruptedIDs[len(lc.interruptedIDs)-maxTrackedItems:]
-	}
-}
-
-func (lc *liveConn) wasTruncated(id string) bool {
-	for _, seen := range lc.truncatedIDs {
-		if seen == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (lc *liveConn) markTruncated(id string) {
-	if lc == nil || id == "" || lc.wasTruncated(id) {
-		return
-	}
-	lc.truncatedIDs = append(lc.truncatedIDs, id)
-	if len(lc.truncatedIDs) > maxTrackedItems {
-		lc.truncatedIDs = lc.truncatedIDs[len(lc.truncatedIDs)-maxTrackedItems:]
-	}
-}
-
-// interruptedItem rejects deltas for any item already interrupted on lc.
-// Caller holds s.mu.
-func (lc *liveConn) interruptedItem(id string) bool {
-	if lc == nil || id == "" {
-		return false
-	}
-	for _, seen := range lc.interruptedIDs {
-		if seen == id {
-			return true
-		}
-	}
-	for _, span := range lc.awaitingItems {
-		if span.itemID == id {
-			return true
-		}
-	}
-	return false
 }

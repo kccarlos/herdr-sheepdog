@@ -235,10 +235,18 @@ func (s *Session) appendFor(lc *liveConn, delegationID, typ, content string) {
 	s.mu.Lock()
 	s.toolSeq++
 	eid := fmt.Sprintf("res_%d", s.toolSeq)
+	if typ == evCommentaryAppend && lc != nil && s.lcActiveLocked(lc) && lc.suppressOutput {
+		lc.resumeAckID = eid
+	}
 	s.lastActivity = s.now()
 	s.mu.Unlock()
 	id := delegationID
 	if err := s.send(lc, appendEvent{Type: typ, EventID: eid, DelegationID: &id, Content: clip(content)}); err != nil {
+		s.mu.Lock()
+		if lc != nil && lc.resumeAckID == eid {
+			lc.resumeAckID = ""
+		}
+		s.mu.Unlock()
 		s.emit(voice.EventError{Err: err})
 	}
 }

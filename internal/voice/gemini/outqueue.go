@@ -8,8 +8,9 @@ import (
 )
 
 type outItem struct {
-	data  []byte
-	epoch uint64
+	data    []byte
+	epoch   uint64
+	flushes []uint64
 }
 
 // outQueue is the model→browser audio queue. The reader goroutine pushes
@@ -21,6 +22,7 @@ type outQueue struct {
 	cond    *sync.Cond
 	items   []outItem
 	epoch   uint64
+	flushes []uint64
 	flushed chan struct{} // closed and replaced on Flush
 	closed  bool
 }
@@ -38,7 +40,7 @@ func (q *outQueue) Push(chunk []byte) {
 	if q.closed {
 		return
 	}
-	q.items = append(q.items, outItem{data: chunk, epoch: q.epoch})
+	q.items = append(q.items, outItem{data: chunk, epoch: q.epoch, flushes: q.flushes})
 	q.cond.Signal()
 }
 
@@ -56,6 +58,7 @@ func (q *outQueue) FlushEpoch() (dropped int, flushedEpoch uint64) {
 	dropped = len(q.items)
 	q.items = nil
 	flushedEpoch = q.epoch
+	q.flushes = voice.AppendFlushEpoch(q.flushes, flushedEpoch)
 	q.epoch = voice.NextAudioEpoch()
 	close(q.flushed)
 	q.flushed = make(chan struct{})
@@ -113,7 +116,7 @@ func (q *outQueue) pumpBoth(ctx context.Context, out chan<- []byte, outChunks ch
 		q.mu.Unlock()
 		select {
 		case out <- item.data:
-		case outChunks <- voice.AudioChunk{Data: item.data, Epoch: item.epoch}:
+		case outChunks <- voice.AudioChunk{Data: item.data, Epoch: item.epoch, FlushedEpochs: item.flushes}:
 		case <-flushed:
 		case <-ctx.Done():
 			return

@@ -78,6 +78,7 @@ func TestPlaybackDrainedKeepsTheNextRun(t *testing.T) {
 	var p PlaybackTracker
 	t0 := time.Unix(1000, 0)
 	sendRun(&p, t0, []string{"first", "reply"}, 1000)
+	p.TurnComplete()
 	sendRun(&p, t0, []string{"second", "reply"}, 1000)
 	p.Report(t0, PlaybackStarted, 0)
 	p.Report(t0.Add(time.Second), PlaybackDrained, 1000)
@@ -431,4 +432,91 @@ func TestPlaybackShortVoicedRunHeardBeforeTrailingSilence(t *testing.T) {
 	if rep := p.Report(now, PlaybackFlushed, 200); rep.Cut != nil {
 		t.Fatalf("all voiced audio was heard: %+v", rep)
 	}
+}
+
+func TestPlaybackEmptyFlushAckDoesNotCutNextRun(t *testing.T) {
+	var p PlaybackTracker
+	t0 := time.Unix(1000, 0)
+
+	// Client locally flushes Run 1 (iOS/web Stop button), then daemon flushes
+	// while the run is empty (afterCancel / interrupt("push")).
+	sendRun(&p, t0, tenWords(), 10000)
+	if rep := p.Report(t0.Add(2*time.Second), PlaybackFlushed, 2000); rep.Cut == nil || rep.Heard != "one two" {
+		t.Fatalf("initial local flush = %+v, want cut at 'one two'", rep)
+	}
+	p.Flush(t0.Add(2050 * time.Millisecond))
+	p.Flush(t0.Add(2060 * time.Millisecond))
+
+	// Before the two empty flush acks return from the client, the next reply begins.
+	sendRun(&p, t0.Add(2100*time.Millisecond), []string{"Stopped", "auth", "agent"}, 900)
+
+	for i := 1; i <= 2; i++ {
+		rep := p.Report(t0.Add(2150*time.Millisecond), PlaybackFlushed, 0)
+		if !rep.Awaited || rep.Cut != nil {
+			t.Fatalf("empty flush ack %d = %+v (cut=%+v), want awaited with nil Cut", i, rep, rep.Cut)
+		}
+	}
+	if p.Empty() {
+		t.Fatal("next reply's run was consumed by empty flush acknowledgements")
+	}
+	if rep := p.Report(t0.Add(2500*time.Millisecond), PlaybackFlushed, 300); rep.Cut == nil || rep.Heard != "Stopped" {
+		t.Fatalf("subsequent cut on next reply = %+v (cut=%+v), want heard='Stopped'", rep, rep.Cut)
+	}
+}
+
+func TestPlaybackCutAfterUnderrunRetainsHeardPrefix(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+
+	t.Run("zero_ms_after_underrun_keeps_first_sentence", func(t *testing.T) {
+		var p PlaybackTracker
+		sendRun(&p, t0, []string{"First", "sentence."}, 1000)
+		p.Report(t0, PlaybackStarted, 0)
+		p.Report(t0.Add(time.Second), PlaybackDrained, 1000)
+
+		// Same reply resumes after underrun gap, then is cut at 0 ms of the continuation.
+		sendRun(&p, t0.Add(1100*time.Millisecond), []string{"Second", "sentence", "long", "tail."}, 2000)
+		p.Report(t0.Add(1150*time.Millisecond), PlaybackStarted, 0)
+		rep := p.Report(t0.Add(1200*time.Millisecond), PlaybackFlushed, 0)
+		if rep.Cut == nil {
+			t.Fatalf("expected cut report, got %+v", rep)
+		}
+		if rep.Heard != "First sentence." {
+			t.Fatalf("rep.Heard = %q, want %q (first sentence erased after drain)", rep.Heard, "First sentence.")
+		}
+		if rep.Cut.HeardMs != 1000 || rep.Cut.RunMs != 3000 {
+			t.Fatalf("cut timing = %+v, want HeardMs=1000 RunMs=3000", rep.Cut)
+		}
+		wantFull := "First sentence. Second sentence long tail."
+		if rep.Cut.Full != wantFull {
+			t.Fatalf("rep.Cut.Full = %q, want %q", rep.Cut.Full, wantFull)
+		}
+	})
+
+	t.Run("partial_ms_after_underrun_appends_continuation_prefix", func(t *testing.T) {
+		var p PlaybackTracker
+		sendRun(&p, t0, []string{"First", "sentence."}, 1000)
+		p.Report(t0, PlaybackStarted, 0)
+		p.Report(t0.Add(time.Second), PlaybackDrained, 1000)
+
+		sendRun(&p, t0.Add(1100*time.Millisecond), []string{"Second", "sentence", "long", "tail."}, 2000)
+		p.Report(t0.Add(1150*time.Millisecond), PlaybackStarted, 0)
+		rep := p.Report(t0.Add(1650*time.Millisecond), PlaybackFlushed, 500)
+		if rep.Cut == nil || rep.Heard != "First sentence. Second" || rep.Cut.HeardMs != 1500 || rep.Cut.RunMs != 3000 {
+			t.Fatalf("cut = %+v (heard=%q), want Heard='First sentence. Second' HeardMs=1500 RunMs=3000", rep.Cut, rep.Heard)
+		}
+	})
+
+	t.Run("cjk_no_space_preserves_exact_full_string", func(t *testing.T) {
+		var p PlaybackTracker
+		p.Sent(t0, 1000*outBytesPerMs)
+		p.Said("第一句。")
+		p.Report(t0.Add(time.Second), PlaybackDrained, 1000)
+
+		p.Sent(t0.Add(1100*time.Millisecond), 1000*outBytesPerMs)
+		p.Said("第二句很长。")
+		rep := p.Report(t0.Add(1150*time.Millisecond), PlaybackFlushed, 0)
+		if rep.Cut == nil || rep.Heard != "第一句。" || rep.Cut.Full != "第一句。第二句很长。" {
+			t.Fatalf("CJK cut = %+v (heard=%q), want Heard='第一句。' Full='第一句。第二句很长。'", rep.Cut, rep.Heard)
+		}
+	})
 }
