@@ -132,7 +132,7 @@ func isPageRoute(path string) bool {
 // request that changes something, whose Origin is present and is not
 // this daemon's own. The app sends no Origin. This stops cross-site
 // WebSocket hijacking and request forgery even with a cookie.
-func crossOrigin(r *http.Request) bool {
+func crossOrigin(r *http.Request, allowForwardedHost bool) bool {
 	o := r.Header.Get("Origin")
 	if o == "" {
 		return false
@@ -142,15 +142,28 @@ func crossOrigin(r *http.Request) bool {
 		return false
 	}
 	u, err := url.Parse(o)
-	return err != nil || !strings.EqualFold(u.Host, r.Host)
+	if err != nil {
+		return true
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return false
+	}
+	if allowForwardedHost {
+		if xfh := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); xfh != "" && strings.EqualFold(u.Host, xfh) {
+			return false
+		}
+	}
+	return true
 }
 
 // guard is the first check on every request:
 //   - plain HTTP from another machine: a page is redirected (308) to the
 //     same address over https, anything else is refused with 426
 //     {"error":"tls_required"};
-//   - from loopback, the Host must be a loopback name (127.0.0.1, ::1,
-//     localhost), which stops a DNS-rebinding page;
+//   - from loopback without a paired device ticket, the Host must be a
+//     loopback name (127.0.0.1, ::1, localhost), which stops a
+//     DNS-rebinding page while allowing paired sds_ tickets through a
+//     Host-preserving reverse proxy;
 //   - an upgrade or a change from another website's Origin is refused.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,12 +179,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeError(w, http.StatusUpgradeRequired, "tls_required")
 			return
 		}
-		if loop && !isLoopbackHost(r.Host) {
+		validTicket := loop && s.hasValidTicket(r)
+		if loop && !isLoopbackHost(r.Host) && !validTicket {
 			s.log.Log(logSource, "web.host_refused", "", map[string]any{"path": r.URL.Path, "host": r.Host})
 			writeError(w, http.StatusForbidden, "host_not_allowed")
 			return
 		}
-		if crossOrigin(r) {
+		if crossOrigin(r, validTicket) {
 			s.log.Log(logSource, "web.origin_refused", "", map[string]any{"path": r.URL.Path, "origin": r.Header.Get("Origin")})
 			writeError(w, http.StatusForbidden, "origin_not_allowed")
 			return

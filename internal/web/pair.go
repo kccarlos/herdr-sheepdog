@@ -229,8 +229,9 @@ type EnrollResponse struct {
 // handleEnroll records a device's public key in exchange for the one-time
 // pairing code (public: the code is the credential).
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
-	remote := !isLoopbackAddr(r.RemoteAddr)
-	if remote && s.limits.isBlocked("enroll", sourceIP(r.RemoteAddr), s.deps.Now()) {
+	remote := s.isRateLimitedCaller(r)
+	src := rateLimitSource(r)
+	if remote && s.limits.isBlocked("enroll", src, s.deps.Now()) {
 		writeRateLimited(w)
 		return
 	}
@@ -252,7 +253,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	if reason := s.enroll.burn(req.Code, s.deps.Now()); reason != "" {
 		if remote {
-			s.limits.fail("enroll", sourceIP(r.RemoteAddr), badCodesPerMinute, s.deps.Now())
+			s.limits.fail("enroll", src, badCodesPerMinute, s.deps.Now())
 		}
 		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
 		writeJSON(w, http.StatusGone, map[string]string{"error": "This code was already used or has expired. Show a new code on your computer and scan it.", "reason": reason})
@@ -270,7 +271,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.log.Log(logSource, "web.device.enroll", "", map[string]any{"device_id": d.ID, "kind": d.Kind, "name": d.Name, "hardware": d.Hardware, "remote_kind": s.kindOf(r.RemoteAddr)})
+	s.log.Log(logSource, "web.device.enroll", "", map[string]any{"device_id": d.ID, "kind": d.Kind, "name": d.Name, "hardware": d.Hardware, "remote_kind": s.requestKind(r)})
 	s.devicePaired(d)
 	writeJSON(w, http.StatusOK, EnrollResponse{DeviceID: d.ID, DaemonID: s.deps.Computer.ID, Name: d.Name})
 }

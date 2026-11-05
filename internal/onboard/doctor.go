@@ -24,6 +24,9 @@ type DoctorOptions struct {
 	// Environment adds the herdr-app, Sheepdog.app and backend checks when
 	// non-nil.
 	Environment *Environment
+	// TailscaleFunnel, when set, checks whether Tailscale Funnel is exposing
+	// cfg.Web.Port to the public internet.
+	TailscaleFunnel func(ctx context.Context, port int) (bool, error)
 }
 
 // Doctor runs every check on the effective config, in a fixed order.
@@ -68,6 +71,16 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	out = append(out, CheckVoice(cfg))
 	out = append(out, CheckPort(ctx, o.PortClient, cfg.Web.Bind, cfg.Web.Port))
 	out = append(out, CheckBind(cfg.Web))
+	if o.TailscaleFunnel != nil {
+		if active, err := o.TailscaleFunnel(ctx, cfg.Web.Port); err == nil && active {
+			out = append(out, Result{
+				Name:   "tailscale funnel",
+				Status: Fail,
+				Detail: fmt.Sprintf("Tailscale Funnel is exposing port %d to the public internet", cfg.Web.Port),
+				Fix:    "run tailscale funnel reset (use tailscale serve for tailnet-only access)",
+			})
+		}
+	}
 	out = append(out, CheckProjectRoots(cfg.Supervisor.ProjectRoots)...)
 	out = append(out, CheckPush(ctx, o.Endpoints, cfg.Push))
 	if o.ConfigPath != "" {

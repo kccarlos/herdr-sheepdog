@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
 )
 
 // CreateWorkspace opens a new shell terminal in cwd, in a new herdr-app
@@ -97,7 +100,7 @@ func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args [
 	if !knownKind(kind) {
 		return fmt.Errorf("herdrcore: unknown agent kind %q", kind)
 	}
-	command := agentCommand(kind, args)
+	command := b.agentCommand(kind, args)
 	_, err := b.client.Send(ctx, paneID, command, false)
 	b.logEvent("herdr.agent_start", paneID, map[string]any{"kind": kind, "command": command, "error": errString(err)})
 	if err != nil {
@@ -108,10 +111,15 @@ func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args [
 	return nil
 }
 
-// agentCommand is the shell line that starts kind with args. Codex runs
-// with --no-daemon under hc, as herdr-core's own skill says.
-func agentCommand(kind string, args []string) string {
-	words := []string{kind}
+// agentCommand is the shell line that starts kind with args at utility OS
+// priority so heavy worker builds do not starve realtime voice audio. Codex
+// runs with --no-daemon under hc, as herdr-core's own skill says.
+func (b *Backend) agentCommand(kind string, args []string) string {
+	var words []string
+	for _, w := range procprio.ShellPrefixForOS(b.goos(), b.lookPath()) {
+		words = append(words, shellQuote(w))
+	}
+	words = append(words, kind)
 	if kind == "codex" {
 		words = append(words, "--no-daemon")
 	}
@@ -119,6 +127,20 @@ func agentCommand(kind string, args []string) string {
 		words = append(words, shellQuote(arg))
 	}
 	return strings.Join(words, " ")
+}
+
+func (b *Backend) goos() string {
+	if b.GOOS != "" {
+		return b.GOOS
+	}
+	return runtime.GOOS
+}
+
+func (b *Backend) lookPath() func(string) (string, error) {
+	if b.LookPath != nil {
+		return b.LookPath
+	}
+	return exec.LookPath
 }
 
 var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)

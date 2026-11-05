@@ -108,7 +108,7 @@ func buildReport(ctx context.Context, o reportOptions) string {
 		environment := onboard.Detect(o.cfg, onboard.SystemProbe(), herdrsheepdog.Panel, herdrsheepdog.Layout)
 		for _, r := range onboard.Doctor(ctx, o.cfg, onboard.DoctorOptions{
 			Endpoints: onboardEndpoints(), Probe: false, ConfigPath: o.configPath, EnvPath: o.envPath,
-			Environment: &environment,
+			Environment: &environment, TailscaleFunnel: onboardTailscaleFunnel(),
 		}) {
 			lines = append(lines, r.Line())
 		}

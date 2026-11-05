@@ -32,6 +32,7 @@ func TestStartAgentTypesTheCommand(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
 			b, srv := newBackend(t)
+			b.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 			srv.Add(liveTerminal("t1", "zsh"))
 			if err := b.StartAgent(testContext(t), "t1", "placeholder", c.kind, c.args, 0); err != nil {
 				t.Fatal(err)
@@ -41,6 +42,92 @@ func TestStartAgentTypesTheCommand(t *testing.T) {
 				t.Fatalf("send params = %+v, want text %q", sent, c.want)
 			}
 		})
+	}
+}
+
+func TestStartAgentRunsAtUtilityPriority(t *testing.T) {
+	cases := []struct {
+		name string
+		goos string
+		bins map[string]string
+		kind string
+		args []string
+		want string
+	}{
+		{
+			name: "darwin with taskpolicy on PATH",
+			goos: "darwin",
+			bins: map[string]string{"nice": "/usr/bin/nice", "taskpolicy": "/usr/sbin/taskpolicy"},
+			kind: "codex",
+			args: []string{"-m", "x"},
+			want: "nice -n 10 taskpolicy -c utility codex --no-daemon -m x",
+		},
+		{
+			name: "darwin with /usr/sbin/taskpolicy fallback when /usr/sbin is off PATH",
+			goos: "darwin",
+			bins: map[string]string{"nice": "/usr/bin/nice", "/usr/sbin/taskpolicy": "/usr/sbin/taskpolicy"},
+			kind: "claude",
+			args: []string{"--model", "y"},
+			want: "nice -n 10 /usr/sbin/taskpolicy -c utility claude --model y",
+		},
+		{
+			name: "linux with nice and ionice",
+			goos: "linux",
+			bins: map[string]string{"nice": "/usr/bin/nice", "ionice": "/usr/bin/ionice"},
+			kind: "codex",
+			args: nil,
+			want: "nice -n 10 ionice -c 2 -n 7 -t codex --no-daemon",
+		},
+		{
+			name: "linux with nice only",
+			goos: "linux",
+			bins: map[string]string{"nice": "/usr/bin/nice"},
+			kind: "claude",
+			args: nil,
+			want: "nice -n 10 claude",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, srv := newBackend(t)
+			b.GOOS = tc.goos
+			b.LookPath = func(file string) (string, error) {
+				if p, ok := tc.bins[file]; ok {
+					return p, nil
+				}
+				return "", exec.ErrNotFound
+			}
+			srv.Add(liveTerminal("t1", "zsh"))
+			if err := b.StartAgent(testContext(t), "t1", "placeholder", tc.kind, tc.args, 0); err != nil {
+				t.Fatal(err)
+			}
+			sent := requestParams[sendParams](t, srv, "terminal.send")
+			if len(sent) != 1 || sent[0].Text != tc.want {
+				t.Fatalf("send = %+v, want %q", sent, tc.want)
+			}
+		})
+	}
+}
+
+func TestWrappedArgvRecognisedAsAgent(t *testing.T) {
+	b, srv := newBackend(t)
+	ctx := testContext(t)
+
+	term := liveTerminal("t1", "nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility", "codex", "--no-daemon")
+	term.Foreground = &hc.Foreground{
+		PID:  200,
+		Name: "nice",
+		Argv: []string{"nice", "-n", "10", "/usr/sbin/taskpolicy", "-c", "utility", "codex", "--no-daemon"},
+	}
+	srv.Add(term)
+	srv.SetScreen("t1", trustScreen)
+
+	agents, err := b.ListAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].Agent != "codex" || agents[0].Status != herdr.StateBlocked {
+		t.Fatalf("ListAgents on wrapped foreground = %+v, want blocked codex", agents)
 	}
 }
 
