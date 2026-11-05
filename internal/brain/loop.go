@@ -193,7 +193,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// What the daemon knows about the agents the words name, and that
 		// it knows nothing more (run C, H7: "did it push?" answered "no"
 		// from a screen that says nothing about pushing).
-		t.req.records = agentRecords(b.host.Agents(), t.req.Question, t.req.Focus, b.cfg.Now)
+		t.req.records = agentRecords(b.redactAgents(b.host.Agents()), t.req.Question, t.req.Focus, b.cfg.Now)
 	}
 	words := ""
 	if t.req.Kind == KindUtterance && t.req.Trigger != TriggerEvent {
@@ -455,7 +455,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 			res.Error = out.err.Error()
 			payload["error"] = res.Error
 		} else {
-			payload["result"] = prose.TruncateRunes(out.result, logResultBytes)
+			payload["result"] = prose.TruncateRunes(b.cfg.Redactor.String(out.result), logResultBytes)
 		}
 		b.ingest(Message{Role: RoleTool, Kind: KindToolResult, Content: out.result, Agent: out.agent, ToolResult: res}, t.n)
 		b.log.Log(logSource, "brain.tool_result", "", payload)
@@ -731,6 +731,24 @@ func (b *Brain) promptSections(includeStable bool) []PromptSection {
 	record := recordLine(started, compaction, now)
 	if screen != "" {
 		record = strings.TrimSpace(record + "\n" + screen)
+	}
+	agents = b.redactAgents(agents)
+	notes = append([]string(nil), notes...)
+	promises = append([]PromiseInfo(nil), promises...)
+	investigations = append([]InvestigationInfo(nil), investigations...)
+	unanswered = append([]UnansweredInfo(nil), unanswered...)
+	for i := range notes {
+		notes[i] = b.cfg.Redactor.String(notes[i])
+	}
+	for i := range promises {
+		promises[i].Text = b.cfg.Redactor.String(promises[i].Text)
+	}
+	for i := range investigations {
+		investigations[i].Question = b.cfg.Redactor.String(investigations[i].Question)
+		investigations[i].Summary = b.cfg.Redactor.String(investigations[i].Summary)
+	}
+	for i := range unanswered {
+		unanswered[i].Text = b.cfg.Redactor.String(unanswered[i].Text)
 	}
 	secs = append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
 	for i := range secs {

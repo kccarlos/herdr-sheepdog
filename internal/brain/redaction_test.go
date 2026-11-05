@@ -61,3 +61,18 @@ func TestConfiguredSecretRedactedBeforeTruncation(t *testing.T) {
 		}
 	}
 }
+
+func TestRosterRedactsBeforeClipping(t *testing.T) {
+	secret := "custom-credential-value-123456789"
+	model := braintest.NewModel(braintest.Step{Text: braintest.Reply("Done.", "")})
+	h := newHarness(t, model, func(c *Config) { c.Redactor = redact.New(secret) })
+	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", State: "working", Task: strings.Repeat("x", 25) + secret})
+	if _, err := h.ask("check auth", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range model.Calls() {
+		if strings.Contains(c.Text(), "custom-cred") {
+			t.Fatal("partial secret reached model")
+		}
+	}
+}

@@ -331,7 +331,7 @@ const doneResult = "finished"
 func (s *Supervisor) recordResult(paneID, spoken string) {
 	now := s.cfg.Now()
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
-		a.LastResult = &state.Result{Spoken: spoken, At: now}
+		a.LastResult = &state.Result{Spoken: s.cfg.Redactor.String(spoken), At: now}
 	})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})

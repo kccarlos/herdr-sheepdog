@@ -46,7 +46,7 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 	// new prompt from this one (docs/dev/roles.md "blocked -> blocked is a
 	// block", reprompt.go): every answer_prompt pending action is built
 	// here, whether the block is real or synthetic.
-	sig := promptSignature(prompt)
+	sig := s.promptSignature(prompt)
 	if _, seen := s.promptSeenAt[paneID]; !seen || s.lastPrompt[paneID] != sig {
 		// When the prompt appeared, for the one rail (inputs.go): a
 		// revival of the same prompt keeps the first time it was seen; a
@@ -264,7 +264,7 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == promptSignature(prompt) {
+	if cur, has := s.store.Pending(); has && cur.Kind == state.PendingAnswerPrompt && cur.PaneID == paneID && pendingSignature(cur) == s.promptSignature(prompt) {
 		return cur, true, ""
 	}
 	row, found = s.store.Get(paneID)
