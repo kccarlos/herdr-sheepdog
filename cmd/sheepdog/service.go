@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -205,7 +206,8 @@ func serviceSpecFor(cfg config.Config, configPath, envFile, binary string) (serv
 			return service.Spec{}, err
 		}
 	}
-	return service.Spec{OS: runtimeGOOS, Binary: binary, EnvFile: envFile, ConfigPath: configPath, Home: home, UID: os.Getuid(), PATH: os.Getenv("PATH"), StdioPath: daemon.StdioFile(cfg.DataDir)}, nil
+	augPath := service.AugmentPATH(os.Getenv("PATH"), home, runtimeGOOS, []string{binary, cfg.Herdr.Bin}, exec.LookPath)
+	return service.Spec{OS: runtimeGOOS, Binary: binary, EnvFile: envFile, ConfigPath: configPath, Home: home, UID: os.Getuid(), PATH: augPath, StdioPath: daemon.StdioFile(cfg.DataDir)}, nil
 }
 
 // stableExecutable is this binary's path, made stable across upgrades:

@@ -457,7 +457,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		payload[k] = v
 	}
 	s.log.Log(logSource, "voice.push", "", payload)
-	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
+	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency, PendingID: voice.PushPendingID(item.tags)})
 }
 
 // PushBacklog implements voice.PushBacklogger: the queued pushes and

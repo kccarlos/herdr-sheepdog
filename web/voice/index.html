@@ -18,7 +18,10 @@
   <h1><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">voice</span></h1>
   <div class="indicator" title="WebSocket to the daemon"><span class="dot" id="ws-dot"></span><span id="ws-text">ws: idle</span></div>
   <div class="indicator" title="voice session in the daemon"><span class="dot" id="voice-dot"></span><span id="voice-text">voice: …</span></div>
-  <a href="/debug">debug page</a>
+  <span class="header-actions">
+    <button id="btn-shortcuts" type="button" class="shortcuts-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+    <a href="/debug">debug page</a>
+  </span>
 </header>
 
 <section class="card hidden" id="auth-gate" aria-live="polite">
@@ -99,7 +102,7 @@
     </dl>
   </section>
 
-  <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
+  <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop · <kbd>?</kbd> shortcuts. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source; <code>?gate=off</code> disables the silence gate (<code>?gate_floor=8&amp;gate_hold=300&amp;gate_preroll=100</code> tune it).</p>
 </main>
 
 <dialog id="card-dialog" class="card-dialog" aria-labelledby="card-title">
@@ -111,6 +114,24 @@
     <button value="close" aria-label="Close the card">Done</button>
   </form>
   <div id="card-body" class="card-body"></div>
+</dialog>
+
+<dialog id="shortcuts-dialog" class="card-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog" class="card-head">
+    <div>
+      <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+      <p class="muted small">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</p>
+    </div>
+    <button value="close" aria-label="Close keyboard shortcuts">Done</button>
+  </form>
+  <div class="card-body">
+    <dl class="shortcuts-list">
+      <dt><kbd>M</kbd></dt><dd>Mute or unmute microphone</dd>
+      <dt><kbd>Space</kbd> / <kbd>Esc</kbd></dt><dd>Stop voice playback and cancel current turn</dd>
+      <dt><kbd>Enter</kbd></dt><dd>Send typed utterance (when focused in text box)</dd>
+      <dt><kbd>?</kbd></dt><dd>Show or hide keyboard shortcuts</dd>
+    </dl>
+  </div>
 </dialog>
 
 <script type="module" src="/voice/app.js"></script>

@@ -456,3 +456,158 @@ func launchdState(out string) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// InstalledPATH returns the PATH value recorded in the installed unit file, or
+// ("", false) when the unit file does not exist or cannot be parsed.
+func (m Manager) InstalledPATH() (string, bool) {
+	if m.Spec.check() != nil {
+		return "", false
+	}
+	data, err := os.ReadFile(m.Spec.UnitPath())
+	if err != nil {
+		return "", false
+	}
+	if m.Spec.OS == "darwin" {
+		return plistEnvPATH(data)
+	}
+	return systemdEnvPATH(string(data))
+}
+
+func plistEnvPATH(data []byte) (string, bool) {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var tag string
+	var text strings.Builder
+	wantString := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			tag = t.Name.Local
+			text.Reset()
+		case xml.CharData:
+			if tag == "key" || tag == "string" {
+				text.Write(t)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "key" {
+				wantString = text.String() == "PATH"
+			} else if t.Name.Local == "string" && wantString {
+				return text.String(), true
+			}
+			tag = ""
+		}
+	}
+}
+
+func systemdEnvPATH(unit string) (string, bool) {
+	for _, raw := range strings.Split(unit, "\n") {
+		line := strings.TrimSpace(raw)
+		val, ok := strings.CutPrefix(line, "Environment=")
+		if !ok {
+			continue
+		}
+		if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+			r := strings.NewReplacer(`\\`, `\`, `\"`, `"`, `$$`, `$`, `%%`, `%`)
+			val = r.Replace(val[1 : len(val)-1])
+		}
+		if p, ok := strings.CutPrefix(val, "PATH="); ok {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// PATHContains reports whether pathEnv includes dir as one of its entries.
+func PATHContains(pathEnv, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	want := filepath.Clean(dir)
+	for _, entry := range filepath.SplitList(pathEnv) {
+		if entry != "" && filepath.Clean(entry) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// AugmentPATH returns current with resolved tool directories and standard user
+// and package-manager bin directories appended when missing. Existing entries
+// stay first in their original order so version-manager shims (mise, nvm, asdf)
+// continue to win.
+func AugmentPATH(current, home, goos string, binaries []string, lookPath func(string) (string, error)) string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(dir string) {
+		if dir == "" {
+			return
+		}
+		clean := filepath.Clean(dir)
+		if clean == "." || seen[clean] {
+			return
+		}
+		seen[clean] = true
+		out = append(out, dir)
+	}
+	for _, entry := range filepath.SplitList(current) {
+		add(entry)
+	}
+	for _, bin := range binaries {
+		if bin == "" {
+			continue
+		}
+		if filepath.IsAbs(bin) {
+			add(filepath.Dir(bin))
+		} else if lookPath != nil {
+			if p, err := lookPath(bin); err == nil && filepath.IsAbs(p) {
+				add(filepath.Dir(p))
+			}
+		}
+	}
+	if lookPath != nil {
+		for _, tool := range []string{"hc", "herdr", "herdr-app", "tailscale", "claude", "codex"} {
+			if p, err := lookPath(tool); err == nil && filepath.IsAbs(p) {
+				add(filepath.Dir(p))
+			}
+		}
+	}
+	for _, fb := range fallbackDirs(home, goos) {
+		add(fb)
+	}
+	return strings.Join(out, string(filepath.ListSeparator))
+}
+
+// MissingFallbackDirs returns standard user/package-manager bin directories
+// absent from pathEnv on goos.
+func MissingFallbackDirs(pathEnv, home, goos string) []string {
+	var check []string
+	if home != "" {
+		check = append(check, filepath.Join(home, ".local", "bin"))
+	}
+	if goos == "darwin" {
+		check = append(check, "/opt/homebrew/bin")
+	}
+	check = append(check, "/usr/local/bin")
+	var missing []string
+	for _, d := range check {
+		if !PATHContains(pathEnv, d) {
+			missing = append(missing, d)
+		}
+	}
+	return missing
+}
+
+func fallbackDirs(home, goos string) []string {
+	var dirs []string
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".local", "bin"))
+	}
+	if goos == "darwin" {
+		dirs = append(dirs, "/opt/homebrew/bin", "/opt/homebrew/sbin")
+	}
+	dirs = append(dirs, "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+	return dirs
+}

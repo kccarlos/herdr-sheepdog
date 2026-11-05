@@ -363,3 +363,122 @@ func TestSetupSheepdogLayout(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupEnvironmentKeybindingOptInAndConflict(t *testing.T) {
+	tries, delay := layoutConfirmTries, layoutConfirmDelay
+	layoutConfirmTries, layoutConfirmDelay = 1, 0
+	t.Cleanup(func() { layoutConfirmTries, layoutConfirmDelay = tries, delay })
+	panel := setupTestPanel()
+	cfg := setupTestConfig()
+	cfg.Herdr.Backend = config.HerdrBackendHC
+
+	// 1. Existing conflict declined: existing binding stays untouched.
+	dir := t.TempDir()
+	appHome, envPath := filepath.Join(dir, "herdr-app"), filepath.Join(dir, ".env")
+	if err := os.MkdirAll(appHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appHome, "shared.json"), []byte(`{"layout":"work"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appHome, "keys.json"), []byte(`{"global":{"cmd-shift-s":"app.palette"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	// Answers: install panel (y), switch layout (y), add shortcut (y), overwrite existing binding (n)
+	prompt := newPrompter(strings.NewReader("y\ny\ny\nn\n"), &out)
+	_, err := setupEnvironment(context.Background(), cfg, envPath, setupEnvironmentOptions{
+		Probe:       setupTestProbe(appHome, false, true),
+		Panel:       panel,
+		Layout:      []byte(`{"id":"root","type":"row","children":[{"type":"block","content":{"mod":"sheepdog"}}]}`),
+		Prompt:      prompt,
+		Interactive: true,
+		LayoutSwitch: func(context.Context) (string, error) {
+			_ = os.WriteFile(filepath.Join(appHome, "shared.json"), []byte(`{"layout":"sheepdog"}`), 0o644)
+			return `{"ok":true}`, nil
+		},
+		Out: &out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotKeys, _ := os.ReadFile(filepath.Join(appHome, "keys.json"))
+	if !strings.Contains(string(gotKeys), "app.palette") || strings.Contains(string(gotKeys), "sheepdog.focus") {
+		t.Fatalf("declined conflict still overwrote keys.json: %s", gotKeys)
+	}
+
+	// 2. Confirming overwrite backs up keys.json and records Previous + PreviousLayout in marker.
+	out.Reset()
+	// Panel & layout already docked now; only shortcut question + overwrite confirmation run!
+	prompt2 := newPrompter(strings.NewReader("y\ny\n"), &out)
+	_, err = setupEnvironment(context.Background(), cfg, envPath, setupEnvironmentOptions{
+		Probe:       setupTestProbe(appHome, false, true),
+		Panel:       panel,
+		Layout:      []byte(`{"id":"root","type":"row","children":[{"type":"block","content":{"mod":"sheepdog"}}]}`),
+		Prompt:      prompt2,
+		Interactive: true,
+		Out:         &out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotKeys, _ = os.ReadFile(filepath.Join(appHome, "keys.json"))
+	if !strings.Contains(string(gotKeys), "sheepdog.focus") {
+		t.Fatalf("confirmed shortcut not written: %s", gotKeys)
+	}
+	mk, err := panelsync.ReadMarker(filepath.Join(appHome, "mods", "sheepdog"))
+	if err != nil || mk.PreviousLayout != "work" || mk.Keybinding == nil || mk.Keybinding.Previous != "app.palette" {
+		t.Fatalf("marker = %+v (keybinding=%+v), %v", mk, mk.Keybinding, err)
+	}
+
+	// 3. Symlinked dev checkout (PanelCurrent without a marker): no spurious marker warning and no unrecorded keys.json mutation.
+	symDir := t.TempDir()
+	symAppHome, symEnvPath := filepath.Join(symDir, "herdr-app"), filepath.Join(symDir, ".env")
+	checkout := filepath.Join(symDir, "checkout")
+	for rel, f := range panel {
+		relMod := strings.TrimPrefix(rel, "mods/sheepdog/")
+		dst := filepath.Join(checkout, filepath.FromSlash(relMod))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, f.Data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(symAppHome, "mods"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(checkout, filepath.Join(symAppHome, "mods", "sheepdog")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(symAppHome, "shared.json"), []byte(`{"layout":"work"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(symAppHome, "keys.json"), []byte(`{"global":{"cmd-shift-s":"app.palette"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	prompt3 := newPrompter(strings.NewReader("y\ny\ny\n"), &out)
+	_, err = setupEnvironment(context.Background(), cfg, symEnvPath, setupEnvironmentOptions{
+		Probe:       setupTestProbe(symAppHome, false, true),
+		Panel:       panel,
+		Layout:      []byte(`{"id":"root","type":"row","children":[{"type":"block","content":{"mod":"sheepdog"}}]}`),
+		Prompt:      prompt3,
+		Interactive: true,
+		LayoutSwitch: func(context.Context) (string, error) {
+			_ = os.WriteFile(filepath.Join(symAppHome, "shared.json"), []byte(`{"layout":"sheepdog"}`), 0o644)
+			return `{"ok":true}`, nil
+		},
+		Out: &out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "could not record the previous layout") {
+		t.Fatalf("spurious previous-layout warning for symlinked panel:\n%s", out.String())
+	}
+	symKeys, _ := os.ReadFile(filepath.Join(symAppHome, "keys.json"))
+	if strings.Contains(string(symKeys), "sheepdog.focus") {
+		t.Fatalf("symlinked checkout without marker still mutated keys.json: %s", symKeys)
+	}
+}

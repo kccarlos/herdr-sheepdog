@@ -114,3 +114,23 @@ test("a tool result spoken without a voice model is the voice's line; a typed on
     assert.equal(r.runs, runs);
   }
 });
+
+test("held questions do not replace the pinned approval", () => {
+  const first = foldQuestions({ questions: [], pending_action: null }, created());
+  const held = foldQuestions(first, created({ id: "held", held: true, muted: true }));
+  assert.equal(held.pending_action.id, "ap-1");
+  assert.equal(held.questions.length, 2);
+});
+
+test("a held question promoted by a kept promise or a finished instruction becomes the pinned approval at once", () => {
+  assert.equal(eventEffect("pending.promoted"), "state", "the state is asked for again");
+  const first = foldQuestions({ questions: [], pending_action: null }, created());
+  const held = foldQuestions(first, created({ id: "held", agent: "docs", held: true, muted: true }));
+  const promoted = foldQuestions(held, ev("pending.promoted", { id: "held", agent: "docs" }));
+  assert.equal(promoted.pending_action.id, "held");
+  assert.equal(promoted.pending_action.agent, "docs");
+  assert.deepEqual(promoted.questions.map((q) => q.id), ["ap-1", "held"], "the list stays as it was");
+  assert.equal(foldQuestions(promoted, ev("pending.promoted", { id: "held" })), promoted, "nothing changes twice");
+  assert.equal(foldQuestions(held, ev("pending.promoted", { id: "unknown" })), held, "an id not listed waits for the state");
+  assert.equal(foldQuestions(null, ev("pending.promoted", { id: "held" })), null);
+});

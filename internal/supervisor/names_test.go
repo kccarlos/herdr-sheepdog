@@ -39,6 +39,13 @@ func withTitleFixtures(t *testing.T) func(*Config) {
 	}
 }
 
+func TestFindAliasDoesNotResolveLongerUnknownName(t *testing.T) {
+	rows := []state.Agent{{PaneID: "w1:p1", Alias: "auth"}}
+	if got, ok := findAlias(rows, "auth-migration-claude"); ok {
+		t.Fatalf("resolved unknown name to %+v", got)
+	}
+}
+
 // claudeIn reports a Claude pane in the sheepdog workspace with its
 // session, as the herdr watcher would.
 func (h *harness) claudeIn(pane, session string, to herdr.State) {

@@ -16,10 +16,13 @@ The Sheepdog block in herdr-app's sidebar contains:
 - **The conversation**, newest first. It has what you and the voice said, what
   your agents did and the questions waiting for you. Drawing the last row loads
   older messages.
-- **A box to type to Sheepdog.** Enter sends; Shift+Enter adds a line. The
-  reply is text and becomes part of the conversation on the phone too. When the
-  panel has focus, Enter focuses the box, and Esc leaves the panel (or returns
-  to it from the box).
+- **A box to type to Sheepdog.** Enter sends (or queues a follow-up while a turn
+  is running); Shift+Enter adds a line. Failed or queued sends stay above the
+  box with **Retry**, **Edit** and **Remove**, and unsent drafts plus active or
+  queued sends survive panel reloads. The reply is text and becomes part of the
+  conversation on the phone too. When the panel has focus, Enter focuses the
+  box, `?` opens the keyboard shortcuts sheet, and Esc leaves the panel (or
+  returns to it from the box).
 - **Questions with one button per answer.** Tap an option to answer the agent,
   or press 1-9 when the panel has focus. Suggested replies take 1-9 as well.
   Long questions shrink to an **Answer** bar that opens the options.
@@ -94,25 +97,35 @@ Then run `sheepdog restart`; see
 ### 3. Install the panel and layout
 
 Run `sheepdog setup` after herdr-app is installed. It installs or updates the
-panel, offers the Sheepdog layout, and switches herdr-app to it. The layout is
-herdr-app's usual window with the panel docked on the right.
+panel, offers the Sheepdog layout and switches herdr-app to it, and optionally
+adds a keyboard shortcut (`Cmd+Shift+S` on macOS, `Ctrl+Shift+S` on Linux) in
+`~/.config/herdr-app/keys.json` that focuses the panel (or opens its window when
+collapsed to the narrow rail) without overwriting an existing binding unless you
+confirm. The layout is herdr-app's usual window with the panel docked on the
+right.
 
 #### Updating the panel
 
 The panel comes with the `sheepdog` program. After you upgrade sheepdog (and
-the daemon restarts into the new version), the daemon replaces the installed
-panel and layout with the new ones by itself, and herdr-app reloads the panel
-without a restart. It does this only for a panel that `sheepdog setup`
-installed and that you have not changed (setup leaves a small
-`.sheepdog-install.json` in the panel folder to tell). It never creates the
-panel folder; that is setup's job. Turn it off with `panel.auto_update = false`
-([CONFIG.md](../CONFIG.md#panel)).
+the daemon restarts into the new version), the daemon atomically swaps in the
+new panel and layout, and herdr-app reloads the panel without a restart. It does
+this only for a panel that `sheepdog setup` installed and that you have not
+changed (setup leaves `.sheepdog-install.json` in the panel folder to tell). It
+never creates the panel folder; that is setup's job. Turn it off with
+`panel.auto_update = false` ([CONFIG.md](../CONFIG.md#panel)).
 
 If you changed a panel file, or installed the panel another way (herdr.dev, by
 hand, an agent), sheepdog leaves it alone. The panel then says "A newer panel is
 available" with a button that runs `sheepdog setup`; `sheepdog status` says it
-too. Setup replaces the panel with the new one (it asks first). A layout you
-edited is never replaced.
+too. Setup replaces the panel with the new one (it asks first). Resizing or
+hiding panes in the Sheepdog layout does not block layout updates; if you edited
+the layout's pane structure, sheepdog keeps your layout and writes the updated
+template next to it at `~/.config/herdr-app/layouts/sheepdog.json.new`.
+
+`sheepdog uninstall` (preview with `sheepdog uninstall --dry-run`) removes an
+unchanged panel, layout and setup-installed shortcut, and switches herdr-app
+back to your previous layout when `sheepdog` is still active; modified files are
+preserved.
 
 You can also ask a coding agent to add the panel:
 

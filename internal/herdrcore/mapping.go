@@ -7,6 +7,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
 )
 
 // knownKinds are the agent programs sheepdog recognises without a status
@@ -56,9 +57,11 @@ func appKind(app string) string {
 	return app
 }
 
-// argvBase is the program name of argv[0], without directory or the
-// leading dash of a login shell.
+// argvBase is the program name of argv[0] (after stripping any leading
+// priority/env wrappers), without directory or the leading dash of a login
+// shell.
 func argvBase(argv []string) string {
+	argv = procprio.UnwrapArgv(argv)
 	if len(argv) == 0 {
 		return ""
 	}

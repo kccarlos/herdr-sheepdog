@@ -24,8 +24,10 @@ const STATE = new Set([
   "voice.stalled", "voice.session_open", "voice.session_close", "voice.session_error",
   "voice.standby", "voice.provider_changed",
   // An agent's state moved (older daemons say nothing else), its attention or
-  // its group changed, a space was muted: the status line's counts follow.
-  "herdr.transition", "agent.attention", "space.muted",
+  // its group changed, a space was muted: the status line's counts follow. A
+  // held question promoted (a kept promise, a finished instruction) becomes
+  // the voice's question with no other event.
+  "herdr.transition", "agent.attention", "space.muted", "pending.promoted",
 ]);
 
 export function eventEffect(type) {

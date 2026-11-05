@@ -6,7 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 )
+
+func panelsyncInstallForTest(appHome string, src panelsync.Source) error {
+	if err := panelsync.InstallPanel(appHome, src.Panel); err != nil {
+		return err
+	}
+	return panelsync.Record(appHome, src)
+}
 
 // fakeExe makes a file that stands in for this sheepdog binary.
 func fakeExe(t *testing.T) string {
@@ -161,5 +170,71 @@ func TestDataDirGuard(t *testing.T) {
 	}
 	if _, err := os.Stat(home); err != nil {
 		t.Fatal("HOME deleted")
+	}
+}
+
+func TestUninstallCleansHerdrAppAndSupportsDryRun(t *testing.T) {
+	fakeService(t)
+	fakeExe(t)
+	cfg, data, _ := lifeSetup(t, "")
+	_ = os.MkdirAll(filepath.Join(data, "events"), 0o700)
+
+	appHome := panelHome()
+	src := panelSource()
+	if err := os.MkdirAll(appHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appHome, "shared.json"), []byte(`{"layout":"sheepdog"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(appHome, "layouts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appHome, "layouts", "sheepdog.json"), src.Layout, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appHome, "layouts", "sheepdog.json.new"), src.Layout, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := panelsyncInstallForTest(appHome, src); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. --dry-run changes nothing.
+	code, out, errs := runCLI("uninstall", "--dry-run", "--config", cfg)
+	if code != 0 {
+		t.Fatalf("dry-run exit %d: %s\n%s", code, errs, out)
+	}
+	if _, err := os.Stat(filepath.Join(appHome, "mods", "sheepdog", "main.js")); err != nil {
+		t.Fatalf("dry-run deleted panel: %v", err)
+	}
+	if _, err := os.Stat(cfg); err != nil {
+		t.Fatalf("dry-run deleted config: %v", err)
+	}
+	if !strings.Contains(out, "would remove") {
+		t.Errorf("dry-run output missing actions:\n%s", out)
+	}
+
+	// 2. Real uninstall removes panel, layout, switches shared.json, and ends with herdr-tui hint.
+	code, out, errs = runCLI("uninstall", "--yes", "--config", cfg)
+	if code != 0 {
+		t.Fatalf("uninstall exit %d: %s\n%s", code, errs, out)
+	}
+	if _, err := os.Stat(filepath.Join(appHome, "mods", "sheepdog")); !os.IsNotExist(err) {
+		t.Errorf("mods/sheepdog still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appHome, "layouts", "sheepdog.json")); !os.IsNotExist(err) {
+		t.Errorf("layouts/sheepdog.json still exists: %v", err)
+	}
+	sharedAfter, _ := os.ReadFile(filepath.Join(appHome, "shared.json"))
+	if !strings.Contains(string(sharedAfter), `"main"`) {
+		t.Errorf("shared.json not switched back to main: %s", sharedAfter)
+	}
+	if !strings.Contains(out, `herdr-app do layout.switch`) {
+		t.Errorf("missing live window layout.switch hint:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if lines[len(lines)-1] != "  herdr plugin uninstall kccarlos.sheepdog" {
+		t.Errorf("last line changed:\n%s", out)
 	}
 }
