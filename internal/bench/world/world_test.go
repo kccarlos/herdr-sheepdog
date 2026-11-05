@@ -193,6 +193,7 @@ func TestKeysAre(t *testing.T) {
 	w.onSend("w2:p1", map[string]any{"kind": "keys", "keys": []any{"esc"}})
 	waitFor(t, "yes done", func() bool { return agents(t, base)["yes"].State == "done" })
 	waitFor(t, "no idle", func() bool { return agents(t, base)["no"].State == "idle" })
+	waitFor(t, "the cue", func() bool { return len(fired) >= 1 })
 	if len(fired) != 1 || <-fired != 0 {
 		t.Errorf("fired cues: %d", len(fired))
 	}

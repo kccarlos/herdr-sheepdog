@@ -177,10 +177,13 @@ func TestRecapCutEllipsisNoteAndJoinAroundOnGemini(t *testing.T) {
 	c1.serve(inputTranscriptMsg("check auth", true))
 	c1.serve(audioMsg(make([]byte, 48*1000)))
 	c1.serve(outputTranscriptMsg("Let me check auth right now."))
-	h.waitEvent("speaking 1", func(ev voice.Event) bool { return h.s.Speaking() })
+	h.waitEvent("speaking 1", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Dir == voice.DirOut && tr.Text == "Let me check auth right now."
+	})
 	h.s.ClientPlayback(voice.PlaybackStarted, 0)
 	c1.serve(interruptedMsg())
-	h.waitEvent("interrupted 1", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok })
+	intr1 := h.waitEvent("interrupted 1", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok }).(voice.EventInterrupted)
 	h.s.ClientPlayback(voice.PlaybackFlushed, 0)
 	c1.serve(inputTranscriptMsg("and docs", true))
 
@@ -189,10 +192,16 @@ func TestRecapCutEllipsisNoteAndJoinAroundOnGemini(t *testing.T) {
 	c1.serve(outputTranscriptMsg("Checking auth and docs"))
 	c1.serve(audioMsg(make([]byte, 48*1000)))
 	c1.serve(outputTranscriptMsg(" right now for you."))
-	h.waitEvent("speaking 2", func(ev voice.Event) bool { return h.s.Speaking() })
+	h.waitEvent("speaking 2", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Dir == voice.DirOut && tr.Text == " right now for you."
+	})
 	h.s.ClientPlayback(voice.PlaybackStarted, 0)
 	c1.serve(interruptedMsg())
-	h.waitEvent("interrupted 2", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok })
+	h.waitEvent("interrupted 2", func(ev voice.Event) bool {
+		intr, ok := ev.(voice.EventInterrupted)
+		return ok && intr.Epoch > intr1.Epoch
+	})
 	h.s.ClientPlayback(voice.PlaybackFlushed, 1000)
 
 	text, _, _ := h.s.reseedText()
