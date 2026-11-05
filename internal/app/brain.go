@@ -7,6 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
@@ -169,6 +170,7 @@ func BrainProviders(cfg config.Config) []web.ProviderInfo {
 // `sheepdog brain-test`).
 func BrainConfig(cfg config.Config) brain.Config {
 	return brain.Config{
+		Redactor:            redact.ForConfig(cfg),
 		Provider:            cfg.Brain.Provider,
 		Model:               cfg.Brain.Model,
 		MaxSteps:            cfg.Brain.MaxSteps,

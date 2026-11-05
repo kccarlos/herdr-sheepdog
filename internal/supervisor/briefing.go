@@ -191,10 +191,22 @@ func recentFinish(a state.Agent, now time.Time) string {
 		return ""
 	}
 	d := now.Sub(a.LastResult.At)
+	if clause := stopClause(a.LastResult.StopReason); clause != "" {
+		if d < time.Minute {
+			return "it stopped under a minute ago " + clause
+		}
+		return "it stopped " + spokenAge(d) + " ago " + clause
+	}
 	if d < time.Minute {
 		return "it finished work under a minute ago"
 	}
 	return "it finished work " + spokenAge(d) + " ago"
+}
+
+// stopClause trims the leading "stopped " verb from a stop summary so
+// callers can place a time phrase between "stopped" and the reason.
+func stopClause(stopReason string) string {
+	return strings.TrimPrefix(strings.TrimSpace(stopReason), "stopped ")
 }
 
 // describeRest tallies the agents that were not listed: "the other two
