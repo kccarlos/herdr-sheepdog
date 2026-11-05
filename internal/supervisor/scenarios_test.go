@@ -936,3 +936,49 @@ func TestTypingCheckDoesNotTreatIdleMenuAsBlocked(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestPlainScreenTypingGuardWhenANSIUnavailable(t *testing.T) {
+	h := twoAgents(t)
+	h.sup.herdr = &unavailableANSI{Herdr: h.sup.herdr}
+
+	h.srv.SetScreen("w5:p1", "────────\n❯\u00a0halftyped\n────────\n  status")
+	res := h.send("w5:p1", "run tests")
+	if !strings.Contains(res.Spoken, "being typed") {
+		t.Errorf("voice result = %+v, want typing refusal", res)
+	}
+	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); !errors.Is(err, ErrTerminalTyping) {
+		t.Errorf("window prompt err = %v, want ErrTerminalTyping", err)
+	}
+	if got := h.promptRequests(); len(got) != 0 {
+		t.Errorf("sent prompts while typing: %v", got)
+	}
+
+	h.srv.SetScreen("w5:p1", "› halftyped\n\n  gpt-5.6-luna max · ~/repo")
+	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); !errors.Is(err, ErrTerminalTyping) {
+		t.Errorf("codex window prompt err = %v, want ErrTerminalTyping", err)
+	}
+
+	for _, screen := range []string{
+		fixture(t, "claude-idle.screen.txt"),
+		fixture(t, "codex-after-approval.screen.txt"),
+		"────────\n❯\u00a0\n────────\n  status",
+	} {
+		h.srv.SetScreen("w5:p1", screen)
+		before := h.log.count("supervisor.typing_check_unavailable")
+		if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err != nil {
+			t.Fatalf("clear screen %q blocked: %v", screen, err)
+		}
+		if got := h.log.count("supervisor.typing_check_unavailable"); got != before {
+			t.Errorf("clear screen %q logged typing_check_unavailable (%d -> %d)", screen, before, got)
+		}
+	}
+
+	h.srv.SetScreen("w5:p1", "plain output without prompt")
+	before := h.log.count("supervisor.typing_check_unavailable")
+	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err != nil {
+		t.Fatalf("unclear screen did not fail open: %v", err)
+	}
+	if got := h.log.count("supervisor.typing_check_unavailable"); got != before+1 {
+		t.Errorf("unclear screen typing_check_unavailable = %d, want %d", got, before+1)
+	}
+}
