@@ -22,6 +22,11 @@ if [ -f "$DIR/env.sh" ]; then
       e2e_kill "$P"
     fi
   fi
+  if [ -n "${E2E_APP_HOME:-}" ]; then
+    ps -axo pid=,command= | awk '/Herdr.app\/Contents\/MacOS\/Herdr/ && !/awk/ {print $1}' | while read -r p; do
+      if ps -E -p "$p" 2>/dev/null | grep -q "HERDR_APP_HOME=$E2E_APP_HOME"; then e2e_kill "$p"; fi
+    done
+  fi
   [ -f "$DIR/daemon.pid" ] && e2e_kill "$(cat "$DIR/daemon.pid")"
   [ -f "$DIR/wrap.pid" ] && e2e_kill "$(cat "$DIR/wrap.pid")"
   if [ -S "$E2E_HC_SOCKET" ]; then

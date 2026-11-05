@@ -23,6 +23,8 @@ final class SceneCoordinator {
 
     /// Main windows, oldest first.
     var scenes: [UUID] = []
+    /// Standalone agent windows (`AgentWindowScene`), oldest first.
+    var agentScenes: [UUID] = []
     /// The window that last asked for a session sheet.
     var requester: UUID?
     /// The offline demo's view model while it is open: an agent window
@@ -40,6 +42,22 @@ final class SceneCoordinator {
     func unregister(_ id: UUID) {
         scenes.removeAll { $0 == id }
         if requester == id { requester = nil }
+    }
+
+    func registerAgent(_ id: UUID) {
+        guard !agentScenes.contains(id) else { return }
+        agentScenes.append(id)
+    }
+
+    func unregisterAgent(_ id: UUID) {
+        agentScenes.removeAll { $0 == id }
+    }
+
+    /// When all main windows are closed, the oldest open agent window drives
+    /// the session's foreground and background transitions.
+    func isAgentLifecycleOwner(_ id: UUID?) -> Bool {
+        guard scenes.isEmpty, let id else { return false }
+        return agentScenes.first == id
     }
 
     /// "Use here": this window takes the audio from whichever holds it. The

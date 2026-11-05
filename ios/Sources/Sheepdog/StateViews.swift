@@ -6,6 +6,7 @@ import SwiftUI
 struct FlockUnavailableView: View {
     let state: FlockPaneState
     @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.sceneID) private var sceneID
 
     var body: some View {
         Group {
@@ -34,13 +35,16 @@ struct FlockUnavailableView: View {
                     .padding(.top, 80)
                 }
             case .notConnected:
+                let copy = Self.notConnectedCopy(isConfigured: model.isConfigured)
                 ContentUnavailableView {
-                    Label("Not connected", systemImage: "bolt.horizontal")
+                    Label(copy.title, systemImage: copy.symbol)
                 } description: {
-                    Text("Connect to see your agents.")
+                    Text(copy.description)
                 } actions: {
-                    Button("Connect") { model.connect() }
-                        .accessibilityIdentifier("flock.notConnected.connect")
+                    Button(copy.actionTitle) {
+                        Self.performNotConnectedAction(model: model, scenes: .shared, sceneID: sceneID)
+                    }
+                    .accessibilityIdentifier(copy.identifier)
                 }
             case .unreachable:
                 // The link's words (`LinkPresentation`): when it was last
@@ -105,6 +109,43 @@ struct FlockUnavailableView: View {
         }
         .tint(Theme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    struct NotConnectedCopy: Equatable {
+        let title: String
+        let symbol: String
+        let description: String
+        let actionTitle: String
+        let identifier: String
+    }
+
+    static func notConnectedCopy(isConfigured: Bool) -> NotConnectedCopy {
+        if isConfigured {
+            return NotConnectedCopy(
+                title: "Not connected",
+                symbol: "bolt.horizontal",
+                description: "Connect to see your agents.",
+                actionTitle: "Connect",
+                identifier: "flock.notConnected.connect"
+            )
+        }
+        return NotConnectedCopy(
+            title: "Pair your computer",
+            symbol: "qrcode.viewfinder",
+            description: "Pair your computer to see its agents.",
+            actionTitle: "Pair",
+            identifier: "flock.notConnected.pair"
+        )
+    }
+
+    @MainActor
+    static func performNotConnectedAction(model: SessionViewModel, scenes: SceneCoordinator, sceneID: UUID?) {
+        if model.isConfigured {
+            model.connect()
+        } else {
+            scenes.request(from: sceneID)
+            model.presentation.present(.settings)
+        }
     }
 
     /// `text` without a leading `prefix` (and the space after it).

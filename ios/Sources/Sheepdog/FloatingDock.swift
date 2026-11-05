@@ -30,6 +30,7 @@ struct FloatingDock: View {
             // Every open question floats above the capsule.
             let cards = showsQuestions ? model.floatingQuestions : []
             if !cards.isEmpty {
+                let ownerID = model.currentComputerID
                 FloatingQuestions(
                     cards: cards,
                     voiceQuestionID: model.approval?.pending.id,
@@ -40,7 +41,7 @@ struct FloatingDock: View {
                     remote: { model.remoteQuestion($0) },
                     talkTo: { model.talk(to: $0) }
                 ) { id, index in
-                    model.answer(question: id, option: index)
+                    model.answer(question: id, option: index, on: ownerID)
                 }
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }

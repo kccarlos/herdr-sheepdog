@@ -93,14 +93,24 @@ final class VoiceLiveActivity {
             // One update at a time, in order: two unordered tasks could
             // land "Reconnecting…" after "Listening", and the banner kept
             // it until the next change.
-            let previous = updating
-            updating = Task {
-                await previous?.value
+            enqueueSyncUpdate {
                 await activity.update(update)
             }
         } else if !dismissedByUser {
             start(next, voiceName: voiceName)
         }
+    }
+
+    func enqueueSyncUpdate(_ operation: @escaping @MainActor () async -> Void) {
+        let previous = updating
+        updating = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+    }
+
+    func enqueueRefreshUpdate(_ operation: @escaping @MainActor () async -> Void) {
+        enqueueSyncUpdate(operation)
     }
 
     private func start(_ next: Content, voiceName: String) {
@@ -183,8 +193,11 @@ final class VoiceLiveActivity {
                 try? await Task.sleep(nanoseconds: UInt64(LiveActivityContent.refreshInterval * 1_000_000_000))
                 guard !Task.isCancelled, let self, let activity = self.activity else { return }
                 // No cached content (forgetShown): the next sync writes it.
-                guard let content = self.content else { continue }
-                await activity.update(Self.activityContent(content))
+                guard self.content != nil else { continue }
+                self.enqueueRefreshUpdate { [weak self] in
+                    guard let self, let current = self.activity, current.id == activity.id, let latest = self.content else { return }
+                    await current.update(Self.activityContent(latest))
+                }
             }
         }
     }

@@ -218,11 +218,69 @@ final class SessionViewModel: ObservableObject {
     /// The computer answers: notifications stay quiet in the foreground,
     /// the screen already shows what they would say.
     var sessionIsLive: Bool { link.isUsable }
-    var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
+    var endpointDisplay: String {
+        _ = linkModel.presentation
+        return settings.endpoint.map { channelEndpoint($0).display } ?? "not set"
+    }
     var isConfigured: Bool { settings.endpoint != nil }
 
     func pendingQuestion(for agent: Agent) -> String? {
         agentsModel.pendingQuestion(for: agent)
+    }
+
+    /// Set by the active window when the Agents / All agents view is on screen.
+    var viewingAgentsScreen = false
+    private var hasReportedScreen = false
+
+    func shouldSuppressForegroundPush(_ payload: PushPayload?) -> Bool {
+        let currentID = settings.computers.currentID
+        let otherOpen: Bool = {
+            guard let cid = payload?.computer, let currentID, cid != currentID,
+                  let other = session(cid) else { return false }
+            return other.link.isUsable && other.liveUpdates == .open
+        }()
+        let uncovered = presentation.current == nil && !demoActive && agentsModel.screenCovers.isEmpty
+        let viewingVoice = uncovered && (hasReportedScreen
+            ? (screenVisible && voiceScreenInFront)
+            : (navigation.pane == .conversation && navigation.path.isEmpty))
+        let viewingAgents = uncovered && (hasReportedScreen
+            ? viewingAgentsScreen
+            : (viewingAgentsScreen || (navigation.pane == .flock && navigation.path.isEmpty)))
+        let voiceLive = voice.core.connection.socket == .open && voice.state != .voiceOff
+        return PushPolicy.shouldSuppressForegroundBanner(
+            payload: payload,
+            currentComputerID: currentID,
+            currentLinkUsable: link.isUsable,
+            currentEventsOpen: linkModel.liveUpdates == .open,
+            voiceConnected: voiceLive,
+            viewingAgents: viewingAgents,
+            otherComputerEventsOpen: otherOpen,
+            viewingVoiceScreen: viewingVoice,
+            demoActive: demoActive
+        )
+    }
+
+    func focusAgent(_ target: AgentFocus) {
+        guard !target.paneID.isEmpty else { return }
+        guard target.isTargetComputerPaired(in: settings.computers) else {
+            show(Banner(tone: .warning, message: AgentFocus.unpairedComputerMessage, hint: nil, retryTitle: nil))
+            return
+        }
+        let isOther = target.isOtherComputer(currentComputerID: currentComputerID)
+        if isOther, let cid = target.computerID {
+            agentsModel.expandComputer(cid)
+            if remoteCard(computer: cid, paneID: target.paneID) == nil {
+                agentsModel.expandedAgents.insert(target.cardKey(currentComputerID: currentComputerID))
+            }
+        } else {
+            agentsModel.expandComputer(currentComputerID)
+            if questionCard(for: target.paneID) == nil {
+                agentsModel.expandedAgents.insert(target.paneID)
+            }
+        }
+        navigation.path = NavigationPath()
+        navigation.pane = .flock
+        navigation.focusedAgent = target
     }
 
     // MARK: - Collaborators
@@ -481,9 +539,34 @@ final class SessionViewModel: ObservableObject {
         let previous = fleet.current
         syncFleet()
         guard let endpoint = settings.endpoint else {
+            if let old = attachedEndpoint, demo == nil {
+                PushCoordinator.shared.endpointChanged(from: old)
+            }
             fleet.makeCurrent(nil)
             attachedEndpoint = nil
+            if voice.core.connection.wantsConnection {
+                disconnect()
+            }
+            if demo == nil {
+                setShellOffered(nil)
+            }
+            spareConversation = ComputerConversation()
+            cardInbox.clear()
+            cardLabel.hide()
+            agentsModel.resetForComputerSwitch()
+            healthModel.clear()
+            settingsModel.clear()
+            notices.banner = nil
+            notices.clearForSwitch()
+            linkModel.setHello(nil)
+            linkModel.setHandshake(.idle)
+            stateVoiceProvider = nil
+            stateVoiceModel = nil
+            stateVoiceClient = nil
+            typedAttempt = nil
+            conversationResetSupported = true
             attachCurrent()
+            conversationChanged(save: false)
             return
         }
         if let old = attachedEndpoint { PushCoordinator.shared.endpointChanged(from: old) }
@@ -509,6 +592,7 @@ final class SessionViewModel: ObservableObject {
                 saveCache(now: true, model: previous)
             }
             cardInbox.clear()
+            agentsModel.resetForComputerSwitch()
             healthModel.clear()
             settingsModel.clear()
             notices.clearForSwitch()
@@ -561,7 +645,8 @@ final class SessionViewModel: ObservableObject {
             send(.endTapped)
             return
         }
-        if fleet.current?.link.state == .noNetwork {
+        let target = fleet.current
+        if target?.link.state == .noNetwork {
             send(.noNetwork)
             return
         }
@@ -569,18 +654,20 @@ final class SessionViewModel: ObservableObject {
             accept(try await current { try await $0.state() })
             await loadHello()
             await settingsModel.loadVoiceProviders()
-        } catch let error as DaemonError {
-            send(.probeFailed(error))
-            return
         } catch is ComputerFleet.Moved, is ComputerModel.Stale {
             // Asked of the computer the app left: the connect that followed
             // the switch has its own probe.
             return
+        } catch let error as DaemonError {
+            guard fleet.current === target else { return }
+            send(.probeFailed(error))
+            return
         } catch {
+            guard fleet.current === target else { return }
             send(.probeFailed(.malformed(error.localizedDescription)))
             return
         }
-        guard voice.core.connection.wantsConnection else { return }
+        guard fleet.current === target, voice.core.connection.wantsConnection else { return }
         // Why first, then the system prompt (only if the user goes on).
         let granted: Bool
         if AVAudioApplication.shared.recordPermission == .undetermined, !(await ask(.microphone)) {
@@ -588,6 +675,7 @@ final class SessionViewModel: ObservableObject {
         } else {
             granted = await AudioEngine.requestMicrophone()
         }
+        guard fleet.current === target else { return }
         // The permission prompt can sit there for a while; the core ignores
         // the answer if End was tapped meanwhile.
         send(.probeSucceeded(micGranted: granted))
@@ -747,11 +835,17 @@ final class SessionViewModel: ObservableObject {
                 // A Live Activity row. Another computer's agent shows on
                 // the Agents page, with Talk to; the app never switches on
                 // its own.
-                if let computer, computer != currentComputerID, session(computer) != nil {
-                    navigation.pane = .flock
-                } else {
-                    openAgentWindow(paneID: id)
+                if let computer = computer?.trimmingCharacters(in: .whitespacesAndNewlines), !computer.isEmpty {
+                    guard settings.computers.computer(computer) != nil else {
+                        show(Banner(tone: .warning, message: AgentFocus.unpairedComputerMessage, hint: nil, retryTitle: nil))
+                        break
+                    }
+                    if computer != currentComputerID {
+                        navigation.pane = .flock
+                        break
+                    }
                 }
+                openAgentWindow(paneID: id)
             }
         }
     }
@@ -1000,15 +1094,18 @@ final class SessionViewModel: ObservableObject {
     @discardableResult
     func refreshState(quiet: Bool) async -> Bool {
         guard settings.endpoint != nil else { return false }
+        let target = fleet.current
         do {
             accept(try await current { try await $0.state() })
-            if linkModel.hello == nil { await loadHello() }
-            if !quiet { notices.banner = nil }
+            if linkModel.hello == nil, fleet.current === target { await loadHello() }
+            if !quiet, fleet.current === target { notices.banner = nil }
             return true
+        } catch is ComputerFleet.Moved, is ComputerModel.Stale {
+            return false
         } catch let error as DaemonError {
             // A loud refresh that fails ends the session, as a failed
-            // Connect would.
-            if !quiet { send(.probeFailed(error)) }
+            // Connect would — unless the app already switched computers.
+            if !quiet, fleet.current === target { send(.probeFailed(error)) }
             SheepdogLog.session.error("state: \(String(describing: error), privacy: .public)")
             return false
         } catch {
@@ -1169,6 +1266,8 @@ final class SessionViewModel: ObservableObject {
 
     /// Settings ▸ Clear conversation on this phone.
     func clearConversation() {
+        saveTask?.cancel()
+        saveTask = nil
         if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
         history.clear()
         reducer.clear()
@@ -1191,19 +1290,23 @@ final class SessionViewModel: ObservableObject {
     /// seconds current after that.
     func loadHealth() async {
         guard settings.endpoint != nil, healthModel.begin() else { return }
+        let target = fleet.current
         defer { healthModel.end() }
         async let state: Bool = refreshState(quiet: true)
         async let settings: Void = settingsModel.loadAll()
-        if linkModel.hello == nil { await loadHello() }
+        if linkModel.hello == nil, fleet.current === target { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
         var next = healthModel.health
         for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.account_problem", "web.account_problem", "brain.fallback", "brain.rate_limited", "voice.connect_error",
                      "voice.push_", "supervisor.echo_", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
+            guard fleet.current === target else { break }
             let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
             guard let events = try? await current({ try await $0.recentEvents(type: type, limit: limit) }) else { continue }
             for event in events { next.fold(event) }
         }
-        healthModel.replace(with: next)
+        if fleet.current === target {
+            healthModel.replace(with: next)
+        }
         _ = await (state, settings)
     }
 
@@ -1472,22 +1575,22 @@ final class SessionViewModel: ObservableObject {
         let target = model ?? fleet.current
         guard let endpoint = target.flatMap({ endpoints[$0.id] }) ?? settings.endpoint else { return }
         let saved = target?.conversation ?? spareConversation
-        if model == nil { saveTask?.cancel() }
+        saveTask?.cancel()
+        saveTask = nil
         let snapshot = ConversationSnapshot(endpoint: endpoint, history: saved.history, lastEventID: saved.lastSeq > 0 ? Int64(clamping: saved.lastSeq) : nil)
         let cache = self.cache
-        let write = {
-            do { try cache.save(snapshot, for: endpoint) } catch {
+        if now {
+            cache.enqueueSave(snapshot, for: endpoint) { error in
                 SheepdogLog.socket.error("cache: \(String(describing: error), privacy: .public)")
             }
-        }
-        if now {
-            write()
             return
         }
-        saveTask = Task.detached(priority: .utility) {
+        saveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            write()
+            guard !Task.isCancelled, self != nil else { return }
+            cache.enqueueSave(snapshot, for: endpoint) { error in
+                SheepdogLog.socket.error("cache: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -1507,9 +1610,11 @@ final class SessionViewModel: ObservableObject {
 
     /// The main screen says what is in front: sent to the daemon as
     /// `visibility` when it changed and the daemon takes it.
-    func setScreen(visible: Bool, voiceScreen: Bool) {
+    func setScreen(visible: Bool, voiceScreen: Bool, agentsScreen: Bool = false) {
+        hasReportedScreen = true
         screenVisible = visible
         voiceScreenInFront = voiceScreen
+        viewingAgentsScreen = visible && agentsScreen
         // The conversation is in front: its rows are the card.
         if voiceScreen || !visible { cardLabel.hide() }
         if demo == nil, let message = cardVisibility.update(visible: visible, voiceScreen: voiceScreen) {
@@ -1648,10 +1753,24 @@ final class SessionViewModel: ObservableObject {
     /// through its computer's model, under the question's key, so every
     /// surface reads one phase. The answer finishes on that computer even
     /// if the app switches meanwhile (decision 6), and its refresh follows.
-    func answer(question id: String, option index: Int) {
+    func answer(question id: String, option index: Int, on computerID: String? = nil) {
         if let remote = RemoteQuestion.parse(id) {
-            // Another computer's: answered through its own daemon.
-            session(remote.computer)?.answer(question: remote.question, option: index)
+            // Another computer's: answered strictly through its own daemon.
+            guard let target = fleet.model(remote.computer) else {
+                show(Banner(tone: .warning, message: "That computer is no longer paired.", hint: "Your answer was not sent.", retryTitle: nil))
+                return
+            }
+            _ = target.answer(question: remote.question, option: index)
+            return
+        }
+        if let computerID, computerID != currentComputerID {
+            let gone = !computerID.isEmpty && fleet.model(computerID) == nil
+            show(Banner(
+                tone: .warning,
+                message: gone ? "That computer is no longer paired." : "Switched computers before your answer was sent.",
+                hint: "Your answer was not sent.",
+                retryTitle: nil
+            ))
             return
         }
         guard let model = fleet.current else { return }
@@ -1910,12 +2029,14 @@ final class SessionViewModel: ObservableObject {
 
     /// Pairs with the computer a scanned code names (docs/dev/ws-contract.md
     /// "Pairing"): finds the first address whose key matches the code's pin,
-    /// makes this phone's key, enrolls once (codes are one-time), signs in,
-    /// and only then saves the computer and repoints the app.
-    func pair(_ code: PairingCode) async -> PairOutcome {
+    /// reuses or makes this phone's key, enrolls once (codes are one-time),
+    /// saves the computer and repoints the app, warming a session ticket on
+    /// a best-effort basis.
+    func pair(_ code: PairingCode, protocolClasses: [AnyClass]? = nil) async -> PairOutcome {
         let trust = PinnedTrustDelegate { [code.pin] }
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
+        if let protocolClasses { config.protocolClasses = protocolClasses }
         let session = URLSession(configuration: config, delegate: trust, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let mismatches = MismatchCounter()
@@ -1936,35 +2057,69 @@ final class SessionViewModel: ObservableObject {
             if mismatches.count > 0 { return .problem(.pinMismatch) }
             return .failed(title: "None of the code's addresses answered", detail: "Tried \(code.addresses.joined(separator: ", ")). \(SetupHelp.unreachableFix)")
         }
+        let daemonID = code.daemonID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !daemonID.isEmpty else {
+            let malformed = DaemonError.malformed("pairing code missing daemon id")
+            return .failed(title: malformed.message, detail: malformed.hint ?? "")
+        }
+        let turn = await PairingEnrollment.beginTurn(daemonID: daemonID)
+        defer { turn.end() }
+        if Task.isCancelled {
+            return .failed(title: "Pairing did not finish", detail: CancellationError().localizedDescription)
+        }
         do {
-            DeviceKey.delete(daemonID: code.daemonID)
-            let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
-            guard let publicKey = DeviceKey.publicKey(key) else {
+            let store = settings.computers
+            let lease = try PairingEnrollment.KeyLease.acquire(daemonID: daemonID)
+            var definiteNonEnrollment = false
+            defer {
+                lease.release(
+                    definiteNonEnrollment: definiteNonEnrollment,
+                    isComputerPaired: store.computer(daemonID) != nil
+                )
+            }
+            guard let publicKey = lease.publicKey else {
+                definiteNonEnrollment = true
                 return .failed(title: "This phone could not make its key", detail: "Try again; restart the phone if it keeps failing.")
             }
             let auth = DeviceAuth(base: base, session: session, trust: trust)
             let kind = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
-            let enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
-            let computer = PairedComputer(
-                daemonID: enrolled.daemonID.isEmpty ? code.daemonID : enrolled.daemonID,
-                name: code.name.isEmpty ? enrolled.name : code.name,
-                addresses: [address] + code.addresses.filter { $0 != address },
-                pin: code.pin, deviceID: enrolled.deviceID, pairedAt: Date()
-            )
-            let store = settings.computers
+            let enrolled: DeviceAuth.Enrolled
+            do {
+                enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
+            } catch {
+                definiteNonEnrollment = PairingEnrollment.isDefiniteNonEnrollment(error)
+                throw error
+            }
+            let computer: PairedComputer
+            do {
+                computer = try PairingEnrollment.pairedComputer(code: code, reachableAddress: address, enrolled: enrolled)
+            } catch {
+                definiteNonEnrollment = true
+                throw error
+            }
+            lease.markCommitted()
             // The app never switches on its own: another computer is added
             // beside the current one. The first one, or a re-pair of the
             // current one, repoints the session.
             let repoint = store.currentID == nil || store.currentID == computer.daemonID
             store.save(computer, address: address)
             settings.hasBeenConfigured = true
-            _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
+            if repoint { store.currentID = computer.daemonID }
             notices.setPairingProblem(nil)
             computersChanged()
-            if repoint {
-                store.currentID = computer.daemonID
-                endpointChanged()
-            }
+            if repoint { endpointChanged() }
+            // Best-effort warm-up: the one-time enroll code is already spent,
+            // and the computer's own link signs in if a blip makes this fail.
+            // A PairingProblem (missing key or immediate revocation) is surfaced.
+            do {
+                _ = try await store.credentials(for: computer.daemonID).ticket(base: base)
+            } catch let problem as PairingProblem {
+                notices.setPairingProblem(problem)
+                return .problem(problem)
+            } catch let DaemonError.pairing(problem) {
+                notices.setPairingProblem(problem)
+                return .problem(problem)
+            } catch {}
             return .paired(computer)
         } catch let problem as PairingProblem {
             return .problem(problem)
@@ -1981,9 +2136,12 @@ final class SessionViewModel: ObservableObject {
     func removeComputer() async {
         guard let id = settings.computers.currentID else {
             // A bare loopback address (the tests): forget it.
+            saveTask?.cancel()
+            saveTask = nil
             if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
             settings.address = ""
             settings.hasBeenConfigured = false
+            if voice.core.connection.wantsConnection { disconnect() }
             endpointChanged()
             return
         }
@@ -1997,6 +2155,10 @@ final class SessionViewModel: ObservableObject {
     func removeComputer(_ id: String) async {
         let store = settings.computers
         let wasCurrent = store.currentID == id
+        if wasCurrent {
+            saveTask?.cancel()
+            saveTask = nil
+        }
         await PushCoordinator.shared.unregister(computer: id)
         // Before the store forgets it, which stops its model: on the
         // address its link uses now, not the stored one.
@@ -2005,10 +2167,20 @@ final class SessionViewModel: ObservableObject {
         } else if let endpoint = store.endpoint(for: id), endpoint.secure, let base = endpoint.url(path: "/"),
                   let credentials = endpoint.credentials,
                   let ticket = try? await credentials.ticket(base: base) {
-            await DeviceAuth(base: base, session: credentials.session(timeout: 4)).unpair(ticket: ticket)
+            let session = credentials.session(timeout: 4)
+            defer { session.finishTasksAndInvalidate() }
+            await DeviceAuth(base: base, session: session).unpair(ticket: ticket)
+        }
+        if wasCurrent {
+            saveTask?.cancel()
+            saveTask = nil
         }
         if let endpoint = store.endpoint(for: id) { cache.clear(for: endpoint) }
         store.remove(id)
+        if navigation.focusedAgent?.computerID == id {
+            navigation.focusedAgent = nil
+        }
+        agentsModel.forgetComputer(id)
         if store.count == 0 { settings.hasBeenConfigured = false }
         computersChanged()
         if wasCurrent {
@@ -2080,6 +2252,7 @@ final class SessionViewModel: ObservableObject {
         }
         let endpoint = channelEndpoint(preferred)
         let probeClient = DaemonClient(endpoint: endpoint)
+        defer { probeClient.invalidate() }
         do {
             let hello = try await probeClient.hello()
             _ = try await probeClient.state()
@@ -2318,8 +2491,10 @@ extension SessionViewModel {
     /// pinned session: the pin is the check, never the address).
     private func checkAddress(_ address: String) async -> String? {
         guard let endpoint = DaemonEndpoint(text: address, secure: true, credentials: settings.credentials) else { return ComputerAddress.Problem.unreadable.message }
+        let client = DaemonClient(endpoint: endpoint)
+        defer { client.invalidate() }
         do {
-            _ = try await DaemonClient(endpoint: endpoint).hello()
+            _ = try await client.hello()
             return nil
         } catch DaemonError.untrusted {
             return "Something answered at \(address), but not with this computer's key, so the app did not use it."

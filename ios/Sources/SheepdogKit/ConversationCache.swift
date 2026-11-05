@@ -54,6 +54,20 @@ public struct ConversationSnapshot: Codable, Equatable, Sendable {
 
 /// One small JSON file per daemon endpoint in Application Support.
 public struct ConversationCache: Sendable {
+    private enum PendingState: Equatable, Sendable {
+        case saved(ConversationSnapshot)
+        case cleared
+    }
+
+    private struct State: Sendable {
+        var generations: [String: UInt64] = [:]
+        var pending: [String: PendingState] = [:]
+    }
+
+    private static let ioQueue = DispatchQueue(label: "sheepdog.conversation-cache.io")
+    private static let stateLock = NSLock()
+    nonisolated(unsafe) private static var state = State()
+
     public let directory: URL
 
     public init(directory: URL) {
@@ -82,7 +96,20 @@ public struct ConversationCache: Sendable {
         directory.appendingPathComponent("\(ConversationCache.key(for: endpoint)).json")
     }
 
+    private func stateKey(for endpoint: DaemonEndpoint) -> String {
+        fileURL(for: endpoint).standardizedFileURL.path
+    }
+
     public func load(for endpoint: DaemonEndpoint) -> ConversationSnapshot? {
+        let path = stateKey(for: endpoint)
+        if let inFlight = Self.stateLock.withLock({ Self.state.pending[path] }) {
+            switch inFlight {
+            case let .saved(snapshot):
+                return snapshot.version == ConversationSnapshot.currentVersion ? snapshot : nil
+            case .cleared:
+                return nil
+            }
+        }
         guard let data = try? Data(contentsOf: fileURL(for: endpoint)),
               let snapshot = try? ConversationCache.decoder.decode(ConversationSnapshot.self, from: data),
               snapshot.version == ConversationSnapshot.currentVersion
@@ -91,6 +118,75 @@ public struct ConversationCache: Sendable {
     }
 
     public func save(_ snapshot: ConversationSnapshot, for endpoint: DaemonEndpoint) throws {
+        let path = stateKey(for: endpoint)
+        let gen = Self.stateLock.withLock { () -> UInt64 in
+            let next = (Self.state.generations[path] ?? 0) &+ 1
+            Self.state.generations[path] = next
+            Self.state.pending[path] = .saved(snapshot)
+            return next
+        }
+        do {
+            try writeUnlocked(snapshot, for: endpoint)
+            Self.stateLock.withLock {
+                if Self.state.generations[path] == gen {
+                    Self.state.pending.removeValue(forKey: path)
+                } else if Self.state.pending[path] == .cleared {
+                    try? FileManager.default.removeItem(at: fileURL(for: endpoint))
+                }
+            }
+        } catch {
+            Self.stateLock.withLock {
+                if Self.state.generations[path] == gen {
+                    Self.state.pending.removeValue(forKey: path)
+                }
+            }
+            throw error
+        }
+    }
+
+    /// Enqueues a background write while publishing the latest snapshot in
+    /// memory immediately so `load` and `clear` never block `@MainActor`
+    /// behind queued disk I/O.
+    public func enqueueSave(
+        _ snapshot: ConversationSnapshot,
+        for endpoint: DaemonEndpoint,
+        onError: (@Sendable (Error) -> Void)? = nil
+    ) {
+        let cache = self
+        let path = stateKey(for: endpoint)
+        let gen = Self.stateLock.withLock { () -> UInt64 in
+            let next = (Self.state.generations[path] ?? 0) &+ 1
+            Self.state.generations[path] = next
+            Self.state.pending[path] = .saved(snapshot)
+            return next
+        }
+        Self.ioQueue.async {
+            let stillCurrent = Self.stateLock.withLock { Self.state.generations[path] == gen }
+            guard stillCurrent else { return }
+            do {
+                try cache.writeUnlocked(snapshot, for: endpoint)
+                let supersededByClear = Self.stateLock.withLock { () -> Bool in
+                    if Self.state.generations[path] == gen {
+                        Self.state.pending.removeValue(forKey: path)
+                        return false
+                    }
+                    return Self.state.pending[path] == .cleared
+                }
+                if supersededByClear {
+                    try? FileManager.default.removeItem(at: cache.fileURL(for: endpoint))
+                }
+            } catch {
+                Self.stateLock.withLock {
+                    if Self.state.generations[path] == gen {
+                        Self.state.pending.removeValue(forKey: path)
+                    }
+                }
+                onError?(error)
+            }
+        }
+    }
+
+    private func writeUnlocked(_ snapshot: ConversationSnapshot, for endpoint: DaemonEndpoint) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var url = fileURL(for: endpoint)
         let data = try ConversationCache.encoder.encode(snapshot)
@@ -102,14 +198,31 @@ public struct ConversationCache: Sendable {
     }
 
     public func clear(for endpoint: DaemonEndpoint) {
-        try? FileManager.default.removeItem(at: fileURL(for: endpoint))
+        let url = fileURL(for: endpoint)
+        let path = stateKey(for: endpoint)
+        let gen = Self.stateLock.withLock { () -> UInt64 in
+            let next = (Self.state.generations[path] ?? 0) &+ 1
+            Self.state.generations[path] = next
+            Self.state.pending[path] = .cleared
+            return next
+        }
+        Self.ioQueue.async {
+            let stillCurrent = Self.stateLock.withLock { Self.state.generations[path] == gen }
+            guard stillCurrent else { return }
+            try? FileManager.default.removeItem(at: url)
+            Self.stateLock.withLock {
+                if Self.state.generations[path] == gen {
+                    Self.state.pending.removeValue(forKey: path)
+                }
+            }
+        }
     }
 
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .custom { date, encoder in
             var c = encoder.singleValueContainer()
-            try c.encode(ISO8601DateFormatter.sheepdog.string(from: date))
+            try c.encode(RFC3339Date.string(from: date))
         }
         e.outputFormatting = [.sortedKeys]
         return e

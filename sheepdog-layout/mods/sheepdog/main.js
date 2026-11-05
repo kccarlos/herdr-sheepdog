@@ -19,11 +19,11 @@ import { createHttp } from "./net/http.js";
 import { createLive, POLL_MS } from "./net/live.js";
 import { focusCommand } from "./model/cards.js";
 import { DRAFT_KEY, keyMaker, readDraft, restored, serializeDraft, submission } from "./model/composer.js";
-import { COMPACT_QUESTION_HEIGHT, DOCKED_WIDTH, layoutMode, needsDock, panelBudget } from "./model/layout.js";
+import { DOCKED_WIDTH, layoutMode, needsDock, resolvePanelLayout } from "./model/layout.js";
 import { createOutbox, OUTBOX_KEY, PANEL_WINDOW_FRESH_MS, PANEL_WINDOW_KEY, pendingItems } from "./model/outbox.js";
 import { atMemoryLimit, canLoadOlder } from "./model/history.js";
 import { amber } from "./model/palette.js";
-import { decide, estimateHeight, natural } from "./model/presentation.js";
+import { estimateHeight } from "./model/presentation.js";
 import { createAnswers } from "./model/questions.js";
 import { keyAction, leaveCommand } from "./model/keys.js";
 import { liveSuggestions } from "./model/replies.js";
@@ -166,12 +166,13 @@ export default class Sheepdog extends View {
   onKey(event, cx) {
     const question = this.answers.cards(this.store.getState().app).find((card) => card.phase === "open") ?? null;
     const phase = deriveStatus(this.store.getState(), this.host()).phase;
+    const mod = event.modifiers ?? {};
     const action = keyAction(event.key, {
       onPanel: this.panelFocus.is_focused(),
       question,
       questionVisible: this.sheet?.type === "questions" || this.presentation !== "compact",
       suggestions: this.derived().live,
-      modified: Boolean(event.ctrl || event.alt || event.cmd || event.platform),
+      modified: Boolean(mod.control || mod.alt || mod.platform || event.ctrl || event.alt || event.cmd || event.platform),
       sheet: this.sheet?.type ?? false,
       window: Boolean(this.overlay),
       busy: this.answers.busy(),
@@ -182,7 +183,11 @@ export default class Sheepdog extends View {
     if (action.type === "composer") this.composer.focus();
     else if (action.type === "panel") this.panelFocus.focus();
     else if (action.type === "shortcuts") this.toggleShortcuts(cx);
-    else if (action.type === "sheet") {
+    else if (action.type === "questions") {
+      this.sheet = { type: "questions" };
+      this.panelFocus?.focus();
+      cx.notify();
+    } else if (action.type === "sheet") {
       this.sheet = null;
       this.panelFocus?.focus();
       cx.notify();
@@ -391,11 +396,9 @@ export default class Sheepdog extends View {
   }
 
   // How the open questions float: the cards, and inline or compact for this
-  // window (the rule of model/presentation.js, with heights estimated).
-  questions(snapshot, area) {
-    const cards = this.answers.cards(snapshot.app);
-    const held = this.sheet?.type === "questions" || this.answers.busy() || cards.some((c) => c.phase === "answered" || c.phase === "gone");
-    this.presentation = decide({ heights: cards.map((c) => estimateHeight(c.pending, { width: this.size.width })), area, held }, this.presentation);
+  // window (resolved by model/layout.js without double-counting the 55% budget).
+  questions(cards, presentation) {
+    this.presentation = presentation;
     // With nothing to answer there is nothing to open.
     if (cards.length === 0 && this.sheet?.type === "questions") this.sheet = null;
     return {
@@ -677,18 +680,20 @@ export default class Sheepdog extends View {
         : 0;
       const interactiveOutbox = outbox.entries.filter((e) => e.phase === "failed" || e.phase === "queued").length;
       const composerHeight = (derived.live ? 116 : 80) + Math.min(interactiveOutbox, 2) * 58;
-      const budgetFor = (question) =>
-        panelBudget({
+      const held = this.sheet?.type === "questions" || this.answers.busy() || questionCards.some((c) => c.phase === "answered" || c.phase === "gone");
+      const { layout, presentation } = resolvePanelLayout(
+        {
           height: this.size.height,
           header: 54,
           banners: bannerHeights,
           voice: voiceHeight,
-          question,
           composer: composerHeight,
-        });
-      const questionBudget = budgetFor(natural(questionHeights));
-      const questions = this.questions(snapshot, questionBudget.questionArea);
-      const layout = budgetFor(questions.presentation === "compact" ? COMPACT_QUESTION_HEIGHT : natural(questionHeights));
+          questionHeights,
+          held,
+        },
+        this.presentation,
+      );
+      const questions = this.questions(questionCards, presentation);
       const closeSheet = (_e, cx) => {
         this.sheet = null;
         this.panelFocus?.focus();

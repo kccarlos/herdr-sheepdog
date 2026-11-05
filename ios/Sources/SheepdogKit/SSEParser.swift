@@ -93,7 +93,7 @@ public struct SSEParser: Sendable {
             payload = decoded
         }
         var timestamp: Date?
-        if let ts = object["ts"] as? String { timestamp = ISO8601DateFormatter.sheepdog.date(from: ts) }
+        if let ts = object["ts"] as? String { timestamp = RFC3339Date.date(from: ts) }
         return DaemonEvent(
             seq: seq,
             ts: timestamp,
@@ -105,11 +105,19 @@ public struct SSEParser: Sendable {
     }
 }
 
-extension ISO8601DateFormatter {
-    /// The daemon writes RFC 3339 with fractional seconds.
-    static let sheepdog: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+/// Thread-safe RFC 3339 parsing and formatting backed by value-type
+/// `Date.ISO8601FormatStyle`, accepting both fractional and whole-second
+/// timestamps.
+public enum RFC3339Date {
+    private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecond = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
+
+    public static func date(from text: String) -> Date? {
+        if let parsed = try? fractional.parse(text) { return parsed }
+        return try? wholeSecond.parse(text)
+    }
+
+    public static func string(from date: Date) -> String {
+        fractional.format(date)
+    }
 }
