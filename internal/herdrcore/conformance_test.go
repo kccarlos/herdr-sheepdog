@@ -2,6 +2,7 @@ package herdrcore_test
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -168,9 +169,14 @@ func (d *coreDriver) Run(ctx context.Context, paneID string, p conformance.Progr
 	if err != nil {
 		return err
 	}
-	argv := append([]string{p.Kind}, p.Args...)
+	argv := append(append([]string(nil), p.Wrapper...), p.Kind)
+	argv = append(argv, p.Args...)
+	name := p.Kind
+	if len(p.Wrapper) > 0 {
+		name = filepath.Base(p.Wrapper[0])
+	}
 	term.Argv = argv
-	term.Foreground = &hc.Foreground{PID: 200, Name: p.Kind, Argv: argv, Cwd: term.Cwd}
+	term.Foreground = &hc.Foreground{PID: 200, Name: name, Argv: argv, Cwd: term.Cwd}
 	if p.Reported {
 		app := p.App
 		if app == "" {

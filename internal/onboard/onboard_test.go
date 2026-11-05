@@ -314,6 +314,33 @@ func TestDoctor(t *testing.T) {
 	}
 }
 
+func TestDoctorFailsOnActiveTailscaleFunnel(t *testing.T) {
+	f := newFakeAPI(t)
+	cfg := config.Default()
+	cfg.Herdr.Socket = filepath.Join(t.TempDir(), "none.sock")
+	cfg.Herdr.HCSocket = filepath.Join(t.TempDir(), "none-hc.sock")
+	cfg.Gemini.APIKeys = []string{goodKey}
+	cfg.Push.Mode = config.PushModeOff
+	cfg.Web.Port = 7777
+
+	rs := Doctor(context.Background(), cfg, DoctorOptions{
+		Endpoints: f.endpoints(),
+		TailscaleFunnel: func(_ context.Context, port int) (bool, error) {
+			return port == 7777, nil
+		},
+	})
+	var found *Result
+	for i := range rs {
+		if rs[i].Name == "tailscale funnel" {
+			found = &rs[i]
+			break
+		}
+	}
+	if found == nil || found.Status != Fail || !strings.Contains(found.Fix, "tailscale funnel reset") {
+		t.Fatalf("tailscale funnel check = %+v, want Fail with tailscale funnel reset fix", found)
+	}
+}
+
 func TestAccountProblemOf(t *testing.T) {
 	for _, tc := range []struct {
 		status int

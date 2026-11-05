@@ -60,9 +60,14 @@ func TestDocFacts(t *testing.T) {
 		"Files",
 	)
 
-	// Finding #3/F1: docs/remote-access.md mentions the read-only file browser when web.shell is off.
+	// Finding #3/F1: docs/remote-access.md mentions the read-only file browser when web.shell is off,
+	// and documents proxy/Funnel loopback rules.
 	remDoc := read("docs/remote-access.md")
-	mustContain("docs/remote-access.md", remDoc, "file browser")
+	mustContain("docs/remote-access.md", remDoc, "file browser", "tailscale funnel reset")
+
+	secDoc := read("SECURITY.md")
+	mustContain("SECURITY.md", secDoc, "X-Forwarded-*", "Tailscale Funnel")
+	mustNotContain("SECURITY.md", secDoc, "It has **no TLS**")
 
 	// Finding #4, #6, #7: docs/quick-start.md and docs/models.md.
 	qsDoc := read("docs/quick-start.md")

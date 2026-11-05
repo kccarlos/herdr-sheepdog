@@ -152,7 +152,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.pruneAttachments()
-	s.log.Log(logSource, "web.attachment", pane, map[string]any{"bytes": written, "type": typ, "remote_kind": remoteKind(r.RemoteAddr)})
+	s.log.Log(logSource, "web.attachment", pane, map[string]any{"bytes": written, "type": typ, "remote_kind": s.requestKind(r)})
 	writeJSON(w, http.StatusCreated, AttachmentResponse{Path: path, Name: name, Bytes: written, Type: typ})
 }
 

@@ -59,5 +59,6 @@ test('device rows name the kind and the last contact', () => {
   assert.equal(lastSeen({}, now), 'Not seen yet');
   assert.equal(lastSeen({ last_seen: '2026-10-21T11:55:00Z', last_network: 'lan' }, now), 'Wi-Fi · 5 min ago');
   assert.equal(lastSeen({ last_seen: '2026-10-21T11:59:59Z', last_network: 'tailscale' }, now), 'Tailscale · just now');
+  assert.equal(lastSeen({ last_seen: '2026-10-21T11:59:59Z', last_network: 'proxy' }, now), 'proxy · just now');
   assert.equal(lastSeen({ last_seen: '2026-10-19T12:00:00Z' }, now), '2 d ago');
 });
