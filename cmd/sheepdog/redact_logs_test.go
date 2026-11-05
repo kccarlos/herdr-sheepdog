@@ -33,6 +33,7 @@ func TestCLIRedactLogs(t *testing.T) {
 
 	envSecret := "custom-env-secret-value-998877"
 	cfgSecret := "custom-cfg-secret-value-112233"
+	bareToken := "gh" + "p_" + strings.Repeat("kM7", 12)
 	envPath := filepath.Join(cfgDir, ".env")
 	if err := os.WriteFile(envPath, []byte("DEEPSEEK_API_KEY="+envSecret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -44,7 +45,7 @@ func TestCLIRedactLogs(t *testing.T) {
 	}
 
 	trFile := filepath.Join(brainDir, "20260918T162804Z.jsonl")
-	trLine := fmt.Sprintf(`{"ts":"2026-09-18T16:28:04Z","role":"user","kind":"request","content":"keys %s and %s","tokens":12}`+"\n", envSecret, cfgSecret)
+	trLine := fmt.Sprintf(`{"ts":"2026-09-18T16:28:04Z","role":"user","kind":"request","content":"keys %s, %s and %s","tokens":12}`+"\n", envSecret, cfgSecret, bareToken)
 	if err := os.WriteFile(trFile, []byte(trLine), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestCLIRedactLogs(t *testing.T) {
 		if !json.Valid(bytes.TrimSpace(raw)) {
 			t.Errorf("%s invalid JSON: %s", p, raw)
 		}
-		for _, s := range []string{envSecret, cfgSecret, "sk-live-abcdef1234567890"} {
+		for _, s := range []string{envSecret, cfgSecret, bareToken, "sk-live-abcdef1234567890"} {
 			if strings.Contains(string(raw), s) {
 				t.Errorf("%s still contains %q: %s", p, s, raw)
 			}
