@@ -436,6 +436,13 @@ func (f *chunkFakeSess) BumpAudioEpoch() {
 	f.epoch = NextAudioEpoch()
 	f.mu.Unlock()
 }
+func (f *chunkFakeSess) FlushAudio() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	old := f.epoch
+	f.epoch = NextAudioEpoch()
+	return old
+}
 func (f *chunkFakeSess) currentEpoch() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -507,9 +514,10 @@ func TestSwitcherSetProviderOrdersFlushBeforeNewProvider(t *testing.T) {
 	sw, err := NewSwitcher([]Provider{
 		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
 		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) {
+			ep := o.currentEpoch()
 			go func() {
-				// Offer an audio chunk immediately as soon as the new provider starts.
-				o.chunks <- AudioChunk{Data: []byte("immediate-openai"), Epoch: o.currentEpoch()}
+				// Offer an audio chunk stamped during Start before SetProvider bumps the epoch.
+				o.chunks <- AudioChunk{Data: []byte("immediate-openai"), Epoch: ep}
 			}()
 			return o, nil
 		}},
@@ -563,6 +571,9 @@ func TestSwitcherSetProviderOrdersFlushBeforeNewProvider(t *testing.T) {
 		}
 		if len(ch.FlushedEpochs) == 0 || ch.FlushedEpochs[0] != intr.Epoch {
 			t.Fatalf("new provider chunk FlushedEpochs = %v, want fence %d", ch.FlushedEpochs, intr.Epoch)
+		}
+		if flushedEp := sw.FlushAudio(); flushedEp < ch.Epoch {
+			t.Fatalf("FlushAudio epoch %d < new provider chunk epoch %d", flushedEp, ch.Epoch)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for immediate-openai audio chunk")
