@@ -59,11 +59,14 @@ const SignOff = "When you finish, end with three short lines for someone who can
 // that starts with "/" is prose and keeps the trailer.
 func withSignOff(text string) string {
 	text = strings.TrimSpace(text)
-	if isSlashCommand(text) {
-		return trimCommandPunct(text)
-	}
 	if text == "" || strings.HasSuffix(text, SignOff) {
 		return text
+	}
+	if picturePath.MatchString(text) {
+		return text + "\n" + SignOff
+	}
+	if isSlashCommand(text) {
+		return trimCommandPunct(text)
 	}
 	return prose.Terminate(text) + " " + SignOff
 }
@@ -72,7 +75,7 @@ func withSignOff(text string) string {
 // command: after trimming, a single line that starts with "/".
 func isSlashCommand(text string) bool {
 	text = strings.TrimSpace(text)
-	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n")
+	return strings.HasPrefix(text, "/") && !strings.ContainsAny(text, "\r\n") && !picturePath.MatchString(text)
 }
 
 // trimCommandPunct drops sentence punctuation and quotes from the very
@@ -162,14 +165,14 @@ func (s *Supervisor) recordJournal(row state.Agent, event string, finish bool) *
 
 	e := state.JournalEntry{At: s.cfg.Now(), Event: event, Tools: d.Tools}
 	if d.Fresh {
-		e.LastAssistant = workerlog.Clip(scrubLines(d.LastAssistant), journalAssistantRunes)
+		e.LastAssistant = workerlog.Clip(scrubLines(s.cfg.Redactor.String(d.LastAssistant)), journalAssistantRunes)
 	}
 	if d.Error != nil {
 		e.Error = d.Error.Summary()
 	}
-	instruction := withoutSignOff(d.Instruction())
+	instruction := withoutSignOff(s.cfg.Redactor.String(d.Instruction()))
 	if instruction == "" {
-		instruction = withoutSignOff(row.CurrentTask)
+		instruction = withoutSignOff(s.cfg.Redactor.String(row.CurrentTask))
 	}
 	e.Instruction = workerlog.Clip(prose.Spoken(instruction, 0), journalInstructionRunes)
 	e.FilesTouched = d.Files

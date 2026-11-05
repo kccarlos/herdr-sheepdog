@@ -417,3 +417,28 @@ func stateOr(s string) string {
 	}
 	return s
 }
+
+// redactAgents copies the fields clipped while rendering model context.
+func (b *Brain) redactAgents(in []AgentInfo) []AgentInfo {
+	out := append([]AgentInfo(nil), in...)
+	r := b.cfg.Redactor.String
+	for i := range out {
+		a := &out[i]
+		a.Task, a.LastTask, a.LastResult, a.LastBlock = r(a.Task), r(a.LastTask), r(a.LastResult), r(a.LastBlock)
+		if a.Pending != nil {
+			p := *a.Pending
+			p.Question = r(p.Question)
+			p.Options = append([]Option(nil), p.Options...)
+			for j := range p.Options {
+				p.Options[j].Label = r(p.Options[j].Label)
+			}
+			a.Pending = &p
+		}
+		a.Journal = append([]JournalEntry(nil), a.Journal...)
+		for j := range a.Journal {
+			a.Journal[j].LastAssistant = r(a.Journal[j].LastAssistant)
+			a.Journal[j].Instruction = r(a.Journal[j].Instruction)
+		}
+	}
+	return out
+}

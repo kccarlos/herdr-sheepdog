@@ -313,7 +313,7 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 	alias := aliasOr(state.Say(row))
 	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
 	s.touch(row.PaneID)
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
@@ -350,7 +350,7 @@ const doneResult = "finished"
 func (s *Supervisor) recordResult(paneID, spoken, stopReason string) {
 	now := s.cfg.Now()
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
-		a.LastResult = &state.Result{Spoken: spoken, At: now, StopReason: stopReason}
+		a.LastResult = &state.Result{Spoken: s.cfg.Redactor.String(spoken), At: now, StopReason: s.cfg.Redactor.String(stopReason)}
 	})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
@@ -396,7 +396,7 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen})
 		return
 	}
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, s.cfg.Redactor.String(prompt.Phrase()), false)
 	muted := s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)

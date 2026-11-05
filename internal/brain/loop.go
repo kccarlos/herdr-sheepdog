@@ -193,7 +193,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// What the daemon knows about the agents the words name, and that
 		// it knows nothing more (run C, H7: "did it push?" answered "no"
 		// from a screen that says nothing about pushing).
-		t.req.records = agentRecords(b.host.Agents(), t.req.Question, t.req.Focus, b.cfg.Now)
+		t.req.records = agentRecords(b.redactAgents(b.host.Agents()), t.req.Question, t.req.Focus, b.cfg.Now)
 	}
 	words := ""
 	if t.req.Kind == KindUtterance && t.req.Trigger != TriggerEvent {
@@ -223,7 +223,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	if t.req.Screen != "" {
 		// The supervisor's own read for this event: in the window like a
 		// read_screen result (wrapped, pruned to a stub later).
-		text := prose.TailBytes(t.req.Screen, maxResultBytes)
+		text := prose.TailBytes(b.cfg.Redactor.String(t.req.Screen), maxResultBytes)
 		b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "screen", text), Agent: t.req.Agent,
 			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
 	}
@@ -464,7 +464,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 			res.Error = out.err.Error()
 			payload["error"] = res.Error
 		} else {
-			payload["result"] = prose.TruncateRunes(out.result, logResultBytes)
+			payload["result"] = prose.TruncateRunes(b.cfg.Redactor.String(out.result), logResultBytes)
 		}
 		b.ingest(Message{Role: RoleTool, Kind: KindToolResult, Content: out.result, Agent: out.agent, ToolResult: res}, t.n)
 		b.log.Log(logSource, "brain.tool_result", "", payload)
@@ -704,7 +704,9 @@ func withState(msgs []Message, state string, turn int) []Message {
 
 // sections assembles the system prompt's sections from the current
 // prompt files, roster and ledger (no host yet: an empty roster).
-func (b *Brain) sections() []PromptSection {
+func (b *Brain) sections() []PromptSection { return b.promptSections(true) }
+
+func (b *Brain) promptSections(includeStable bool) []PromptSection {
 	b.mu.Lock()
 	host := b.host
 	userVars := b.userVars
@@ -730,13 +732,38 @@ func (b *Brain) sections() []PromptSection {
 			screen = screenLine(dh.ScreenVisible())
 		}
 	}
-	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	var secs []PromptSection
+	if includeStable {
+		secs = append(append(secs, stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	}
 	now := b.cfg.Now()
 	record := recordLine(started, compaction, now)
 	if screen != "" {
 		record = strings.TrimSpace(record + "\n" + screen)
 	}
-	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
+	agents = b.redactAgents(agents)
+	notes = append([]string(nil), notes...)
+	promises = append([]PromiseInfo(nil), promises...)
+	investigations = append([]InvestigationInfo(nil), investigations...)
+	unanswered = append([]UnansweredInfo(nil), unanswered...)
+	for i := range notes {
+		notes[i] = b.cfg.Redactor.String(notes[i])
+	}
+	for i := range promises {
+		promises[i].Text = b.cfg.Redactor.String(promises[i].Text)
+	}
+	for i := range investigations {
+		investigations[i].Question = b.cfg.Redactor.String(investigations[i].Question)
+		investigations[i].Summary = b.cfg.Redactor.String(investigations[i].Summary)
+	}
+	for i := range unanswered {
+		unanswered[i].Text = b.cfg.Redactor.String(unanswered[i].Text)
+	}
+	secs = append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, record)...)
+	for i := range secs {
+		secs[i].Text = b.cfg.Redactor.String(secs[i].Text)
+	}
+	return secs
 }
 
 // stateNow renders the state block from the Host as it is now: the loop
@@ -745,7 +772,7 @@ func (b *Brain) sections() []PromptSection {
 // request it costs the prefix cache nothing.
 func (b *Brain) stateNow() string {
 	var dynamic []PromptSection
-	for _, s := range b.sections() {
+	for _, s := range b.promptSections(false) {
 		if s.Source == SourceDynamic {
 			dynamic = append(dynamic, s)
 		}

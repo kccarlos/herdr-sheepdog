@@ -170,7 +170,7 @@ func (s *Supervisor) Show(ctx context.Context, req brain.CardRequest) (brain.Car
 func (s *Supervisor) buildCard(ctx context.Context, req brain.CardRequest) (Card, error) {
 	card := Card{Kind: req.Kind}
 	if req.Kind == brain.ShowCard {
-		card.Title, card.Markdown = req.Title, req.Markdown
+		card.Title, card.Markdown = s.cfg.Redactor.String(req.Title), s.cfg.Redactor.String(req.Markdown)
 		return card, nil
 	}
 	row, ok := s.store.Get(req.PaneID)
@@ -191,7 +191,7 @@ func (s *Supervisor) buildCard(ctx context.Context, req brain.CardRequest) (Card
 		if err != nil {
 			return Card{}, err
 		}
-		card.Text = lastLines(reANSI.ReplaceAllString(read.Text, ""), lines)
+		card.Text = lastLines(s.cfg.Redactor.String(reANSI.ReplaceAllString(read.Text, "")), lines)
 		card.Title = name + ": its screen"
 	case brain.ShowApproval:
 		p, has := s.store.Pending()
@@ -207,6 +207,9 @@ func (s *Supervisor) buildCard(ctx context.Context, req brain.CardRequest) (Card
 	default:
 		return Card{}, fmt.Errorf("show kind %q", req.Kind)
 	}
+	card.Title = s.cfg.Redactor.String(card.Title)
+	card.Command = s.cfg.Redactor.String(card.Command)
+	card.Question = s.cfg.Redactor.String(card.Question)
 	return card, nil
 }
 

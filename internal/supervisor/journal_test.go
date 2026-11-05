@@ -491,3 +491,31 @@ func TestAgentNowDoesNotRepeatStop(t *testing.T) {
 		t.Errorf("state = %q", got)
 	}
 }
+
+func TestSignOffPreservesTrailingImagePath(t *testing.T) {
+	if isSlashCommand("/tmp/photo.png") {
+		t.Error("image path is not a slash command")
+	}
+	for _, in := range []string{"look\n/tmp/photo.png", "~/photo.png", "/tmp/photo.png"} {
+		got := withSignOff(in)
+		if got != in+"\n"+SignOff {
+			t.Errorf("got %q", got)
+		}
+		if again := withSignOff(got); again != got {
+			t.Errorf("sign-off duplicated: %q", again)
+		}
+	}
+}
+
+func TestJournalRedactsWorkerSecrets(t *testing.T) {
+	h := newHarness(t, withWorkerLog(t.TempDir()))
+	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+	secret := "sk-" + "example1234567890abcdef"
+	claudeTurn(t, h, "w5:p1", "result "+secret)
+	row, _ := h.store.Get("w5:p1")
+	h.sup.recordJournal(row, "done", false)
+	row, _ = h.store.Get("w5:p1")
+	if len(row.Journal) != 1 || strings.Contains(row.Journal[0].LastAssistant, secret) || !strings.Contains(row.Journal[0].LastAssistant, "[REDACTED]") {
+		t.Error("journal did not redact the worker secret")
+	}
+}
