@@ -569,15 +569,31 @@ func unchangedSnapshotIsSilent(t *testing.T, newDriver NewDriver) {
 		t.Fatal("timed out waiting for the initial snapshot")
 	}
 
-	// Let the initial refresh and any immediately queued socket work settle
-	// before using LastBeat to count the periodic snapshots.
-	time.Sleep(2 * snapshotEvery)
-	before := w.LastBeat()
-	log.reset()
+	// Wait on LastBeat for the initial refresh and one periodic snapshot to
+	// complete so any startup socket work has settled before resetting the log.
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
+	var settleBeat time.Time
+	for settled := 0; settled < 2; {
+		select {
+		case tr, ok := <-transitions:
+			if !ok {
+				t.Fatal("transitions channel closed")
+			}
+			t.Fatalf("unchanged periodic snapshot emitted transition %+v", tr)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for initial snapshots to settle")
+		case <-tick.C:
+			if now := w.LastBeat(); !now.IsZero() && now.After(settleBeat) {
+				settleBeat = now
+				settled++
+			}
+		}
+	}
+	before := settleBeat
+	log.reset()
 	lastBeat := before
 	for beats := 0; beats < 2; {
 		select {

@@ -41,8 +41,7 @@ func TestNoSpeechOutputIsNotAnAnswer(t *testing.T) {
 				r.At = h.clock.Now().Add(300 * time.Millisecond)
 				h.pusher.setPlayback(r)
 			}
-			time.Sleep(200 * time.Millisecond)
-			h.sup.replies.Wait()
+			h.waitRelay()
 			if got := h.log.count("supervisor.relay_by_daemon") == 1; got != tc.relay {
 				t.Errorf("relay_by_daemon = %d, want relayed=%v", h.log.count("supervisor.relay_by_daemon"), tc.relay)
 			}

@@ -150,10 +150,21 @@ func TestMenuGuardAfterADecline(t *testing.T) {
 			h.transition("w5:p1", herdr.StateBlocked, herdr.StateIdle)
 			h.clock.Advance(3 * time.Second)
 			if c.redraw {
-				go func() {
-					time.Sleep(declineRecheckDelay / 3)
-					h.srv.SetScreen("w5:p1", fixture(t, "codex-declined-esc.screen.txt"))
-				}()
+				base := h.sup.herdr
+				var reads int
+				h.sup.herdr = &interceptHerdr{
+					Herdr: base,
+					onRead: func(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+						res, err := base.Read(ctx, paneID, source, lines)
+						if paneID == "w5:p1" {
+							reads++
+							if reads == 1 {
+								h.srv.SetScreen("w5:p1", fixture(t, "codex-declined-esc.screen.txt"))
+							}
+						}
+						return res, err
+					},
+				}
 			}
 			_, err := brainHost{s: h.sup}.Prompt(context.Background(), "w5:p1", "Push to a new branch instead.")
 			if blocked := errors.Is(err, ErrMenuOnScreen); blocked != c.blocked {

@@ -251,7 +251,7 @@ func TestRelayWaitsForATrailingTranscript(t *testing.T) {
 	blockedAuth(t, h)
 	h.clock.Advance(time.Second)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		waitFor(t, func() bool { return h.sup.inGraceWait() }, "relay to enter inputGrace")
 		h.hear("yes")
 	}()
 	res := h.relay("yes")

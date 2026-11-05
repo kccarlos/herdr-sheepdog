@@ -75,19 +75,17 @@ func countRequests(srv *hctest.Server, method string) int {
 	return n
 }
 
-// awaitSubscribers waits until the server has seen n events.subscribe
-// requests in total, then gives it a moment to register the last one before
-// the test emits events.
+// awaitSubscribers waits until n events.subscribe requests have completed
+// registration and written their initial response.
 func awaitSubscribers(t *testing.T, srv *hctest.Server, n int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
-	for countRequests(srv, "events.subscribe") < n {
+	for srv.SubscriptionsHandled() < n {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %d subscriptions", n)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
-	time.Sleep(100 * time.Millisecond)
 }
 
 // receive returns the next value of ch or fails the test.

@@ -28,7 +28,7 @@ func startMarks(t *testing.T, b *herdrcore.Backend, srv *hctest.Server) {
 		cancel()
 		<-done
 	})
-	waitFor(t, "the marks subscription", func() bool { return srv.Subscribers() > before })
+	waitFor(t, "the marks subscription", func() bool { return srv.Subscribers() > before && b.MarksLive() })
 }
 
 func waitFor(t *testing.T, what string, ok func() bool) {

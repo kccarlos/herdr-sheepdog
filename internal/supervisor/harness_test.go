@@ -67,11 +67,12 @@ func (l *recLog) count(typ string) int { return len(l.ofType(typ)) }
 // fakePusher records pushes and implements voiceResetter (reset.go) so
 // tests can see a "New conversation" reach the voice side.
 type fakePusher struct {
-	mu     sync.Mutex
-	pushes []voice.EventPush
-	tags   []map[string]any
-	err    error
-	resets []string
+	mu       sync.Mutex
+	pushes   []voice.EventPush
+	pushedAt []time.Time
+	tags     []map[string]any
+	err      error
+	resets   []string
 	// playback is the client's last playback report (LastPlayback);
 	// onset when the client's speech detector last opened.
 	playback voice.PlaybackReport
@@ -127,8 +128,18 @@ func (p *fakePusher) PushTagged(text string, u voice.Urgency, tags map[string]an
 		return p.err
 	}
 	p.pushes = append(p.pushes, voice.EventPush{Text: text, Urgency: u})
+	p.pushedAt = append(p.pushedAt, time.Now())
 	p.tags = append(p.tags, tags)
 	return nil
+}
+
+func (p *fakePusher) firstPushAt() (time.Time, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.pushedAt) == 0 {
+		return time.Time{}, false
+	}
+	return p.pushedAt[0], true
 }
 
 // tagsOf returns the tags of the i-th push.
@@ -343,6 +354,15 @@ func (h *harness) hear(text string) {
 func (h *harness) relay(text string) voice.ToolResult {
 	h.t.Helper()
 	return h.call(ToolToSupervisor, map[string]any{"text": text})
+}
+
+// waitRelay waits for an armed unanswered-utterance watch to disarm or fire
+// and for any resulting daemon relay to finish.
+func (h *harness) waitRelay() {
+	h.t.Helper()
+	waitFor(h.t, func() bool { return !h.sup.relayArmed() }, "the relay watch to settle")
+	h.sup.relay.wg.Wait()
+	h.sup.replies.Wait()
 }
 
 // payload returns the event's payload map.

@@ -40,13 +40,14 @@ type Server struct {
 	closeOnce sync.Once
 	emitMu    sync.Mutex
 
-	mu          sync.Mutex
-	seq         uint64
-	nextID      uint64
-	terminals   map[string]hc.Terminal
-	screens     map[string]string
-	requests    []Request
-	subscribers map[*subscriber]struct{}
+	mu                   sync.Mutex
+	seq                  uint64
+	nextID               uint64
+	terminals            map[string]hc.Terminal
+	screens              map[string]string
+	requests             []Request
+	subscribers          map[*subscriber]struct{}
+	subscriptionsHandled int
 
 	// Framed mode (framed.go).
 	fconns   map[*framedConn]struct{}
@@ -297,6 +298,14 @@ func (s *Server) Subscribers() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.subscribers)
+}
+
+// SubscriptionsHandled returns how many events.subscribe requests have
+// completed registration and sent their initial response.
+func (s *Server) SubscriptionsHandled() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.subscriptionsHandled
 }
 
 // DropSubscribers closes every open subscription connection.
@@ -637,6 +646,9 @@ func (s *Server) subscribe(conn net.Conn, request wireRequest) {
 	var filter hc.SubscribeFilter
 	if err := decodeParams(request.Params, &filter); err != nil {
 		s.reply(conn, wireResponse{JSONRPC: "2.0", ID: request.ID, Error: hcError(err)})
+		s.mu.Lock()
+		s.subscriptionsHandled++
+		s.mu.Unlock()
 		return
 	}
 
@@ -653,6 +665,9 @@ func (s *Server) subscribe(conn net.Conn, request wireRequest) {
 				ID:      request.ID,
 				Error:   hcError(notFound(filter.Terminal)),
 			})
+			s.mu.Lock()
+			s.subscriptionsHandled++
+			s.mu.Unlock()
 			return
 		}
 	}
@@ -665,6 +680,9 @@ func (s *Server) subscribe(conn net.Conn, request wireRequest) {
 
 	s.reply(conn, wireResponse{JSONRPC: "2.0", ID: request.ID, Result: snapshot})
 	sub.writeMu.Unlock()
+	s.mu.Lock()
+	s.subscriptionsHandled++
+	s.mu.Unlock()
 
 	_, _ = io.Copy(io.Discard, conn)
 	s.mu.Lock()

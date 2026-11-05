@@ -1,7 +1,7 @@
 package supervisor
 
 import (
-	"context"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -51,6 +51,9 @@ type relayWatch struct {
 	pushSpeaking bool
 	// closed: the daemon is going down; nothing is relayed any more.
 	closed bool
+	// wg tracks an armed timer callback until it either aborts or registers
+	// in s.replies, so stopRelay never returns with a callback in flight.
+	wg sync.WaitGroup
 }
 
 // armRelayLocked (re)starts the watch for in, the voice input that just
@@ -62,16 +65,26 @@ func (s *Supervisor) armRelayLocked(in *shepherdInput) {
 	s.disarmRelayLocked()
 	gen := s.relay.gen
 	s.relay.seq = in.seq
+	s.relay.wg.Add(1)
 	s.relay.timer = time.AfterFunc(s.cfg.relayAfter, func() { s.relayUnanswered(gen) })
 }
 
 // disarmRelayLocked stops the watch. Caller holds s.mu.
 func (s *Supervisor) disarmRelayLocked() {
 	if s.relay.timer != nil {
-		s.relay.timer.Stop()
+		if s.relay.timer.Stop() {
+			s.relay.wg.Done()
+		}
 		s.relay.timer = nil
 	}
 	s.relay.gen++
+}
+
+// relayArmed reports whether the unanswered-utterance watch is currently armed.
+func (s *Supervisor) relayArmed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.relay.timer != nil
 }
 
 // toolCalled records that the voice called a tool: whatever the user
@@ -96,19 +109,28 @@ func (s *Supervisor) stopRelay() {
 	s.relay.closed = true
 	s.disarmRelayLocked()
 	s.mu.Unlock()
+	s.relay.wg.Wait()
 }
 
 // relayUnanswered is the watch firing: the input it was armed for is
 // still the newest, unclaimed and unanswered, so the daemon claims it
 // (with any unanswered words before it in the same run) and relays it.
 func (s *Supervisor) relayUnanswered(gen uint64) {
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			s.relay.wg.Done()
+		}
+	}()
 	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
 	s.mu.Lock()
-	if gen != s.relay.gen || s.relay.closed {
+	if gen == s.relay.gen {
+		s.relay.timer = nil
+	}
+	if gen != s.relay.gen || s.relay.closed || s.shut {
 		s.mu.Unlock()
 		return
 	}
-	s.relay.timer = nil
 	last := s.lastInputLocked()
 	if last != nil && last.answered && silentAnswer(last, playback) {
 		// The voice's "answer" played for under silentAnswerMs: it said
@@ -136,9 +158,11 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	waited := s.cfg.Now().Sub(c.in.at)
 	s.replies.Add(1)
 	s.mu.Unlock()
+	handedOff = true
+	s.relay.wg.Done()
 	defer s.replies.Done()
 	s.log.Log(logSource, "supervisor.relay_by_daemon", "", map[string]any{"text": c.text, "waited_ms": waited.Milliseconds(), "inputs": c.n, "utterance_id": c.id})
-	res, _ := s.handleUtterance(context.Background(), c, "", true, false)
+	res, _ := s.handleUtterance(s.life, c, "", true, false)
 	if res.Spoken == "" {
 		return
 	}

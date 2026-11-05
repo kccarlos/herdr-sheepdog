@@ -103,7 +103,7 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.config/sheepdog/.env` | Your API keys (mode 0600). | Until you delete it. |
 | `~/.config/sheepdog/prompts/` | Your prompt overrides, if any. | Until you delete it. |
 | `~/.local/share/sheepdog/events/YYYY-MM-DD.jsonl` | The event log: every event of the daemon, including **transcripts of what you said**, the voice's and the orchestrator's answers, and agent screen excerpts. | 14 days (`events.retention_days`). |
-| `~/.local/share/sheepdog/brain/` | The orchestrator's transcripts and the requests it sent to its model; they include what you said. | `events.retention_days`, deleted with the event log. |
+| `~/.local/share/sheepdog/brain/` | The orchestrator's transcripts and the requests it sent to its model; they include what you said, with secrets masked (`sheepdog redact-logs` masks older files in place). | `events.retention_days`, deleted with the event log. |
 | `~/.local/share/sheepdog/cards.jsonl` | Cards the orchestrator showed on your screen (`show` tool): markdown notes, agent cards, terminal excerpts and approval prompt snapshots. | `events.retention_days`, deleted with the event log. |
 | `~/.local/share/sheepdog/notes.jsonl` | Notes the orchestrator wrote about your agents. | Until you delete it. |
 | `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions, your runtime settings. | Overwritten as it changes. |
@@ -157,10 +157,11 @@ sends nothing.
 | To delete | Run |
 |---|---|
 | The event log and transcripts now | `sheepdog stop`, then `sheepdog data clear --events` |
+| Mask secrets in existing orchestrator transcripts and request logs (without deleting them) | `sheepdog stop`, then `sheepdog redact-logs` |
 | Everything under the data directory (config and keys stay) | `sheepdog stop`, then `sheepdog data clear --all` |
 | Everything, including config and keys | `sheepdog uninstall` (asks before each directory) |
 
-All three ask first. For
+`data clear` and `uninstall` ask first. For
 [herdr-tui](https://github.com/herdrdev/herdr), deleting the plugin is
 `herdr plugin uninstall kccarlos.sheepdog`.
 

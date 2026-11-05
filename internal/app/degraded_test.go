@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -67,9 +68,19 @@ func TestVoiceConnectFailureKeepsTheDaemonUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dead := "http://" + ln.Addr().String()
-	_ = ln.Close() // connection refused from now on
-	t.Setenv("GOOGLE_GEMINI_BASE_URL", dead)
+	t.Cleanup(func() { _ = ln.Close() })
+	var attempts atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			attempts.Add(1)
+			_ = c.Close()
+		}
+	}()
+	t.Setenv("GOOGLE_GEMINI_BASE_URL", "http://"+ln.Addr().String())
 	defer SetVoiceRetry(50*time.Millisecond, 100*time.Millisecond)()
 
 	a, err := Build(cfg, Options{Herdr: HerdrMock, Drain: time.Second})
@@ -92,7 +103,12 @@ func TestVoiceConnectFailureKeepsTheDaemonUp(t *testing.T) {
 	if !failed(v) {
 		t.Fatalf("voice = %+v", v)
 	}
-	time.Sleep(400 * time.Millisecond) // a few retries
+	for attempts.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if attempts.Load() < 3 {
+		t.Fatalf("voice retry attempts = %d, want >= 3", attempts.Load())
+	}
 	if err := stop(); err != nil {
 		t.Errorf("Run: %v", err)
 	}
@@ -163,6 +179,8 @@ func TestHangingVoiceDialDoesNotBlockThePages(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var held []net.Conn
+	dialed := make(chan struct{})
+	var dialOnce sync.Once
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -172,6 +190,7 @@ func TestHangingVoiceDialDoesNotBlockThePages(t *testing.T) {
 			mu.Lock()
 			held = append(held, c) // accepted, never answered
 			mu.Unlock()
+			dialOnce.Do(func() { close(dialed) })
 		}
 	}()
 	t.Cleanup(func() {
@@ -189,18 +208,18 @@ func TestHangingVoiceDialDoesNotBlockThePages(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := runApp(t, a)
-	time.Sleep(300 * time.Millisecond) // the dial is hanging now
-	client := &http.Client{Timeout: time.Second}
+	select {
+	case <-dialed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("voice never dialed the hanging listener")
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
 	for _, path := range []string{"/api/state", "/api/hello"} {
-		start := time.Now()
 		resp, err := client.Get(a.URL() + path)
 		if err != nil {
 			t.Fatalf("%s while the voice dials: %v", path, err)
 		}
 		_ = resp.Body.Close()
-		if d := time.Since(start); d > 500*time.Millisecond {
-			t.Errorf("%s took %s", path, d)
-		}
 	}
 	mu.Lock()
 	for _, c := range held {

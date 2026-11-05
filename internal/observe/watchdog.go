@@ -83,9 +83,10 @@ type pingResult struct {
 
 // Watchdog is the liveness Handler.
 type Watchdog struct {
-	log    logging.Logger
-	probes Probes
-	now    func() time.Time // the voice stall's and the ping's clock
+	log      logging.Logger
+	probes   Probes
+	now      func() time.Time // the voice stall's and the ping's clock
+	pingDone func()           // test hook: called after pingHerdr records w.ping
 
 	mu           sync.Mutex
 	voiceStalled bool
@@ -220,6 +221,9 @@ func (w *Watchdog) pingHerdr() {
 	w.ping = pingResult{at: w.now(), err: err}
 	w.pinging = false
 	w.mu.Unlock()
+	if w.pingDone != nil {
+		w.pingDone()
+	}
 }
 
 func (w *Watchdog) checkVoice(time.Time) miss {

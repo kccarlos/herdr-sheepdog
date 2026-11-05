@@ -82,7 +82,7 @@ func newCoreDriverOver(t *testing.T, srv *hctest.Server, procs *coreProcTable) *
 		<-done
 	})
 	deadline := time.Now().Add(3 * time.Second)
-	for srv.Subscribers() <= before {
+	for srv.Subscribers() <= before || !backend.MarksLive() {
 		if time.Now().After(deadline) {
 			t.Fatal("the marks subscription never came up")
 		}

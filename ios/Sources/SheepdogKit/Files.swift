@@ -162,6 +162,9 @@ public enum FileProblem: String, Equatable, Sendable {
     case notFound = "not_found"
     case outside
     case sensitive
+    case homeRoot = "home_root"
+    case privateRoot = "private_root"
+    case filesOff = "files_off"
     case notFile = "not_file"
     case denied
     case tooLarge = "too_large"
@@ -211,8 +214,22 @@ public enum FileProblem: String, Equatable, Sendable {
                          symbol: "folder")
         case .sensitive:
             return Words(title: "Hidden for safety",
-                         message: "Sheepdog hides files like .env and keys, and cannot open your home folder or its data folder. Choose a project folder or open it on your computer.",
+                         message: subject == .folder
+                             ? "Sheepdog hides folders like .git and .ssh. Open it on your computer."
+                             : "Sheepdog hides files like .env and keys. Open it on your computer.",
                          symbol: "lock")
+        case .homeRoot:
+            return Words(title: "Can't open your home folder",
+                         message: "Sheepdog only browses project folders, not your home folder or folders above it. Choose a project folder, or open it on your computer.",
+                         symbol: "house")
+        case .privateRoot:
+            return Words(title: "Can't open sheepdog's data folder",
+                         message: "Sheepdog keeps its own logs and state out of the file browser. Choose a project folder, or open it on your computer.",
+                         symbol: "lock")
+        case .filesOff:
+            return Words(title: "File browsing is off",
+                         message: "File browsing is turned off on your computer (web.files = false). Changes still work.",
+                         symbol: "folder")
         case .notFile:
             return Words(title: "Not a regular file",
                          message: "Sheepdog reads files and folders. Pipes, sockets and devices cannot be shown.",

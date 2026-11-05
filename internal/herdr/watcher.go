@@ -393,6 +393,9 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 	if ev.State != StateUnknown {
 		p.activate()
 	}
+	if ev.Source == "snapshot" && ev.State == p.state && p.pending == nil {
+		return
+	}
 	if ev.State == p.lastEv && ev.At.Sub(p.lastEvAt) < w.cfg.DedupWindow {
 		w.log.Log("herdr", "herdr.dedup", p.id, map[string]any{"state": ev.State, "source": ev.Source})
 		return

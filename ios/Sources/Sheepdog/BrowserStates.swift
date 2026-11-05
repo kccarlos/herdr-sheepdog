@@ -114,7 +114,7 @@ enum BrowserWords {
         case let .problem(problem):
             let words = problem.words(subject: subject, root: root, name: name, size: size)
             var action: BrowserState.Action?
-            if problem == .olderDaemon, let changes {
+            if problem == .olderDaemon || problem == .filesOff, let changes {
                 action = .init(title: "Show Changes", identifier: "browser.state.changes", run: changes)
             } else if problem.canRetry {
                 action = .init(title: problem == .denied ? "Retry" : "Try again", identifier: "browser.state.retry", run: retry)

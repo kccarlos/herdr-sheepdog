@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,18 +12,43 @@ import (
 )
 
 func TestAuditSensitiveRoots(t *testing.T) {
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(filepath.Join(home, "project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	data := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(filepath.Join(data, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", home)
-	s := &Server{}
-	s.deps.DataDir = data
-	for _, p := range []string{home, filepath.Dir(home), data, filepath.Join(data, "sub")} {
-		if !s.privateRoot(p) {
-			t.Errorf("allowed %s", p)
+
+	h := newHarness(t, harnessOpts{dataDir: data})
+	trackIn(t, h, "w1:p1", home)
+	trackIn(t, h, "w1:p2", filepath.Dir(home))
+	trackIn(t, h, "w1:p3", data)
+	trackIn(t, h, "w1:p4", filepath.Join(data, "sub"))
+	trackIn(t, h, "w1:p5", filepath.Join(home, "project"))
+
+	for _, tc := range []struct {
+		pane   string
+		reason string
+		errSub string
+	}{
+		{"w1:p1", "home_root", "home folder"},
+		{"w1:p2", "home_root", "home folder"},
+		{"w1:p3", "private_root", "data folder"},
+		{"w1:p4", "private_root", "data folder"},
+	} {
+		for _, suffix := range []string{"files", "changes"} {
+			var body map[string]string
+			code := h.getJSON(windowPath(tc.pane, suffix), &body)
+			if code != 403 || body["reason"] != tc.reason || !strings.Contains(body["error"], tc.errSub) {
+				t.Errorf("%s %s = %d %v, want 403 %s (%s)", tc.pane, suffix, code, body, tc.reason, tc.errSub)
+			}
 		}
 	}
-	if s.privateRoot(filepath.Join(home, "project")) {
-		t.Error("project under home refused")
+	if code := h.getJSON(windowPath("w1:p5", "files"), nil); code != 200 {
+		t.Errorf("project under home = %d, want 200", code)
 	}
 }
 

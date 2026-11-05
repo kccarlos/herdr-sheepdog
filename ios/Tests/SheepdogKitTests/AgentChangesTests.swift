@@ -1,3 +1,6 @@
+#if os(iOS)
+@testable import Sheepdog
+#endif
 @testable import SheepdogKit
 import XCTest
 
@@ -125,3 +128,55 @@ final class DemoChangesTests: XCTestCase {
         }
     }
 }
+
+#if os(iOS)
+final class ChangesRefusalTests: XCTestCase {
+    func testFolderRefusalsUseFolderWordsAndOmitRetryWhenPermanent() {
+        let sensitive = FilesRefusal(status: 403, problem: .sensitive, message: "sensitive")
+        XCTAssertTrue(changesErrorText(sensitive, subject: .folder, root: "shop").contains(".git"))
+        XCTAssertFalse(changesErrorText(sensitive, subject: .folder, root: "shop").contains(".env"))
+        XCTAssertTrue(changesErrorText(sensitive, subject: .file, root: "shop").contains(".env"))
+
+        guard case let .failed(msg, req, problem) = ChangesPhase.failed(sensitive, describe: { RequestFailure($0, linkUsable: true) }) else {
+            return XCTFail("expected failed phase")
+        }
+        let folderState = ChangesListView.failedState(message: msg, request: req, problem: problem, name: "shop", retry: {})
+        XCTAssertEqual(folderState.title, "Hidden for safety")
+        XCTAssertTrue(folderState.message.contains(".git"), "got: \(folderState.message)")
+        XCTAssertNil(folderState.action, "permanent refusal should not offer Try again")
+
+        for rootProblem in [FileProblem.homeRoot, .privateRoot] {
+            let refusal = FilesRefusal(status: 403, problem: rootProblem, message: "blocked")
+            guard case let .failed(m, r, p) = ChangesPhase.failed(refusal, describe: { RequestFailure($0, linkUsable: true) }) else {
+                return XCTFail("expected failed phase for \(rootProblem)")
+            }
+            let state = ChangesListView.failedState(message: m, request: r, problem: p, name: "shop", retry: {})
+            XCTAssertEqual(state.title, rootProblem.words(subject: .folder, root: "shop").title)
+            XCTAssertNil(state.action, "\(rootProblem) cannot succeed on retry")
+        }
+
+        // An unknown 403 reason maps to .failed, which still permits retry.
+        let unknown = FilesRefusal(status: 403, problem: FileProblem(reason: "future_reason"), message: "temporary")
+        if case let .failed(m, r, p) = ChangesPhase.failed(unknown, describe: { RequestFailure($0, linkUsable: true) }) {
+            let state = ChangesListView.failedState(message: m, request: r, problem: p, name: "shop", retry: {})
+            XCTAssertNotNil(state.action)
+        } else {
+            XCTFail("expected failed phase")
+        }
+    }
+
+    func testDiffRefusalsKeepFileWordsAndOmitRetryWhenPermanent() {
+        let sensitive = FilesRefusal(status: 403, problem: .sensitive, message: "sensitive")
+        let diffState = DiffView.failedState(sensitive, fileName: ".env", retry: {})
+        XCTAssertEqual(diffState.title, "Hidden for safety")
+        XCTAssertTrue(diffState.message.contains(".env"))
+        XCTAssertNil(diffState.action)
+
+        let transient = DaemonError.rejected(status: 500, message: "git failed")
+        let transientState = DiffView.failedState(transient, fileName: "a.go", retry: {})
+        XCTAssertEqual(transientState.title, "Could not read the diff")
+        XCTAssertEqual(transientState.message, "git failed")
+        XCTAssertEqual(transientState.action?.title, "Try again")
+    }
+}
+#endif
