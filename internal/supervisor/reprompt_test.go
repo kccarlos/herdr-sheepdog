@@ -328,3 +328,14 @@ func TestFastPathAnswerRepromptsToNewPrompt(t *testing.T) {
 		t.Fatalf("send_keys after the reprompt = %v", keys)
 	}
 }
+
+func TestRedactedPromptRemainsIdentifiable(t *testing.T) {
+	h := newHarness(t)
+	prompt := herdr.Prompt{Question: "Use password=example12345?", Command: "echo sk-example1234567890", Options: []herdr.Option{{Label: "sk-example1234567890"}}}
+	h.sup.mu.Lock()
+	pending := h.sup.newAnswerPrompt("w5:p1", prompt, "auth", time.Time{})
+	h.sup.mu.Unlock()
+	if pendingSignature(pending) != h.sup.promptSignature(prompt) {
+		t.Fatal("stored prompt no longer matches screen")
+	}
+}

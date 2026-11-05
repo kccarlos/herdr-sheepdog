@@ -124,6 +124,7 @@ func (a *App) wire() error {
 		notifier = a.push
 	}
 	sup, err := supervisor.New(store, a.herdr, querier, pusher, a.log, supervisor.Config{
+		Redactor:         redact.ForConfig(cfg),
 		PendingTTL:       time.Duration(cfg.PendingTTLS) * time.Second,
 		DataDir:          cfg.DataDir,
 		Chattiness:       cfg.Supervisor.Chattiness,
