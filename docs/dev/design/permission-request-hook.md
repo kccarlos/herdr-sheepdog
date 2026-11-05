@@ -1,5 +1,7 @@
 # Lease-Gated Claude Code PermissionRequest Hook
 
+**Decided (KC, 2026-11-05):** install by default, with an opt-out.
+
 ## Decision needed
 
 1. **Install during `sheepdog setup`: default-on or opt-in?**

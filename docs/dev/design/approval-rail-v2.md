@@ -12,6 +12,13 @@ The rest of this document assumes **Option A** and **Yes** to automatic canonica
 
 ---
 
+## Decisions (KC, 2026-11-05)
+
+- Option A: the daemon speaks a question's exact text with its own TTS clip.
+- The answer path doesn't change: speech becomes text in the voice model, the orchestrator reads it, and the daemon maps the answer to keys from the options on screen. TTS only speaks; it never interprets an answer or produces a command.
+- Context comes with the clip. The clip's exact text, its question ID and the agent are added to the voice model's and the orchestrator's context as soon as it's scheduled, marked heard or cut from the playback report, so "yes", "why?" and "what does that change?" all work. The transcript and the app show it too.
+- Users are told. docs/privacy.md, docs/voice setup and the setup page say prompts are sent to a TTS provider as well as the live voice model, after redaction. If TTS fails, the question isn't counted as told and the user is asked to answer on the phone.
+
 ## Why v1 is being replaced
 
 Approval rail v1 (`internal/supervisor/displaced.go` on `fix/audit-safety`, evaluated in `docs/dev/eval/approval-rail-2026-11-04.md`) tried to stop a bare `"yes"` from approving a newly arrived prompt B when the user was answering an earlier prompt A. Review turned up four structural flaws:
