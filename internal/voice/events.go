@@ -102,6 +102,9 @@ type EventToolResult struct {
 type EventPush struct {
 	Text    string
 	Urgency Urgency
+	// PendingID is the question the push states (its TagPendingID tag),
+	// "" for any other push.
+	PendingID string
 }
 
 // EventTurnComplete is emitted when the model considers its turn finished

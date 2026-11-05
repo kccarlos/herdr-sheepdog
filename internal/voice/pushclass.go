@@ -104,6 +104,18 @@ func PushID(tags map[string]any) string {
 	return id
 }
 
+// TagPendingID is the push tag naming the question (answer_prompt) a push
+// states: its announcement, a reminder, a re-ask. It travels onto
+// EventPush.PendingID, so the supervisor knows which question was told
+// when the push goes out.
+const TagPendingID = "pending_id"
+
+// PushPendingID is a push's pending_id tag ("" when none).
+func PushPendingID(tags map[string]any) string {
+	id, _ := tags[TagPendingID].(string)
+	return id
+}
+
 func nonEmpty(v any) bool {
 	switch x := v.(type) {
 	case nil:

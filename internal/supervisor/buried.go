@@ -61,21 +61,23 @@ type promptHearing struct {
 }
 
 // tagPendingID marks a push that announces an answer_prompt: its id.
-const tagPendingID = "pending_id"
+const tagPendingID = voice.TagPendingID
 
 // notePromptLine records text as a spoken line about the open prompt
-// when tags name it (tagPendingID).
+// when tags name it (tagPendingID). The displacement rail notes it for
+// whichever open question it names, the voice's or not (displaced.go).
 func (s *Supervisor) notePromptLine(text string, tags map[string]any) {
 	id, _ := tags[tagPendingID].(string)
 	if id == "" || text == "" {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptLineLocked(text, id) // displaced.go
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.ID != id {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	h := &s.promptHeard
 	if h.pendingID != p.ID {
 		*h = promptHearing{pendingID: p.ID, lines: map[string]bool{}, quietSince: h.quietSince}
@@ -161,6 +163,8 @@ func (s *Supervisor) ceoSpokeSinceLocked(t time.Time) bool {
 func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, reason string, ok bool) {
 	h := s.promptHeard
 	p, has := s.store.Pending()
+	// A prompt not announced yet is no business of this file: the
+	// displacement rail (displaced.go) keeps a yes off it in code.
 	if !has || p.Kind != state.PendingAnswerPrompt || p.ID != h.pendingID || h.sentAt.IsZero() || h.sentAt.After(at) {
 		return state.PendingAction{}, "", false
 	}
@@ -221,6 +225,9 @@ func (s *Supervisor) remindBuriedPrompt() {
 	if !ok {
 		s.mu.Unlock()
 		return
+	}
+	if h.lines == nil {
+		h.lines = map[string]bool{}
 	}
 	h.reminded = true
 	text := reminderLine(p.SpokenSummary, s.ceoChineseLocked())
