@@ -201,6 +201,8 @@ public struct PushPayload: Equatable, Sendable {
 /// Which agent card a notification tap asks the app to reveal: the pane id,
 /// plus the computer id when the payload named one (`sheepdog.computer`).
 public struct AgentFocus: Equatable, Sendable {
+    public static let unpairedComputerMessage = "That computer is no longer paired."
+
     public var computerID: String?
     public var paneID: String
 
@@ -208,6 +210,14 @@ public struct AgentFocus: Equatable, Sendable {
         let trimmedComputer = computerID?.trimmed
         self.computerID = (trimmedComputer?.isEmpty == false) ? trimmedComputer : nil
         self.paneID = paneID.trimmed
+    }
+
+    /// Validates an explicit target computer against `store`, regardless of how
+    /// many computers remain paired. A focus without an explicit `computerID`
+    /// (legacy single-daemon payload or bare route) is allowed.
+    public func isTargetComputerPaired(in store: ComputerStore) -> Bool {
+        guard let computerID else { return true }
+        return store.computer(computerID) != nil
     }
 
     /// True when this focus targets a secondary computer rather than `currentComputerID`.
@@ -233,8 +243,8 @@ public struct AgentFocus: Equatable, Sendable {
         currentAgents: [Agent],
         otherComputerAgents: (String) -> [Agent]?
     ) -> Bool {
-        if sectioned, isOtherComputer(currentComputerID: currentComputerID), let cid = computerID {
-            guard let remote = otherComputerAgents(cid) else { return false }
+        if isOtherComputer(currentComputerID: currentComputerID), let cid = computerID {
+            guard sectioned, let remote = otherComputerAgents(cid) else { return false }
             return Flock(remote).running.contains { $0.paneID == paneID }
         }
         return currentAgents.contains { $0.paneID == paneID }

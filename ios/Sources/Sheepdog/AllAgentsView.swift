@@ -35,6 +35,10 @@ struct AllAgentsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if model.notices.banner != nil {
+                SessionBanners()
+                    .padding(.top, 8)
+            }
             if paneState != .content, model.otherSnapshots.isEmpty {
                 FlockUnavailableView(state: paneState)
             } else if shown.isEmpty, model.otherSnapshots.isEmpty {
@@ -54,6 +58,7 @@ struct AllAgentsView: View {
                 grid
             }
         }
+        .animation(Theme.ease, value: model.notices.banner)
         .animation(Theme.ease(reduceMotion: reduceMotion), value: filter)
         .onChange(of: model.navigation.focusedAgent, initial: true) { _, _ in
             ensureFocusedAgentVisible()
@@ -261,9 +266,10 @@ struct AllAgentsView: View {
 
     private func ensureFocusedAgentVisible() {
         guard let target = model.navigation.focusedAgent, filter != .all else { return }
-        let isOther = model.showsComputerLabels && target.isOtherComputer(currentComputerID: model.currentComputerID)
+        let isOther = target.isOtherComputer(currentComputerID: model.currentComputerID)
         let matchingAgent: Agent?
         if isOther, let cid = target.computerID {
+            guard model.showsComputerLabels else { return }
             let agents = model.sectionSnapshots.first(where: { $0.id == cid })?.agents ?? []
             matchingAgent = Flock(agents).running.first(where: { $0.paneID == target.paneID })
         } else {
@@ -286,8 +292,9 @@ struct AllAgentsView: View {
     private func scrollToFocus(_ proxy: ScrollViewProxy) {
         guard let target = model.navigation.focusedAgent else { return }
         ensureFocusedAgentVisible()
-        let isOther = model.showsComputerLabels && target.isOtherComputer(currentComputerID: model.currentComputerID)
+        let isOther = target.isOtherComputer(currentComputerID: model.currentComputerID)
         if isOther, let cid = target.computerID {
+            guard model.showsComputerLabels else { return }
             model.agentsModel.expandComputer(cid)
         } else {
             model.agentsModel.expandComputer(model.currentComputerID)

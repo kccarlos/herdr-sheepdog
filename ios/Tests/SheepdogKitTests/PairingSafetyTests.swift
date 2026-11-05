@@ -118,6 +118,188 @@ final class PairingSafetyTests: XCTestCase {
         XCTAssertNil(DeviceKey.load(daemonID: daemonID), "failed first-time pairing should not leave an un-enrolled key behind")
     }
 
+    func testOverlappingStalledTimeoutAndFreshPairSerializesAndPreservesEnrolledKey() async throws {
+        let daemonID = "test-overlap-timeout-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: daemonID)
+        defer { DeviceKey.delete(daemonID: daemonID) }
+
+        let model = makeModel()
+        defer { model.fleet.set([]) }
+        PairStubProtocol.enrolledDaemonID = daemonID
+
+        let firstReachedEnroll = expectation(description: "first attempt reached /api/devices/enroll")
+        PairStubProtocol.setBehavior(
+            forCode: "stalled-code",
+            .init(
+                delay: 0.15,
+                result: .failure(URLError(.timedOut)),
+                onStart: { firstReachedEnroll.fulfill() }
+            )
+        )
+        PairStubProtocol.setBehavior(
+            forCode: "fresh-code",
+            .init(delay: 0, result: .status(200, nil))
+        )
+
+        let stalledCode = try makeCode(daemonID: daemonID, code: "stalled-code")
+        let freshCode = try makeCode(daemonID: daemonID, code: "fresh-code")
+
+        let attempt1 = Task { await model.pair(stalledCode, protocolClasses: [PairStubProtocol.self]) }
+        await fulfillment(of: [firstReachedEnroll], timeout: 2.0)
+
+        let attempt2 = Task { await model.pair(freshCode, protocolClasses: [PairStubProtocol.self]) }
+        let outcome2 = await attempt2.value
+        _ = await attempt1.value
+
+        guard case let .paired(computer) = outcome2 else {
+            return XCTFail("expected second pairing attempt to succeed, got \(outcome2)")
+        }
+        XCTAssertEqual(computer.daemonID, daemonID)
+        XCTAssertEqual(PairStubProtocol.maxConcurrentEnrolls, 1, "enrollments for the same daemon must be serialised")
+
+        let survivingKey = try XCTUnwrap(
+            DeviceKey.load(daemonID: daemonID),
+            "timed-out first attempt must not delete the key adopted by the successful attempt"
+        )
+        let enrolledPub = try XCTUnwrap(PairStubProtocol.enrolledPublicKey(forCode: "fresh-code"))
+        XCTAssertEqual(DeviceKey.publicKey(survivingKey), enrolledPub)
+    }
+
+    func testOverlappingDefiniteFailureAndFreshPairNeverLeavesPairedComputerKeyless() async throws {
+        let daemonID = "test-overlap-410-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: daemonID)
+        defer { DeviceKey.delete(daemonID: daemonID) }
+
+        let model = makeModel()
+        defer { model.fleet.set([]) }
+        PairStubProtocol.enrolledDaemonID = daemonID
+
+        let firstReachedEnroll = expectation(description: "first attempt reached /api/devices/enroll")
+        PairStubProtocol.setBehavior(
+            forCode: "stalled-expired",
+            .init(
+                delay: 0.15,
+                result: .status(410, nil),
+                onStart: { firstReachedEnroll.fulfill() }
+            )
+        )
+        PairStubProtocol.setBehavior(
+            forCode: "fresh-valid",
+            .init(delay: 0, result: .status(200, nil))
+        )
+
+        let stalledCode = try makeCode(daemonID: daemonID, code: "stalled-expired")
+        let freshCode = try makeCode(daemonID: daemonID, code: "fresh-valid")
+
+        let attempt1 = Task { await model.pair(stalledCode, protocolClasses: [PairStubProtocol.self]) }
+        await fulfillment(of: [firstReachedEnroll], timeout: 2.0)
+
+        let attempt2 = Task { await model.pair(freshCode, protocolClasses: [PairStubProtocol.self]) }
+        let outcome2 = await attempt2.value
+        _ = await attempt1.value
+
+        guard case .paired = outcome2 else {
+            return XCTFail("expected fresh code to pair, got \(outcome2)")
+        }
+        XCTAssertEqual(PairStubProtocol.maxConcurrentEnrolls, 1, "enrollments for the same daemon must be serialised")
+
+        let survivingKey = try XCTUnwrap(
+            DeviceKey.load(daemonID: daemonID),
+            "earlier failed attempt must never delete the key used by the paired computer"
+        )
+        let enrolledPub = try XCTUnwrap(PairStubProtocol.enrolledPublicKey(forCode: "fresh-valid"))
+        XCTAssertEqual(DeviceKey.publicKey(survivingKey), enrolledPub)
+    }
+
+    func testAmbiguousEnrollmentFailuresPreserveNewDeviceKey() async throws {
+        // 1. Network timeout after sending POST /api/devices/enroll is ambiguous: keep the key.
+        let timeoutDaemon = "test-ambig-timeout-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: timeoutDaemon)
+        defer { DeviceKey.delete(daemonID: timeoutDaemon) }
+
+        let model = makeModel()
+        defer { model.fleet.set([]) }
+        PairStubProtocol.enrolledDaemonID = timeoutDaemon
+        PairStubProtocol.setBehavior(
+            forCode: "timeout-once",
+            .init(delay: 0, result: .failure(URLError(.timedOut)))
+        )
+
+        let timeoutCode = try makeCode(daemonID: timeoutDaemon, code: "timeout-once")
+        let timeoutOutcome = await model.pair(timeoutCode, protocolClasses: [PairStubProtocol.self])
+        if case .paired = timeoutOutcome {
+            XCTFail("expected timeout to fail pairing, got \(timeoutOutcome)")
+        }
+        let preservedTimeoutKey = try XCTUnwrap(
+            DeviceKey.load(daemonID: timeoutDaemon),
+            "ambiguous transport failure during enroll must preserve the key"
+        )
+        let timeoutSentPub = try XCTUnwrap(PairStubProtocol.enrolledPublicKey(forCode: "timeout-once"))
+        XCTAssertEqual(DeviceKey.publicKey(preservedTimeoutKey), timeoutSentPub)
+
+        // 2. HTTP 502 from a reverse proxy or daemon crash is ambiguous: keep the key.
+        let serverErrDaemon = "test-ambig-502-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: serverErrDaemon)
+        defer { DeviceKey.delete(daemonID: serverErrDaemon) }
+
+        PairStubProtocol.setBehavior(
+            forCode: "proxy-502",
+            .init(delay: 0, result: .status(502, nil))
+        )
+        let serverErrCode = try makeCode(daemonID: serverErrDaemon, code: "proxy-502")
+        _ = await model.pair(serverErrCode, protocolClasses: [PairStubProtocol.self])
+        XCTAssertNotNil(
+            DeviceKey.load(daemonID: serverErrDaemon),
+            "HTTP 5xx during enroll is ambiguous and must preserve the key"
+        )
+
+        // 3. Truncated HTTP 200 body (JSON decode failure) is ambiguous: keep the key.
+        let truncatedDaemon = "test-ambig-200-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: truncatedDaemon)
+        defer { DeviceKey.delete(daemonID: truncatedDaemon) }
+
+        PairStubProtocol.setBehavior(
+            forCode: "truncated-200",
+            .init(delay: 0, result: .status(200, Data(#"{"device_id":"#.utf8)))
+        )
+        let truncatedCode = try makeCode(daemonID: truncatedDaemon, code: "truncated-200")
+        _ = await model.pair(truncatedCode, protocolClasses: [PairStubProtocol.self])
+        XCTAssertNotNil(
+            DeviceKey.load(daemonID: truncatedDaemon),
+            "truncated 200 enroll reply is ambiguous and must preserve the key"
+        )
+    }
+
+    func testKeyLeaseNeverDeletesKeyAdoptedByAnotherAttemptAndDifferentDaemonsRunConcurrently() async throws {
+        // 1. Direct KeyLease adoption invariant: if attempt 1 creates a key and
+        //    attempt 2 adopts it, attempt 1 failing definitely must never delete it.
+        let daemonID = "test-lease-adopt-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: daemonID)
+        defer { DeviceKey.delete(daemonID: daemonID) }
+
+        let lease1 = try PairingEnrollment.KeyLease.acquire(daemonID: daemonID)
+        XCTAssertTrue(lease1.createdNew)
+        let createdPub = try XCTUnwrap(lease1.publicKey)
+
+        let lease2 = try PairingEnrollment.KeyLease.acquire(daemonID: daemonID)
+        XCTAssertFalse(lease2.createdNew)
+        XCTAssertEqual(lease2.publicKey, createdPub)
+        lease2.markCommitted()
+        lease2.release(definiteNonEnrollment: false, isComputerPaired: true)
+
+        // Even if lease1 unwinds with definiteNonEnrollment == true and isComputerPaired == false,
+        // the registry knows another attempt adopted and committed this key.
+        lease1.release(definiteNonEnrollment: true, isComputerPaired: false)
+        let surviving = try XCTUnwrap(DeviceKey.load(daemonID: daemonID), "adopted key must never be deleted by an earlier failed lease")
+        XCTAssertEqual(DeviceKey.publicKey(surviving), createdPub)
+
+        // 2. Per-daemon turns do not block distinct daemons.
+        let turnA = await PairingEnrollment.beginTurn(daemonID: "daemon-a-\(UUID().uuidString)")
+        let turnB = await PairingEnrollment.beginTurn(daemonID: "daemon-b-\(UUID().uuidString)")
+        turnB.end()
+        turnA.end()
+    }
+
     // MARK: - Finding 11: Post-enroll ticket warm-up failure does not fail pairing
 
     func testPairingSucceedsAndUpdatesFleetWhenInitialTicketWarmupFails() async throws {
@@ -219,12 +401,26 @@ final class PairingSafetyTests: XCTestCase {
     }
 }
 
-private final class PairStubProtocol: URLProtocol {
+private final class PairStubProtocol: URLProtocol, @unchecked Sendable {
+    struct CodeBehavior {
+        enum Outcome {
+            case status(Int, Data?)
+            case failure(Error)
+        }
+        var delay: TimeInterval = 0
+        var result: Outcome
+        var onStart: (() -> Void)?
+    }
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var state = (
         enrollStatus: 200,
         enrolledDaemonID: "daemon-1",
-        lastEnrolledPublicKey: String?.none
+        lastEnrolledPublicKey: String?.none,
+        enrolledByCode: [String: String](),
+        behaviors: [String: CodeBehavior](),
+        activeEnrolls: 0,
+        maxConcurrentEnrolls: 0
     )
 
     static var enrollStatus: Int {
@@ -241,15 +437,47 @@ private final class PairStubProtocol: URLProtocol {
         lock.withLock { state.lastEnrolledPublicKey }
     }
 
+    static var maxConcurrentEnrolls: Int {
+        lock.withLock { state.maxConcurrentEnrolls }
+    }
+
+    static func enrolledPublicKey(forCode code: String) -> String? {
+        lock.withLock { state.enrolledByCode[code] }
+    }
+
+    static func setBehavior(forCode code: String, _ behavior: CodeBehavior) {
+        lock.withLock { state.behaviors[code] = behavior }
+    }
+
     static func reset() {
         lock.withLock {
-            state = (enrollStatus: 200, enrolledDaemonID: "daemon-1", lastEnrolledPublicKey: nil)
+            state = (
+                enrollStatus: 200,
+                enrolledDaemonID: "daemon-1",
+                lastEnrolledPublicKey: nil,
+                enrolledByCode: [:],
+                behaviors: [:],
+                activeEnrolls: 0,
+                maxConcurrentEnrolls: 0
+            )
         }
     }
 
+    private var finished = false
+    private var countedEnroll = false
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
+
+    override func stopLoading() {
+        Self.lock.withLock {
+            finished = true
+            if countedEnroll {
+                countedEnroll = false
+                Self.state.activeEnrolls -= 1
+            }
+        }
+    }
 
     override func startLoading() {
         let path = request.url?.path ?? ""
@@ -257,39 +485,101 @@ private final class PairStubProtocol: URLProtocol {
         case "/api/hello":
             respond(200, ["version": "test"])
         case "/api/devices/enroll":
+            var codeText = ""
             if let body = Self.body(request),
-               let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-               let pub = obj["public_key"] as? String {
-                Self.lock.withLock { Self.state.lastEnrolledPublicKey = pub }
+               let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                codeText = obj["code"] as? String ?? ""
+                if let pub = obj["public_key"] as? String {
+                    Self.lock.withLock {
+                        Self.state.lastEnrolledPublicKey = pub
+                        if !codeText.isEmpty { Self.state.enrolledByCode[codeText] = pub }
+                    }
+                }
             }
-            let status = Self.enrollStatus
-            if status == 200 {
-                respond(200, [
-                    "device_id": "dev-enrolled",
-                    "daemon_id": Self.enrolledDaemonID,
-                    "name": "Studio Mac",
-                ])
-            } else if status == 410 {
-                respond(410, ["error": "gone", "reason": "code_used"])
+            let behavior = Self.lock.withLock { () -> CodeBehavior? in
+                countedEnroll = true
+                Self.state.activeEnrolls += 1
+                Self.state.maxConcurrentEnrolls = max(Self.state.maxConcurrentEnrolls, Self.state.activeEnrolls)
+                return Self.state.behaviors[codeText]
+            }
+            behavior?.onStart?()
+
+            let complete = { [weak self] in
+                guard let self else { return }
+                let shouldDeliver = Self.lock.withLock { () -> Bool in
+                    if self.countedEnroll {
+                        self.countedEnroll = false
+                        Self.state.activeEnrolls -= 1
+                    }
+                    guard !self.finished else { return false }
+                    self.finished = true
+                    return true
+                }
+                guard shouldDeliver else { return }
+                if let behavior {
+                    switch behavior.result {
+                    case let .failure(error):
+                        self.client?.urlProtocol(self, didFailWithError: error)
+                    case let .status(status, rawData):
+                        if let rawData {
+                            self.respondRaw(status, rawData)
+                        } else {
+                            self.deliverEnrollStatus(status)
+                        }
+                    }
+                } else {
+                    self.deliverEnrollStatus(Self.enrollStatus)
+                }
+            }
+
+            if let delay = behavior?.delay, delay > 0 {
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: complete)
             } else {
-                respond(status, ["error": "enroll failed"])
+                complete()
             }
         default:
             respond(404, ["error": "not found"])
         }
     }
 
+    private func deliverEnrollStatus(_ status: Int) {
+        if status == 200 {
+            respondRaw(200, Self.jsonData([
+                "device_id": "dev-enrolled",
+                "daemon_id": Self.enrolledDaemonID,
+                "name": "Studio Mac",
+            ]))
+        } else if status == 410 {
+            respondRaw(410, Self.jsonData(["error": "gone", "reason": "code_used"]))
+        } else {
+            respondRaw(status, Self.jsonData(["error": "enroll failed"]))
+        }
+    }
+
     private func respond(_ status: Int, _ object: [String: Any]) {
+        let shouldDeliver = Self.lock.withLock { () -> Bool in
+            guard !finished else { return false }
+            finished = true
+            return true
+        }
+        guard shouldDeliver else { return }
+        respondRaw(status, Self.jsonData(object))
+    }
+
+    private func respondRaw(_ status: Int, _ data: Data) {
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: status,
             httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json"]
         )!
-        let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func jsonData(_ object: [String: Any]) -> Data {
+        (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
     }
 
     private static func body(_ request: URLRequest) -> Data? {

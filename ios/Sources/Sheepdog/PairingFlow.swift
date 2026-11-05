@@ -84,6 +84,7 @@ struct PairingFlowView: View {
     /// Runs after "Done" or swipe-dismissal on the paired screen.
     var onPaired: () -> Void = {}
     @State private var completion: PairingCompletion
+    @State private var pairingTask: Task<Void, Never>?
 
     init(stage: PairingStage, onPaired: @escaping () -> Void = {}, pairedID: String? = nil, typedName: String? = nil) {
         _stage = State(initialValue: stage)
@@ -114,7 +115,13 @@ struct PairingFlowView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .interactiveDismissDisabled(isWorking)
-        .onDisappear { finishPaired() }
+        .onDisappear {
+            if isWorking {
+                pairingTask?.cancel()
+                pairingTask = nil
+            }
+            finishPaired()
+        }
         .accessibilityIdentifier("pairing.\(stage.id)")
     }
 
@@ -383,9 +390,12 @@ struct PairingFlowView: View {
     }
 
     private func run(_ code: PairingCode) {
+        pairingTask?.cancel()
         stage = .working(code.name)
-        Task {
-            switch await model.pair(code) {
+        pairingTask = Task {
+            let outcome = await model.pair(code)
+            guard !Task.isCancelled else { return }
+            switch outcome {
             case let .paired(computer):
                 Haptics.connected()
                 completion.begin(daemonID: computer.daemonID)

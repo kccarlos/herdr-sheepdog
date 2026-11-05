@@ -111,6 +111,12 @@ final class AgentsModel {
         collapsedComputers.remove(id)
     }
 
+    func forgetComputer(_ id: String) {
+        collapsedComputers.remove(id)
+        let prefix = "\(id)|"
+        expandedAgents = expandedAgents.filter { !$0.hasPrefix(prefix) }
+    }
+
     func toggleComputer(_ id: String) {
         if collapsedComputers.contains(id) {
             collapsedComputers.remove(id)

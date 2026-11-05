@@ -166,6 +166,137 @@ final class NotificationRoutingTests: XCTestCase {
         XCTAssertTrue(model.viewingAgentsScreen, "focusing an agent on regular-width iPad should switch detail to All agents")
     }
 
+    func testTappingRemovedComputerNotificationRefusesAndDoesNotRevealRemainingComputerAgent() async throws {
+        let model = makeModel()
+        defer { model.fleet.set([]) }
+
+        // Pair A and B, then remove A so only B remains paired with its own %1.
+        let compA = PairedComputer(daemonID: "computer-a", name: "Studio Mac", addresses: ["192.0.2.10:7777"], pin: "pin_a", deviceID: "da", pairedAt: Date())
+        let compB = PairedComputer(daemonID: "computer-b", name: "Work Mac", addresses: ["198.51.100.20:7777"], pin: "pin_b", deviceID: "db", pairedAt: Date())
+        model.settings.computers.save(compA, address: "192.0.2.10:7777")
+        model.settings.computers.save(compB, address: "198.51.100.20:7777")
+        model.settings.computers.remove("computer-a")
+        model.settings.computers.currentID = "computer-b"
+        model.settings.hasBeenConfigured = true
+        model.computersChanged()
+
+        let endB = try XCTUnwrap(model.settings.computers.endpoint(for: "computer-b"))
+        let runtimeB = ComputerModel(
+            id: "computer-b",
+            name: "Work Mac",
+            addresses: [endB.display],
+            certExpires: nil,
+            connection: ComputerConnection(computerID: "computer-b", address: endB.display) { _ in
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ActionRaceStub.self]
+                return DaemonClient(endpoint: endB, session: URLSession(configuration: config))
+            },
+            scheduler: ManualLinkClock(),
+            demand: LinkDemand(isCurrent: true)
+        )
+        let agentB = try DaemonClient.decoder.decode(
+            Agent.self,
+            from: Data(#"{"pane_id":"%1","alias":"billing","state":"working"}"#.utf8)
+        )
+        runtimeB.accept(DaemonState(agents: [agentB], pendingAction: nil, questions: [], voice: .init(mode: "gemini", status: "ready")))
+        model.fleet.set([runtimeB])
+        model.fleet.makeCurrent("computer-b")
+        model.attachCurrent()
+
+        XCTAssertEqual(model.computerCount, 1)
+        XCTAssertFalse(model.showsComputerLabels, "single remaining computer does not show computer sections")
+        XCTAssertEqual(model.navigation.pane, .conversation)
+
+        let push = PushCoordinator(
+            defaults: defaults,
+            store: model.settings.computers,
+            makeSettings: { model.settings },
+            makeKeyStore: { _ in PushContentKeyStore(service: "sheepdog.tests.notif.\(UUID().uuidString)", account: "key", accessGroup: nil) },
+            namesSuite: "\(suite).names.\(UUID().uuidString)",
+            makeClient: { endpoint in
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ActionRaceStub.self]
+                return DaemonClient(endpoint: endpoint, session: URLSession(configuration: config))
+            },
+            notifyOpenHandler: { _, _ in },
+            removeDeliveredHandler: { _ in }
+        )
+        push.model = model
+
+        let root = MainView()
+            .environmentObject(model)
+            .environment(\.horizontalSizeClass, .compact)
+            .environment(\.appPhase, .active)
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // Tap A's notification for %1 after A was removed.
+        let payloadFromRemovedA = PushPayload(kind: "done", paneID: "%1", agent: "deploy", computer: "computer-a")
+        await push.handle(
+            action: "com.apple.UNNotificationDefaultActionIdentifier",
+            payload: payloadFromRemovedA,
+            notificationID: "notif-removed-a"
+        )
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertEqual(model.notices.banner?.tone, .warning)
+        XCTAssertEqual(model.notices.banner?.message, "That computer is no longer paired.")
+        XCTAssertEqual(model.navigation.pane, .conversation, "tapping a removed computer's notification must not switch to Agents")
+        XCTAssertNil(model.navigation.focusedAgent, "removed computer's focus must not be queued or consumed")
+        XCTAssertFalse(model.agentsModel.expandedAgents.contains("%1"), "remaining computer B's colliding %1 card must not expand")
+        XCTAssertFalse(model.agentsModel.expandedAgents.contains("computer-a|%1"))
+    }
+
+    func testRemovedComputerNotificationRefusedAcrossZeroAndMultiplePairedComputers() {
+        // 1. Multiple computers paired (B and C), notification names removed A.
+        let multi = makeModel()
+        defer { multi.fleet.set([]) }
+        let compB = PairedComputer(daemonID: "computer-b", name: "Work Mac", addresses: ["198.51.100.20:7777"], pin: "pin_b", deviceID: "db", pairedAt: Date())
+        let compC = PairedComputer(daemonID: "computer-c", name: "Home Mac", addresses: ["203.0.113.30:7777"], pin: "pin_c", deviceID: "dc", pairedAt: Date())
+        multi.settings.computers.save(compB, address: "198.51.100.20:7777")
+        multi.settings.computers.save(compC, address: "203.0.113.30:7777")
+        multi.settings.computers.currentID = "computer-b"
+        multi.settings.hasBeenConfigured = true
+        multi.computersChanged()
+        multi.endpointChanged()
+        multi.navigation.path.append(AgentWindowRoute(paneID: "%2"))
+
+        multi.focusAgent(AgentFocus(computerID: "computer-a", paneID: "%1"))
+
+        XCTAssertEqual(multi.notices.banner?.tone, .warning)
+        XCTAssertEqual(multi.notices.banner?.message, "That computer is no longer paired.")
+        XCTAssertEqual(multi.navigation.pane, .conversation)
+        XCTAssertEqual(multi.navigation.path.count, 1, "refused notification must not pop open navigation routes")
+        XCTAssertNil(multi.navigation.focusedAgent)
+        XCTAssertTrue(multi.agentsModel.expandedAgents.isEmpty)
+
+        // 2. Zero paired computers, notification names removed A.
+        let empty = makeModel()
+        empty.focusAgent(AgentFocus(computerID: "computer-a", paneID: "%1"))
+
+        XCTAssertEqual(empty.notices.banner?.tone, .warning)
+        XCTAssertEqual(empty.notices.banner?.message, "That computer is no longer paired.")
+        XCTAssertNil(empty.navigation.focusedAgent)
+        XCTAssertTrue(empty.agentsModel.expandedAgents.isEmpty)
+
+        // 3. Explicit computer on sheepdog://window route also refuses a removed computer.
+        multi.notices.banner = nil
+        multi.navigation.path = NavigationPath()
+        multi.handle(route: .window("%1", computer: "computer-a"))
+        XCTAssertEqual(multi.notices.banner?.message, "That computer is no longer paired.")
+        XCTAssertTrue(multi.navigation.path.isEmpty, "removed computer window route must not open current computer's %1")
+    }
+
     // MARK: - Finding 8: Foreground banner suppression, multi-computer registration & retry on .online
 
     func testForegroundPresentationPolicyPerComputerAndScreen() {

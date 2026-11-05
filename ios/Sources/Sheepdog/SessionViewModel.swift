@@ -262,7 +262,11 @@ final class SessionViewModel: ObservableObject {
 
     func focusAgent(_ target: AgentFocus) {
         guard !target.paneID.isEmpty else { return }
-        let isOther = showsComputerLabels && target.isOtherComputer(currentComputerID: currentComputerID)
+        guard target.isTargetComputerPaired(in: settings.computers) else {
+            show(Banner(tone: .warning, message: AgentFocus.unpairedComputerMessage, hint: nil, retryTitle: nil))
+            return
+        }
+        let isOther = target.isOtherComputer(currentComputerID: currentComputerID)
         if isOther, let cid = target.computerID {
             agentsModel.expandComputer(cid)
             if remoteCard(computer: cid, paneID: target.paneID) == nil {
@@ -831,11 +835,17 @@ final class SessionViewModel: ObservableObject {
                 // A Live Activity row. Another computer's agent shows on
                 // the Agents page, with Talk to; the app never switches on
                 // its own.
-                if let computer, computer != currentComputerID, session(computer) != nil {
-                    navigation.pane = .flock
-                } else {
-                    openAgentWindow(paneID: id)
+                if let computer = computer?.trimmingCharacters(in: .whitespacesAndNewlines), !computer.isEmpty {
+                    guard settings.computers.computer(computer) != nil else {
+                        show(Banner(tone: .warning, message: AgentFocus.unpairedComputerMessage, hint: nil, retryTitle: nil))
+                        break
+                    }
+                    if computer != currentComputerID {
+                        navigation.pane = .flock
+                        break
+                    }
                 }
+                openAgentWindow(paneID: id)
             }
         }
     }
@@ -2047,22 +2057,47 @@ final class SessionViewModel: ObservableObject {
             if mismatches.count > 0 { return .problem(.pinMismatch) }
             return .failed(title: "None of the code's addresses answered", detail: "Tried \(code.addresses.joined(separator: ", ")). \(SetupHelp.unreachableFix)")
         }
+        let daemonID = code.daemonID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !daemonID.isEmpty else {
+            let malformed = DaemonError.malformed("pairing code missing daemon id")
+            return .failed(title: malformed.message, detail: malformed.hint ?? "")
+        }
+        let turn = await PairingEnrollment.beginTurn(daemonID: daemonID)
+        defer { turn.end() }
+        if Task.isCancelled {
+            return .failed(title: "Pairing did not finish", detail: CancellationError().localizedDescription)
+        }
         do {
-            let hadKey = DeviceKey.load(daemonID: code.daemonID) != nil
-            let key = try DeviceKey.loadOrCreate(daemonID: code.daemonID)
-            var enrolledOK = false
+            let store = settings.computers
+            let lease = try PairingEnrollment.KeyLease.acquire(daemonID: daemonID)
+            var definiteNonEnrollment = false
             defer {
-                if !enrolledOK, !hadKey { DeviceKey.delete(daemonID: code.daemonID) }
+                lease.release(
+                    definiteNonEnrollment: definiteNonEnrollment,
+                    isComputerPaired: store.computer(daemonID) != nil
+                )
             }
-            guard let publicKey = DeviceKey.publicKey(key) else {
+            guard let publicKey = lease.publicKey else {
+                definiteNonEnrollment = true
                 return .failed(title: "This phone could not make its key", detail: "Try again; restart the phone if it keeps failing.")
             }
             let auth = DeviceAuth(base: base, session: session, trust: trust)
             let kind = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
-            let enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
-            let computer = try PairingEnrollment.pairedComputer(code: code, reachableAddress: address, enrolled: enrolled)
-            enrolledOK = true
-            let store = settings.computers
+            let enrolled: DeviceAuth.Enrolled
+            do {
+                enrolled = try await auth.enroll(code: code.code, publicKey: publicKey, name: UIDevice.current.name, kind: kind, hardware: DeviceKey.isHardware)
+            } catch {
+                definiteNonEnrollment = PairingEnrollment.isDefiniteNonEnrollment(error)
+                throw error
+            }
+            let computer: PairedComputer
+            do {
+                computer = try PairingEnrollment.pairedComputer(code: code, reachableAddress: address, enrolled: enrolled)
+            } catch {
+                definiteNonEnrollment = true
+                throw error
+            }
+            lease.markCommitted()
             // The app never switches on its own: another computer is added
             // beside the current one. The first one, or a re-pair of the
             // current one, repoints the session.
@@ -2142,6 +2177,10 @@ final class SessionViewModel: ObservableObject {
         }
         if let endpoint = store.endpoint(for: id) { cache.clear(for: endpoint) }
         store.remove(id)
+        if navigation.focusedAgent?.computerID == id {
+            navigation.focusedAgent = nil
+        }
+        agentsModel.forgetComputer(id)
         if store.count == 0 { settings.hasBeenConfigured = false }
         computersChanged()
         if wasCurrent {

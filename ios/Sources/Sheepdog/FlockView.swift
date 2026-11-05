@@ -324,8 +324,9 @@ private struct FlockScrollContent: View {
     private func scrollToFocus(_ proxy: ScrollViewProxy) {
         guard let target = focusedAgent else { return }
         let currentID = computers.first(where: \.isCurrent)?.id
-        let isOther = sectioned && target.isOtherComputer(currentComputerID: currentID)
+        let isOther = target.isOtherComputer(currentComputerID: currentID)
         if isOther, let cid = target.computerID {
+            guard sectioned else { return }
             expandComputer(cid)
         } else if let currentID {
             expandComputer(currentID)
