@@ -86,6 +86,9 @@ func taskFacts(a state.Agent, now time.Time) string {
 	}
 	if n := len(a.Journal); n > 0 && !a.Journal[n-1].At.IsZero() && now.After(a.Journal[n-1].At) {
 		e := a.Journal[n-1]
+		if e.Error != "" && a.LastResult != nil && !a.LastResult.At.IsZero() && e.Error == a.LastResult.StopReason {
+			return b.String()
+		}
 		act := e.Event
 		if e.Error != "" {
 			act = e.Error

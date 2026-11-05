@@ -274,9 +274,6 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 		stopReason = stopErr.Summary()
 		stopDetail = stopErr.Message
 		sentence = stopErr.Sentence(alias)
-		if stopErr.Kind != workerlog.StopAborted {
-			kind = pushBlockedInfo
-		}
 	}
 	// herdr reports the finish as idle rather than done when the user
 	// had the pane focused (herdr/src/pane/state.rs's "seen" bit): an

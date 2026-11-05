@@ -271,15 +271,14 @@ func setSessionLines(t *testing.T, h *harness, pane, kind string, lines ...strin
 }
 
 func TestStopErrorsNeverSayFinishedWithoutBrain(t *testing.T) {
-	t.Run("uninvolved claude 529 overloaded speaks at normal and never says finished", func(t *testing.T) {
-		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Normal) })
+	t.Run("claude 529 overloaded speaks at chatty and never says finished", func(t *testing.T) {
+		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Chatty) })
 		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
 		setSessionLines(t, h, "w5:p1", "claude",
 			`{"type":"user","message":{"role":"user","content":"Audit the auth handler."}}`,
 			`{"type":"assistant","isApiErrorMessage":true,"error":"server_error","apiErrorStatus":529,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"}]}}`,
 		)
-		// Not touched: at Normal chattiness a routine uninvolved finish would
-		// be suppressed, whereas a 529 stop is announced honestly.
+		// Chatty announces an uninvolved stop honestly.
 		doneAuth(h)
 
 		got := h.pusher.last(t).Text
@@ -311,7 +310,7 @@ func TestStopErrorsNeverSayFinishedWithoutBrain(t *testing.T) {
 	})
 
 	t.Run("codex quota wall on working to idle", func(t *testing.T) {
-		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Normal) })
+		h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Chatty) })
 		h.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
 		setSessionLines(t, h, "w6:p1", "codex",
 			`{"type":"event_msg","payload":{"type":"user_message","message":"Write release notes."}}`,
@@ -358,9 +357,9 @@ func TestStopErrorsNeverSayFinishedWithoutBrain(t *testing.T) {
 }
 
 func TestStopErrorsAndNarrationReachBrain(t *testing.T) {
-	t.Run("incorrect orchestrator finish is replaced with stop reason", func(t *testing.T) {
+	t.Run("orchestrator reply is preserved", func(t *testing.T) {
 		m := braintest.NewModel()
-		m.EventDefault = announceReply("Auth finished the migration.", "idle", "", "", false)
+		m.EventDefault = announceReply("Auth stopped after a provider error.", "idle", "", "", false)
 		h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
 		h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
 		h.sup.touch("w5:p1")
@@ -368,7 +367,7 @@ func TestStopErrorsAndNarrationReachBrain(t *testing.T) {
 			`{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`,
 		)
 		doneAuth(h)
-		if got := h.pusher.last(t).Text; got != "auth stopped because the model provider returned 529 overloaded." {
+		if got := h.pusher.last(t).Text; got != "Auth stopped after a provider error." {
 			t.Fatalf("push = %q", got)
 		}
 	})
@@ -449,4 +448,46 @@ func TestStopErrorsAndNarrationReachBrain(t *testing.T) {
 			t.Fatalf("narration missing from announce turn:\n%+v", calls)
 		}
 	})
+}
+
+func TestStopAnnouncementRespectsReply(t *testing.T) {
+	for _, tc := range []struct{ name, spoken, urgency string }{{"honest", "Auth hit its limit.", "idle"}, {"skip", "", "skip"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := braintest.NewModel()
+			m.EventDefault = announceReply(tc.spoken, tc.urgency, "", "", false)
+			h := newBrainHarness(t, m, withWorkerLog(t.TempDir()))
+			h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+			h.sup.touch("w5:p1")
+			setSessionLines(t, h, "w5:p1", "claude", `{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`)
+			doneAuth(h)
+			pushes := h.pusher.all()
+			if tc.spoken == "" {
+				if len(pushes) != 0 {
+					t.Errorf("skip pushed: %+v", pushes)
+				}
+				return
+			}
+			if len(pushes) != 1 || pushes[0].Text != tc.spoken {
+				t.Errorf("pushes = %+v", pushes)
+			}
+		})
+	}
+}
+
+func TestUninvolvedTransientStopQuietAtNormal(t *testing.T) {
+	h := newHarness(t, withWorkerLog(t.TempDir()), func(c *Config) { c.Chattiness = string(Normal) })
+	h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
+	setSessionLines(t, h, "w5:p1", "claude", `{"type":"assistant","isApiErrorMessage":true,"apiErrorStatus":529,"message":{"content":"API Error: 529 Overloaded"}}`)
+	doneAuth(h)
+	if pushes := h.pusher.all(); len(pushes) != 0 {
+		t.Errorf("pushes = %+v", pushes)
+	}
+}
+
+func TestAgentNowDoesNotRepeatStop(t *testing.T) {
+	now := time.Now()
+	a := state.Agent{State: herdr.StateWorking, LastResult: &state.Result{At: now.Add(-time.Minute), StopReason: "stopped because its turn was aborted"}, Journal: []state.JournalEntry{{At: now.Add(-time.Minute), Error: "stopped because its turn was aborted"}}}
+	if got := agentState(a, now); strings.Count(got, "because its turn was aborted") != 1 {
+		t.Errorf("state = %q", got)
+	}
 }

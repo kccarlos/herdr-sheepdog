@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 )
 
 // StopKind classifies why a worker's turn stopped short of a normal finish.
@@ -131,7 +133,7 @@ func ClassifyError(status int, code, rawMsg string, resetAfterSec int) *TurnErro
 			}
 		}
 	}
-	msg = clipRunes(strings.Join(strings.Fields(msg), " "), 300)
+	msg = clipRunes(strings.Join(strings.Fields(new(redact.Redactor).String(msg)), " "), 300)
 
 	resetsAt := extractResetsAt(msg)
 	if resetsAt == "" && resetAfterSec > 0 {
@@ -262,10 +264,7 @@ func classifyStopKind(status int, code, msg string) StopKind {
 		strings.Contains(lm, "insufficient credits") ||
 		strings.Contains(lm, "insufficient quota") ||
 		strings.Contains(lm, "out of credits") ||
-		strings.Contains(lm, "extra usage") ||
-		strings.Contains(lm, "allowance") ||
-		strings.Contains(lm, "upgrade to pro") ||
-		strings.Contains(lm, "billing"):
+		strings.Contains(lm, "upgrade to pro"):
 		return StopQuota
 
 	case status == 429 ||

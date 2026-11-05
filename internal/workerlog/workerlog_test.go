@@ -663,6 +663,9 @@ func TestCodexErrorsAndAborts(t *testing.T) {
 		if d.Error == nil || d.Error.Kind != StopRateLimit {
 			t.Fatalf("Error = %+v, want rate limit", d.Error)
 		}
+		if d.Fresh || d.LastAssistant != "" {
+			t.Errorf("stale completion: %+v", d)
+		}
 	})
 	t.Run("usage limit error is not overwritten by trailing turn_aborted", func(t *testing.T) {
 		_, sess := writeSessionFile(t, "codex",
@@ -761,4 +764,27 @@ func TestCodexErrorsAndAborts(t *testing.T) {
 			t.Fatalf("Error = %+v, want StopConnection", d.Error)
 		}
 	})
+}
+
+func TestStopErrorRedactionAndClassification(t *testing.T) {
+	e := ClassifyError(401, "", "Incorrect API key provided: sk-test-12345678901234567890 Bearer abcdefghijklmnop", 0)
+	if strings.Contains(e.Message, "12345678901234567890") || strings.Contains(e.Message, "abcdefghijklmnop") {
+		t.Error("credential was not redacted")
+	}
+	if got := ClassifyError(429, "rate_limit_error", "rate limit; check billing settings", 0).Kind; got != StopRateLimit {
+		t.Errorf("kind = %s", got)
+	}
+	if got := ClassifyError(0, "http_connection_failed", "connection failed to billing service", 0).Kind; got != StopConnection {
+		t.Errorf("kind = %s", got)
+	}
+}
+
+func TestLongDuplicateInstruction(t *testing.T) {
+	var a accumulator
+	text := strings.Repeat("a", maxText+1)
+	a.instruction(text)
+	a.instruction(text)
+	if len(a.instructions) != 1 {
+		t.Errorf("instructions = %d", len(a.instructions))
+	}
 }

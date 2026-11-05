@@ -65,6 +65,7 @@ func (a *accumulator) instruction(text string) {
 		// <environment_context>), not something a person asked.
 		return
 	}
+	text = clipRunes(text, maxText)
 	if n := len(a.instructions); n > 0 && a.instructions[n-1] == text &&
 		a.stopErr == nil && a.lastAssistant == "" && len(a.tools) == 0 && len(a.files) == 0 {
 		return
@@ -79,7 +80,7 @@ func (a *accumulator) instruction(text string) {
 	a.tools, a.files = nil, nil
 	a.final = false
 	if n := len(a.instructions); n == 0 || a.instructions[n-1] != text {
-		a.instructions = append(a.instructions, clipRunes(text, maxText))
+		a.instructions = append(a.instructions, text)
 		if over := len(a.instructions) - MaxInstructions; over > 0 {
 			a.instructions = a.instructions[over:]
 		}
@@ -386,6 +387,9 @@ func (a *accumulator) codex(b []byte) {
 		if hasJSONValue(p.Error) || hasJSONValue(p.CodexErrorInfo) {
 			a.stopErr = codexTurnError(p.Message, p.Error, p.CodexErrorInfo)
 			a.streamErr = false
+			return
+		}
+		if a.stopErr != nil && !a.streamErr {
 			return
 		}
 		if p.LastAgentMessage != nil && strings.TrimSpace(*p.LastAgentMessage) != "" {

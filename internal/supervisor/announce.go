@@ -220,9 +220,6 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	rep := r.rep
 	spoken, overflow := earLine(rep)
-	if a.stopReason != "" {
-		spoken, overflow = a.sentence, ""
-	}
 	if !s.pendingStillOpen(a) {
 		// The prompt was answered or went away while the orchestrator wrote
 		// about it: whatever it says now is about something gone.
