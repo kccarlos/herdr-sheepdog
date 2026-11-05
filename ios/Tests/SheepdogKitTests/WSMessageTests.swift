@@ -48,6 +48,20 @@ final class WSMessageTests: XCTestCase {
     func testSilenceRoundTrip() throws {
         XCTAssertEqual(try WSMessage.silence(true).encodedString(), #"{"on":true,"type":"silence"}"#)
         XCTAssertEqual(try decode(#"{"type":"silence","on":true}"#).on, true)
+        var stamped = WSMessage.silence(true, speechEndMs: 400)
+        stamped.seq = 12
+        stamped.monoMs = 98_765
+        stamped.rttMs = 24
+        XCTAssertEqual(
+            try stamped.encodedString(),
+            #"{"mono_ms":98765,"on":true,"rtt_ms":24,"seq":12,"speech_end_ms":400,"type":"silence"}"#
+        )
+        XCTAssertEqual(try decode(try stamped.encodedString()), stamped)
+        var bad = WSMessage.silence(true, speechEndMs: -1)
+        XCTAssertThrowsError(try bad.encode())
+        bad = WSMessage.silence(true)
+        bad.seq = -2
+        XCTAssertThrowsError(try bad.encode())
     }
 
     func testCancelCarriesNothingElse() throws {
@@ -122,7 +136,19 @@ final class WSMessageTests: XCTestCase {
 
     func testErrorRequiresAMessage() throws {
         XCTAssertEqual(try decode(#"{"type":"error","message":"rate limited"}"#).message, "rate limited")
+        XCTAssertEqual(try decode(#"{"type":"error","message":"rate limited"}"#).displayErrorMessage, "rate limited")
         XCTAssertThrowsError(try WSMessage(type: .error).encode())
+
+        for raw in ["invalid_key", "quota", "balance"] {
+            let m = try decode(#"{"type":"error","message":"DeepSeek failed.","problem":"\#(raw)","role":"orchestrator","provider":"deepseek","fix":"top up the account"}"#)
+            XCTAssertEqual(m.problem?.rawValue, raw)
+            XCTAssertEqual(m.role, "orchestrator")
+            XCTAssertEqual(m.provider, "deepseek")
+            XCTAssertEqual(m.fix, "top up the account")
+            XCTAssertEqual(m.displayErrorMessage, "DeepSeek failed. Top up the account.")
+        }
+        let future = try decode(#"{"type":"error","message":"Provider suspended.","problem":"suspended"}"#)
+        XCTAssertEqual(future.problem, .unknown)
     }
 
     func testUnknownTypeIsRejectedSoTheCallerCanLogIt() {

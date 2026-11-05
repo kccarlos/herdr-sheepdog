@@ -142,7 +142,7 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	if question == "" {
 		return brain.InvestigationStart{}, errors.New("investigate needs a question")
 	}
-	plan, err := s.planInvestigation(row, req, question)
+	plan, err := s.planInvestigation(ctx, row, req, question)
 	if err != nil {
 		return brain.InvestigationStart{}, err
 	}
@@ -228,7 +228,7 @@ func (p investigationPlan) jobSession() string {
 // is still resumable (the fork, for a worker job); otherwise the
 // question carries that job's answer so a cold start has what the
 // user already heard, and a worker job forks the worker again.
-func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationRequest, question string) (investigationPlan, error) {
+func (s *Supervisor) planInvestigation(ctx context.Context, row state.Agent, req brain.InvestigationRequest, question string) (investigationPlan, error) {
 	source, err := investigationSource(req.Source)
 	if err != nil {
 		return investigationPlan{}, err
@@ -257,7 +257,7 @@ func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationR
 		p.question = fmt.Sprintf("Earlier you were asked: %s\nYou answered:\n%s\n\nNow: %s", prev.Question, prev.Result, question)
 	}
 	if p.source == state.InvestigationSourceWorker {
-		backend, session, transcript, err := s.workerFork(row)
+		backend, session, transcript, err := s.workerFork(ctx, row)
 		if err != nil {
 			return investigationPlan{}, err
 		}
@@ -312,24 +312,31 @@ var sessionUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // backend that keeps it and the id its fork takes. A session sheepdog
 // cannot find is refused with the worker.session_missing reason, for the
 // model to read, pointing it at the default source.
-func (s *Supervisor) workerFork(row state.Agent) (backend, session, transcript string, err error) {
+func (s *Supervisor) workerFork(ctx context.Context, row state.Agent) (backend, session, transcript string, err error) {
 	alias := aliasOr(row.Alias)
 	refuse := func(why string) error {
 		return fmt.Errorf("cannot ask %s itself: %s; investigate without source asks a read-only agent in its repository instead", alias, why)
 	}
-	sess := workerSession(row)
-	transcript, err = s.cfg.WorkerLog.Locate(sess)
+	sess := workerSessionWithRoots(row, s.paneRoots(ctx, row))
+	res, err := s.cfg.WorkerLog.Resolve(sess)
+	s.syncDiscoveredSession(row.PaneID)
 	if err != nil {
 		reason := workerlog.Reason(err)
 		return "", "", "", refuse(reason + " (" + sessionMissingWhy[reason] + ")")
 	}
-	backend = workerBackend(sess)
-	session = sess.Value
-	if sess.Kind == herdr.SessionKindPath {
+	transcript = res.Path
+	backend = string(res.Format)
+	if backend == "" {
+		backend = workerBackend(sess)
+	}
+	session = res.ID
+	if session == "" && sess.Kind == herdr.SessionKindPath {
 		// Both backends name the transcript after the session: claude
 		// <id>.jsonl, codex rollout-<timestamp>-<id>.jsonl.
 		stem := strings.TrimSuffix(filepath.Base(sess.Value), ".jsonl")
 		session = stem[max(0, len(stem)-36):]
+	} else if session == "" {
+		session = sess.Value
 	}
 	if !sessionUUID.MatchString(session) {
 		return "", "", "", refuse(workerlog.ReasonNotFound + " (its session id is not one the " + backend + " CLI can resume)")

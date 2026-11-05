@@ -30,16 +30,24 @@ import (
 
 // fakeSession is an in-memory voice.Session.
 type fakeSession struct {
-	mu     sync.Mutex
-	audio  chan []byte
-	events chan voice.Event
-	sent   [][]byte
-	texts  []string
-	pushes []string
-	muted  bool
-	status voice.Status
-	ends   int // AudioStreamEnd calls
-	speaks bool
+	mu          sync.Mutex
+	audio       chan []byte
+	rawChunks   chan voice.AudioChunk
+	outAudio    chan []byte
+	audioChunks chan voice.AudioChunk
+	flushed     chan struct{}
+	closed      chan struct{}
+	pumpHold    chan struct{}
+	epoch       uint64
+	flushes     []uint64
+	events      chan voice.Event
+	sent        [][]byte
+	texts       []string
+	pushes      []string
+	muted       bool
+	status      voice.Status
+	ends        int // AudioStreamEnd calls
+	speaks      bool
 	// attached is the last ClientAttached value.
 	attached bool
 	// resets records every Reset(reason) call.
@@ -51,14 +59,96 @@ type fakeSession struct {
 	pushTags []map[string]any
 	// pushUrgency records the urgency of every PushTagged call.
 	pushUrgency []voice.Urgency
+	onSetMuted  func(bool)
+
+	trackPlayback bool
+	play          voice.PlaybackTracker
+	recap         voice.Recap
+	outText       string
 }
 
 func newFakeSession() *fakeSession {
-	return &fakeSession{audio: make(chan []byte, 64), events: make(chan voice.Event, 64), status: voice.StatusConnected}
+	f := &fakeSession{
+		audio:       make(chan []byte, 64),
+		rawChunks:   make(chan voice.AudioChunk, 64),
+		outAudio:    make(chan []byte),
+		audioChunks: make(chan voice.AudioChunk),
+		flushed:     make(chan struct{}),
+		closed:      make(chan struct{}),
+		epoch:       voice.NextAudioEpoch(),
+		events:      make(chan voice.Event, 64),
+		status:      voice.StatusConnected,
+	}
+	go func() {
+		defer close(f.outAudio)
+		defer close(f.audioChunks)
+		deliver := func(ch voice.AudioChunk) {
+			f.mu.Lock()
+			fl := f.flushed
+			hold := f.pumpHold
+			f.mu.Unlock()
+			if hold != nil {
+				select {
+				case <-hold:
+				case <-fl:
+					return
+				case <-f.closed:
+					return
+				}
+			}
+			select {
+			case f.outAudio <- ch.Data:
+			case f.audioChunks <- ch:
+			case <-fl:
+			case <-f.closed:
+			}
+		}
+		for f.audio != nil || f.rawChunks != nil {
+			select {
+			case <-f.closed:
+				return
+			case b, ok := <-f.audio:
+				if !ok {
+					f.audio = nil
+					continue
+				}
+				ep, fl := f.currentEpochAndFlushes()
+				deliver(voice.AudioChunk{Data: b, Epoch: ep, FlushedEpochs: fl})
+			case ch, ok := <-f.rawChunks:
+				if !ok {
+					f.rawChunks = nil
+					continue
+				}
+				deliver(ch)
+			}
+		}
+	}()
+	return f
 }
 
 func (f *fakeSession) Start(context.Context) error { return nil }
-func (f *fakeSession) Close() error                { close(f.audio); close(f.events); return nil }
+func (f *fakeSession) Close() error {
+	f.holdPump(false)
+	close(f.closed)
+	close(f.audio)
+	close(f.rawChunks)
+	close(f.events)
+	return nil
+}
+func (f *fakeSession) holdPump(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if on {
+		if f.pumpHold == nil {
+			f.pumpHold = make(chan struct{})
+		}
+		return
+	}
+	if f.pumpHold != nil {
+		close(f.pumpHold)
+		f.pumpHold = nil
+	}
+}
 func (f *fakeSession) SendAudio(pcm []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -79,10 +169,15 @@ func (f *fakeSession) Push(text string, _ voice.Urgency) error {
 }
 func (f *fakeSession) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.pushes = append(f.pushes, text)
 	f.pushTags = append(f.pushTags, tags)
 	f.pushUrgency = append(f.pushUrgency, u)
+	interrupt := f.trackPlayback && u == voice.UrgencyInterrupt
+	f.mu.Unlock()
+	if interrupt {
+		ep := f.FlushAudio()
+		f.emit(voice.EventInterrupted{Epoch: ep})
+	}
 	return nil
 }
 func (f *fakeSession) pushUrgencies() []voice.Urgency {
@@ -95,10 +190,112 @@ func (f *fakeSession) taggedPushes() []map[string]any {
 	defer f.mu.Unlock()
 	return append([]map[string]any(nil), f.pushTags...)
 }
-func (f *fakeSession) Audio() <-chan []byte       { return f.audio }
+func (f *fakeSession) Audio() <-chan []byte                 { return f.outAudio }
+func (f *fakeSession) AudioChunks() <-chan voice.AudioChunk { return f.audioChunks }
+func (f *fakeSession) currentEpoch() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch
+}
+func (f *fakeSession) currentEpochAndFlushes() (uint64, []uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch, f.flushes
+}
+func (f *fakeSession) pushAudio(pcm []byte) {
+	ep, fl := f.currentEpochAndFlushes()
+	f.rawChunks <- voice.AudioChunk{Data: pcm, Epoch: ep, FlushedEpochs: fl}
+}
+func (f *fakeSession) pushTrackedSpeech(pcm []byte, text string) {
+	f.mu.Lock()
+	f.play.Sent(time.Now(), len(pcm))
+	if text != "" {
+		f.play.Said(text)
+		f.outText += text
+	}
+	ep, fl := f.epoch, f.flushes
+	f.mu.Unlock()
+	if text != "" {
+		f.emit(voice.EventTranscript{Dir: voice.DirOut, Text: text})
+	}
+	f.rawChunks <- voice.AudioChunk{Data: pcm, Epoch: ep, FlushedEpochs: fl}
+}
+func (f *fakeSession) endTrackedTurn() {
+	f.mu.Lock()
+	f.play.TurnComplete()
+	seq := f.recap.AddSeq(voice.RecapAssistant, f.outText)
+	f.play.SetRecapSeq(seq)
+	f.outText = ""
+	f.mu.Unlock()
+	f.emit(voice.EventTurnComplete{})
+}
+func (f *fakeSession) recapEntries() []voice.RecapEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.recap.Entries()
+}
+func (f *fakeSession) emitChunk(ch voice.AudioChunk) {
+	f.rawChunks <- ch
+}
+func (f *fakeSession) purgeQueueLocked(barrier bool) uint64 {
+	for {
+		select {
+		case <-f.audio:
+		case <-f.rawChunks:
+		default:
+			close(f.flushed)
+			f.flushed = make(chan struct{})
+			old := f.epoch
+			if barrier {
+				f.flushes = voice.AppendFlushEpoch(f.flushes, old)
+			}
+			f.epoch = voice.NextAudioEpoch()
+			return old
+		}
+	}
+}
+func (f *fakeSession) FlushAudio() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.trackPlayback {
+		seq := f.recap.AddSeq(voice.RecapAssistant, f.outText)
+		f.outText = ""
+		if f.attached {
+			f.play.FlushMeta(time.Now(), voice.FlushMeta{RecapSeq: seq})
+		} else {
+			f.play.Detach()
+		}
+	}
+	return f.purgeQueueLocked(true)
+}
+func (f *fakeSession) PurgeAudio() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.purgeQueueLocked(false)
+}
+func (f *fakeSession) ExpectFlush() {
+	f.mu.Lock()
+	if f.trackPlayback && f.attached {
+		f.play.Flush(time.Now())
+	}
+	f.mu.Unlock()
+}
+func (f *fakeSession) BumpAudioEpoch() {
+	f.mu.Lock()
+	f.epoch = voice.NextAudioEpoch()
+	f.mu.Unlock()
+}
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
-func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
-func (f *fakeSession) Status() voice.Status       { return f.status }
+func (f *fakeSession) SetMuted(m bool) {
+	f.mu.Lock()
+	f.muted = m
+	cb := f.onSetMuted
+	f.mu.Unlock()
+	if cb != nil {
+		cb(m)
+	}
+}
+func (f *fakeSession) Status() voice.Status { return f.status }
 func (f *fakeSession) Speaking() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -125,12 +322,33 @@ func (f *fakeSession) AudioStreamEnd() { f.mu.Lock(); f.ends++; f.mu.Unlock() }
 func (f *fakeSession) ClientAttached(a bool) {
 	f.mu.Lock()
 	f.attached = a
+	if f.trackPlayback {
+		f.play.Detach()
+	}
 	f.mu.Unlock()
 }
 func (f *fakeSession) ClientPlayback(state string, playedMs int) {
 	f.mu.Lock()
 	f.playback = append(f.playback, fmt.Sprintf("%s:%d", state, playedMs))
+	var cutEv *voice.EventTranscript
+	if f.trackPlayback {
+		rep := f.play.Report(time.Now(), state, playedMs)
+		if state == voice.PlaybackFlushed && !rep.Awaited {
+			f.purgeQueueLocked(false)
+		}
+		if rep.Cut != nil {
+			if !rep.Awaited && rep.RecapSeq == 0 {
+				rep.RecapSeq = f.recap.AddSeq(voice.RecapAssistant, f.outText)
+				f.outText = ""
+			}
+			f.recap.CutSeq(rep.RecapSeq, rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+			cutEv = &voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut}
+		}
+	}
 	f.mu.Unlock()
+	if cutEv != nil {
+		f.emit(*cutEv)
+	}
 }
 func (f *fakeSession) ClientSpeaking(on bool) {
 	f.mu.Lock()
@@ -252,6 +470,11 @@ type harnessOpts struct {
 	marks bool
 	mutes *attention.Mutes
 	wrap  func(*supervisor.Supervisor) Supervisor
+	now   func() time.Time
+	// trackPlayback wires PlaybackTracker and Recap into fakeSession so
+	// end-to-end /ws tests exercise real flush acknowledgement slots,
+	// underruns, cuts, and stop pushes.
+	trackPlayback bool
 }
 
 // testFleet is the fleet a test's marks follow: the injector's panes.
@@ -285,6 +508,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	var session *fakeSession
 	if o.voice {
 		session = newFakeSession()
+		session.trackPlayback = o.trackPlayback
 		pusher = session
 	}
 	var b *brain.Brain
@@ -328,13 +552,14 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	deps := Deps{Log: log, Store: store, Supervisor: serverSup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, Files: !o.filesOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
-		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir}
+		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir, Now: o.now}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {
 		deps.Voice = session
 		if o.switcher {
 			session2 = newFakeSession()
+			session2.trackPlayback = o.trackPlayback
 			sw, err = voice.NewSwitcher([]voice.Provider{
 				{ProviderInfo: voice.ProviderInfo{ID: "gemini", Label: "Gemini Live", Model: "gemini-3.8-live", Available: true}, New: func() (voice.Session, error) { return session, nil }},
 				{ProviderInfo: voice.ProviderInfo{ID: "openai", Label: "GPT-Live", Model: "gpt-live-1", Available: true, Billing: voice.BillingPerMinute}, New: func() (voice.Session, error) { return session2, nil }},

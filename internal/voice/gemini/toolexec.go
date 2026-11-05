@@ -27,11 +27,21 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 		s.inflight[call.ID] = cancel
 	}
 	turnDone := s.turnDone
-	s.noteToolCallLocked(s.now())
+	now := s.now()
+	s.noteToolCallLocked(now)
+	var gateTailElapsed *int64
+	if call.Name == voice.ToolToSupervisor && !s.tailStartedAt.IsZero() {
+		ms := max(int64(0), now.Sub(s.tailStartedAt).Milliseconds())
+		gateTailElapsed = &ms
+	}
 	s.mu.Unlock()
 	s.clearStalled()
 
-	s.log.Log(logSource, "voice.tool_call", "", map[string]any{"id": call.ID, "name": call.Name, "args": call.Args})
+	payload := map[string]any{"id": call.ID, "name": call.Name, "args": call.Args}
+	if gateTailElapsed != nil {
+		payload["gate_tail_elapsed_ms"] = *gateTailElapsed
+	}
+	s.log.Log(logSource, "voice.tool_call", "", payload)
 	s.emit(voice.EventToolCall{Call: call})
 
 	s.wg.Add(1)

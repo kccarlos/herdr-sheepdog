@@ -43,10 +43,15 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	}
 	s.syncToldLocked() // displaced.go
 	s.mu.Unlock()
-	if !t.Closed && !t.Released {
+	var roots workerlog.ProcessRoots
+	pureRename := t.Renamed && !t.Closed && (t.From == "" || t.From == t.To)
+	if !t.Closed && !t.Released && t.To != herdr.StateUnknown {
+		if !pureRename || row.SessionValue == "" {
+			roots = s.paneRoots(ctx, row)
+		}
 		// The worker's own session title, read as a fact: it may
 		// change the spoken names (names.go).
-		s.refreshTitle(row)
+		s.refreshTitle(row, roots)
 		if r, ok := s.store.Get(t.PaneID); ok {
 			row = r
 		}
@@ -114,7 +119,10 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// a block"). A new block adds a journal entry first, so its
 		// announce turn hears what the worker last wrote.
 		if from != herdr.StateBlocked {
-			s.recordJournal(row, string(herdr.StateBlocked), false)
+			s.recordJournal(ctx, row, roots, string(herdr.StateBlocked), false)
+			if r, ok := s.store.Get(t.PaneID); ok {
+				row = r
+			}
 		}
 		s.onBlocked(ctx, row)
 	case herdr.StateUnknown:
@@ -122,6 +130,8 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "agent_exited")
 		s.forgetPrompt(t.PaneID)
 		s.mu.Unlock()
+		s.cfg.WorkerLog.Forget(t.PaneID)
+		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
 		}
@@ -155,7 +165,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
 			// seen at rest has no news (its transcript is history).
-			stopErr = s.recordJournal(row, string(t.To), finish)
+			stopErr = s.recordJournal(ctx, row, roots, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
 		if r, ok := s.store.Get(t.PaneID); ok {

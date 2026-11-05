@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,21 +19,51 @@ func TestBackendConformance(t *testing.T) {
 	conformance.RunAll(t, newCoreDriver)
 }
 
+type coreProcTable struct {
+	mu      sync.Mutex
+	nextPID int
+	shells  map[string]int
+}
+
+func newCoreProcTable() *coreProcTable {
+	return &coreProcTable{nextPID: 1000, shells: map[string]int{}}
+}
+
+func (p *coreProcTable) alloc() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nextPID++
+	return p.nextPID
+}
+
+func (p *coreProcTable) shellPID(paneID string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if sh, ok := p.shells[paneID]; ok {
+		return sh
+	}
+	p.nextPID++
+	sh := p.nextPID
+	p.shells[paneID] = sh
+	return sh
+}
+
 type coreDriver struct {
 	backend *herdrcore.Backend
 	client  *hc.Client
 	srv     *hctest.Server
+	procs   *coreProcTable
 }
 
 func newCoreDriver(t *testing.T) conformance.Driver {
 	t.Helper()
 	srv := hctest.New(t)
-	return newCoreDriverOver(t, srv)
+	return newCoreDriverOver(t, srv, newCoreProcTable())
 }
 
 // newCoreDriverOver is a daemon's view of the machine: a backend that keeps
 // its marks current from the event stream, up before the scenario starts.
-func newCoreDriverOver(t *testing.T, srv *hctest.Server) *coreDriver {
+func newCoreDriverOver(t *testing.T, srv *hctest.Server, procs *coreProcTable) *coreDriver {
 	t.Helper()
 	client := hc.NewClient(srv.Path)
 	backend := herdrcore.New(client, nil)
@@ -57,7 +88,7 @@ func newCoreDriverOver(t *testing.T, srv *hctest.Server) *coreDriver {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	return &coreDriver{backend: backend, client: client, srv: srv}
+	return &coreDriver{backend: backend, client: client, srv: srv, procs: procs}
 }
 
 func (d *coreDriver) Marker() herdr.Marker { return d.backend }
@@ -85,7 +116,7 @@ func (d *coreDriver) MarkWrites() int {
 
 func (d *coreDriver) RestartDaemon(t *testing.T) conformance.Driver {
 	t.Helper()
-	return newCoreDriverOver(t, d.srv)
+	return newCoreDriverOver(t, d.srv, d.procs)
 }
 
 // StartAgent is sheepdog's spawn path: a shell terminal it opens, the
@@ -164,10 +195,24 @@ func (d *coreDriver) StartPlain(ctx context.Context, cwd string) (herdr.PaneInfo
 	return d.backend.CreateWorkspace(ctx, cwd, "")
 }
 
+func (d *coreDriver) ensureShellPID(term *hc.Terminal) int {
+	if term.PID != nil && *term.PID > 0 {
+		return *term.PID
+	}
+	sh := d.procs.shellPID(term.Address)
+	term.PID = &sh
+	return sh
+}
+
 func (d *coreDriver) Run(ctx context.Context, paneID string, p conformance.Program) error {
 	term, err := d.client.Get(ctx, paneID)
 	if err != nil {
 		return err
+	}
+	d.ensureShellPID(&term)
+	fg := p.PID
+	if fg <= 0 {
+		fg = d.procs.alloc()
 	}
 	argv := append(append([]string(nil), p.Wrapper...), p.Kind)
 	argv = append(argv, p.Args...)
@@ -176,7 +221,7 @@ func (d *coreDriver) Run(ctx context.Context, paneID string, p conformance.Progr
 		name = filepath.Base(p.Wrapper[0])
 	}
 	term.Argv = argv
-	term.Foreground = &hc.Foreground{PID: 200, Name: name, Argv: argv, Cwd: term.Cwd}
+	term.Foreground = &hc.Foreground{PID: fg, Name: name, Argv: argv, Cwd: term.Cwd}
 	if p.Reported {
 		app := p.App
 		if app == "" {
@@ -199,8 +244,9 @@ func (d *coreDriver) Exit(ctx context.Context, paneID string) error {
 	if err != nil {
 		return err
 	}
+	sh := d.ensureShellPID(&term)
 	term.Argv = []string{"zsh"}
-	term.Foreground = &hc.Foreground{PID: 100, Name: "zsh", Argv: []string{"zsh"}, Cwd: term.Cwd}
+	term.Foreground = &hc.Foreground{PID: sh, Name: "zsh", Argv: []string{"zsh"}, Cwd: term.Cwd}
 	term.Status = nil
 	// Keep Reported true: a program that once reported must still leave the
 	// agent list when its status is cleared and the shell is in front.

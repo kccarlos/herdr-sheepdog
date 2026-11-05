@@ -34,6 +34,49 @@ func TestPushCoverageOnRun2Lines(t *testing.T) {
 	}
 }
 
+func TestPushCoverageNormalisesNumbersAndCodeJoiners(t *testing.T) {
+	cases := []struct {
+		name, push, said string
+		minCov           float64
+	}{
+		{
+			name:   "cardinal digits vs spoken words and snake_case dot filename",
+			push:   "3 failures in ws_proto.go",
+			said:   "three failures in ws underscore proto dot go",
+			minCov: 0.99,
+		},
+		{
+			name:   "compound number 23 and kebab-case slash path",
+			push:   "23 warnings in cmd/auth-handler/main.go",
+			said:   "twenty-three warnings in cmd slash auth dash handler slash main dot go",
+			minCov: 0.99,
+		},
+		{
+			name:   "camelCase and acronym splitting",
+			push:   "parseHTTPResponse failed in authService",
+			said:   "parse HTTP response failed in auth service",
+			minCov: 0.99,
+		},
+		{
+			name:   "ordinals 1st..21st vs spoken ordinals",
+			push:   "failed on the 1st and 21st retry",
+			said:   "failed on the first and twenty first retry",
+			minCov: 0.99,
+		},
+		{
+			name:   "Chinese numerals vs Arabic digits",
+			push:   "测试还是失败，结果是25，应该是30。",
+			said:   "测试还是失败，结果是二十五，应该是三十。",
+			minCov: 0.99,
+		},
+	}
+	for _, tc := range cases {
+		if got := PushCoverage(tc.push, tc.said); got < tc.minCov {
+			t.Errorf("%s: PushCoverage(%q, %q) = %.2f, want >= %.2f", tc.name, tc.push, tc.said, got, tc.minCov)
+		}
+	}
+}
+
 // TestHeardTrackerIgnoresTheInterruptionItsOwnPushCauses: Gemini reports
 // "interrupted" right after an interrupting push and sends a stray
 // turnComplete (run 2, 00:48:12.310 and .417) before it voices the push;
@@ -114,5 +157,65 @@ func TestRequeueHoldCollisionTimeline(t *testing.T) {
 	g := RequeueFacts{LastInput: at(50), ReplyDoneAt: at(40)}
 	if got := RequeueHold(at(61), g); got != "" {
 		t.Errorf("61: %q, want free", got)
+	}
+}
+
+func TestHeardTrackerLateFlushedJudgesInterruptedPushWithoutTouchingNewPush(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	var h HeardTracker
+
+	// Run 1: push 1 cut by barge-in.
+	h.Pushed(t0, "first push body needs full coverage here", nil, false)
+	h.Said("first push body needs full coverage here")
+	h.Interrupted(t0.Add(100*time.Millisecond), "model", true)
+
+	// Run 2: push 2 starts speaking before push 1's flushed report arrives.
+	h.Pushed(t0.Add(200*time.Millisecond), "second push body stays heard completely", nil, false)
+	h.Said("second push body stays heard completely")
+	h.TurnComplete()
+
+	// Late flushed report judges push 1 as unheard, leaving push 2 watched.
+	cut1 := &TranscriptCut{HeardMs: 300, RunMs: 2000, Full: "first push body needs full coverage here"}
+	unheard := h.Flushed(t0.Add(250*time.Millisecond), cut1, "first")
+	if len(unheard) != 1 || unheard[0].Text != "first push body needs full coverage here" {
+		t.Fatalf("Flushed = %+v, want push 1 unheard", unheard)
+	}
+	if !h.Watching() {
+		t.Fatal("push 2 should still be watched after push 1 flushed")
+	}
+	if settled := h.Settle(t0.Add(500*time.Millisecond), false); len(settled) != 0 {
+		t.Fatalf("Settle push 2 = %+v, want heard", settled)
+	}
+}
+
+func TestHeardTrackerStaysAlignedWithPlaybackTrackerAcrossNonPushAndEmptySlots(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	var p PlaybackTracker
+	var h HeardTracker
+
+	// Slot 1: non-push assistant reply with real audio (w == nil, non-empty run).
+	p.Sent(t0, 4000*outBytesPerMs)
+	p.Said("normal reply one two three four")
+	p.Flush(t0.Add(100 * time.Millisecond))
+	h.Interrupted(t0.Add(100*time.Millisecond), "model", true)
+
+	// Slot 2: watched push voiced and interrupted.
+	h.Pushed(t0.Add(200*time.Millisecond), "watched push body needs full coverage", nil, false)
+	p.Sent(t0.Add(250*time.Millisecond), 3000*outBytesPerMs)
+	p.Said("watched push body needs full coverage")
+	h.Said("watched push body needs full coverage")
+	p.Flush(t0.Add(300 * time.Millisecond))
+	h.Interrupted(t0.Add(300*time.Millisecond), "push", true)
+
+	// Client reports played_ms: 1000 for Slot 1 (non-push reply): must NOT pop Slot 2!
+	rep1 := p.Report(t0.Add(350*time.Millisecond), PlaybackFlushed, 1000)
+	if unheard := h.FlushedReport(t0.Add(350*time.Millisecond), rep1); len(unheard) != 0 {
+		t.Fatalf("Slot 1 report judged Slot 2 prematurely: %+v", unheard)
+	}
+
+	// Client reports played_ms: 3000 (heard whole) for Slot 2: push is heard!
+	rep2 := p.Report(t0.Add(400*time.Millisecond), PlaybackFlushed, 3000)
+	if unheard := h.FlushedReport(t0.Add(400*time.Millisecond), rep2); len(unheard) != 0 {
+		t.Fatalf("Slot 2 heard report judged unheard: %+v", unheard)
 	}
 }

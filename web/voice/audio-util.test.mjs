@@ -375,6 +375,25 @@ test('SilenceGate: floor is inclusive-exclusive at the configured LSB and prerol
   assert.equal(r.send.length, 1);
 });
 
+test('SilenceGate: stamps speechEndMs only when voiced frames occurred in the open segment', () => {
+  const g = new SilenceGate({ floor: 8, holdMs: 60, prerollMs: 20, frameMs: 20 });
+  // Initial open segment with zero voiced frames: speechEndMs is null.
+  g.push(int16Frame(0));
+  g.push(int16Frame(0));
+  const initialClose = g.push(int16Frame(0));
+  assert.equal(initialClose.transition, 'on');
+  assert.equal(initialClose.speechEndMs, null);
+
+  // Reopen with speech, speak one more frame, then 60 ms quiet closes with speechEndMs = 60.
+  assert.equal(g.push(int16Frame(500)).transition, 'off');
+  g.push(int16Frame(400));
+  g.push(int16Frame(2));
+  g.push(int16Frame(2));
+  const afterSpeech = g.push(int16Frame(2));
+  assert.equal(afterSpeech.transition, 'on');
+  assert.equal(afterSpeech.speechEndMs, 60);
+});
+
 // ---------------------------------------------------------------- playback reports
 
 function reporting(opts) {

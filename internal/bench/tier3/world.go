@@ -26,7 +26,7 @@ type Options struct {
 	// Root is the scratch directory runs are made under.
 	Root string
 	// BenchRepo is the toy repo cloned per workspace
-	// (/Users/kc/Documents/sheepdog-bench).
+	// (~/Documents/sheepdog-bench).
 	BenchRepo string
 	// EnvFile is the daemon's --env-file (the orchestrator's keys).
 	EnvFile string

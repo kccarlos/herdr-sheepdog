@@ -14,8 +14,8 @@ import SheepdogKit
 protocol VoiceAudio: AnyObject {
     /// A 40 ms frame ready for the socket.
     var onFrame: ((Data) -> Void)? { get set }
-    /// The silence gate flipped: `true` when it closed.
-    var onGate: ((Bool) -> Void)? { get set }
+    /// The silence gate flipped: `true` when it closed, with speech-end offset (ms).
+    var onGate: ((Bool, Int?) -> Void)? { get set }
     /// Playback started or stopped (the voice speaking).
     var onSpeakingChanged: ((Bool) -> Void)? { get set }
     /// A playback report for the daemon, in the order they happened.

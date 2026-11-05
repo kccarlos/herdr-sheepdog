@@ -1040,6 +1040,8 @@ final class SessionViewModel: ObservableObject {
                 }
             }
             refreshSoon()
+        case "card.shown":
+            scheduleHistorySync()
         case "pending.promoted":
             refreshSoon()
         case "conversation.reset":
@@ -1285,8 +1287,8 @@ final class SessionViewModel: ObservableObject {
         if linkModel.hello == nil, fleet.current === target { await loadHello() }
         // `/api/events` filters by one type prefix: one small request each.
         var next = healthModel.health
-        for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
-                     "voice.push_", "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
+        for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.account_problem", "web.account_problem", "brain.fallback", "brain.rate_limited", "voice.connect_error",
+                     "voice.push_", "supervisor.echo_", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
             guard fleet.current === target else { break }
             let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
             guard let events = try? await current({ try await $0.recentEvents(type: type, limit: limit) }) else { continue }
