@@ -401,6 +401,7 @@ jobs:
           mkdir -p "$t/Formula"
           cp "$RUNNER_TEMP/sheepdog.rb" "$t/Formula/sheepdog.rb"
           git -C "$t" init -q
+          brew trust sheepdog-ci/audit
           brew audit --strict --formula sheepdog-ci/audit/sheepdog
           rm -rf "$t"
 
@@ -455,6 +456,7 @@ jobs:
           set -euo pipefail
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew tap kccarlos/tap
+          brew trust kccarlos/tap
           brew install --formula kccarlos/tap/sheepdog
           sheepdog version
           brew test kccarlos/tap/sheepdog
