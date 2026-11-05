@@ -407,8 +407,15 @@ func eventRequestText(req Request) string {
 			fmt.Fprintf(&b, "- %s: %q (%s)\n", p.ID, p.Text, promiseCondition(p))
 		}
 	}
+	if req.StopError != "" {
+		fmt.Fprintf(&b, "The agent did not finish cleanly: its session record shows it %s. Say what happened rather than saying it finished.\n", req.StopError)
+	}
 	if req.Owed {
-		b.WriteString("The user is waiting on this: the agent was working on their request. The finish is not spoken until your line lands, so your line is what the user hears: say what it found or did, the gist from the screen, not only that it finished.\n")
+		if req.StopError != "" {
+			fmt.Fprintf(&b, "The user is waiting on this: the agent was working on their request when it %s. Your line is what the user hears: say plainly what happened and what is left.\n", req.StopError)
+		} else {
+			b.WriteString("The user is waiting on this: the agent was working on their request. The finish is not spoken until your line lands, so your line is what the user hears: say what it found or did, the gist from the screen, not only that it finished.\n")
+		}
 	}
 	if req.AlsoAsking != "" {
 		fmt.Fprintf(&b, "After finishing, the agent is also showing a prompt of its own: %q. Your one line covers both: what it found, then that it is asking this, with the question in ask, needs_user true and the prompt's choices in options.\n", req.AlsoAsking)
@@ -655,6 +662,13 @@ func journalLedgerLinesN(journal []JournalEntry, now time.Time, n int) string {
 	var b strings.Builder
 	for _, e := range recent[start:] {
 		text := e.LastAssistant
+		if e.Error != "" {
+			if text != "" {
+				text = e.Error + " (" + text + ")"
+			} else {
+				text = e.Error
+			}
+		}
 		if text == "" && e.Instruction != "" {
 			text = "asked: " + e.Instruction
 		}
@@ -669,8 +683,17 @@ func journalLedgerLinesN(journal []JournalEntry, now time.Time, n int) string {
 // journalRecallLine renders one journal entry in full for recall.
 func journalRecallLine(alias string, e JournalEntry) string {
 	line := fmt.Sprintf("%s journal (%s, %s)", aliasOr(alias), e.At.Format("15:04"), e.Event)
+	hasHead := false
+	if e.Error != "" {
+		line += fmt.Sprintf(": %s", oneLine(e.Error))
+		hasHead = true
+	}
 	if e.LastAssistant != "" {
-		line += fmt.Sprintf(": wrote %q", oneLine(e.LastAssistant))
+		sep := ": "
+		if hasHead {
+			sep = "; "
+		}
+		line += fmt.Sprintf("%swrote %q", sep, oneLine(e.LastAssistant))
 	}
 	if e.Instruction != "" {
 		line += fmt.Sprintf("; instruction %q", e.Instruction)
@@ -782,6 +805,9 @@ func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Tim
 		b.WriteString("; journal:")
 		for _, e := range a.Journal[max(0, len(a.Journal)-recordEntries):] {
 			fmt.Fprintf(&b, " [%s %s]", e.At.Format("15:04:05"), e.Event)
+			if e.Error != "" {
+				fmt.Fprintf(&b, " %s", clipText(oneLine(e.Error), recordRunes))
+			}
 			if e.LastAssistant != "" {
 				fmt.Fprintf(&b, " wrote %q", clipText(oneLine(e.LastAssistant), recordRunes))
 			}
