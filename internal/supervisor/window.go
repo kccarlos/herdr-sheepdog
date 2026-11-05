@@ -162,6 +162,10 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	name := aliasOr(state.Say(row))
 	ps := s.paneSend(paneID)
 	ps.Lock()
+	if err := s.checkTypedInput(ctx, paneID); err != nil {
+		ps.Unlock()
+		return WindowResult{}, err
+	}
 	// The row records the prompt before the RPC (see sendInstruction): a
 	// quick turn's transitions can land before Prompt returns.
 	note := clipNote(text)
@@ -175,7 +179,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	sctx, flight := s.beginSendLocked(ctx, paneID)
 	s.mu.Unlock()
 
-	_, err := s.herdr.Prompt(sctx, paneID, text)
+	err := s.prompt(sctx, row, text)
 
 	s.mu.Lock()
 	s.endSendLocked(paneID, flight)
@@ -283,4 +287,30 @@ func clipNote(text string) string {
 		cut--
 	}
 	return fmt.Sprintf("%s… (%d bytes in all)", text[:cut], len(text))
+}
+
+// ErrTerminalTyping prevents a prompt from being appended to desktop input.
+var ErrTerminalTyping = errors.New("terminal has unsent input")
+
+func (s *Supervisor) checkTypedInput(ctx context.Context, paneID string) error {
+	r, ok := s.herdr.(ANSIReader)
+	if !ok {
+		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "ansi_unavailable"})
+		return nil
+	}
+	read, err := r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
+	if err != nil {
+		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
+		return nil
+	}
+	typed, known := herdr.TypedInput(read.Text)
+	if !known || read.Truncated {
+		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "unclear_screen"})
+		return nil
+	}
+	// The user can type between this read and Prompt; the backend has no atomic check-and-send.
+	if typed {
+		return ErrTerminalTyping
+	}
+	return nil
 }

@@ -879,3 +879,18 @@ func TestAskUserQuestionMetaOptionIsRailOnly(t *testing.T) {
 		t.Error("a tap on the meta option was accepted")
 	}
 }
+
+func TestTypedTerminalInputBlocksPrompts(t *testing.T) {
+	h := twoAgents(t)
+	h.srv.SetScreen("w5:p1", "\x1b[0m❯ unfinished words\n────────")
+	res := h.send("w5:p1", "run tests")
+	if !strings.Contains(res.Spoken, "being typed") {
+		t.Errorf("result = %+v", res)
+	}
+	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err == nil {
+		t.Error("window prompt accepted")
+	}
+	if got := h.promptRequests(); len(got) != 0 {
+		t.Errorf("sent prompts: %v", got)
+	}
+}

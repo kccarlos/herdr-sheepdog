@@ -177,6 +177,10 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	}
 	ps := s.paneSend(row.PaneID)
 	ps.Lock()
+	if err := s.checkTypedInput(ctx, row.PaneID); err != nil {
+		ps.Unlock()
+		return voice.ToolResult{Spoken: "The terminal may have text being typed. Finish or clear it before sending; nothing was sent.", Scheduling: voice.UrgencyInterrupt}, err
+	}
 
 	// The row records the instruction before the RPC, as sendInterrupt
 	// marks before its own: a transition the send causes can be handled
@@ -194,7 +198,7 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	sctx, flight := s.beginSendLocked(ctx, row.PaneID)
 	s.mu.Unlock()
 
-	_, err := s.herdr.Prompt(sctx, row.PaneID, text)
+	err := s.prompt(sctx, row, text)
 
 	s.mu.Lock()
 	// A turn cancelled by the stop (ctx done) aborted its Prompt before
