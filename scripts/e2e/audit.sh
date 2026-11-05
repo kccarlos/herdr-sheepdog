@@ -81,7 +81,7 @@ Fix the confirmed findings below in this worktree. For each fix, first write and
 
 $(cat "$TMP/selected.json")
 EOF2
-if ! python3 "$HERE/agy_run.py" claude-sonnet-5-5-medium "$WT" "$TMP/fix-prompt" "$OUT/audit-fix.log" 1500; then
+if ! python3 "$HERE/agy_run.py" gemini-4-argon-high "$WT" "$TMP/fix-prompt" "$OUT/audit-fix.log" 3600; then
   note 'Fix skipped: agent did not complete; see audit-fix.log.'; exit 0
 fi
 if [ "$(git -C "$WT" rev-parse HEAD)" != "$SHA" ]; then
