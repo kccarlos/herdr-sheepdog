@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
 // DoctorOptions configures Doctor.
@@ -24,6 +27,15 @@ type DoctorOptions struct {
 	// Environment adds the herdr-app, Sheepdog.app and backend checks when
 	// non-nil.
 	Environment *Environment
+	// Home, HerdrAppHomeEnv and HCSessionEnv carry shell environment overrides
+	// so Doctor can warn when a shell diverges from the login service.
+	Home            string
+	HerdrAppHomeEnv string
+	HCSessionEnv    string
+	// ServiceInstalled and ServicePATH describe the installed login service
+	// unit when present.
+	ServiceInstalled bool
+	ServicePATH      string
 }
 
 // Doctor runs every check on the effective config, in a fixed order.
@@ -31,7 +43,23 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	var out []Result
 	out = append(out, CheckHerdr(cfg.Herdr))
 	if o.Environment != nil {
-		out = append(out, environmentChecks(cfg, *o.Environment)...)
+		out = append(out, environmentChecks(cfg, *o.Environment, o)...)
+	}
+	if o.ServiceInstalled {
+		goos := ""
+		if o.Environment != nil {
+			goos = o.Environment.OS
+		}
+		if missing := service.MissingFallbackDirs(o.ServicePATH, o.Home, goos); len(missing) > 0 {
+			out = append(out, Result{
+				Name:   "login service",
+				Status: Warn,
+				Detail: fmt.Sprintf("installed unit PATH omits %s (GUI launches may miss herdr/hc)", strings.Join(missing, ", ")),
+				Fix:    "run: sheepdog service install",
+			})
+		} else {
+			out = append(out, Result{Name: "login service", Status: OK, Detail: "installed, PATH includes user tool directories"})
+		}
 	}
 	out = append(out, checkGeminiKeys(ctx, o.Endpoints, cfg)...)
 	if cfg.Gemini.Vertex.APIKey != "" || cfg.Gemini.Vertex.Project != "" {
@@ -79,7 +107,7 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	return out
 }
 
-func environmentChecks(cfg config.Config, env Environment) []Result {
+func environmentChecks(cfg config.Config, env Environment, o DoctorOptions) []Result {
 	var out []Result
 	switch env.Panel {
 	case PanelNotApplicable:
@@ -113,6 +141,28 @@ func environmentChecks(cfg config.Config, env Environment) []Result {
 			fix = "SHEEPDOG_HERDR_BACKEND=" + advice.Set
 		}
 		out = append(out, Result{Name: "herdr backend", Status: Warn, Detail: advice.Why, Fix: fix})
+	}
+	if appEnv := strings.TrimSpace(o.HerdrAppHomeEnv); appEnv != "" {
+		def := ""
+		if o.Home != "" {
+			def = filepath.Join(o.Home, ".config", "herdr-app")
+		}
+		if def == "" || filepath.Clean(appEnv) != filepath.Clean(def) {
+			out = append(out, Result{
+				Name:   "HERDR_APP_HOME",
+				Status: Warn,
+				Detail: fmt.Sprintf("HERDR_APP_HOME=%s overrides ~/.config/herdr-app in this shell", appEnv),
+				Fix:    "unset HERDR_APP_HOME unless you mean to target a separate herdr-app home",
+			})
+		}
+	}
+	if sess := strings.TrimSpace(o.HCSessionEnv); sess != "" && sess != "default" {
+		out = append(out, Result{
+			Name:   "HC_SESSION",
+			Status: Warn,
+			Detail: fmt.Sprintf("HC_SESSION=%s points this shell at a non-default herdr-core session (the login service uses default unless herdr.hc_socket is set)", sess),
+			Fix:    "unset HC_SESSION, or set herdr.hc_socket in config.toml so the daemon uses the same session",
+		})
 	}
 	return out
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
 // onboardEndpoints are the API roots init and doctor validate keys
@@ -99,10 +100,14 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		src = "defaults (no " + cfgPath + ")"
 	}
 	fprintln(stdout, onboard.Result{Name: "config", Status: onboard.OK, Detail: "loaded " + src}.Line())
-	environment := onboard.Detect(cfg, onboard.SystemProbe(), herdrsheepdog.Panel, herdrsheepdog.Layout)
+	probe := onboard.SystemProbe()
+	environment := onboard.Detect(cfg, probe, herdrsheepdog.Panel, herdrsheepdog.Layout)
+	svcInstalled, svcPATH := installedServicePATH()
 	results := onboard.Doctor(ctx, cfg, onboard.DoctorOptions{
 		Endpoints: onboardEndpoints(), Probe: !*noProbe, ConfigPath: cfgPath, EnvPath: envPath,
-		Environment: &environment,
+		Environment: &environment, Home: probe.Home,
+		HerdrAppHomeEnv: os.Getenv("HERDR_APP_HOME"), HCSessionEnv: os.Getenv("HC_SESSION"),
+		ServiceInstalled: svcInstalled, ServicePATH: svcPATH,
 	})
 	if r, ok := envLocationCheck(cfg.DataDir, envPath); ok {
 		results = append(results, r)
@@ -114,6 +119,20 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 	return 0
+}
+
+// installedServicePATH reports whether the user's login service unit exists
+// and what PATH it embeds.
+func installedServicePATH() (bool, string) {
+	home, err := serviceHome()
+	if err != nil || home == "" {
+		return false, ""
+	}
+	m := service.Manager{Spec: service.Spec{OS: runtimeGOOS, Binary: "/bin/sheepdog", Home: home}}
+	if pathVal, ok := m.InstalledPATH(); ok {
+		return true, pathVal
+	}
+	return false, ""
 }
 
 // envLocationCheck warns when the keys come from an env file other than

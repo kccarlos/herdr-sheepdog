@@ -127,6 +127,47 @@ func TestReportWithABrokenConfig(t *testing.T) {
 	}
 }
 
+func TestReportIncludesServicePATHAndEnvOverrideChecks(t *testing.T) {
+	home, _ := fakeService(t)
+	exe := fakeExe(t)
+	cfg, _, _ := lifeSetup(t, "")
+	spec, err := serviceSpec(cfg, "", exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(spec.UnitPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a unit with a bare PATH missing ~/.local/bin so doctor warns on login service PATH.
+	spec.PATH = "/usr/bin:/bin"
+	unit, err := spec.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec.UnitPath(), unit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("HC_SESSION", "custom-session")
+
+	old := onboardEndpoints
+	onboardEndpoints = func() onboard.Endpoints {
+		return onboard.Endpoints{GeminiBase: "http://127.0.0.1:9", OpenAIBase: "http://127.0.0.1:9/v1"}
+	}
+	t.Cleanup(func() { onboardEndpoints = old })
+
+	code, report, errs := runCLI("doctor", "--report", "--config", cfg)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(report, "login service") || !strings.Contains(report, "installed unit PATH omits") {
+		t.Errorf("report missing login service PATH check:\n%s", report)
+	}
+	if !strings.Contains(report, "WARN  HC_SESSION") {
+		t.Errorf("report missing HC_SESSION override check:\n%s", report)
+	}
+}
+
 func TestUpdate(t *testing.T) {
 	var status int
 	var body string
