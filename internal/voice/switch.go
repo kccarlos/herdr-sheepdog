@@ -264,13 +264,13 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		sw.innerRetired = nil
 	}
 	fence := NextAudioEpoch()
-	if b, ok := inner.(interface{ BumpAudioEpoch() }); ok {
-		b.BumpAudioEpoch()
-	}
 	sw.current, sw.inner = id, inner
 	muted, client, check := sw.muted, sw.client, sw.openCheck
 	ready := make(chan struct{})
 	sw.forwardLocked(inner, fence, ready)
+	if b, ok := inner.(interface{ BumpAudioEpoch() }); ok {
+		b.BumpAudioEpoch()
+	}
 	sw.retire.Add(1)
 	sw.mu.Unlock()
 
@@ -388,7 +388,8 @@ func (sw *Switcher) forwardLocked(inner Session, fence uint64, ready <-chan stru
 	ctx := sw.ctx
 	retired := make(chan struct{})
 	sw.innerRetired = retired
-	sw.innerEpoch.Store(NextAudioEpoch())
+	floor := NextAudioEpoch()
+	sw.innerEpoch.Store(floor)
 	var fenceOnly []uint64
 	if fence != 0 {
 		fenceOnly = []uint64{fence}
@@ -441,6 +442,10 @@ func (sw *Switcher) forwardLocked(inner Session, fence uint64, ready <-chan stru
 		send := func(chunk AudioChunk) {
 			if !sw.isCurrent(inner) {
 				return
+			}
+			// Lift chunks queued during Start before BumpAudioEpoch above fence while staying <= inner's bumped epoch.
+			if fence != 0 && chunk.Epoch <= fence {
+				chunk.Epoch = floor
 			}
 			chunk.FlushedEpochs = stampFence(chunk.FlushedEpochs)
 			select {
