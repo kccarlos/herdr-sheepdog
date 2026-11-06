@@ -58,7 +58,7 @@ func appKind(app string) string {
 }
 
 // argvBase is the program name of argv[0] (after stripping any leading
-// priority/env wrappers), without directory or the leading dash of a login
+// priority wrappers), without directory or the leading dash of a login
 // shell.
 func argvBase(argv []string) string {
 	argv = procprio.UnwrapArgv(argv)
