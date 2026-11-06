@@ -125,6 +125,7 @@ targets:
         PRODUCT_MODULE_NAME: SheepdogMac
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         ENABLE_HARDENED_RUNTIME: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: Sources/SheepdogMac/SheepdogMac.entitlements
       properties:

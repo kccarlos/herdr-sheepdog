@@ -110,7 +110,7 @@ public final class StatusItemController: NSObject {
             files: DiskFileChecker(),
             launcher: DetachedScriptLauncher(log: updateLog),
             log: updateLog,
-            openURL: { NSWorkspace.shared.open($0) }
+            openURL: { NSWorkspace.shared.open($0) }, appVersion: appVersion, voiceActive: { voice.state.heldHere }, quit: { voice.handle(route: .end); source.stop(); hotkey.stop(); quit() }
         )
         self.appVersion = appVersion
         self.source = source
@@ -160,8 +160,6 @@ public final class StatusItemController: NSObject {
         }
         hotkey.start()
         source.start()
-        // The cask reopens the app after upgrading: pick up what the
-        // detached upgrade left in its log.
         let updater = updater
         Task { await updater.resume() }
     }
@@ -206,6 +204,7 @@ public final class StatusItemController: NSObject {
         case .openMicrophoneSettings:
             voice.openMicrophoneSettings()
         case .updateApp:
+            if updater.state == .restartNeeded { updater.relaunch(); return }
             guard let offer else { return }
             let updater = updater
             Task { await updater.start(offer: offer) }
@@ -225,7 +224,7 @@ public final class StatusItemController: NSObject {
     private func menu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state, hotkey: hotkey.shortcut, update: offer.map { MacUpdatePresentation(offer: $0, state: updater.state) }) {
+        for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state, hotkey: hotkey.shortcut, update: MacUpdatePresentation(offer: offer, state: updater.state)) {
             switch row {
             case let .status(text):
                 let line = NSMenuItem(title: text, action: nil, keyEquivalent: "")
@@ -237,7 +236,7 @@ public final class StatusItemController: NSObject {
                 entry.isEnabled = enabled
                 entry.state = checked ? .on : .off
                 entry.representedObject = ActionBox(action)
-                if action == .updateApp, let offer {
+                if action == .updateApp {
                     entry.setAccessibilityLabel(MacUpdatePresentation(offer: offer, state: updater.state).accessibilityLabel)
                 }
                 menu.addItem(entry)
