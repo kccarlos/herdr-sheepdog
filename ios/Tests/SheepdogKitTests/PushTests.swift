@@ -223,4 +223,64 @@ final class PushTests: XCTestCase {
             )
         )
     }
+
+    func testClosedQuestionNotificationIDsRemovesOnlyOwnComputersClosedApprovals() throws {
+        let opt = [PendingOption(index: 1, label: "Yes")]
+        let delivered: [(id: String, payload: PushPayload)] = [
+            ("n-home-closed", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "home", options: opt)),
+            ("n-home-open", PushPayload(kind: "approval", paneID: "%2", pendingID: "q-open", computer: "home", options: opt)),
+            ("n-home-done", PushPayload(kind: "done", paneID: "%1", computer: "home")),
+            ("n-home-followup", try XCTUnwrap(PushPayload(userInfo: PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "home", options: opt).openInsteadUserInfo()))),
+            ("n-work-collide", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "work", options: opt)),
+            ("n-unpaired", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "removed", options: opt)),
+            ("n-legacy", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-legacy", computer: nil, options: opt)),
+        ]
+        let twoPaired: Set<String> = ["home", "work"]
+
+        // Reconciling `home` with `q-open` still open removes only `n-home-closed`:
+        // keeps `home`'s open question, non-question `done`, `openInstead` follow-up,
+        // `work`'s colliding `q-closed`, `removed`'s notification, and ambiguous `n-legacy`.
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(
+                in: delivered,
+                computerID: "home",
+                pairedComputerIDs: twoPaired,
+                open: ["q-open"]
+            ),
+            ["n-home-closed"]
+        )
+
+        // Single closed question event (`closedID`) removes only that question on that computer,
+        // even without clearing other notifications not in `open`.
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(
+                in: delivered,
+                computerID: "work",
+                pairedComputerIDs: twoPaired,
+                closedID: "q-closed"
+            ),
+            ["n-work-collide"]
+        )
+
+        // Unpaired computer or bare computerID while computers are paired never clears anything.
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(in: delivered, computerID: "removed", pairedComputerIDs: twoPaired, open: []),
+            []
+        )
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(in: delivered, computerID: "", pairedComputerIDs: twoPaired, open: []),
+            []
+        )
+
+        // Single paired computer may clear a legacy (`computer == nil`) closed question,
+        // and bare setup (`pairedComputerIDs` empty) clears only computer-less notifications.
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(in: delivered, computerID: "home", pairedComputerIDs: ["home"], open: ["q-open"]),
+            ["n-home-closed", "n-legacy"]
+        )
+        XCTAssertEqual(
+            PushPolicy.closedQuestionNotificationIDs(in: delivered, computerID: "", pairedComputerIDs: [], open: []),
+            ["n-legacy"]
+        )
+    }
 }

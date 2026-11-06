@@ -109,6 +109,7 @@ extension SessionViewModel {
             let pairedID = self.settings.computers.computer(id) != nil ? id : nil
             PushCoordinator.shared.computerCameOnline(id: pairedID, endpoint: self.endpoints[id])
         }
+        model.onQuestionsChanged = { [weak self] closed in if self?.demo == nil { self?.onQuestionsChanged?(id, closed) } }
         return model
     }
 

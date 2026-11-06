@@ -553,6 +553,18 @@ public enum PushPolicy {
         guard currentLinkUsable && (currentEventsOpen || voiceConnected) else { return false }
         return (payload.isAnswerable && approvalSurfaceVisible) || voiceConnected || viewingAgents
     }
+
+    public static func closedQuestionNotificationIDs(in delivered: [(id: String, payload: PushPayload)], computerID: String?,
+                                                     pairedComputerIDs: Set<String>, open: Set<String> = [], closedID: String? = nil) -> [String] {
+        func norm(_ s: String?) -> String? { s?.trimmed.isEmpty == false ? s?.trimmed : nil }
+        let cid = norm(computerID), closed = norm(closedID)
+        guard cid.map(pairedComputerIDs.contains) ?? pairedComputerIDs.isEmpty else { return [] }
+        return delivered.compactMap { item in
+            guard let pid = norm(item.payload.pendingID), closed.map({ pid == $0 }) ?? !open.contains(pid) else { return nil }
+            if let sender = norm(item.payload.computer) { return sender == cid ? item.id : nil }
+            return pairedComputerIDs.count <= 1 ? item.id : nil
+        }
+    }
 }
 
 /// Tracks which computers (or bare fixture endpoints) have accepted this

@@ -350,6 +350,7 @@ final class SessionViewModel: ObservableObject {
     private var syncingHistory: Set<String> = []
 
     private(set) var appPhase: AppPhase = .active
+    var onQuestionsChanged: ((String, String?) -> Void)?
 
     /// Whether the person agreed to send their voice and words to AI
     /// services (`SessionViewModel+Consent.swift`).
@@ -1205,6 +1206,7 @@ final class SessionViewModel: ObservableObject {
             history.applyNewest(page, requestedAt: sent)
             reducer.dropSettledSpeech(before: sent)
             conversationChanged()
+            if appPhase == .background { refreshSoon() }
         } catch {
             // Quiet: the cache and the live stream still show something,
             // and the state probe reports what is wrong in plain words.
