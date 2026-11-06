@@ -28,6 +28,17 @@ export const NOTE_MS = 6000;
 
 const same = (a, b) => (a ?? "").trim() === (b ?? "").trim();
 
+const makeEntry = (fields) => ({
+  error: null,
+  reuseKey: true,
+  resumed: false,
+  reply: null,
+  repliedAt: 0,
+  userId: null,
+  replyId: null,
+  ...fields,
+});
+
 function loadSavedEntries(saved, nowMs) {
   let obj = saved;
   if (typeof obj === "string") {
@@ -45,79 +56,34 @@ function loadSavedEntries(saved, nowMs) {
     if (typeof raw.key !== "string" || !raw.key || typeof raw.text !== "string" || !raw.text.trim() || typeof raw.at !== "number") continue;
     const ageMs = nowMs - raw.at / 1000;
     if (ageMs >= OUTBOX_TTL_MS || ageMs < -OUTBOX_TTL_MS) continue;
+    const base = { key: raw.key, text: raw.text, at: raw.at };
     if (raw.phase === "sending") {
       if (!hasSending && ageMs < IDEM_TTL_MS) {
         hasSending = true;
-        out.push({
-          key: raw.key,
-          text: raw.text,
-          at: raw.at,
-          phase: "sending",
-          error: null,
-          reuseKey: true,
-          resumed: true,
-          reply: null,
-          repliedAt: 0,
-          userId: null,
-          replyId: null,
-        });
+        out.push(makeEntry({ ...base, phase: "sending", resumed: true }));
       } else if (ageMs < IDEM_TTL_MS) {
-        out.push({
-          key: raw.key,
-          text: raw.text,
-          at: raw.at,
-          phase: "queued",
-          error: null,
-          reuseKey: true,
-          resumed: false,
-          reply: null,
-          repliedAt: 0,
-          userId: null,
-          replyId: null,
-        });
+        out.push(makeEntry({ ...base, phase: "queued" }));
       } else {
-        out.push({
-          key: raw.key,
-          text: raw.text,
-          at: raw.at,
-          phase: "failed",
-          error: "Sheepdog reloaded before this turn finished. Retry if it still needs to run.",
-          reuseKey: false,
-          resumed: false,
-          reply: null,
-          repliedAt: 0,
-          userId: null,
-          replyId: null,
-        });
+        out.push(
+          makeEntry({
+            ...base,
+            phase: "failed",
+            error: "Sheepdog reloaded before this turn finished. Retry if it still needs to run.",
+            reuseKey: false,
+          }),
+        );
       }
     } else if (raw.phase === "queued") {
-      out.push({
-        key: raw.key,
-        text: raw.text,
-        at: raw.at,
-        phase: "queued",
-        error: null,
-        reuseKey: Boolean(raw.reuseKey ?? true),
-        resumed: false,
-        reply: null,
-        repliedAt: 0,
-        userId: null,
-        replyId: null,
-      });
+      out.push(makeEntry({ ...base, phase: "queued", reuseKey: Boolean(raw.reuseKey ?? true) }));
     } else if (raw.phase === "failed") {
-      out.push({
-        key: raw.key,
-        text: raw.text,
-        at: raw.at,
-        phase: "failed",
-        error: typeof raw.error === "string" && raw.error ? raw.error : "Sheepdog did not answer.",
-        reuseKey: Boolean(raw.reuseKey),
-        resumed: false,
-        reply: null,
-        repliedAt: 0,
-        userId: null,
-        replyId: null,
-      });
+      out.push(
+        makeEntry({
+          ...base,
+          phase: "failed",
+          error: typeof raw.error === "string" && raw.error ? raw.error : "Sheepdog did not answer.",
+          reuseKey: Boolean(raw.reuseKey),
+        }),
+      );
     }
   }
   return out;
@@ -144,14 +110,12 @@ export function createOutbox({
   active: initialActive = true,
 }) {
   let active = Boolean(initialActive);
-  const initialEntries = active ? loadSavedEntries(saved, now()) : [];
-  const initialBusy = initialEntries.some((e) => e.phase === "sending");
-  const initialFailed = initialEntries.find((e) => e.phase === "failed");
-  let snapshot = {
-    entries: initialEntries,
-    busy: initialBusy,
-    notice: !initialBusy && initialFailed ? { tone: "error", text: initialFailed.error, at: now() } : null,
+  const stateFromEntries = (entries) => {
+    const busy = entries.some((e) => e.phase === "sending");
+    const failed = entries.find((e) => e.phase === "failed");
+    return { entries, busy, notice: !busy && failed ? { tone: "error", text: failed.error, at: now() } : null };
   };
+  let snapshot = stateFromEntries(active ? loadSavedEntries(saved, now()) : []);
   // When a failed entry with unknown outcome is moved back into the composer
   // via `take(key)`, keep its key so submitting the exact same words reuses it.
   let takenRetry = null;
@@ -213,7 +177,7 @@ export function createOutbox({
 
   async function runEntry(entryKey) {
     const current = snapshot.entries.find((e) => e.key === entryKey);
-    if (!current) return { restore: null };
+    if (!current) return;
     activeKey = entryKey;
     const sendAt = current.phase === "queued" || (!current.resumed && !current.reuseKey) ? now() * 1000 : current.at;
     set(
@@ -233,7 +197,7 @@ export function createOutbox({
       if (!snapshot.entries.some((e) => e.key === entryKey)) {
         if (activeKey === entryKey) activeKey = null;
         if (!startNextQueued()) set({ busy: false }, true);
-        return { restore: null };
+        return;
       }
       if (err.status === 409 && !/Idempotency-Key/.test(err.message)) {
         // A spoken turn claimed the words first and answers them.
@@ -249,7 +213,7 @@ export function createOutbox({
           true,
         );
         if (willDrain) startNextQueued();
-        return { restore: null };
+        return;
       }
       let errorText;
       let reuseKey = false;
@@ -272,7 +236,7 @@ export function createOutbox({
         },
         true,
       );
-      return { restore: null, failed: true };
+      return;
     }
     if (snapshot.entries.some((e) => e.key === entryKey)) {
       set(
@@ -297,14 +261,12 @@ export function createOutbox({
     if (!startNextQueued() && snapshot.busy) {
       set({ busy: false });
     }
-    return { restore: null };
   }
 
   function drainNext() {
-    if (snapshot.busy) return Promise.resolve({ restore: null });
+    if (snapshot.busy) return Promise.resolve();
     const sendKey = prepareNextQueued();
-    if (!sendKey) return Promise.resolve({ restore: null });
-    return runEntry(sendKey);
+    return sendKey ? runEntry(sendKey) : Promise.resolve();
   }
 
   // Sends `text` (already stripped; see model/composer.js), or queues it if a
@@ -323,38 +285,13 @@ export function createOutbox({
     }
     if (snapshot.busy || hasFailure()) {
       const key = consumeTakenKey(text) ?? newKey();
-      const queued = {
-        key,
-        text,
-        at: now() * 1000,
-        phase: "queued",
-        error: null,
-        reuseKey: true,
-        resumed: false,
-        reply: null,
-        repliedAt: 0,
-        userId: null,
-        replyId: null,
-      };
-      set({ entries: [...snapshot.entries, queued] }, true);
-      return { restore: null, queued: true };
+      set({ entries: [...snapshot.entries, makeEntry({ key, text, at: now() * 1000, phase: "queued" })] }, true);
+      return;
     }
     const spliceHead = editingHead;
     editingHead = false;
     const key = consumeTakenKey(text) ?? newKey();
-    const entry = {
-      key,
-      text,
-      at: now() * 1000,
-      phase: "sending",
-      error: null,
-      reuseKey: true,
-      resumed: false,
-      reply: null,
-      repliedAt: 0,
-      userId: null,
-      replyId: null,
-    };
+    const entry = makeEntry({ key, text, at: now() * 1000, phase: "sending" });
     // Insert ahead of any queued entries that were paused while editing a failed item.
     const firstQueued = spliceHead ? snapshot.entries.findIndex((e) => e.phase === "queued") : -1;
     const entries =
@@ -367,10 +304,10 @@ export function createOutbox({
 
   // Retries a failed entry (or starts a paused queued entry when idle and unblocked).
   async function retry(key) {
-    if (snapshot.busy) return { restore: null };
+    if (snapshot.busy) return;
     const idx = snapshot.entries.findIndex((e) => e.key === key && (e.phase === "failed" || e.phase === "queued"));
-    if (idx < 0) return { restore: null };
-    if (snapshot.entries.slice(0, idx).some((e) => e.phase === "failed")) return { restore: null };
+    if (idx < 0) return;
+    if (snapshot.entries.slice(0, idx).some((e) => e.phase === "failed")) return;
     editingHead = false;
     const target = snapshot.entries[idx];
     const sendKey = target.reuseKey ? target.key : newKey();
@@ -429,28 +366,20 @@ export function createOutbox({
       return;
     }
     if (!activeKey && snapshot.entries.length === 0) {
-      const loaded = loadSavedEntries(load(), now());
-      const busy = loaded.some((e) => e.phase === "sending");
-      const failed = loaded.find((e) => e.phase === "failed");
       resumedOnce = false;
-      set({
-        entries: loaded,
-        busy,
-        notice: !busy && failed ? { tone: "error", text: failed.error, at: now() } : null,
-      });
+      set(stateFromEntries(loadSavedEntries(load(), now())));
     }
   }
 
   // Reattaches to an in-flight persisted turn (or drains restored queued items)
   // once the initial conversation snapshot has been reconciled.
   async function resume() {
-    if (!active || resumedOnce) return { restore: null };
+    if (!active || resumedOnce) return;
     resumedOnce = true;
     reconcile(items());
     const restoredSending = snapshot.entries.find((e) => e.phase === "sending" && e.resumed);
     if (restoredSending) return runEntry(restoredSending.key);
     if (!snapshot.busy) return drainNext();
-    return { restore: null };
   }
 
   // Matches the entries against the conversation's items by id and drops the

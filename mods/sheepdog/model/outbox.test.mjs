@@ -72,7 +72,7 @@ test("a send shows as a pending line at once, then with the reply", async () => 
     pendingItems(h.outbox.getState().entries).map((i) => [i.kind, i.text, i.pending]),
     [["shepherd", "run the tests", true]],
   );
-  assert.deepEqual(await sent, { restore: null });
+  await sent;
   assert.equal(h.outbox.getState().busy, false);
   assert.deepEqual(
     pendingItems(h.outbox.getState().entries).map((i) => [i.kind, i.text, Boolean(i.pending)]),
@@ -148,16 +148,16 @@ test("failed sends stay retryable inline: unknown outcomes reuse the key and HTT
   ]);
   // A failed send (whether typed or a tapped suggested reply) stays in the outbox as "failed"
   // so it can be retried, edited, or removed without losing the words.
-  assert.deepEqual(await h.outbox.submit("same words"), { restore: null, failed: true });
+  await h.outbox.submit("same words");
   const failed = h.outbox.getState().entries[0];
   assert.equal(failed.phase, "failed");
   assert.equal(failed.reuseKey, true);
   assert.deepEqual(pendingItems(h.outbox.getState().entries), [], "failed entries render in the composer, not as timeline bubbles");
 
-  assert.deepEqual(await h.outbox.retry(failed.key), { restore: null });
+  await h.outbox.retry(failed.key);
   assert.equal(h.calls[0].key, h.calls[1].key, "unknown outcome reuses the Idempotency-Key");
 
-  assert.deepEqual(await h.outbox.submit("same words"), { restore: null, failed: true }, "503");
+  await h.outbox.submit("same words");
   const refused = h.outbox.getState().entries.find((e) => e.phase === "failed");
   assert.equal(refused.reuseKey, false);
   await h.outbox.retry(refused.key);
@@ -184,7 +184,7 @@ test("editing a failed send moves its text back, preserving the key only if subm
 
 test("503 keeps the failed entry with the daemon's reason and clears the error when removed", async () => {
   const h = harness([new DaemonError("http", "the orchestrator is off (no brain key)", 503)]);
-  assert.deepEqual(await h.outbox.submit("hello"), { restore: null, failed: true });
+  await h.outbox.submit("hello");
   const s = h.outbox.getState();
   assert.equal(s.entries.length, 1);
   assert.equal(s.entries[0].phase, "failed");
@@ -197,7 +197,7 @@ test("503 keeps the failed entry with the daemon's reason and clears the error w
 
 test("409 says it was answered by voice and keeps nothing", async () => {
   const h = harness([new DaemonError("http", "a spoken turn is already answering this", 409)]);
-  assert.deepEqual(await h.outbox.submit("hello"), { restore: null });
+  await h.outbox.submit("hello");
   const s = h.outbox.getState();
   assert.deepEqual(s.entries, []);
   assert.deepEqual([s.notice.tone, s.notice.text], ["info", "Answered by voice."]);
@@ -211,9 +211,10 @@ test("an idempotency 409 is a failure to retry with a fresh key, not an answer b
     new DaemonError("http", "the first request with this Idempotency-Key did not keep its reply; send a new key", 409),
     reply("ok"),
   ]);
-  assert.deepEqual(await h.outbox.submit("hello"), { restore: null, failed: true });
+  await h.outbox.submit("hello");
   assert.equal(h.outbox.getState().notice.tone, "error");
   const failed = h.outbox.getState().entries[0];
+  assert.equal(failed.phase, "failed");
   assert.equal(failed.reuseKey, false);
   await h.outbox.retry(failed.key);
   assert.notEqual(h.calls[0].key, h.calls[1].key);
@@ -225,8 +226,8 @@ test("follow-up sends while busy queue in FIFO order and drain as turns complete
   const h = harness([() => firstTurn.promise, () => secondTurn.promise, reply("c")]);
 
   const first = h.outbox.submit("one");
-  assert.deepEqual(await h.outbox.submit("two"), { restore: null, queued: true });
-  assert.deepEqual(await h.outbox.submit("three"), { restore: null, queued: true });
+  await h.outbox.submit("two");
+  await h.outbox.submit("three");
   assert.deepEqual(
     h.outbox.getState().entries.map((e) => [e.text, e.phase]),
     [
@@ -351,12 +352,12 @@ test("retrying or removing a failed send clears the error notice, and a follow-u
   const h = harness([new DaemonError("http", "off", 503), reply("fixed"), reply("committed")]);
   let heard = 0;
   h.outbox.subscribe(() => heard++);
-  assert.deepEqual(await h.outbox.submit("fix the bug"), { restore: null, failed: true });
+  await h.outbox.submit("fix the bug");
   assert.ok(h.outbox.getState().notice);
 
   // Submitting a follow-up after a failure (when no other item was queued yet) must queue behind the failed turn, never bypass it!
   const before = heard;
-  assert.deepEqual(await h.outbox.submit("commit the fix"), { restore: null, queued: true });
+  await h.outbox.submit("commit the fix");
   assert.ok(heard > before);
   assert.equal(h.calls.length, 1, "follow-up did not run ahead of the failed turn");
   assert.deepEqual(
@@ -431,7 +432,7 @@ test("reconciling an in-flight turn before http.turn resolves keeps busy true an
   });
 
   const p1 = outbox.submit("one");
-  assert.deepEqual(await outbox.submit("two"), { restore: null, queued: true });
+  await outbox.submit("two");
 
   // SSE delivers the completed exchange for "one" while http.turn("one") is still in flight.
   const at = outbox.getState().entries[0].at;
@@ -439,7 +440,7 @@ test("reconciling an in-flight turn before http.turn resolves keeps busy true an
   outbox.reconcile(history);
 
   assert.equal(outbox.getState().busy, true, "outbox stays busy until runEntry completes");
-  assert.deepEqual(await outbox.submit("three"), { restore: null, queued: true });
+  await outbox.submit("three");
   assert.equal(calls.length, 1, "submitting 'three' did not start a concurrent turn");
   assert.deepEqual(
     outbox.getState().entries.map((e) => [e.text, e.phase]),
@@ -454,7 +455,7 @@ test("reconciling an in-flight turn before http.turn resolves keeps busy true an
   firstTurn.resolve(reply("a"));
   await new Promise((r) => setImmediate(r));
   assert.equal(outbox.getState().busy, true, "outbox stays busy while refresh() is awaiting");
-  assert.deepEqual(await outbox.submit("four"), { restore: null, queued: true });
+  await outbox.submit("four");
   assert.equal(calls.length, 1);
 
   refreshBlocked = false;
@@ -575,6 +576,7 @@ test("a failed turn whose exchange already appeared in the stream is reconciled 
     },
   };
   outbox = createOutbox({ http, newKey: () => "k1", now: () => 1_000_000, items: () => history });
-  assert.deepEqual(await outbox.submit("hello"), { restore: null });
+  await outbox.submit("hello");
   assert.deepEqual(outbox.getState().entries, []);
+  assert.equal(outbox.getState().notice, null);
 });
