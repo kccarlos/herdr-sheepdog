@@ -253,11 +253,11 @@ fi
 # ---- audit -------------------------------------------------------------------
 if want audit; then
   # Findings and operational problems do not turn the regression red.
-  step audit 5400 "$HERE/audit.sh" "$OUT" "$SHA" "$DAY" "$FIXER"
+  step audit 8400 "$HERE/audit.sh" "$OUT" "$SHA" "$DAY" "$FIXER"
   audit_rc=$?
   if [ "$audit_rc" != 0 ] && [ "$audit_rc" != 3 ]; then
     unset 'FAILED[${#FAILED[@]}-1]'
-    ROWS[${#ROWS[@]}-1]="| audit | SKIP | 5400s or less | [audit.log](audit.log) |"
+    ROWS[${#ROWS[@]}-1]="| audit | SKIP | 8400s or less | [audit.log](audit.log) |"
     echo "SKIP audit did not complete (exit $audit_rc)" >>"$OUT/audit.log"
   fi
 fi

@@ -25,7 +25,7 @@ chmod -R a-w "$TMP/read" || skip "could not make checkout read-only"
 cat >"$TMP/audit-prompt" <<EOF2
 Audit this repository at the checked-out commit. Scope: $SCOPE. Read only: do not modify files, run tests, invoke other agents, use network, or change any system state. Examine code and report only real, actionable problems. Return ONLY JSON lines, one object per finding with keys file (repository-relative path), line (positive integer), scenario, fix, severity (high, medium, or low). If none, return exactly []. Do not use markdown fences.
 EOF2
-if ! python3 "$HERE/agy_run.py" gemini-4-argon-high "$TMP/read" "$TMP/audit-prompt" "$OUT/audit-agent.log" 1800; then
+if ! python3 "$HERE/agy_run.py" gemini-4-argon-high "$TMP/read" "$TMP/audit-prompt" "$OUT/audit-agent.log" 3600; then
   skip "audit agent could not complete; see audit-agent.log for its reason"
 fi
 cat >"$TMP/verify-prompt" <<EOF2
