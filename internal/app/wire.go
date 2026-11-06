@@ -38,8 +38,9 @@ func (a *App) wire() error {
 	a.store = store
 
 	var inner supervisor.Herdr
+	var backendSocket string
 	if opts.Herdr == HerdrSocket {
-		a.backend, a.term = a.newBackend(cfg)
+		a.backend, a.term, backendSocket = a.newBackend(cfg)
 		inner = a.backend
 		a.wref = &watcherRef{}
 	}
@@ -263,8 +264,12 @@ func (a *App) wire() error {
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent
 	}
-	if cfg.Hooks.ClaudePermission {
-		deps.ClaudeHook = sup.RecordClaudeHook
+	if cfg.Hooks.ClaudePermission && backendSocket != "" {
+		deps.ClaudeHook = func(paneID, socket string, raw []byte) {
+			if sameSocketPath(socket, backendSocket) {
+				sup.RecordClaudeHook(paneID, raw)
+			}
+		}
 	}
 	if so := opts.Setup; so != nil {
 		deps.Setup = &web.SetupDeps{

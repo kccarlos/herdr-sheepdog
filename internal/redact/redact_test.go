@@ -75,25 +75,38 @@ func TestShapesAreRedactedWithoutConfig(t *testing.T) {
 		"fine-grained " + ghPat + " in log",
 		"slack bot " + slackBot + " and user " + slackUser,
 		"aws id " + awsKey + " in output",
+		"DEPLOY_TOKEN=fixture-value-987654321 touch ok.txt",
+		`export WEBHOOK_SECRET="fixture-secret-abcdef"`,
+		`DB_PASSWD='hunter222'`,
+		`{"command":"DEPLOY_TOKEN=\"fixture-value-987654321\"\necho ok"}`,
 	} {
 		out := r.String(in)
 		for _, leak := range []string{
 			"AIzaSyA123", "abcdefghijklmnop", "sk-or-v1", "ZZZsecretZZZ", "AIzaSecond",
 			"plainlongtokenvalue", "MIGTAgEAMBMG", "sk-FakeK",
 			ghpTok, ghoTok, ghPat, slackBot, slackUser, awsKey,
+			"fixture-value-987654321", "fixture-secret-abcdef", "hunter222",
 		} {
 			if strings.Contains(out, leak) {
 				t.Errorf("%q -> %q leaks %q", in, out, leak)
 			}
 		}
+		if strings.HasPrefix(in, "{") && !json.Valid([]byte(out)) {
+			t.Errorf("JSON input became invalid: %q -> %q", in, out)
+		}
 	}
 	// Ordinary log text survives, including tool call IDs and short prefixes.
+	defCfg := config.Default()
+	defCfg.Brain.OpenAICompat = []config.OpenAICompat{{Name: "groq", APIKeyEnv: "GROQ_KEY"}}
 	for _, keep := range []string{
 		"gemini.api_keys=4 web.token=set",
 		"pane_id w5:p1 turn_id t-12",
 		"monkey: banana-split",
 		"call_00_xoxuwTT1s9a12esbdi0Z9019",
 		"prefixes ghp_ github_pat_ xoxb- xoxp- AKIA alone",
+		"GOOGLE_APPLICATION_CREDENTIALS=/tmp/creds.json",
+		"git log --sort-key=timestamp",
+		defCfg.String(),
 	} {
 		if got := r.String(keep); got != keep {
 			t.Errorf("%q was changed to %q", keep, got)

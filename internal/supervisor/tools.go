@@ -476,6 +476,7 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 	// Answered: the next prompt on this pane appeared after now, even if
 	// it reads the same (inputs.go's promptSinceLocked).
 	delete(s.promptSeenAt, p.PaneID)
+	prevHook := s.takeClaudeHook(p.PaneID)
 	prevDecl, hadDecl := s.declined[p.PaneID]
 	declined := declines(p, keys)
 	if declined {
@@ -504,6 +505,7 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 				s.promptSeenAt[p.PaneID] = prevSeen
 			}
 		}
+		s.restoreClaudeHook(p.PaneID, prevHook)
 		if declined {
 			if cur, ok := s.declined[p.PaneID]; ok && cur.at.Equal(now) {
 				if hadDecl {

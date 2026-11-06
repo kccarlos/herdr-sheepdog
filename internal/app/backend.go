@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,22 +24,39 @@ const hcTermOff = "the live terminal needs a running herdr-core that has termina
 // sockets once, docs/dev/design/herdr-core-backend.md "Choosing the
 // backend") and logs the choice as daemon.herdr_backend, with the live
 // terminal deps of that backend.
-func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps) {
+func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps, socket string) {
 	old := herdr.NewClient(cfg.Herdr.Socket)
 	old.Log = a.log
 	hcSocket := cfg.Herdr.HCSocketPath()
 	core := herdrcore.New(hc.NewClient(hcSocket), a.log)
 
 	kind, reason := chooseBackend(context.Background(), cfg.Herdr.Backend, old, core)
-	socket := cfg.Herdr.Socket
+	socket = cfg.Herdr.Socket
 	if kind == config.HerdrBackendHC {
 		socket = hcSocket
 	}
 	a.log.Log("daemon", "daemon.herdr_backend", "", map[string]any{"backend": kind, "reason": reason, "socket": socket})
 	if kind == config.HerdrBackendHC {
-		return core, hcTerm(core, cfg.Supervisor.ProjectRoots)
+		return core, hcTerm(core, cfg.Supervisor.ProjectRoots), socket
 	}
-	return old, herdrTerm(cfg, old)
+	return old, herdrTerm(cfg, old), socket
+}
+
+func sameSocketPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	canon := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+			return filepath.Join(dir, filepath.Base(p))
+		}
+		return p
+	}
+	return canon(a) == canon(b)
 }
 
 // hcTerm is herdr-core's live terminal: one framed attach stream per

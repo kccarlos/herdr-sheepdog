@@ -205,15 +205,15 @@ func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p sta
 		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
 		return
 	}
-	prompt, ok := s.parsePrompt(row.PaneID, read.Text)
+	prompt, ok, same := s.samePrompt(row.PaneID, read.Text, p)
 	if !ok {
 		gone()
 		return
 	}
-	sig := s.promptSignature(prompt)
-	if sig == pendingSignature(p) {
+	if same {
 		return
 	}
+	sig := s.promptSignature(prompt)
 	if row.State != herdr.StateBlocked {
 		gone()
 		return
@@ -241,17 +241,18 @@ func (s *Supervisor) checkQuestion(ctx context.Context, row state.Agent, q state
 		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
 		return
 	}
-	prompt, ok := s.parsePrompt(row.PaneID, read.Text)
-	muted := ok && row.State == herdr.StateBlocked && s.promptSignature(prompt) != pendingSignature(q) && s.paneMuted(ctx, row.PaneID)
+	prompt, ok, same := s.samePrompt(row.PaneID, read.Text, q)
+	muted := ok && row.State == herdr.StateBlocked && !same && s.paneMuted(ctx, row.PaneID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cur, has := s.store.Question(q.ID); !has || cur.PaneID != q.PaneID {
 		return
 	}
 	switch {
-	case ok && s.promptSignature(prompt) == pendingSignature(q):
+	case same:
 		return
 	case !ok || row.State != herdr.StateBlocked:
+		s.clearClaudeHook(q.PaneID)
 		s.dropQuestionLocked(q)
 		s.log.Log(logSource, "pending.cancelled", q.PaneID, map[string]any{"id": q.ID, "kind": q.Kind, "reason": "prompt_gone"})
 	default:
@@ -303,8 +304,8 @@ func (s *Supervisor) stillAsking(ctx context.Context, p state.PendingAction) (as
 		s.log.Log(logSource, "supervisor.reconcile_error", p.PaneID, map[string]any{"error": err.Error(), "for": "tap"})
 		return false, false
 	}
-	prompt, parsed := s.parsePrompt(p.PaneID, read.Text)
-	return parsed && s.promptSignature(prompt) == pendingSignature(p), true
+	_, _, same := s.samePrompt(p.PaneID, read.Text, p)
+	return same, true
 }
 
 // claimPrompt atomically compares sig against s.lastPrompt[paneID] and,

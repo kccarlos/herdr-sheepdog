@@ -546,7 +546,7 @@ before a line is written.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `hooks.claude_permission` | *(TOML only)* | `true` | Adds a `PermissionRequest` entry (`sheepdog hook claude-permission`) to `~/.claude/settings.json` during `sheepdog setup` (keeping `~/.claude/settings.json.bak`) so long Claude Code commands arrive in full instead of being cut at 40 screen lines. The hook exits at once outside a herdr pane, never holds or decides, and answers still go through the approval rail. Set `false` to opt out; `sheepdog uninstall` removes the entry. |
+| `hooks.claude_permission` | *(TOML only)* | `true` | Adds an async `PermissionRequest` entry (`sheepdog hook claude-permission`) to `~/.claude/settings.json` during `sheepdog setup` (keeping `~/.claude/settings.json.bak`) so multi-line Claude Code Bash commands whose box is still on screen arrive with newlines intact beyond the 40-line prompt window. The hook exits at once outside a herdr pane, never holds or decides, and answers still go through the approval rail. Set `false` to opt out; `sheepdog uninstall` removes the entry. |
 
 ## What sheepdog stores
 

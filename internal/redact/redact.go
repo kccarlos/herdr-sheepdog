@@ -88,6 +88,15 @@ var shapes = []shapeRule{
 		},
 	},
 	{
+		// Shell and env assignments to secret-named variables (DEPLOY_TOKEN=...,
+		// WEBHOOK_SECRET="...", DB_PASSWD='...') not loaded in the daemon's own env.
+		re: regexp.MustCompile(`(?i)((?:^|[^0-9A-Za-z._-])[A-Za-z_][A-Za-z0-9_]*(?:key|token|secret|password|passwd|credentials?)(?:s|_\d+)?=\s*(?:\\"|["'])?)[^\s"'\\&,;/$][^\s"'\\&,;}]{5,}`),
+		mayMatch: func(s, lower string) bool {
+			return strings.IndexByte(s, '=') >= 0 &&
+				(strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "passw") || strings.Contains(lower, "credential"))
+		},
+	},
+	{
 		re: regexp.MustCompile(`(?i)([?&](?:key|token)=)[^\s"'&,;}]{6,}`),
 		mayMatch: func(s, lower string) bool {
 			return strings.ContainsAny(s, "?&") && (strings.Contains(lower, "key") || strings.Contains(lower, "token"))

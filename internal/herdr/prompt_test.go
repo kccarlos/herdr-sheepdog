@@ -3,6 +3,7 @@ package herdr_test
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -505,5 +506,59 @@ func TestParsePromptFolderAccessNeedsEnter(t *testing.T) {
 	}
 	if got := strings.Join(p.YesKeys, " "); got != "enter" {
 		t.Errorf("yes keys = %q, want enter", got)
+	}
+}
+
+func TestMatchClaudeCommand(t *testing.T) {
+	makeScreen := func(header string, bodyLines []string) string {
+		var lines []string
+		lines = append(lines,
+			"────────────────────────────────────────────────────────────────────────────────",
+			" "+header,
+			" Run command",
+			"╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+		)
+		for _, b := range bodyLines {
+			lines = append(lines, " │ "+b)
+		}
+		lines = append(lines,
+			"╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+			" Do you want to proceed?",
+			" ❯ 1. Yes",
+			"   2. No",
+			"",
+			" Esc to cancel",
+		)
+		return strings.Join(lines, "\n")
+	}
+
+	var fifty []string
+	for i := 1; i <= 50; i++ {
+		fifty = append(fifty, "echo line-"+strconv.Itoa(i))
+	}
+	fullCmd := strings.Join(fifty, "\n")
+	fullScreen := makeScreen("Bash command", fifty)
+	allLines := strings.Split(fullScreen, "\n")
+	cutScreen := strings.Join(allLines[len(allLines)-40:], "\n")
+
+	if !herdr.MatchClaudeCommand(fullScreen, fullCmd) {
+		t.Fatal("full 50-line Bash command box did not match exact command")
+	}
+	if herdr.MatchClaudeCommand(cutScreen, fullCmd) {
+		t.Fatal("truncated screen missing top rule/header matched tail")
+	}
+	ellipsisScreen := makeScreen("Bash command", []string{"echo line-1", "… +48 lines", "echo line-50"})
+	if herdr.MatchClaudeCommand(ellipsisScreen, fullCmd) {
+		t.Fatal("ellipsis-truncated box matched full command")
+	}
+	spaceScreen := makeScreen("Bash command", []string{`rm "draft notes.txt"`})
+	if herdr.MatchClaudeCommand(spaceScreen, `rm "draftnotes.txt"`) {
+		t.Fatal("whitespace-distinct command matched")
+	}
+	if herdr.MatchClaudeCommand(makeScreen("Bash command", []string{`echo "a  b"`}), `echo "a b"`) {
+		t.Fatal("double-space command matched single-space command")
+	}
+	if herdr.MatchClaudeCommand(screen(t, "claude-permission-prompt.screen.txt"), "1 hello from claude") {
+		t.Fatal("non-Bash Create file box matched as Bash command")
 	}
 }

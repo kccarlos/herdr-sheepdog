@@ -28,6 +28,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
@@ -493,7 +494,7 @@ func getJSON(ctx context.Context, base, path string, v any) error {
 }
 
 func runHook(args []string, stdin io.Reader) int {
-	pane := cmp.Or(os.Getenv("HC_TERMINAL_ID"), os.Getenv("HERDR_PANE_ID"))
+	pane, sock := hookOrigin()
 	if len(args) != 1 || args[0] != "claude-permission" || pane == "" {
 		return 0
 	}
@@ -513,7 +514,7 @@ func runHook(args []string, stdin io.Reader) int {
 		}
 		raw, err := io.ReadAll(io.LimitReader(stdin, 128<<10))
 		if req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, info.URL+"/api/hooks/claude-permission", bytes.NewReader(raw)); err == nil && rerr == nil && json.Valid(raw) {
-			req.Header = http.Header{"Content-Type": {"application/json"}, "X-Sheepdog-Pane": {pane}}
+			req.Header = http.Header{"Content-Type": {"application/json"}, "X-Sheepdog-Pane": {pane}, "X-Sheepdog-Socket": {sock}}
 			if resp, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Do(req); err == nil {
 				_ = resp.Body.Close()
 			}
@@ -524,4 +525,15 @@ func runHook(args []string, stdin io.Reader) int {
 	case <-time.After(300 * time.Millisecond):
 	}
 	return 0
+}
+
+func hookOrigin() (pane, sock string) {
+	home, _ := os.UserHomeDir()
+	if id := os.Getenv("HC_TERMINAL_ID"); id != "" {
+		return id, hc.DefaultSocket(os.Getenv, home, os.Getuid(), nil)
+	}
+	if id := os.Getenv("HERDR_PANE_ID"); id != "" {
+		return id, cmp.Or(os.Getenv("HERDR_SOCKET_PATH"), filepath.Join(home, ".config", "herdr", "herdr.sock"))
+	}
+	return "", ""
 }

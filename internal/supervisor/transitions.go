@@ -314,7 +314,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 		return
 	}
 	if herdr.EndsInQuestion(read.Text) {
-		if prompt, ok := s.parsePrompt(row.PaneID, read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
+		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
 			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed, stopErr)
 			return
 		}
@@ -420,6 +420,7 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 	if !ok {
 		// Blocked at something with no options to send: the user has to
 		// look. Nothing is pending, so nothing can be answered for them.
+		s.clearClaudeHook(row.PaneID)
 		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"alias": alias})
 		s.recordBlock(row.PaneID, "", true)
 		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen})
@@ -469,6 +470,7 @@ func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
 func (s *Supervisor) forgetPrompt(paneID string) {
 	// The pane left its prompt (answered in the terminal, say): a prompt
 	// that reads the same later appeared then, not now (inputs.go).
+	s.clearClaudeHook(paneID)
 	delete(s.promptSeenAt, paneID)
 	delete(s.told.asked, paneID)
 	s.closedLocked() // displaced.go

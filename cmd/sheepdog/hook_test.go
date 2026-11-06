@@ -55,14 +55,14 @@ func TestHookCommandBehaviourAndDeadline(t *testing.T) {
 		t.Fatalf("unknown subcommand: code=%d out=%q err=%q", code, out.String(), errb.String())
 	}
 
-	// 3. Running daemon on loopback HTTP: receives POST with pane header and raw JSON, zero output.
+	// 3. Running daemon on loopback HTTP: receives POST with pane + originating socket headers and raw JSON, zero output.
 	type gotReq struct {
-		pane, ctype, body string
+		pane, sock, ctype, body string
 	}
 	recv := make(chan gotReq, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		recv <- gotReq{r.Header.Get("X-Sheepdog-Pane"), r.Header.Get("Content-Type"), string(b)}
+		recv <- gotReq{r.Header.Get("X-Sheepdog-Pane"), r.Header.Get("X-Sheepdog-Socket"), r.Header.Get("Content-Type"), string(b)}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -81,11 +81,26 @@ func TestHookCommandBehaviourAndDeadline(t *testing.T) {
 	}
 	select {
 	case got := <-recv:
-		if got.pane != "w1:p1" || got.ctype != "application/json" || !strings.Contains(got.body, `"PermissionRequest"`) {
-			t.Fatalf("unexpected HTTP hook request: %+v", got)
+		if got.pane != "w1:p1" || got.sock != "/tmp/herdr.sock" || got.ctype != "application/json" || !strings.Contains(got.body, `"PermissionRequest"`) {
+			t.Fatalf("unexpected HTTP hook request (herdr): %+v", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for HTTP hook payload")
+	}
+
+	// HC_TERMINAL_ID reports the hc socket instead of HERDR_SOCKET_PATH.
+	t.Setenv("HC_TERMINAL_ID", "t-9")
+	t.Setenv("HC_SOCKET", "/tmp/hc-test.sock")
+	if code := runSub(realStdin, "claude-permission"); code != 0 {
+		t.Fatalf("with hc daemon: code=%d", code)
+	}
+	select {
+	case got := <-recv:
+		if got.pane != "t-9" || got.sock != "/tmp/hc-test.sock" {
+			t.Fatalf("unexpected HTTP hook request (hc): %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for hc HTTP hook payload")
 	}
 
 	// 4. Stalled server + never-ending stdin: hard ~300 ms ceiling, exits 0 with no output.

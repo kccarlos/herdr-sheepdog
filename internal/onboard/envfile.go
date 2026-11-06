@@ -118,10 +118,21 @@ func EditEnvFile(path string, set map[string]string, del []string) error {
 	for _, k := range add {
 		lines = append(lines, k+"="+set[k])
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	return writeFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"))
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := rejectSymlink(dir); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".env-*")
+	if err := rejectSymlink(path); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return err
 	}
@@ -130,7 +141,7 @@ func EditEnvFile(path string, set map[string]string, del []string) error {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -141,6 +152,14 @@ func EditEnvFile(path string, set map[string]string, del []string) error {
 		return err
 	}
 	return os.Chmod(path, 0o600)
+}
+
+func rejectSymlink(path string) error {
+	st, err := os.Lstat(path)
+	if err == nil && st.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("onboard: refusing to follow symlink %s", path)
+	}
+	return nil
 }
 
 // WriteConfig writes a new config file: the commented template with the

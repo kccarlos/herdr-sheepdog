@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -596,20 +597,7 @@ const claudeBashHeader = "bash command"
 // claude"). Both are "" when the layout is not there.
 func claudeCommand(lines []string) (command, reason string) {
 	r1, r2 := dashedBox(lines)
-	if r1 < 0 {
-		return "", ""
-	}
-	header := -1
-	for i := r1 - 1; i >= 0 && i >= r1-4; i-- {
-		t := strings.TrimSpace(lines[i])
-		if t == "" || reRule.MatchString(t) {
-			break
-		}
-		if strings.EqualFold(t, claudeBashHeader) {
-			header = i
-			break
-		}
-	}
+	header := claudeBashHeaderAt(lines, r1)
 	if header < 0 {
 		return "", ""
 	}
@@ -639,6 +627,22 @@ func claudeCommand(lines []string) (command, reason string) {
 	return join(lines[r1+1 : r2]), join(desc)
 }
 
+func claudeBashHeaderAt(lines []string, r1 int) int {
+	if r1 < 0 {
+		return -1
+	}
+	for i := r1 - 1; i >= 0 && i >= r1-8; i-- {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || reRule.MatchString(t) {
+			break
+		}
+		if strings.EqualFold(t, claudeBashHeader) {
+			return i
+		}
+	}
+	return -1
+}
+
 func dashedBox(lines []string) (r1, r2 int) {
 	dashed := func(s string) bool { return strings.Contains(s, "╌") && reRule.MatchString(s) }
 	for r2 = len(lines) - 1; r2 >= 0 && !dashed(lines[r2]); r2-- {
@@ -648,30 +652,76 @@ func dashedBox(lines []string) (r1, r2 int) {
 	return r1, r2
 }
 
-// MatchClaudeCommand reports whether the command box on screen agrees with cmd.
+// MatchClaudeCommand reports whether screen shows a complete Claude Bash
+// command box whose body matches cmd line-for-line (allowing terminal wraps).
 func MatchClaudeCommand(screen, cmd string) bool {
-	lines := tailLines(screen, promptTailLines)
-	r1, r2 := dashedBox(lines)
-	if r2 < 0 {
+	cmd = strings.TrimRight(cmd, "\r\n")
+	if strings.TrimSpace(cmd) == "" {
 		return false
 	}
-	compact := func(s string) string { return strings.Join(strings.Fields(s), "") }
-	head, tail, cut := "", "", false
-	for _, raw := range lines[r1+1 : r2] {
-		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "│"))
-		if strings.HasPrefix(t, "…") || strings.HasPrefix(t, "...") {
-			cut = true
-		} else if cut {
-			tail += compact(t)
-		} else {
-			head += compact(t)
+	all := strings.Split(screen, "\n")
+	tail := all[max(len(all)-promptTailLines, 0):]
+	_, first, _, ok := findOptions(tail)
+	if !ok {
+		_, first, _, ok = findCursorMenu(tail)
+	}
+	if !ok {
+		return false
+	}
+	above := all[:len(all)-len(tail)+first]
+	r1, r2 := dashedBox(above)
+	if r1 < 0 || len(above)-1-r2 > promptQuestionLines || claudeBashHeaderAt(above, r1) < 0 ||
+		slices.ContainsFunc(above[r2+1:], reRule.MatchString) {
+		return false
+	}
+	rawLines := above[r1+1 : r2]
+	cmdLines := strings.Split(cmd, "\n")
+	if len(rawLines) == 0 {
+		return false
+	}
+	pad := 1
+	if t := strings.TrimLeft(rawLines[0], " \t"); !strings.HasPrefix(t, "│") {
+		leadRaw := len(rawLines[0]) - len(strings.TrimLeft(rawLines[0], " "))
+		leadCmd := len(cmdLines[0]) - len(strings.TrimLeft(cmdLines[0], " "))
+		if leadRaw >= leadCmd && leadRaw-leadCmd <= 4 {
+			pad = leadRaw - leadCmd
 		}
 	}
-	cc := compact(cmd)
-	if cut {
-		return (head != "" || tail != "") && strings.HasPrefix(cc, head) && strings.HasSuffix(cc, tail) && len(cc) >= len(head)+len(tail)
+	margin := strings.Repeat(" ", pad)
+	stripGutter := func(s string) string {
+		s = strings.TrimRight(s, " \t\r")
+		if t := strings.TrimLeft(s, " \t"); strings.HasPrefix(t, "│") {
+			return strings.TrimPrefix(strings.TrimPrefix(t, "│"), " ")
+		}
+		return strings.TrimPrefix(s, margin)
 	}
-	return head != "" && ((r1 < 0 && strings.HasSuffix(cc, head)) || (r1 >= 0 && cc == head))
+	cols := screenCols(all)
+	j := 0
+	for _, cmdLine := range cmdLines {
+		if j >= len(rawLines) {
+			return false
+		}
+		want := strings.TrimRight(cmdLine, " \t\r")
+		seg := stripGutter(rawLines[j])
+		j++
+		for len(seg) < len(want) && cols > 0 && j < len(rawLines) && strings.HasPrefix(want, seg) {
+			next := stripGutter(rawLines[j])
+			nextTrim := strings.TrimLeft(next, " ")
+			if want[len(seg)] == ' ' && wrapped(rawLines[j-1], nextTrim, cols) {
+				seg += " " + nextTrim
+				j++
+			} else if displayWidth(strings.TrimRight(rawLines[j-1], " \t\r")) >= cols-1 && strings.HasPrefix(want[len(seg):], next) {
+				seg += next
+				j++
+			} else {
+				break
+			}
+		}
+		if seg != want {
+			return false
+		}
+	}
+	return j == len(rawLines)
 }
 
 // tailLines returns the last n lines of text.

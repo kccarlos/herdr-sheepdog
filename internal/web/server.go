@@ -124,7 +124,7 @@ type Deps struct {
 	// Watcher receives POST /api/herdr/event status events; nil means
 	// --herdr=mock.
 	Watcher    EventInjector
-	ClaudeHook func(paneID string, raw []byte)
+	ClaudeHook func(paneID, socket string, raw []byte)
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
 	// and PUT /api/brain/model (the runtime provider/model switch,
 	// persisted in Store's session.brain_provider / brain_model); nil
@@ -582,7 +582,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/herdr/event", accessLoopback, s.handleHerdrEvent},
 		route{"POST /api/hooks/claude-permission", accessSetup, func(w http.ResponseWriter, r *http.Request) {
 			if raw, err := io.ReadAll(io.LimitReader(r.Body, 256<<10)); err == nil && s.deps.ClaudeHook != nil {
-				s.deps.ClaudeHook(r.Header.Get("X-Sheepdog-Pane"), raw)
+				s.deps.ClaudeHook(r.Header.Get("X-Sheepdog-Pane"), r.Header.Get("X-Sheepdog-Socket"), raw)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		}},

@@ -621,6 +621,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		if slot {
 			s.clearPending(p, "prompt_gone")
 		} else {
+			s.clearClaudeHook(p.PaneID)
 			s.dropQuestionLocked(p)
 			s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "prompt_gone"})
 		}

@@ -160,6 +160,9 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	if p.Kind == state.PendingAnswerPrompt {
+		if reason == "prompt_gone" {
+			s.clearClaudeHook(p.PaneID)
+		}
 		s.dropQuestionLocked(p)
 		s.closedLocked() // displaced.go: also when the list had dropped it already
 	}
@@ -556,25 +559,72 @@ func (s *Supervisor) RecordClaudeHook(paneID string, raw []byte) {
 	if paneID == "" || paneID == s.cfg.OwnPane || json.Unmarshal(raw, &req) != nil || req.Event != "PermissionRequest" {
 		return
 	}
-	cmd := strings.TrimSpace(req.Input.Command)
-	if req.Tool != "Bash" {
-		cmd = ""
+	cmd := strings.TrimRight(req.Input.Command, "\r\n")
+	s.hookMu.Lock()
+	if req.Tool != "Bash" || strings.TrimSpace(cmd) == "" {
+		delete(s.hooks, paneID)
+	} else {
+		if s.hooks == nil {
+			s.hooks = map[string]string{}
+		}
+		s.hooks[paneID] = cmd[:min(len(cmd), 64<<10)]
+	}
+	s.hookMu.Unlock()
+}
+
+func (s *Supervisor) clearClaudeHook(paneID string) {
+	s.hookMu.Lock()
+	delete(s.hooks, paneID)
+	s.hookMu.Unlock()
+}
+
+func (s *Supervisor) takeClaudeHook(paneID string) string {
+	s.hookMu.Lock()
+	prev := s.hooks[paneID]
+	delete(s.hooks, paneID)
+	s.hookMu.Unlock()
+	return prev
+}
+
+func (s *Supervisor) restoreClaudeHook(paneID, prev string) {
+	if prev == "" {
+		return
 	}
 	s.hookMu.Lock()
-	if s.hooks == nil {
-		s.hooks = map[string]string{}
+	if _, newer := s.hooks[paneID]; !newer {
+		if s.hooks == nil {
+			s.hooks = map[string]string{}
+		}
+		s.hooks[paneID] = prev
 	}
-	s.hooks[paneID] = cmd[:min(len(cmd), 64<<10)]
 	s.hookMu.Unlock()
 }
 
 func (s *Supervisor) parsePrompt(paneID, screen string) (herdr.Prompt, bool) {
 	prompt, ok := herdr.ParsePrompt(screen)
+	if !ok {
+		return prompt, false
+	}
+	return s.withClaudeHook(paneID, screen, prompt), true
+}
+
+func (s *Supervisor) withClaudeHook(paneID, screen string, prompt herdr.Prompt) herdr.Prompt {
 	s.hookMu.Lock()
 	cmd := s.hooks[paneID]
 	s.hookMu.Unlock()
-	if ok && cmd != "" && herdr.MatchClaudeCommand(screen, cmd) {
+	if cmd != "" && herdr.MatchClaudeCommand(screen, cmd) {
 		prompt.Command = cmd
 	}
-	return prompt, ok
+	return prompt
+}
+
+// samePrompt checks whether screen still shows p, even if an async hook landed after p was built.
+func (s *Supervisor) samePrompt(paneID, screen string, p state.PendingAction) (prompt herdr.Prompt, ok, same bool) {
+	raw, ok := herdr.ParsePrompt(screen)
+	if !ok {
+		return herdr.Prompt{}, false, false
+	}
+	prompt = s.withClaudeHook(paneID, screen, raw)
+	sig := pendingSignature(p)
+	return prompt, true, s.promptSignature(prompt) == sig || s.promptSignature(raw) == sig
 }
