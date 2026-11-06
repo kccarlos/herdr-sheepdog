@@ -1,6 +1,7 @@
 package herdr_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -505,5 +506,84 @@ func TestParsePromptFolderAccessNeedsEnter(t *testing.T) {
 	}
 	if got := strings.Join(p.YesKeys, " "); got != "enter" {
 		t.Errorf("yes keys = %q, want enter", got)
+	}
+}
+
+// TestParsePromptLongClaudeBashCommand covers a real Claude Code 2.1.318
+// capture with a 45-line Bash command (taller than promptTailLines, inside
+// the 200-line read window), and checks that old prompts higher in scrollback
+// never leak into or pose as the live prompt at the bottom.
+func TestParsePromptLongClaudeBashCommand(t *testing.T) {
+	longScreen := screen(t, "claude-bash-prompt-long.screen.txt")
+	wantLines := make([]string, 45)
+	wantLines[0] = "echo step-01 > steps.txt"
+	for i := 2; i <= 45; i++ {
+		wantLines[i-1] = fmt.Sprintf("echo step-%02d >> steps.txt", i)
+	}
+	wantCmd := strings.Join(wantLines, "\n")
+
+	p, ok := herdr.ParsePrompt(longScreen)
+	if !ok {
+		t.Fatal("not parsed as a prompt")
+	}
+	if p.Question != "Do you want to proceed?" {
+		t.Errorf("question = %q", p.Question)
+	}
+	if p.Reason != "Write steps 01 through 45 to steps.txt" {
+		t.Errorf("reason = %q", p.Reason)
+	}
+	if p.Command != wantCmd {
+		t.Errorf("command (%d lines) =\n%s\nwant (%d lines):\n%s", len(strings.Split(p.Command, "\n")), p.Command, len(wantLines), wantCmd)
+	}
+	if got := p.Summary("Claude"); got != "Claude asks to run echo step-01." {
+		t.Errorf("summary = %q, want %q", got, "Claude asks to run echo step-01.")
+	}
+	if len(p.Options) != 4 || strings.Join(p.YesKeys, " ") != "1" || strings.Join(p.NoKeys, " ") != "4" {
+		t.Errorf("options = %+v, yes=%v no=%v", p.Options, p.YesKeys, p.NoKeys)
+	}
+
+	oldBash := screen(t, "claude-bash-prompt.screen.txt")
+
+	// Old prompt higher in scrollback, idle/working output at the bottom: not a prompt.
+	trailing := strings.Repeat("● Working on the next step…\n", 45)
+	if got, ok := herdr.ParsePrompt(longScreen + "\n" + trailing); ok {
+		t.Errorf("old prompt in scrollback parsed as live: %+v", got)
+	}
+
+	// Old Bash prompt in scrollback above a live non-Bash prompt: Command stays empty.
+	for name, live := range map[string]string{
+		"askuserquestion": screen(t, "claude-askuserquestion.screen.txt"),
+		"create-file":     screen(t, "claude-permission-prompt.screen.txt"),
+		"result-question": screen(t, "claude-result-then-prompt.screen.txt"),
+		"unbordered":      "Pick one?\n❯ 1. Red\n  2. Blue\n",
+	} {
+		t.Run("old-bash-above-"+name, func(t *testing.T) {
+			got, ok := herdr.ParsePrompt(oldBash + "\n" + live)
+			if !ok {
+				t.Fatal("live prompt not parsed")
+			}
+			if got.Command != "" {
+				t.Errorf("old scrollback command leaked into %s: %q", name, got.Command)
+			}
+		})
+	}
+
+	// Old Bash prompt in scrollback above the live 45-line Bash prompt: only the live box counts.
+	p, ok = herdr.ParsePrompt(oldBash + "\n" + longScreen)
+	if !ok || p.Command != wantCmd {
+		t.Errorf("old-above-live command = %q (ok=%v), want 45-line live command", p.Command, ok)
+	}
+
+	// Beyond the read window (header and opening dashed rule scrolled off): prompt still
+	// parses, Command is empty rather than taking an older box or misreading a file diff.
+	cut := strings.Join(strings.Split(longScreen, "\n")[30:], "\n")
+	p, ok = herdr.ParsePrompt(cut)
+	if !ok || p.Question != "Do you want to proceed?" || p.Command != "" {
+		t.Errorf("truncated box = %+v (ok=%v), want question with empty command", p, ok)
+	}
+	borderedCut := oldBash + "\n────────────────────────────────────────\n" + cut
+	p, ok = herdr.ParsePrompt(borderedCut)
+	if !ok || p.Command != "" {
+		t.Errorf("bordered truncated box leaked old command: %+v (ok=%v)", p, ok)
 	}
 }
