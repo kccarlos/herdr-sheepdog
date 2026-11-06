@@ -164,7 +164,8 @@ func isChatOption(label string) bool { return labelKey(label) == "chat about thi
 // carry indented description lines) with the cursor on exactly one of
 // them, nor an unnumbered cursor menu at the very end (findCursorMenu).
 func ParsePrompt(screen string) (Prompt, bool) {
-	lines := tailLines(screen, promptTailLines)
+	all := strings.Split(screen, "\n")
+	lines := all[max(len(all)-promptTailLines, 0):]
 	opts, first, cursor, ok := findOptions(lines)
 	numbered := ok
 	if !ok {
@@ -195,7 +196,8 @@ func ParsePrompt(screen string) (Prompt, bool) {
 	p := Prompt{Options: opts, Default: def}
 	p.Question, p.Command, p.Reason = above(lines[:first])
 	if p.Command == "" {
-		p.Command, p.Reason = claudeCommand(lines[:first])
+		// shortcut: commands taller than the screen read lose their header and parse as empty, widen ReadLines or scroll blocked hc reads if needed
+		p.Command, p.Reason = claudeCommand(all[:len(all)-len(lines)+first])
 	}
 	for _, o := range opts {
 		if o.Meta {
@@ -597,9 +599,12 @@ const claudeBashHeader = "bash command"
 func claudeCommand(lines []string) (command, reason string) {
 	dashed := func(line string) bool { return strings.Contains(line, "╌") && reRule.MatchString(line) }
 	r2 := -1
-	for i := len(lines) - 1; i >= 0; i-- {
+	for i := len(lines) - 1; i >= max(len(lines)-promptQuestionLines, 0); i-- {
 		if dashed(lines[i]) {
 			r2 = i
+			break
+		}
+		if t := strings.TrimSpace(lines[i]); (t != "" && reRule.MatchString(t)) || reOption.MatchString(lines[i]) || reCursorRow.MatchString(lines[i]) {
 			break
 		}
 	}
@@ -607,6 +612,9 @@ func claudeCommand(lines []string) (command, reason string) {
 	for i := r2 - 1; i >= 0; i-- {
 		if dashed(lines[i]) {
 			r1 = i
+			break
+		}
+		if strings.Contains(lines[i], "─") && reRule.MatchString(lines[i]) {
 			break
 		}
 	}
@@ -627,14 +635,14 @@ func claudeCommand(lines []string) (command, reason string) {
 	if header < 0 {
 		return "", ""
 	}
-	join := func(ls []string) string {
+	join := func(ls []string, sep string) string {
 		var out []string
 		for _, l := range ls {
-			if t := strings.TrimSpace(l); t != "" {
+			if t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "│")); t != "" {
 				out = append(out, t)
 			}
 		}
-		return strings.Join(out, " ")
+		return strings.Join(out, sep)
 	}
 	// Claude Code 2.1.30x adds a "Tip: …" paragraph under the header; it
 	// is advice about auto mode, not the command's reason. Its wrapped
@@ -650,7 +658,7 @@ func claudeCommand(lines []string) (command, reason string) {
 			desc = desc[1:]
 		}
 	}
-	return join(lines[r1+1 : r2]), join(desc)
+	return join(lines[r1+1:r2], "\n"), join(desc, " ")
 }
 
 // tailLines returns the last n lines of text.
