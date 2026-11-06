@@ -111,6 +111,7 @@ public struct MacUpdateOffer: Equatable, Sendable {
 public enum MacUpdateState: Equatable, Sendable {
     case idle
     case upgrading
+    case restartNeeded
     case failed(String)
 }
 
@@ -123,6 +124,7 @@ public struct MacUpdatePresentation: Equatable, Sendable {
     public var accessibilityLabel: String
 
     public init(offer: MacUpdateOffer?, state: MacUpdateState) {
+        if state == .restartNeeded { status = nil; itemTitle = "Restart to finish updating"; accessibilityLabel = "Update installed. Choose to restart Sheepdog."; return }
         guard let offer else {
             status = nil
             itemTitle = nil
@@ -130,7 +132,7 @@ public struct MacUpdatePresentation: Equatable, Sendable {
             return
         }
         switch state {
-        case .idle:
+        case .idle, .restartNeeded:
             status = nil
             itemTitle = "Update available — \(offer.latest)"
             accessibilityLabel = "Update available, version \(offer.latest.dropFirst()). Choose to install it."
@@ -147,8 +149,7 @@ public struct MacUpdatePresentation: Equatable, Sendable {
 }
 
 /// Runs the update the user chose. Homebrew-installed: `brew upgrade` in a
-/// detached shell (the cask quits and reopens the app, which must not kill
-/// it), progress read from its log file. Otherwise: the release page in the
+/// detached shell, progress read from its log file. Otherwise: the release page in the
 /// browser. No main-thread work.
 @MainActor
 public final class MacUpdater {
@@ -165,6 +166,7 @@ public final class MacUpdater {
     private let openURL: @MainActor (URL) -> Void
     private let timeout: TimeInterval
     private let pollInterval: TimeInterval
+    private let bundleURL: URL, appVersion: String?, voiceActive: @MainActor () -> Bool, quit: @MainActor () -> Void
 
     public init(
         runner: UpdateCommandRunning,
@@ -173,7 +175,7 @@ public final class MacUpdater {
         log: UpdateLogStoring,
         openURL: @escaping @MainActor (URL) -> Void,
         timeout: TimeInterval = MacUpdater.timeout,
-        pollInterval: TimeInterval = 2
+        pollInterval: TimeInterval = 2, bundleURL: URL = Bundle.main.bundleURL, appVersion: String? = nil, voiceActive: @escaping @MainActor () -> Bool = { false }, quit: @escaping @MainActor () -> Void = {}
     ) {
         detector = MacInstallDetector(runner: runner, files: files)
         self.launcher = launcher
@@ -181,6 +183,7 @@ public final class MacUpdater {
         self.openURL = openURL
         self.timeout = timeout
         self.pollInterval = pollInterval
+        self.bundleURL = bundleURL; self.appVersion = appVersion ?? Self.bundleVersion(at: bundleURL); self.voiceActive = voiceActive; self.quit = quit
     }
 
     /// The brew arguments for what is installed. Never sudo.
@@ -217,14 +220,14 @@ public final class MacUpdater {
         }
     }
 
-    /// On launch (the cask reopens the app after upgrading): read what the
+    /// On launch: read what a previous
     /// detached upgrade left. Finished: show a failure once, or clear a
     /// success. Still running: follow it.
     public func resume() async {
         guard state != .upgrading, let text = log.read() else { return }
         if let result = Self.finished(text) {
             log.clear()
-            state = Self.outcome(result)
+            finish(result)
         } else if let at = log.modified(), Date().timeIntervalSince(at) < timeout {
             state = .upgrading
             await poll(since: at)
@@ -237,7 +240,7 @@ public final class MacUpdater {
     private func poll(since started: Date) async {
         while true {
             if let text = log.read(), let result = Self.finished(text) {
-                state = Self.outcome(result)
+                finish(result)
                 return
             }
             if Date().timeIntervalSince(started) >= timeout {
@@ -246,6 +249,22 @@ public final class MacUpdater {
             }
             try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
         }
+    }
+
+    public static func relaunchScript(bundlePath: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier) -> String {
+        "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; sleep 0.2; echo \"exit=0\"; /usr/bin/open '\(bundlePath.replacingOccurrences(of: "'", with: "'\\''"))' >/dev/null 2>&1"
+    }
+    public func relaunch() {
+        do { try launcher.launch(script: Self.relaunchScript(bundlePath: bundleURL.path)); state = .idle; quit() }
+        catch { state = .failed("Could not restart Sheepdog: \(error.localizedDescription)") }
+    }
+    static func bundleVersion(at url: URL) -> String? {
+        (try? NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist"), error: ()))?["CFBundleShortVersionString"] as? String
+    }
+    private func finish(_ result: UpdateRunResult) {
+        let next = Self.outcome(result)
+        guard next == .idle, let appVersion, let disk = Self.bundleVersion(at: bundleURL), disk != appVersion else { state = next; return }
+        if voiceActive() { state = .restartNeeded } else { relaunch() }
     }
 
     /// The log's result once its last line is `exit=N`.

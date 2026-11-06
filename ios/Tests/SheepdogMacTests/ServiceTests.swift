@@ -178,6 +178,8 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertFalse(items(busy).contains { $0.title.hasPrefix("Update") })
         let none = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
         XCTAssertFalse(items(none).contains { $0.title.hasPrefix("Update") })
+        let restart = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: nil, state: .restartNeeded))
+        XCTAssertTrue(restart.contains(.item(title: "Restart to finish updating", action: .updateApp, enabled: true, checked: false)))
     }
 
     func testTheVoiceRowsWithTheDaemonUpAndNoSessionHere() {

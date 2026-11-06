@@ -47,6 +47,7 @@ private final class FakeLauncher: UpdateDetachedLaunching, @unchecked Sendable {
     /// What the detached script writes to the log at once.
     var output: String?
     var log: FakeLog?
+    var onLaunch: ((String) -> Void)?
 
     struct Boom: Error {}
 
@@ -54,6 +55,7 @@ private final class FakeLauncher: UpdateDetachedLaunching, @unchecked Sendable {
         if failure { throw Boom() }
         scripts.append(script)
         if let output { log?.text = output }
+        onLaunch?(script)
     }
 }
 
@@ -236,5 +238,113 @@ final class MacUpdaterTests: XCTestCase {
         let none = MacUpdatePresentation(offer: nil, state: .idle)
         XCTAssertNil(none.itemTitle)
         XCTAssertNil(none.status)
+    }
+
+    private func makeBundle(version: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Sheepdog-\(UUID().uuidString).app")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        try writeBundleVersion(version, to: dir)
+        return dir
+    }
+
+    private func writeBundleVersion(_ version: String, to bundle: URL) throws {
+        let data = try PropertyListSerialization.data(fromPropertyList: ["CFBundleShortVersionString": version], format: .xml, options: 0)
+        try data.write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+    }
+
+    func testSuccessfulCaskUpgradeRelaunchesWhenBundleVersionChanged() async throws {
+        let bundle = try makeBundle(version: "0.2.5")
+        let log = FakeLog()
+        let launcher = FakeLauncher()
+        launcher.onLaunch = { [weak self] script in
+            guard script.contains("brew") else { return }
+            try? self?.writeBundleVersion("0.2.6", to: bundle)
+            log.text = "==> Upgrading\nSkipping quitting application as brew is running inside it\nexit=0\n"
+        }
+        var quits = 0
+        let updater = MacUpdater(
+            runner: brewRunner(), files: FakeFiles(present: [brew]), launcher: launcher, log: log,
+            openURL: { _ in }, timeout: 5, pollInterval: 0.005, bundleURL: bundle, quit: { quits += 1 }
+        )
+        await updater.start(offer: try XCTUnwrap(offer()))
+        XCTAssertEqual(quits, 1)
+        XCTAssertEqual(launcher.scripts.count, 2)
+        let relaunch = MacUpdater.relaunchScript(bundlePath: bundle.path)
+        XCTAssertEqual(launcher.scripts.last, relaunch)
+        XCTAssertTrue(relaunch.contains("kill -0 \(ProcessInfo.processInfo.processIdentifier)"))
+        XCTAssertTrue(relaunch.contains("/usr/bin/open '\(bundle.path)'"))
+        XCTAssertTrue(relaunch.contains("exit=0"))
+
+        // When the new 0.2.6 bundle launches and resumes, it clears the log and does not loop.
+        log.text = "exit=0\n"
+        var secondQuits = 0
+        let reopened = MacUpdater(
+            runner: FakeRunner(), files: FakeFiles(), launcher: FakeLauncher(), log: log,
+            openURL: { _ in }, bundleURL: bundle, quit: { secondQuits += 1 }
+        )
+        await reopened.resume()
+        XCTAssertEqual(reopened.state, .idle)
+        XCTAssertNil(log.text)
+        XCTAssertEqual(secondQuits, 0)
+    }
+
+    func testNoRelaunchWhenBundleVersionUnchangedOrUpgradeFailed() async throws {
+        let bundle = try makeBundle(version: "0.2.5")
+        let log = FakeLog()
+        let launcher = FakeLauncher()
+        launcher.output = "==> Upgrading sheepdog\nexit=0\n"
+        launcher.log = log
+        var quits = 0
+        let updater = MacUpdater(
+            runner: brewRunner(), files: FakeFiles(present: [brew]), launcher: launcher, log: log,
+            openURL: { _ in }, timeout: 5, pollInterval: 0.005, bundleURL: bundle, quit: { quits += 1 }
+        )
+        await updater.start(offer: try XCTUnwrap(offer()))
+        XCTAssertEqual(updater.state, .idle)
+        XCTAssertEqual(quits, 0)
+        XCTAssertEqual(launcher.scripts.count, 1)
+
+        launcher.output = nil
+        launcher.onLaunch = { [weak self] _ in
+            try? self?.writeBundleVersion("0.2.6", to: bundle)
+            log.text = "Error: sha256 mismatch\nexit=1\n"
+        }
+        await updater.start(offer: try XCTUnwrap(offer()))
+        XCTAssertEqual(updater.state, .failed("Error: sha256 mismatch"))
+        XCTAssertEqual(quits, 0)
+        XCTAssertEqual(launcher.scripts.count, 2)
+    }
+
+    func testVoiceSessionDefersRelaunchUntilRestartChosen() async throws {
+        let bundle = try makeBundle(version: "0.2.5")
+        let log = FakeLog()
+        let launcher = FakeLauncher()
+        launcher.onLaunch = { [weak self] script in
+            guard script.contains("brew") else { return }
+            try? self?.writeBundleVersion("0.2.6", to: bundle)
+            log.text = "==> Upgrading\nexit=0\n"
+        }
+        var quits = 0
+        let updater = MacUpdater(
+            runner: brewRunner(), files: FakeFiles(present: [brew]), launcher: launcher, log: log,
+            openURL: { _ in }, timeout: 5, pollInterval: 0.005, bundleURL: bundle,
+            voiceActive: { true }, quit: { quits += 1 }
+        )
+        let o = try XCTUnwrap(offer())
+        await updater.start(offer: o)
+        XCTAssertEqual(updater.state, .restartNeeded)
+        XCTAssertEqual(quits, 0)
+        XCTAssertEqual(launcher.scripts.count, 1)
+
+        let withOffer = MacUpdatePresentation(offer: o, state: updater.state)
+        XCTAssertEqual(withOffer.itemTitle, "Restart to finish updating")
+        XCTAssertNil(withOffer.status)
+        XCTAssertEqual(MacUpdatePresentation(offer: nil, state: .restartNeeded).itemTitle, "Restart to finish updating")
+
+        updater.relaunch()
+        XCTAssertEqual(quits, 1)
+        XCTAssertEqual(launcher.scripts.count, 2)
+        XCTAssertEqual(updater.state, .idle)
     }
 }
