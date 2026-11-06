@@ -73,7 +73,6 @@ func (s *Supervisor) notePromptLine(text string, tags map[string]any) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.promptLineLocked(text, id) // displaced.go
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.ID != id {
 		return

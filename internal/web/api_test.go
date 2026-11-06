@@ -134,9 +134,14 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("/api/voice/system_prompt = %d %+v", code, sp)
 	}
 
-	// "yes" → to_supervisor → the bare-answer fast path → send_keys →
-	// pending.confirmed (no model involved at all).
+	// With --voice=off, SkippedPusher drops the push without showing it to a
+	// client, so the first bare "yes" returns the prompt synchronously and the
+	// second bare "yes" confirms.
 	var tr ToolResponse
+	code, body = h.postJSON("/api/utterance", map[string]any{"text": "yes"}, &tr)
+	if code != http.StatusOK || !strings.Contains(tr.Spoken, "auth asks to run printf") {
+		t.Fatalf("first utterance yes (re-ask) = %d %s", code, body)
+	}
 	code, body = h.postJSON("/api/utterance", map[string]any{"text": "yes"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Via != "text_router" || !strings.Contains(tr.Spoken, "Told auth yes") {
 		t.Fatalf("utterance yes = %d %s", code, body)

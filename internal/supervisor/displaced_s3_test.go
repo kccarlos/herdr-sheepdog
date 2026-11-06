@@ -32,230 +32,208 @@ const gitPushPromptScreen = `• Running git push origin main
 
   Press enter to confirm or esc to cancel`
 
-// Finding 1a: an inline voice reply (or fast-path re-ask) whose tool call is
-// cancelled before the voice speaks it must not leave the question marked told.
-func TestS3Finding1CancelledToolResultRevokesInlineTold(t *testing.T) {
+type noReportPusher struct{ *fakePusher }
+
+func (p *noReportPusher) PlaybackReports() bool { return false }
+
+// 1. A question becomes told only after confirmed playback (EventPlayed),
+// never on EventPush, EventTranscript, EventTurnComplete, or ToSupervisor return.
+func TestRailV2ToldOnlyAfterConfirmedPlayed(t *testing.T) {
 	m := braintest.NewModel()
 	h := newBrainHarness(t, m)
 	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-
 	h.block(authPane, "codex-approval-prompt.screen.txt")
 	ap, _ := h.pending()
+
+	// Push sent, transcribed, and turn-completed, but client has NOT drained it.
+	h.sup.OnVoiceEvent(voice.EventPush{Text: ap.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: ap.ID})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: ap.SpokenSummary, Final: true})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+
+	// Inline ToSupervisor reply also returned, still unplayed.
 	m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What is waiting?")
-	h.clock.Advance(time.Second)
-
-	// Docs blocks, displacing auth without being announced yet.
-	h.block(docsPane, "codex-approval-prompt.screen.txt")
-	dp, ok := h.pending()
-	if !ok || dp.PaneID != docsPane {
-		t.Fatalf("pending = %+v, want docs", dp)
+	res := h.say("What is waiting?")
+	if !strings.Contains(res.Spoken, ap.SpokenSummary) {
+		t.Fatalf("reply = %q", res.Spoken)
 	}
 
-	// The user asks what is going on; the handler returns an inline reply
-	// stating docs' question, then the voice session cancels the tool response
-	// before speaking it.
-	m.Add(braintest.Step{Text: braintest.Reply(dp.SpokenSummary+" Should it go ahead?", "")})
-	h.hear("Status?")
-	call := voice.ToolCall{ID: "call-cancel-1", Name: ToolToSupervisor, Args: map[string]any{"text": "Status?"}}
-	if _, err := h.sup.Handler()(context.Background(), call); err != nil {
-		t.Fatal(err)
-	}
-	h.sup.OnVoiceEvent(voice.EventToolResult{Call: call, Err: context.Canceled, Cancelled: true})
-
-	// The user never heard docs' question: a bare yes meant for auth must be
-	// refused.
 	h.clock.Advance(time.Second)
-	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-	m.Add(braintest.Step{Text: braintest.Reply("I did not send that.", "")})
+	reask := h.say("Yes.")
+	if n := h.keysTo(authPane); n != 0 {
+		t.Fatalf("bare yes before EventPlayed sent %d keys", n)
+	}
+	if !strings.Contains(reask.Spoken, "hadn't finished reading") {
+		t.Fatalf("reask = %q, want untold re-ask", reask.Spoken)
+	}
+
+	// Once the client reports playback drained, the next bare yes succeeds.
+	h.playText(reask.Spoken)
+	h.clock.Advance(time.Second)
+	h.say("Yes.")
+	if n := h.keysTo(authPane); n != 1 {
+		t.Fatalf("keys after EventPlayed = %d, want 1", n)
+	}
+}
+
+// 2. Cut before the prompt text leaves it untold; cut after the prompt text marks it told.
+func TestRailV2CutBeforeVsAfterPromptText(t *testing.T) {
+	h := toldAuth(t)
+	h.srv.SetScreen(docsPane, gitPushPromptScreen)
+	h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
+	dp, _ := h.pending()
+
+	// Cut before docs' prompt text: EventPlayed carries only the heard prefix.
+	h.playText("Auth is still waiting on printf.")
+	h.clock.Advance(500 * time.Millisecond)
 	h.say("Yes.")
 	if n := h.keysTo(docsPane); n != 0 {
-		t.Fatalf("cancelled inline reply left docs marked told: sent %d key presses", n)
+		t.Fatalf("cut before docs' prompt text sent %d keys", n)
+	}
+
+	// Cut after docs' prompt text played: EventPlayed carries dp.SpokenSummary.
+	h.playText(dp.SpokenSummary)
+	h.clock.Advance(500 * time.Millisecond)
+	h.say("Yes.")
+	if n := h.keysTo(docsPane); n != 1 {
+		t.Fatalf("cut after docs' prompt text sent %d keys, want 1", n)
 	}
 }
 
-// Finding 1b: an inline reply or spoken push cut during playback before it
-// reaches question B must revoke B's telling, while keeping a question that
-// was already stated in the heard prefix.
-func TestS3Finding1PlaybackCutRevokesUnheardQuestion(t *testing.T) {
-	t.Run("inline_reply_cut_before_question", func(t *testing.T) {
-		m := braintest.NewModel()
-		h := newBrainHarness(t, m)
-		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-
-		h.block(authPane, "codex-approval-prompt.screen.txt")
-		ap, _ := h.pending()
-		m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-		h.say("What is waiting?")
-		h.clock.Advance(time.Second)
-
-		h.block(docsPane, "codex-approval-prompt.screen.txt")
-		dp, _ := h.pending()
-
-		full := "Auth is still waiting on printf. " + dp.SpokenSummary + " Should it go ahead?"
-		m.Add(braintest.Step{Text: braintest.Reply(full, "")})
-		res := h.say("Any update?")
-		if res.UtteranceID == "" {
-			t.Fatalf("missing UtteranceID on inline reply: %+v", res)
-		}
-
-		// Client cuts playback before docs' question is reached.
-		heardPrefix := "Auth is still waiting on printf."
-		h.sup.OnVoiceEvent(voice.EventInterrupted{})
-		h.sup.OnVoiceEvent(voice.EventTranscript{
-			Dir:   voice.DirOut,
-			Text:  heardPrefix,
-			Final: true,
-			Cut:   &voice.TranscriptCut{Full: res.Spoken, HeardMs: 1200, UtteranceID: res.UtteranceID},
-		})
-
-		h.clock.Advance(time.Second)
-		m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-		m.Add(braintest.Step{Text: braintest.Reply("I did not send that.", "")})
-		h.say("Yes.")
-		if n := h.keysTo(docsPane); n != 0 {
-			t.Fatalf("cut reply before docs' question still authorised docs: sent %d key presses", n)
-		}
-	})
-
-	t.Run("push_cut_before_question", func(t *testing.T) {
-		h := toldAuth(t)
-		docsLine := blockDocs(t, h)
-		dp, _ := h.pending()
-
-		h.sup.OnVoiceEvent(voice.EventPush{Text: docsLine, Urgency: voice.UrgencyInterrupt, PendingID: dp.ID})
-		h.sup.OnVoiceEvent(voice.EventInterrupted{})
-		h.sup.OnVoiceEvent(voice.EventTranscript{
-			Dir:   voice.DirOut,
-			Text:  "Dropping auth;",
-			Final: true,
-			Cut:   &voice.TranscriptCut{Full: docsLine, HeardMs: 400},
-		})
-
-		h.clock.Advance(time.Second)
-		h.say("Yes.")
-		if n := h.keysTo(docsPane); n != 0 {
-			t.Fatalf("cut push before docs' question still authorised docs: sent %d key presses", n)
-		}
-	})
-}
-
-// Finding 2: a status sentence that names an agent and shares a single word
-// ("git") with its unheard approval ("git push origin main") must not mark that
-// approval told.
-func TestS3Finding2StatusSentenceDoesNotTellUnheardQuestion(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		reply string
-	}{
-		{"status_plus_other_question", "Docs finished updating git documentation, and auth asks to run printf. Should it go ahead?"},
-		{"status_period_other_git_push", "Docs finished updating git documentation. Auth asks to run git push; should it go ahead?"},
-		{"different_git_subcommand", "Docs asks whether to check git history."},
-		{"past_tense_completed_command", "Docs already ran git push earlier and finished."},
+// 3 & 4. Model paraphrase, omission, or status prose ("Docs needs more tests for git push")
+// without played key content for git push origin main leaves the question untold.
+func TestRailV2ParaphraseOmissionAndStatusProseDoNotTell(t *testing.T) {
+	for _, played := range []string{
+		"Docs wants your permission to run a command.",
+		"Docs asks whether to push your commits.",
+		"Docs needs more tests for git push.",
+		"Docs finished updating git documentation, and auth asks to run printf.",
+		"auth-v2 asks to run git push origin main.",
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(played, func(t *testing.T) {
 			m := braintest.NewModel()
 			h := newBrainHarness(t, m)
 			h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
 			h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+			h.addAgent(shopPane, "auth-v2", "codex", herdr.StateWorking)
 
-			// Auth blocks on printf and the user hears it.
 			h.block(authPane, "codex-approval-prompt.screen.txt")
 			ap, _ := h.pending()
-			m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-			h.say("What is waiting?")
+			h.playText(ap.SpokenSummary)
 			h.clock.Advance(time.Second)
 
-			// Docs blocks on git push origin main, unheard.
 			h.srv.SetScreen(docsPane, gitPushPromptScreen)
 			h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
-			dp, ok := h.pending()
-			if !ok || dp.PaneID != docsPane {
-				t.Fatalf("pending = %+v, want docs", dp)
-			}
-
-			m.Add(braintest.Step{Text: braintest.Reply(tc.reply, "")})
-			h.say("Status?")
+			h.playText(played)
 			h.clock.Advance(500 * time.Millisecond)
 
 			m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
 			m.Add(braintest.Step{Text: braintest.Reply("Holding off.", "")})
-			h.say("Yes, approve it.")
+			h.say("Yes.")
 			if n := h.keysTo(docsPane); n != 0 {
-				t.Fatalf("reply %q falsely marked docs' git push told (%d key presses)", tc.reply, n)
+				t.Fatalf("played %q falsely marked docs told (%d keys)", played, n)
 			}
 		})
 	}
 }
 
-// Finding 3: restarting the daemon after B displaced heard A must not erase the
-// evidence needed to reject a bare "yes" meant for A.
-func TestS3Finding3RestartPreservesDisplacementProtection(t *testing.T) {
-	h := toldAuth(t)
-	blockDocs(t, h)
-	h.clock.Advance(500 * time.Millisecond)
+// 5. told after speech began (acoustic onset before EventPlayed.At) blocks bare answer.
+func TestRailV2ToldAfterSpeechOnsetBlocksBareAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	ap, _ := h.pending()
 
+	// User starts speaking at t0; playback drains at t0 + 150ms; ASR arrives at t0 + 300ms.
+	h.pusher.mu.Lock()
+	h.pusher.onset = h.clock.Now()
+	h.pusher.mu.Unlock()
+	h.clock.Advance(150 * time.Millisecond)
+	h.playText(ap.SpokenSummary)
+	h.clock.Advance(150 * time.Millisecond)
+	h.say("Yes.")
+	if n := h.keysTo(authPane); n != 0 {
+		t.Fatalf("bare yes whose speech began before EventPlayed sent %d keys", n)
+	}
+}
+
+// 10 & 11. No-report client (PlaybackReports() == false): bare yes never sends keys,
+// re-ask tells user to name the agent or tap (EN & ZH), naming works, and tap works
+// (including right after a daemon restart when told is empty).
+func TestRailV2NoReportClientAndRestartFailClosedWithTap(t *testing.T) {
+	h := newHarness(t)
+	h.sup.pusher = &noReportPusher{fakePusher: h.pusher}
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+
+	res := h.say("Yes.")
+	if n := h.keysTo(authPane); n != 0 {
+		t.Fatalf("no-report client sent %d keys on bare yes", n)
+	}
+	if !strings.Contains(res.Spoken, "can't confirm audio playback") || !strings.Contains(res.Spoken, "Say 'yes, auth'") {
+		t.Fatalf("EN no-report reask = %q", res.Spoken)
+	}
+
+	// Chinese user hears the Chinese no-report instruction.
+	h.clock.Advance(time.Second)
+	h.hear("好的")
+	p, _ := h.pending()
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, p.YesKeys); err == nil {
+		t.Fatal("expected refusal on ZH bare yes without playback reports")
+	}
+	if got := h.lastPushText(); !strings.Contains(got, "不支持播放确认") || !strings.Contains(got, "批准auth") {
+		t.Fatalf("ZH no-report reask = %q", got)
+	}
+
+	// Naming the agent authorises on the no-report client.
+	h.clock.Advance(time.Second)
+	h.hear("Yes, approve auth.")
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, p.YesKeys); err != nil {
+		t.Fatalf("naming agent on no-report client failed: %v", err)
+	}
+	if n := h.keysTo(authPane); n != 1 {
+		t.Fatalf("keys to auth = %d, want 1", n)
+	}
+	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
+
+	// Restart starts with empty told: bare yes fails closed, AnswerTap works.
+	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+	h.speak(blockDocs(t, h))
 	store2, err := state.Open(h.store.Path(), state.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{
-		PendingTTL:     120 * time.Second,
-		Now:            h.clock.Now,
-		DataDir:        h.dir,
-		inputGrace:     -1,
-		relayAfter:     -1,
-		interruptCheck: 40 * time.Millisecond,
-		bareAnswers:    true,
+		PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir,
+		inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond, bareAnswers: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sup2.shutdown()
 	sup2.SetVoiceConnected(true)
-	sup2.reconcileReprompts(context.Background())
 
-	// User says "yes" meant for auth, which they heard right before restart.
 	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes.", Final: true})
-	res, err := sup2.Handler()(context.Background(), voice.ToolCall{ID: "c1", Name: ToolToSupervisor, Args: map[string]any{"text": "Yes."}})
-	if err != nil {
+	if _, err := sup2.Handler()(context.Background(), voice.ToolCall{ID: "c1", Name: ToolToSupervisor, Args: map[string]any{"text": "Yes."}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := h.keysTo(docsPane); n != 0 {
-		t.Fatalf("after restart, bare yes meant for auth approved unheard docs (%d key presses)", n)
+		t.Fatalf("post-restart bare yes sent %d keys with no persisted told", n)
 	}
-	if !strings.Contains(res.Spoken, "did not send that") || !strings.Contains(res.Spoken, "docs") {
-		t.Fatalf("refusal after restart = %+v, want explanation and re-ask of docs", res)
-	}
-
-	// After hearing the re-ask, the user's next "yes" approves docs.
-	h.clock.Advance(time.Second)
-	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes.", Final: true})
-	if _, err := sup2.Handler()(context.Background(), voice.ToolCall{ID: "c2", Name: ToolToSupervisor, Args: map[string]any{"text": "Yes."}}); err != nil {
-		t.Fatal(err)
+	dp, _ := store2.Pending()
+	if _, err := sup2.AnswerTap(context.Background(), dp.ID, 1); err != nil {
+		t.Fatalf("AnswerTap after restart: %v", err)
 	}
 	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("keys to docs after re-ask = %d, want 1", n)
+		t.Fatalf("keys to docs after tap = %d, want 1", n)
 	}
 }
 
-// Finding 4: when Auth's heard A1 is replaced on screen by A2 while Docs owns
-// the pending slot, AnswerPrompt revives A2 and refuses it with a re-ask. That
-// re-ask's pending_id must resolve so speaking the re-ask marks A2 told and the
-// user's follow-up approval succeeds, without replacing Docs as Pending on the
-// refusal.
+// Revived same-pane replacement re-ask resolves and does not overwrite Pending on refusal.
 func TestS3Finding4RevivedDisplacedReaskIDResolves(t *testing.T) {
 	h := toldAuth(t)
 	h.speak(blockDocs(t, h))
-	docsPending, ok := h.pending()
-	if !ok || docsPending.PaneID != docsPane {
-		t.Fatalf("pending = %+v, want docs", docsPending)
-	}
+	docsPending, _ := h.pending()
 
-	// Auth's screen moves from A1 (printf) to A2 (create claude.txt) before
-	// reconcile runs, while Docs still owns Pending.
 	h.srv.SetScreen(authPane, fixture(t, "claude-permission-prompt.screen.txt"))
 	h.clock.Advance(500 * time.Millisecond)
 
@@ -268,61 +246,43 @@ func TestS3Finding4RevivedDisplacedReaskIDResolves(t *testing.T) {
 		t.Fatalf("refused revival changed pending from %s to %s", docsPending.ID, after.ID)
 	}
 
-	// Find the pushed re-ask and deliver it as the voice session does, carrying
-	// its pending_id tag.
-	all := h.pusher.all()
-	reaskIdx := -1
-	for i := from; i < len(all); i++ {
-		if all[i].Urgency != voice.UrgencySilent && strings.Contains(all[i].Text, "did not send that") && strings.Contains(all[i].Text, "auth") {
-			reaskIdx = i
-			break
-		}
-	}
-	if reaskIdx < 0 {
+	line, ok := h.askedAgain(from, "auth")
+	if !ok {
 		t.Fatalf("no re-ask pushed for auth; pushes = %v", h.pushTexts()[from:])
 	}
-	tags := h.pusher.tagsOf(reaskIdx)
-	pid, _ := tags[tagPendingID].(string)
-	h.sup.OnVoiceEvent(voice.EventPush{Text: all[reaskIdx].Text, Urgency: all[reaskIdx].Urgency, PendingID: pid})
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: all[reaskIdx].Text, Final: true})
-	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	h.speak(line)
 
-	// Now that the user heard A2's re-ask, "Yes, auth can go ahead" must pass.
 	h.clock.Advance(time.Second)
 	h.hear("Yes, auth can go ahead.")
 	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, []string{"1"}); err != nil {
-		t.Fatalf("second AnswerPrompt after speaking A2's re-ask failed: %v", err)
+		t.Fatalf("second AnswerPrompt after playing A2's re-ask failed: %v", err)
 	}
 	if n := h.keysTo(authPane); n != 1 {
 		t.Fatalf("keys to auth = %d, want 1", n)
 	}
 }
 
-// Finding 5: when a typed turn is refused with a voice session configured and
-// no listener speaking pushes, TypedTurn must return the re-ask synchronously
-// in TypedReply.Text and record that delivery so the next typed answer passes.
+// TypedTurn returns a synchronous re-ask in TypedReply.Text and records it as told.
 func TestS3Finding5TypedRefusalReturnsReaskInTypedReply(t *testing.T) {
 	m := braintest.NewModel()
 	h := newBrainHarness(t, m)
 	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
 
-	// User hears Auth's A1.
 	h.block(authPane, "codex-approval-prompt.screen.txt")
 	a1, _ := h.pending()
 	m.Add(braintest.Step{Text: braintest.Reply(a1.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What is waiting?")
+	h.sup.ShepherdInput(InputTyped, "what is waiting?")
+	if _, err := h.sup.TypedTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	h.clock.Advance(time.Second)
 
-	// Auth's prompt changes to A2 (same-pane displacement: even naming "auth"
-	// cannot bypass it), and no voice listener speaks A2's announcement.
 	h.srv.SetScreen(authPane, "working")
 	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
 	h.clock.Advance(500 * time.Millisecond)
 	h.block(authPane, "claude-permission-prompt.screen.txt")
 	h.clock.Advance(500 * time.Millisecond)
 
-	// User submits a typed approval via TypedTurn while no voice listener plays
-	// spoken pushes.
 	from := len(h.pusher.all())
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"1"}})}})
 	m.Add(braintest.Step{Text: braintest.Reply("Holding off.", "")})
@@ -343,171 +303,14 @@ func TestS3Finding5TypedRefusalReturnsReaskInTypedReply(t *testing.T) {
 		}
 	}
 
-	// Follow-up typed approval must succeed without any voice EventPush.
 	h.clock.Advance(time.Second)
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"1"}})}})
 	m.Add(braintest.Step{Text: braintest.Reply("Approved auth.", "")})
 	h.sup.ShepherdInput(InputTyped, "yes, approve auth")
-	reply2, err := h.sup.TypedTurn(context.Background())
-	if err != nil {
+	if _, err := h.sup.TypedTurn(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if n := h.keysTo(authPane); n != 1 {
-		t.Fatalf("second typed turn after synchronous typed re-ask sent %d key presses, want 1 (reply=%+v)", n, reply2)
+		t.Fatalf("second typed turn after synchronous typed re-ask sent %d key presses, want 1", n)
 	}
-}
-
-func TestS3EdgeCases(t *testing.T) {
-	t.Run("cut_reply_keeps_stated_prefix_and_revokes_suffix", func(t *testing.T) {
-		m := braintest.NewModel()
-		h := newBrainHarness(t, m)
-		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-
-		h.block(authPane, "codex-approval-prompt.screen.txt")
-		ap, _ := h.pending()
-		h.srv.SetScreen(docsPane, gitPushPromptScreen)
-		h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
-		dp, _ := h.pending()
-
-		full := ap.SpokenSummary + " Also, " + dp.SpokenSummary + " Should they go ahead?"
-		m.Add(braintest.Step{Text: braintest.Reply(full, "")})
-		res := h.say("What is waiting?")
-
-		// Client hears auth's question, then cuts before docs' question.
-		h.sup.OnVoiceEvent(voice.EventInterrupted{})
-		h.sup.OnVoiceEvent(voice.EventTranscript{
-			Dir:   voice.DirOut,
-			Text:  ap.SpokenSummary,
-			Final: true,
-			Cut:   &voice.TranscriptCut{Full: res.Spoken, HeardMs: 1100, UtteranceID: res.UtteranceID},
-		})
-
-		h.clock.Advance(time.Second)
-		m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-		m.Add(braintest.Step{Text: braintest.Reply("Holding off.", "")})
-		h.say("Yes, approve it.")
-		if n := h.keysTo(docsPane); n != 0 {
-			t.Fatalf("cut before docs still authorised docs (%d key presses)", n)
-		}
-	})
-
-	t.Run("typed_delivery_not_revoked_by_unrelated_voice_cut", func(t *testing.T) {
-		m := braintest.NewModel()
-		h := newBrainHarness(t, m)
-		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-
-		h.block(authPane, "codex-approval-prompt.screen.txt")
-		ap, _ := h.pending()
-		m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-		h.say("What is waiting?")
-		h.clock.Advance(time.Second)
-
-		h.srv.SetScreen(docsPane, gitPushPromptScreen)
-		h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
-		dp, _ := h.pending()
-
-		m.Add(braintest.Step{Text: braintest.Reply(dp.SpokenSummary+" Should it go ahead?", "")})
-		h.sup.ShepherdInput(InputTyped, "what is docs asking?")
-		if _, err := h.sup.TypedTurn(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-
-		// An unrelated voice cut arrives afterwards; typed telling must remain.
-		h.sup.OnVoiceEvent(voice.EventTranscript{
-			Dir:   voice.DirOut,
-			Text:  "Sure",
-			Final: true,
-			Cut:   &voice.TranscriptCut{Full: "Sure, let me check.", HeardMs: 300},
-		})
-
-		h.clock.Advance(time.Second)
-		m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-		m.Add(braintest.Step{Text: braintest.Reply("Approved docs.", "")})
-		h.sup.ShepherdInput(InputTyped, "yes, go ahead")
-		if _, err := h.sup.TypedTurn(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if n := h.keysTo(docsPane); n != 1 {
-			t.Fatalf("typed telling lost on voice cut: keys to docs = %d, want 1", n)
-		}
-	})
-
-	t.Run("comma_less_conjunction_and_superstring_alias", func(t *testing.T) {
-		h := newHarness(t)
-		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-		h.addAgent(docsPane, "auth-v2", "codex", herdr.StateWorking)
-		if _, err := h.store.Update(docsPane, func(a *state.Agent) { a.Alias = "auth-v2"; a.Spoken = "auth v2" }); err != nil {
-			t.Fatal(err)
-		}
-		p := state.PendingAction{PaneID: authPane, Command: "git push origin main"}
-		h.sup.mu.Lock()
-		bySuper := h.sup.statesLocked("auth-v2 asks to run git push; should it go ahead?", p)
-		byConj := h.sup.statesLocked("auth finished updating git documentation and auth-v2 asks to run git push?", p)
-		byReal := h.sup.statesLocked("auth asks whether to run git push on main.", p)
-		h.sup.mu.Unlock()
-		if bySuper {
-			t.Fatal("superstring alias auth-v2 falsely stated auth's prompt")
-		}
-		if byConj {
-			t.Fatal("comma-less conjunction bled auth-v2's question into auth's status clause")
-		}
-		if !byReal {
-			t.Fatal("natural paraphrase of auth's git push did not count as stated")
-		}
-	})
-
-	t.Run("same_pane_and_closed_window_across_restart_plus_tap", func(t *testing.T) {
-		h := toldAuth(t)
-		// Auth closes right before restart; docs blocks right after restart.
-		h.srv.SetScreen(authPane, "running")
-		h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
-		h.clock.Advance(time.Second)
-
-		store2, err := state.Open(h.store.Path(), state.Options{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{
-			PendingTTL:     120 * time.Second,
-			Now:            h.clock.Now,
-			DataDir:        h.dir,
-			inputGrace:     -1,
-			relayAfter:     -1,
-			interruptCheck: 40 * time.Millisecond,
-			bareAnswers:    true,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sup2.shutdown()
-		sup2.SetVoiceConnected(true)
-
-		h.srv.SetScreen(docsPane, fixture(t, "codex-approval-prompt.screen.txt"))
-		h.srv.SetStatus(docsPane, herdr.StateBlocked)
-		row, _ := store2.Get(docsPane)
-		sup2.HandleTransition(context.Background(), herdr.Transition{PaneID: docsPane, From: herdr.StateWorking, To: herdr.StateBlocked, At: h.clock.Now(), Agent: row.Kind, WorkspaceID: row.Workspace, WorkspaceLabel: row.WorkspaceLabel})
-		dp, ok := store2.Pending()
-		if !ok || dp.PaneID != docsPane {
-			t.Fatalf("pending = %+v, want docs", dp)
-		}
-
-		// Bare "yes" within window of auth's pre-restart question is refused.
-		sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes.", Final: true})
-		if _, err := sup2.Handler()(context.Background(), voice.ToolCall{ID: "c1", Name: ToolToSupervisor, Args: map[string]any{"text": "Yes."}}); err != nil {
-			t.Fatal(err)
-		}
-		if n := h.keysTo(docsPane); n != 0 {
-			t.Fatalf("post-restart bare yes within closed window sent %d keys to docs", n)
-		}
-
-		// Phone tap by ID always works without waiting for voice delivery.
-		if _, err := sup2.AnswerTap(context.Background(), dp.ID, 1); err != nil {
-			t.Fatalf("AnswerTap after restart: %v", err)
-		}
-		if n := h.keysTo(docsPane); n != 1 {
-			t.Fatalf("keys to docs after tap = %d, want 1", n)
-		}
-	})
 }

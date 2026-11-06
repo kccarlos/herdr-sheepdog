@@ -11,12 +11,16 @@ import (
 )
 
 // speak is the voice sending a spoken push to the model and finishing
-// the turn that read it (the --heard-echo order: push, transcript, turn
-// complete).
+// the turn that read it (push, transcript, turn complete, client played).
 func (h *harness) speak(text string) {
 	h.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: voice.UrgencyIdle})
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
 	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	h.playText(text)
+}
+
+func (h *harness) playText(text string) {
+	h.sup.OnVoiceEvent(voice.EventPlayed{Text: text, At: h.clock.Now()})
 }
 
 // lastPushText is the newest spoken push the supervisor handed out.

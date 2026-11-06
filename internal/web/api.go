@@ -784,6 +784,9 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	if err != nil {
 		return call, res, err
 	}
+	if ctx.Err() == nil && s.deps.Supervisor != nil {
+		s.deps.Supervisor.NoteReturnedText(res.Spoken)
+	}
 	if call.Name == supervisor.ToolStop {
 		s.hub.afterCancel(res)
 	}

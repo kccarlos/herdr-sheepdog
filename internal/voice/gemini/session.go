@@ -905,7 +905,17 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
 	}
+	for _, t := range rep.Played {
+		s.emit(voice.EventPlayed{Text: t, At: now})
+	}
 	s.poke()
+}
+
+// PlaybackReports reports whether the attached client sends playback reports.
+func (s *Session) PlaybackReports() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.play.Reports()
 }
 
 // LastPlayback is the client's most recent playback report.

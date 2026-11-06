@@ -475,6 +475,17 @@
       "dur_ms": 2330
     },
     {
+      "scenario": "collision-displaced-bare-yes",
+      "text": "What's going on?",
+      "lang": "en",
+      "voice": "Puck",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "790bb04a4bc4dcb08bd7df7d",
+      "sha256": "23016cd6984dfbe485a04c4c55376bee916a390d95032dbba0e17cb36aa446a8",
+      "dur_ms": 1290
+    },
+    {
       "scenario": "barge-in-long-answer",
       "text": "What did bench-claude say when it finished?",
       "lang": "en",

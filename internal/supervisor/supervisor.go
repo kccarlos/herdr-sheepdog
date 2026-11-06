@@ -490,7 +490,6 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 			s.holdQuestion(q.ID)
 		}
 	}
-	s.restoreTold()
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.
@@ -701,7 +700,6 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 				s.brain.SaidCut(e.Text, e.Cut.Full, e.Cut.HeardMs)
 			}
 			s.onAnswerCut(e.Cut, e.Text) // unanswered.go
-			s.onToldCut(e.Cut, e.Text)   // displaced.go
 			return
 		}
 		if e.Dir == voice.DirIn {
@@ -725,9 +723,6 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventTurnComplete:
 		s.closeVoiceInput()
 		s.pushSpoken(false)
-		s.mu.Lock()
-		s.notePushTurnDoneLocked()
-		s.mu.Unlock()
 		s.voiceStopped()
 		s.promptTurnDone() // buried.go
 		if s.brain != nil {
@@ -747,20 +742,17 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			// markPushed). A silent push is context the voice never
 			// speaks.
 			s.pushSpoken(true)
-			s.markPushed(e.Text, e.PendingID)
+			s.markPushed(e.Text)
 			s.noteNamesSaid(e.Text) // names.go: what the user was told
 		}
 	case voice.EventInterrupted:
 		// The user barged in on whatever was playing, a push
 		// included: what the voice says next answers them.
-		s.mu.Lock()
-		s.notePushInterruptedLocked()
-		s.mu.Unlock()
 		s.pushSpoken(false)
 		s.voiceStopped()
 		s.flushFocus()
-	case voice.EventToolResult:
-		s.onToolResult(e) // displaced.go
+	case voice.EventPlayed:
+		s.notePlayed(e.Text, e.At)
 	case voice.EventPushUnheard:
 		s.onPushUnheard(e) // unheard.go
 	}

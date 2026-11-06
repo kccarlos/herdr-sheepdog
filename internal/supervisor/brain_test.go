@@ -246,6 +246,9 @@ func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 	h = newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if p, ok := h.pending(); ok {
+		h.playText(p.SpokenSummary)
+	}
 	res := h.say("please approve it")
 	if res.Spoken != "Told auth yes." {
 		t.Errorf("result = %+v", res)

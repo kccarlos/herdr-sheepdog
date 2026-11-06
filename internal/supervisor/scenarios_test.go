@@ -81,6 +81,7 @@ func TestBriefingCacheInvalidation(t *testing.T) {
 	if got != "Two agents: auth is asking would you like to run the following command and docs is working on something. Auth is waiting for your answer." {
 		t.Errorf("after block: %q", got)
 	}
+	h.playText(h.lastPushText())
 	h.say("yes")
 	if got := h.roster(); strings.Contains(got, "waiting for your answer") {
 		t.Errorf("after the answer the pending mention must go: %q", got)
@@ -140,6 +141,7 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 func TestScenario3ConfirmSendsKeys(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	res := h.say("yes")
 	if res.Spoken != "Told auth yes." || res.Clarify {
 		t.Errorf("answer = %+v", res)
@@ -190,6 +192,7 @@ func TestConfirmAnswerMapping(t *testing.T) {
 			h := newHarness(t)
 			h.addAgent("w5:p1", "w5", "codex", herdr.StateWorking)
 			h.block("w5:p1", c.screen)
+			h.playText(h.lastPushText())
 			res := h.say(c.answer)
 			if res.Spoken != c.spoken {
 				t.Errorf("spoken = %q, want %q", res.Spoken, c.spoken)
@@ -262,6 +265,7 @@ func TestAgyPromptsAnswerWithDigits(t *testing.T) {
 	if p, ok := h.pending(); !ok || strings.Join(p.YesKeys, ",") != "1" || strings.Join(p.NoKeys, ",") != "2" {
 		t.Fatalf("edit prompt pending = %+v", p)
 	}
+	h.playText(h.lastPushText())
 	if res := h.say("no"); res.Spoken != "Told auth no." {
 		t.Errorf("no = %+v", res)
 	}
@@ -270,6 +274,7 @@ func TestAgyPromptsAnswerWithDigits(t *testing.T) {
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 	h.block("w5:p1", "agy-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	if res := h.say("yes"); res.Spoken != "Told auth yes." {
 		t.Errorf("yes = %+v", res)
 	}
@@ -445,6 +450,9 @@ func TestLateBareYesGoesToTheBrain(t *testing.T) {
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if p, ok := h.pending(); ok {
+		h.playText(p.SpokenSummary)
+	}
 	calls := len(m.Calls())
 	h.clock.Advance(7 * time.Minute)
 	res := h.say("yes")
@@ -511,7 +519,8 @@ func TestReplacementAnnouncement(t *testing.T) {
 	if h.log.count("pending.replaced") != 1 || h.log.count("pending.created") != 2 {
 		t.Errorf("replaced=%d created=%d", h.log.count("pending.replaced"), h.log.count("pending.created"))
 	}
-	// A bare answer goes to the newest question.
+	// A bare answer goes to the newest question once heard.
+	h.playText(push.Text)
 	h.say("yes")
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w6:p1", "1"} {
 		t.Errorf("send_keys = %v", keys)
@@ -578,6 +587,7 @@ func TestAskUserQuestionBlockCreatesPendingAndSendKeysPasses(t *testing.T) {
 	if p.Question != "this is a test approval prompt: do you want to proceed" {
 		t.Errorf("question = %q", p.Question)
 	}
+	h.playText(p.SpokenSummary)
 	h.clock.Advance(time.Second)
 	h.sup.ShepherdInput(InputTyped, "yes")
 	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"1"})
@@ -709,6 +719,7 @@ func TestInstructionWhenHerdrSaysBlocked(t *testing.T) {
 	if got := h.promptRequests(); len(got) != 0 {
 		t.Errorf("agent.prompt = %v, want nothing typed", got)
 	}
+	h.playText(res.Spoken)
 	h.say("yes")
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0][1] != "y" {
 		t.Errorf("send_keys = %v", keys)
@@ -802,9 +813,15 @@ func TestPersistedPendingSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "no", Final: true})
+	reask, _ := sup2.ToSupervisor(context.Background(), "no")
+	if !strings.Contains(reask.Spoken, "auth asks to run printf.") || len(h.sendKeysRequests()) != 0 {
+		t.Fatalf("first bare answer after restart = %+v, keys = %v", reask, h.sendKeysRequests())
+	}
+	sup2.OnVoiceEvent(voice.EventPlayed{Text: reask.Spoken, At: h.clock.Now()})
+	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "no", Final: true})
 	res, _ := sup2.ToSupervisor(context.Background(), "no")
 	if res.Spoken != "Told auth no." {
-		t.Errorf("answer after restart = %+v", res)
+		t.Errorf("answer after re-ask played = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0][1] != "esc" {
 		t.Errorf("send_keys = %v", keys)

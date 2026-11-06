@@ -451,16 +451,6 @@ func viaPlace(via string) string {
 func (s *Supervisor) holdSpaceQuestions(idx *folderIndex, path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for pane := range s.told.asked {
-		if row, ok := s.store.Get(pane); ok && s.folderOfPane(idx, row) == path {
-			delete(s.told.asked, pane)
-		}
-	}
-	for k := range s.told.stated {
-		if row, ok := s.store.Get(k.pane); ok && s.folderOfPane(idx, row) == path {
-			delete(s.told.stated, k)
-		}
-	}
 	open := s.openKeysLocked()
 	p, has := s.store.Pending()
 	changed := false

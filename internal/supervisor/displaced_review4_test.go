@@ -37,7 +37,7 @@ func TestReview4NamedStatusDoesNotPromoteHeld(t *testing.T) {
 	w.block(authPane, "codex-approval-prompt.screen.txt")
 	q, _ := w.store.Question(firstQuestionOf(w.harness, authPane))
 	w.sup.ShepherdInput(InputTyped, "How is auth doing?")
-	w.sup.toldInReply("Auth is paused on printf in your muted space.")
+	w.sup.NoteReturnedText("Auth is paused on printf in your muted space.")
 	if !w.sup.heldQuestion(q.ID) {
 		t.Fatal("status promoted hidden question")
 	}
@@ -69,7 +69,7 @@ func TestReview4ShortNameAndScrubbedCommandInReply(t *testing.T) {
 	p.Question = ""
 	p.SpokenSummary = ""
 	h.sup.mu.Lock()
-	got := h.sup.statesLocked("db asks to run rm a file", p)
+	got := h.sup.statesQuestionLocked("db asks to run rm a file", p)
 	h.sup.mu.Unlock()
 	if !got {
 		t.Fatal("reply did not match short name and command")
@@ -97,7 +97,7 @@ func TestReview4ScrubPlaceholderDoesNotIdentifyQuestion(t *testing.T) {
 	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
 	p := state.PendingAction{PaneID: docsPane, Command: "rm /tmp/example"}
 	h.sup.mu.Lock()
-	got := h.sup.statesLocked("docs is working on a file", p)
+	got := h.sup.statesQuestionLocked("docs is working on a file", p)
 	h.sup.mu.Unlock()
 	if got {
 		t.Fatal("generic scrub placeholder identified an unheard question")
@@ -118,7 +118,7 @@ func TestReview2StatesNamesAndChinese(t *testing.T) {
 			}
 			p := state.PendingAction{PaneID: docsPane, Question: tc.question}
 			h.sup.mu.Lock()
-			got := h.sup.statesLocked(tc.reply, p)
+			got := h.sup.statesQuestionLocked(tc.reply, p)
 			h.sup.mu.Unlock()
 			if !got {
 				t.Fatalf("%q did not identify %q's question", tc.reply, tc.name)
@@ -150,9 +150,7 @@ func TestReview2MutedRevivalNeverSends(t *testing.T) {
 	if !ok {
 		t.Fatal("missing pending question")
 	}
-	w.sup.mu.Lock()
-	w.sup.toldKeyLocked(keyOf(p), "")
-	w.sup.mu.Unlock()
+	w.playText(p.SpokenSummary)
 	if err := w.store.ClearPending(); err != nil {
 		t.Fatal(err)
 	}

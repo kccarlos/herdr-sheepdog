@@ -368,11 +368,19 @@ transcription, typed text, or a tap on the question — that arrived after
 the prompt appeared (when it was first seen, per pane) and within
 `supervisor.authorise_window_s`, and whose
 own words (never the voice model's `to_supervisor` argument) answer it:
-never empty, and a "no" never approves. Nor can words the user began
-before a question was told to them answer it while another question
-they had heard was still open or had just closed (the displacement rail;
-the daemon then tells them why and asks again, and the exact rule is in
-`internal/supervisor/displaced.go`). A `to_supervisor` call with no
+never empty, and a "no" never approves. A bare spoken or typed answer never sends keys unless the question was
+`told` before the user's speech began — on voice, the voice model's
+output transcript contained the agent's name and the distinctive part of
+the command or question and the client confirmed that audio played
+(`voice.EventPlayed` from `drained`, or `flushed` past that text; never
+on a client without `playback` reports), or on typed routes
+(`POST /api/turn`, `--voice=off`), the text returned to the client
+contained it — and no second `told` question is open on another pane;
+naming the agent authorises unless another agent with an open or recent
+`told` question is named or that pane had a different `told` question
+within `supervisor.authorise_window_s` (`internal/supervisor/displaced.go`;
+when refused, the daemon states why and re-asks once per input, and
+`told` is not persisted across restarts). A `to_supervisor` call with no
 such input since the previous call and the last push is the voice
 model's own initiative and does nothing
 (`supervisor.voice_initiative_ignored`): that is the one relay guard

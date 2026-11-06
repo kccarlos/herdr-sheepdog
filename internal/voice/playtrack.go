@@ -100,6 +100,8 @@ type PlaybackReport struct {
 	Cut *TranscriptCut
 	// Heard is the heard part of a cut run.
 	Heard string
+	// Played are the assistant transcript spans the client confirmed played.
+	Played []string
 	// Awaited identifies a daemon-interrupted run, already saved in recap.
 	Awaited bool
 	// RecapSeq is the Recap sequence id of the cut assistant entry when known.
@@ -445,7 +447,7 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 		p.playing = false
 		p.holdUntil = now.Add(PlaybackGapHold)
 		p.endedAt = now
-		p.drainBytes(playedMs * outBytesPerMs)
+		rep.Played = p.drainBytes(playedMs * outBytesPerMs)
 	case PlaybackFlushed:
 		for len(p.awaiting) > 0 && now.Sub(p.awaiting[0].flushedAt) > awaitingTTL {
 			p.awaiting = p.awaiting[1:]
@@ -484,6 +486,11 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 				ByPush:      r.meta.ByPush,
 			}
 			rep.Heard = heard
+		}
+		if playedMs > 0 && r.sent > 0 {
+			if heardRaw, _ := r.splitAt(playedMs * outBytesPerMs); strings.TrimSpace(heardRaw) != "" {
+				rep.Played = []string{strings.TrimSpace(r.prefixRaw + heardRaw)}
+			}
 		}
 	}
 	p.last = rep
@@ -535,20 +542,29 @@ func (p *PlaybackTracker) EndedAt(now time.Time) time.Time {
 // Last is the most recent client report (zero State: none yet).
 func (p *PlaybackTracker) Last() PlaybackReport { return p.last }
 
-func (p *PlaybackTracker) drainBytes(n int) {
-	rem := n
-	for len(p.done) > 0 && rem > 0 {
-		if rem >= p.done[0].sent {
-			rem -= p.done[0].sent
-			p.done = p.done[1:]
-			continue
+func (p *PlaybackTracker) drainBytes(n int) (played []string) {
+	advance := func(r *playRun) {
+		before := len(r.prefixRaw)
+		*r = r.advanceInTurn(n)
+		if t := strings.TrimSpace(r.prefixRaw); len(r.prefixRaw) > before && t != "" {
+			played = append(played, t)
 		}
-		p.done[0] = p.done[0].advanceInTurn(rem)
-		return
 	}
-	if len(p.done) == 0 && rem > 0 && !p.run.empty() {
-		p.run = p.run.advanceInTurn(rem)
+	for len(p.done) > 0 && n > 0 {
+		if n < p.done[0].sent {
+			advance(&p.done[0])
+			return played
+		}
+		d := p.done[0]
+		n, p.done = n-d.sent, p.done[1:]
+		if heardRaw, _ := d.splitAt(d.sent); d.sent > 0 && strings.TrimSpace(d.prefixRaw+heardRaw) != "" {
+			played = append(played, strings.TrimSpace(d.prefixRaw+heardRaw))
+		}
 	}
+	if len(p.done) == 0 && n > 0 && !p.run.empty() {
+		advance(&p.run)
+	}
+	return played
 }
 
 func shiftNonNeg(v int) int {

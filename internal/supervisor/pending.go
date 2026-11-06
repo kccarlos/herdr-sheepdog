@@ -301,11 +301,14 @@ func (s *Supervisor) registerRevivedQuestionLocked(p state.PendingAction) {
 	if p.Kind != state.PendingAnswerPrompt {
 		return
 	}
-	if _, ok := s.openByIDLocked(p.ID); ok {
+	if cur, has := s.store.Pending(); has && cur.ID == p.ID {
 		return
 	}
 	var old *state.PendingAction
 	for _, q := range s.store.Questions() {
+		if q.ID == p.ID {
+			return
+		}
 		if q.PaneID == p.PaneID {
 			cp := q
 			old = &cp

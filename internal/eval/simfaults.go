@@ -35,6 +35,20 @@ type SimFaults struct {
 	// UnvoicedTurns: the voice never says the answer: the user hears
 	// nothing, and the voice layer reports the answer not voiced.
 	UnvoicedTurns []int `json:"unvoiced_turns,omitempty"`
+	// UnconfirmedPushAgents: pushes for these agents omit EventPlayed.
+	UnconfirmedPushAgents []string `json:"unconfirmed_push_agents,omitempty"`
+}
+
+func (w *simWorld) unconfirmedPush(text string) bool {
+	if w.sc.Faults != nil {
+		low := strings.ToLower(text)
+		for _, a := range w.sc.Faults.UnconfirmedPushAgents {
+			if a = strings.ToLower(strings.TrimSpace(a)); a != "" && (strings.Contains(low, a) || strings.Contains(low, strings.ReplaceAll(a, "-", " "))) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // fault is what SimFaults force on one turn.
@@ -164,9 +178,13 @@ func (w *simWorld) voiceAnswer(text string, res voice.ToolResult, f fault, cutWo
 		w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: heard, Final: true, Cut: &voice.TranscriptCut{
 			UtteranceID: res.UtteranceID, HeardMs: 60 * utf8.RuneCountInString(heard), RunMs: runMs, Full: said,
 		}})
+		if heard != "" {
+			w.sup.OnVoiceEvent(voice.EventPlayed{Text: heard, At: time.Now()})
+		}
 		return heard
 	}
 	w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: said, Final: true})
 	w.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	w.sup.OnVoiceEvent(voice.EventPlayed{Text: said, At: time.Now()})
 	return said
 }

@@ -28,6 +28,7 @@ func TestTrustDialogAnsweredByBrainKeys(t *testing.T) {
 	if !ok || len(p.Options) != 2 || p.Options[1].Label != "Yes, I trust this folder" {
 		t.Fatalf("pending = %+v, %v", p, ok)
 	}
+	h.playText(p.SpokenSummary)
 	h.say("yes, trust that folder")
 	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "down enter"} {
 		t.Errorf("keys = %v, want down enter", got)
@@ -45,6 +46,7 @@ func TestTrustDialogFastPath(t *testing.T) {
 			h := newHarness(t)
 			h.addAgent("w5:p1", "auth", "claude", herdr.StateWorking)
 			h.block("w5:p1", "claude-trust-dialog.screen.txt")
+			h.playText(h.lastPushText())
 			h.say(c.say)
 			if got := h.sendKeysRequests(); len(got) != 1 || got[0][1] != c.keys {
 				t.Errorf("keys = %v, want %q", got, c.keys)

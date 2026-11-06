@@ -268,7 +268,7 @@ func TestSimInterruptCancelsPromptEvents(t *testing.T) {
 // declined prompt leaves the worker idle at its input line.
 func TestSimDefaultReactionToKeys(t *testing.T) {
 	sc := SimScenario{
-		ID: "decline", Goal: "decline", Script: []string{"no"},
+		ID: "decline", Goal: "decline", Script: []string{"no, auth"},
 		Agents: []SimAgent{{Alias: "auth", State: "blocked", Screen: "codex-approval-prompt.screen.txt"}},
 		Caps:   SimCaps{MaxTurns: 2, MaxSeconds: 20, SilenceSeconds: 1},
 	}

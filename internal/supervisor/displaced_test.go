@@ -136,7 +136,7 @@ func TestYesBegunBeforeADisplacingBlockDoesNotReachIt(t *testing.T) {
 			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes", Final: false})
 			docsLine := blockDocs(t, h)
 			if toldMidway {
-				h.sup.OnVoiceEvent(voice.EventPush{Text: docsLine, Urgency: voice.UrgencyInterrupt})
+				h.playText(docsLine)
 			}
 			h.clock.Advance(300 * time.Millisecond)
 			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: ".", Final: true})
@@ -171,19 +171,28 @@ func firstQuestionOf(h *harness, pane string) string {
 	return ""
 }
 
-// Outside the rule nothing changes: a question that displaced nothing (the
-// last one closed long ago) is answered by a yes said before its
-// announcement, as before.
-func TestQuestionAfterALongClosedOneIsAnsweredAsBefore(t *testing.T) {
+// Even when the previous question closed long ago so nothing else is open or
+// recently told, a bare yes on an untold question never sends keys: it re-asks
+// once with SpokenSummary, and once that re-ask plays the next bare yes works.
+func TestQuestionAfterALongClosedOneReasksUntilPlayed(t *testing.T) {
 	h := toldAuth(t)
 	h.srv.SetScreen(authPane, "running the tests")
 	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
 	h.clock.Advance(2 * time.Minute)
 	blockDocs(t, h)
 	h.clock.Advance(500 * time.Millisecond)
+	res := h.say("Yes.")
+	if n := h.keysTo(docsPane); n != 0 {
+		t.Fatalf("untold sole question got %d key presses on bare yes", n)
+	}
+	if !strings.Contains(res.Spoken, "hadn't finished reading") || !strings.Contains(res.Spoken, "docs asks to run printf") {
+		t.Fatalf("re-ask = %q, want untold re-ask with SpokenSummary", res.Spoken)
+	}
+	h.playText(res.Spoken)
+	h.clock.Advance(500 * time.Millisecond)
 	h.say("Yes.")
 	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("keys to docs = %d, want 1 (rail_blocked %v)", n, h.log.ofType("brain.rail_blocked"))
+		t.Fatalf("keys to docs after re-ask played = %d, want 1", n)
 	}
 }
 

@@ -27,6 +27,7 @@ func TestMutedQuestionDoesNotTakeOverAnAnnouncedOne(t *testing.T) {
 	if !ok || heard.PaneID != "w6:p1" {
 		t.Fatalf("pending after docs asked = %+v", heard)
 	}
+	w.playText(w.pushTexts()[0])
 
 	// auth, in the muted space, asks next, silently.
 	w.block("w5:p1", "codex-approval-prompt.screen.txt")
@@ -132,6 +133,7 @@ func TestUnmuteAnnouncesHeldQuestionsSoTheyAreAnswerableByVoice(t *testing.T) {
 	if n := w.log.count("pending.promoted"); n != 1 {
 		t.Errorf("pending.promoted = %d, want 1", n)
 	}
+	w.playText(w.pushTexts()[0])
 	w.say("yes")
 	if got := keysTo(w); len(got) != 1 || got[0] != "w5:p1" {
 		t.Errorf("after it was announced, yes sent keys to %v, want w5:p1", got)

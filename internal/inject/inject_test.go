@@ -109,6 +109,7 @@ func TestBlockedRunsFullChain(t *testing.T) {
 	if len(h.push.pushes) != 1 || !strings.Contains(h.push.pushes[0], "auth asks to run") {
 		t.Fatalf("pushes = %v", h.push.pushes)
 	}
+	h.sup.OnVoiceEvent(voice.EventPlayed{Text: h.push.pushes[0]})
 
 	// The read served the injected screen.
 	read, err := h.herdr.Read(context.Background(), "fake:1", herdr.SourceRecentUnwrapped, 5)
