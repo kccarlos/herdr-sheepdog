@@ -212,14 +212,6 @@ func forwardTargetsPort(addr string, port int) (matched, valid bool) {
 	return n == port, true
 }
 
-var funnelCLICache struct {
-	mu      sync.Mutex
-	bin     string
-	checked time.Time
-	out     []byte
-	err     error
-}
-
 // TailscaleFunnelCLI checks `tailscale serve status --json` when tailscale is
 // installed.
 func TailscaleFunnelCLI() TailscaleFunnelFunc {
@@ -228,34 +220,14 @@ func TailscaleFunnelCLI() TailscaleFunnelFunc {
 		if bin == "" {
 			return false, nil
 		}
-		out, err := cachedTailscaleServeStatus(ctx, bin)
+		cctx, cancel := context.WithTimeout(ctx, funnelCheckLimit)
+		defer cancel()
+		out, err := exec.CommandContext(cctx, bin, "serve", "status", "--json").Output() //nolint:gosec // bin is resolved via tailscaleBin()
 		if err != nil {
 			return false, nil
 		}
 		return FunnelTargetsPort(out, port), nil
 	}
-}
-
-func cachedTailscaleServeStatus(ctx context.Context, bin string) ([]byte, error) {
-	funnelCLICache.mu.Lock()
-	if funnelCLICache.bin == bin && time.Since(funnelCLICache.checked) < 2*time.Second {
-		out, err := funnelCLICache.out, funnelCLICache.err
-		funnelCLICache.mu.Unlock()
-		return out, err
-	}
-	funnelCLICache.mu.Unlock()
-
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(cctx, bin, "serve", "status", "--json").Output() //nolint:gosec // bin is resolved via tailscaleBin()
-
-	funnelCLICache.mu.Lock()
-	funnelCLICache.bin = bin
-	funnelCLICache.checked = time.Now()
-	funnelCLICache.out = out
-	funnelCLICache.err = err
-	funnelCLICache.mu.Unlock()
-	return out, err
 }
 
 // tailscaleFetchTimeout bounds one `tailscale cert` run (it may wait for
