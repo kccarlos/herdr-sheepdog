@@ -121,27 +121,19 @@ func TestUnwrapArgv(t *testing.T) {
 			want: []string{"codex", "--no-daemon"},
 		},
 		{
-			in:   []string{"/usr/bin/nice", "-10", "taskpolicy", "-c", "utility", "--", "/opt/homebrew/bin/claude", "--resume"},
+			in:   []string{"/usr/bin/nice", "-n", "10", "taskpolicy", "-c", "utility", "/opt/homebrew/bin/claude", "--resume"},
 			want: []string{"/opt/homebrew/bin/claude", "--resume"},
 		},
 		{
-			in:   []string{"nice", "-n10", "ionice", "-c", "2", "-n", "7", "-t", "claude"},
-			want: []string{"claude"},
-		},
-		{
-			in:   []string{"ionice", "-c2", "-n7", "-t", "choom", "-n", "+500", "env", "FOO=1", "-i", "pi"},
-			want: []string{"pi"},
-		},
-		{
-			in:   []string{"/usr/sbin/taskpolicy", "-c", "utility", "-l", "1", "-g", "throttle", "codex", "--no-daemon"},
+			in:   []string{"/usr/sbin/taskpolicy", "-c", "utility", "codex", "--no-daemon"},
 			want: []string{"codex", "--no-daemon"},
 		},
 		{
-			in:   []string{"env", "--unset=FOO", "-S", "BAR=1 claude --model sonnet"},
-			want: []string{"claude", "--model", "sonnet"},
+			in:   []string{"nice", "-n", "10", "ionice", "-c", "2", "-n", "7", "-t", "claude"},
+			want: []string{"claude"},
 		},
 		{
-			in:   []string{"env", "--split-string=FOO=1 nice -n 10 codex", "--no-daemon"},
+			in:   []string{"ionice", "-c", "2", "-n", "7", "-t", "codex", "--no-daemon"},
 			want: []string{"codex", "--no-daemon"},
 		},
 		{

@@ -306,8 +306,7 @@ export default class Sheepdog extends View {
   send(text, cx, fromComposer) {
     if (fromComposer) this.setComposerValue("");
     cx.spawn(async (cx) => {
-      const { restore } = await this.outbox.submit(text);
-      if (restore != null && fromComposer) this.setComposerValue(restored(restore, this.composer.value()));
+      await this.outbox.submit(text);
       cx.notify();
     });
   }

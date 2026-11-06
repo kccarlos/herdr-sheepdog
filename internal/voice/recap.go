@@ -218,15 +218,11 @@ func (r *Recap) CutSeq(seq uint64, full, heard string, heardMs int) bool {
 		} else if full == "" || !strings.Contains(full, e.Text) {
 			continue
 		}
-		wasTail := i == len(r.entries)-1
 		if heard == "" {
 			r.entries = append(r.entries[:i], r.entries[i+1:]...)
 			if i > 0 && i < len(r.entries) && r.entries[i-1].Role == RecapUser && r.entries[i].Role == RecapUser {
 				r.entries[i-1].Text = strings.TrimSpace(r.entries[i-1].Text) + " " + strings.TrimSpace(r.entries[i].Text)
 				r.entries = append(r.entries[:i], r.entries[i+1:]...)
-				if wasTail {
-					r.joinNextUser = false
-				}
 			} else if i > 1 && r.entries[i-1].Role == RecapUser && r.entries[i-2].Role == RecapUser {
 				r.entries[i-2].Text = strings.TrimSpace(r.entries[i-2].Text) + " " + strings.TrimSpace(r.entries[i-1].Text)
 				r.entries = append(r.entries[:i-1], r.entries[i:]...)
@@ -236,7 +232,7 @@ func (r *Recap) CutSeq(seq uint64, full, heard string, heardMs int) bool {
 			return true
 		}
 		e.Text, e.Cut, e.CutAfterMs = heard, true, heardMs
-		if wasTail {
+		if i == len(r.entries)-1 {
 			r.joinNextUser = false
 		}
 		return true

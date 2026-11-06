@@ -139,10 +139,6 @@ func TagPayload(payload map[string]any, id string) map[string]any {
 	return payload
 }
 
-// Run is the utterance whose reply the latest started run plays ("" when
-// that run is not a reply).
-func (p *PlaybackUtterance) Run() string { return p.run }
-
 // Flushed returns and clears the utterance id of a flushed run: the active
 // started run when set, or the handed utterance when awaited is true (the
 // model had already begun producing the reply before PlaybackStarted arrived).
@@ -196,12 +192,11 @@ type playRun struct {
 	prefixHeardMs int
 	prefixRunMs   int
 
-	sent     int
-	voiced   int
-	segs     []playSeg
-	frags    []spokenFrag
-	meta     FlushMeta
-	turnDone bool
+	sent   int
+	voiced int
+	segs   []playSeg
+	frags  []spokenFrag
+	meta   FlushMeta
 	// flushedAt is when the daemon flushed the run (awaiting runs).
 	flushedAt time.Time
 }
@@ -375,7 +370,6 @@ func (p *PlaybackTracker) TurnComplete() {
 		p.run = playRun{}
 		return
 	}
-	p.run.turnDone = true
 	p.done = append(p.done, p.run)
 	p.run = playRun{}
 }
@@ -581,7 +575,6 @@ func (r playRun) advanceInTurn(n int) playRun {
 		prefixHeardMs: r.prefixHeardMs + clamped/outBytesPerMs,
 		prefixRunMs:   r.prefixRunMs + clamped/outBytesPerMs,
 		meta:          r.meta,
-		turnDone:      r.turnDone,
 		frags:         remFrags,
 	}
 	if n >= r.sent {

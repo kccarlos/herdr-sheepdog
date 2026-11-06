@@ -46,8 +46,6 @@ const state = {
   reconnectTimer: 0,
   reconnects: 0,
   pingTimer: 0,
-  pingSentAt: 0,
-  pingOutstanding: false,
   pongMs: null,
   // The /ws protocol handshake of the current connection (handshake.js).
   handshake: null,
@@ -524,8 +522,6 @@ function sendPingPacket() {
   });
   if (ok) {
     pingTracker.sent();
-    state.pingSentAt = performance.now();
-    state.pingOutstanding = true;
   }
   return ok;
 }
@@ -550,7 +546,6 @@ function stopPing() {
   clearInterval(state.pingTimer);
   state.pingTimer = 0;
   pingTracker.reset();
-  state.pingOutstanding = false;
 }
 
 const wakeController = createWakeController({
@@ -627,7 +622,6 @@ function onControl(m) {
     case 'pong': {
       const pong = pingTracker.onPong();
       if (pong.rttMs !== null) state.pongMs = pong.rttMs;
-      state.pingOutstanding = pingTracker.outstanding();
       if (pong.drained) wakeController.onPong();
       break;
     }

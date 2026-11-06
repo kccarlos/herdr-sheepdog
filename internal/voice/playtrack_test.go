@@ -196,24 +196,28 @@ func TestPlaybackStaleAwaitingRunExpires(t *testing.T) {
 	}
 }
 
-// Run is the utterance whose reply the latest started run plays: set by
-// the start a hand-over tags, cleared by an untagged start.
-func TestPlaybackUtteranceRun(t *testing.T) {
+// PlaybackUtterance tags only the first start after a hand-over and reports
+// the active started run on flush until an untagged start clears it.
+func TestPlaybackUtterance(t *testing.T) {
 	var p PlaybackUtterance
 	p.Handed("utt-1")
-	if p.Run() != "" {
-		t.Errorf("run before a start = %q", p.Run())
+	if got := p.Flushed(false); got != "" {
+		t.Errorf("flush before start = %q", got)
 	}
-	if got := p.Started(PlaybackStarted); got != "utt-1" || p.Run() != "utt-1" {
-		t.Errorf("started %q, run %q", got, p.Run())
+	if got := p.Started(PlaybackStarted); got != "utt-1" {
+		t.Errorf("started = %q, want utt-1", got)
 	}
-	p.Started(PlaybackFlushed)
-	if p.Run() != "utt-1" {
-		t.Errorf("a flush moved the run: %q", p.Run())
+	if got := p.Started(PlaybackFlushed); got != "" {
+		t.Errorf("non-start tagged %q", got)
 	}
+	if got := p.Flushed(false); got != "utt-1" {
+		t.Errorf("flush of started run = %q, want utt-1", got)
+	}
+	p.Handed("utt-2")
 	p.Started(PlaybackStarted)
-	if p.Run() != "" {
-		t.Errorf("an untagged start kept %q", p.Run())
+	p.Started(PlaybackStarted)
+	if got := p.Flushed(false); got != "" {
+		t.Errorf("flush after untagged start = %q", got)
 	}
 }
 
