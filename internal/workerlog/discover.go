@@ -131,34 +131,7 @@ func (r *Reader) discoverByPID(sess Session, f Format) (Resolved, bool, error) {
 	}
 
 	if f == FormatClaude || f == "" {
-		if sess.Pane != "" && hasCached && cached.roots == sess.Roots && cached.format == FormatClaude && cached.agentPID > 0 {
-			if sid, docCwd, ok := r.readClaudePIDFile(cached.agentPID); ok {
-				p := ""
-				if sid == cached.sessionID && cached.path != "" && fileExists(cached.path) {
-					p = cached.path
-				} else {
-					p = r.locateClaudeID(sid, sess.Cwd, docCwd)
-				}
-				r.storePIDCache(sess.Pane, gen, pidEntry{
-					roots:      sess.Roots,
-					format:     FormatClaude,
-					agentPID:   cached.agentPID,
-					sessionID:  sid,
-					path:       p,
-					reportedID: sess.Value,
-				})
-				if p == "" {
-					return Resolved{}, true, missing(ReasonNotFound, nil)
-				}
-				return Resolved{Format: FormatClaude, ID: sid, Source: "pid:claude", Path: p, FromPID: true}, true, nil
-			}
-		}
-		for _, pid := range getPIDs() {
-			sid, docCwd, ok := r.readClaudePIDFile(pid)
-			if !ok {
-				continue
-			}
-			p := r.locateClaudeID(sid, sess.Cwd, docCwd)
+		finish := func(pid int, sid, p string) (Resolved, bool, error) {
 			r.storePIDCache(sess.Pane, gen, pidEntry{
 				roots:      sess.Roots,
 				format:     FormatClaude,
@@ -171,6 +144,20 @@ func (r *Reader) discoverByPID(sess Session, f Format) (Resolved, bool, error) {
 				return Resolved{}, true, missing(ReasonNotFound, nil)
 			}
 			return Resolved{Format: FormatClaude, ID: sid, Source: "pid:claude", Path: p, FromPID: true}, true, nil
+		}
+		if sess.Pane != "" && hasCached && cached.roots == sess.Roots && cached.format == FormatClaude && cached.agentPID > 0 {
+			if sid, docCwd, ok := r.readClaudePIDFile(cached.agentPID); ok {
+				p := cached.path
+				if sid != cached.sessionID || p == "" || !fileExists(p) {
+					p = r.locateClaudeID(sid, sess.Cwd, docCwd)
+				}
+				return finish(cached.agentPID, sid, p)
+			}
+		}
+		for _, pid := range getPIDs() {
+			if sid, docCwd, ok := r.readClaudePIDFile(pid); ok {
+				return finish(pid, sid, r.locateClaudeID(sid, sess.Cwd, docCwd))
+			}
 		}
 	}
 
