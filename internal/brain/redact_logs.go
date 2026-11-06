@@ -601,18 +601,15 @@ func redactEmbeddedJSON(s string, r *redact.Redactor) (string, bool) {
 			break
 		}
 		cand := i + rel
-		end, ok := scanJSONValueEnd(s, cand)
-		if !ok {
+		dec := json.NewDecoder(strings.NewReader(s[cand:]))
+		dec.UseNumber()
+		var inner any
+		if err := dec.Decode(&inner); err != nil {
 			probes++
 			i = cand + 1
 			continue
 		}
-		inner, decoded := decodeSingleJSON([]byte(s[cand:end]))
-		if !decoded {
-			probes++
-			i = cand + 1
-			continue
-		}
+		end := cand + int(dec.InputOffset())
 		if cand > plainStart {
 			plain := s[plainStart:cand]
 			redPlain := r.String(plain)
@@ -665,104 +662,6 @@ func redactEmbeddedJSON(s string, r *redact.Redactor) (string, bool) {
 	}
 	res := out.String()
 	return res, changed && res != s
-}
-
-// scanJSONValueEnd finds the byte index just past a balanced JSON object or
-// array starting at s[start], rejecting non-JSON code/prose early.
-func scanJSONValueEnd(s string, start int) (int, bool) {
-	if start >= len(s) {
-		return 0, false
-	}
-	open := s[start]
-	if open != '{' && open != '[' {
-		return 0, false
-	}
-	// Quick structural check on the first non-whitespace token inside: a
-	// non-empty JSON object must begin with a quoted key, and an empty {} or []
-	// holds nothing to redact.
-	first := start + 1
-	for first < len(s) && isJSONSpace(s[first]) {
-		first++
-	}
-	if first >= len(s) {
-		return 0, false
-	}
-	if open == '{' && s[first] != '"' {
-		return 0, false
-	}
-	if open == '[' && s[first] == ']' {
-		return 0, false
-	}
-
-	stack := make([]byte, 1, 8)
-	if open == '{' {
-		stack[0] = '}'
-	} else {
-		stack[0] = ']'
-	}
-	inString := false
-	escaped := false
-	for j := start + 1; j < len(s); j++ {
-		c := s[j]
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if c == '\\' {
-				escaped = true
-				continue
-			}
-			if c == '"' {
-				inString = false
-				continue
-			}
-			if c < 0x20 {
-				return 0, false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case '{':
-			stack = append(stack, '}')
-		case '[':
-			stack = append(stack, ']')
-		case '}', ']':
-			if stack[len(stack)-1] != c {
-				return 0, false
-			}
-			stack = stack[:len(stack)-1]
-			if len(stack) == 0 {
-				if !json.Valid([]byte(s[start : j+1])) {
-					return 0, false
-				}
-				return j + 1, true
-			}
-		default:
-			if !isJSONOutsideStringByte(c) {
-				return 0, false
-			}
-		}
-	}
-	return 0, false
-}
-
-func isJSONSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
-}
-
-func isJSONOutsideStringByte(c byte) bool {
-	if isJSONSpace(c) || (c >= '0' && c <= '9') {
-		return true
-	}
-	switch c {
-	case ':', ',', '-', '+', '.', 'e', 'E', 't', 'r', 'u', 'f', 'a', 'l', 's', 'n':
-		return true
-	default:
-		return false
-	}
 }
 
 func decodeSingleJSON(b []byte) (any, bool) {
