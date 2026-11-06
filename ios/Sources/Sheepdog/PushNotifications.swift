@@ -67,7 +67,11 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     /// The screen, once SwiftUI has built it (nil during a background launch
     /// for a notification action).
     @ObservationIgnored weak var model: SessionViewModel? {
-        didSet { applyPendingFocus() }
+        didSet {
+            applyPendingFocus()
+            model?.onQuestionsChanged = { [weak self] id, closed in self?.reconcileQuestions(computerID: id, closedID: closed) }
+            if model !== oldValue { for c in model?.fleet.models ?? [] where c.lastState != nil { reconcileQuestions(computerID: c.id) } }
+        }
     }
 
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
@@ -93,6 +97,7 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
     private let makeClient: @Sendable (DaemonEndpoint) -> DaemonClient
     private let notifyOpenHandler: ((PushPayload, String) async -> Void)?
     private let removeDeliveredHandler: (([String]) -> Void)?
+    @ObservationIgnored var deliveredProvider: (() async -> [(id: String, payload: PushPayload)])?
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
     @ObservationIgnored private var pendingFocus: AgentFocus?
     @ObservationIgnored private var targetEpochs: [String: Int] = [:]
@@ -608,6 +613,18 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
         guard let model, let target = pendingFocus else { return }
         pendingFocus = nil
         model.focusAgent(target)
+    }
+
+    func reconcileQuestions(computerID: String, closedID: String? = nil) {
+        Task {
+            let list = if let deliveredProvider { await deliveredProvider() } else {
+                await center.deliveredNotifications().compactMap { n in PushPayload(userInfo: n.request.content.userInfo).map { (n.request.identifier, $0) } }
+            }
+            guard let c = model?.fleet.models.first(where: { $0.id == computerID }), closedID != nil || c.lastState != nil else { return }
+            let open = Set(c.questions.map(\.id)).union(c.approval?.isSettled == false ? [c.approval!.pending.id] : [])
+            let ids = PushPolicy.closedQuestionNotificationIDs(in: list, computerID: computerID, pairedComputerIDs: Set(store.ids), open: open, closedID: closedID)
+            if !ids.isEmpty { if let h = removeDeliveredHandler { h(ids) } else { center.removeDeliveredNotifications(withIdentifiers: ids) } }
+        }
     }
 }
 

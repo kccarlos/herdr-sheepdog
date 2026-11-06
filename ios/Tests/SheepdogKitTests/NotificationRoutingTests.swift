@@ -437,6 +437,73 @@ final class NotificationRoutingTests: XCTestCase {
 
         XCTAssertEqual(onlineTransitions, 1)
     }
+
+    func testRetractsAnsweredQuestionNotificationsAcrossComputersAndLifecycles() async {
+        let model = makeModel()
+        defer { model.fleet.set([]) }
+
+        let home = PairedComputer(daemonID: "home", name: "Home Mac", addresses: ["192.0.2.10:7777"], pin: "pin_h", deviceID: "dh", pairedAt: Date())
+        let work = PairedComputer(daemonID: "work", name: "Work Mac", addresses: ["198.51.100.20:7777"], pin: "pin_w", deviceID: "dw", pairedAt: Date())
+        model.settings.computers.save(home, address: "192.0.2.10:7777")
+        model.settings.computers.save(work, address: "198.51.100.20:7777")
+        model.settings.computers.currentID = "home"
+        model.settings.hasBeenConfigured = true
+        model.computersChanged()
+        model.endpointChanged()
+
+        let opt = [PendingOption(index: 1, label: "Yes")]
+        var delivered: [(id: String, payload: PushPayload)] = [
+            ("n-home-closed", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "home", options: opt)),
+            ("n-home-open", PushPayload(kind: "approval", paneID: "%2", pendingID: "q-open", computer: "home", options: opt)),
+            ("n-home-done", PushPayload(kind: "done", paneID: "%1", computer: "home")),
+            ("n-work-unknown", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "work", options: opt)),
+            ("n-work-bg", PushPayload(kind: "approval", paneID: "%2", pendingID: "q-work-bg", computer: "work", options: opt)),
+            ("n-removed", PushPayload(kind: "approval", paneID: "%1", pendingID: "q-closed", computer: "removed", options: opt)),
+        ]
+        var removedBatches: [[String]] = []
+        let push = PushCoordinator(
+            defaults: defaults,
+            store: model.settings.computers,
+            makeSettings: { model.settings },
+            makeKeyStore: { _ in PushContentKeyStore(service: "sheepdog.tests.notif.\(UUID().uuidString)", account: "key", accessGroup: nil) },
+            namesSuite: "\(suite).names.\(UUID().uuidString)",
+            makeClient: { DaemonClient(endpoint: $0) },
+            notifyOpenHandler: { _, _ in },
+            removeDeliveredHandler: { ids in
+                removedBatches.append(ids)
+                delivered.removeAll { ids.contains($0.id) }
+            }
+        )
+        push.deliveredProvider = { delivered }
+        push.model = model
+
+        // Both computers start with unknown state (`lastState == nil`): nothing is cleared.
+        await settle(5)
+        XCTAssertEqual(removedBatches, [])
+
+        // App open: `home` reports `q-open` still open and `q-closed` gone; `work` is still unknown.
+        let openHome = PendingAction(id: "q-open", paneID: "%2", kind: "answer_prompt", options: opt)
+        model.fleet.model("home")?.accept(DaemonState(agents: [], pendingAction: openHome, questions: [openHome], voice: .init(mode: "gemini", status: "ready")))
+        await settle(5)
+        XCTAssertEqual(delivered.map(\.id), ["n-home-open", "n-home-done", "n-work-unknown", "n-work-bg", "n-removed"])
+
+        // Running app: `q-open` closes on `home` (e.g. `/events` `pending.confirmed`).
+        model.fleet.model("home")?.questionResolved("q-open", as: .confirmed, answer: "Yes", via: "tap")
+        await settle(5)
+        XCTAssertEqual(delivered.map(\.id), ["n-home-done", "n-work-unknown", "n-work-bg", "n-removed"])
+
+        // Running in background (voice session) or reopening: `work` answers state with `q-work-bg` still open,
+        // then closes `q-work-bg` while in background.
+        model.enteredBackground()
+        let openWork = PendingAction(id: "q-work-bg", paneID: "%2", kind: "answer_prompt", options: opt)
+        model.fleet.model("work")?.accept(DaemonState(agents: [], pendingAction: openWork, questions: [openWork], voice: .init(mode: "gemini", status: "ready")))
+        await settle(5)
+        XCTAssertEqual(delivered.map(\.id), ["n-home-done", "n-work-bg", "n-removed"])
+
+        model.fleet.model("work")?.accept(DaemonState(agents: [], pendingAction: nil, questions: [], voice: .init(mode: "gemini", status: "ready")))
+        await settle(5)
+        XCTAssertEqual(delivered.map(\.id), ["n-home-done", "n-removed"])
+    }
 }
 
 private final class ActionRaceStub: URLProtocol {

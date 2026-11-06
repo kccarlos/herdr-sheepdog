@@ -95,6 +95,7 @@ public final class ComputerModel {
     @ObservationIgnored public private(set) var liveUpdates: SocketLife = .idle
     /// Fires whenever this computer's link transitions into `.online`.
     @ObservationIgnored public var onOnline: (() -> Void)?
+    @ObservationIgnored public var onQuestionsChanged: ((String?) -> Void)?
 
     public enum AnswerFeedback: Equatable, Sendable {
         case tapped
@@ -533,6 +534,7 @@ public final class ComputerModel {
             $0.retain(open: ids)
             $0.present(state.pendingAction)
         }
+        onQuestionsChanged?(nil)
         onState?(state)
     }
 
@@ -550,6 +552,7 @@ public final class ComputerModel {
     public func questionResolved(_ id: String, as resolution: ConversationItem.Resolution, answer: String?, via: String?) {
         guard !stopped else { return }
         updateFlow { $0.resolved(pendingID: id, as: resolution, answer: answer, via: via) }
+        onQuestionsChanged?(id)
     }
 
     /// Changes the flow, assigning it only when it changed, and starts the
@@ -649,12 +652,14 @@ public final class ComputerModel {
         do {
             let spoken = try await actions.run(key, .answer, as: ComputerRequests.self) { try await $0.answerPending(id: id, option: option.index) }
             updateFlow { $0.succeeded(pendingID: id, spoken: spoken) }
+            onQuestionsChanged?(id)
             if feedback { onAnswerFeedback?(.answered) }
             return spoken
         } catch let error as Stale {
             throw error
         } catch DaemonError.pendingGone {
             updateFlow { $0.gone(pendingID: id) }
+            onQuestionsChanged?(id)
             if feedback { onAnswerFeedback?(.failed) }
             throw DaemonError.pendingGone
         } catch {
