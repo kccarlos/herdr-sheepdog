@@ -3,8 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -480,5 +486,650 @@ func TestSetupEnvironmentKeybindingOptInAndConflict(t *testing.T) {
 	symKeys, _ := os.ReadFile(filepath.Join(symAppHome, "keys.json"))
 	if strings.Contains(string(symKeys), "sheepdog.focus") {
 		t.Fatalf("symlinked checkout without marker still mutated keys.json: %s", symKeys)
+	}
+}
+
+func setupBackendProbe(appHome string, oldInstalled, oldRunning, coreInstalled, coreRunning, appInstalled bool) onboard.Probe {
+	p := setupTestProbe(appHome, oldRunning, coreRunning)
+	p.LookPath = func(name string) (string, error) {
+		switch name {
+		case "herdr":
+			if oldInstalled {
+				return "/fake/herdr", nil
+			}
+		case "hc":
+			if coreInstalled {
+				return "/fake/hc", nil
+			}
+		case "herdr-app":
+			if appInstalled {
+				return "/fake/herdr-app", nil
+			}
+		}
+		return "", fs.ErrNotExist
+	}
+	return p
+}
+
+func TestSetupEnvironmentBackendChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		backend                    string
+		oldInstalled, oldRunning   bool
+		coreInstalled, coreRunning bool
+		appInstalled               bool
+		interactive                bool
+		input                      string
+		preEnv                     string
+		wantChosen                 string
+		wantChanged                bool
+		wantEnvBackend             string // "" means env file untouched / key absent
+		wantText                   []string
+		forbidText                 []string
+	}{
+		{
+			name:          "pinned herdr with both installed and herdr-app asks, default is pin, keep writes nothing",
+			backend:       config.HerdrBackendHerdr,
+			oldInstalled:  true,
+			oldRunning:    true,
+			coreInstalled: true,
+			coreRunning:   true,
+			appInstalled:  true,
+			interactive:   true,
+			input:         "\nn\n",
+			wantChosen:    config.HerdrBackendHerdr,
+			wantChanged:   false,
+			wantText: []string{
+				"Agents running in the other herdr will not appear in Sheepdog.",
+				"Which herdr should Sheepdog use:",
+				"1) herdr-core (hc) — herdr-app",
+				"2) herdr-tui (current)",
+				"choice [2]:",
+				"herdr backend: using herdr-tui (pinned).",
+			},
+			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend=", "pinned: SHEEPDOG_HERDR_BACKEND="},
+		},
+		{
+			name:          "pinned hc without herdr-app omits herdr-app from label and keep leaves env file untouched",
+			backend:       config.HerdrBackendHC,
+			oldInstalled:  true,
+			oldRunning:    true,
+			coreInstalled: true,
+			coreRunning:   true,
+			appInstalled:  false,
+			interactive:   true,
+			input:         "\n",
+			preEnv:        "KEEP_ME=1\n",
+			wantChosen:    config.HerdrBackendHC,
+			wantChanged:   false,
+			wantText: []string{
+				"Agents running in the other herdr will not appear in Sheepdog.",
+				"1) herdr-core (hc) (current)",
+				"2) herdr-tui",
+				"choice [1]:",
+				"herdr backend: using herdr-core (pinned).",
+			},
+			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "herdr-core (hc) — herdr-app", "pinned: herdr.backend="},
+		},
+		{
+			name:           "pinned herdr changed to hc writes env, reports change and says not running",
+			backend:        config.HerdrBackendHerdr,
+			oldInstalled:   true,
+			oldRunning:     true,
+			coreInstalled:  true,
+			coreRunning:    false,
+			interactive:    true,
+			input:          "1\n",
+			preEnv:         "KEEP_ME=1\n",
+			wantChosen:     config.HerdrBackendHC,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHC,
+			wantText: []string{
+				"1) herdr-core (hc)\n",
+				"2) herdr-tui (current)",
+				"choice [2]:",
+				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
+				"herdr backend: using herdr-core (pinned; not running).",
+			},
+			forbidText: []string{"herdr-core (hc) — herdr-app", "pinned: SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend="},
+		},
+		{
+			name:           "pinned hc changed to herdr with herdr-app writes env and reports change",
+			backend:        config.HerdrBackendHC,
+			oldInstalled:   true,
+			oldRunning:     true,
+			coreInstalled:  true,
+			coreRunning:    true,
+			appInstalled:   true,
+			interactive:    true,
+			input:          "2\nn\n",
+			wantChosen:     config.HerdrBackendHerdr,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHerdr,
+			wantText: []string{
+				"1) herdr-core (hc) — herdr-app (current)",
+				"choice [1]:",
+				"Set SHEEPDOG_HERDR_BACKEND=herdr in ",
+				"herdr backend: using herdr-tui (pinned).",
+			},
+			forbidText: []string{"pinned: SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend="},
+		},
+		{
+			name:          "plain auto with both installed and only herdr-tui running asks, keep default leaves auto unpinned",
+			backend:       config.HerdrBackendAuto,
+			oldInstalled:  true,
+			oldRunning:    true,
+			coreInstalled: true,
+			coreRunning:   false,
+			appInstalled:  false,
+			interactive:   true,
+			input:         "\n",
+			preEnv:        "KEEP_ME=1\n",
+			wantChosen:    config.HerdrBackendHerdr,
+			wantChanged:   false,
+			wantText: []string{
+				"Which herdr should Sheepdog use:",
+				"1) herdr-core (hc)\n",
+				"2) herdr-tui (current)",
+				"choice [2]:",
+				"herdr backend: using herdr-tui (auto: only herdr-tui is running).",
+			},
+			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "pinned", "herdr-core (hc) — herdr-app"},
+		},
+		{
+			name:           "plain auto with both installed writes env when user picks non-default",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			oldRunning:     true,
+			coreInstalled:  true,
+			coreRunning:    false,
+			appInstalled:   false,
+			interactive:    true,
+			input:          "1\n",
+			wantChosen:     config.HerdrBackendHC,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHC,
+			wantText: []string{
+				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
+				"herdr backend: using herdr-core (pinned; not running).",
+			},
+		},
+		{
+			name:           "auto with both installed and only herdr-core running asks without contradicting reason and pins default",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			oldRunning:     false,
+			coreInstalled:  true,
+			coreRunning:    true,
+			appInstalled:   true,
+			interactive:    true,
+			input:          "\nn\n",
+			wantChosen:     config.HerdrBackendHC,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHC,
+			wantText: []string{
+				"1) herdr-core (hc) — herdr-app (current)",
+				"choice [1]:",
+				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
+				"herdr backend: using herdr-core (pinned).",
+			},
+			forbidText: []string{"Only herdr-core is running, so pinning it"},
+		},
+		{
+			name:           "auto with both installed and only herdr-core running lets user pick herdr-tui without contradiction",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			oldRunning:     false,
+			coreInstalled:  true,
+			coreRunning:    true,
+			interactive:    true,
+			input:          "2\n",
+			wantChosen:     config.HerdrBackendHerdr,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHerdr,
+			wantText: []string{
+				"Set SHEEPDOG_HERDR_BACKEND=herdr in ",
+				"herdr backend: using herdr-tui (pinned; not running).",
+			},
+			forbidText: []string{"Only herdr-core is running, so pinning it"},
+		},
+		{
+			name:          "non-interactive pinned leaves env file untouched and never prompts",
+			backend:       config.HerdrBackendHerdr,
+			oldInstalled:  true,
+			oldRunning:    true,
+			coreInstalled: true,
+			coreRunning:   true,
+			interactive:   false,
+			preEnv:        "KEEP_ME=1\n",
+			wantChosen:    config.HerdrBackendHerdr,
+			wantChanged:   false,
+			wantText:      []string{"herdr backend: using herdr-tui (pinned)."},
+			forbidText:    []string{"choice [", "Which herdr", "Set SHEEPDOG_HERDR_BACKEND=", "herdr.backend="},
+		},
+		{
+			name:         "one backend installed does not ask",
+			backend:      config.HerdrBackendHerdr,
+			oldInstalled: true,
+			oldRunning:   true,
+			interactive:  true,
+			wantChosen:   config.HerdrBackendHerdr,
+			wantChanged:  false,
+			wantText:     []string{"herdr backend: using herdr-tui (pinned)."},
+			forbidText:   []string{"choice [", "Which herdr", "herdr.backend="},
+		},
+		{
+			name:         "auto with only herdr-tui running names resolved backend without asking",
+			backend:      config.HerdrBackendAuto,
+			oldInstalled: true,
+			oldRunning:   true,
+			interactive:  true,
+			wantChosen:   config.HerdrBackendHerdr,
+			wantChanged:  false,
+			wantText:     []string{"herdr backend: using herdr-tui (auto: only herdr-tui is running)."},
+			forbidText:   []string{"choice [", "Which herdr"},
+		},
+		{
+			name:          "auto with both running non-interactive names resolved backend and keeps advice",
+			backend:       config.HerdrBackendAuto,
+			oldInstalled:  true,
+			oldRunning:    true,
+			coreInstalled: true,
+			coreRunning:   true,
+			appInstalled:  true,
+			interactive:   false,
+			wantChosen:    config.HerdrBackendHerdr,
+			wantChanged:   false,
+			wantText: []string{
+				"Both are running, and auto would pick herdr-tui.",
+				"SHEEPDOG_HERDR_BACKEND=hc",
+				"herdr backend: using herdr-tui (auto: both herdr-tui and herdr-core are running).",
+			},
+			forbidText: []string{"choice ["},
+		},
+		{
+			name:         "auto with neither running names herdr-tui and says not running",
+			backend:      config.HerdrBackendAuto,
+			oldInstalled: true,
+			oldRunning:   false,
+			interactive:  true,
+			wantChosen:   config.HerdrBackendHerdr,
+			wantChanged:  false,
+			wantText:     []string{"herdr backend: using herdr-tui (auto: neither answers, waiting for herdr-tui; not running)."},
+			forbidText:   []string{"choice ["},
+		},
+		{
+			name:          "pinned but not running says so",
+			backend:       config.HerdrBackendHC,
+			coreInstalled: true,
+			coreRunning:   false,
+			interactive:   true,
+			wantChosen:    config.HerdrBackendHC,
+			wantChanged:   false,
+			wantText:      []string{"herdr backend: using herdr-core (pinned; not running)."},
+			forbidText:    []string{"choice [", "herdr.backend="},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			appHome, envPath := filepath.Join(dir, "herdr-app"), filepath.Join(dir, ".env")
+			if tc.preEnv != "" {
+				if err := os.WriteFile(envPath, []byte(tc.preEnv), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := setupTestConfig()
+			cfg.Herdr.Backend = tc.backend
+			var out bytes.Buffer
+			var setenvVal string
+			var chosen string
+			changed, err := setupEnvironment(context.Background(), cfg, envPath, setupEnvironmentOptions{
+				Probe:       setupBackendProbe(appHome, tc.oldInstalled, tc.oldRunning, tc.coreInstalled, tc.coreRunning, tc.appInstalled),
+				Panel:       setupTestPanel(),
+				Layout:      []byte("layout"),
+				Prompt:      newPrompter(strings.NewReader(tc.input), &out),
+				Interactive: tc.interactive,
+				Setenv: func(k, v string) error {
+					if k != "SHEEPDOG_HERDR_BACKEND" {
+						t.Errorf("unexpected Setenv key %q", k)
+					}
+					setenvVal = v
+					return nil
+				},
+				Out:    &out,
+				Chosen: &chosen,
+			})
+			if err != nil {
+				t.Fatalf("setupEnvironment: %v\n%s", err, out.String())
+			}
+			if changed != tc.wantChanged || chosen != tc.wantChosen {
+				t.Errorf("changed=%v chosen=%q, want changed=%v chosen=%q\n%s", changed, chosen, tc.wantChanged, tc.wantChosen, out.String())
+			}
+			if setenvVal != tc.wantEnvBackend {
+				t.Errorf("Setenv = %q, want %q", setenvVal, tc.wantEnvBackend)
+			}
+			if tc.wantEnvBackend == "" {
+				got, err := os.ReadFile(envPath)
+				if tc.preEnv == "" {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("env file unexpectedly created: %q (%v)", got, err)
+					}
+				} else if err != nil || string(got) != tc.preEnv {
+					t.Errorf("env file mutated = %q (%v), want %q", got, err, tc.preEnv)
+				}
+			} else {
+				env, err := onboard.ReadEnvFile(envPath)
+				if err != nil || env["SHEEPDOG_HERDR_BACKEND"] != tc.wantEnvBackend {
+					t.Errorf("env = %v, %v; want SHEEPDOG_HERDR_BACKEND=%s", env, err, tc.wantEnvBackend)
+				}
+				if tc.preEnv != "" && env["KEEP_ME"] != "1" {
+					t.Errorf("existing env key lost: %v", env)
+				}
+			}
+			text := out.String()
+			for _, want := range tc.wantText {
+				if !strings.Contains(text, want) {
+					t.Errorf("output missing %q:\n%s", want, text)
+				}
+			}
+			for _, bad := range tc.forbidText {
+				if strings.Contains(text, bad) {
+					t.Errorf("output unexpectedly contains %q:\n%s", bad, text)
+				}
+			}
+		})
+	}
+}
+
+func TestSetupDaemonHerdrMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		stateJSON  string
+		chosenKind string
+		wantLines  int
+		wantText   []string
+		forbidText []string
+	}{
+		{
+			name:       "daemon agrees with chosen backend",
+			stateJSON:  `{"herdr":"socket","herdr_backend":"hc"}`,
+			chosenKind: config.HerdrBackendHC,
+			wantText:   []string{"Daemon herdr: herdr-core NOT reachable:", "/fake/hc.sock"},
+			forbidText: []string{"differs from your choice", "Fix:"},
+		},
+		{
+			name:       "daemon disagrees: running herdr-tui when choice is herdr-core",
+			stateJSON:  `{"herdr":"socket","herdr_backend":"herdr"}`,
+			chosenKind: config.HerdrBackendHC,
+			wantText: []string{
+				"Daemon herdr: herdr-tui NOT reachable:",
+				"differs from your choice (herdr-core).",
+				"Fix: run `sheepdog restart` (or check SHEEPDOG_HERDR_BACKEND in your shell or login service).",
+			},
+		},
+		{
+			name:       "daemon disagrees: running herdr-core when choice is herdr-tui",
+			stateJSON:  `{"herdr":"socket","herdr_backend":"hc"}`,
+			chosenKind: config.HerdrBackendHerdr,
+			wantText: []string{
+				"Daemon herdr: herdr-core NOT reachable:",
+				"differs from your choice (herdr-tui).",
+				"Fix: run `sheepdog restart`",
+			},
+		},
+		{
+			name:       "older daemon without herdr_backend prints single restart line without claiming chosen backend",
+			stateJSON:  `{"herdr":"socket"}`,
+			chosenKind: config.HerdrBackendHC,
+			wantLines:  1,
+			wantText:   []string{"Daemon herdr: the running daemon is too old to report its herdr; run `sheepdog restart`."},
+			forbidText: []string{"herdr-core", "herdr-tui", "differs from your choice"},
+		},
+		{
+			name:       "mock daemon prints nothing",
+			stateJSON:  `{"herdr":"mock"}`,
+			chosenKind: config.HerdrBackendHC,
+			forbidText: []string{"Daemon herdr:"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/state" {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write([]byte(tc.stateJSON))
+			}))
+			defer srv.Close()
+
+			l := &lifecycle{cfg: setupTestConfig()}
+			var out bytes.Buffer
+			l.printRunningHerdr(context.Background(), srv.URL, tc.chosenKind, &out)
+			text := out.String()
+			if tc.wantLines > 0 && strings.Count(text, "\n") != tc.wantLines {
+				t.Errorf("lines = %d, want %d:\n%s", strings.Count(text, "\n"), tc.wantLines, text)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(text, want) {
+					t.Errorf("output missing %q:\n%s", want, text)
+				}
+			}
+			for _, bad := range tc.forbidText {
+				if strings.Contains(text, bad) {
+					t.Errorf("output unexpectedly contains %q:\n%s", bad, text)
+				}
+			}
+		})
+	}
+
+	// Also verify the reachable formatting directly without needing a live unix socket.
+	got := formatDaemonHerdr(statusHerdr{Reachable: true, Program: "herdr-tui", Socket: "/fake/old.sock"}, config.HerdrBackendHC)
+	for _, want := range []string{
+		"Daemon herdr: herdr-tui reachable (/fake/old.sock) — differs from your choice (herdr-core).",
+		"Fix: run `sheepdog restart`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reachable mismatch message missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestStatusHerdrOlderAndCurrentDaemon(t *testing.T) {
+	var stateJSON string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/hello":
+			_, _ = w.Write([]byte(`{"name":"sheepdog","version":"v0.1.27"}`))
+		case "/api/state":
+			_, _ = w.Write([]byte(stateJSON))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	body := fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n[herdr]\nbackend = %q\nsocket = %q\nhc_socket = %q\n",
+		filepath.Join(dir, "data"), port, config.HerdrBackendHC, "/fake/old.sock", "/fake/hc.sock")
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Older daemon omits herdr_backend: status keeps its previous output without claiming daemon source.
+	stateJSON = `{"herdr":"socket"}`
+	code, out, errs := runCLI("status", "--config", cfgPath)
+	if code != 0 || !strings.Contains(out, "  herdr         herdr-core NOT reachable:") || !strings.Contains(out, "/fake/hc.sock") {
+		t.Fatalf("older daemon status: exit %d err=%q:\n%s", code, errs, out)
+	}
+	for _, bad := range []string{"Daemon herdr", "too old", "from daemon"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("older daemon status unexpectedly contains %q:\n%s", bad, out)
+		}
+	}
+
+	// Current daemon reports herdr_backend: status reports the daemon's backend over local config.
+	stateJSON = `{"herdr":"socket","herdr_backend":"herdr"}`
+	code, out, errs = runCLI("status", "--config", cfgPath)
+	if code != 0 || !strings.Contains(out, "  herdr         herdr-tui NOT reachable:") || !strings.Contains(out, "/fake/old.sock") {
+		t.Fatalf("current daemon status: exit %d err=%q:\n%s", code, errs, out)
+	}
+	code, rawJSON, _ := runCLI("status", "--json", "--config", cfgPath)
+	var rep statusReport
+	if err := json.Unmarshal([]byte(rawJSON), &rep); err != nil || code != 0 || rep.Herdr.Program != "herdr-tui" {
+		t.Fatalf("current daemon json: exit %d err=%v herdr=%+v", code, err, rep.Herdr)
+	}
+}
+
+func TestSetupRestartGuard(t *testing.T) {
+	fakeKeyAPI(t)
+	noOnboardKeys(t)
+	oldExe := osExecutable
+	osExecutable = func() (string, error) { return "/usr/local/bin/sheepdog", nil }
+	t.Cleanup(func() { osExecutable = oldExe })
+
+	// Probe with only herdr-core answering under auto so setupEnvironment writes SHEEPDOG_HERDR_BACKEND=hc.
+	oldProbe := setupEnvironmentProbe
+	setupEnvironmentProbe = func() onboard.Probe {
+		return setupBackendProbe(filepath.Join(t.TempDir(), "herdr-app"), false, false, true, true, false)
+	}
+	t.Cleanup(func() { setupEnvironmentProbe = oldProbe })
+
+	t.Run("stopped daemon with installed login service is not started", func(t *testing.T) {
+		unsetEnv(t, "SHEEPDOG_HERDR_BACKEND")
+		t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_HERDR_BACKEND") })
+		_, calls := fakeService(t)
+		dir := t.TempDir()
+		cfgPath, envPath := filepath.Join(dir, "config.toml"), filepath.Join(dir, ".env")
+		cfgBody := fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n[herdr]\nsocket = %q\nhc_socket = %q\n",
+			filepath.Join(dir, "data"), freePort(t), "/fake/old.sock", "/fake/hc.sock")
+		if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var iOut, iErr strings.Builder
+		if code := run(context.Background(), []string{"service", "install", "--binary", "/usr/local/bin/sheepdog", "--config", cfgPath, "--env-file", envPath}, &iOut, &iErr); code != 0 {
+			t.Fatalf("service install exit %d: %s", code, iErr.String())
+		}
+		*calls = nil
+
+		var out, errb strings.Builder
+		code := runSetup(context.Background(), []string{"--terminal", "--config", cfgPath, "--env-file", envPath}, strings.NewReader("3\n"+initGeminiKey+"\n\n\n\n"), &out, &errb)
+		if code != 0 {
+			t.Fatalf("setup --terminal exit %d:\nout:\n%s\nerr:\n%s", code, out.String(), errb.String())
+		}
+		env, err := onboard.ReadEnvFile(envPath)
+		if err != nil || env["SHEEPDOG_HERDR_BACKEND"] != config.HerdrBackendHC {
+			t.Fatalf("env = %v, %v; want SHEEPDOG_HERDR_BACKEND=hc", env, err)
+		}
+		for _, bad := range []string{"Restarting the running daemon", "sheepdog is not running"} {
+			if strings.Contains(out.String(), bad) {
+				t.Errorf("output unexpectedly contains %q:\n%s", bad, out.String())
+			}
+		}
+		for _, call := range *calls {
+			for _, verb := range []string{"start", "stop", "restart", "bootstrap", "bootout", "kickstart"} {
+				if strings.Contains(call, verb) {
+					t.Errorf("stopped service got lifecycle command %q (all calls: %q)", call, *calls)
+				}
+			}
+		}
+	})
+
+	t.Run("running daemon without pid file or service does not abort setup", func(t *testing.T) {
+		_, _ = fakeService(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/hello":
+				_, _ = w.Write([]byte(`{"name":"sheepdog","version":"v0.1.27"}`))
+			case "/api/state":
+				_, _ = w.Write([]byte(`{"herdr":"socket","herdr_backend":"herdr"}`))
+			default:
+				_, _ = w.Write([]byte(`{}`))
+			}
+		}))
+		defer srv.Close()
+		port := srv.Listener.Addr().(*net.TCPAddr).Port
+
+		origDisplay := hasDisplay
+		hasDisplay = func() bool { return true }
+		t.Cleanup(func() { hasDisplay = origDisplay })
+
+		for _, mode := range []struct {
+			name  string
+			args  []string
+			stdin string
+		}{
+			{name: "browser", args: []string{"--no-open"}, stdin: ""},
+			{name: "terminal", args: []string{"--terminal"}, stdin: "3\n" + initGeminiKey + "\n\n\n\nn\n"},
+		} {
+			t.Run(mode.name, func(t *testing.T) {
+				unsetEnv(t, "SHEEPDOG_HERDR_BACKEND")
+				t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_HERDR_BACKEND") })
+				dir := t.TempDir()
+				cfgPath, envPath := filepath.Join(dir, "config.toml"), filepath.Join(dir, ".env")
+				cfgBody := fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n[herdr]\nsocket = %q\nhc_socket = %q\n",
+					filepath.Join(dir, "data"), port, "/fake/old.sock", "/fake/hc.sock")
+				if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var out, errb strings.Builder
+				args := append(append([]string{}, mode.args...), "--config", cfgPath)
+				code := runSetup(context.Background(), args, strings.NewReader(mode.stdin), &out, &errb)
+				if code != 0 {
+					t.Fatalf("setup (%s) exit %d:\nout:\n%s\nerr:\n%s", mode.name, code, out.String(), errb.String())
+				}
+				env, err := onboard.ReadEnvFile(envPath)
+				if err != nil || env["SHEEPDOG_HERDR_BACKEND"] != config.HerdrBackendHC {
+					t.Fatalf("env = %v, %v; want SHEEPDOG_HERDR_BACKEND=hc", env, err)
+				}
+				combined := out.String() + errb.String()
+				for _, bad := range []string{"Restarting the running daemon", "left no pid file", "cannot stop"} {
+					if strings.Contains(combined, bad) {
+						t.Errorf("output unexpectedly contains %q:\n%s", bad, combined)
+					}
+				}
+				for _, want := range []string{
+					"Daemon herdr: herdr-tui NOT reachable:",
+					"differs from your choice (herdr-core).",
+					"Fix: run `sheepdog restart`",
+				} {
+					if !strings.Contains(out.String(), want) {
+						t.Errorf("output missing %q:\n%s", want, out.String())
+					}
+				}
+			})
+		}
+	})
+}
+
+func TestEnvBackendOverridesConfigPin(t *testing.T) {
+	unsetEnv(t, "SHEEPDOG_HERDR_BACKEND")
+	dir := t.TempDir()
+	cfgPath, envPath := filepath.Join(dir, "config.toml"), filepath.Join(dir, ".env")
+	if err := os.WriteFile(cfgPath, []byte("data_dir = "+`"`+filepath.Join(dir, "data")+`"`+"\n[herdr]\nbackend = \"herdr\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envPath, []byte("SHEEPDOG_HERDR_BACKEND=hc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	l, code, ok := loadLifecycle(context.Background(), "setup", cfgPath, envPath, &out, &errb)
+	if !ok || code != 0 {
+		t.Fatalf("loadLifecycle: code=%d err=%s", code, errb.String())
+	}
+	if l.cfg.Herdr.Backend != config.HerdrBackendHC {
+		t.Fatalf("Herdr.Backend = %q, want %q (SHEEPDOG_HERDR_BACKEND must override config.toml)", l.cfg.Herdr.Backend, config.HerdrBackendHC)
+	}
+}
+
+func TestDevNullIsNotATerminal(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if newPrompter(f, io.Discard).tty != nil {
+		t.Fatal("/dev/null counted as a terminal, so setup would prompt with no one to answer")
 	}
 }
