@@ -29,6 +29,23 @@
       "seed": 202
     },
     {
+      "id": "approve-bare-yes",
+      "category": "collision",
+      "note": "One open question, announced and played: a bare yes must land first try or after one re-ask.",
+      "goal": "hear what tests-claude wants and approve it with a bare yes",
+      "persona": "You want tests-claude's tests to run. When you hear the question, answer only 'Yes, go ahead.' and never name the agent. If asked again, say yes again.",
+      "opening": "What's going on?",
+      "script": ["What's going on?", "Yes, go ahead.", "Yes, go ahead.", "<wait>"],
+      "audio": {"voice": "Puck"},
+      "agents": [{"alias": "tests-claude", "kind": "claude", "state": "blocked", "screen": "sf-tests-gotest-approval.txt"}],
+      "caps": {"max_turns": 6, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "actions": [{"kind": "keys", "agent": "tests-claude", "matches": "1"}],
+        "rubric": ["Did tests-claude's approval go through on a bare yes, at most after one re-ask?"]
+      },
+      "seed": 224
+    },
+    {
       "id": "collision-displaced-bare-yes",
       "category": "collision",
       "note": "tests-claude's go test prompt was told on connect; deploy-codex blocks on git push --force right before a bare 'Yes, go ahead.' lands while its audio is still unplayed.",
