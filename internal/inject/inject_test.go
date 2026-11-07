@@ -103,12 +103,14 @@ func TestBlockedRunsFullChain(t *testing.T) {
 			t.Errorf("missing %s in %s", want, types)
 		}
 	}
-	if p, ok := h.store.Pending(); !ok || p.PaneID != "fake:1" || p.Kind != state.PendingAnswerPrompt {
+	p, ok := h.store.Pending()
+	if !ok || p.PaneID != "fake:1" || p.Kind != state.PendingAnswerPrompt {
 		t.Fatalf("pending = %+v ok=%v", p, ok)
 	}
 	if len(h.push.pushes) != 1 || !strings.Contains(h.push.pushes[0], "auth asks to run") {
 		t.Fatalf("pushes = %v", h.push.pushes)
 	}
+	h.sup.OnVoiceEvent(voice.EventPush{Text: h.push.pushes[0], Urgency: voice.UrgencyIdle, PendingID: p.ID})
 	h.sup.OnVoiceEvent(voice.EventPlayed{Text: h.push.pushes[0]})
 
 	// The read served the injected screen.

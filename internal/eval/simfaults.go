@@ -178,13 +178,10 @@ func (w *simWorld) voiceAnswer(text string, res voice.ToolResult, f fault, cutWo
 		w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: heard, Final: true, Cut: &voice.TranscriptCut{
 			UtteranceID: res.UtteranceID, HeardMs: 60 * utf8.RuneCountInString(heard), RunMs: runMs, Full: said,
 		}})
-		if heard != "" {
-			w.sup.OnVoiceEvent(voice.EventPlayed{Text: heard, At: time.Now()})
-		}
 		return heard
 	}
 	w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: said, Final: true})
 	w.sup.OnVoiceEvent(voice.EventTurnComplete{})
-	w.sup.OnVoiceEvent(voice.EventPlayed{Text: said, At: time.Now()})
+	w.sup.OnVoiceEvent(voice.EventPlayed{Text: said, End: time.Now()})
 	return said
 }

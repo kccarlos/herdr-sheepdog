@@ -817,7 +817,7 @@ func TestPersistedPendingSurvivesRestart(t *testing.T) {
 	if !strings.Contains(reask.Spoken, "auth asks to run printf.") || len(h.sendKeysRequests()) != 0 {
 		t.Fatalf("first bare answer after restart = %+v, keys = %v", reask, h.sendKeysRequests())
 	}
-	sup2.OnVoiceEvent(voice.EventPlayed{Text: reask.Spoken, At: h.clock.Now()})
+	sup2.OnVoiceEvent(voice.EventPlayed{Text: reask.Spoken, Start: h.clock.Now(), End: h.clock.Now()})
 	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "no", Final: true})
 	res, _ := sup2.ToSupervisor(context.Background(), "no")
 	if res.Spoken != "Told auth no." {

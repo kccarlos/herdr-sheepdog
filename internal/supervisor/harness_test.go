@@ -127,7 +127,7 @@ func (p *fakePusher) PushTagged(text string, u voice.Urgency, tags map[string]an
 	if p.err != nil {
 		return p.err
 	}
-	p.pushes = append(p.pushes, voice.EventPush{Text: text, Urgency: u})
+	p.pushes = append(p.pushes, voice.EventPush{Text: text, Urgency: u, PendingID: voice.PushPendingID(tags)})
 	p.pushedAt = append(p.pushedAt, time.Now())
 	p.tags = append(p.tags, tags)
 	return nil

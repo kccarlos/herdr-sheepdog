@@ -507,8 +507,8 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
 	}
-	for _, t := range rep.Played {
-		s.emit(voice.EventPlayed{Text: t, At: now})
+	for _, ev := range rep.Played {
+		s.emit(ev)
 	}
 }
 

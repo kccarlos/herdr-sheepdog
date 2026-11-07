@@ -470,7 +470,7 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 	// The pane left its prompt (answered in the terminal, say): a prompt
 	// that reads the same later appeared then, not now (inputs.go).
 	delete(s.promptSeenAt, paneID)
-	s.closedLocked() // displaced.go
+	s.syncToldLocked() // displaced.go
 }
 
 // aliasOf returns the alias of a pane, or "another agent" when unknown

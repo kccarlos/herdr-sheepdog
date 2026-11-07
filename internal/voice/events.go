@@ -113,10 +113,10 @@ type EventPush struct {
 // (audio played out). Useful for "wait until quiet" logic and tests.
 type EventTurnComplete struct{}
 
-// EventPlayed is emitted when the client confirms output speech played out.
+// EventPlayed is emitted when the client confirms a whole spoken run played out.
 type EventPlayed struct {
-	Text string
-	At   time.Time
+	Text       string
+	Start, End time.Time
 }
 
 // EventResumed is emitted after a reconnect. Handle is the resumption

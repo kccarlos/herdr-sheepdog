@@ -47,7 +47,7 @@ func TestS4Finding3TypedReplyCountsOnlyReturnedText(t *testing.T) {
 		h.srv.SetScreen(docsPane, gitPushPromptScreen)
 		h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
 
-		spoken := "Docs is waiting on you. " + ap.SpokenSummary + " Should it go ahead?"
+		spoken := ap.SpokenSummary + " Should it go ahead?"
 		m.Add(braintest.Step{Text: replyJSONWithOptions(t, spoken, "Approve docs' git push origin main", "Approve auth")})
 		h.sup.ShepherdInput(InputTyped, "status?")
 		if _, err := h.sup.TypedTurn(context.Background()); err != nil {
@@ -104,9 +104,14 @@ func TestS4Finding3TypedReplyCountsOnlyReturnedText(t *testing.T) {
 		m := braintest.NewModel()
 		h := newBrainHarness(t, m)
 		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+		h.sup.ShepherdInput(InputTyped, "status?")
+		h.clock.Advance(100 * time.Millisecond)
 		h.srv.SetScreen(docsPane, gitPushPromptScreen)
 		h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
+		// Question opened after the typed turn began is not told by NoteReturnedText.
+		h.sup.NoteReturnedText("Docs wants to git push origin main.")
 
+		h.clock.Advance(time.Second)
 		m.Add(braintest.Step{Text: replyJSONWithOptions(t, "Choose which agent to answer.", "Approve docs' git push origin main")})
 		h.sup.ShepherdInput(InputTyped, "options?")
 		res, err := h.sup.ToSupervisor(context.Background(), "options?")

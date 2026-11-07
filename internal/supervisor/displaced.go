@@ -14,9 +14,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Approval rail v2 (docs/dev/roles.md "The one rail"): a question counts as
-// told only when its key content played on the client (voice.EventPlayed) or
-// was returned synchronously to a typed client (NoteReturnedText). Under s.mu.
+// Approval rail v2 (docs/dev/roles.md "The one rail"): whole played voice runs
+// after pending_id push (EventPlayed) or returned text (NoteReturnedText). Under s.mu.
+// drainReportLag is the client's 300 ms underrun window before drained (audio-util.js, PlaybackQueue.swift).
+const drainReportLag = 300 * time.Millisecond
+
 type promptKey struct{ pane, sig string }
 
 func keyOf(p state.PendingAction) promptKey {
@@ -30,6 +32,7 @@ type toldEntry struct {
 }
 
 type toldState struct {
+	handed    map[string]toldEntry
 	told      map[promptKey]*toldEntry
 	nextOrder uint64
 	reasked   map[promptKey]uint64
@@ -80,6 +83,11 @@ func (s *Supervisor) syncToldLocked() {
 			delete(t.reasked, k)
 		}
 	}
+	for id := range t.handed {
+		if _, _, ok := s.questionByID(id); !ok {
+			delete(t.handed, id)
+		}
+	}
 }
 
 func (s *Supervisor) installedLocked(p state.PendingAction) {
@@ -94,56 +102,78 @@ func (s *Supervisor) installedLocked(p state.PendingAction) {
 	}
 }
 
-// closedLocked records that p left the open questions (cleared from the
-// slot, dropped from the list): unless its pane and prompt are still open
-// under another id, it closed now. Caller holds s.mu.
-func (s *Supervisor) closedLocked() {
-	s.syncToldLocked()
-}
-
 func (s *Supervisor) untellLocked(k promptKey) {
 	t := &s.told
 	if e := t.told[k]; e != nil && e.closedAt.IsZero() {
 		e.closedAt = s.cfg.Now()
 	}
+	if q, ok := s.openKeysLocked()[k]; ok {
+		delete(t.handed, q.ID)
+	}
+}
+
+func (s *Supervisor) noteHanded(id string) {
+	s.mu.Lock()
+	s.noteHandedLocked(id)
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) noteHandedLocked(id string) {
+	s.syncToldLocked()
+	if _, _, open := s.questionByID(id); open && s.told.handed[id].at.IsZero() {
+		if s.told.handed == nil {
+			s.told.handed = map[string]toldEntry{}
+		}
+		s.told.handed[id] = toldEntry{at: s.cfg.Now(), seq: s.inputSeq}
+	}
 }
 
 // NoteReturnedText records text returned synchronously to a typed client.
-func (s *Supervisor) NoteReturnedText(text string) { s.notePlayed(text, time.Time{}) }
+func (s *Supervisor) NoteReturnedText(text string) { s.notePlayed(voice.EventPlayed{Text: text}, true) }
 
-func (s *Supervisor) notePlayed(text string, at time.Time) {
-	if strings.TrimSpace(text) == "" {
+func (s *Supervisor) notePlayed(ev voice.EventPlayed, typed bool) {
+	if strings.TrimSpace(ev.Text) == "" || (!typed && !s.clientReportsPlayback()) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if at.IsZero() {
-		at = s.cfg.Now()
+	at, start := s.cfg.Now(), s.cfg.Now()
+	if in := s.lastInputLocked(); typed && in != nil && in.kind == InputTyped {
+		start = in.beganAt
+	} else if !typed && !ev.End.IsZero() {
+		if start = ev.Start; start.IsZero() {
+			start = ev.End
+		}
+		if at = ev.End.Add(-drainReportLag); at.Before(start) {
+			at = start
+		}
 	}
 	s.syncToldLocked()
+	s.told.nextOrder++
 	for _, q := range s.openKeysLocked() {
-		if q.Held || s.heldQuestion(q.ID) {
-			if !readsOut(text, q) {
+		seq := s.inputSeq
+		if q.Held || s.heldQuestion(q.ID) || (typed && s.paneMutedCached(q.PaneID)) {
+			if !typed || s.promptSinceLocked(q).After(start) || !readsOut(ev.Text, q) {
 				continue
 			}
 			q = s.promoteHeldLocked(q)
-		} else if !s.statesQuestionLocked(text, q) {
+		} else if h, ok := s.told.handed[q.ID]; typed && s.promptSinceLocked(q).After(start) || (!typed && (!ok || start.Before(h.at))) || !s.namedInLocked(ev.Text, q.PaneID) {
 			continue
-		} else if readsOut(text, q) && s.paneMutedCached(q.PaneID) {
-			q = s.promoteHeldLocked(q)
+		} else if !typed && ev.End.After(start) {
+			seq = h.seq
 		}
 		k := keyOf(q)
 		if e := s.told.told[k]; e != nil && e.closedAt.IsZero() {
 			if at.Before(e.at) {
 				e.at = at
 			}
+			e.seq = min(e.seq, seq)
 			continue
 		}
 		if s.told.told == nil {
 			s.told.told = map[promptKey]*toldEntry{}
 		}
-		s.told.nextOrder++
-		s.told.told[k] = &toldEntry{seq: s.inputSeq, order: s.told.nextOrder, at: at}
+		s.told.told[k] = &toldEntry{seq: seq, order: s.told.nextOrder, at: at}
 	}
 }
 
@@ -152,57 +182,6 @@ func (s *Supervisor) notePlayed(text string, at time.Time) {
 func readsOut(text string, q state.PendingAction) bool {
 	sum := strings.ToLower(strings.TrimRight(strings.TrimSpace(q.SpokenSummary), ".。!?！？ "))
 	return sum != "" && (strings.Contains(strings.ToLower(text), sum) || countSeq(nameTokens(text), nameTokens(sum)) > 0)
-}
-
-// promptStockWords are words of a prompt too common to say which prompt
-// a reply states.
-var promptStockWords = map[string]bool{
-	"asks": true, "ask": true, "asking": true, "wants": true, "wanting": true, "permission": true,
-	"approve": true, "approval": true, "allow": true, "accept": true, "confirm": true, "confirmation": true,
-	"run": true, "running": true, "following": true, "command": true, "proceed": true, "should": true,
-	"shall": true, "could": true, "may": true, "let": true, "waiting": true, "question": true, "prompt": true,
-	"yes": true, "don't": true, "dont": true, "file": true, "path": true, "link": true, "again": true,
-	"commands": true, "start": true, "who": true, "how": true, "will": true, "not": true, "are": true,
-	"have": true, "decision": true, "need": true, "needs": true, "whether": true, "choose": true,
-	"choice": true, "option": true, "options": true, "select": true, "pick": true,
-}
-
-func (s *Supervisor) statesQuestionLocked(text string, p state.PendingAction) bool {
-	if !s.namedInLocked(text, p.PaneID) {
-		return false
-	}
-	if readsOut(text, p) {
-		return true
-	}
-	for _, a := range s.store.List() {
-		if a.PaneID != p.PaneID && s.namedInLocked(text, a.PaneID) {
-			return false
-		}
-	}
-	src := p.Question
-	if p.Command != "" {
-		src = p.Command
-		if i := strings.IndexAny(src, "'\"|><;&$`"); i >= 0 {
-			src = src[:i]
-		}
-	}
-	row, _ := s.store.Get(p.PaneID)
-	names := wordSet(nameTokens(row.Alias + " " + state.Say(row) + " " + s.sayOf(p.PaneID)))
-	words := wordSet(nameTokens(text))
-	matched := 0
-	for _, w := range nameTokens(prose.Spoken(src, 0)) {
-		if isHan(w) {
-			w = strings.TrimLeft(w, "是否要不请求询问允许批准确认运行执")
-		}
-		if len([]rune(w)) < 2 || names[w] || promptStockWords[w] || (shortNameStopWords[w] && w != "go") {
-			continue
-		}
-		if !tokenMatches(words, w) {
-			return false
-		}
-		matched++
-	}
-	return matched > 0
 }
 
 func countSeq(toks, seq []string) int {
@@ -225,36 +204,11 @@ func countSeq(toks, seq []string) int {
 	return n
 }
 
-func tokenMatches(words map[string]bool, w string) bool {
-	if words[w] {
-		return true
-	}
-	for reply := range words {
-		if isHan(w) && len([]rune(w)) >= 2 && strings.Contains(reply, w) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHan(w string) bool {
-	return w != "" && strings.IndexFunc(w, func(r rune) bool { return !unicode.Is(unicode.Han, r) }) == -1
-}
-
-func wordSet(ws []string) map[string]bool {
-	out := make(map[string]bool, len(ws))
-	for _, w := range ws {
-		out[w] = true
-	}
-	return out
-}
-
 // nameTokens are the lower-case runs of letters and digits of text, of
-// any length: "fix-claude's" is fix, claude, s.
+// any length (each Han character its own token): "fix-claude's" is fix, claude, s.
 func nameTokens(text string) []string {
 	var out []string
 	var token []rune
-	var han bool
 	flush := func() {
 		if len(token) > 0 {
 			out = append(out, string(token))
@@ -266,22 +220,19 @@ func nameTokens(text string) []string {
 			flush()
 			continue
 		}
-		h := unicode.Is(unicode.Han, r)
-		if len(token) > 0 && h != han {
+		if unicode.Is(unicode.Han, r) {
 			flush()
+			out = append(out, string(r))
+			continue
 		}
-		han = h
 		token = append(token, r)
 	}
 	flush()
 	return out
 }
 
-var shortNameStopWords = map[string]bool{"go": true, "on": true, "to": true, "in": true, "it": true, "is": true, "no": true, "me": true, "my": true, "we": true, "do": true, "or": true, "an": true, "as": true, "at": true, "be": true, "by": true, "of": true, "ok": true, "so": true, "up": true, "us": true}
-
-// namedInLocked reports whether text (the user's words) names pane's
-// agent: every token of its alias or spoken name is in it. Common short
-// words do not count as names. Caller holds s.mu.
+// namedInLocked reports whether text names pane's agent by exact match on its
+// alias or spoken name. Caller holds s.mu.
 func (s *Supervisor) namedInLocked(text, pane string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
@@ -291,18 +242,8 @@ func (s *Supervisor) namedInLocked(text, pane string) bool {
 		return false
 	}
 	allToks := nameTokens(text)
-	words := wordSet(allToks)
 	for _, n := range []string{row.Alias, state.Say(row), s.sayOf(pane)} {
-		n = strings.ToLower(strings.TrimSpace(n))
-		if len([]rune(n)) >= 2 && strings.IndexFunc(n, func(r rune) bool { return !unicode.Is(unicode.Han, r) }) == -1 && strings.Contains(strings.ToLower(text), n) {
-			return true
-		}
-		toks := nameTokens(n)
-		long := false
-		for _, w := range toks {
-			long = long || len([]rune(w)) >= 2 && !shortNameStopWords[w]
-		}
-		if long && containsWords(words, toks) && !s.subsumedNameLocked(allToks, pane, toks) {
+		if toks := nameTokens(n); len(toks) > 0 && countSeq(allToks, toks) > 0 && !s.subsumedNameLocked(allToks, pane, toks) {
 			return true
 		}
 	}
@@ -319,15 +260,6 @@ func (s *Supervisor) subsumedNameLocked(textToks []string, pane string, toks []s
 		}
 	}
 	return false
-}
-
-func containsWords(have map[string]bool, want []string) bool {
-	for _, w := range want {
-		if !have[w] {
-			return false
-		}
-	}
-	return true
 }
 
 // toldOpenLocked reports whether the open question p was told to the
@@ -358,14 +290,14 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 	k := keyOf(p)
 	row, _ := s.store.Get(p.PaneID)
 	stillSame := row.State == herdr.StateBlocked && (row.LastBlock == nil || !row.LastBlock.Answered) && s.lastPrompt[p.PaneID] == k.sig
-	if e := s.told.told[k]; e != nil && (e.closedAt.IsZero() || stillSame) && !e.at.After(in.beganAt) && in.began > e.seq {
-		return "", promptKey{}, ""
-	}
+	cur := s.told.told[k]
+	pTold := cur != nil && (cur.closedAt.IsZero() || stillSame) && !cur.at.After(in.beganAt) && in.began > cur.seq
 	now := s.cfg.Now()
 	var otherSeq, otherOrder uint64
-	found, samePane := false, false
+	found, samePane, ambigRun := false, false, false
+	open := s.openKeysLocked()
 	otherPanes := map[string]bool{}
-	for k2, q := range s.openKeysLocked() {
+	for k2, q := range open {
 		if k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) {
 			otherPanes[k2.pane] = true
 		}
@@ -373,6 +305,9 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 	for k2, e := range s.told.told {
 		if k2 == k || e.at.After(in.beganAt) || e.seq >= in.began || (!e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow) {
 			continue
+		}
+		if q, ok := open[k2]; pTold && ok && k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) && e.order >= cur.order {
+			ambigRun = true
 		}
 		if k2.pane == p.PaneID {
 			samePane = true
@@ -382,6 +317,9 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 		if !found || e.seq > otherSeq || (e.seq == otherSeq && (e.order > otherOrder || (e.order == otherOrder && (k2.pane < other.pane || (k2.pane == other.pane && k2.sig < other.sig))))) {
 			other, otherSeq, otherOrder, found = k2, e.seq, e.order, true
 		}
+	}
+	if pTold && !ambigRun {
+		return "", promptKey{}, ""
 	}
 	if !samePane && s.namedInLocked(in.text, p.PaneID) {
 		ambig := false
@@ -393,6 +331,8 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 		}
 	}
 	switch {
+	case pTold:
+		return fmt.Sprintf("another open prompt (%s) was told to them alongside %s's, so a bare answer is ambiguous", s.aliasOf(other.pane), s.aliasOf(p.PaneID)), other, "ambiguous"
 	case samePane:
 		return fmt.Sprintf("the user's words began before %s's new prompt was told to them, while its earlier prompt was the one they had heard", s.aliasOf(p.PaneID)), promptKey{pane: p.PaneID}, "same_pane"
 	case found:
@@ -429,6 +369,8 @@ func (s *Supervisor) reaskLocked(p state.PendingAction, in *shepherdInput) strin
 func reaskLine(alias, other, kind, summary string, zh bool) string {
 	summary = prose.Terminate(summary)
 	switch {
+	case zh && kind == "ambiguous":
+		return fmt.Sprintf("%s和%s都在等你回答，所以我没发出去。%s 请点名回答%s或%s，或直接点选。", alias, other, summary, alias, other)
 	case zh && kind == "same_pane":
 		return fmt.Sprintf("等等——你回答时%s的问题刚变了，所以我没发出去。%s 这个新问题怎么处理？", alias, summary)
 	case zh && kind == "displaced":
@@ -437,6 +379,8 @@ func reaskLine(alias, other, kind, summary string, zh bool) string {
 		return fmt.Sprintf("当前客户端不支持播放确认，单说“好”不会批准%s。%s 请说“批准%s”或“拒绝%s”，或直接点选。", alias, summary, alias, alias)
 	case zh:
 		return fmt.Sprintf("我还没把%s的原话读完：%s 现在请回答。", alias, summary)
+	case kind == "ambiguous":
+		return fmt.Sprintf("Both %s and %s are waiting for your answer, so I did not send that. %s Say 'yes, %s' or 'yes, %s', or tap to answer.", alias, other, summary, alias, other)
 	case kind == "same_pane":
 		return fmt.Sprintf("Hold on — %s's prompt changed just as you answered, so I did not send that. %s What is your answer for this one?", alias, summary)
 	case kind == "displaced":
@@ -485,7 +429,6 @@ func (s *Supervisor) queueReaskLocked(p state.PendingAction, line string) {
 type typedReaskKey struct{}
 
 type typedReaskItem struct {
-	key  promptKey
 	pane string
 	text string
 }
@@ -495,12 +438,12 @@ type typedReaskCollector struct {
 	items []typedReaskItem
 }
 
-func (c *typedReaskCollector) add(key promptKey, pane, text string) {
+func (c *typedReaskCollector) add(pane, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
 	c.mu.Lock()
-	c.items = append(c.items, typedReaskItem{key: key, pane: pane, text: text})
+	c.items = append(c.items, typedReaskItem{pane: pane, text: text})
 	c.mu.Unlock()
 }
 

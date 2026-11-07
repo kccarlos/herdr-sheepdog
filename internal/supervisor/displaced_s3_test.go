@@ -75,85 +75,137 @@ func TestRailV2ToldOnlyAfterConfirmedPlayed(t *testing.T) {
 	}
 }
 
-// 2. Cut before the prompt text leaves it untold; cut after the prompt text marks it told.
-func TestRailV2CutBeforeVsAfterPromptText(t *testing.T) {
-	h := toldAuth(t)
-	h.srv.SetScreen(docsPane, gitPushPromptScreen)
-	h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
-	dp, _ := h.pending()
+// Option B whole-run evidence: push ordering, mid-run append, cut vs tolerance,
+// agent naming, "force push to main" + Chinese, drainReportLag both sides,
+// two agents in one run, and declines obeying the same rail.
+func TestRailV2WholeRunEvidence(t *testing.T) {
+	forcePushScreen := strings.ReplaceAll(gitPushPromptScreen, "git push origin main", "git push --force origin main")
 
-	// Cut before docs' prompt text: EventPlayed carries only the heard prefix.
-	h.playText("Auth is still waiting on printf.")
-	h.clock.Advance(500 * time.Millisecond)
-	h.say("Yes.")
-	if n := h.keysTo(docsPane); n != 0 {
-		t.Fatalf("cut before docs' prompt text sent %d keys", n)
-	}
+	t.Run("stale_audio_and_mid_run_append_without_drain", func(t *testing.T) {
+		for _, newTurn := range []bool{false, true} {
+			h := toldAuth(t)
+			var pt voice.PlaybackTracker
+			t0 := h.clock.Now()
+			pt.Report(t0, voice.PlaybackStarted, 0)
+			pt.Sent(t0, 48*1000)
+			pt.Said("docs finished earlier.")
+			if newTurn {
+				pt.TurnComplete()
+			}
+			h.clock.Advance(200 * time.Millisecond)
+			blockDocs(t, h)
+			dp, _ := h.pending()
+			if !newTurn {
+				h.sup.OnVoiceEvent(voice.EventPlayed{Text: "docs asks to run printf.", Start: h.clock.Now(), End: h.clock.Now().Add(time.Second)})
+				if h.sup.toldOpenLocked(dp) {
+					t.Fatal("played run before pending_id push marked docs told")
+				}
+			}
+			h.sup.OnVoiceEvent(voice.EventPush{Text: dp.SpokenSummary, Urgency: voice.UrgencyInterrupt, PendingID: dp.ID})
+			h.clock.Advance(50 * time.Millisecond)
+			pt.Sent(h.clock.Now(), 48*1000)
+			pt.Said(" docs asks to run printf.")
+			pt.TurnComplete()
+			h.clock.Advance(2 * time.Second)
+			for _, ev := range pt.Report(h.clock.Now(), voice.PlaybackDrained, 2000).Played {
+				h.sup.OnVoiceEvent(ev)
+			}
+			h.clock.Advance(500 * time.Millisecond)
+			h.say("Yes.")
+			want := 0
+			if newTurn {
+				want = 1
+			}
+			if n := h.keysTo(docsPane); n != want {
+				t.Fatalf("newTurn=%v: keys to docs = %d, want %d", newTurn, n, want)
+			}
+		}
+	})
 
-	// Cut after docs' prompt text played: EventPlayed carries dp.SpokenSummary.
-	h.playText(dp.SpokenSummary)
-	h.clock.Advance(500 * time.Millisecond)
-	h.say("Yes.")
-	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("cut after docs' prompt text sent %d keys, want 1", n)
-	}
-}
-
-// 3 & 4. Model paraphrase, omission, or status prose ("Docs needs more tests for git push")
-// without played key content for git push origin main leaves the question untold.
-func TestRailV2ParaphraseOmissionAndStatusProseDoNotTell(t *testing.T) {
-	for _, played := range []string{
-		"Docs wants your permission to run a command.",
-		"Docs asks whether to push your commits.",
-		"Docs needs more tests for git push.",
-		"Docs finished updating git documentation, and auth asks to run printf.",
-		"auth-v2 asks to run git push origin main.",
-	} {
-		t.Run(played, func(t *testing.T) {
-			m := braintest.NewModel()
-			h := newBrainHarness(t, m)
-			h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	t.Run("cut_tolerance_unnamed_force_push_chinese_and_decline", func(t *testing.T) {
+		flushRun := func(h *harness, text string, playedMs int) {
+			var pt voice.PlaybackTracker
+			t0 := h.clock.Now()
+			pt.Sent(t0, 48*2000)
+			pt.Said(text)
+			for _, ev := range pt.Report(t0.Add(time.Duration(playedMs)*time.Millisecond), voice.PlaybackFlushed, playedMs).Played {
+				h.sup.OnVoiceEvent(ev)
+			}
+		}
+		for _, wording := range []string{"docs wants to force push to main.", "docs请求强制推送到main分支，要批准吗？"} {
+			h := newHarness(t)
 			h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-			h.addAgent(shopPane, "auth-v2", "codex", herdr.StateWorking)
+			h.addAgent(shopPane, "docs-v2", "codex", herdr.StateWorking)
+			h.srv.SetScreen(docsPane, forcePushScreen)
+			h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
+			dp, _ := h.pending()
+			h.sup.OnVoiceEvent(voice.EventPush{Text: dp.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: dp.ID})
 
+			t0 := h.clock.Now()
+			flushRun(h, wording, 1000)
+			h.sup.OnVoiceEvent(voice.EventPlayed{Text: "A command needs approval.", Start: t0, End: t0.Add(time.Second)})
+			h.sup.OnVoiceEvent(voice.EventPlayed{Text: "docs-v2-codex wants to force push.", Start: t0, End: t0.Add(time.Second)})
+			h.clock.Advance(2 * time.Second)
+			if h.say("No."); h.keysTo(docsPane) != 0 {
+				t.Fatalf("decline on untold question sent %d keys", h.keysTo(docsPane))
+			}
+
+			flushRun(h, wording, 1900)
+			h.clock.Advance(2 * time.Second)
+			h.say("No.")
+			if got := h.sendKeysRequests(); len(got) != 1 || got[0][1] != "esc" {
+				t.Fatalf("decline after told (%q) = %v, want esc", wording, got)
+			}
+		}
+	})
+
+	t.Run("drain_report_lag_both_sides_and_two_agents_in_one_run", func(t *testing.T) {
+		for _, tc := range []struct {
+			lag      time.Duration
+			wantKeys int
+		}{{350 * time.Millisecond, 0}, {250 * time.Millisecond, 1}} {
+			h := newHarness(t)
+			h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
 			h.block(authPane, "codex-approval-prompt.screen.txt")
 			ap, _ := h.pending()
-			h.playText(ap.SpokenSummary)
-			h.clock.Advance(time.Second)
-
-			h.srv.SetScreen(docsPane, gitPushPromptScreen)
-			h.transition(docsPane, herdr.StateWorking, herdr.StateBlocked)
-			h.playText(played)
-			h.clock.Advance(500 * time.Millisecond)
-
-			m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-			m.Add(braintest.Step{Text: braintest.Reply("Holding off.", "")})
-			h.say("Yes.")
-			if n := h.keysTo(docsPane); n != 0 {
-				t.Fatalf("played %q falsely marked docs told (%d keys)", played, n)
+			t0 := h.clock.Now()
+			h.sup.OnVoiceEvent(voice.EventPush{Text: ap.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: ap.ID})
+			h.clock.Advance(2300*time.Millisecond - tc.lag)
+			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes.", Final: true})
+			h.clock.Advance(tc.lag)
+			h.sup.OnVoiceEvent(voice.EventPlayed{Text: ap.SpokenSummary, Start: t0.Add(100 * time.Millisecond), End: t0.Add(2300 * time.Millisecond)})
+			h.relay("Yes.")
+			if got := h.keysTo(authPane); got != tc.wantKeys {
+				t.Fatalf("lag=%v: keys=%d, want %d", tc.lag, got, tc.wantKeys)
 			}
-		})
-	}
-}
+		}
 
-// 5. told after speech began (acoustic onset before EventPlayed.At) blocks bare answer.
-func TestRailV2ToldAfterSpeechOnsetBlocksBareAnswer(t *testing.T) {
-	h := newHarness(t)
-	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-	h.block(authPane, "codex-approval-prompt.screen.txt")
-	ap, _ := h.pending()
-
-	// User starts speaking at t0; playback drains at t0 + 150ms; ASR arrives at t0 + 300ms.
-	h.pusher.mu.Lock()
-	h.pusher.onset = h.clock.Now()
-	h.pusher.mu.Unlock()
-	h.clock.Advance(150 * time.Millisecond)
-	h.playText(ap.SpokenSummary)
-	h.clock.Advance(150 * time.Millisecond)
-	h.say("Yes.")
-	if n := h.keysTo(authPane); n != 0 {
-		t.Fatalf("bare yes whose speech began before EventPlayed sent %d keys", n)
-	}
+		// Two agents named in one run: tells both, bare yes stays ambiguous, naming or tap works.
+		h := newHarness(t)
+		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+		h.block(authPane, "codex-approval-prompt.screen.txt")
+		ap, _ := h.store.Question(firstQuestionOf(h, authPane))
+		blockDocs(t, h)
+		dp, _ := h.pending()
+		t0 := h.clock.Now()
+		h.sup.OnVoiceEvent(voice.EventPush{Text: ap.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: ap.ID})
+		h.sup.OnVoiceEvent(voice.EventPush{Text: dp.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: dp.ID})
+		h.sup.OnVoiceEvent(voice.EventPlayed{Text: "Both auth and docs need approval.", Start: t0, End: t0.Add(time.Second)})
+		if !h.sup.toldOpenLocked(ap) || !h.sup.toldOpenLocked(dp) {
+			t.Fatal("run naming both agents did not tell both")
+		}
+		h.clock.Advance(2 * time.Second)
+		h.say("Yes.")
+		if h.keysTo(authPane)+h.keysTo(docsPane) != 0 {
+			t.Fatal("bare yes after two-agent run sent keys")
+		}
+		h.clock.Advance(time.Second)
+		h.hear("Yes, approve auth.")
+		if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, ap.YesKeys); err != nil {
+			t.Fatalf("naming auth after two-agent run: %v", err)
+		}
+	})
 }
 
 // 10 & 11. No-report client (PlaybackReports() == false): bare yes never sends keys,

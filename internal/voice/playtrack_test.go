@@ -525,77 +525,64 @@ func TestPlaybackCutAfterUnderrunRetainsHeardPrefix(t *testing.T) {
 	})
 }
 
-func TestPlaybackPlayedSpans(t *testing.T) {
+func TestPlaybackWholeRuns(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 
-	t.Run("no_played_before_drain_or_without_reports", func(t *testing.T) {
+	t.Run("drained_rounding_and_turn_complete_after_drain", func(t *testing.T) {
 		var p PlaybackTracker
-		sendRun(&p, t0, []string{"auth", "asks", "to", "run", "printf."}, 1000)
+		p.Sent(t0, 1000*outBytesPerMs+10) // 1000.2 ms -> client rounds played_ms to 1000
+		p.Said("auth asks to run printf.")
 		p.TurnComplete()
 		if p.Reports() {
 			t.Fatal("Reports() true before any client playback message")
 		}
-		rep := p.Report(t0.Add(50*time.Millisecond), PlaybackStarted, 0)
-		if !p.Reports() || len(rep.Played) != 0 {
+		if rep := p.Report(t0.Add(50*time.Millisecond), PlaybackStarted, 0); !p.Reports() || len(rep.Played) != 0 {
 			t.Fatalf("started report = %+v, Reports=%v", rep, p.Reports())
 		}
-		rep = p.Report(t0.Add(time.Second), PlaybackDrained, 1000)
-		if len(rep.Played) != 1 || rep.Played[0] != "auth asks to run printf." {
-			t.Fatalf("drained Played = %q, want full sentence", rep.Played)
+		end := t0.Add(time.Second)
+		rep := p.Report(end, PlaybackDrained, 1000)
+		want := EventPlayed{Text: "auth asks to run printf.", Start: t0, End: end}
+		if len(rep.Played) != 1 || rep.Played[0] != want {
+			t.Fatalf("drained Played = %+v, want %+v", rep.Played, want)
 		}
 	})
 
-	t.Run("cut_before_vs_after_prompt_and_unvoiced_tail", func(t *testing.T) {
-		var p PlaybackTracker
-		p.SentPCM(t0, voicedPCM(1000))
-		p.Said("Auth finished. ")
-		p.SentPCM(t0, voicedPCM(1000))
-		p.Said("Docs asks to run git push origin main.")
-		if rep := p.Report(t0.Add(400*time.Millisecond), PlaybackFlushed, 400); len(rep.Played) != 0 {
-			t.Fatalf("cut at 400ms Played = %q, want empty before first word", rep.Played)
+	t.Run("cut_vs_flushed_within_tolerance", func(t *testing.T) {
+		var pCut PlaybackTracker
+		sendRun(&pCut, t0, []string{"auth", "asks", "to", "run", "printf."}, 2000)
+		if rep := pCut.Report(t0.Add(1800*time.Millisecond), PlaybackFlushed, 1800); rep.Cut == nil || len(rep.Played) != 0 {
+			t.Fatalf("cut run (200ms short) = %+v, want Cut and no Played", rep)
 		}
 
-		var p2 PlaybackTracker
-		p2.SentPCM(t0, voicedPCM(1000))
-		p2.Said("Auth finished. ")
-		p2.SentPCM(t0, voicedPCM(1000))
-		p2.Said("Docs asks to run git push origin main.")
-		if rep := p2.Report(t0.Add(1200*time.Millisecond), PlaybackFlushed, 1200); len(rep.Played) != 1 || strings.Contains(rep.Played[0], "git push") {
-			t.Fatalf("cut mid-prompt Played = %q, want git push unplayed", rep.Played)
-		}
-
-		var p2b PlaybackTracker
-		p2b.SentPCM(t0, voicedPCM(1000))
-		p2b.Said("Auth finished. ")
-		p2b.SentPCM(t0, voicedPCM(1000))
-		p2b.Said("Docs asks to run git push origin main.")
-		p2b.SentPCM(t0, voicedPCM(1000))
-		p2b.Said("Should I proceed?")
-		if rep := p2b.Report(t0.Add(2200*time.Millisecond), PlaybackFlushed, 2200); len(rep.Played) != 1 || !strings.Contains(rep.Played[0], "Docs asks to run git push origin main.") {
-			t.Fatalf("cut after prompt span Played = %q, want prompt included", rep.Played)
-		}
-
-		var p3 PlaybackTracker
-		p3.SentPCM(t0, voicedPCM(1000))
-		p3.Said("Auth finished. ")
-		p3.SentPCM(t0, silentPCM(200))
-		p3.Said("Docs asks to run git push origin main.") // unvoiced tail in trailing silence
-		p3.TurnComplete()
-		if rep := p3.Report(t0.Add(time.Second), PlaybackDrained, 1200); len(rep.Played) != 1 || rep.Played[0] != "Auth finished." {
-			t.Fatalf("drained with unvoiced tail Played = %q, want voiced prefix only", rep.Played)
+		var pTol PlaybackTracker
+		sendRun(&pTol, t0, []string{"auth", "asks", "to", "run", "printf."}, 2000)
+		end := t0.Add(1900 * time.Millisecond)
+		rep := pTol.Report(end, PlaybackFlushed, 1900) // 100ms short <= cutTolerance (150ms)
+		want := EventPlayed{Text: "auth asks to run printf.", Start: t0, End: end}
+		if rep.Cut != nil || len(rep.Played) != 1 || rep.Played[0] != want {
+			t.Fatalf("within-tolerance flush = %+v, want %+v", rep, want)
 		}
 	})
 
-	t.Run("mid_turn_underrun_and_detach", func(t *testing.T) {
-		var p PlaybackTracker
-		sendRun(&p, t0, []string{"auth", "asks"}, 1000)
-		if rep := p.Report(t0.Add(time.Second), PlaybackDrained, 1000); len(rep.Played) != 1 || rep.Played[0] != "auth asks" {
-			t.Fatalf("mid-turn drain Played = %q", rep.Played)
-		}
-		sendRun(&p, t0.Add(1100*time.Millisecond), []string{"to", "run", "printf."}, 1000)
-		p.Detach()
-		if p.Reports() {
-			t.Fatal("Reports() stayed true after Detach")
+	t.Run("two_queued_runs_both_reported", func(t *testing.T) {
+		t1 := t0.Add(500 * time.Millisecond)
+		for _, state := range []string{PlaybackDrained, PlaybackFlushed} {
+			var p PlaybackTracker
+			sendRun(&p, t0, []string{"first", "run."}, 1000)
+			p.TurnComplete()
+			sendRun(&p, t1, []string{"second", "run."}, 1000)
+			playedMs := 1950
+			if state == PlaybackDrained {
+				p.TurnComplete()
+				playedMs = 2000
+			} else {
+				p.Flush(t0.Add(1950 * time.Millisecond))
+			}
+			end := t0.Add(2 * time.Second)
+			rep := p.Report(end, state, playedMs)
+			if len(rep.Played) != 2 || rep.Played[0] != (EventPlayed{Text: "first run.", Start: t0, End: end}) || rep.Played[1] != (EventPlayed{Text: "second run.", Start: t1, End: end}) {
+				t.Fatalf("%s two runs = %+v", state, rep.Played)
+			}
 		}
 	})
 }

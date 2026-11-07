@@ -744,6 +744,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			s.pushSpoken(true)
 			s.markPushed(e.Text)
 			s.noteNamesSaid(e.Text) // names.go: what the user was told
+			s.noteHanded(e.PendingID)
 		}
 	case voice.EventInterrupted:
 		// The user barged in on whatever was playing, a push
@@ -752,7 +753,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		s.voiceStopped()
 		s.flushFocus()
 	case voice.EventPlayed:
-		s.notePlayed(e.Text, e.At)
+		s.notePlayed(e, false)
 	case voice.EventPushUnheard:
 		s.onPushUnheard(e) // unheard.go
 	}

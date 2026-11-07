@@ -138,6 +138,9 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		s.railBlockedLocked(p, keys, "fast_path", reason)
 		if reason == s.displacedLocked(p, in) {
 			if line := s.reaskLocked(p, in); line != "" {
+				if in.kind == InputVoice {
+					s.noteHandedLocked(p.ID)
+				}
 				s.mu.Unlock()
 				s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "asked_again", "text": text, "id": p.ID, "input": string(in.kind)})
 				return voice.ToolResult{Spoken: line, Clarify: true, Scheduling: voice.UrgencyInterrupt}, true
