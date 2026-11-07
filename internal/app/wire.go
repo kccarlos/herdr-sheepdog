@@ -215,9 +215,11 @@ func (a *App) wire() error {
 		// been pushed.
 		a.routerCtx = a.voiceCtx.Session("text-router", "")
 		a.routerCtx.EpochOnFirstUse("text router (--voice=off)", "No voice model is running: the /debug text router stands in for it. Nothing here reaches a model; it shows what the router relayed and what a voice model would have been pushed.")
-		skipped := inject.SkippedPusher{Log: a.log, Context: a.routerCtx, Shown: sup.PushShown}
+		skipped := inject.SkippedPusher{Log: a.log, Context: a.routerCtx}
 		if opts.HeardEcho {
-			skipped.Heard = func(text string, u voice.Urgency) { heardEcho(sup, voice.EventPush{Text: text, Urgency: u}, text) }
+			skipped.Heard = func(text string, u voice.Urgency, tags map[string]any) {
+				heardEcho(sup, voice.EventPush{Text: text, Urgency: u, PendingID: voice.PushPendingID(tags)}, text)
+			}
 		}
 		pusher.set(skipped)
 		sup.SetVoiceConnected(true)
@@ -385,6 +387,7 @@ func heardEcho(sup *supervisor.Supervisor, start voice.Event, text string) {
 		}
 		sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
 		sup.OnVoiceEvent(voice.EventTurnComplete{})
+		sup.OnVoiceEvent(voice.EventPlayed{Text: text, End: time.Now()})
 	}()
 }
 

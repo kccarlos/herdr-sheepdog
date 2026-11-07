@@ -524,3 +524,93 @@ func TestPlaybackCutAfterUnderrunRetainsHeardPrefix(t *testing.T) {
 		}
 	})
 }
+
+func TestPlaybackWholeRuns(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+
+	t.Run("drained_rounding_and_turn_complete_after_drain", func(t *testing.T) {
+		var p PlaybackTracker
+		p.Sent(t0, 1000*outBytesPerMs+10) // 1000.2 ms -> client rounds played_ms to 1000
+		p.Said("auth asks to run printf.")
+		p.TurnComplete()
+		if p.Reports() {
+			t.Fatal("Reports() true before any client playback message")
+		}
+		if rep := p.Report(t0.Add(50*time.Millisecond), PlaybackStarted, 0); !p.Reports() || len(rep.Played) != 0 {
+			t.Fatalf("started report = %+v, Reports=%v", rep, p.Reports())
+		}
+		end := t0.Add(time.Second)
+		rep := p.Report(end, PlaybackDrained, 1000)
+		want := EventPlayed{Text: "auth asks to run printf.", Start: t0, End: end}
+		if len(rep.Played) != 1 || rep.Played[0] != want {
+			t.Fatalf("drained Played = %+v, want %+v", rep.Played, want)
+		}
+	})
+
+	t.Run("cut_vs_flushed_within_tolerance", func(t *testing.T) {
+		var pCut PlaybackTracker
+		sendRun(&pCut, t0, []string{"auth", "asks", "to", "run", "printf."}, 2000)
+		if rep := pCut.Report(t0.Add(1800*time.Millisecond), PlaybackFlushed, 1800); rep.Cut == nil || len(rep.Played) != 0 {
+			t.Fatalf("cut run (200ms short) = %+v, want Cut and no Played", rep)
+		}
+
+		var pTol PlaybackTracker
+		sendRun(&pTol, t0, []string{"auth", "asks", "to", "run", "printf."}, 2000)
+		end := t0.Add(1900 * time.Millisecond)
+		rep := pTol.Report(end, PlaybackFlushed, 1900) // 100ms short <= cutTolerance (150ms)
+		want := EventPlayed{Text: "auth asks to run printf.", Start: t0, End: end}
+		if rep.Cut != nil || len(rep.Played) != 1 || rep.Played[0] != want {
+			t.Fatalf("within-tolerance flush = %+v, want %+v", rep, want)
+		}
+	})
+
+	t.Run("two_queued_runs_both_reported", func(t *testing.T) {
+		t1 := t0.Add(500 * time.Millisecond)
+		for _, state := range []string{PlaybackDrained, PlaybackFlushed} {
+			var p PlaybackTracker
+			sendRun(&p, t0, []string{"first", "run."}, 1000)
+			p.TurnComplete()
+			sendRun(&p, t1, []string{"second", "run."}, 1000)
+			playedMs := 1950
+			if state == PlaybackDrained {
+				p.TurnComplete()
+				playedMs = 2000
+			} else {
+				p.Flush(t0.Add(1950 * time.Millisecond))
+			}
+			end := t0.Add(2 * time.Second)
+			rep := p.Report(end, state, playedMs)
+			if len(rep.Played) != 2 || rep.Played[0] != (EventPlayed{Text: "first run.", Start: t0, End: end}) || rep.Played[1] != (EventPlayed{Text: "second run.", Start: t1, End: end}) {
+				t.Fatalf("%s two runs = %+v", state, rep.Played)
+			}
+		}
+	})
+}
+
+func TestPlaybackTrackerSwitchFlushDoesNotCreditNewRun(t *testing.T) {
+	t0 := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	var p PlaybackTracker
+
+	// Switching voices installs an empty ExpectFlush slot in the new tracker
+	// while the client had 2 s of old-session audio playing.
+	p.Flush(t0)
+
+	// Before the client's flush acknowledgement arrives, the new voice queues
+	// a 1 s run naming question B.
+	t1 := t0.Add(50 * time.Millisecond)
+	sendRun(&p, t1, []string{"B", "wants", "to", "run", "make."}, 1000)
+	p.TurnComplete()
+
+	// The old client's flushed(2000) arrives for the switch flush.
+	rep := p.Report(t0.Add(100*time.Millisecond), PlaybackFlushed, 2000)
+	if len(rep.Played) != 0 || rep.Cut != nil {
+		t.Fatalf("switch flush credited new run: Played=%+v Cut=%+v", rep.Played, rep.Cut)
+	}
+
+	// B's run remains active and plays out when its own drain arrives.
+	end := t1.Add(time.Second)
+	drained := p.Report(end, PlaybackDrained, 1000)
+	if len(drained.Played) != 1 || drained.Played[0] != (EventPlayed{Text: "B wants to run make.", Start: t1, End: end}) {
+		t.Fatalf("subsequent drain Played = %+v", drained.Played)
+	}
+}

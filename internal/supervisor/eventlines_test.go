@@ -130,6 +130,7 @@ func TestPromptStateFact(t *testing.T) {
 		t.Fatalf("pending = %+v", p2)
 	}
 	a.pending = p2.ID
+	h.playText(p2.SpokenSummary)
 	h.clock.Advance(time.Second)
 	if res := h.say("yes"); res.Spoken != "Told auth yes." {
 		t.Fatalf("answer = %+v", res)

@@ -40,6 +40,7 @@ func (h *harness) lastPollOutcome(t *testing.T) string {
 func TestPollRepromptRaisesOnDifferentPrompt(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	first, _ := h.pending()
 
 	h.say("yes")
@@ -72,6 +73,7 @@ func TestPollRepromptRaisesOnDifferentPrompt(t *testing.T) {
 func TestPollRepromptSamePromptNotRaised(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes")
 
 	waitFor(t, func() bool { return h.log.count("supervisor.reprompt_poll") == 1 }, "the poll to end")
@@ -92,6 +94,7 @@ func TestPollRepromptSamePromptNotRaised(t *testing.T) {
 func TestPollRepromptStopsWhenLeavesBlocked(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes")
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 
@@ -111,6 +114,7 @@ func TestPollRepromptStopsWhenLeavesBlocked(t *testing.T) {
 func TestPollRepromptTimesOut(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 
@@ -130,6 +134,7 @@ func TestPollRepromptTimesOut(t *testing.T) {
 func TestReconcileRaisesForAnsweredBlockedWithPrompt(t *testing.T) {
 	h := twoAgents(t) // no poll: isolates the reconciler
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
@@ -173,6 +178,7 @@ func TestReconcileSkipsOpenPending(t *testing.T) {
 func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
@@ -180,6 +186,7 @@ func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 	if n := h.log.count("supervisor.reprompt"); n != 1 {
 		t.Fatalf("first sweep: supervisor.reprompt = %d", n)
 	}
+	h.playText(h.lastPushText())
 	h.say("yes") // answers the git prompt too
 
 	h.sup.reconcileReprompts(context.Background()) // the screen never moved on
@@ -200,6 +207,7 @@ func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 func TestPollAndReconcileNeverDoubleRaiseTheSamePrompt(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 	h.say("yes") // starts the post-answer poll
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
@@ -297,6 +305,7 @@ func TestBriefingNamesNewQuestionAfterReprompt(t *testing.T) {
 func TestFastPathAnswerRepromptsToNewPrompt(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.playText(h.lastPushText())
 
 	res := h.say("yes")
 	if res.Spoken != "Told auth yes." {
@@ -318,6 +327,7 @@ func TestFastPathAnswerRepromptsToNewPrompt(t *testing.T) {
 	if _, ok := h.pending(); !ok {
 		t.Fatal("no pending action for the new prompt")
 	}
+	h.playText(h.lastPushText())
 
 	res2 := h.say("yes")
 	if res2.Spoken != "Told auth yes." {

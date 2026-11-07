@@ -178,14 +178,16 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("inject = %d", resp.StatusCode)
 	}
-	body, _ = json.Marshal(map[string]any{"text": "yes"})
-	resp, err = http.Post(url+"/api/utterance", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("utterance = %d", resp.StatusCode)
+	for range 2 {
+		body, _ = json.Marshal(map[string]any{"text": "yes"})
+		resp, err = http.Post(url+"/api/utterance", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("utterance = %d", resp.StatusCode)
+		}
 	}
 
 	cancel()

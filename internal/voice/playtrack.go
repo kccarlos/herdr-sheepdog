@@ -100,6 +100,8 @@ type PlaybackReport struct {
 	Cut *TranscriptCut
 	// Heard is the heard part of a cut run.
 	Heard string
+	// Played are whole assistant runs the client confirmed played to their end.
+	Played []EventPlayed
 	// Awaited identifies a daemon-interrupted run, already saved in recap.
 	Awaited bool
 	// RecapSeq is the Recap sequence id of the cut assistant entry when known.
@@ -192,6 +194,10 @@ type playRun struct {
 	prefixHeardMs int
 	prefixRunMs   int
 
+	said      string
+	startedAt time.Time
+	prior     []playRun
+
 	sent   int
 	voiced int
 	segs   []playSeg
@@ -202,7 +208,7 @@ type playRun struct {
 }
 
 func (r playRun) empty() bool {
-	return r.sent == 0 && len(r.frags) == 0 && r.prefixRaw == ""
+	return r.sent == 0 && len(r.frags) == 0 && r.prefixRaw == "" && len(r.prior) == 0
 }
 
 func (r playRun) hasPending() bool {
@@ -316,6 +322,9 @@ func (p *PlaybackTracker) SentPCM(now time.Time, pcm []byte) {
 }
 
 func (p *PlaybackTracker) advanceEst(now time.Time, n int) {
+	if p.run.startedAt.IsZero() {
+		p.run.startedAt = now
+	}
 	if p.est.Before(now) {
 		p.est = now
 	}
@@ -337,14 +346,11 @@ func (p *PlaybackTracker) pendingBytes() int {
 }
 
 func (p *PlaybackTracker) takeActiveRun() playRun {
-	if len(p.done) > 0 {
-		r := p.done[0]
-		p.done = nil
-		p.run = playRun{}
-		return r
+	r, prior := p.run, p.done
+	if r.empty() && len(prior) > 0 {
+		r, prior = prior[len(prior)-1], prior[:len(prior)-1]
 	}
-	r := p.run
-	p.run = playRun{}
+	r.prior, p.done, p.run = prior, nil, playRun{}
 	return r
 }
 
@@ -380,6 +386,7 @@ func (p *PlaybackTracker) Said(text string) {
 	if text == "" {
 		return
 	}
+	p.run.said += text
 	p.run.frags = append(p.run.frags, spokenFrag{text: text, at: p.run.sent, voicedAt: p.run.voiced})
 }
 
@@ -445,16 +452,10 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 		p.playing = false
 		p.holdUntil = now.Add(PlaybackGapHold)
 		p.endedAt = now
-		p.drainBytes(playedMs * outBytesPerMs)
+		rep.Played = p.drainBytes(playedMs*outBytesPerMs, now)
 	case PlaybackFlushed:
 		for len(p.awaiting) > 0 && now.Sub(p.awaiting[0].flushedAt) > awaitingTTL {
 			p.awaiting = p.awaiting[1:]
-		}
-		if playedMs > 0 {
-			for len(p.awaiting) > 0 && p.awaiting[0].empty() {
-				p.awaiting = p.awaiting[1:]
-				rep.awaitedPopped++
-			}
 		}
 		var r playRun
 		if len(p.awaiting) > 0 {
@@ -467,8 +468,23 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 			r = p.takeActiveRun()
 			p.est = time.Time{}
 		}
+		for i, d := range r.prior {
+			segMs := d.sent / outBytesPerMs
+			if _, _, _, _, dCut := d.heardAt(min(playedMs, segMs)); dCut {
+				for _, t := range append(r.prior[i+1:], r) {
+					rep.RunMs += t.prefixRunMs + t.sent/outBytesPerMs
+				}
+				r = d
+				break
+			}
+			rep.RunMs += d.prefixRunMs + segMs
+			playedMs = shiftNonNeg(playedMs - segMs)
+			if ev, ok := d.playedEvent(now); ok {
+				rep.Played = append(rep.Played, ev)
+			}
+		}
 		heard, full, heardMs, runMs, cut := r.heardAt(playedMs)
-		rep.RunMs = runMs
+		rep.RunMs += runMs
 		rep.RecapSeq = r.meta.RecapSeq
 		if p.Empty() {
 			p.playing = false
@@ -484,6 +500,8 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 				ByPush:      r.meta.ByPush,
 			}
 			rep.Heard = heard
+		} else if ev, ok := r.playedEvent(now); ok {
+			rep.Played = append(rep.Played, ev)
 		}
 	}
 	p.last = rep
@@ -535,20 +553,27 @@ func (p *PlaybackTracker) EndedAt(now time.Time) time.Time {
 // Last is the most recent client report (zero State: none yet).
 func (p *PlaybackTracker) Last() PlaybackReport { return p.last }
 
-func (p *PlaybackTracker) drainBytes(n int) {
-	rem := n
-	for len(p.done) > 0 && rem > 0 {
-		if rem >= p.done[0].sent {
-			rem -= p.done[0].sent
-			p.done = p.done[1:]
-			continue
+func (r playRun) playedEvent(end time.Time) (EventPlayed, bool) {
+	t := strings.TrimSpace(r.said)
+	return EventPlayed{Text: t, Start: r.startedAt, End: end}, (r.sent > 0 || r.prefixRunMs > 0) && t != ""
+}
+
+func (p *PlaybackTracker) drainBytes(n int, now time.Time) (played []EventPlayed) {
+	for len(p.done) > 0 && n > 0 {
+		if n+outBytesPerMs < p.done[0].sent {
+			p.done[0] = p.done[0].advanceInTurn(n)
+			return played
 		}
-		p.done[0] = p.done[0].advanceInTurn(rem)
-		return
+		d := p.done[0]
+		n, p.done = shiftNonNeg(n-d.sent), p.done[1:]
+		if ev, ok := d.playedEvent(now); ok {
+			played = append(played, ev)
+		}
 	}
-	if len(p.done) == 0 && rem > 0 && !p.run.empty() {
-		p.run = p.run.advanceInTurn(rem)
+	if len(p.done) == 0 && n > 0 && !p.run.empty() {
+		p.run = p.run.advanceInTurn(n)
 	}
+	return played
 }
 
 func shiftNonNeg(v int) int {
@@ -574,6 +599,8 @@ func (r playRun) advanceInTurn(n int) playRun {
 		prefixRaw:     r.prefixRaw + heardRaw,
 		prefixHeardMs: r.prefixHeardMs + clamped/outBytesPerMs,
 		prefixRunMs:   r.prefixRunMs + clamped/outBytesPerMs,
+		said:          r.said,
+		startedAt:     r.startedAt,
 		meta:          r.meta,
 		frags:         remFrags,
 	}

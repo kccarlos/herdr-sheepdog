@@ -333,7 +333,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 					s.registerRevivedQuestionLocked(p)
 				}
 				if tr := typedReasksOf(ctx); tr != nil {
-					tr.add(keyOf(p), p.PaneID, line)
+					tr.add(p.PaneID, line)
 				} else {
 					s.queueReaskLocked(p, line)
 				}

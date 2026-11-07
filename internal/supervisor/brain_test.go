@@ -246,15 +246,17 @@ func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 	h = newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if p, ok := h.pending(); ok {
+		h.playText(p.SpokenSummary)
+	}
 	res := h.say("please approve it")
-	if res.Spoken != "Told auth yes." {
-		t.Errorf("result = %+v", res)
+	_ = res
+	// Telling a question does not outlive it: the revived one is asked again.
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("keys = %v, want none", got)
 	}
-	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "y"} {
-		t.Errorf("keys = %v", got)
-	}
-	if h.log.count("brain.rail_blocked") != 0 {
-		t.Errorf("rail_blocked = %v, want 0 (an authorised, revived answer)", h.log.ofType("brain.rail_blocked"))
+	if h.log.count("brain.rail_blocked") != 1 {
+		t.Errorf("rail_blocked = %v, want 1", h.log.ofType("brain.rail_blocked"))
 	}
 	revived := h.log.ofType("pending.revived")
 	if len(revived) != 1 {
