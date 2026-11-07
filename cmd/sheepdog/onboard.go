@@ -174,10 +174,8 @@ type prompter struct {
 
 func newPrompter(stdin io.Reader, out io.Writer) *prompter {
 	p := &prompter{r: bufio.NewReader(stdin), out: out}
-	if f, ok := stdin.(*os.File); ok {
-		if st, err := f.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
-			p.tty = f
-		}
+	if f, ok := stdin.(*os.File); ok && isTerminal(f) {
+		p.tty = f
 	}
 	return p
 }

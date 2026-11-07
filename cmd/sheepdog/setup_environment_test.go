@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -850,5 +851,16 @@ func TestEnvBackendOverridesConfigPin(t *testing.T) {
 	}
 	if l.cfg.Herdr.Backend != config.HerdrBackendHC {
 		t.Fatalf("Herdr.Backend = %q, want %q (SHEEPDOG_HERDR_BACKEND must override config.toml)", l.cfg.Herdr.Backend, config.HerdrBackendHC)
+	}
+}
+
+func TestDevNullIsNotATerminal(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if newPrompter(f, io.Discard).tty != nil {
+		t.Fatal("/dev/null counted as a terminal, so setup would prompt with no one to answer")
 	}
 }
