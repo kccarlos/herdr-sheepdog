@@ -508,7 +508,7 @@ func TestReplacementAnnouncement(t *testing.T) {
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	h.block("w6:p1", "claude-permission-prompt.screen.txt")
 	push := h.pusher.last(t)
-	want := "Dropping the earlier question; now docs is asking do you want to create claude.txt."
+	want := "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt."
 	if push.Text != want {
 		t.Errorf("push = %q, want %q", push.Text, want)
 	}

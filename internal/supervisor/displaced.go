@@ -28,6 +28,7 @@ type toldEntry struct {
 	seq, order uint64
 	at         time.Time
 	closedAt   time.Time
+	handed     time.Time // the hand-over this entry's order came from
 }
 
 type toldState struct {
@@ -70,8 +71,7 @@ func (s *Supervisor) syncToldLocked() {
 	open := s.openKeysLocked()
 	now := s.cfg.Now()
 	for k, e := range t.told {
-		_, seen := s.promptSeenAt[k.pane]
-		if _, ok := open[k]; !ok && (!seen || s.lastPrompt[k.pane] != k.sig) && e.closedAt.IsZero() {
+		if _, ok := open[k]; !ok && e.closedAt.IsZero() {
 			e.closedAt = now
 		}
 		if !e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow {
@@ -120,7 +120,7 @@ func (s *Supervisor) noteHanded(id string) {
 
 func (s *Supervisor) noteHandedLocked(id string) {
 	s.syncToldLocked()
-	if _, _, open := s.questionByID(id); open && s.told.handed[id].at.IsZero() {
+	if _, _, open := s.questionByID(id); open {
 		if s.told.handed == nil {
 			s.told.handed = map[string]toldEntry{}
 		}
@@ -167,13 +167,16 @@ func (s *Supervisor) notePlayed(ev voice.EventPlayed, typed bool) {
 			if at.Before(e.at) {
 				e.at = at
 			}
-			e.seq, e.order = min(e.seq, seq), s.told.nextOrder
+			e.seq = min(e.seq, seq)
+			if h := s.told.handed[q.ID]; h.at.After(e.handed) {
+				e.handed, e.order = h.at, s.told.nextOrder
+			}
 			continue
 		}
 		if s.told.told == nil {
 			s.told.told = map[promptKey]*toldEntry{}
 		}
-		s.told.told[k] = &toldEntry{seq: seq, order: s.told.nextOrder, at: at}
+		s.told.told[k] = &toldEntry{seq: seq, order: s.told.nextOrder, at: at, handed: s.told.handed[q.ID].at}
 	}
 }
 
@@ -304,7 +307,7 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 		if k2 == k || e.at.After(in.beganAt) || e.seq >= in.began || (!e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow) {
 			continue
 		}
-		if q, ok := open[k2]; pTold && ok && k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) && e.order >= cur.order {
+		if q := open[k2]; pTold && k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) && e.order >= cur.order {
 			ambigRun = true
 		}
 		if k2.pane == p.PaneID {
@@ -372,7 +375,7 @@ func reaskLine(alias, other, kind, summary string, zh bool) string {
 	case zh && kind == "same_pane":
 		return fmt.Sprintf("等等——你回答时%s的问题刚变了，所以我没发出去。%s 这个新问题怎么处理？", alias, summary)
 	case zh && kind == "displaced":
-		return fmt.Sprintf("等等——我没把刚才的回复发给%s，因为它刚弹出了新问题。%s %s这边怎么处理？", alias, summary, alias)
+		return fmt.Sprintf("等等——我没把刚才的回复发给%s，因为你在回答%s时它刚弹出了新问题。%s %s这边怎么处理？", alias, other, summary, alias)
 	case zh && kind == "no_reports":
 		return fmt.Sprintf("当前客户端不支持播放确认，单说“好”不会批准%s。%s 请说“批准%s”或“拒绝%s”，或直接点选。", alias, summary, alias, alias)
 	case zh:
@@ -382,7 +385,7 @@ func reaskLine(alias, other, kind, summary string, zh bool) string {
 	case kind == "same_pane":
 		return fmt.Sprintf("Hold on — %s's prompt changed just as you answered, so I did not send that. %s What is your answer for this one?", alias, summary)
 	case kind == "displaced":
-		return fmt.Sprintf("Hold on — I did not send that to %s, because its prompt just came in. %s What should %s do?", alias, summary, alias)
+		return fmt.Sprintf("Hold on — I did not send that to %s, because its prompt came in while you were answering %s. %s What should %s do?", alias, other, summary, alias)
 	case kind == "no_reports":
 		return fmt.Sprintf("I can't confirm audio playback on this client, so a bare yes won't approve %s. %s Say 'yes, %s' or 'no, %s', or tap to answer.", alias, summary, alias, alias)
 	}

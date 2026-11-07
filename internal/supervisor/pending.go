@@ -118,7 +118,7 @@ func (s *Supervisor) setPendingMuted(p state.PendingAction, muted bool) string {
 			"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": p.ID, "new_kind": p.Kind,
 		})
 		if old.Kind == state.PendingAnswerPrompt && p.Kind == state.PendingAnswerPrompt && old.PaneID != p.PaneID && s.allows(pushReplacement) {
-			spoken = replacedLine(p.SpokenSummary, s.ceoChineseLocked())
+			spoken = replacedLine(s.sayOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
 		}
 	}
 	s.installedLocked(p) // displaced.go
@@ -541,9 +541,9 @@ func answerOptions(p state.PendingAction) []state.Option {
 // replacedLine is the spoken line for a question that displaces another
 // pane's: in the user's language, like the summary it carries (no
 // "。." seam, docs/dev/eval/eval-campaign-2026-10-03.md H1/H4).
-func replacedLine(summary string, zh bool) string {
+func replacedLine(oldAlias, summary string, zh bool) string {
 	if zh {
-		return "先放下之前的问题。现在 " + prose.Terminate(summary)
+		return "先放下 " + oldAlias + " 之前的问题。现在 " + prose.Terminate(summary)
 	}
-	return fmt.Sprintf("Dropping the earlier question; now %s.", lowerFirst(strings.TrimRight(summary, ".。")))
+	return fmt.Sprintf("Dropping the earlier question from %s; now %s.", oldAlias, lowerFirst(strings.TrimRight(summary, ".。")))
 }

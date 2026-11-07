@@ -69,10 +69,10 @@ func TestToldLine(t *testing.T) {
 
 // A question displacing another pane's keeps one language and no seam.
 func TestReplacedLineLanguage(t *testing.T) {
-	if got := replacedLine("docs 需要你做个决定。", true); got != "先放下之前的问题。现在 docs 需要你做个决定。" {
+	if got := replacedLine("auth", "docs 需要你做个决定。", true); got != "先放下 auth 之前的问题。现在 docs 需要你做个决定。" {
 		t.Errorf("zh = %q", got)
 	}
-	if got := replacedLine("docs is asking do you want to create claude.txt.", false); got != "Dropping the earlier question; now docs is asking do you want to create claude.txt." {
+	if got := replacedLine("auth", "docs is asking do you want to create claude.txt.", false); got != "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt." {
 		t.Errorf("en = %q", got)
 	}
 }

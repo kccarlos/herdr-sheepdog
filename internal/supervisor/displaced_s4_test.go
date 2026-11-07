@@ -379,14 +379,16 @@ func TestReplayedQuestionUpdatesOrder(t *testing.T) {
 
 	// B (docs) told order 1, A (auth) told order 2; both open, A pending.
 	h.block(docsPane, "codex-approval-prompt.screen.txt")
+	dp, _ := h.pending()
 	h.speak(h.lastPushText())
 	h.clock.Advance(time.Second)
 	h.block(authPane, "codex-approval-prompt.screen.txt")
 	ap, _ := h.pending()
 	h.speak(h.lastPushText())
 
-	// A later whole run re-asks B (docs).
+	// A later whole run re-asks B (docs), handed to the voice again.
 	h.clock.Advance(time.Second)
+	h.sup.noteHanded(dp.ID)
 	tReask := h.clock.Now()
 	h.sup.OnVoiceEvent(voice.EventPlayed{Text: "docs is still asking to run printf.", Start: tReask, End: tReask.Add(time.Second)})
 
@@ -398,5 +400,47 @@ func TestReplayedQuestionUpdatesOrder(t *testing.T) {
 	}
 	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, ap.YesKeys); err == nil {
 		t.Fatal("AnswerPrompt approved auth on bare yes after docs was re-asked")
+	}
+}
+
+// A run about one question that happens to contain another agent's name does
+// not make the other question newer, so its bare answer still lands.
+func TestRunMentioningAnotherAgentKeepsItsOrder(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	h.speak(h.lastPushText())
+	h.clock.Advance(time.Second)
+	h.block(docsPane, "codex-approval-prompt.screen.txt")
+	dp, _ := h.pending()
+	h.sup.noteHanded(dp.ID)
+	h.clock.Advance(time.Second)
+	start := h.clock.Now()
+	h.sup.OnVoiceEvent(voice.EventPlayed{Text: "docs asks to edit auth.go.", Start: start, End: start.Add(time.Second)})
+	h.clock.Advance(2 * time.Second)
+	h.say("Yes.")
+	if n := h.keysTo(docsPane); n != 1 {
+		t.Fatalf("keys to docs = %d, want 1", n)
+	}
+}
+
+// A newer told question that closes just before the bare answer leaves the
+// answer unclaimed: it must not fall to the older open question.
+func TestBareYesDoesNotFallToOlderQuestionWhenNewerCloses(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+	h.block(docsPane, "codex-approval-prompt.screen.txt")
+	h.speak(h.lastPushText())
+	h.clock.Advance(time.Second)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	h.speak(h.lastPushText())
+	h.clock.Advance(time.Second)
+	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
+	h.clock.Advance(100 * time.Millisecond)
+	h.say("Yes.")
+	if n := h.keysTo(docsPane); n != 0 {
+		t.Fatalf("keys to docs = %d, want 0", n)
 	}
 }
