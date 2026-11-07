@@ -85,16 +85,18 @@ step. For another platform, [build from source](#other-ways-to-install).
 
 ## Set up in your browser
 
-`sheepdog setup` detects which herdr program is installed and running. If both
-herdr-tui and herdr-core run, it asks which backend to use; the setting is
-[`herdr.backend`](../CONFIG.md#herdr). Setup starts the daemon if needed and
-opens this page:
+`sheepdog setup` prints which herdr program (`herdr-tui` or `herdr-core`)
+Sheepdog will use, and asks which one to use whenever both are installed
+(agents in the other one will not appear in Sheepdog); the setting is
+[`herdr.backend`](../CONFIG.md#herdr). Setup starts the daemon if needed,
+confirms the herdr backend it connected to, and opens this page:
 
 ```text
 Starting sheepdog…
 sheepdog started in the background (pid 57577)
   voice page  http://127.0.0.1:7777/voice
   logs        sheepdog logs -f
+Daemon herdr: herdr-tui reachable (~/.config/herdr/herdr.sock)
 
 Set up sheepdog in your browser:
 

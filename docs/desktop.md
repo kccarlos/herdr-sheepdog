@@ -81,19 +81,13 @@ Install the daemon with the one-liner from
 [the quick start](quick-start.md#herdr-app-on-herdr-core)
 or `brew install kccarlos/tap/sheepdog`, then run `sheepdog setup`.
 
-### 2. Choose herdr-core if both backends are running
+### 2. Choose herdr-core if both backends are installed
 
-`sheepdog setup` asks which backend to use when both
-[herdr-tui](https://github.com/herdrdev/herdr) and herdr-core run; to choose
-herdr-core, put this in `~/.config/sheepdog/config.toml`:
-
-```toml
-[herdr]
-backend = "hc"
-```
-
-Then run `sheepdog restart`; see
-[`herdr.backend`](../CONFIG.md#herdr) for the environment override.
+Interactive `sheepdog setup` asks whether to use `herdr-core` or
+[herdr-tui](https://github.com/herdrdev/herdr) whenever both are installed
+(even if one was already pinned) and restarts a running daemon when you switch.
+For non-interactive or manual configuration, see
+[`herdr.backend`](../CONFIG.md#herdr).
 
 ### 3. Install the panel and layout
 
