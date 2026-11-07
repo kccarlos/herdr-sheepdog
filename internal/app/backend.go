@@ -103,7 +103,7 @@ func chooseBackend(ctx context.Context, want string, old, core pinger) (kind, re
 func ResolveBackend(want string, oldUp, coreUp bool) (kind, reason string) {
 	switch want {
 	case config.HerdrBackendHerdr, config.HerdrBackendHC:
-		return want, "herdr.backend=" + want
+		return want, "pinned"
 	}
 	switch {
 	case oldUp && coreUp:
