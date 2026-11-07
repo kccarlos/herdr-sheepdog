@@ -586,3 +586,31 @@ func TestPlaybackWholeRuns(t *testing.T) {
 		}
 	})
 }
+
+func TestPlaybackTrackerSwitchFlushDoesNotCreditNewRun(t *testing.T) {
+	t0 := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	var p PlaybackTracker
+
+	// Switching voices installs an empty ExpectFlush slot in the new tracker
+	// while the client had 2 s of old-session audio playing.
+	p.Flush(t0)
+
+	// Before the client's flush acknowledgement arrives, the new voice queues
+	// a 1 s run naming question B.
+	t1 := t0.Add(50 * time.Millisecond)
+	sendRun(&p, t1, []string{"B", "wants", "to", "run", "make."}, 1000)
+	p.TurnComplete()
+
+	// The old client's flushed(2000) arrives for the switch flush.
+	rep := p.Report(t0.Add(100*time.Millisecond), PlaybackFlushed, 2000)
+	if len(rep.Played) != 0 || rep.Cut != nil {
+		t.Fatalf("switch flush credited new run: Played=%+v Cut=%+v", rep.Played, rep.Cut)
+	}
+
+	// B's run remains active and plays out when its own drain arrives.
+	end := t1.Add(time.Second)
+	drained := p.Report(end, PlaybackDrained, 1000)
+	if len(drained.Played) != 1 || drained.Played[0] != (EventPlayed{Text: "B wants to run make.", Start: t1, End: end}) {
+		t.Fatalf("subsequent drain Played = %+v", drained.Played)
+	}
+}

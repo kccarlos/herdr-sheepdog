@@ -300,3 +300,103 @@ func TestS4Finding4MutedPromotedQuestionStaysAnswerableAfterDisplacement(t *test
 		}
 	})
 }
+
+func TestClosedToldEvidenceNotRevived(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+
+	// A1 is told, then the pane leaves blocked so its told entry closes.
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	ap, _ := h.pending()
+	h.speak(h.lastPushText())
+	h.clock.Advance(time.Second)
+	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
+
+	// Within the window the pane blocks again on identical prompt A2, but the
+	// initial screen read fails so no question or pending_id push is created.
+	h.clock.Advance(time.Second)
+	base := h.sup.herdr
+	failRead := true
+	h.sup.herdr = &interceptHerdr{
+		Herdr: base,
+		onRead: func(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+			if failRead {
+				return herdr.ReadResult{}, context.DeadlineExceeded
+			}
+			return base.Read(ctx, paneID, source, lines)
+		},
+	}
+	h.srv.SetScreen(authPane, fixture(t, "codex-approval-prompt.screen.txt"))
+	h.transition(authPane, herdr.StateWorking, herdr.StateBlocked)
+	failRead = false
+
+	// A later bare "yes" or send_keys revives A2 from the screen; A1's closed
+	// evidence must not satisfy pTold for A2.
+	h.clock.Advance(time.Second)
+	h.hear("Yes.")
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, ap.YesKeys); err == nil {
+		t.Fatal("AnswerPrompt approved revived A2 using A1's closed told evidence")
+	}
+	if n := h.keysTo(authPane); n != 0 {
+		t.Fatalf("keys to auth = %d, want 0", n)
+	}
+}
+
+func TestAnswerShapedAliasDoesNotBypassRail(t *testing.T) {
+	h := toldAuth(t)
+	if _, err := h.store.Update(docsPane, func(a *state.Agent) { a.Alias = "ok"; a.Spoken = "ok" }); err != nil {
+		t.Fatal(err)
+	}
+	h.block(docsPane, "codex-approval-prompt.screen.txt")
+	p, _ := h.pending()
+
+	// The user says "OK" meaning auth; it must not count as naming the untold
+	// agent aliased "ok" on either the fast path or send_keys.
+	h.clock.Advance(500 * time.Millisecond)
+	h.say("OK")
+	if n := h.keysTo(docsPane); n != 0 {
+		t.Fatalf("fast path sent %d keys to untold 'ok' agent on bare 'OK'", n)
+	}
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), docsPane, p.YesKeys); err == nil {
+		t.Fatal("AnswerPrompt approved untold 'ok' agent on bare 'OK'")
+	}
+
+	// A real naming utterance still authorises the short alias.
+	h.clock.Advance(time.Second)
+	h.hear("tell ok yes")
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), docsPane, p.YesKeys); err != nil {
+		t.Fatalf("AnswerPrompt on 'tell ok yes' failed: %v", err)
+	}
+	if n := h.keysTo(docsPane); n != 1 {
+		t.Fatalf("keys to 'ok' after 'tell ok yes' = %d, want 1", n)
+	}
+}
+
+func TestReplayedQuestionUpdatesOrder(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+
+	// B (docs) told order 1, A (auth) told order 2; both open, A pending.
+	h.block(docsPane, "codex-approval-prompt.screen.txt")
+	h.speak(h.lastPushText())
+	h.clock.Advance(time.Second)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	ap, _ := h.pending()
+	h.speak(h.lastPushText())
+
+	// A later whole run re-asks B (docs).
+	h.clock.Advance(time.Second)
+	tReask := h.clock.Now()
+	h.sup.OnVoiceEvent(voice.EventPlayed{Text: "docs is still asking to run printf.", Start: tReask, End: tReask.Add(time.Second)})
+
+	// A bare yes meant for B must not approve pending A (auth).
+	h.clock.Advance(2 * time.Second)
+	h.say("Yes.")
+	if n := h.keysTo(authPane); n != 0 {
+		t.Fatalf("bare yes after re-asking docs approved auth (%d keys)", n)
+	}
+	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, ap.YesKeys); err == nil {
+		t.Fatal("AnswerPrompt approved auth on bare yes after docs was re-asked")
+	}
+}

@@ -46,7 +46,7 @@ func TestChattinessLevels(t *testing.T) {
 	const (
 		authQ    = `auth asks to run printf.`
 		docsQ    = "docs is asking do you want to create claude.txt."
-		replaced = "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt."
+		replaced = "Dropping the earlier question; now docs is asking do you want to create claude.txt."
 		docsDone = "docs finished."
 		vpsDone  = "vps finished."
 		started  = `vps started on "run the tests".`

@@ -457,12 +457,6 @@ func (p *PlaybackTracker) Report(now time.Time, state string, playedMs int) Play
 		for len(p.awaiting) > 0 && now.Sub(p.awaiting[0].flushedAt) > awaitingTTL {
 			p.awaiting = p.awaiting[1:]
 		}
-		if playedMs > 0 {
-			for len(p.awaiting) > 0 && p.awaiting[0].empty() {
-				p.awaiting = p.awaiting[1:]
-				rep.awaitedPopped++
-			}
-		}
 		var r playRun
 		if len(p.awaiting) > 0 {
 			r, p.awaiting = p.awaiting[0], p.awaiting[1:]

@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -71,7 +70,8 @@ func (s *Supervisor) syncToldLocked() {
 	open := s.openKeysLocked()
 	now := s.cfg.Now()
 	for k, e := range t.told {
-		if _, ok := open[k]; !ok && e.closedAt.IsZero() {
+		_, seen := s.promptSeenAt[k.pane]
+		if _, ok := open[k]; !ok && (!seen || s.lastPrompt[k.pane] != k.sig) && e.closedAt.IsZero() {
 			e.closedAt = now
 		}
 		if !e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow {
@@ -167,7 +167,7 @@ func (s *Supervisor) notePlayed(ev voice.EventPlayed, typed bool) {
 			if at.Before(e.at) {
 				e.at = at
 			}
-			e.seq = min(e.seq, seq)
+			e.seq, e.order = min(e.seq, seq), s.told.nextOrder
 			continue
 		}
 		if s.told.told == nil {
@@ -288,10 +288,8 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 	}
 	s.syncToldLocked()
 	k := keyOf(p)
-	row, _ := s.store.Get(p.PaneID)
-	stillSame := row.State == herdr.StateBlocked && (row.LastBlock == nil || !row.LastBlock.Answered) && s.lastPrompt[p.PaneID] == k.sig
 	cur := s.told.told[k]
-	pTold := cur != nil && (cur.closedAt.IsZero() || stillSame) && !cur.at.After(in.beganAt) && in.began > cur.seq
+	pTold := cur != nil && cur.closedAt.IsZero() && !cur.at.After(in.beganAt) && in.began > cur.seq
 	now := s.cfg.Now()
 	var otherSeq, otherOrder uint64
 	found, samePane, ambigRun := false, false, false
@@ -321,7 +319,7 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 	if pTold && !ambigRun {
 		return "", promptKey{}, ""
 	}
-	if !samePane && s.namedInLocked(in.text, p.PaneID) {
+	if _, _, bare := bareAnswer(p, in.text); !samePane && !bare && s.namedInLocked(in.text, p.PaneID) {
 		ambig := false
 		for pane := range otherPanes {
 			ambig = ambig || s.namedInLocked(in.text, pane)
@@ -374,7 +372,7 @@ func reaskLine(alias, other, kind, summary string, zh bool) string {
 	case zh && kind == "same_pane":
 		return fmt.Sprintf("等等——你回答时%s的问题刚变了，所以我没发出去。%s 这个新问题怎么处理？", alias, summary)
 	case zh && kind == "displaced":
-		return fmt.Sprintf("等等——我没把刚才的回复发给%s，因为你在回答%s时它刚弹出了新问题。%s %s这边怎么处理？", alias, other, summary, alias)
+		return fmt.Sprintf("等等——我没把刚才的回复发给%s，因为它刚弹出了新问题。%s %s这边怎么处理？", alias, summary, alias)
 	case zh && kind == "no_reports":
 		return fmt.Sprintf("当前客户端不支持播放确认，单说“好”不会批准%s。%s 请说“批准%s”或“拒绝%s”，或直接点选。", alias, summary, alias, alias)
 	case zh:
@@ -384,7 +382,7 @@ func reaskLine(alias, other, kind, summary string, zh bool) string {
 	case kind == "same_pane":
 		return fmt.Sprintf("Hold on — %s's prompt changed just as you answered, so I did not send that. %s What is your answer for this one?", alias, summary)
 	case kind == "displaced":
-		return fmt.Sprintf("Hold on — I did not send that to %s, because its prompt came in while you were answering %s. %s What should %s do?", alias, other, summary, alias)
+		return fmt.Sprintf("Hold on — I did not send that to %s, because its prompt just came in. %s What should %s do?", alias, summary, alias)
 	case kind == "no_reports":
 		return fmt.Sprintf("I can't confirm audio playback on this client, so a bare yes won't approve %s. %s Say 'yes, %s' or 'no, %s', or tap to answer.", alias, summary, alias, alias)
 	}
