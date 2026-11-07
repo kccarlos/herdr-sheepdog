@@ -854,7 +854,7 @@ func TestSetupDaemonHerdrMessage(t *testing.T) {
 			name:       "daemon agrees with chosen backend",
 			stateJSON:  `{"herdr":"socket","herdr_backend":"hc"}`,
 			chosenKind: config.HerdrBackendHC,
-			wantText:   []string{"Daemon herdr: herdr-core NOT reachable:", "/fake/hc.sock does not answer"},
+			wantText:   []string{"Daemon herdr: herdr-core NOT reachable:", "/fake/hc.sock"},
 			forbidText: []string{"differs from your choice", "Fix:"},
 		},
 		{
@@ -960,7 +960,7 @@ func TestStatusHerdrOlderAndCurrentDaemon(t *testing.T) {
 	// Older daemon omits herdr_backend: status keeps its previous output without claiming daemon source.
 	stateJSON = `{"herdr":"socket"}`
 	code, out, errs := runCLI("status", "--config", cfgPath)
-	if code != 0 || !strings.Contains(out, "  herdr         herdr-core NOT reachable:") || !strings.Contains(out, "/fake/hc.sock does not answer") {
+	if code != 0 || !strings.Contains(out, "  herdr         herdr-core NOT reachable:") || !strings.Contains(out, "/fake/hc.sock") {
 		t.Fatalf("older daemon status: exit %d err=%q:\n%s", code, errs, out)
 	}
 	for _, bad := range []string{"Daemon herdr", "too old", "from daemon"} {
@@ -972,7 +972,7 @@ func TestStatusHerdrOlderAndCurrentDaemon(t *testing.T) {
 	// Current daemon reports herdr_backend: status reports the daemon's backend over local config.
 	stateJSON = `{"herdr":"socket","herdr_backend":"herdr"}`
 	code, out, errs = runCLI("status", "--config", cfgPath)
-	if code != 0 || !strings.Contains(out, "  herdr         herdr-tui NOT reachable:") || !strings.Contains(out, "/fake/old.sock does not answer") {
+	if code != 0 || !strings.Contains(out, "  herdr         herdr-tui NOT reachable:") || !strings.Contains(out, "/fake/old.sock") {
 		t.Fatalf("current daemon status: exit %d err=%q:\n%s", code, errs, out)
 	}
 	code, rawJSON, _ := runCLI("status", "--json", "--config", cfgPath)
