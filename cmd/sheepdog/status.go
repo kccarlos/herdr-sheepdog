@@ -183,12 +183,7 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			r.Service = st
 		}
 	}
-	h := onboard.CheckHerdr(cfg.Herdr)
-	program, socket := onboard.HerdrTarget(cfg.Herdr)
-	r.Herdr = statusHerdr{Reachable: h.Status == onboard.OK, Program: program, Socket: socket}
-	if !r.Herdr.Reachable {
-		r.Herdr.Detail = h.Detail
-	}
+	r.Herdr = statusHerdrFor(cfg.Herdr)
 	info, pidKnown, running := l.running(ctx)
 	r.Running = running
 	if running {
@@ -212,7 +207,8 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			r.Voice = statusVoice{Provider: hello.VoiceProvider, Model: hello.VoiceModel, Source: "daemon"}
 		}
 		var st struct {
-			Brain *struct {
+			HerdrBackend string `json:"herdr_backend"`
+			Brain        *struct {
 				Provider string `json:"provider"`
 				Model    string `json:"model"`
 			} `json:"brain"`
@@ -223,6 +219,11 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 			Update *update.Status `json:"update"`
 		}
 		if err := getJSON(ctx, r.URL, "/api/state", &st); err == nil {
+			if st.HerdrBackend != "" {
+				hc := cfg.Herdr
+				hc.Backend = st.HerdrBackend
+				r.Herdr = statusHerdrFor(hc)
+			}
 			r.Orchestrator = statusOrchestrator{Source: "daemon"}
 			if st.Brain != nil {
 				r.Orchestrator.Enabled, r.Orchestrator.Provider, r.Orchestrator.Model = true, st.Brain.Provider, st.Brain.Model
@@ -254,6 +255,22 @@ func (l *lifecycle) status(ctx context.Context) statusReport {
 	r.LastError = lastError(cfg.DataDir, redact.ForConfig(cfg))
 	r.Keys = keysStatus(cfg.DataDir)
 	return r
+}
+
+func statusHerdrFor(hc config.Herdr) statusHerdr {
+	c := onboard.CheckHerdr(hc)
+	program, socket := onboard.HerdrTarget(hc)
+	if c.Status == onboard.OK {
+		return statusHerdr{Reachable: true, Program: program, Socket: socket}
+	}
+	return statusHerdr{Program: program, Socket: socket, Detail: c.Detail}
+}
+
+func (h statusHerdr) line() string {
+	if h.Reachable {
+		return h.Program + " reachable (" + h.Socket + ")"
+	}
+	return h.Program + " NOT reachable: " + h.Detail
 }
 
 func ago(now, t time.Time) string {
@@ -310,11 +327,7 @@ func printStatus(w io.Writer, r statusReport, now time.Time) {
 		orch += ", from config"
 	}
 	row("orchestrator", orch)
-	if r.Herdr.Reachable {
-		row("herdr", r.Herdr.Program+" reachable ("+r.Herdr.Socket+")")
-	} else {
-		row("herdr", r.Herdr.Program+" NOT reachable: "+r.Herdr.Detail)
-	}
+	row("herdr", r.Herdr.line())
 	if r.Phones != nil {
 		conn := "no voice client connected"
 		if r.Phones.VoiceClientConnected {

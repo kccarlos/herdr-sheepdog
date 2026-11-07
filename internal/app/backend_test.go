@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -67,5 +68,31 @@ func TestHCTermStartsABridgeWithoutHerdrBin(t *testing.T) {
 	}
 	if deps.Bin != "" || deps.Off == "" || deps.Shells == nil || len(deps.ProjectRoots) != 1 || deps.ProjectRoots[0] != roots[0] {
 		t.Errorf("deps = %+v, want its shell wire, project roots, no herdr binary and an off message", deps)
+	}
+}
+
+func TestStateReportsChosenHerdrBackend(t *testing.T) {
+	srv := hctest.New(t)
+	cfg := testConfig(t)
+	cfg.Herdr.Backend = config.HerdrBackendAuto
+	cfg.Herdr.HCSocket = srv.Path
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrSocket, CLI: CLIOff, Brain: BrainOff, Drain: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	var st map[string]any
+	getJSON(t, a.URL()+"/api/state", &st)
+	if st["herdr"] != HerdrSocket || st["herdr_backend"] != config.HerdrBackendHC {
+		t.Errorf("/api/state = %v, want herdr=socket herdr_backend=hc", st)
 	}
 }

@@ -74,7 +74,7 @@ func runPair(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "sheepdog pair: %s\n", p.Error)
 		return 1
 	}
-	tty := isTerminal(stdout) && !*plain
+	tty := stdoutIsTerminal(stdout) && !*plain
 	var code string
 	if tty {
 		code, err = pair.ANSI(p.Link)
@@ -109,14 +109,20 @@ func runPair(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// isTerminal reports whether w is a terminal (a character device).
-func isTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
+// isTerminal reports whether f is a terminal. /dev/null is a character
+// device too, and a run with no input must not count as one that can answer.
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
 		return false
 	}
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	null, err := os.Stat(os.DevNull)
+	return err != nil || !os.SameFile(st, null)
+}
+
+func stdoutIsTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && isTerminal(f)
 }
 
 // printPairCompact is the code with a one-line title and

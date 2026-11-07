@@ -143,7 +143,7 @@ type Deps struct {
 	BrainProviders []ProviderInfo
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
-	HerdrMode, VoiceMode string
+	HerdrMode, HerdrBackend, VoiceMode string
 	// SystemPrompt and Aliases are what GET /api/voice/system_prompt
 	// answers: the voice system prompt the session runs with (or would,
 	// with --voice=off) and the aliases rendered into it. SystemPrompt is

@@ -42,6 +42,7 @@ type StateResponse struct {
 	// ("off" and "" with --voice=off).
 	VoiceProvider string `json:"voice_provider"`
 	VoiceModel    string `json:"voice_model"`
+	HerdrBackend  string `json:"herdr_backend,omitempty"`
 	// ConversationStartedAt is when the current conversation began: the
 	// last "New conversation" reset, or daemon start.
 	ConversationStartedAt time.Time `json:"conversation_started_at"`
@@ -162,6 +163,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Settings:              s.settings(),
 		Brain:                 s.brainInfo(),
 		Herdr:                 s.deps.HerdrMode,
+		HerdrBackend:          s.deps.HerdrBackend,
 		Version:               s.deps.Version,
 		Now:                   s.deps.Now().UTC(),
 		VoiceProvider:         s.voiceProvider(),

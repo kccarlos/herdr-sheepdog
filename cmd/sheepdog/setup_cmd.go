@@ -16,6 +16,7 @@ import (
 	"time"
 
 	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
@@ -74,6 +75,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	l.useEnvFile(envPath)
 	l.fromSetup = true
 	prompt := newPrompter(stdin, stdout)
+	var chosen string
 	wrote, err := setupEnvironment(ctx, l.cfg, envPath, setupEnvironmentOptions{
 		Probe:         setupEnvironmentProbe(),
 		Panel:         setupPanel,
@@ -84,12 +86,13 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		LayoutSwitch:  setupLayoutSwitch,
 		Setenv:        os.Setenv,
 		Out:           stdout,
+		Chosen:        &chosen,
 	})
 	if err != nil {
 		fprintf(stderr, "sheepdog setup: %v\n", err)
 		return 1
 	} else if wrote {
-		if _, _, running := l.running(ctx); running {
+		if _, pidKnown, running := l.running(ctx); running && (pidKnown || l.serviceInstalled()) {
 			fprintln(stdout, "")
 			fprintln(stdout, "Restarting the running daemon so it uses the new settings…")
 			if code := l.stop(ctx); code != 0 {
@@ -112,6 +115,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 			return 1
 		}
 	}
+	l.printRunningHerdr(ctx, info.URL, chosen, stdout)
 	url := info.URL + "/setup"
 	fprintln(stdout, "")
 	fprintln(stdout, "Set up sheepdog in your browser:")
@@ -153,6 +157,7 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 		return code
 	}
 	l.useEnvFile(envPath)
+	var chosen string
 	if _, err := setupEnvironment(ctx, l.cfg, envPath, setupEnvironmentOptions{
 		Probe:         setupEnvironmentProbe(),
 		Panel:         setupPanel,
@@ -163,6 +168,7 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 		LayoutSwitch:  setupLayoutSwitch,
 		Setenv:        os.Setenv,
 		Out:           stdout,
+		Chosen:        &chosen,
 	}); err != nil {
 		fprintf(stderr, "sheepdog setup: %v\n", err)
 		return 1
@@ -182,7 +188,7 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 			l.out = stdout
 		}
 	}
-	if _, pidKnown, running := l.running(ctx); running && pidKnown {
+	if _, pidKnown, running := l.running(ctx); running && (pidKnown || l.serviceInstalled()) {
 		fprintln(stdout, "")
 		fprintln(stdout, "Restarting the running daemon so it uses the new settings…")
 		if code := l.stop(ctx); code != 0 {
@@ -191,6 +197,9 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 		if code := l.start(ctx); code != 0 {
 			return code
 		}
+	}
+	if info, _, running := l.running(ctx); running {
+		l.printRunningHerdr(ctx, info.URL, chosen, stdout)
 	}
 	fprintln(stdout, "")
 	fprintln(stdout, strings.Join([]string{
@@ -240,6 +249,7 @@ type setupEnvironmentOptions struct {
 	LayoutSwitch  setupLayoutSwitchFunc
 	Setenv        func(string, string) error
 	Out           io.Writer
+	Chosen        *string
 }
 
 // These three seams are replaced in focused tests. They stay variables so
@@ -279,51 +289,54 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	}
 
 	advice := onboard.AdviseBackend(cfg, env)
-	wroteBackend := false
-	writeBackend := func(value string) error {
-		if err := onboard.EditEnvFile(envPath, map[string]string{"SHEEPDOG_HERDR_BACKEND": value}, nil); err != nil {
-			return err
-		}
-		if o.Setenv != nil {
-			if err := o.Setenv("SHEEPDOG_HERDR_BACKEND", value); err != nil {
-				return fmt.Errorf("update SHEEPDOG_HERDR_BACKEND for the restart: %w", err)
-			}
-		}
-		return nil
+	both := (env.OldHerdr.Installed || env.OldHerdr.Answers) && (env.HerdrCore.Installed || env.HerdrCore.Answers)
+	asking := o.Interactive && o.Prompt != nil && both
+	fprintln(o.Out, "")
+	if advice.Why != "" && (!asking || advice.Ask) {
+		fprintln(o.Out, advice.Why)
 	}
-	if advice.Why != "" {
-		fprintln(o.Out, "")
-		fprintln(o.Out, "herdr backend: "+advice.Why)
-	}
-	if advice.Set != "" {
-		if err := writeBackend(advice.Set); err != nil {
+	curKind, _ := app.ResolveBackend(cfg.Herdr.Backend, env.OldHerdr.Answers, env.HerdrCore.Answers)
+	pin := ""
+	switch {
+	case asking:
+		def := onboard.OrDefault(advice.Default, onboard.OrDefault(advice.Set, curKind))
+		hcLabel := "herdr-core (hc)"
+		if env.HerdrApp {
+			hcLabel += " — herdr-app"
+		}
+		labels := []string{hcLabel, "herdr-tui"}
+		labels[map[string]int{config.HerdrBackendHC: 0, config.HerdrBackendHerdr: 1}[curKind]] += " (current)"
+		fprintln(o.Out, "Agents running in the other herdr will not appear in Sheepdog.")
+		chosen, err := o.Prompt.chooseDef("Which herdr should Sheepdog use", []string{config.HerdrBackendHC, config.HerdrBackendHerdr}, labels, def)
+		if err != nil {
 			return false, err
 		}
-		fprintf(o.Out, "Set SHEEPDOG_HERDR_BACKEND=%s in %s.\n", advice.Set, envPath)
-		wroteBackend = true
-	} else if advice.Ask {
-		chosen := ""
-		if o.Interactive && o.Prompt != nil {
-			var err error
-			chosen, err = o.Prompt.chooseDef(
-				"Which herdr should Sheepdog use",
-				[]string{config.HerdrBackendHC, config.HerdrBackendHerdr},
-				[]string{"herdr-core (hc) — herdr-app", "herdr-tui"},
-				advice.Default,
-			)
-			if err != nil {
-				return false, err
+		if chosen != def || advice.Set != "" || advice.Ask {
+			pin = chosen
+		}
+	case advice.Set != "":
+		pin = advice.Set
+	case advice.Ask:
+		fprintf(o.Out, "Set it with this line in %s:\n  SHEEPDOG_HERDR_BACKEND=%s\n", envPath, advice.Default)
+	}
+	effective := cfg.Herdr.Backend
+	if pin != "" {
+		if err := onboard.EditEnvFile(envPath, map[string]string{"SHEEPDOG_HERDR_BACKEND": pin}, nil); err != nil {
+			return false, err
+		}
+		if o.Setenv != nil {
+			if err := o.Setenv("SHEEPDOG_HERDR_BACKEND", pin); err != nil {
+				return false, fmt.Errorf("update SHEEPDOG_HERDR_BACKEND for the restart: %w", err)
 			}
 		}
-		if chosen != "" {
-			if err := writeBackend(chosen); err != nil {
-				return false, err
-			}
-			fprintf(o.Out, "Set SHEEPDOG_HERDR_BACKEND=%s in %s.\n", chosen, envPath)
-			wroteBackend = true
-		} else {
-			fprintf(o.Out, "Set it with this line in %s:\n  SHEEPDOG_HERDR_BACKEND=%s\n", envPath, advice.Default)
-		}
+		fprintf(o.Out, "Set SHEEPDOG_HERDR_BACKEND=%s in %s.\n", pin, envPath)
+		effective = pin
+	}
+	wroteBackend := pin != ""
+	resolvedKind, backendLine := setupBackendLine(effective, env.OldHerdr.Answers, env.HerdrCore.Answers)
+	fprintln(o.Out, backendLine)
+	if o.Chosen != nil {
+		*o.Chosen = resolvedKind
 	}
 
 	installedPanel := env.Panel == onboard.PanelCurrent
@@ -378,6 +391,39 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		fprintln(o.Out, "  brew install --cask kccarlos/tap/sheepdog-app")
 	}
 	return wroteBackend, nil
+}
+
+func setupBackendLine(want string, oldUp, coreUp bool) (kind, line string) {
+	kind, why := app.ResolveBackend(want, oldUp, coreUp)
+	if (kind == config.HerdrBackendHC && !coreUp) || (kind != config.HerdrBackendHC && !oldUp) {
+		why += "; not running"
+	}
+	name, _ := onboard.HerdrTarget(config.Herdr{Backend: kind})
+	return kind, fmt.Sprintf("herdr backend: using %s (%s).", name, why)
+}
+
+func (l *lifecycle) printRunningHerdr(ctx context.Context, url, chosenKind string, w io.Writer) {
+	var st struct {
+		Herdr        string `json:"herdr"`
+		HerdrBackend string `json:"herdr_backend"`
+	}
+	if getJSON(ctx, url, "/api/state", &st) != nil || st.Herdr == "mock" {
+		return
+	}
+	if st.HerdrBackend == "" {
+		fprintln(w, "Daemon herdr: the running daemon is too old to report its herdr; run `sheepdog restart`.")
+		return
+	}
+	hc := l.cfg.Herdr
+	hc.Backend = st.HerdrBackend
+	fprintln(w, formatDaemonHerdr(statusHerdrFor(hc), chosenKind))
+}
+
+func formatDaemonHerdr(h statusHerdr, chosenKind string) string {
+	if want, _ := onboard.HerdrTarget(config.Herdr{Backend: chosenKind}); h.Program != want {
+		return fmt.Sprintf("Daemon herdr: %s — differs from your choice (%s).\n  Fix: run `sheepdog restart` (or check SHEEPDOG_HERDR_BACKEND in your shell or login service).", h.line(), want)
+	}
+	return "Daemon herdr: " + h.line()
 }
 
 func setupSheepdogLayout(ctx context.Context, env onboard.Environment, o setupEnvironmentOptions) bool {

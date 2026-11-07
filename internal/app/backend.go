@@ -30,6 +30,7 @@ func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps
 	core := herdrcore.New(hc.NewClient(hcSocket), a.log)
 
 	kind, reason := chooseBackend(context.Background(), cfg.Herdr.Backend, old, core)
+	a.herdrBackend = kind
 	socket := cfg.Herdr.Socket
 	if kind == config.HerdrBackendHC {
 		socket = hcSocket
@@ -94,13 +95,23 @@ func chooseBackend(ctx context.Context, want string, old, core pinger) (kind, re
 	go probe(old, &oldUp)
 	go probe(core, &coreUp)
 	wg.Wait()
+	return ResolveBackend(want, oldUp, coreUp)
+}
+
+// ResolveBackend resolves herdr.backend ("herdr", "hc" or "auto") from
+// which sockets answer, returning the backend kind and reason.
+func ResolveBackend(want string, oldUp, coreUp bool) (kind, reason string) {
+	switch want {
+	case config.HerdrBackendHerdr, config.HerdrBackendHC:
+		return want, "pinned"
+	}
 	switch {
 	case oldUp && coreUp:
-		return config.HerdrBackendHerdr, "both herdr and herdr-core answer; herdr.backend = \"hc\" picks herdr-core"
+		return config.HerdrBackendHerdr, "auto: both herdr-tui and herdr-core are running"
 	case coreUp:
-		return config.HerdrBackendHC, "only herdr-core answers"
+		return config.HerdrBackendHC, "auto: only herdr-core is running"
 	case oldUp:
-		return config.HerdrBackendHerdr, "only herdr answers"
+		return config.HerdrBackendHerdr, "auto: only herdr-tui is running"
 	}
-	return config.HerdrBackendHerdr, "neither answers yet; waiting for herdr"
+	return config.HerdrBackendHerdr, "auto: neither answers, waiting for herdr-tui"
 }

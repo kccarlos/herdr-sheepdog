@@ -225,6 +225,7 @@ type App struct {
 	restart       chan string
 	restartOnce   sync.Once
 	restartReason string
+	herdrBackend  string
 }
 
 // ReasonUpdate is the restart reason that moves the daemon into a new
