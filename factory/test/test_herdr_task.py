@@ -1914,6 +1914,22 @@ class AgyWorker(unittest.TestCase):
         self.assertEqual(allow[0], "command(ls)")
         self.assertIn("command(/x/herdr-task status)", allow)
 
+    def test_a_switched_task_does_not_read_the_old_agents_log(self):
+        from herdr_task.agents import agent_log
+        t = {"agents": [{"address": "t1", "agent": "claude", "session": "c1", "log": "/old.jsonl"},
+                        {"address": "t2", "agent": "agy", "session": "5b9e", "log": None}]}
+        self.assertIsNone(agent_log(t))
+        self.assertIsNone(agent_log(t, "t2"))
+        self.assertEqual(agent_log(t, "t1"), "/old.jsonl")
+
+    def test_a_resumed_agent_keeps_its_sessions_log_until_its_own_is_found(self):
+        from herdr_task.agents import agent_log
+        t = {"agents": [{"address": "t1", "agent": "claude", "session": "c1", "log": "/c1.jsonl"},
+                        {"address": "t2", "agent": "claude", "session": "c1", "log": None}]}
+        self.assertEqual(agent_log(t), "/c1.jsonl")
+        t["agents"][1]["log"] = "/c1b.jsonl"
+        self.assertEqual(agent_log(t), "/c1b.jsonl")
+
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv
         self.assertEqual(resume_argv(["agy", "--mode", "plan"], "abc"), ["agy", "--mode", "plan", "--conversation", "abc"])

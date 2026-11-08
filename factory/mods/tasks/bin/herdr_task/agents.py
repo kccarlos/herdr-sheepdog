@@ -256,8 +256,13 @@ def log_tail(log, size=262144):
 
 
 def agent_log(task, address=None):
-    a = [x for x in task.get("agents") or [] if x.get("log") and (address is None or x.get("address") == address)]
-    return a[-1]["log"] if a else None
+    """The log of the task's newest agent (at `address`), else of an earlier one with the same session
+    (a resumed agent's own log isn't found yet); never another conversation's."""
+    a = [x for x in task.get("agents") or [] if address is None or x.get("address") == address]
+    if not a:
+        return None
+    last = a[-1]
+    return next((x["log"] for x in [last] + a[-2::-1] if x.get("log") and (x is last or last.get("session") and x.get("session") == last["session"])), None)
 
 
 def said(d):
