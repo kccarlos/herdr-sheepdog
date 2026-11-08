@@ -258,7 +258,7 @@ func TestCLINotices(t *testing.T) {
 	_ = update.WriteCache(dataDir, update.Cache{CheckedAt: now, Tag: "v0.3.0"})
 	out.Reset()
 	printCLINotices(context.Background(), l, &out, now)
-	if !strings.Contains(out.String(), "sheepdog v0.3.0 is available (you have v0.2.0). To update: brew upgrade sheepdog, then sheepdog restart") {
+	if !strings.Contains(out.String(), "sheepdog v0.3.0 is available (you have v0.2.0). To update: sheepdog update\n") {
 		t.Errorf("update line:\n%s", out.String())
 	}
 	out.Reset()
@@ -301,9 +301,9 @@ func TestFlagValueAndNoticeCommands(t *testing.T) {
 func TestStatusShowsUpdateLines(t *testing.T) {
 	var b bytes.Buffer
 	r := statusReport{Running: true, Version: "v0.1.0", CLIVersion: "v0.2.0", URL: "http://x", Service: "not installed",
-		Update: &update.Status{Current: "v0.1.0", Latest: "v0.3.0", Available: true, How: "brew upgrade sheepdog"}}
+		Update: &update.Status{Current: "v0.1.0", Latest: "v0.3.0", Available: true, How: "sheepdog update"}}
 	printStatus(&b, r, time.Now())
-	for _, want := range []string{"v0.3.0 is available (you have v0.1.0)", "brew upgrade sheepdog, then sheepdog restart", "this sheepdog is v0.2.0: run `sheepdog restart`"} {
+	for _, want := range []string{"v0.3.0 is available (you have v0.1.0)", "to update: sheepdog update\n", "this sheepdog is v0.2.0: run `sheepdog restart`"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, b.String())
 		}
@@ -311,7 +311,7 @@ func TestStatusShowsUpdateLines(t *testing.T) {
 	b.Reset()
 	r.Update = &update.Status{RestartPending: true, RestartTo: "v0.2.0", AutoRestart: true}
 	printStatus(&b, r, time.Now())
-	if !strings.Contains(b.String(), "update installed (v0.2.0), restart to finish: sheepdog restart (or it restarts itself when idle)") {
+	if !strings.Contains(b.String(), "update installed (v0.2.0), to finish: sheepdog update (or it restarts itself when idle)") {
 		t.Errorf("restart line:\n%s", b.String())
 	}
 }

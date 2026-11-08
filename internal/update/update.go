@@ -1,7 +1,8 @@
-// Package update tells the user a newer sheepdog exists and notices when
-// an upgrade replaced the running daemon's executable (docs/dev/update.md).
+// Package update tells the user a newer sheepdog exists, installs it
+// (Install, for `sheepdog update`) and notices when an upgrade replaced
+// the running daemon's executable (docs/dev/update.md).
 //
-// Nothing here changes what is installed. The daemon asks GitHub for the
+// The daemon asks GitHub for the
 // latest v* release once a day (Run), caches the answer in the data
 // directory (<data_dir>/update-check.json), and reports it as a Status in
 // /api/state. A second loop (AutoRestart) restarts the daemon into a new

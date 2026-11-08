@@ -14,7 +14,7 @@ export function bannerModel(u) {
       text: u.auto_restart
         ? `sheepdog ${to} is installed. It restarts itself when idle; or run `
         : `sheepdog ${to} is installed. To finish, run `,
-      code: 'sheepdog restart',
+      code: 'sheepdog update',
       link: null,
     };
   }

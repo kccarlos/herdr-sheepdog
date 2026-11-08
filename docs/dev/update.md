@@ -1,6 +1,7 @@
-# Update notices and the restart after an upgrade
+# Updates: the check, `sheepdog update` and the restart after an upgrade
 
-Code: `internal/update` (the check, the cache, the watcher), `cmd/sheepdog/updater.go`
+Code: `internal/update` (the check, the cache, the installer, the watcher), `cmd/sheepdog/update.go`
+(`sheepdog update`), `cmd/sheepdog/updater.go`
 (wiring, CLI notices, the restart), `cmd/sheepdog/serve.go` (the restart branch of the serve
 loop), `web/static/update-banner.js` (the pages). The user's view is
 [quick-start.md](../quick-start.md#update); the keys are `update.check` and
@@ -24,7 +25,36 @@ it from there (from the cache when the daemon is down). Commands that end with a
 GitHub. They also print, every time, "The running sheepdog is vA; vB is installed" when
 `/api/hello` shows a daemon older than the CLI.
 
-## The restart
+## `sheepdog update`
+
+`runUpdate` checks the latest release (`update.Latest`, as the daemon does). When it is newer than a
+released build, `update.Install` installs it for the install kind `detectInstall` reports, asking
+nothing:
+
+- **binary** (the installer, a manual download): `sheepdog_<tag>_<GOOS>_<GOARCH>.tar.gz` and
+  `checksums.txt` from `/releases/download/<tag>/` (never `latest/`); the sha256 must match the line
+  for that file, as in `scripts/install.sh`; the `sheepdog` file is staged in the executable's own
+  directory, must answer `version` with the tag, and is renamed over the executable (a rename, never a
+  copy into the old file, which would break the code signature on macOS). No signature check yet.
+- **homebrew**: `brew update`, then `brew upgrade kccarlos/tap/sheepdog`.
+- **herdr plugin**: `herdr plugin update --yes kccarlos.sheepdog` (without `--yes` herdr refuses a
+  non-interactive stdin).
+- **source** and a development build: the steps are printed; nothing is installed.
+
+On macOS, Sheepdog.app is upgraded (`brew upgrade --cask kccarlos/tap/sheepdog-app`) only when
+`brew list --cask kccarlos/tap/sheepdog-app` succeeds; otherwise brew is not run for it. A failed
+cask upgrade is printed and does not stop the daemon's restart.
+
+Then `finishUpdate` restarts a running daemon straight away with `sheepdog restart`'s code, whether
+or not anyone is using it, when its `/api/hello` version differs from the tag just installed (or,
+when there was nothing to download, from this CLI's version, so it finishes an upgrade made another
+way). It ends with one line naming the version the daemon reports after the restart (exit 1 when that
+is not the expected one), or the installed program's version when no daemon runs. `update.Install` does not restart, so the daemon can call it too.
+
+`SHEEPDOG_RELEASE_API` replaces `https://api.github.com` and `SHEEPDOG_RELEASE_URL` the download
+directory, for a test release server.
+
+## The restart after an upgrade made another way
 
 `update.Watch` snapshots the program the daemon was started from at startup: the user-facing path
 (argv[0] made absolute, or looked up on PATH), its symlinks resolved, with device, inode, size and

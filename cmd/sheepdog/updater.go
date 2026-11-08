@@ -48,10 +48,14 @@ var (
 	}
 )
 
-// installHow is the upgrade command for how this binary was installed.
+// installHow is the command that upgrades this binary: sheepdog update,
+// or the steps for a source checkout.
 func installHow() string {
 	exe, _ := osExecutable()
-	return upgradeCommand(detectInstall(exe))
+	if m := detectInstall(exe); m.Kind == "source" {
+		return upgradeCommand(m)
+	}
+	return "sheepdog update"
 }
 
 // startUpdateWatchers runs the daily check (when update.check is on) and
@@ -199,6 +203,6 @@ func printCLINotices(ctx context.Context, l *lifecycle, w io.Writer, now time.Ti
 	if !st.Available || !update.NoticeDue(l.cfg.DataDir, now) {
 		return
 	}
-	fprintf(w, "sheepdog %s is available (you have %s). To update: %s, then sheepdog restart\n", st.Latest, st.Current, st.How)
+	fprintf(w, "sheepdog %s is available (you have %s). To update: %s\n", st.Latest, st.Current, st.How)
 	update.NoticeShown(l.cfg.DataDir, now)
 }

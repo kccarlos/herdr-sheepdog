@@ -53,7 +53,7 @@ Privacy & Security, Microphone, enable your browser. Browsers ask per origin, so
 
 **How do I update or remove it?** sheepdog tells you when a new version exists
 and restarts itself into it when idle ([quick-start.md](quick-start.md#update)).
-`sheepdog update` prints the upgrade steps;
+`sheepdog update` installs it and restarts the daemon;
 `sheepdog uninstall` removes it ([commands.md](commands.md)).
 
 **It broke. What do I send?** `sheepdog doctor --report` and the

@@ -58,9 +58,12 @@ A popup closes when its command exits, so
   `~/.config/sheepdog/` (`config.toml`, `.env`), so a plugin install and a
   Homebrew or `make install` one share a setup. The plugin writes nothing
   to its own config or state directories.
-- The service runs `<plugin dir>/bin/sheepdog`. `herdr plugin update`
-  replaces that file in place; run `sheepdog service install` again to
-  restart the daemon on the new binary.
+- The service runs `~/.local/bin/sheepdog`, the link to `<plugin dir>/bin/sheepdog`
+  (`stableExecutable`; the plugin path itself when there is no link). herdr 0.9.4+
+  installs each `herdr plugin update` in a new folder and removes the old one, and
+  plugin-fetch.sh moves the link. `sheepdog update` runs `herdr plugin update` and
+  restarts the daemon. A service installed by an older sheepdog may record the old
+  folder: run `sheepdog service install` once.
 
 ## Tests
 
