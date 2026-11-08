@@ -62,7 +62,8 @@ class Autopilot(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.autopilot as ap
         self.ap, self.io, self.redirect = ap, io, contextlib.redirect_stdout
-        self.tmp = tempfile.mkdtemp()
+        # real path: the code keys folders by it (store.locate), and /var is /private/var on macOS
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.lists = []  # the task lists a wake looks at (waiting())
         self.folder = os.path.join(self.tmp, "tt-repo")
         os.makedirs(self.folder)
