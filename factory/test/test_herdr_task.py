@@ -3921,7 +3921,7 @@ class Asks(unittest.TestCase):
                        "task": "FAC-3", "to": "t5", "at": 1}, f)
         p = subprocess.run([sys.executable, self.entry, "_ask-pane", "ab12cd"], input="\n2\n", capture_output=True, text=True, env=self.env)
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("  1. Yes  (recommended)\n  2. No\nAnswer with a number or your own words", p.stdout)
+        self.assertIn("❯ 1. Yes  (recommended)\n  2. No\nAnswer with a number or your own words", p.stdout)
         self.assertIn("\x1b]7501;state=blocked:kind=question:msg=U2hpcCA8aXQ+IHRvbmlnaHQ/\x07", p.stdout)
         self.assertEqual(self.record("ab12cd")["answer"], "No")
         [msg] = self.held()["t5"]
@@ -4021,8 +4021,8 @@ class Asks(unittest.TestCase):
         t = out["terminal"]
         until(lambda: (get(t).get("status") or {}).get("state") == "blocked", f"the pane didn't report blocked: {get(t)}")
         self.assertEqual(get(t)["status"], {"kind": "question", "msg": "Ship it tonight?", "state": "blocked"})
-        self.assertIn("2. Ship  (recommended)", hc("read", t).stdout)
-        self.assertEqual(hc("keys", t, "2", "enter").returncode, 0)
+        self.assertEqual(sheepdog_parse(hc("read", t).stdout), (["Wait", "Ship  (recommended)"], 1))
+        self.assertEqual(hc("keys", t, "2").returncode, 0)  # a tap, as sheepdog sends it: no Enter
         until(lambda: get(t).get("state") == "finished", f"the pane didn't exit: {get(t)}")
         self.assertEqual(get(t)["exit_code"], 0)
         rec = self.record(out["id"])
@@ -4260,3 +4260,123 @@ class Checks(unittest.TestCase):
         self.assertIsNone(self.t.get("checks"))
         self.tick()
         self.assertEqual(len(self.cwds), 2)
+
+
+def sheepdog_parse(screen):
+    """A copy of sheepdog's ParsePrompt for numbered menus (herdr/prompt.go findOptions/parseOptions at cf9c7337):
+    options numbered from 1, exactly one with a cursor marker. Returns (labels, cursor index) or None."""
+    import re
+    rx = re.compile(r"^\s*([›❯>])?\s*(\d+)\.\s+(.+?)\s*$")
+    lines = screen.split("\n")[-40:]
+    for i in range(len(lines) - 1, -1, -1):
+        m = rx.match(lines[i])
+        if not m or m.group(2) != "1":
+            continue
+        labels, cursor, cursors = [], -1, 0
+        for line in lines[i:]:
+            m = rx.match(line)
+            if m and m.group(2) == str(len(labels) + 1):
+                if m.group(1):
+                    cursor, cursors = len(labels), cursors + 1
+                labels.append(m.group(3))
+            else:
+                break  # the pane's own text under the options ends the block
+        if len(labels) >= 2 and cursors == 1:
+            return labels, cursor
+    return None
+
+
+class AskPane(unittest.TestCase):
+    """FAC-28: the ask pane is a question card in sheepdog (cursor marker) and a tapped digit answers it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ask-pane-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        os.makedirs(os.path.join(self.tmp, "asks"))
+        self.env = {**os.environ, "HERDR_TASK_STORE": self.tmp}
+
+    def pane(self, feed):
+        """Runs the real pane on a pseudo-terminal, sends `feed` once its prompt is up; returns (screen, record)."""
+        import pty, select, time
+        with open(os.path.join(self.tmp, "asks", "ab1.json"), "w") as f:  # fresh each run: no answer left over
+            json.dump({"id": "ab1", "question": "Ship it?", "options": ["Yes, ship", "Wait for review", "Drop it"],
+                       "recommend": "Wait for review"}, f)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, os.path.join(BIN, "herdr-task"), "_ask-pane", "ab1"], self.env)
+        out, sent, end = b"", False, time.time() + 15
+        while time.time() < end:
+            if select.select([fd], [], [], 0.2)[0]:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
+            if not sent and b"> " in out.split(b"\x07")[-1]:
+                for part in feed if isinstance(feed, tuple) else (feed,):
+                    time.sleep(part) if isinstance(part, float) else os.write(fd, part)
+                sent = True
+        try:
+            for _ in range(20):  # the pane ends by itself once answered
+                done, status = os.waitpid(pid, os.WNOHANG)
+                if done:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, 9)  # a pane that never answered (the old one) must not hang the test
+                os.waitpid(pid, 0)
+                self.fail("the pane did not end")
+        finally:
+            os.close(fd)
+        self.assertEqual(status, 0, "the pane crashed")
+        with open(os.path.join(self.tmp, "asks", "ab1.json")) as f:
+            return out.decode(errors="replace"), json.load(f)
+
+    def test_the_screen_parses_as_a_question_card_on_the_recommended_option(self):
+        screen, _ = self.pane(b"1")
+        self.assertEqual(sheepdog_parse(screen.replace("\r", "")),
+                         (["Yes, ship", "Wait for review  (recommended)", "Drop it"], 1))
+
+    def test_a_tapped_digit_answers_with_or_without_enter(self):
+        for keys in (b"3", b"3\r"):
+            self.assertEqual(self.pane(keys)[1]["answer"], "Drop it", keys)
+
+    def test_typed_words_still_answer(self):
+        self.assertEqual(self.pane(b"2 weeks, then ship\r")[1]["answer"], "2 weeks, then ship")
+
+    def test_input_typed_ahead_and_a_lone_escape_are_not_lost(self):
+        self.assertEqual(self.pane(b"\r2\r")[1]["answer"], "Wait for review")
+        self.assertEqual(self.pane(b"\r2")[1]["answer"], "Wait for review")
+        import time
+        self.assertEqual(self.pane((b"\x1b", 0.2, b"1"))[1]["answer"], "Yes, ship")
+
+    def test_typing_edits_like_a_terminal(self):
+        for keys, want in ((b"\xc2\xb2 maybe\r", "\xb2 maybe"), ("\u6539\u5929\r".encode(), "\u6539\u5929"),
+                           (b"n\x7f1\r", "Yes, ship"), (b"\x7f2\r", "Wait for review"),
+                           (b"\x1b[B3\r", "Drop it"), (b"\x1b[B\x1b[A1", "Yes, ship")):
+            self.assertEqual(self.pane(keys)[1]["answer"], want, keys)
+
+    def test_a_recommended_no_needs_a_yes_to_be_tappable(self):
+        import argparse
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.ask as ask
+        def args(opts, rec):
+            return argparse.Namespace(show=None, question="Ship?", option=opts, recommend=rec, task=None)
+        # Never a real pane or the real store: hc and the asks folder are replaced, whatever the code does.
+        with mock.patch.object(ask, "run", side_effect=AssertionError("started hc")) as run, \
+                mock.patch.object(ask, "ASKS", os.path.join(self.tmp, "asks")), \
+                mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""}):  # empty: stops at the terminal check
+            with self.assertRaisesRegex(ask.Fail, "starts with"):
+                ask.cmd_ask(args(["Wait for review", "Ship now"], "Wait for review"))
+            with self.assertRaisesRegex(ask.Fail, "own terminal"):
+                ask.cmd_ask(args(["Wait for review", "Yes, ship"], "Wait for review"))
+            with self.assertRaisesRegex(ask.Fail, "own terminal"):  # "Do it" is no negative, "Do not" is
+                ask.cmd_ask(args(["Do it now", "Hold"], "Do it now"))
+            with self.assertRaisesRegex(ask.Fail, "starts with"):
+                ask.cmd_ask(args(["Do not ship", "Ship"], "Do not ship"))
+            with self.assertRaisesRegex(ask.Fail, "short word in parentheses"):
+                ask.cmd_ask(args(["Switch (v2)", "Ship"], "Ship"))
+            run.assert_not_called()
