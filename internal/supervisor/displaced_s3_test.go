@@ -180,7 +180,8 @@ func TestRailV2WholeRunEvidence(t *testing.T) {
 			}
 		}
 
-		// Two agents named in one run: tells both, bare yes stays ambiguous, naming or tap works.
+		// Two agents named in one run: it tells only the newest hand-over
+		// (docs); auth needs naming or a re-ask.
 		h := newHarness(t)
 		h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
 		h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
@@ -192,13 +193,13 @@ func TestRailV2WholeRunEvidence(t *testing.T) {
 		h.sup.OnVoiceEvent(voice.EventPush{Text: ap.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: ap.ID})
 		h.sup.OnVoiceEvent(voice.EventPush{Text: dp.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: dp.ID})
 		h.sup.OnVoiceEvent(voice.EventPlayed{Text: "Both auth and docs need approval.", Start: t0, End: t0.Add(time.Second)})
-		if !h.sup.toldOpenLocked(ap) || !h.sup.toldOpenLocked(dp) {
-			t.Fatal("run naming both agents did not tell both")
+		if h.sup.toldOpenLocked(ap) || !h.sup.toldOpenLocked(dp) {
+			t.Fatal("run naming both agents did not tell only docs, the newest hand-over")
 		}
 		h.clock.Advance(2 * time.Second)
-		h.say("Yes.")
-		if h.keysTo(authPane)+h.keysTo(docsPane) != 0 {
-			t.Fatal("bare yes after two-agent run sent keys")
+		h.hear("Yes.")
+		if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, ap.YesKeys); err == nil {
+			t.Fatal("bare yes after two-agent run approved auth")
 		}
 		h.clock.Advance(time.Second)
 		h.hear("Yes, approve auth.")

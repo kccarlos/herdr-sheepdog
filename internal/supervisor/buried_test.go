@@ -25,13 +25,19 @@ func (h *harness) speak(text string) {
 	h.playText(text)
 }
 
+// playText hands text's tagged push to the voice (or, for a line that was
+// not pushed, such as a tool result, the pending question) and plays it.
 func (h *harness) playText(text string) {
+	handed := false
 	for _, p := range h.pusher.all() {
 		if p.Text == text && p.PendingID != "" && p.Urgency != voice.UrgencySilent {
 			h.sup.OnVoiceEvent(p)
+			_, open := h.store.Question(p.PendingID)
+			cur, _ := h.pending()
+			handed = handed || open || cur.ID == p.PendingID
 		}
 	}
-	if p, ok := h.pending(); ok && !p.Held && !h.sup.heldQuestion(p.ID) {
+	if p, ok := h.pending(); !handed && ok && !p.Held && !h.sup.heldQuestion(p.ID) {
 		h.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: voice.UrgencyIdle, PendingID: p.ID})
 	}
 	now := h.clock.Now()

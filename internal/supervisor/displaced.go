@@ -24,18 +24,29 @@ func keyOf(p state.PendingAction) promptKey {
 	return promptKey{pane: p.PaneID, sig: pendingSignature(p)}
 }
 
+// toldEntry is a question told to the user: at is when it was told last
+// (a later telling replaces an earlier one), seq the input count then.
 type toldEntry struct {
-	seq, order uint64
+	seq      uint64
+	at       time.Time
+	closedAt time.Time
+}
+
+// handOver is the question last handed to the voice (a spoken push with
+// its pending_id): at and seq are when it became the newest hand-over;
+// told, that a run told it since. skip: it replaced an untold question of
+// the same pane, so the next run naming the agent may be that one's.
+type handOver struct {
+	id, pane   string
 	at         time.Time
-	closedAt   time.Time
-	handed     time.Time // the hand-over this entry's order came from
+	seq        uint64
+	told, skip bool
 }
 
 type toldState struct {
-	handed    map[string]toldEntry
-	told      map[promptKey]*toldEntry
-	nextOrder uint64
-	reasked   map[promptKey]uint64
+	newest  handOver
+	told    map[promptKey]*toldEntry
+	reasked map[promptKey]uint64
 }
 
 func (s *Supervisor) resetToldLocked() {
@@ -83,11 +94,6 @@ func (s *Supervisor) syncToldLocked() {
 			delete(t.reasked, k)
 		}
 	}
-	for id := range t.handed {
-		if _, _, ok := s.questionByID(id); !ok {
-			delete(t.handed, id)
-		}
-	}
 }
 
 func (s *Supervisor) installedLocked(p state.PendingAction) {
@@ -107,8 +113,8 @@ func (s *Supervisor) untellLocked(k promptKey) {
 	if e := t.told[k]; e != nil && e.closedAt.IsZero() {
 		e.closedAt = s.cfg.Now()
 	}
-	if q, ok := s.openKeysLocked()[k]; ok {
-		delete(t.handed, q.ID)
+	if q, ok := s.openKeysLocked()[k]; ok && q.ID == t.newest.id {
+		t.newest = handOver{}
 	}
 }
 
@@ -118,13 +124,12 @@ func (s *Supervisor) noteHanded(id string) {
 	s.mu.Unlock()
 }
 
+// noteHandedLocked records that question id was handed to the voice. A
+// hand-over of the question already newest keeps the time it became so.
 func (s *Supervisor) noteHandedLocked(id string) {
-	s.syncToldLocked()
-	if _, _, open := s.questionByID(id); open {
-		if s.told.handed == nil {
-			s.told.handed = map[string]toldEntry{}
-		}
-		s.told.handed[id] = toldEntry{at: s.cfg.Now(), seq: s.inputSeq}
+	if q, _, open := s.questionByID(id); open && s.told.newest.id != id {
+		prev := s.told.newest
+		s.told.newest = handOver{id: id, pane: q.PaneID, at: s.cfg.Now(), seq: s.inputSeq, skip: prev.pane == q.PaneID && !prev.told}
 	}
 }
 
@@ -149,34 +154,40 @@ func (s *Supervisor) notePlayed(ev voice.EventPlayed, typed bool) {
 		}
 	}
 	s.syncToldLocked()
-	s.told.nextOrder++
+	h := s.told.newest
 	for _, q := range s.openKeysLocked() {
 		seq := s.inputSeq
-		if q.Held || s.heldQuestion(q.ID) || (typed && s.paneMutedCached(q.PaneID)) {
-			if !typed || s.promptSinceLocked(q).After(start) || !readsOut(ev.Text, q) {
+		switch {
+		case !typed:
+			// A played run tells only the newest hand-over, and only when
+			// it names that question's agent: other agents it names are
+			// told nothing.
+			if q.ID != h.id || q.Held || s.heldQuestion(q.ID) || !s.namedInLocked(ev.Text, q.PaneID) {
 				continue
 			}
-			q = s.promoteHeldLocked(q)
-		} else if h, ok := s.told.handed[q.ID]; typed && s.promptSinceLocked(q).After(start) || (!typed && (!ok || start.Before(h.at))) || !s.namedInLocked(ev.Text, q.PaneID) {
+			if s.told.newest.skip || start.Before(h.at) {
+				s.told.newest.skip = false
+				continue
+			}
+			s.told.newest.told = true
+			if ev.End.After(start) {
+				seq = h.seq
+			}
+		case s.promptSinceLocked(q).After(start) || !readsOut(ev.Text, q):
+			// Returned text tells the questions it reads out, held ones
+			// too (the user saw them); an agent named in passing is not.
 			continue
-		} else if !typed && ev.End.After(start) {
-			seq = h.seq
+		case q.Held || s.heldQuestion(q.ID) || s.paneMutedCached(q.PaneID):
+			q = s.promoteHeldLocked(q)
 		}
 		k := keyOf(q)
-		if e := s.told.told[k]; e != nil && e.closedAt.IsZero() {
-			if at.Before(e.at) {
-				e.at = at
-			}
-			e.seq = min(e.seq, seq)
-			if h := s.told.handed[q.ID]; h.at.After(e.handed) {
-				e.handed, e.order = h.at, s.told.nextOrder
-			}
+		if e := s.told.told[k]; e != nil && e.closedAt.IsZero() && at.Before(e.at) {
 			continue
 		}
 		if s.told.told == nil {
 			s.told.told = map[promptKey]*toldEntry{}
 		}
-		s.told.told[k] = &toldEntry{seq: seq, order: s.told.nextOrder, at: at, handed: s.told.handed[q.ID].at}
+		s.told.told[k] = &toldEntry{seq: seq, at: at}
 	}
 }
 
@@ -293,8 +304,7 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 	k := keyOf(p)
 	cur := s.told.told[k]
 	pTold := cur != nil && cur.closedAt.IsZero() && !cur.at.After(in.beganAt) && in.began > cur.seq
-	now := s.cfg.Now()
-	var otherSeq, otherOrder uint64
+	var otherAt time.Time
 	found, samePane, ambigRun := false, false, false
 	open := s.openKeysLocked()
 	otherPanes := map[string]bool{}
@@ -304,10 +314,10 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 		}
 	}
 	for k2, e := range s.told.told {
-		if k2 == k || e.at.After(in.beganAt) || e.seq >= in.began || (!e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow) {
+		if k2 == k || e.at.After(in.beganAt) || e.seq >= in.began {
 			continue
 		}
-		if q := open[k2]; pTold && k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) && e.order >= cur.order {
+		if q := open[k2]; pTold && k2.pane != p.PaneID && !q.Held && !s.heldQuestion(q.ID) && !e.at.Before(cur.at) {
 			ambigRun = true
 		}
 		if k2.pane == p.PaneID {
@@ -315,8 +325,8 @@ func (s *Supervisor) checkPromptLocked(p state.PendingAction, in *shepherdInput)
 		} else {
 			otherPanes[k2.pane] = true
 		}
-		if !found || e.seq > otherSeq || (e.seq == otherSeq && (e.order > otherOrder || (e.order == otherOrder && (k2.pane < other.pane || (k2.pane == other.pane && k2.sig < other.sig))))) {
-			other, otherSeq, otherOrder, found = k2, e.seq, e.order, true
+		if !found || e.at.After(otherAt) || (e.at.Equal(otherAt) && (k2.pane < other.pane || (k2.pane == other.pane && k2.sig < other.sig))) {
+			other, otherAt, found = k2, e.at, true
 		}
 	}
 	if pTold && !ambigRun {
@@ -415,13 +425,17 @@ type reask struct {
 	tags       map[string]any
 }
 
-// queueReaskLocked queues line, the re-ask of p, for pushReask. Caller
-// holds s.mu.
-func (s *Supervisor) queueReaskLocked(p state.PendingAction, line string) {
+// queueReaskLocked queues line, the re-ask of p, for pushReask; one for
+// typed words hands nothing to the voice (no pending_id). Caller holds s.mu.
+func (s *Supervisor) queueReaskLocked(p state.PendingAction, line string, voiced bool) {
 	if strings.TrimSpace(line) == "" {
 		return
 	}
-	s.reasks = append(s.reasks, reask{pane: p.PaneID, text: line, tags: reaskTags(p)})
+	tags := reaskTags(p)
+	if !voiced {
+		delete(tags, tagPendingID)
+	}
+	s.reasks = append(s.reasks, reask{pane: p.PaneID, text: line, tags: tags})
 }
 
 // typedReaskKey carries a synchronous typed-turn re-ask collector on ctx
