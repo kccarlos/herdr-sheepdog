@@ -1885,7 +1885,7 @@ class AgyWorker(unittest.TestCase):
         s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a: a), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a, *_: a), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
             L.launch(s, {"id": 6, "title": "fake", "agents": []}, ["agy", "--mode", "plan"], "sp1", "Your task")
             L.launch(s, {"id": 7, "title": "fake", "agents": []}, ["claude"], "sp1", "Your task")
@@ -1947,6 +1947,27 @@ class AgyWorker(unittest.TestCase):
         self.assertTrue(resumed)
         self.assertEqual(a["session"], "S")
         self.assertEqual(agent_log(t), "/S.jsonl")
+
+    def test_it_trusts_the_worktree_made_for_the_task_only(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import herdr_task.launch as L
+        ran = []
+
+        def run(argv, *a, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
+        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/wt/x" if t["mode"] == "worktree" else "/main"), \
+                mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "HOME", self.home), \
+                mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
+            for mode, role in (("worktree", None), ("here", None), ("worktree", "reviewer")):
+                L.launch(s, {"id": 6, "mode": mode, "agents": []}, ["agy"], "sp1", role=role)
+        trusted = lambda hc: json.loads(hc[hc.index("--settings") + 1]).get("trustedWorkspaces") if "--settings" in hc else None
+        self.assertEqual(trusted(ran[0]), ["/wt/x"])
+        self.assertIsNone(trusted(ran[1]))
+        self.assertIsNone(trusted(ran[2]))
 
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv
@@ -2019,7 +2040,7 @@ class CleanEnv(unittest.TestCase):
         task = {"id": 6, "title": "fake", "agents": []}
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a: a), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a, *_: a), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
             L.launch(s, task, ["env"], "sp1")
         hc = ran[0]
@@ -2221,7 +2242,7 @@ class Revive(unittest.TestCase):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude"],
                             "labels": {"herdr.task": "dev#6"}}
         self.crash("t5")
-        with self.mock.patch("herdr_task.launch.own_argv", lambda argv: argv):
+        with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_: argv):
             self.tick()
         self.assertTrue(self.sent[0][1].startswith("cd /wt && HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
 

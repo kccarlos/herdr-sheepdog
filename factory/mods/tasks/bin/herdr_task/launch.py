@@ -65,8 +65,9 @@ def own_rules(path):
     return rules
 
 
-def own_argv(argv):
-    """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex)."""
+def own_argv(argv, worktree=None):
+    """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex, and agy,
+    which also trusts `worktree`, the one herdr-task made for the task)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
@@ -108,6 +109,7 @@ def own_argv(argv):
                 theirs = list(json.load(f)["permissions"]["allow"])
         except (OSError, ValueError, KeyError, TypeError):
             theirs = []
+        trusted = {"trustedWorkspaces": [worktree]} if worktree else {}  # skips agy's "Trust this folder?" for it
         cur, i = None, 0
         if "--settings" in out[:-1]:
             i = out.index("--settings")
@@ -122,9 +124,9 @@ def own_argv(argv):
         if isinstance(cur, dict):
             perms = dict(cur.get("permissions") or {})
             perms["allow"] = list(perms.get("allow") or []) + theirs + own
-            out[i + 1] = json.dumps({**cur, "permissions": perms})
+            out[i + 1] = json.dumps({**cur, **trusted, "permissions": perms})
             return out
-        return out[:1] + ["--settings", json.dumps({"permissions": {"allow": theirs + own}})] + out[1:]
+        return out[:1] + ["--settings", json.dumps({**trusted, "permissions": {"allow": theirs + own}})] + out[1:]
     return out
 
 
@@ -611,9 +613,9 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     which keeps it under a restarted coordinator) and herdr.role=reviewer for a reviewer, kept
     apart from the task's agents. Returns its record."""
     key = s.key(task)
-    cmd = list(resume or argv)
+    cmd, folder = list(resume or argv), folder_for(s, task)
     if not role:
-        cmd = own_argv(cmd)
+        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None)
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
@@ -626,7 +628,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     rel = ["--parent", parent, "--outlive-parent"] if parent else ["--no-parent"]
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.
-    r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder_for(s, task), "--name", name,
+    r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder, "--name", name,
              *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *in_shell(cmd)]), name)])
     try:
         out = json.loads(r.stdout)
