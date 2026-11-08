@@ -21,7 +21,7 @@ SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or os.path.join(HOME, ".herdr",
 TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".config", "herdr-core", "templates")
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
-DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
+DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
@@ -264,6 +264,7 @@ MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "m
 # --set's keys (Shepherdr's spellings too) and the task fields they set.
 SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
             "rounds": "review_rounds", "review.rounds": "review_rounds", "review-rounds": "review_rounds", "review_rounds": "review_rounds",
+            "review.min": "review_min", "review_min": "review_min",
             "mustfix": "must_fix", "must-fix": "must_fix", "must_fix": "must_fix", "review.mustfix": "must_fix",
             "agent": "agent", "task.agent": "agent", "model": "model", "task.model": "model", "effort": "effort", "task.effort": "effort",
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
@@ -286,7 +287,7 @@ def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.rounds, review.min, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -305,6 +306,10 @@ def set_task(t, key, value):
         if not m or not 0 <= int(m.group(1)) <= 10:
             raise Fail("review.rounds is 1 to 10 (0: no review).")
         sets[field] = int(m.group(1))
+    elif field == "review_min":
+        if not re.fullmatch(r"\d+", low) or int(low) > 10:
+            raise Fail("review.min is 0 to 10: the passing rounds herdr-task's own reviewer must give (0: the worker reviews).")
+        sets[field] = int(low)
     elif field == "must_fix":
         if low not in MUST_VALUES:
             raise Fail("review.mustFix is blocker, major or minor.")
@@ -364,14 +369,20 @@ def task_settings(s, t, space=None, argv=None):
         lines.append({"label": label, "text": text, "value": value, "by": by})
 
     rounds_cfg = int(k.get("review_rounds") or 0)
-    if "review" in sets:
+    gate = gate_min(s, t, space)
+    if gate:  # a gate folder: herdr-task reviews (FAC-13)
+        on, rev_by = True, "task" if "review_min" in sets else by_layer(s, space, "tasks", "review_min", gate, 0)
+    elif "review" in sets:
         on, rev_by = sets["review"] == "on", "task"
     elif "review_rounds" in sets:
         on, rev_by = sets["review_rounds"] > 0, "task"
     else:
         on, rev_by = rounds_cfg > 0, by_layer(s, space, "tasks", "review_rounds", rounds_cfg > 0, False)
     here = t.get("mode") != "worktree"
-    add("Review", "off" if not on else "on", on, rev_by)
+    add("Review", "off" if not on else "on" if not gate else (
+        f"herdr-task's own: once you say ready it starts the reviewer itself, for your final commit, and needs {gate} passing "
+        f"rounds; start no reviewer of your own and don't run `reviewed`. Findings come to you as a message: fix them, commit, "
+        f"ready again"), on, rev_by)
     # What it runs on: the given argv, else its last agent's, else what it would start with.
     argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
     agent = agent_key(argv)
@@ -391,7 +402,7 @@ def task_settings(s, t, space=None, argv=None):
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort")}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
-        rounds = sets.get("review_rounds") or (rounds_cfg if rounds_cfg > 0 else 3)
+        rounds = sets.get("review_rounds") or max(rounds_cfg or 3, gate)
         more = int(t.get("review_rounds_added") or 0)
         add("Review rounds", f"at most {rounds + more}" + (f" ({more} added by the assistant)" if more else ""), rounds + more,
             "task" if "review_rounds" in sets else by_layer(s, space, "tasks", "review_rounds", rounds, 3))
@@ -418,6 +429,15 @@ def task_settings(s, t, space=None, argv=None):
 def settings_block(s, t, space=None, argv=None):
     rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in task_settings(s, t, space, argv)]
     return "\n".join([SETTINGS_HEAD, *rows])
+
+
+def gate_min(s, t, space=None):
+    """The passing rounds a worktree task needs from herdr-task's own reviewer (review.min); 0
+    outside gate folders, and for a task in the folder itself."""
+    if t.get("mode") != "worktree":
+        return 0
+    sets = t.get("set") or {}
+    return int(sets["review_min"] if "review_min" in sets else settings_for(s, space or t.get("space"))["tasks"].get("review_min") or 0)
 
 
 def review_limits(s, t):

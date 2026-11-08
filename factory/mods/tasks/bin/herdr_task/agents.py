@@ -512,7 +512,8 @@ def starting(task):
     last = (task.get("agents") or [None])[-1]
     if last and last.get("ended"):
         return False
-    at = max([x for x in (task.get("started"), (last or {}).get("at"), (task.get("review") or {}).get("at")) if isinstance(x, (int, float))] or [0])
+    at = max([x for x in (task.get("started"), (last or {}).get("at"), (task.get("review") or {}).get("at"),
+                                ((task.get("review_runs") or [None])[-1] or {}).get("at")) if isinstance(x, (int, float))] or [0])
     return now() - at < STARTING_MS
 
 

@@ -10,9 +10,9 @@ import subprocess
 import sys
 import time
 
-from .base import Fail, git, guard, now, run, STORE, VERSION
+from .base import Fail, git, guard, hc_json, now, run, STORE, VERSION
 from .settings import (
-    agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, settings_block, settings_for, space_base,
+    agent_argv, agent_key, argv_for, bare, gate_min, merge_policy, MUST_WORDS, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
@@ -31,6 +31,7 @@ from .output import line, minutes, say, view
 from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
+from .templates import instructions
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -218,7 +219,7 @@ def cmd_show(args):
         v["settings"] = task_settings(s, t)
         on, rounds = review_limits(s, t)
         if on:
-            v["review_rounds"] = {"used": rounds_used(t), "of": rounds, "added": int(t.get("review_rounds_added") or 0)}
+            v["review_rounds"] = {"used": rounds_used(t, bool(gate_min(s, t))), "of": rounds, "added": int(t.get("review_rounds_added") or 0)}
         v["after_refs"] = after_refs(s, t)
         block = settings_block(s, t)
         if getattr(args, "evidence", False):
@@ -408,7 +409,7 @@ def cmd_ready(args):
             how = f"pull request #{gone['number']} is merged" if gone else f"its work is already in {t.get('base') or 'main'}"
             say(args, v, f"{s.ref(t)}: {how}; done.")
             return
-        msg = finalize(s, t)
+        msg = (None if t.get("nothing_to_merge") else gate_step(s, t)) or finalize(s, t)
         if proof:
             msg += f" Proof: {proof['title']}."
         elif asked:
@@ -421,8 +422,58 @@ def cmd_ready(args):
 REVIEWED = ("report", "pass", "changes")  # a recorded review round (report: the agent's own reviewed)
 
 
-def rounds_used(t):
+def rounds_used(t, gate=False):
+    """Review rounds used: in a gate folder, the reviewers herdr-task started (review_runs)."""
+    if gate:
+        return len(t.get("review_runs") or [])
     return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED)
+
+
+def gate_passes(t, head):
+    return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
+
+
+def gate_step(s, t):
+    """A gate folder's ready (FAC-13): None once its head has review.min passing rounds from
+    herdr-task's own reviewer; else starts the next one for that head (or says why it waits)."""
+    need, head = gate_min(s, t), t.get("head")
+    if not need or gate_passes(t, head) >= need:
+        return None
+    if not head or not os.path.isdir(t.get("worktree") or ""):
+        raise Fail(f"{s.ref(t)} has no worktree to review: start it first.")
+    back_to_work(s, t, "a new commit to review")  # a Ready task's unreviewed commit never stays mergeable
+    t.pop("auto_merge", None)
+    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
+    runs, done = t.get("review_runs") or [], {r["round"] for r in mine}
+    if mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes":
+        return f"{s.ref(t)}: Herdr's reviewer asked for changes to {head[:7]}: fix them, commit, then run ready again."
+    if any(r["head"] == head and r["round"] not in done and (k := hc_json("get", r["address"]) or {}).get("state") == "live" and agent_running(k) for r in runs):
+        return f"{s.ref(t)}: Herdr's reviewer is still reviewing {head[:7]}; its findings come to you as a message."
+    on, rounds = review_limits(s, t)
+    if len(runs) >= rounds:
+        t["review_out"] = now()
+        return (f"{s.ref(t)}: all {rounds} review rounds are used and {head[:7]} has {gate_passes(t, head)} of {need} passing "
+                f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
+    rows = {x["label"]: x["value"] for x in task_settings(s, t)}
+    rv, wt, ref, ht, folder = rows["Reviewer"], t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
+    argv = argv_for({**rv, "perm": "read-only" if rv["agent"] == "codex" else "plan"})
+    diff = git(wt, "diff", f"{t['start']}..{head}")[1]
+    cmd = f"{ht} review {ref} --folder {folder}"
+    prompt = "\n\n".join([
+        instructions("reviewer"), f"The task, {ref}:\n" + ((t.get("prompt") or "").strip() or t["title"]),
+        f"Review commit {head} in {wt}. Its diff (git diff {t['start']}..{head})" + (", cut: run it for the rest" if len(diff) > 20000 else "")
+        + f":\n{diff[:20000]}",
+        f"Must fix: {MUST_WORDS[rows['Must fix']]}. Herdr started you, not the worker: when done, record your verdict with one of "
+        f"`{cmd} --pass` or `{cmd} --changes \"<each finding with its level and proof>\" --must-fix <how many are at or above "
+        f"Must fix>`. It is taken only from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted. "
+        f"Then end with your findings as your last message."
+        + (" Codex's sandbox can't reach Herdr: give that command sandbox_permissions \"require_escalated\"." if rv["agent"] == "codex" else "")])
+    live = workers(s, t)
+    a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer")
+    t.setdefault("review_runs", []).append({"round": len(runs) + 1, "head": head, "address": a["address"], "cli": agent_key(argv),
+                                            "model": rv.get("model") or None, "at": now()})
+    t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
+    return f"{s.ref(t)}: Herdr started review round {len(runs) + 1} of {head[:7]} ({a['address']}); its findings come to you as a message."
 
 
 def review_refusal(s, t, wt):
@@ -432,8 +483,8 @@ def review_refusal(s, t, wt):
     task in the folder itself needs a round recorded since it started. Out of rounds, only the
     Assistant adds one (review-more): the task then waits, saying so (review_out)."""
     on, rounds = review_limits(s, t)
-    if not on or not t.get("review_gate"):
-        return None
+    if not on or not t.get("review_gate") or gate_min(s, t):
+        return None  # a gate folder: herdr-task reviews after ready (gate_step)
     if wt and t.get("start") and t.get("head") == t["start"]:
         return None  # no commits of its own: nothing to review (nothing to merge)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
@@ -462,6 +513,8 @@ def cmd_reviewed(args):
         on, rounds = review_limits(s, t)
         if not on:
             raise Fail(f"Review is off for {s.ref(t)}: there is no round to record.")
+        if gate_min(s, t):
+            raise Fail(f"{s.ref(t)}'s review is herdr-task's own: say ready, and it starts the reviewer for your final commit.")
         used = rounds_used(t)
         if used >= rounds:
             raise Fail(f"All {rounds} review rounds of {s.ref(t)} are used. Say why in your chat and end your turn: only your "
@@ -498,7 +551,7 @@ def cmd_review_more(args):
             raise Fail(f"Review is off for {s.ref(t)}.")
         if t["state"] == "done":
             raise Fail(f"{s.ref(t)} is already done; it needs no more review.")
-        used = rounds_used(t)
+        used = rounds_used(t, bool(gate_min(s, t)))
         if used < rounds:
             raise Fail(f"{s.ref(t)} has used {used} of {rounds} review rounds; add one only when they are all used.")
         t["review_rounds_added"] = int(t.get("review_rounds_added") or 0) + 1
@@ -510,8 +563,10 @@ def cmd_review_more(args):
             ht, folder = own_path(), shlex.quote(s.loc["folder"])
             from .news import send_or_hold
             r = send_or_hold(live[-1]["address"],
-                     f"Your Assistant added one review round to {s.ref(t)}: {rounds + 1} in all. Have your final commit reviewed, "
-                     f"record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report \"<findings, a line>\"`, then run ready again.")
+                     f"Your Assistant added one review round to {s.ref(t)}: {rounds + 1} in all. " + (
+                         f"Run `{ht} ready {s.ref(t)} --folder {folder}` again: Herdr starts its reviewer." if gate_min(s, t) else
+                         f"Have your final commit reviewed, record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report "
+                         f"\"<findings, a line>\"`, then run ready again."))
             told = live[-1]["address"] if r else None
         v = view(s, t)
     say(args, {**v, "rounds": rounds + 1, "told": told},
@@ -667,6 +722,8 @@ def cmd_review(args):
             text = f.read()
     with open_store(args) as s:
         t = s.find(args.id)
+        if gate_min(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13)
+            return gate_verdict(s, t, args, text)
         rv = t.pop("review", None) or {}
         cfg = settings_for(s, t.get("space"))["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
@@ -689,10 +746,47 @@ def cmd_review(args):
     # This reviewer is finished: it ends a moment after this command returns.
     me = os.environ.get("HC_TERMINAL_ID")
     if me and rv.get("reviewer") == me:
-        guard(["hc"])
-        subprocess.Popen(["sh", "-c", 'sleep 4; hc kill "$1" >/dev/null 2>&1; sleep 2; hc rm "$1" >/dev/null 2>&1', "x", me],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        end_reviewer(me)
     say(args, v, msg)
+
+
+def end_reviewer(me):
+    guard(["hc"])
+    subprocess.Popen(["sh", "-c", 'sleep 4; hc kill "$1" >/dev/null 2>&1; sleep 2; hc rm "$1" >/dev/null 2>&1', "x", me],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def gate_verdict(s, t, args, text):
+    """A verdict from herdr-task's own reviewer (FAC-13): only from its open round's terminal, while
+    the worktree's HEAD is still that round's head with nothing uncommitted. That reviewer then ends."""
+    me = os.environ.get("HC_TERMINAL_ID")
+    if t["state"] == "done":
+        raise Fail(f"{s.ref(t)} is already done.")
+    done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}
+    rn = next((r for r in reversed(t.get("review_runs") or []) if me and r["address"] == me and r["round"] not in done), None)
+    if not rn:
+        raise Fail(f"Only the reviewer herdr-task started for {s.ref(t)}'s open review round records it, from its own terminal.")
+    wt = t.get("worktree") or ""
+    if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
+    must = args.must_fix if args.must_fix is not None else (0 if args.passed else None)
+    if must is None or must < 0 or bool(args.passed) != (must == 0):  # findings below Must fix never block
+        raise Fail("Say --pass (nothing at Must fix; --notes for the rest), or --changes \"…\" --must-fix N: N (1 or more) findings at or above Must fix.")
+    t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": me, "started_by": "herdr-task",
+                                        "verdict": "pass" if args.passed else "changes", "must_fix": must,
+                                        "report": (text or args.notes or "").strip()[:2000], "at": now()})
+    for k in ("review_out", "progress"):
+        t.pop(k, None)
+    s.dirty = True
+    if args.passed:
+        msg = f"{s.ref(t)}: review round {rn['round']} passed. " + (gate_step(s, t) or finalize(s, t))
+    else:
+        sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
+                              f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
+                              f"{shlex.quote(s.loc['folder'])}` again."), None)
+        msg = f"{s.ref(t)}: findings sent to {sent}."
+    end_reviewer(me)
+    say(args, view(s, t), msg)
 
 
 def cmd_state(args, state):
@@ -700,7 +794,7 @@ def cmd_state(args, state):
         t = s.find(args.id)
         if state == "reopen":
             state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
-            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
+            for k in ("reviews", "review", "review_runs", "review_out", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True

@@ -1621,6 +1621,295 @@ class Store:
         return f"f#{t['id']}"
 
 
+class GateReview(unittest.TestCase):
+    """FAC-13: in a gate folder (review.min > 0) ready starts herdr-task's own reviewer for the exact
+    head, and only that reviewer's terminal, on that unmoved head, records a round. A throwaway git
+    repo; hc run, the worker's messages and GitHub are faked. Records go through the contract's validator."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        sys.path.insert(0, os.path.join(ROOT, "test"))
+        import herdr_task.commands as commands
+        import herdr_task.launch as launch
+        import herdr_task.templates as templates
+        import herdr_task.settings as settings
+        import contract_gate_evidence as contract
+        self.commands, self.contract = commands, contract
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.git(self.main, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/13", self.wt, "HEAD")
+        start = self.git(self.wt, "rev-parse", "HEAD")
+        self.head = self.change("say \"hi\" $HOME `date`")
+        self.store = Store([{"id": 13, "title": "Gate", "state": "running", "mode": "worktree", "worktree": self.wt,
+                             "branch": "task/13", "base": "main", "start": start, "agents": [{"address": "w1"}],
+                             "prompt": "Make the gate.", "space": "sp1", "review_gate": True, "started": 1, "set": {"review_min": 2},
+                             "reviewer": "agy", "reviewer_model": "gemini-4-argon-high"}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        self.runs, self.told = [], []
+        self.reviewer_term = {"state": "live", "agent": "agy"}  # what hc get says of a reviewer
+
+        def hc_run(argv, **k):
+            self.runs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"term-{len(self.runs)}"}), "")
+        tdir = tempfile.mkdtemp(dir=self.root)
+        for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
+                                 (commands, "find_proof", lambda *a: None), (commands, "ready_turns", lambda *a: {}),
+                                 (commands, "live_agents", lambda key: []), (commands, "detail", lambda k: k),
+                                 (commands, "github", lambda s: None), (commands, "already_merged", lambda *a: None),
+                                 (commands, "own_work", lambda *a: None), (commands, "guard", lambda *a: None),
+                                 (commands, "tell", lambda s, t, msg, args: self.told.append(msg) or ("w1", False)),
+                                 (launch, "run", hc_run), (launch, "hc_json", lambda *a: None),
+                                 (launch, "low_priority", lambda argv, name: argv), (templates, "TEMPLATES", tdir),
+                                 (settings, "SETTINGS", os.path.join(tdir, "none.json")),
+                                 (commands, "hc_json", lambda *a: self.reviewer_term),
+                                 (commands, "subprocess", mock.Mock())):  # no real `hc kill` of a reviewer
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.env("HC_TERMINAL_ID", None)
+
+    def env(self, k, v):
+        from unittest import mock
+        p = mock.patch.dict(os.environ, {k: v} if v else {})
+        p.start()
+        self.addCleanup(p.stop)
+        if not v:
+            os.environ.pop(k, None)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def change(self, words):
+        with open(os.path.join(self.wt, "gate.txt"), "w") as f:
+            f.write(words)
+        self.git(self.wt, "add", "gate.txt")
+        self.git(self.wt, "commit", "-q", "-m", "gate")
+        return self.git(self.wt, "rev-parse", "HEAD")
+
+    def ready(self):
+        import argparse
+        self.commands.cmd_ready(argparse.Namespace(id="SHEP-13", json=True, folder=None, summary="The gate.", details=None,
+                                                   proof=None, agents_md=None))
+
+    def verdict(self, by, passed=True, changes=None, must_fix=0):
+        import argparse
+        self.env("HC_TERMINAL_ID", by)
+        self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=passed, changes=changes,
+                                                    changes_file=None, notes=None, must_fix=must_fix))
+
+    def valid(self):
+        for r in self.task.get("review_runs") or []:
+            self.contract.validate_review_run(r)
+        for r in self.task.get("reviews") or []:
+            self.contract.validate_review(r)
+
+    def test_ready_starts_a_reviewer_for_the_head(self):
+        self.ready()
+        self.assertEqual(self.task["state"], "running")  # not Ready until the gate's rounds pass
+        self.assertEqual(len(self.runs), 1)
+        argv = self.runs[0]
+        self.assertIn("herdr.role=reviewer", argv)
+        self.assertEqual(argv[argv.index("--cwd") + 1], self.wt)
+        cmd = argv[argv.index("--") + 1:]
+        self.assertIn("agy", [os.path.basename(a) for a in cmd])
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gemini-4-argon-high")
+        self.assertEqual(cmd[cmd.index("--mode") + 1], "plan")
+        prompt = cmd[cmd.index("-i") + 1]
+        from herdr_task.templates import REVIEWER_MD
+        for words in (REVIEWER_MD.strip()[:60], "Make the gate.", 'say "hi" $HOME `date`', "major", self.head,
+                      "review SHEP-13", "--must-fix"):
+            self.assertIn(words, prompt)
+        settings = json.loads(cmd[cmd.index("--settings") + 1])
+        self.assertEqual(settings["trustedWorkspaces"], [self.wt])
+        self.assertTrue(any(" review" in r for r in settings["permissions"]["allow"]))
+        self.assertFalse(any(" ready" in r or " reviewed" in r for r in settings["permissions"]["allow"]))
+        runs = self.task["review_runs"]
+        self.assertEqual([(r["round"], r["head"], r["address"], r["cli"], r["model"]) for r in runs],
+                         [(1, self.head, "term-1", "agy", "gemini-4-argon-high")])
+        self.valid()
+        self.ready()  # again while its reviewer works: no second one
+        self.assertEqual(len(self.runs), 1)
+
+    def test_a_verdict_from_another_terminal_is_refused(self):
+        self.ready()
+        for by in ("term-9", "w1", None):
+            with self.assertRaises(self.commands.Fail):
+                self.verdict(by)
+        self.assertNotIn("reviews", self.task)
+        self.assertEqual(self.task["state"], "running")
+
+    def test_a_verdict_after_head_moved_or_on_a_dirty_tree_is_refused(self):
+        self.ready()
+        with open(os.path.join(self.wt, "gate.txt"), "a") as f:
+            f.write("more")
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1")
+        self.change("moved")
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1")
+        self.assertNotIn("reviews", self.task)
+
+    def test_a_pass_needs_no_must_fix(self):
+        self.ready()
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1", must_fix=1)
+        self.assertNotIn("reviews", self.task)
+
+    def test_pass_with_min_2_starts_round_2_then_ready(self):
+        self.ready()
+        self.verdict("term-1")
+        self.assertEqual(self.task["state"], "running")
+        self.assertEqual(len(self.runs), 2)
+        self.assertEqual([(r["round"], r["head"], r["address"]) for r in self.task["review_runs"]],
+                         [(1, self.head, "term-1"), (2, self.head, "term-2")])
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1")  # round 1's reviewer can't record round 2
+        self.verdict("term-2")
+        self.assertEqual(self.task["state"], "ready")
+        self.assertEqual([(r["round"], r["by"], r["verdict"], r["started_by"]) for r in self.task["reviews"]],
+                         [(1, "term-1", "pass", "herdr-task"), (2, "term-2", "pass", "herdr-task")])
+        self.valid()
+
+    def test_changes_go_to_the_worker_and_the_next_ready_reviews_the_new_head(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="gate.txt says hi twice", must_fix=1)
+        self.assertEqual(self.task["state"], "running")
+        self.assertIn("gate.txt says hi twice", self.told[-1])
+        self.assertEqual(len(self.runs), 1)
+        new = self.change("fixed")
+        self.ready()
+        self.assertEqual([(r["round"], r["head"]) for r in self.task["review_runs"]], [(1, self.head), (2, new)])
+        self.valid()
+
+    def test_ready_again_without_fixing_the_changes_starts_none(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="gate.txt says hi twice", must_fix=1)
+        self.ready()  # the same head: no fresh reviewer for unfixed code
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(self.task["state"], "running")
+
+    def test_a_reviewer_gone_without_a_verdict_doesnt_stop_the_next(self):
+        self.ready()
+        self.reviewer_term = {"state": "live", "agent": "zsh", "foreground": {"name": "zsh"}}  # its CLI exited, the kept shell stays
+        self.ready()
+        self.assertEqual([r["round"] for r in self.task["review_runs"]], [1, 2])
+
+    def test_findings_below_must_fix_never_block(self):
+        self.ready()
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1", passed=False, changes="nitpick: rename a variable", must_fix=0)
+        self.assertNotIn("reviews", self.task)
+
+    def test_review_more_and_show_in_a_gate_folder(self):
+        import argparse
+        from unittest import mock
+        self.task["set"]["review_rounds"] = 1
+        self.ready()
+        self.verdict("term-1")
+        self.assertNotIn("progress", self.task)  # its "reviewer is on it" line is gone: it waits for a round
+        sent = []
+        with mock.patch("herdr_task.news.send_or_hold", lambda to, msg: sent.append(msg) or True), \
+                mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]), \
+                mock.patch.object(self.commands, "caller_labels", lambda: {}):
+            self.commands.cmd_review_more(argparse.Namespace(id="SHEP-13", json=True, folder=None))
+        self.assertIn(" ready SHEP-13", sent[0])
+        self.assertNotIn(" reviewed ", sent[0])
+        self.assertEqual(self.commands.rounds_used(self.task, True), 1)
+        from herdr_task import settings
+        self.assertEqual(settings.review_limits(self.store, {"id": 4, "title": "x", "mode": "worktree", "agents": [],
+                                                             "set": {"review_min": 5}}), (True, 5))
+
+    def test_a_new_commit_on_a_ready_task_is_never_left_mergeable(self):
+        self.ready()
+        self.verdict("term-1")
+        self.verdict("term-2")
+        self.assertEqual(self.task["state"], "ready")
+        self.change("unreviewed")
+        self.ready()
+        self.assertEqual(self.task["state"], "running")  # back at work until its rounds pass
+        self.assertEqual(len(self.runs), 3)
+
+    def test_no_verdict_on_a_done_task_and_no_crash_without_a_worktree(self):
+        self.ready()
+        self.task["state"] = "done"
+        with self.assertRaises(self.commands.Fail):
+            self.verdict("term-1")
+        self.assertEqual(self.task["state"], "done")
+        self.task.update(state="todo", worktree=os.path.join(self.root, "gone"))
+        with self.assertRaises(self.commands.Fail):
+            self.ready()
+
+    def test_rounds_never_below_the_minimum(self):
+        from herdr_task import settings
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"everywhere": {"tasks": {"review_rounds": 2, "review_min": 3}}}, f)
+        self.assertEqual(settings.review_limits(self.store, {"id": 5, "title": "x", "mode": "worktree", "agents": []}), (True, 3))
+
+    def test_its_reviewer_booting_is_not_a_wait_for_the_person(self):
+        from herdr_task import agents
+        self.task["started"] = 1
+        self.ready()
+        self.assertTrue(agents.starting(self.task))
+
+    def test_a_codex_reviewer_is_told_to_escalate_its_verdict(self):
+        self.task["reviewer"], self.task["reviewer_model"] = "codex", None
+        self.ready()
+        cmd = self.runs[0][self.runs[0].index("--") + 1:]
+        self.assertIn("read-only", cmd)
+        self.assertIn("require_escalated", cmd[-1])
+
+    def test_out_of_rounds_starts_none(self):
+        self.task["set"]["review_rounds"] = 1
+        self.ready()
+        self.verdict("term-1")
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(self.task["state"], "running")
+        self.assertTrue(self.task.get("review_out"))
+
+    def test_the_workers_own_reviewed_is_refused(self):
+        import argparse
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+        self.assertNotIn("reviews", self.task)
+
+    def test_outside_a_gate_folder_nothing_changes(self):
+        del self.task["set"]
+        self.task["set"] = {"review": "on"}
+        with self.assertRaises(self.commands.Fail):  # its own reviewed round is still what ready waits for
+            self.ready()
+        self.assertEqual(self.runs, [])
+        import argparse
+        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+        self.ready()
+        self.assertEqual((self.task["state"], self.runs), ("ready", []))
+
+    def test_the_setting_and_its_words(self):
+        from herdr_task import settings
+        from herdr_task.launch import closing_line
+        t = {"id": 2, "title": "x", "mode": "worktree", "agents": []}
+        settings.set_task(t, "review.min", "2")
+        self.assertEqual(t["set"], {"review_min": 2})
+        with self.assertRaises(settings.Fail):
+            settings.set_task(t, "review.min", "eleven")
+        block = settings.settings_block(self.store, t)
+        self.assertIn("herdr-task", block.split("- Review:")[1].split("\n")[0])
+        words = closing_line(self.store, t)
+        self.assertNotIn(" reviewed ", words)
+        self.assertEqual(settings.review_limits(self.store, t), (True, 3))
+        plain = {"id": 3, "title": "y", "mode": "worktree", "agents": [], "set": {"review": "on"}}
+        self.assertNotIn("herdr-task", settings.settings_block(self.store, plain).split("- Review:")[1].split("\n")[0])
+        self.assertIn(" reviewed ", closing_line(self.store, plain))
+
+
 class Scheduled(unittest.TestCase):
     """APP-38: a task that starts by itself at a time (--at "fri 8:15", --in 6h). A real task list on
     disk in a throwaway store and a throwaway git repo; only starting an agent, hc and the clock are faked."""
@@ -2168,9 +2457,10 @@ class AgyWorker(unittest.TestCase):
         trusted = lambda hc: json.loads(hc[hc.index("--settings") + 1]).get("trustedWorkspaces") if "--settings" in hc else None
         self.assertEqual(trusted(ran[0]), ["/wt/x"])
         self.assertIsNone(trusted(ran[1]))
-        # an agy reviewer in a worktree: that worktree trusted, but none of the worker's own rules
+        # an agy reviewer in a worktree: that worktree trusted, and of herdr-task only its verdict (FAC-13), none of the worker's own rules
         self.assertEqual(trusted(ran[2]), ["/wt/x"])
-        self.assertNotIn("herdr-task", json.dumps(json.loads(ran[2][ran[2].index("--settings") + 1])["permissions"]))
+        self.assertEqual([r.split()[-1] for r in json.loads(ran[2][ran[2].index("--settings") + 1])["permissions"]["allow"]
+                          if "herdr-task" in r], ["review)"])
         # an argv's own --settings keeps the folders it already trusts
         with mock.patch.object(L, "HOME", self.home):
             out = L.own_argv(["agy", "--settings", '{"trustedWorkspaces": ["/code"]}'], "/wt/x")

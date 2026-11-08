@@ -282,7 +282,7 @@ def main():
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)
     c.add_argument("--machine", help=argparse.SUPPRESS)  # this machine's name, from Herdr's window (HERD-40)
     c.add_argument("--hold", help=argparse.SUPPRESS)  # its start limits as JSON, from Settings > Machines
-    c = sub.add_parser("review")  # reviewers herdr-task started before agents reviewed their own work
+    c = sub.add_parser("review")  # a verdict from a reviewer herdr-task started (a gate folder's, or an old one)
     c.add_argument("id")
     c.add_argument("--folder")
     c.add_argument("--json", action="store_true")
@@ -291,6 +291,7 @@ def main():
     c.add_argument("--changes", help="what must be fixed, for the worker")
     c.add_argument("--changes-file")
     c.add_argument("--notes", help="suggestions with a pass")
+    c.add_argument("--must-fix", type=int, help="findings at or above Must fix (herdr-task's own reviewer, FAC-13)")
     c = cmd("scheduler", cmd_scheduler, "run automations and the queue (herdr-core keeps one as herdr-automations)", id=False)
     c.add_argument("--ensure", action="store_true", help="start it if automations need it and it isn't running")
     c.add_argument("--once", action="store_true", help="one round, then exit")

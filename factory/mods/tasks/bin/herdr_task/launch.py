@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ENTRY, Fail, HOME, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -50,11 +50,14 @@ def own_path():
     return found if found and os.path.realpath(found) == me else me
 
 
-def own_rules(path):
-    """Claude's allow rules for this exact path; a path a rule can't state literally gets none."""
+def own_rules(path, verbs=OWN):
+    """Claude's allow rules for this exact path (verbs: a reviewer's are only its own verdict);
+    a path a rule can't state literally gets none."""
     if not re.fullmatch(r"[\w@%+=:,./-]+", path):
         return []
-    rules = [f"Bash({path} {verb}:*)" for verb in OWN]
+    rules = [f"Bash({path} {verb}:*)" for verb in verbs]
+    if verbs is not OWN:
+        return rules
     sp = secret_path()
     for p in [sp, "herdr-secret"] if sp and re.fullmatch(r"[\w@%+=:,./-]+", sp) else []:
         rules += [f"Bash({p} {verb}:*)" for verb in SECRET]
@@ -65,14 +68,14 @@ def own_rules(path):
     return rules
 
 
-def own_argv(argv, worktree=None, with_own=True, cwd=None):
+def own_argv(argv, worktree=None, verbs=OWN, cwd=None):
     """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex, and agy,
-    which also trusts `worktree`, the one herdr-task made for the task; with_own=False: no own rules, agy only;
+    which also trusts `worktree`, the one herdr-task made for the task; verbs: the herdr-task verbs allowed;
     cwd: the folder agy runs in, which a relative --settings file is read from)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
-        rules = own_rules(path)
+        rules = own_rules(path, verbs)
         if not rules:
             return out
         if "--settings" in out[:-1]:
@@ -104,7 +107,7 @@ def own_argv(argv, worktree=None, with_own=True, cwd=None):
     if k == "agy":
         # agy's --settings allow list replaces the person's own (~/.gemini/antigravity-cli): it carries
         # the argv's own --settings rules, then the person's, then these.
-        own = [re.sub(r":\*\)$", ")", r.replace("Bash(", "command(", 1)) for r in own_rules(path) if with_own]
+        own = [re.sub(r":\*\)$", ")", r.replace("Bash(", "command(", 1)) for r in own_rules(path, verbs)]
         try:
             with open(os.path.join(HOME, ".gemini", "antigravity-cli", "settings.json")) as f:
                 theirs = list(json.load(f)["permissions"]["allow"])
@@ -415,7 +418,10 @@ def closing_line(s, task, parent=None, argv=None):
             f"`--details \"<a few short bullets in plain words, one per line: what changed for the person first, then how it was checked>\"`; with `--agents-md \"<one line>\"` when you learned something "
             f"about setting up or testing this repo that its AGENTS.md lacks). The person accepts it from there; never mark it done yourself.")
     on, rounds = review_limits(s, task)
-    if on:
+    if gate_min(s, task):
+        text += (f" Review is herdr-task's own: after ready it starts the reviewer for your final commit and tells you what it "
+                 f"finds; `reviewed` doesn't count here.")
+    elif on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
                  f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
@@ -635,8 +641,9 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     cmd, folder = list(resume or argv), folder_for(s, task)
     if not role:
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, cwd=folder)
-    elif role == "reviewer" and agent_key(cmd) == "agy" and task.get("mode") == "worktree":
-        cmd = own_argv(cmd, folder, with_own=False, cwd=folder)  # a read-only reviewer: its worktree trusted, none of the worker's own rules
+    elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
+        # a read-only reviewer: its worktree trusted, only its verdict allowed (herdr-task review)
+        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder)
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
