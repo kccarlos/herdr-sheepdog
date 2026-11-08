@@ -25,6 +25,7 @@ from .star import cmd_star
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
+from .ask import cmd_ask, cmd_ask_pane
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -444,6 +445,16 @@ def main():
     c.add_argument("--space")
     c.add_argument("--parent")
     c.add_argument("--keep", action="store_true", help="add the agent beside the old one")
+    c = cmd("ask", cmd_ask, "ask the person without blocking: ask \"<question>\" --option A --option B --recommend A starts an "
+            "ask pane; the answer comes to you as news (--show <id>: an ask and its answer)", id=False)
+    c.add_argument("question", nargs="?")
+    c.add_argument("--option", action="append", help="an answer to pick by number (repeatable)")
+    c.add_argument("--recommend", help="the option you recommend")
+    c.add_argument("--task", help="the task it is about (FAC-3)")
+    c.add_argument("--show", metavar="ID")
+    c = sub.add_parser("_ask-pane")  # the ask pane's program (ask.py)
+    c.add_argument("id")
+    c.set_defaults(fn=cmd_ask_pane, json=False)
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
     c.set_defaults(fn=cmd_allow, json=False)
