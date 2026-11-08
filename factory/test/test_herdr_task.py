@@ -2632,6 +2632,21 @@ class AgentReactions(unittest.TestCase):
         self.assertIn("👀", self.sent[2][1])
 
 
+class ReviewerFlagsSet(unittest.TestCase):
+    """add/edit's --reviewer-model and --reviewer-effort flags set the task's fields (they used to fail)."""
+
+    def test_flags(self):
+        import argparse
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        t = {}
+        args = argparse.Namespace(reviewer="claude", reviewer_model="opus", reviewer_effort="high", set=None)
+        settings.set_opts(t, args)
+        self.assertEqual((t["reviewer"], t["reviewer_model"], t["reviewer_effort"]), ("claude", "opus", "high"))
+        settings.set_task(t, "reviewer.model", "sonnet")
+        self.assertEqual(t["reviewer_model"], "sonnet")
+
+
 class AssistantSettings(unittest.TestCase):
     """SHEP-42/SHEP-49: a space's Assistant is told its settings (Reactions among them): the block its
     session gets at the start, and the one message a running one gets when some change. A throwaway
