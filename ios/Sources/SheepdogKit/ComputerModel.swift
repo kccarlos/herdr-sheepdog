@@ -30,6 +30,8 @@ public final class ComputerModel {
     public private(set) var questions: [PendingAction] = []
     /// The voice's own question (`/api/state` `pending_action`).
     public private(set) var pendingAction: PendingAction?
+    /// The herdr backend switch state from `/api/state`.
+    public private(set) var herdr: HerdrBackendSwitch?
     /// Each question's answer phase and the voice's pinned question: the
     /// one value every surface reads (the voice's approval card, the
     /// question cards, the floating questions) and every answer writes
@@ -394,6 +396,7 @@ public final class ComputerModel {
         set(\.agents, [])
         set(\.questions, [])
         set(\.pendingAction, nil)
+        set(\.herdr, nil)
         endLinger()
         updateFlow { $0.reset() }
     }
@@ -527,6 +530,7 @@ public final class ComputerModel {
         set(\.agents, state.agents)
         set(\.questions, state.questions ?? state.pendingAction.map { [$0] } ?? [])
         set(\.pendingAction, state.pendingAction)
+        set(\.herdr, HerdrBackendSwitch(state: state))
         // Forget the phase of open questions that closed, and follow the
         // voice's question.
         let ids = Set(questions.map(\.id))
