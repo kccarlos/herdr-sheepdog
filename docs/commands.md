@@ -32,7 +32,7 @@
 
 | Command | What it does |
 |---|---|
-| `sheepdog update` | Check for a new release now and print how to upgrade for the way you installed it. Changes nothing. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
+| `sheepdog update` | Check for a new release now; if there is one, install it the way you installed sheepdog (installer, Homebrew, herdr plugin; on a Mac also Sheepdog.app when Homebrew installed it) and restart the running daemon. Asks nothing. A source checkout gets the steps instead. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
 | `sheepdog uninstall` | Stop, remove the login service, the `~/.local/bin/sheepdog` link, and unchanged `herdr-app` panel/layout/shortcut files (restoring your previous layout if `sheepdog` was active), ask before deleting config and data, then print the herdr-tui command that finishes the job. `--dry-run` previews every step without changing anything; `--yes` deletes without asking; `--keep-data` keeps config and data. |
 | `sheepdog service install` | Start at login (launchd on macOS, `systemd --user` on Linux). Also `uninstall`, `start`, `status`, `logs`; `install --dry-run` prints the unit. |
 | `sheepdog data clear` | Delete the event log and transcripts (`--events`, the default) or everything under the data directory (`--all`). Asks first; `--yes` skips. Stop the daemon first. |

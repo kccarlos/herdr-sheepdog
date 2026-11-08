@@ -27,6 +27,8 @@ struct SettingsView: View {
     @State private var firstRun = false
     /// Add a computer: the pairing sheet for another computer's code.
     @State private var addingComputer: PairingSheet?
+    @State private var pendingHerdr: HerdrBackendSwitch.Kind?
+    @State private var herdrError: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -80,6 +82,9 @@ struct SettingsView: View {
                             MenuRow(title: "Languages", symbol: "globe", value: model.settingsModel.daemonSettings?.languagesSummary ?? "—")
                         }
                         .accessibilityIdentifier("settings.languages")
+                        if let herdr = model.fleet.current?.herdr {
+                            herdrRow(herdr)
+                        }
                         if model.shellOffered == false {
                             MenuRow(title: "Shell", symbol: "apple.terminal", value: "Off on this computer")
                                 .accessibilityIdentifier("settings.shell")
@@ -90,9 +95,7 @@ struct SettingsView: View {
                     } header: {
                         Text("Computer")
                     } footer: {
-                        if model.shellOffered == false {
-                            Text(PhoneShell.offExplanation)
-                        }
+                        computerFooter
                     }
                     }
                 }
@@ -145,6 +148,12 @@ struct SettingsView: View {
                 PairingFlowView(stage: sheet.stage)
                     .environmentObject(model)
             }
+            .alert("Switch to \(pendingHerdr?.fullName ?? "herdr")?", isPresented: Binding(get: { pendingHerdr != nil }, set: { if !$0 { pendingHerdr = nil } }), presenting: pendingHerdr) { kind in
+                Button("Switch") { switchHerdr(to: kind) }
+                Button("Cancel", role: .cancel) { pendingHerdr = nil }
+            } message: { _ in
+                Text(HerdrBackendSwitch.confirmMessage)
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: done)
@@ -183,11 +192,57 @@ struct SettingsView: View {
                 .accessibilityIdentifier("computerLabel.settings.\(computer.id)")
             }
             addComputerButton
+            if let herdr = model.fleet.current?.herdr {
+                herdrRow(herdr)
+            }
         } header: {
             Text("Computers")
         } footer: {
-            if model.shellOffered == false {
-                Text(PhoneShell.offExplanation)
+            computerFooter
+        }
+    }
+
+    @ViewBuilder
+    private var computerFooter: some View {
+        if let herdrError {
+            Text(herdrError).foregroundStyle(Theme.danger)
+        } else if model.shellOffered == false {
+            Text(PhoneShell.offExplanation)
+        }
+    }
+
+    @ViewBuilder
+    private func herdrRow(_ herdr: HerdrBackendSwitch) -> some View {
+        if let reason = herdr.readOnlyReason {
+            MenuRow(title: "herdr", symbol: "rectangle.split.2x1", value: "\(herdr.currentLabel) (\(reason))")
+                .accessibilityIdentifier("settings.herdr")
+        } else {
+            Menu {
+                ForEach(herdr.options) { opt in
+                    Button {
+                        if opt.canSelect { pendingHerdr = opt.kind }
+                    } label: {
+                        if opt.current { Label(opt.title, systemImage: "checkmark") } else { Text(opt.title) }
+                    }
+                    .disabled(!opt.canSelect)
+                }
+            } label: {
+                MenuRow(title: "herdr", symbol: "rectangle.split.2x1", value: herdr.currentLabel)
+            }
+            .tint(Theme.primaryText)
+            .accessibilityIdentifier("settings.herdr")
+        }
+    }
+
+    private func switchHerdr(to kind: HerdrBackendSwitch.Kind) {
+        pendingHerdr = nil
+        herdrError = nil
+        Task {
+            do {
+                _ = try await model.current { try await $0.setHerdrBackend(kind) }
+                await model.refreshState(quiet: true)
+            } catch {
+                herdrError = model.requestFailure(error).message
             }
         }
     }

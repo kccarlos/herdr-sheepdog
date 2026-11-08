@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,7 +95,11 @@ func chooseBackend(ctx context.Context, want string, old, core pinger) (kind, re
 	case config.HerdrBackendHerdr, config.HerdrBackendHC:
 		return want, "herdr.backend=" + want
 	}
-	var oldUp, coreUp bool
+	oldUp, coreUp := probeBackends(ctx, old, core)
+	return ResolveBackend(want, oldUp, coreUp)
+}
+
+func probeBackends(ctx context.Context, old, core pinger) (oldUp, coreUp bool) {
 	var wg sync.WaitGroup
 	probe := func(p pinger, up *bool) {
 		defer wg.Done()
@@ -105,7 +112,32 @@ func chooseBackend(ctx context.Context, want string, old, core pinger) (kind, re
 	go probe(old, &oldUp)
 	go probe(core, &coreUp)
 	wg.Wait()
-	return ResolveBackend(want, oldUp, coreUp)
+	return oldUp, coreUp
+}
+
+func (a *App) herdrBackends(ctx context.Context) []string {
+	if a.opts.Herdr != HerdrSocket {
+		return nil
+	}
+	oldUp, coreUp := probeBackends(ctx, herdr.NewClient(a.cfg.Herdr.Socket), herdrcore.New(hc.NewClient(a.cfg.Herdr.HCSocketPath()), nil))
+	var out []string
+	if oldUp {
+		out = append(out, config.HerdrBackendHerdr)
+	}
+	if coreUp {
+		out = append(out, config.HerdrBackendHC)
+	}
+	return out
+}
+
+func (a *App) herdrOverride() string {
+	if a.opts.Herdr != HerdrSocket {
+		return "set by --herdr=" + a.opts.Herdr
+	}
+	if v, ok := os.LookupEnv("SHEEPDOG_HERDR_BACKEND"); ok && strings.TrimSpace(v) != "" && !slices.Contains(a.opts.EnvFileNames, "SHEEPDOG_HERDR_BACKEND") {
+		return "set by SHEEPDOG_HERDR_BACKEND in the environment"
+	}
+	return ""
 }
 
 // awaitFirstHerdr asks both sockets every poll until one answers. The

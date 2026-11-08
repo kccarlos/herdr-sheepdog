@@ -26,10 +26,12 @@ public struct MenuBarState: Equatable, Sendable {
     public var kind: Kind
     /// Open questions: the "needs you" badge.
     public var needsYou: Int
+    public var herdr: HerdrBackendSwitch?
 
-    public init(kind: Kind, needsYou: Int = 0) {
+    public init(kind: Kind, needsYou: Int = 0, herdr: HerdrBackendSwitch? = nil) {
         self.kind = kind
         self.needsYou = needsYou
+        self.herdr = herdr
     }
 
     /// `voice.client.platform` of this app.
@@ -57,6 +59,7 @@ public struct MenuBarState: Equatable, Sendable {
         } else {
             self.init(kind: .off, needsYou: badge)
         }
+        self.herdr = HerdrBackendSwitch(state: state)
     }
 
     /// The menu's first line.
