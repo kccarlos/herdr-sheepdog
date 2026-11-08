@@ -248,6 +248,52 @@ def cmd_allow(args):
 # ---- starting agents ------------------------------------------------------------------------
 
 
+# ---- agy reviewers run sandboxed (FAC-49) ---------------------------------------------------
+# agy matches allow rules by literal prefix, so a reviewer's every new command would prompt. On a Mac
+# it runs instead with --dangerously-skip-permissions under sandbox-exec (reviewer.sb): it reads only
+# its worktree, the repo's git dir and the system's tools, writes only its run's temp dir, and can't
+# reach herdr-core's sockets. That dir is its HOME, holding all of agy's state for the run (a copy of
+# its sign-in and onboarding only); the launcher's trap removes it, sweep_sandboxes() what a killed
+# one left. It can't run herdr-task: the gate reads its verdict from its terminal (gate_reads).
+SANDBOX_ROOT = f"/private/tmp/herdr-review-{os.getuid()}" if hasattr(os, "getuid") else ""
+SANDBOX_SH = r"""root=$1 profile=$2 wt=$3 git=$4 nvm=$5 core=$6; shift 6
+mkdir -p -m 700 "$root" && d=$(mktemp -d "$root/$$.XXXXXX") || exit 1
+trap 'rm -rf "$d"' EXIT; trap 'exit 1' HUP INT TERM
+g="$HOME/.gemini/antigravity-cli" a="$d/.gemini/antigravity-cli"; mkdir -p "$a/cache"
+cp -p "$g/antigravity-oauth-token" "$a/"; cp -p "$g/cache/onboarding.json" "$a/cache/"
+dev=$(xcode-select -p 2>/dev/null || echo /Library/Developer/CommandLineTools); agy=$(realpath "$(command -v "$1")")
+PATH="$dev/usr/bin:$PATH" HOME="$d" TMPDIR="$d/" GIT_OPTIONAL_LOCKS=0 sandbox-exec -p "$profile" -D TMP="$d" -D WORKTREE="$wt" \
+  -D GITDIR="$git" -D AGY="$agy" -D DEVDIR="$dev" -D NVM="$nvm" -D CORE="$core" "$@"
+"""
+
+
+def sandboxes(argv):
+    """An agy reviewer here runs sandboxed: agy on a Mac with sandbox-exec. Elsewhere it keeps plan
+    mode and its allow list (never skipped permissions without the sandbox)."""
+    return agent_key(argv) == "agy" and sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec")
+
+
+def sandboxed(argv, worktree):
+    """argv (agy's) run under reviewer.sb in a temp dir of its own (SANDBOX_SH)."""
+    import pkgutil
+    common = git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")[1] or worktree
+    real = os.path.realpath
+    return ["sh", "-c", SANDBOX_SH, "herdr-sandbox", SANDBOX_ROOT, pkgutil.get_data(__package__, "reviewer.sb").decode(),
+            real(worktree), real(common), real(os.path.join(HOME, ".nvm", "versions")),
+            real(os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "herdr-core")), *argv]
+
+
+def sweep_sandboxes():
+    """Removes the temp dirs of sandboxed reviewers whose launcher (the pid each is named by) is gone."""
+    for n in os.listdir(SANDBOX_ROOT) if SANDBOX_ROOT and os.path.isdir(SANDBOX_ROOT) else []:
+        try:
+            os.kill(int(n.split(".")[0]), 0)
+        except ProcessLookupError:
+            shutil.rmtree(os.path.join(SANDBOX_ROOT, n), ignore_errors=True)
+        except (ValueError, OSError):
+            pass
+
+
 def resume_argv(argv, session):
     k = agent_key(argv)
     if k == "claude":
@@ -652,13 +698,18 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     apart from the task's agents; reads: a reviewer's read-only commands (review_reads). Returns its record."""
     key = s.key(task)
     cmd, folder = list(resume or argv), folder_for(s, task)
+    sand = role == "reviewer" and sandboxes(cmd)
     if not role:
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, cwd=folder)
+    elif sand:  # its fresh HOME trusts no folder yet
+        cmd = cmd + ["--settings", json.dumps({"trustedWorkspaces": [folder]})]
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
         # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder, reads=reads)
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
+    if sand:
+        cmd = sandboxed(cmd, folder)
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
               "--label", f"herdr.agent={agent_key(argv)}"]
     ctab = coordinator_tab(parent)
@@ -666,6 +717,8 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
         labels += ["--label", f"herdr.coordinator={ctab}"]
     if role:
         labels += ["--label", f"herdr.role={role}"]
+    if sand:  # never revived (revive.watched): it would come back unsandboxed
+        labels += ["--label", "herdr.sandbox=1"]
     rel = ["--parent", parent, "--outlive-parent"] if parent else ["--no-parent"]
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.

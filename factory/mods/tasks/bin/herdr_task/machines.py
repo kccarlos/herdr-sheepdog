@@ -101,7 +101,7 @@ def manifest():
         at = rec["at"] if rec.get("sha") == sha and rec.get("at") else max(int(os.path.getmtime(s) * 1000) for s in sources)
         files.append({"path": rel, "data": data, "sha": sha, "mode": mode, "at": at, "protect": protect, "test": test})
 
-    sources = [ENTRY] + ([os.path.join(PACKAGE, n) for n in os.listdir(PACKAGE) if n.endswith(".py")] if os.path.isdir(PACKAGE) else [])
+    sources = [ENTRY] + ([os.path.join(PACKAGE, n) for n in os.listdir(PACKAGE) if n.endswith(".py") or n == "reviewer.sb"] if os.path.isdir(PACKAGE) else [])
     add(".local/bin/herdr-task", bundle(), 0o755, sources, test=["--version"])
     links, touch = [], []
     art = _real(".local/bin/herdr-artifact")

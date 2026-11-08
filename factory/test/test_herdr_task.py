@@ -1671,6 +1671,7 @@ class GateReview(unittest.TestCase):
                                  (launch, "low_priority", lambda argv, name: argv), (templates, "TEMPLATES", tdir),
                                  (settings, "SETTINGS", os.path.join(tdir, "none.json")),
                                  (commands, "hc_json", lambda *a: self.reviewer_term),
+                                 (commands, "sandboxes", lambda argv: False), (launch, "sandboxes", lambda argv: False),
                                  (commands, "subprocess", mock.Mock())):  # no real `hc kill` of a reviewer
             p = mock.patch.object(mod, name, value)
             p.start()
@@ -1924,6 +1925,153 @@ class GateReview(unittest.TestCase):
         self.ready()
         self.assertEqual((self.task["state"], self.runs), ("ready", []))
 
+    # ---- FAC-49: an agy reviewer on a Mac runs under sandbox-exec; its verdict is read from its terminal ----
+
+    def sandbox(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        for mod in (self.commands, launch):
+            p = mock.patch.object(mod, "sandboxes", lambda argv: os.path.basename(argv[0]) == "agy")
+            p.start()
+            self.addCleanup(p.stop)
+
+    def screen(self, text):
+        from unittest import mock
+        read = []
+        p = mock.patch.object(self.commands, "run", lambda argv, **k: read.append(argv) or subprocess.CompletedProcess(argv, 0, text, ""))
+        p.start()
+        self.addCleanup(p.stop)
+        return read
+
+    def test_a_sandboxed_reviewer_skips_permissions_inside_sandbox_exec(self):
+        import herdr_task.launch as launch
+        self.sandbox()
+        self.ready()
+        argv = self.runs[0]
+        self.assertIn("herdr.sandbox=1", argv)  # revive never brings it back outside its sandbox
+        cmd = argv[argv.index(launch.SANDBOX_SH) - 2:]  # inside the launch's usual wraps (clean env, the person's shell)
+        self.assertEqual(cmd[:3], ["sh", "-c", launch.SANDBOX_SH])
+        with open(os.path.join(BIN, "herdr_task", "reviewer.sb")) as f:
+            self.assertEqual(cmd[5], f.read())
+        real = os.path.realpath
+        self.assertEqual(cmd[6:8], [real(self.wt), real(os.path.join(self.main, ".git"))])
+        agy = cmd[10:]
+        self.assertEqual(agy[0], "agy")
+        self.assertIn("--dangerously-skip-permissions", agy)
+        self.assertNotIn("--mode", agy)
+        self.assertEqual(json.loads(agy[agy.index("--settings") + 1]), {"trustedWorkspaces": [self.wt]})  # no allow list
+        prompt = agy[agy.index("-i") + 1]
+        code = self.commands.round_code(self.task["review_runs"][0])
+        self.assertIn(f"This round's code is {code}.", prompt)
+        self.assertNotIn("review SHEP-13", prompt)
+        self.assertIsNone(self.commands.read_verdict(prompt, code))  # its echoed prompt is never a verdict
+        self.valid()
+
+    def test_its_verdict_is_read_from_its_own_terminal(self):
+        self.sandbox()
+        self.ready()
+        rn = self.task["review_runs"][0]
+        code = self.commands.round_code(rn)
+        read = self.screen(f"> Review commit ... This round's code is {code}.\n  Working\n  {code} begin\n  - major: gate.txt says hi"
+                           f"\n    twice\n  {code} changes 1\n\n>\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"app": "antigravity", "state": "working"}}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(read, [])  # never read mid-turn
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"app": "antigravity", "state": "done"}}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(read, [["hc", "read", rn["address"], "--lines", "400"]])  # that run's terminal only
+        self.assertEqual([(r["round"], r["by"], r["verdict"], r["must_fix"], r["report"]) for r in self.task["reviews"]],
+                         [(1, rn["address"], "changes", 1, "- major: gate.txt says hi\ntwice")])
+        self.assertIn("gate.txt says hi", self.told[-1])
+        self.assertTrue(self.commands.subprocess.Popen.called)  # that reviewer ends
+        self.commands.gate_reads(self.store, self.task)  # a recorded round is never read again
+        self.assertEqual(len(self.task["reviews"]), 1)
+        self.valid()
+
+    def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
+        self.sandbox()
+        self.ready()
+        code = self.commands.round_code(self.task["review_runs"][0])
+        self.screen(f"**{code} pass**\n")
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual([r["verdict"] for r in self.task["reviews"]], ["pass"])
+        self.assertEqual(len(self.task["review_runs"]), 2)  # min 2: round 2 started
+        code2 = self.commands.round_code(self.task["review_runs"][1])
+        self.assertNotEqual(code, code2)
+        self.assertEqual(self.commands.read_verdict(f"`{code2} changes 0`\n", code2), (True, 0, ""))  # only minor findings: a pass
+        self.assertEqual(self.commands.read_verdict(f"- minor: x\n{code2} pass", code2), (True, 0, "- minor: x"))  # no begin line
+        self.screen(f"{code} pass\n")  # round 1's code on round 2's screen: no verdict
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.task["reviews"]), 1)
+        with open(os.path.join(self.wt, "gate.txt"), "a") as f:  # a dirty tree: nothing recorded, its reviewer kept for a later try
+            f.write("more")
+        self.commands.subprocess.Popen.reset_mock()
+        self.screen(f"{code2} pass\n")
+        with self.assertRaises(self.commands.Fail):
+            self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.task["reviews"]), 1)
+        self.assertFalse(self.commands.subprocess.Popen.called)
+        from unittest import mock
+        self.git(self.wt, "checkout", "gate.txt")
+        with mock.patch.object(self.commands, "gate_step", side_effect=RuntimeError("hc run failed")):  # starting the next round fails
+            with self.assertRaises(RuntimeError):
+                self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.task["reviews"]), 1)  # rolled back, read again next tick
+        self.assertEqual(self.task["progress"]["text"], "Herdr's reviewer is on it")  # all of it, its progress too
+        self.assertFalse(self.commands.subprocess.Popen.called)
+        self.change("moved")  # its head moved on: no verdict, and that reviewer ends
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.task["reviews"]), 1)
+        self.assertTrue(self.commands.subprocess.Popen.called)
+        self.reviewer_term = {"state": "gone"}  # nor from a terminal no longer live
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.task["reviews"]), 1)
+
+    def test_the_sweep_removes_dirs_of_ended_launchers_only(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        root = tempfile.mkdtemp(dir=self.root)
+        p = subprocess.Popen(["true"])
+        p.wait()
+        for n in (f"{os.getpid()}.live", f"{p.pid}.gone", "other"):
+            os.makedirs(os.path.join(root, n, "x"))
+        with mock.patch.object(launch, "SANDBOX_ROOT", root):
+            launch.sweep_sandboxes()
+        self.assertEqual(sorted(os.listdir(root)), [f"{os.getpid()}.live", "other"])
+
+    @unittest.skipUnless(sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec"), "sandbox-exec is macOS's")
+    def test_the_launcher_really_confines_it_and_removes_its_temp_dir(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        real = os.path.realpath
+        root, home, bindir = (real(tempfile.mkdtemp(dir=self.root)) for _ in range(3))
+        g = os.path.join(home, ".gemini", "antigravity-cli")
+        os.makedirs(os.path.join(g, "cache"))
+        for f in ("antigravity-oauth-token", "cache/onboarding.json", "settings.json"):
+            with open(os.path.join(g, f), "w") as fh:
+                fh.write("{}")
+        fake = os.path.join(bindir, "agy")
+        with open(fake, "w") as f:  # stands in for agy: where it runs, what it can read and write
+            f.write('#!/bin/sh\necho "home=$HOME"; ls -A "$HOME/.gemini/antigravity-cli" "$HOME/.gemini/antigravity-cli/cache"\n'
+                    'touch "$HOME/ok" && echo wrote-tmp\ntouch gate2.txt 2>/dev/null || echo no-write-worktree\n'
+                    'cat gate.txt >/dev/null && echo read-worktree\ngit log -1 --format=%s\n'
+                    f'cat {g}/settings.json 2>/dev/null || echo no-read-home\n'
+                    'cat .env 2>/dev/null || echo no-read-env\n')
+        os.chmod(fake, 0o755)
+        with open(os.path.join(self.wt, ".env"), "w") as f:  # herdr-secret env writes one: never readable in there
+            f.write("TOKEN=x\n")
+        with mock.patch.object(launch, "SANDBOX_ROOT", os.path.join(root, "r")), mock.patch.object(launch, "HOME", home):
+            argv = launch.sandboxed([fake, "-i", "hi"], self.wt)
+        out = subprocess.run(argv, cwd=self.wt, capture_output=True, text=True, timeout=60,
+                             env={**os.environ, "HOME": home, "PATH": bindir + ":/usr/bin:/bin:/usr/sbin"}).stdout
+        self.assertRegex(out, rf"home={os.path.join(root, 'r')}/\d+\.\w+\n")
+        for words in ("antigravity-oauth-token", "onboarding.json", "wrote-tmp", "no-write-worktree", "read-worktree", "gate",
+                      "no-read-home", "no-read-env"):
+            self.assertIn(words, out)
+        self.assertNotIn("settings.json", out)  # only the sign-in and onboarding are copied
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "gate2.txt")))
+        self.assertEqual(os.listdir(os.path.join(root, "r")), [])  # its trap removed the run's temp dir
+
     def test_the_setting_and_its_words(self):
         from herdr_task import settings
         from herdr_task.launch import closing_line
@@ -1940,6 +2088,35 @@ class GateReview(unittest.TestCase):
         plain = {"id": 3, "title": "y", "mode": "worktree", "agents": [], "set": {"review": "on"}}
         self.assertNotIn("herdr-task", settings.settings_block(self.store, plain).split("- Review:")[1].split("\n")[0])
         self.assertIn(" reviewed ", closing_line(self.store, plain))
+
+
+class SandboxedReviewer(unittest.TestCase):
+    """FAC-49: which reviewers run under sandbox-exec (GateReview patches this choice)."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+
+    def test_only_agy_on_a_mac_is_sandboxed(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        with mock.patch.object(launch.sys, "platform", "linux"):
+            self.assertFalse(launch.sandboxes(["agy"]))
+        with mock.patch.object(launch.sys, "platform", "darwin"), mock.patch.object(launch.os.path, "exists", lambda p: True):
+            self.assertTrue(launch.sandboxes(["/x/agy", "--model", "m"]))
+            self.assertFalse(launch.sandboxes(["claude"]))
+        with mock.patch.object(launch.sys, "platform", "darwin"), mock.patch.object(launch.os.path, "exists", lambda p: False):
+            self.assertFalse(launch.sandboxes(["agy"]))
+
+    def test_its_launcher_counts_as_its_agent_running(self):
+        from herdr_task.agents import agent_running
+        self.assertTrue(agent_running({"foreground": {"name": "bash", "argv": ["sh", "-c", "root=$1 ...", "herdr-sandbox", "/r"]}}))
+        self.assertFalse(agent_running({"foreground": {"name": "bash", "argv": ["bash"]}}))
+
+    def test_revive_never_brings_a_sandboxed_reviewer_back(self):
+        from herdr_task.revive import watched
+        labels = {"herdr.task": "dev#6", "herdr.role": "reviewer"}
+        self.assertTrue(watched({"labels": labels}))
+        self.assertFalse(watched({"labels": {**labels, "herdr.sandbox": "1"}}))
 
 
 class Scheduled(unittest.TestCase):
@@ -2483,7 +2660,8 @@ class AgyWorker(unittest.TestCase):
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/wt/x" if t["mode"] == "worktree" else "/main"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
                 mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "HOME", self.home), \
-                mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
+                mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a), \
+                mock.patch.object(L, "sandboxes", lambda a: False):  # FAC-36's path, as off a Mac
             for mode, role in (("worktree", None), ("here", None), ("worktree", "reviewer")):
                 L.launch(s, {"id": 6, "mode": mode, "agents": []}, ["agy"], "sp1", role=role)
         trusted = lambda hc: json.loads(hc[hc.index("--settings") + 1]).get("trustedWorkspaces") if "--settings" in hc else None

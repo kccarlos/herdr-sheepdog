@@ -144,7 +144,7 @@ def bundle():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(zipfile.ZipInfo("__main__.py", (1980, 1, 1, 0, 0, 0)), entry, zipfile.ZIP_DEFLATED)
         for name in sorted(os.listdir(PACKAGE)):
-            if name.endswith(".py"):
+            if name.endswith(".py") or name == "reviewer.sb":  # its sandbox profile (launch.sandboxed)
                 with open(os.path.join(PACKAGE, name), "rb") as f:
                     z.writestr(zipfile.ZipInfo(f"herdr_task/{name}", (1980, 1, 1, 0, 0, 0)), f.read(), zipfile.ZIP_DEFLATED)
     return buf.getvalue()

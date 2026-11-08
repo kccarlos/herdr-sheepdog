@@ -1,6 +1,7 @@
 """The task commands: add, start, status, ready, accept, merge and the rest."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -17,13 +18,13 @@ from .settings import (
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
-    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
+    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, set_branch, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, sandboxes, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -459,7 +460,10 @@ def gate_step(s, t):
                 f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
     rv, wt, ref, ht, folder = rows["Reviewer"], t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
-    argv = argv_for({**rv, "perm": "read-only" if rv["agent"] == "codex" else "plan"})
+    sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
+    argv = argv_for({**rv, "perm": "read-only" if rv["agent"] == "codex" else "full" if sand else "plan"})
+    at = now()
+    code = round_code({"round": len(runs) + 1, "head": head, "at": at}) if sand else None
     diff = git(wt, "diff", f"{t['start']}..{head}")[1]
     cmd = f"{ht} review {ref} --folder {folder}"
     check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
@@ -467,18 +471,25 @@ def gate_step(s, t):
         instructions("reviewer"), f"The task, {ref}:\n" + ((t.get("prompt") or "").strip() or t["title"]),
         f"Review commit {head} in {wt}. Its diff (git diff {t['start']}..{head})" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
-        f"Must fix: {MUST_WORDS[rows['Must fix']]}. Herdr started you, not the worker: when done, record your verdict with one of "
+        f"Must fix: {MUST_WORDS[rows['Must fix']]}. Herdr started you, not the worker. "
+        + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
+           f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
+           f"proof, between two lines of their own: first one holding only this round's code and the word begin, last one "
+           f"holding only the code and your verdict: pass, or changes and how many findings are at or above Must fix. Herdr "
+           f"reads it from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted, and runs this "
+           f"folder's check itself, outside the sandbox: don't run it here. This round's code is {code}." if sand else
+        f"When done, record your verdict with one of "
         f"`{cmd} --pass` or `{cmd} --changes \"<each finding with its level and proof>\" --must-fix <how many are at or above "
         f"Must fix>`. It is taken only from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted. "
         f"Then end with your findings as your last message."
         + (f" Your shell runs without asking only {', '.join(REVIEW_READS)}" + (f" and this folder's check, `{check}`" if check else "")
            + ": anything else waits on a prompt nobody here can answer." if rv["agent"] in ("agy", "claude") else "")
-        + (" Codex's sandbox can't reach Herdr: give that command sandbox_permissions \"require_escalated\"." if rv["agent"] == "codex" else "")])
+        + (" Codex's sandbox can't reach Herdr: give that command sandbox_permissions \"require_escalated\"." if rv["agent"] == "codex" else ""))])
     live = workers(s, t)
     a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer",
                reads=review_reads(check))
     t.setdefault("review_runs", []).append({"round": len(runs) + 1, "head": head, "address": a["address"], "cli": agent_key(argv),
-                                            "model": rv.get("model") or None, "at": now()})
+                                            "model": rv.get("model") or None, "at": at})
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
     return f"{s.ref(t)}: Herdr started review round {len(runs) + 1} of {head[:7]} ({a['address']}); its findings come to you as a message."
 
@@ -773,27 +784,78 @@ def gate_verdict(s, t, args, text):
     rn = next((r for r in reversed(t.get("review_runs") or []) if me and r["address"] == me and r["round"] not in done), None)
     if not rn:
         raise Fail(f"Only the reviewer herdr-task started for {s.ref(t)}'s open review round records it, from its own terminal.")
-    wt = t.get("worktree") or ""
-    if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
-        raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
     must = args.must_fix if args.must_fix is not None else (0 if args.passed else None)
     if must is None or must < 0 or bool(args.passed) != (must == 0):  # findings below Must fix never block
         raise Fail("Say --pass (nothing at Must fix; --notes for the rest), or --changes \"…\" --must-fix N: N (1 or more) findings at or above Must fix.")
-    t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": me, "started_by": "herdr-task",
-                                        "verdict": "pass" if args.passed else "changes", "must_fix": must,
-                                        "report": (text or args.notes or "").strip()[:2000], "at": now()})
+    msg = record_verdict(s, t, rn, bool(args.passed), must, text or args.notes or "")
+    end_reviewer(me)
+    say(args, view(s, t), msg)
+
+
+def record_verdict(s, t, rn, passed, must, text):
+    """Records review round rn's verdict (from its own terminal: gate_verdict, gate_reads) while the
+    worktree's HEAD is still its head with nothing uncommitted; returns what happened."""
+    wt = t.get("worktree") or ""
+    if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
+    t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
+                                        "verdict": "pass" if passed else "changes", "must_fix": must,
+                                        "report": text.strip()[:2000], "at": now()})
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
-    if args.passed:
+    if passed:
         msg = f"{s.ref(t)}: review round {rn['round']} passed. " + (gate_step(s, t) or finalize(s, t))
     else:
         sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
                               f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
                               f"{shlex.quote(s.loc['folder'])}` again."), None)
         msg = f"{s.ref(t)}: findings sent to {sent}."
-    end_reviewer(me)
-    say(args, view(s, t), msg)
+    return msg
+
+
+def round_code(rn):
+    """A sandboxed round's code, which its verdict lines start with: from its round, head and start, so it
+    is never in the diff or the store's other words, and no new record field."""
+    return "R" + hashlib.sha256(f"{rn['round']}:{rn['head']}:{rn['at']}".encode()).hexdigest()[:8]
+
+
+def read_verdict(screen, code):
+    """(passed, must_fix, findings) from a sandboxed reviewer's screen: its last line holding only
+    `code pass` or `code changes N` (0: a pass), the findings above it up to its `code begin` line
+    (else its last 80 lines); else None."""
+    lines = screen.split("\n")
+    mark = re.compile(rf"^\W*{code}\s+(?:(begin)|(pass)|changes\s+(\d+))\W*$")
+    ends = [(i, m) for i, m in enumerate(map(mark.match, lines)) if m and not m.group(1)]
+    if not ends:
+        return None
+    end, m = ends[-1]
+    begin = max((i for i, x in enumerate(lines[:end]) if (y := mark.match(x)) and y.group(1)), default=max(-1, end - 81))
+    must = 0 if m.group(2) else int(m.group(3))
+    return not must, must, "\n".join(x.strip() for x in lines[begin + 1:end]).strip()
+
+
+def gate_reads(s, t):
+    """Verdicts of sandboxed reviewers (FAC-49), which can't run herdr-task: read with hc read from
+    each open round's own terminal (G2: only that run's terminal counts), then that reviewer ends."""
+    done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}
+    for rn in t.get("review_runs") or []:
+        k = (hc_json("get", rn["address"]) or {}) if sandboxes([rn["cli"]]) and rn["round"] not in done else {}
+        if k.get("state") != "live" or status_word(k) in ("working", "blocked"):  # read only once its turn is over
+            continue
+        got = read_verdict(run(["hc", "read", rn["address"], "--lines", "400"]).stdout, round_code(rn))
+        if not got:
+            continue
+        before, dirty = json.loads(json.dumps(t)), s.dirty
+        try:
+            record_verdict(s, t, rn, *got)
+        except Exception:  # nothing half recorded: a later tick tries again, its reviewer still there
+            t.clear()
+            t.update(before)
+            s.dirty = dirty
+            if git(t.get("worktree") or "", "rev-parse", "HEAD")[1] in ("", rn["head"]):
+                raise
+        end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
 
 
 def cmd_state(args, state):

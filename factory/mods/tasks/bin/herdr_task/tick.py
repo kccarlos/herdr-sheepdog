@@ -14,13 +14,13 @@ from .agents import agent_log, agent_running, busy_again, detail, held_ask, live
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
-from .launch import default_space
+from .launch import default_space, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
 from .archive import archive_pass
 from .browsers import browser_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, merge_now, MERGE_FAILED
+from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED
 from .news import news_pass, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
@@ -143,6 +143,11 @@ def tick_store(s, report):
                 checks_pass(s, t)
             except Exception as e:  # never stops the tick
                 report.setdefault("checks_error", []).append(f"{s.ref(t)}: {e}")
+        if t.get("review_runs") and t["state"] in ("running", "ready"):
+            try:
+                gate_reads(s, t)  # a sandboxed reviewer's verdict, from its terminal
+            except Exception as e:  # never stops the tick
+                report.setdefault("review_error", []).append(f"{s.ref(t)}: {e}")
     due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
     n = running_count(s) if queued else 0
@@ -482,6 +487,7 @@ def cmd_tick(args):
     except Exception as e:  # never stops the queue
         report["logs_error"] = str(e)
     try:
+        sweep_sandboxes()  # temp dirs of sandboxed reviewers that ended without their trap
         browser_pass(report)
     except Exception as e:  # never stops the queue
         report["browser_error"] = str(e)

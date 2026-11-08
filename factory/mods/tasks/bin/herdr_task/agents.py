@@ -54,6 +54,8 @@ def detail(k):
 
 
 def agent_running(k):
+    if "herdr-sandbox" in ((k.get("foreground") or {}).get("argv") or [])[:4]:
+        return True  # a sandboxed reviewer's launcher (launch.SANDBOX_SH), alive while its agy runs
     fg = (k.get("foreground") or {}).get("name") or ""
     if fg:
         return os.path.basename(fg) not in SHELLS

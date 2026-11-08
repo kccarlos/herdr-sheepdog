@@ -164,9 +164,11 @@ def write_record(k, rec):
 
 
 def watched(k):
-    """An Assistant or a task's agent (its worker or reviewer): what comes back."""
+    """An Assistant or a task's agent (its worker or reviewer): what comes back. Never a sandboxed
+    reviewer (launch.sandboxed): it would come back outside its sandbox."""
     labels = k.get("labels") or {}
-    return labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES or bool(labels.get("herdr.task"))
+    return not labels.get("herdr.sandbox") and (labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
+                                                or bool(labels.get("herdr.task")))
 
 
 def task_ref(k):
