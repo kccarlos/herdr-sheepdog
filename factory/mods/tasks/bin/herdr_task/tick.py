@@ -26,6 +26,7 @@ from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 from .revive import revive_pass
+from .checks import checks_pass
 
 
 def at_work(s, t):
@@ -136,6 +137,12 @@ def tick_store(s, report):
                 if not merge_now(s, t):
                     report["done"].append(t["id"])
             t.pop("_pr_fresh", None)
+    for t in s.data["tasks"]:
+        if t.get("worktree") or t.get("check_run"):
+            try:
+                checks_pass(s, t)
+            except Exception as e:  # never stops the tick
+                report.setdefault("checks_error", []).append(f"{s.ref(t)}: {e}")
     due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
     n = running_count(s) if queued else 0
@@ -454,7 +461,7 @@ def cmd_tick(args):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
+                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
             continue
         try:
             with Store(locate(d["folder"])) as s:

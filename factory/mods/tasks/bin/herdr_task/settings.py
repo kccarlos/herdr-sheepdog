@@ -22,7 +22,7 @@ TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".confi
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
-                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
+                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "", "check": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]

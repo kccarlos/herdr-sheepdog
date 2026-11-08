@@ -4059,3 +4059,172 @@ class HandoffsAtTheFloor(unittest.TestCase):
         self.assertIsNone(self.handoff.pool_of({"agent": "agy", "argv": ["agy"]}))
         self.assertEqual(self.handoff.handoffs(self.store, None, self.store.data["tasks"]), [])
         self.assertFalse(os.path.exists(os.path.join(self.store_dir, "handoffs")))
+
+
+class Checks(unittest.TestCase):
+    """FAC-14: the gate runs tasks.check itself at a Ready task's exact head, in a throwaway worktree.
+    A real throwaway git repo; hc is a fake that really runs the command, gh is not reached."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        sys.path.insert(0, os.path.join(ROOT, "test"))
+        import herdr_task.checks as checks
+        self.c, self.mock = checks, mock
+        self.repo = tempfile.mkdtemp()
+        self.git("init", "-q")
+        self.commit("one")
+        self.terms, self.cwds = {}, []
+        self.cfg, self.min, self.clock = "echo ran; test -f f.txt", 1, [1000]
+
+        def hc(args, **kw):
+            out, code = "", 0
+            if args[:2] == ["hc", "run"]:
+                cwd = args[args.index("--cwd") + 1]
+                self.cwds.append(cwd)
+                p = subprocess.run(args[args.index("--") + 1:], cwd=cwd, capture_output=True, text=True)
+                self.terms[f"t{len(self.terms) + 1}"] = {"state": "finished", "exit_code": p.returncode, "out": p.stdout,
+                                                         "labels": [a for a in args if a.startswith("herdr.")]}
+                out = json.dumps({"address": f"t{len(self.terms)}"})
+            elif args[:2] == ["hc", "read"]:
+                out = self.terms[args[2]]["out"]
+            elif args[:2] == ["hc", "kill"]:
+                self.terms[args[2]]["state"] = "finished"
+            elif args[:2] == ["hc", "rm"]:
+                self.terms.pop(args[2], None)
+            return subprocess.CompletedProcess(args, code, out, "")
+        for name, value in (("run", hc), ("hc_json", lambda *a: dict(self.terms[a[1]]) if a[1] in self.terms else None),
+                            ("settings_for", lambda s, sp=None: {"tasks": {"check": self.cfg}}),
+                            ("gate_min", lambda s, t, sp=None: self.min)):
+            p = mock.patch.object(checks, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(checks, "now", lambda: self.clock[0])
+        p.start()
+        self.addCleanup(p.stop)
+        self.s = type("S", (), {"dirty": False, "key": lambda self, t: "dev#14", "loc": {"folder": self.repo}})()
+        self.s.repo = self.repo
+        self.t = {"id": 14, "state": "ready", "worktree": self.repo}
+
+    def git(self, *a):
+        return subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, name):
+        with open(os.path.join(self.repo, "f.txt"), "w") as f:
+            f.write(name)
+        self.git("add", "."), self.git("commit", "-qm", name)
+        return self.git("rev-parse", "HEAD")
+
+    def tick(self):
+        self.c.checks_pass(self.s, self.t)
+
+    def test_a_ready_task_gets_one_run_at_its_head_and_a_valid_record(self):
+        from contract_gate_evidence import validate_check
+        head = self.git("rev-parse", "HEAD")
+        self.tick()
+        self.assertEqual(len(self.terms), 1)
+        self.assertNotEqual(self.cwds[0], self.repo)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "ran")))
+        self.assertIn("herdr.role=checks", self.terms["t1"]["labels"])
+        self.assertIn("herdr.checks=dev#14", self.terms["t1"]["labels"])
+        self.assertNotIn("herdr.task=dev#14", self.terms["t1"]["labels"])
+        self.assertIn("running", self.c.checks_line(self.t))
+        self.tick()  # finished: recorded, cleaned up
+        rec = self.t["checks"][0]
+        validate_check(rec)
+        self.assertEqual((rec["sha"], rec["exit"], rec["output_tail"].strip()), (head, 0, "ran"))
+        self.assertFalse(os.path.exists(self.cwds[0]))
+        self.assertEqual(self.terms, {})
+        self.tick()  # same head, has a record: no new run
+        self.assertEqual(len(self.t["checks"]), 1)
+        self.assertEqual(len(self.cwds), 1)
+        self.assertIn("passed", self.c.checks_line(self.t))
+
+    def test_a_failing_command_gives_a_valid_record(self):
+        from contract_gate_evidence import validate_check
+        self.cfg = "echo boom; exit 3"
+        self.tick(), self.tick()
+        validate_check(self.t["checks"][0])
+        self.assertEqual(self.t["checks"][0]["exit"], 3)
+        self.assertIn("failed (exit 3)", self.c.checks_line(self.t))
+
+    def test_a_moved_head_gets_a_new_run(self):
+        self.tick(), self.tick()
+        new = self.commit("two")
+        self.tick(), self.tick()
+        self.assertEqual([r["sha"] for r in self.t["checks"]][1], new)
+        self.assertEqual(len(self.cwds), 2)
+
+    def test_not_a_gate_folder_not_ready_or_no_command_get_none(self):
+        self.min = 0
+        self.tick()
+        self.min = 1
+        self.t["state"] = "running"
+        self.tick()
+        self.t["state"], self.cfg = "ready", ""
+        self.tick()
+        self.assertEqual(self.terms, {})
+
+    def test_a_check_past_the_limit_is_killed_and_recorded_failed(self):
+        from contract_gate_evidence import validate_check
+        self.tick()
+        self.terms["t1"]["state"] = "live"
+        self.clock[0] += self.c.LIMIT_MS + 1
+        self.tick()  # killed; recorded once it has exited
+        self.assertFalse(self.t.get("checks"))
+        self.tick()
+        self.assertEqual(self.terms, {})
+        rec = self.t["checks"][0]
+        validate_check(rec)
+        self.assertNotEqual(rec["exit"], 0)
+        self.assertTrue(rec["output_tail"].endswith("Killed: ran longer than 20 minutes."))
+
+    def test_a_run_whose_head_moved_or_task_left_ready_is_dropped_without_a_record(self):
+        self.tick()
+        self.terms["t1"]["state"] = "live"
+        tmp = self.cwds[0]
+        self.commit("two")
+        self.tick(), self.tick()  # kill, then drop
+        self.assertEqual((self.t.get("check_run"), self.t.get("checks"), self.terms), (None, None, {}))
+        self.assertFalse(os.path.exists(tmp))
+        self.tick()  # the new head gets its run
+        self.assertEqual(len(self.cwds), 2)
+
+    def test_a_pending_ci_state_is_refreshed(self):
+        self.t["pr"] = {"repo": "o/r", "url": "https://x/1"}
+        states = iter(["pending", "none", "success"])
+        self.mock.patch.object(self.c, "ci_of", lambda t, sha: {"state": next(states), "url": "https://x/1"}).start()
+        self.addCleanup(self.mock.patch.stopall)
+        self.tick(), self.tick()
+        self.assertEqual(self.t["checks"][0]["ci"]["state"], "pending")
+        self.tick()
+        self.assertEqual(self.t["checks"][0]["ci"]["state"], "none")  # GitHub may not have registered runs yet
+        self.tick()
+        self.assertEqual(self.t["checks"][0]["ci"]["state"], "success")
+
+    def test_an_hc_that_does_not_answer_never_makes_a_failed_record(self):
+        self.tick()
+        self.terms["t1"]["state"] = "live"
+        real = self.terms
+        self.c.hc_json = lambda *a: None
+        self.tick()
+        self.assertEqual((self.t.get("checks"), bool(self.t.get("check_run")), os.path.exists(self.cwds[0])), (None, True, True))
+        self.clock[0] += self.c.LIMIT_MS + 1  # past the limit but hc still silent: waits, never a failed record or a rerun
+        self.tick()
+        self.assertEqual((self.t.get("checks"), bool(self.t.get("check_run"))), (None, True))
+        self.clock[0] += self.c.LIMIT_MS  # gone for good: dropped, no record, run again
+        self.tick()
+        self.assertEqual((self.t.get("checks"), self.t.get("check_run")), (None, None))
+        self.assertFalse(os.path.exists(self.cwds[0]))
+
+    def test_a_run_killed_as_stale_is_never_recorded_even_if_ready_again(self):
+        self.tick()
+        self.terms["t1"]["state"] = "live"
+        self.t["state"] = "running"
+        self.tick()  # killed
+        self.t["state"] = "ready"
+        self.tick()  # reaped: dropped, then run again at the same head
+        self.assertIsNone(self.t.get("checks"))
+        self.tick()
+        self.assertEqual(len(self.cwds), 2)

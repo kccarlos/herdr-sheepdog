@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from .checks import checks_line
 from .base import Fail, git, guard, hc_json, now, run, STORE, VERSION
 from .settings import (
     agent_argv, agent_key, argv_for, bare, gate_min, merge_policy, MUST_WORDS, review_limits, set_opts, settings_block, settings_for, space_base,
@@ -240,6 +241,8 @@ def cmd_show(args):
                     + (" (ready refused: out of rounds)" if v.get("review_out") else ""))
     if v.get("agents_md"):
         text.append(f"for AGENTS.md: {v['agents_md']}")
+    if checks_line(t):
+        text.append(checks_line(t))
     if v.get("pr"):
         text.append(f"pull request: #{v['pr']['number']} {v['pr']['url']}")
     if v.get("why") and v["status"] == "needs":
