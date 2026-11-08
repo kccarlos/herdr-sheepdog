@@ -1,0 +1,74 @@
+[
+ {
+  "usage": {
+   "details": [
+    {
+     "rows": [
+      {
+       "label": "Limit Reset Credits",
+       "secondaryValue": "Expires Dec 15 at 8:59\u202fPM",
+       "value": "1 available"
+      }
+     ]
+    }
+   ],
+   "subscriptionRenewsAt": "2026-11-13T01:52:55Z",
+   "secondary": {
+    "windowMinutes": 10080,
+    "resetDescription": "Nov 8 at 8:59PM",
+    "usedPercent": 75,
+    "resetsAt": "2026-11-09T04:59:59Z"
+   },
+   "accountOrganization": "Example Organization",
+   "updatedAt": "2026-11-08T16:37:53Z",
+   "primary": {
+    "windowMinutes": 300,
+    "resetDescription": "Nov 8 at 10:29AM",
+    "usedPercent": 10,
+    "resetsAt": "2026-11-08T18:29:59Z"
+   },
+   "extraRateWindows": [
+    {
+     "window": {
+      "windowMinutes": 10080,
+      "usedPercent": 0,
+      "resetsAt": "2026-11-09T05:00:00Z"
+     },
+     "title": "Fable only",
+     "id": "claude-weekly-scoped-fable"
+    }
+   ],
+   "identity": {
+    "accountOrganization": "Example Organization",
+    "loginMethod": "Claude Max 5x",
+    "accountEmail": "user@example.com",
+    "providerID": "claude"
+   },
+   "accountEmail": "user@example.com",
+   "tertiary": null,
+   "loginMethod": "Claude Max 5x"
+  },
+  "provider": "claude",
+  "source": "web",
+  "rateWindowLabels": {
+   "primary": "Session",
+   "secondary": "Weekly"
+  },
+  "pace": {
+   "primary": {
+    "deltaPercent": -53,
+    "summary": "53% in reserve | Expected 63% used | Lasts until reset",
+    "willLastToReset": true,
+    "stage": "farBehind",
+    "expectedUsedPercent": 63
+   },
+   "secondary": {
+    "deltaPercent": -18,
+    "summary": "18% in reserve | Expected 93% used | Lasts until reset",
+    "willLastToReset": true,
+    "stage": "farBehind",
+    "expectedUsedPercent": 93
+   }
+  }
+ }
+]

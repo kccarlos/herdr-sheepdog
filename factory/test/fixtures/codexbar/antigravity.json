@@ -1,0 +1,74 @@
+[
+ {
+  "usage": {
+   "tertiary": null,
+   "accountEmail": "user@example.com",
+   "identity": {
+    "loginMethod": "Google AI Ultra",
+    "providerID": "antigravity",
+    "accountEmail": "user@example.com"
+   },
+   "updatedAt": "2026-11-08T16:37:57Z",
+   "secondary": {
+    "usedPercent": 99.451548,
+    "windowMinutes": 10080,
+    "resetsAt": "2026-11-11T08:02:36Z",
+    "resetDescription": "You have used some of your weekly limit, it will fully refresh in 2 days, 15 hours."
+   },
+   "loginMethod": "Google AI Ultra",
+   "extraRateWindows": [
+    {
+     "title": "Gemini 5-hour",
+     "window": {
+      "windowMinutes": 300,
+      "resetDescription": "You have used some of your 5-hour limit, it will fully refresh in 4 hours, 45 minutes.",
+      "resetsAt": "2026-11-08T21:23:28Z",
+      "usedPercent": 2.9387100000000004
+     },
+     "id": "antigravity-quota-summary-gemini-5h"
+    },
+    {
+     "title": "Gemini weekly",
+     "window": {
+      "windowMinutes": 10080,
+      "resetDescription": "You have used some of your weekly limit, it will fully refresh in 5 days, 7 hours.",
+      "resetsAt": "2026-11-13T23:43:05Z",
+      "usedPercent": 23.65066999999999
+     },
+     "id": "antigravity-quota-summary-gemini-weekly"
+    },
+    {
+     "title": "Claude/GPT 5-hour",
+     "window": {
+      "windowMinutes": 300,
+      "resetsAt": "2026-11-08T21:37:57Z",
+      "usedPercent": 0
+     },
+     "id": "antigravity-quota-summary-3p-5h"
+    },
+    {
+     "title": "Claude/GPT weekly",
+     "window": {
+      "windowMinutes": 10080,
+      "resetDescription": "You have used some of your weekly limit, it will fully refresh in 2 days, 15 hours.",
+      "resetsAt": "2026-11-11T08:02:36Z",
+      "usedPercent": 99.451548
+     },
+     "id": "antigravity-quota-summary-3p-weekly"
+    }
+   ],
+   "primary": {
+    "usedPercent": 23.65066999999999,
+    "windowMinutes": 10080,
+    "resetsAt": "2026-11-13T23:43:05Z",
+    "resetDescription": "You have used some of your weekly limit, it will fully refresh in 5 days, 7 hours."
+   }
+  },
+  "source": "app",
+  "provider": "antigravity",
+  "rateWindowLabels": {
+   "primary": "Gemini Models",
+   "secondary": "Claude and GPT"
+  }
+ }
+]
