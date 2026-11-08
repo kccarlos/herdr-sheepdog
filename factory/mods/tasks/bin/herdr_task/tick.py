@@ -456,8 +456,11 @@ def cmd_tick(args):
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
                 t.get("state") in ("queued", "scheduled", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
             continue
-        with Store(locate(d["folder"])) as s:
-            tick_store(s, report)
+        try:
+            with Store(locate(d["folder"])) as s:
+                tick_store(s, report)
+        except Fail as e:  # one folder never stops the rest
+            report.setdefault("folder_errors", []).append(f"{d['folder']}: {e}")
     try:
         news_pass(report, args.folder)
     except Exception as e:  # never stops the queue

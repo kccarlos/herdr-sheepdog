@@ -1663,6 +1663,7 @@ class Scheduled(unittest.TestCase):
                    mock.patch.object(commands, "begin", begin), mock.patch.object(tick, "begin", begin),
                    mock.patch.object(commands, "ensure_scheduler", lambda quiet=False: {}),
                    mock.patch.object(commands, "default_space", lambda: "sp1"),
+                   mock.patch.object(tick, "default_space", lambda: "sp1"),
                    mock.patch.object(commands, "caller_space", lambda: None),
                    mock.patch.object(commands, "worker_argv", lambda s, t, space, key=None: ["claude"]),
                    mock.patch.object(tick, "worker_argv", lambda s, t, space, key=None: ["claude"]),
@@ -1777,6 +1778,84 @@ class Scheduled(unittest.TestCase):
                 mock.patch.object(queues, "working", lambda s, t: t["state"] == "running"):
             self.assertEqual(self.tick_at(v["scheduled_for"] + 1000), [])
             self.assertEqual(self.task(2)["state"], "queued")
+
+    def four_tasks(self):
+        """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""
+        import time
+        for title in ("One", "Two", "Three", "Four"):
+            self.add(title)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            for i in (1, 2):
+                s.find(i)["state"] = "done"
+            s.find(3).update(state="running", agents=[{"address": "t3", "at": int(time.time() * 1000)}])
+            s.find(4).update(state="queued", queued_at=1)
+            s.dirty = True
+
+    def test_room_after_two_finish_starts_the_queued_one(self):
+        """FAC-10: max_running 3, two of three done and one working: the queued one starts on the next tick
+        (the queue's own rule was right; what failed was that no round ran, below)."""
+        from unittest import mock
+        self.four_tasks()
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 3):
+            self.assertEqual(self.tick_at(None), ["APP-4"])
+
+    def test_a_tick_stuck_in_git_doesnt_freeze_the_queue(self):
+        """FAC-10: the service's tick hung in `git rev-parse` in the folder (macOS kept it from the
+        folder) while holding the tick lock, so every scheduler round gave up after its wait and the
+        queued task stayed Queued with no reason. The folder's git call now gives up, the tick ends."""
+        import threading
+        import time
+        from unittest import mock
+        import herdr_task.automations as au
+        import herdr_task.autopilot as ap
+        import herdr_task.home as home
+        self.four_tasks()
+        store = os.path.join(self.tmp, "tasks")
+        fakebin, hung, block = os.path.join(self.tmp, "bin"), os.path.join(self.tmp, "hung"), os.path.join(self.tmp, "block")
+        os.makedirs(fakebin)
+        real = subprocess.run(["which", "git"], capture_output=True, text=True).stdout.strip()
+        with open(os.path.join(fakebin, "git"), "w") as f:  # rev-parse hangs while `block` exists
+            f.write(f'#!/bin/sh\ncase "$*" in *rev-parse*) [ -e {block} ] && touch {hung} && exec sleep 8;; esac\nexec {real} "$@"\n')
+        os.chmod(os.path.join(fakebin, "git"), 0o755)
+        open(block, "w").close()
+        quiet = lambda *a, **k: None
+        patches = [mock.patch.dict(os.environ, {"PATH": fakebin + os.pathsep + os.environ["PATH"]}),
+                   mock.patch.object(self.store_mod.Store, "max_running", lambda s: 3),
+                   mock.patch.object(self.store_mod, "GIT_WAIT_S", 1, create=True),
+                   mock.patch.object(self.tick, "STORE", store), mock.patch.object(au, "STORE", store),
+                   mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")), mock.patch.object(au, "LOCK_WAIT_S", 4),
+                   mock.patch.object(ap, "autopilot_pass", quiet), mock.patch.object(home, "home_pass", quiet),
+                   mock.patch.object(au, "automations_pass", quiet)]
+        patches += [mock.patch.object(self.tick, n, quiet) for n in (
+            "revive_pass", "retry_pass", "archive_pass", "news_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "browser_pass", "say")]
+        patches += [mock.patch.object(au, n, quiet) for n in (
+            "retry_pass", "archive_pass", "news_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "backup_pass",
+            "cli_check_pass", "machines_pass")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        # The service's tick, where git can't get into the folder
+        args = self.argparse.Namespace(folder=None, json=True, machine=None, hold=None)
+        service = threading.Thread(target=self.tick.cmd_tick, args=(args,))
+        service.start()
+        self.addCleanup(service.join)
+        for _ in range(100):
+            if os.path.exists(hung):
+                break
+            time.sleep(0.05)
+        self.assertTrue(os.path.exists(hung), "the service's tick never reached git")
+        service.join(5)
+        self.assertFalse(service.is_alive(), "the service's tick still holds the lock")
+        # the same folder again within the minute fails at once (a tick finds it several times)
+        began = time.monotonic()
+        with self.assertRaises(self.Fail):
+            self.store_mod.locate(self.folder)
+        self.assertLess(time.monotonic() - began, 0.5)
+        os.remove(block)  # the scheduler (its own process, no memory of the hang) gets in
+        self.store_mod._hung.clear()
+        report = {"started": [], "done": [], "attention": [], "fired": []}
+        au.one_pass(report)
+        self.assertEqual([x["ref"] for x in report["started"]], ["APP-4"], "the scheduler's round never got the tick lock")
 
     def test_after_and_a_time_start_when_both_hold(self):
         self.add("First")

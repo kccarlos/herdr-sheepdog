@@ -101,16 +101,16 @@ def guard(args):
                    "HC_SESSION and HC_SOCKET: changed ones can reach the real window and wipe its spaces.")
 
 
-def run(args, cwd=None, check=False):
+def run(args, cwd=None, check=False, timeout=None):
     guard(args)
-    r = subprocess.run(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    r = subprocess.run(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
     if check and r.returncode != 0:
         raise Fail((r.stderr or r.stdout).strip() or f"{args[0]} failed")
     return r
 
 
-def git(cwd, *args):
-    r = run(["git", "-C", cwd, *args])
+def git(cwd, *args, timeout=None):
+    r = run(["git", "-C", cwd, *args], timeout=timeout)
     return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
 
 

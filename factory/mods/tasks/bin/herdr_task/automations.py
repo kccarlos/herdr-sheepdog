@@ -625,6 +625,7 @@ def one_pass(report):
     lock = open(os.path.join(STORE, ".tick.lock"), "a")
     if not take_lock(lock, LOCK_WAIT_S):
         lock.close()
+        print(f"{time.strftime('%H:%M:%S')} a tick held the lock for {LOCK_WAIT_S} s: skipped this round", flush=True)
         return
     try:
         seen_all = read_list(SEEN) or {}
@@ -635,10 +636,13 @@ def one_pass(report):
             busy = any(t.get("state") in ("queued", "scheduled") or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
             if not busy and not d.get("automations"):
                 continue
-            with Store(locate(d["folder"])) as s:
-                seen = seen_all.setdefault(s.slug, {})
-                automations_pass(s, seen, report, feeds)
-                tick_store(s, report)
+            try:
+                with Store(locate(d["folder"])) as s:
+                    seen = seen_all.setdefault(s.slug, {})
+                    automations_pass(s, seen, report, feeds)
+                    tick_store(s, report)
+            except Fail as e:  # one folder never stops the rest (a git that doesn't answer there, FAC-10)
+                print(f"{time.strftime('%H:%M:%S')} {d['folder']}: {e}", flush=True)
         try:
             retry_pass(report)
         except Exception as e:  # never stops the scheduler
