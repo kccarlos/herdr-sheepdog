@@ -92,6 +92,12 @@ daemon_running=0
 if [ -n "$installed" ] && "$installed" status >/dev/null 2>&1; then
 	daemon_running=1
 fi
+# An upgrade: sheepdog was installed and set up, so setup is not offered.
+configured=0
+if { [ -n "$installed" ] || [ -x "$link" ]; } &&
+	{ [ -f "$HOME/.config/sheepdog/config.toml" ] || [ -f "$HOME/.config/sheepdog/.env" ]; }; then
+	configured=1
+fi
 
 if [ -n "${SHEEPDOG_RELEASE_URL:-}" ]; then
 	base=$SHEEPDOG_RELEASE_URL
@@ -176,9 +182,16 @@ if [ -n "$first" ] && [ "$first" != "$link" ]; then
 	cli=$link
 fi
 
+# A running daemon moves to the new version now.
+if [ "$daemon_running" -eq 1 ] && ! "$link" restart </dev/null; then
+	echo "Restart it to use the new version: sheepdog restart"
+fi
+
 # Ask on the terminal even when the script itself arrives on stdin
 # (curl | sh); without a terminal, never wait for input.
-if [ "${SHEEPDOG_NO_SETUP:-}" != "1" ] && tty_available; then
+if [ "$configured" -eq 1 ]; then
+	:
+elif [ "${SHEEPDOG_NO_SETUP:-}" != "1" ] && tty_available; then
 	printf 'Run sheepdog setup now? [Y/n] ' >/dev/tty
 	if ! IFS= read -r answer </dev/tty; then
 		answer=n
@@ -191,9 +204,6 @@ else
 	echo "Next: sheepdog setup"
 fi
 
-if [ "$daemon_running" -eq 1 ]; then
-	echo "Restart it to use the new version: sheepdog restart"
-fi
 if [ "$os" = Darwin ] && [ ! -d /Applications/Sheepdog.app ] && [ ! -d "$HOME/Applications/Sheepdog.app" ]; then
 	echo "For voice on this Mac with herdr-app: brew install --cask kccarlos/tap/sheepdog-app"
 fi

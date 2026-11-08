@@ -207,7 +207,8 @@ Not in v1, each refused with the message the app already shows:
 above). `auto` asks both sockets once at startup: the one that answers
 wins; if both answer, the old herdr (behaviour unchanged for its users)
 and the choice is logged as `daemon.herdr_backend`; if neither answers,
-the old herdr, as today. Tests and the bench daemon set both sockets to
+it starts on the old herdr and asks both again every 2 s: herdr-core
+first restarts the daemon onto it (`awaitFirstHerdr`). Tests and the bench daemon set both sockets to
 temporary paths, so no test can reach a real core.
 
 ## PR plan

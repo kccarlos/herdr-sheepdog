@@ -384,6 +384,38 @@ func TestStopUnloadsInsteadOfSignalling(t *testing.T) {
 	}
 }
 
+// TestRestartInOneStep: the service's daemon restarts with kickstart -k /
+// systemctl restart, never bootout + bootstrap; Runs says whether the
+// service runs it (a pid in launchctl print, systemd active).
+func TestRestartInOneStep(t *testing.T) {
+	for goos, want := range map[string]string{
+		"linux":  "systemctl --user restart " + Unit,
+		"darwin": "launchctl kickstart -k gui/501/" + Label,
+	} {
+		f := &fakeRunner{}
+		if err := (Manager{Spec: spec(t, goos), Run: f.run}).Restart(context.Background()); err != nil || strings.Join(f.calls, "|") != want {
+			t.Errorf("%s: err=%v calls=%q, want %q", goos, err, f.calls, want)
+		}
+	}
+	print := "launchctl print gui/501/" + Label
+	active := "systemctl --user is-active " + Unit
+	for _, tc := range []struct {
+		name, goos string
+		f          *fakeRunner
+		want       bool
+	}{
+		{"darwin running", "darwin", &fakeRunner{out: map[string]string{print: "state = running\n\tpid = 7\n"}}, true},
+		{"darwin loaded, no pid", "darwin", &fakeRunner{out: map[string]string{print: "state = waiting\n"}}, false},
+		{"darwin not loaded", "darwin", &fakeRunner{fail: map[string]bool{print: true}}, false},
+		{"linux active", "linux", &fakeRunner{out: map[string]string{active: "active\n"}}, true},
+		{"linux inactive", "linux", &fakeRunner{out: map[string]string{active: "inactive\n"}}, false},
+	} {
+		if got := (Manager{Spec: spec(t, tc.goos), Run: tc.f.run}).Runs(context.Background()); got != tc.want {
+			t.Errorf("%s: Runs = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestUnitsRestartOnCrashAndUseStdioPath: the launchd agent keeps the
 // daemon alive and the systemd unit restarts it on failure; both send
 // stdout/stderr to StdioPath and run serve --background.

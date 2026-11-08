@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
+	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
 // lifeSetup writes a config with its own data dir and a free port (never
@@ -343,5 +344,85 @@ func TestLifecycleEndToEnd(t *testing.T) {
 	_, out := sd("logs", "-n", "200")
 	if !strings.Contains(out, "daemon.stop") {
 		t.Errorf("no clean shutdown (daemon.stop) in the log:\n%s", out)
+	}
+}
+
+// TestRestartUnderServiceInOneStep: with the login service installed and
+// its daemon running, restart asks the service to restart (kickstart -k /
+// systemctl restart) instead of unloading it, and waits for the new pid.
+func TestRestartUnderServiceInOneStep(t *testing.T) {
+	cfgPath, dataDir, _ := lifeSetup(t, "")
+	home, _ := fakeService(t)
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return "/usr/local/bin/sheepdog", nil }
+	defer func() { osExecutable = origExe }()
+	// The "old daemon" pid is a child of this test, so a wrong code path
+	// that signals it can only hit a process the test started.
+	old := exec.Command("sleep", "30")
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = old.Process.Kill(); _ = old.Wait() }()
+	unit := service.Spec{OS: runtimeGOOS, Home: home}.UnitPath()
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("unit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"sheepdog"}`))
+	}))
+	defer srv.Close()
+	lock, err := daemon.Acquire(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	if err := lock.Write(daemon.Info{PID: old.Process.Pid, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	serviceRuns := true
+	serviceRunner = func(_ context.Context, name string, args ...string) (string, error) {
+		cmd := name + " " + strings.Join(args, " ")
+		calls = append(calls, cmd)
+		switch {
+		case strings.Contains(cmd, "kickstart -k") || strings.Contains(cmd, "--user restart"):
+			return "", lock.Write(daemon.Info{PID: old.Process.Pid + 1, URL: srv.URL})
+		case strings.Contains(cmd, "launchctl print") && serviceRuns:
+			return fmt.Sprintf("state = running\n\tpid = %d\n", old.Process.Pid), nil
+		case strings.Contains(cmd, "launchctl print"):
+			return "", fmt.Errorf("exit status 113")
+		case strings.Contains(cmd, "is-active") && serviceRuns:
+			return "active\n", nil
+		}
+		return "", nil
+	}
+	code, out, errs := runCLI("restart", "--config", cfgPath)
+	if code != 0 || !strings.Contains(out, fmt.Sprintf("sheepdog started again by the login service (pid %d)", old.Process.Pid+1)) || strings.Contains(out+errs, "unloaded") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errs)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "bootout") || strings.Contains(c, " stop ") {
+			t.Errorf("restart unloaded or stopped the service: %q", calls)
+		}
+	}
+
+	// A daemon the service does not run (started by hand while the unit
+	// exists) is not restarted through the service, which would start a
+	// second one: restart stops and starts as before.
+	if err := lock.Write(daemon.Info{PID: old.Process.Pid, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	st := stopTimeout
+	stopTimeout = 200 * time.Millisecond
+	defer func() { stopTimeout = st }()
+	serviceRuns, calls = false, nil
+	_, _, _ = runCLI("restart", "--config", cfgPath)
+	for _, c := range calls {
+		if strings.Contains(c, "kickstart -k") || strings.Contains(c, "--user restart") {
+			t.Errorf("restarted through a service that does not run the daemon: %q", calls)
+		}
 	}
 }

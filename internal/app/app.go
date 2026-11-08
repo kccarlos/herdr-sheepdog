@@ -228,6 +228,9 @@ type App struct {
 	restartOnce   sync.Once
 	restartReason string
 	herdrBackend  string
+	// awaitHerdr, set when auto found neither herdr running, runs until
+	// one answers (awaitFirstHerdr).
+	awaitHerdr func(context.Context)
 }
 
 // ReasonUpdate is the restart reason that moves the daemon into a new

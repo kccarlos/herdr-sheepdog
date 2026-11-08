@@ -213,6 +213,7 @@ func InstallPanel(home string, panel fs.FS) error {
 		updated := newMarker(Source{Version: prev.Version}, emb, prev.Layout)
 		updated.PreviousLayout = prev.PreviousLayout
 		updated.Keybinding = prev.Keybinding
+		updated.KeyDeclined = prev.KeyDeclined
 		if err := writeMarker(stage, updated); err != nil {
 			return err
 		}
@@ -235,6 +236,17 @@ func RecordPreviousLayout(home, layout string) error {
 		return nil
 	}
 	m.PreviousLayout = layout
+	return writeMarker(dir, m)
+}
+
+// RecordKeyDeclined remembers that the user declined the focus shortcut.
+func RecordKeyDeclined(home string) error {
+	dir := modDir(home)
+	m, err := ReadMarker(dir)
+	if err != nil {
+		return err
+	}
+	m.KeyDeclined = true
 	return writeMarker(dir, m)
 }
 

@@ -148,12 +148,8 @@ func environmentChecks(cfg config.Config, env Environment, o DoctorOptions) []Re
 			out = append(out, Result{Name: "Sheepdog.app", Status: Warn, Detail: "not installed", Fix: fix})
 		}
 	}
-	if advice := AdviseBackend(cfg, env); advice.Ask || advice.Set != "" {
-		fix := "run sheepdog setup to choose"
-		if advice.Set != "" {
-			fix = "SHEEPDOG_HERDR_BACKEND=" + advice.Set
-		}
-		out = append(out, Result{Name: "herdr backend", Status: Warn, Detail: advice.Why, Fix: fix})
+	if advice := AdviseBackend(cfg, env); advice.Ask {
+		out = append(out, Result{Name: "herdr backend", Status: Warn, Detail: advice.Why, Fix: "run sheepdog setup to choose"})
 	}
 	if appEnv := strings.TrimSpace(o.HerdrAppHomeEnv); appEnv != "" {
 		def := ""

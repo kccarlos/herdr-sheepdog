@@ -437,6 +437,31 @@ func (m Manager) Stop(ctx context.Context) (installed bool, err error) {
 	return true, nil
 }
 
+// Runs reports whether the service is running its daemon now.
+func (m Manager) Runs(ctx context.Context) bool {
+	if m.Spec.OS == "darwin" {
+		out, err := m.Run(ctx, "launchctl", "print", m.domain()+"/"+Label)
+		return err == nil && strings.Contains(out, "pid = ")
+	}
+	out, _ := m.Run(ctx, "systemctl", "--user", "is-active", Unit)
+	return strings.TrimSpace(out) == "active"
+}
+
+// Restart restarts the service's running daemon in one step (launchctl
+// kickstart -k, systemctl restart); both stop it with SIGTERM first.
+func (m Manager) Restart(ctx context.Context) error {
+	if m.Spec.OS == "darwin" {
+		if out, err := m.Run(ctx, "launchctl", "kickstart", "-k", m.domain()+"/"+Label); err != nil {
+			return fmt.Errorf("launchctl kickstart: %v: %s", err, strings.TrimSpace(out))
+		}
+		return nil
+	}
+	if out, err := m.Run(ctx, "systemctl", "--user", "restart", Unit); err != nil {
+		return fmt.Errorf("systemctl restart: %v: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 // launchdState picks the state, pid and last exit code out of
 // `launchctl print`.
 func launchdState(out string) string {
