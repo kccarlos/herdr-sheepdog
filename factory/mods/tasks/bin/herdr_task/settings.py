@@ -349,8 +349,7 @@ def by_layer(s, space, section, key, value, default):
 
 def other_cli(agent):
     """The reviewer by default: the other CLI than the task agent's where it's installed, else its own."""
-    other = {"claude": "codex", "codex": "claude"}.get(agent)
-    return other if other and shutil.which(other) else agent
+    return next((o for o in ("claude", "codex") if o != agent and shutil.which(o)), agent)
 
 
 def task_settings(s, t, space=None, argv=None):

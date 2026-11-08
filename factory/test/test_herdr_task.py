@@ -1892,6 +1892,28 @@ class AgyWorker(unittest.TestCase):
         self.assertEqual(ran[0][-4:], ["--mode", "plan", "-i", "Your task"])  # agy reads prompts only from -i
         self.assertEqual(ran[1][-2:], ["claude", "Your task"])
 
+    def test_its_reviewer_is_another_installed_cli(self):
+        from unittest import mock
+        import herdr_task.settings as settings
+        for have, want in (({"claude", "codex"}, "claude"), ({"codex"}, "codex"), (set(), "agy")):
+            with mock.patch.object(settings.shutil, "which", lambda n: "/bin/" + n if n in have else None):
+                self.assertEqual(settings.other_cli("agy"), want)
+                self.assertEqual(settings.other_cli("claude"), "codex" if "codex" in have else "claude")
+
+    def test_an_settings_file_is_merged_into(self):
+        from unittest import mock
+        from herdr_task import launch
+        f = os.path.join(self.home, "s.json")
+        with open(f, "w") as fh:
+            json.dump({"permissions": {"allow": ["command(ls)"]}}, fh)
+        with mock.patch.object(launch, "HOME", self.home), mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
+                mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+            out = launch.own_argv(["agy", "--settings", f])
+        self.assertEqual(out.count("--settings"), 1)
+        allow = json.loads(out[out.index("--settings") + 1])["permissions"]["allow"]
+        self.assertEqual(allow[0], "command(ls)")
+        self.assertIn("command(/x/herdr-task status)", allow)
+
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv
         self.assertEqual(resume_argv(["agy", "--mode", "plan"], "abc"), ["agy", "--mode", "plan", "--conversation", "abc"])

@@ -114,7 +114,11 @@ def own_argv(argv):
             try:
                 cur = json.loads(out[i + 1])
             except ValueError:
-                pass
+                try:
+                    with open(os.path.expanduser(out[i + 1])) as f:
+                        cur = json.load(f)
+                except (OSError, ValueError):
+                    pass
         if isinstance(cur, dict):
             perms = dict(cur.get("permissions") or {})
             perms["allow"] = list(perms.get("allow") or []) + theirs + own
