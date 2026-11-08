@@ -1968,6 +1968,10 @@ class AgyWorker(unittest.TestCase):
         self.assertEqual(trusted(ran[0]), ["/wt/x"])
         self.assertIsNone(trusted(ran[1]))
         self.assertIsNone(trusted(ran[2]))
+        # an argv's own --settings keeps the folders it already trusts
+        with mock.patch.object(L, "HOME", self.home):
+            out = L.own_argv(["agy", "--settings", '{"trustedWorkspaces": ["/code"]}'], "/wt/x")
+        self.assertEqual(trusted(out), ["/code", "/wt/x"])
 
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv

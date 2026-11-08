@@ -124,6 +124,8 @@ def own_argv(argv, worktree=None):
         if isinstance(cur, dict):
             perms = dict(cur.get("permissions") or {})
             perms["allow"] = list(perms.get("allow") or []) + theirs + own
+            if worktree:
+                trusted = {"trustedWorkspaces": list(cur.get("trustedWorkspaces") or []) + [worktree]}
             out[i + 1] = json.dumps({**cur, **trusted, "permissions": perms})
             return out
         return out[:1] + ["--settings", json.dumps({**trusted, "permissions": {"allow": theirs + own}})] + out[1:]
