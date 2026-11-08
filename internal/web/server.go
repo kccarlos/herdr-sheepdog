@@ -165,6 +165,9 @@ type Deps struct {
 	Version   string
 	// Update, when set, backs /api/state's update field.
 	Update func() update.Status
+	// InstallUpdate, when set, backs POST /api/update: it starts what
+	// `sheepdog update` does, or says why it cannot.
+	InstallUpdate func() error
 	// Panel, when set, backs /api/state's panel field.
 	Panel func() panelsync.State
 	// ReloadPrompts, when set, backs POST /api/prompts/reload: it
@@ -511,6 +514,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"DELETE /api/devices/self", accessDevice, s.handleDeviceUnpair},
 		route{"POST /api/shells/{pane_id}/close", accessDevice, s.handleShellClose},
 		route{"GET /api/state", accessDevice, s.handleState},
+		route{"POST /api/update", accessDevice, s.handleUpdate},
 		route{"POST /api/voice/mute", accessDevice, s.handleVoiceMute},
 		route{"POST /api/voice/stop", accessDevice, s.handleVoiceStop},
 		route{"POST /api/voice/ptt", accessDevice, s.handleVoicePTT},

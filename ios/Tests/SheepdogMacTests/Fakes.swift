@@ -71,6 +71,8 @@ final class FakeStatusSource: DaemonStatusSource {
 
     func start() { running = true }
     func stop() { running = false }
+    var installs = 0
+    func installUpdate() async throws -> UpdateInfo? { installs += 1; return UpdateInfo(state: "installing") }
 
     func emit(_ event: DaemonEvent) {
         MainActor.assumeIsolated { onEvent?(event) }

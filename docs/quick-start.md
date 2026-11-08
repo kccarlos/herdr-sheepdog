@@ -241,8 +241,10 @@ each key from the environment; see [commands.md](commands.md#flags-of-sheepdog-i
 
 sheepdog checks for a new release once a day (one request to
 `api.github.com`, nothing personal sent; [privacy.md](privacy.md)). When there
-is one, `sheepdog status` and the setup and voice pages say so. The voice
-never speaks it. To update, run:
+is one, `sheepdog status` says so, and the setup and voice pages, the iPhone
+app and the Mac menu bar app show an **Update** button that does the same as
+`sheepdog update` below. The voice never speaks it. To update from a terminal,
+run:
 
 ```sh
 sheepdog update

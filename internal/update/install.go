@@ -43,7 +43,7 @@ func Install(ctx context.Context, kind, exe, tag string, out io.Writer) error {
 		return err
 	}
 	const cask = "kccarlos/tap/sheepdog-app"
-	if runtime.GOOS == "darwin" && exec.CommandContext(ctx, "brew", "list", "--cask", cask).Run() == nil {
+	if runtime.GOOS == "darwin" && run(ctx, io.Discard, "brew", "list", "--cask", cask) == nil {
 		if err := run(ctx, out, "brew", "upgrade", "--cask", cask); err != nil {
 			// The daemon is updated: say so and carry on to its restart.
 			_, _ = fmt.Fprintf(out, "Sheepdog.app was not updated: %v\n", err)
@@ -52,8 +52,12 @@ func Install(ctx context.Context, kind, exe, tag string, out io.Writer) error {
 	return nil
 }
 
+// command builds every brew and herdr command Install runs (tests check
+// it cannot reach the real tools).
+var command = exec.CommandContext
+
 func run(ctx context.Context, out io.Writer, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := command(ctx, name, args...)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)

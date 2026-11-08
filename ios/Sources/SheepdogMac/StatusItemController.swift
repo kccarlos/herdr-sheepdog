@@ -18,7 +18,7 @@ public struct MenuItemSpec: Equatable {
         case selectHotkey(HotkeyShortcut)
         case selectHerdr(HerdrBackendSwitch.Kind)
         case openMicrophoneSettings
-        /// Run the update (`MacUpdater`).
+        /// The daemon updates itself (`MacUpdater`, `POST /api/update`).
         case updateApp
     }
 
@@ -97,7 +97,6 @@ public final class StatusItemController: NSObject {
     private let log: AppLogging
     private let quit: () -> Void
     private let updater: MacUpdater
-    private let appVersion: String?
     private var statusItem: NSStatusItem?
 
     /// The state the menu shows; the daemon is "down" until it answers.
@@ -126,18 +125,13 @@ public final class StatusItemController: NSObject {
         loginItem: LoginItemControlling,
         log: AppLogging,
         updater: MacUpdater? = nil,
-        appVersion: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
         quit: @escaping () -> Void = { NSApp.terminate(nil) }
     ) {
-        let updateLog = UpdateLogFile()
         self.updater = updater ?? MacUpdater(
-            runner: UpdateProcessRunner(),
-            files: DiskFileChecker(),
-            launcher: DetachedScriptLauncher(log: updateLog),
-            log: updateLog,
-            openURL: { NSWorkspace.shared.open($0) }, appVersion: appVersion, voiceActive: { voice.state.heldHere }, quit: { voice.handle(route: .end); source.stop(); hotkey.stop(); quit() }
+            install: { try await source.installUpdate() },
+            launcher: DetachedScriptLauncher(),
+            openURL: { NSWorkspace.shared.open($0) }, quit: { voice.handle(route: .end); source.stop(); hotkey.stop(); quit() }
         )
-        self.appVersion = appVersion
         self.source = source
         self.voice = voice
         self.panel = panel
@@ -185,13 +179,12 @@ public final class StatusItemController: NSObject {
         }
         hotkey.start()
         source.start()
-        let updater = updater
-        Task { await updater.resume() }
     }
 
     public func update(_ daemon: DaemonState?) {
         state = MenuBarState(state: daemon)
-        offer = MacUpdateOffer(info: daemon?.update, appVersion: appVersion)
+        offer = MacUpdateOffer(info: daemon?.update)
+        updater.follow(daemon)
         render()
     }
 
@@ -245,7 +238,6 @@ public final class StatusItemController: NSObject {
         case .openMicrophoneSettings:
             voice.openMicrophoneSettings()
         case .updateApp:
-            if updater.state == .restartNeeded { updater.relaunch(); return }
             guard let offer else { return }
             let updater = updater
             Task { await updater.start(offer: offer) }

@@ -56,7 +56,7 @@ struct SettingsView: View {
                 } else {
                     if let notice = model.notices.update?.notice {
                         Section {
-                            UpdateNoticeRow(notice: notice)
+                            UpdateNoticeRow(notice: notice, update: model.installUpdate)
                         }
                     }
                     // The computer: with one computer, one row and what
@@ -361,12 +361,23 @@ struct EchoCancellationRow: View {
 }
 
 /// Settings' update line: what the daemon reports about a newer release
-/// (`UpdateInfo.notice`), with the command to run on the computer in
-/// monospace. Wraps at every text size; VoiceOver reads it as one sentence.
+/// (`UpdateInfo.notice`), with its Update button, or the command to run on
+/// the computer in monospace. Wraps at every text size; VoiceOver reads the
+/// line as one sentence and the button on its own.
 struct UpdateNoticeRow: View {
     let notice: UpdateNotice
+    let update: () -> Void
 
     var body: some View {
+        line
+        if let action = notice.action {
+            Button(action, action: update)
+                .accessibilityHint("Installs the update on your computer and restarts Sheepdog.")
+                .accessibilityIdentifier("settings.update.button")
+        }
+    }
+
+    private var line: some View {
         Label {
             VStack(alignment: .leading, spacing: 6) {
                 Text(notice.text)

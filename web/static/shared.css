@@ -22,3 +22,5 @@ a { color: var(--primary-text); }
 .update-banner code { background: var(--card); padding: .05rem .35rem; border-radius: var(--radius-sm); }
 .update-dismiss { flex: none; min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--fg); font-size: 1.25rem; line-height: 1; cursor: pointer; border-radius: var(--radius-sm); }
 .update-dismiss:hover { background: var(--card); }
+.update-now { margin-left: .25rem; min-height: 32px; padding: .2rem .8rem; border: 0; border-radius: var(--radius-sm); background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; }
+.update-now:disabled { opacity: .6; cursor: default; }

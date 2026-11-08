@@ -360,12 +360,14 @@ With one computer, none of this shows: no names and no Talk to.
   herdr-tui (`tui`) and herdr-core (`core`) when the other one is running,
   after confirming.
 - **Update notice.** When the daemon knows of a newer sheepdog, the top of
-  Settings says so in one line, with the command to run on your computer
-  (for example "sheepdog v0.1.5 is available. To update, run this on your
-  computer: `sheepdog update`"). The phone cannot update the daemon;
-  once the update is installed, the daemon restarts into it when no one is
-  using it, or tells you to run `sheepdog restart`
-  ([quick-start.md](quick-start.md#update)). There is no line when the
+  Settings and a banner on the main screen say so, with an **Update**
+  button. It does what `sheepdog update` does on the computer: the daemon
+  installs the release the way sheepdog was installed (Sheepdog.app too
+  when Homebrew installed it) and restarts straight away
+  ([quick-start.md](quick-start.md#update)). The notice says "Installing…"
+  until the daemon is back on the new version; if the install fails, it
+  shows the daemon's error and **Try again**. A daemon run from a source
+  checkout shows the command to run instead. There is no notice when the
   daemon is up to date, has `update.check` off, or is too old to report
   updates.
 - **Live Activity.** While a voice session runs, the lock screen shows what

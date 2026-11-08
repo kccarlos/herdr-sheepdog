@@ -1073,6 +1073,7 @@ final class SessionViewModel: ObservableObject {
         default:
             if event.type.hasPrefix("herdr.") || event.type.hasPrefix("supervisor.") || event.type.hasPrefix("web.inject")
                 || event.type.hasPrefix("investigation.") || event.type.hasPrefix("promise.") || event.type == "daemon.start"
+                || event.type.hasPrefix("update.")
                 || AttentionEvents.refreshesState(event.type) {
                 refreshSoon()
             }
@@ -1521,6 +1522,26 @@ final class SessionViewModel: ObservableObject {
 
     /// `/api/hello`'s reason when the live terminal is unavailable.
     var termUnavailableReason: String? { linkModel.hello?.termUnavailable }
+
+    // MARK: - Update
+
+    /// The update notice's button: `POST /api/update`, what `sheepdog
+    /// update` does. The progress and the daemon's own error come back in
+    /// `/api/state`'s `update`; a refusal shows in the notice.
+    func installUpdate() {
+        guard settings.endpoint != nil else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                if let info = try await self.current({ try await $0.installUpdate() }) { self.notices.setUpdate(info) }
+            } catch {
+                var failed = self.notices.update ?? UpdateInfo()
+                failed.state = "failed"
+                failed.error = (error as? DaemonError).map { $0.hint ?? $0.message } ?? error.localizedDescription
+                self.notices.setUpdate(failed)
+            }
+        }
+    }
 
     // MARK: - New conversation
 

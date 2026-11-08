@@ -2,8 +2,9 @@
 
 Code: `internal/update` (the check, the cache, the installer, the watcher), `cmd/sheepdog/update.go`
 (`sheepdog update`), `cmd/sheepdog/updater.go`
-(wiring, CLI notices, the restart), `cmd/sheepdog/serve.go` (the restart branch of the serve
-loop), `web/static/update-banner.js` (the pages). The user's view is
+(wiring, `POST /api/update`, CLI notices, the restart), `cmd/sheepdog/serve.go` (the restart branch of the serve
+loop), `web/static/update-banner.js` (the pages), `ios/Sources/SheepdogKit/MacUpdater.swift` (the
+Mac menu). The user's view is
 [quick-start.md](../quick-start.md#update); the keys are `update.check` and
 `update.auto_restart` in [CONFIG.md](../../CONFIG.md).
 
@@ -53,6 +54,35 @@ is not the expected one), or the installed program's version when no daemon runs
 
 `SHEEPDOG_RELEASE_API` replaces `https://api.github.com` and `SHEEPDOG_RELEASE_URL` the download
 directory, for a test release server.
+
+Every brew and herdr command `update.Install` runs, the `brew list --cask` check included, goes
+through one runner (`command` in install.go); the package's `TestMain` points PATH at an empty
+directory, so a test reaches only the fakes it puts there.
+
+## The Update button (`POST /api/update`)
+
+The setup and voice pages' banner, the iPhone app (Settings and the main-screen banner) and the Mac
+menu bar app's **Update** item all send `POST /api/update` (a paired device or this computer). It is
+`sheepdog update` run by the daemon (`installNow` in `cmd/sheepdog/updater.go`):
+
+- **409** with the reason when the daemon's latest check found nothing newer, the install is a source
+  checkout (`can_install` is false in `/api/state`; the clients show `how` instead of a button), or
+  an install is already running. 404 on a daemon that cannot update itself.
+- Otherwise **202** with the status, and in the background `update.Install` with the daemon's own
+  install kind, executable and the tag of its latest check. `/api/state`'s `update.state` is
+  `installing` meanwhile; the event log gets `update.installing`, so clients that refresh on events
+  read it.
+- After the install, the launch path must report a different `version` line; then the daemon
+  restarts at once through the update restart below (`daemon.restart`), without waiting for idle.
+  When `restart_pending` is already set the install is skipped and it only restarts.
+- A failure leaves the daemon running with `update.state = "failed"` and `update.error` (the
+  install's or the restart's error), and logs `update.failed`.
+
+The pages poll `/api/state` every 2 s after the click and reload once `update.current` changed. The
+Mac app asks its local daemon and follows `/api/state`; when the daemon comes back on another version
+and the app bundle on disk is a different version than the running app (a cask upgrade whose quit
+did not work; Homebrew reopens an app it quit itself), it relaunches itself. When the daemon does not
+answer it opens the release page. The app does not run brew itself.
 
 ## The restart after an upgrade made another way
 

@@ -243,6 +243,30 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	panelTr := newPanelTracker(cfg)
 	opts.Panel = panelTr.State
 	var pendingUpdate atomic.Pointer[[2]string] // from, to version lines
+	// trigger starts the update restart (the watcher's, and POST
+	// /api/update's right after its install).
+	trigger := func(from, to string) error {
+		a := cur.Load()
+		if a == nil {
+			return update.ErrBusy
+		}
+		pendingUpdate.Store(&[2]string{from, to})
+		via := "exec"
+		if underService() {
+			via = "service"
+		}
+		a.Log().Log("daemon", "daemon.restart", "", map[string]any{"from": update.VersionOf(from), "to": update.VersionOf(to), "via": via})
+		a.RequestRestart(app.ReasonUpdate)
+		if a.RestartReason() != app.ReasonUpdate {
+			return update.ErrBusy // a reload is already in progress
+		}
+		return nil
+	}
+	opts.InstallUpdate = installNow(ctx, tracker, trigger, func(typ string, fields map[string]any) {
+		if a := cur.Load(); a != nil {
+			a.Log().Log("daemon", typ, "", fields)
+		}
+	}, stdout)
 
 	// SIGHUP re-reads the prompt override directory (docs/dev/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
@@ -336,23 +360,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 					}
 					return "starting"
 				},
-				func(from, to string) error {
-					a := cur.Load()
-					if a == nil {
-						return update.ErrBusy
-					}
-					pendingUpdate.Store(&[2]string{from, to})
-					via := "exec"
-					if underService() {
-						via = "service"
-					}
-					a.Log().Log("daemon", "daemon.restart", "", map[string]any{"from": update.VersionOf(from), "to": update.VersionOf(to), "via": via})
-					a.RequestRestart(app.ReasonUpdate)
-					if a.RestartReason() != app.ReasonUpdate {
-						return update.ErrBusy // a reload is already in progress
-					}
-					return nil
-				},
+				trigger,
 				func(f string, a ...any) { fprintf(stderr, "sheepdog: "+f+"\n", a...) })
 		}
 
@@ -374,6 +382,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			// The exec failed: the new executable cannot start. Take the lock
 			// back and carry on with this one; the notice stays.
 			tracker.SetRestart(true, next, true)
+			tracker.SetInstall("failed", "could not start sheepdog "+next)
 			_, _, _, opts.EnvFileNames = loadServeEnvFileAt(o.envFile, stderr)
 			if lock, err = daemon.Acquire(cfg.DataDir); err != nil {
 				fprintf(stderr, "%v\n", err)

@@ -955,12 +955,15 @@ control messages; the daemon resamples for GPT-Live (which runs at
   last "New conversation" reset, below, or daemon start), and `update`,
   the update notice (omitted when the daemon does not track updates):
   `{current, latest, available, how, url, restart_pending, restart_to,
-  auto_restart}`. `available`: `latest` is a newer `v*` release than
+  auto_restart, can_install, state, error}`. `available`: `latest` is a newer `v*` release than
   `current` (never for a development build); `how` is the upgrade command
   for the install method; `restart_pending`: the program on disk is not the
   one running ("update installed, restart to finish"), `restart_to` its
-  version. Display only: the voice never speaks it
-  ([`update.md`](update.md)). `panel` is the herdr-app panel installed on
+  version; `can_install`: `POST /api/update` can install it (not a source
+  checkout); `state`: `installing` while that runs, `failed` with `error`
+  when it did not finish. `POST /api/update` starts it: `202` with this
+  object, `409 {"error": …}` when there is nothing to do. The voice never
+  speaks it ([`update.md`](update.md#the-update-button-post-apiupdate)). `panel` is the herdr-app panel installed on
   this computer against the one built into the daemon (omitted when the
   daemon does not track it): `{installed, version, modified,
   update_available, auto_update}`; `version` is the sheepdog that installed
