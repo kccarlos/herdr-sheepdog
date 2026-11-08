@@ -1,10 +1,33 @@
 # CI runners on Cloud Run worker pools
 
-GitHub-hosted Actions minutes for this private repo ran out (billing lock,
-2026-10-05), so every Linux job in `.github/workflows/` runs on self-hosted
-runners in Google Cloud, billed to the same billing account as the Vertex AI
-project (trial credit). The iOS repo is untouched (Xcode Cloud only), and no
-workflow may use macOS runners (the `policy` job enforces it).
+Built when GitHub-hosted Actions minutes hit a billing lock while the repo was
+still private (2026-10-05): the `CI_RUNNER`-gated Linux jobs in
+`.github/workflows/` (`ci.yml`, `relay.yml`, and `release.yml`'s `release` job)
+default to `runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}` on self-hosted
+ephemeral runners in Google Cloud, billed to the same billing account as the
+Vertex AI project (trial credit).
+
+This is now a **public monorepo** containing [`ios/`](../../ios/README.md)
+(the iPhone and Mac apps). Xcode Cloud only archives and uploads TestFlight
+builds on `ios-v*` tags and runs no tests
+([`ios/docs/dev/xcode-cloud.md`](../../ios/docs/dev/xcode-cloud.md)). The
+`policy` CI job ([`scripts/workflow-policy.sh`](../../scripts/workflow-policy.sh);
+see [`docs/dev/development.md`](../../docs/dev/development.md#cicd)) enforces
+an explicit allowlist for GitHub-hosted `xcode-27` macOS runners (free on the
+public repository) and `xcodebuild`:
+
+- [`.github/workflows/ios.yml`](../../.github/workflows/ios.yml) — simulator
+  unit and UI tests and `SheepdogKitMac` unit tests, with no secrets at all
+  (not even `GITHUB_TOKEN` or `id-token`).
+- [`.github/workflows/release.yml`](../../.github/workflows/release.yml) — only
+  inside a job declaring `environment: release` (`sign-macos`, which requires
+  maintainer approval and deploys `v*` tags only to sign and notarize the
+  `darwin/arm64` binary and `Sheepdog.app`; see
+  [`docs/dev/signing.md`](../../docs/dev/signing.md)).
+
+Any macOS runner, Xcode image, or `xcodebuild` anywhere else (including
+self-hosted macOS labels and un-gated `release.yml` jobs) fails the `policy`
+check.
 
 Pattern: Google's tutorial [Host GitHub runners with Cloud Run worker
 pools](https://cloud.google.com/run/docs/tutorials/github-runner) and its
@@ -26,7 +49,7 @@ webhook autoscaler rather than CREMA (CREMA is an always-on polling service,
 | Secrets (Secret Manager) | `github-runner-token` (GitHub token), `github-webhook-secret`; readable only by `ci-autoscaler` |
 | Service accounts | `ci-runner` (pool: log writer, image reader, nothing else), `ci-autoscaler` (secrets above, `run.developer` on the pool only, act-as `ci-runner`), `ci-builder` (Cloud Build: image push, logs) |
 | Budget | $20/month on the project, e-mail at 50 / 90 / 100 % |
-| Runner labels | `self-hosted, linux, x64, cloudrun`; workflows use `runs-on: ${{ vars.CI_RUNNER \|\| 'cloudrun' }}` |
+| Runner labels | `self-hosted, linux, x64, cloudrun`; `CI_RUNNER`-gated Linux jobs (`ci.yml`, `relay.yml`, `release.yml`'s `release` job) use `runs-on: ${{ vars.CI_RUNNER \|\| 'cloudrun' }}` |
 
 ## How it works
 
@@ -52,12 +75,29 @@ warm floor (`scale 1`) would remove the wait for $0.20/hour.
 - The runners never see the GitHub token: only the autoscaler holds it. A
   job can at most ask the autoscaler for another JIT registration.
 - Runners exist only for this repository (repo-level registration).
-- Fork pull requests: the repo is private and "Run workflows from fork pull
-  requests" is off (`run_workflows_from_fork_pull_requests: false`), so
-  workflows from forks never reach these runners. Keep it off.
-- Anyone who can push a branch here can run code on the runner (as with any
-  CI), including reading the runner's metadata-server identity, which can
-  write logs and pull the image, nothing more.
+- Fork pull requests on this public repository:
+  - GitHub's **Fork pull request workflows from outside collaborators** Actions
+    setting gates outside-collaborator fork PR runs behind maintainer approval.
+    Keep it set to **Require approval for all external contributors** while
+    `cloudrun` runners are active, and inspect workflow or build-script changes
+    before clicking **Approve and run**: until approved, runs stay in
+    `action_required`, no `workflow_job` is queued, and the autoscaler never
+    scales the pool. Setting `CI_RUNNER=ubuntu-latest` moves PR Linux jobs onto
+    GitHub-hosted Ubuntu runners instead.
+  - Every PR workflow (`ci.yml`, `ios.yml`, `relay.yml`) triggers on
+    `pull_request` (never `pull_request_target`) with read-only permissions
+    (`contents: read`) and no repository secrets; deployment and signing
+    secrets live in the `release` (`v*` tags, maintainer approval) and `relay`
+    (`main` branch) environments, enforced in `ios.yml` and `release.yml` by
+    [`scripts/workflow-policy.sh`](../../scripts/workflow-policy.sh).
+  - Each `cloudrun` job runs on an ephemeral single-job JIT runner
+    (`--jitconfig` in `runner/start.sh`, work directory and credentials wiped
+    on exit) in the isolated `herdr-sheepdog-ci` GCP project (`MAX_RUNNERS=3`,
+    $20 budget).
+- Anyone who can push a branch here — or whose fork PR workflow run a
+  maintainer approves — can run code on the runner (as with any CI), including
+  reading the runner's metadata-server identity (`ci-runner`), which can write
+  logs and pull the image in `herdr-sheepdog-ci`, nothing more.
 - The stored token is currently the owner's `gh` CLI OAuth token (`repo`
   scope on all their repos). Replace it with a fine-grained PAT (see
   "Rotate the token"). If the owner runs `gh auth logout`/`login`, that token
@@ -101,10 +141,12 @@ GITHUB_PAT_FILE=~/path/to/pat infra/ci-runners/ci-runners.sh rotate-token && rm 
 (default 4 / 8Gi; the first full run peaked near 20 % memory and 70 % CPU)
 are env vars of `deploy`, e.g. `MAX_RUNNERS=2 infra/ci-runners/ci-runners.sh deploy`.
 
-**Switch back to GitHub-hosted runners** (once Actions billing works again):
+**Switch to GitHub-hosted runners** (free on the public repository; `ios.yml`
+and `release.yml`'s `sign-macos` and `homebrew` jobs already use GitHub-hosted
+runners):
 
 ```bash
-gh variable set CI_RUNNER --body ubuntu-latest   # all workflows, immediately
+gh variable set CI_RUNNER --body ubuntu-latest   # all CI_RUNNER Linux jobs, immediately
 gh variable delete CI_RUNNER                     # back to Cloud Run
 ```
 
