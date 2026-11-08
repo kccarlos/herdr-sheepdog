@@ -2015,6 +2015,14 @@ class AgyWorker(unittest.TestCase):
         t["agents"][1]["log"] = "/c1b.jsonl"
         self.assertEqual(agent_log(t), "/c1b.jsonl")
 
+    def test_a_resumed_agent_at_its_address_falls_back_to_its_sessions_log(self):
+        from herdr_task.agents import agent_log
+        t = {"agents": [{"address": "w1", "agent": "claude", "session": "S1", "log": "/s1.jsonl"},
+                        {"address": "w2", "agent": "claude", "session": "S1", "log": None}]}
+        self.assertEqual(agent_log(t, "w2"), "/s1.jsonl")
+        t["agents"].append({"address": "w3", "agent": "agy", "session": "5b9e", "log": None})
+        self.assertIsNone(agent_log(t, "w3"))
+
     def test_a_resumed_agent_has_its_session_from_the_start(self):
         from types import SimpleNamespace
         from unittest import mock
